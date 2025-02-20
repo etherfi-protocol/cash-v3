@@ -214,8 +214,8 @@ contract TopUpFactoryTest is Test, Constants {
         assertEq(addresses.length, 1, "Should return only available addresses");
     }
 
-    /// @dev Test pullFunds
-    function test_pullFunds_transfersFundsToFactory() public {
+    /// @dev Test processTopUp
+    function test_processTopUp_transfersFundsToFactory() public {
         // Deploy TopUp through factory
         vm.prank(admin);
         bytes32 salt = bytes32(uint256(1));
@@ -233,8 +233,8 @@ contract TopUpFactoryTest is Test, Constants {
         deal(address(usdc), topUpAddr, 100);
         deal(address(weETH), topUpAddr, 1 ether);
 
-        // Test pullFunds
-        factory.pullFunds(tokens, 0, 1);
+        // Test processTopUp
+        factory.processTopUp(tokens, 0, 1);
 
         // Verify balances
         assertEq(usdc.balanceOf(topUpAddr), 0, "TopUp contract should have 0 USDC");
@@ -243,21 +243,69 @@ contract TopUpFactoryTest is Test, Constants {
         assertEq(weETH.balanceOf(address(factory)), 1 ether, "Factory should have received weETH");
     }
 
-    /// @dev Test pullFunds with invalid inputs
-    function test_pullFundsFromTopUpContract_reverts_whenInvalidAddress() public {
+    /// @dev Test processTopUp with invalid inputs
+    function test_processTopUpFromContracts_reverts_whenInvalidAddress() public {
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
 
+        address[] memory topUpContracts = new address[](1);
+        topUpContracts[0] = makeAddr("invalid");
+
         vm.expectRevert(TopUpFactory.InvalidTopUpAddress.selector);
-        factory.pullFundsFromTopUpContract(tokens, makeAddr("invalid"));
+        factory.processTopUpFromContracts(tokens, topUpContracts);
     }
 
-    function test_pullFunds_reverts_whenStartTooHigh() public {
+    function test_processTopUpFromContracts_succeeds() public {
+        // Deploy TopUp through factory
+        vm.startPrank(admin);
+        bytes32 salt1 = bytes32(uint256(1));
+        bytes32 salt2 = bytes32(uint256(2));
+        factory.deployTopUpContract(salt1);
+        factory.deployTopUpContract(salt2);
+        vm.stopPrank();
+
+        // Get deployed topUp contract address
+        address topUpAddr1 = factory.getDeterministicAddress(salt1);
+        address topUpAddr2 = factory.getDeterministicAddress(salt2);
+
+        // Test topUp contract functionality
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
+
+        uint256 usdcBalTopUp1 = 100;
+        uint256 usdcBalTopUp2 = 500;
+        uint256 weETHBalTopUp1 = 1 ether;
+        uint256 weETHBalTopUp2 = 2 ether;
+
+        // Send some tokens and ETH to topUp contract
+        deal(address(usdc), topUpAddr1, usdcBalTopUp1);
+        deal(address(weETH), topUpAddr1, weETHBalTopUp1);
+        deal(address(usdc), topUpAddr2, usdcBalTopUp2);
+        deal(address(weETH), topUpAddr2, weETHBalTopUp2);
+
+        address[] memory topUpContracts = new address[](2);
+        topUpContracts[0] = topUpAddr1;
+        topUpContracts[1] = topUpAddr2;
+
+        // Test processTopUpFromContracts
+        factory.processTopUpFromContracts(tokens, topUpContracts);
+
+        // Verify balances
+        assertEq(usdc.balanceOf(topUpAddr1), 0, "TopUp contract 1 should have 0 USDC");
+        assertEq(weETH.balanceOf(topUpAddr1), 0, "TopUp contract 1 should have 0 weETH");
+        assertEq(usdc.balanceOf(topUpAddr2), 0, "TopUp contract 2 should have 0 USDC");
+        assertEq(weETH.balanceOf(topUpAddr2), 0, "TopUp contract 2 should have 0 weETH");
+        assertEq(usdc.balanceOf(address(factory)), usdcBalTopUp1 + usdcBalTopUp2, "Factory should have received USDC");
+        assertEq(weETH.balanceOf(address(factory)), weETHBalTopUp1 + weETHBalTopUp2, "Factory should have received weETH");
+    }
+
+    function test_processTopUp_reverts_whenStartTooHigh() public {
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
 
         vm.expectRevert(TopUpFactory.InvalidStartIndex.selector);
-        factory.pullFunds(tokens, 100, 1);
+        factory.processTopUp(tokens, 100, 1);
     }
 
     /// @dev Test token configuration validation

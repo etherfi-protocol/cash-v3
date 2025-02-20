@@ -46,7 +46,7 @@ contract TopUpFactory is BeaconFactory {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpFactory")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant TopUpFactoryStorageLocation = 0xe4e747da44afe6bc45062fa78d7d038abc167c5a78dee3046108b9cc47b1b100;
 
-    /// @notice Max slippage allowed for briging
+    /// @notice Max slippage allowed for bridging
     uint96 public constant MAX_ALLOWED_SLIPPAGE = 200; // 2%
 
     /// @notice Emitted when tokens are bridged to the destination chain
@@ -124,15 +124,15 @@ contract TopUpFactory is BeaconFactory {
     }
 
     /**
-     * @notice Pulls specified tokens from a range of deployed topUp contracts
-     * @dev Iterates through deployed topUp contracts starting at index 'start' and calls pullFunds on each
-     * @param tokens Array of token addresses to pull from each topUp contract
+     * @notice Processes specified tokens from a range of deployed topUp contracts
+     * @dev Iterates through deployed topUp contracts starting at index 'start' and calls processTopUp on each
+     * @param tokens Array of token addresses to process
      * @param start Starting index in the deployedAddresses array
      * @param n Number of topUp contracts to process
      * @custom:throws If start + n exceeds the number of deployed topUp contracts
-     * @custom:throws If any topUp's pullFunds call fails
+     * @custom:throws If any topUp's processTopUp call fails
      */
-    function pullFunds(address[] calldata tokens, uint256 start, uint256 n) external {
+    function processTopUp(address[] calldata tokens, uint256 start, uint256 n) external {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         uint256 length = $.deployedAddresses.length();
@@ -140,7 +140,7 @@ contract TopUpFactory is BeaconFactory {
         if (start + n > length) n = length - start;
 
         for (uint256 i = 0; i < n;) {
-            TopUp($.deployedAddresses.at(start + i)).pullFunds(tokens);
+            TopUp($.deployedAddresses.at(start + i)).processTopUp(tokens);
             unchecked {
                 ++i;
             }
@@ -148,17 +148,22 @@ contract TopUpFactory is BeaconFactory {
     }
 
     /**
-     * @notice Pulls specified tokens from a given topUp contract
+     * @notice Processes specified tokens from a given topUp contract
      * @dev Verifies the topUp contract is valid before attempting to pull funds
-     * @param tokens Array of token addresses to pull from the TopUp contract
-     * @param topUpContract Address of the topUp contract to pull funds from
+     * @param tokens Array of token addresses to process
+     * @param topUpContracts Array of addresses of the topUp contracts to process
      * @custom:throws InvalidTopUpAddress if the TopUp address is not a deployed TopUp contract
-     * @custom:throws If the TopUp contracts's pullFunds call fails
+     * @custom:throws If the TopUp contracts's processTopUp call fails
      */
-    function pullFundsFromTopUpContract(address[] calldata tokens, address topUpContract) external {
+    function processTopUpFromContracts(address[] calldata tokens, address[] calldata topUpContracts) external {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
-        if (!$.deployedAddresses.contains(topUpContract)) revert InvalidTopUpAddress();
-        TopUp(topUpContract).pullFunds(tokens);
+        uint256 addrLength = topUpContracts.length;
+
+        for (uint256 i = 0; i < addrLength;) {
+            if (!$.deployedAddresses.contains(topUpContracts[i])) revert InvalidTopUpAddress();
+            TopUp(topUpContracts[i]).processTopUp(tokens);
+            unchecked { ++i; }
+        }
     }
 
     /**

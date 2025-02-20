@@ -26,8 +26,8 @@ contract TopUpTest is Test, Constants {
         topUp.initialize(owner);
     }
 
-    /// @dev Test pullFunds functionality
-    function test_pullFunds_transfersAllFundsToOwner() public {
+    /// @dev Test processTopUp functionality
+    function test_processTopUp_transfersAllFundsToOwner() public {
         // Setup test tokens and ETH
         token.mint(address(topUp), 100);
         vm.deal(address(topUp), 1 ether);
@@ -37,7 +37,7 @@ contract TopUpTest is Test, Constants {
         tokens[1] = ETH; // ETH
 
         vm.prank(owner);
-        topUp.pullFunds(tokens);
+        topUp.processTopUp(tokens);
 
         assertEq(token.balanceOf(address(topUp)), 0, "TopUp contract should have 0 tokens");
         assertEq(address(topUp).balance, 0, "TopUp contract should have 0 ETH");
@@ -46,13 +46,13 @@ contract TopUpTest is Test, Constants {
     }
 
     /// @dev Test non-owner cannot pull funds
-    function test_pullFunds_reverts_whenCalledByNonOwner() public {
+    function test_processTopUp_reverts_whenCalledByNonOwner() public {
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
 
         vm.prank(user);
         vm.expectRevert(TopUp.OnlyOwner.selector);
-        topUp.pullFunds(tokens);
+        topUp.processTopUp(tokens);
     }
 
     /// @dev Test cannot initialize twice

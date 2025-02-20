@@ -38,7 +38,7 @@ contract TopUp is Constants, Ownable {
      * @custom:throws OnlyOwner if caller is not the owner
      * @custom:throws EthTransferFailed if ETH transfer fails
      */
-    function pullFunds(address[] calldata tokens) external {
+    function processTopUp(address[] calldata tokens) external {
         address _owner = owner();
         if (_owner != msg.sender) revert OnlyOwner();
 
