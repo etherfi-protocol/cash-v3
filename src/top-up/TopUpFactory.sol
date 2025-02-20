@@ -44,7 +44,7 @@ contract TopUpFactory is BeaconFactory {
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpFactory")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant TopUpFactoryStorageLocation = 0xa4ab27fb7af65b0a5099b71c4d9f74446de19fab791c4440d1111c5ab3db0b00;
+    bytes32 private constant TopUpFactoryStorageLocation = 0xe4e747da44afe6bc45062fa78d7d038abc167c5a78dee3046108b9cc47b1b100;
 
     /// @notice Max slippage allowed for briging
     uint96 public constant MAX_ALLOWED_SLIPPAGE = 200; // 2%

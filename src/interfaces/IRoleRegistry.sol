@@ -5,18 +5,19 @@ pragma solidity ^0.8.28;
  * @title IRoleRegistry
  * @notice Interface for role-based access control management
  * @dev Provides functions for managing and querying role assignments
- * @custom:security Implements role-based access control for protocol permissions
  */
 interface IRoleRegistry {
     /**
      * @notice Verifies if an account has pauser privileges
      * @param account The address to check for pauser role
+     * @custom:throws Reverts if account is not an authorized pauser
      */
     function onlyPauser(address account) external view;
 
     /**
      * @notice Verifies if an account has unpauser privileges
      * @param account The address to check for unpauser role
+     * @custom:throws Reverts if account is not an authorized unpauser
      */
     function onlyUnpauser(address account) external view;
 

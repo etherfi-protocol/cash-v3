@@ -20,7 +20,9 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
 
     /// @notice Thrown when a non-owner attempts to upgrade the contract
     error OnlyUpgrader();
+    /// @notice Thrown when an account without pauser role attempts to upgrade the contract
     error OnlyPauser();
+    /// @notice Thrown when an account without unpauser role attempts to upgrade the contract
     error OnlyUnpauser();
 
     /// @custom:oz-upgrades-unsafe-allow constructor

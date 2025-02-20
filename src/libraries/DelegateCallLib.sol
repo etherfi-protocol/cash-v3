@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+/**
+ * @title DelegateCallLib
+ * @notice Library for delegatecall operations
+ * @author ether.fi
+ */
 library DelegateCallLib {
     /**
      * @notice Performs a delegate call to the target contract
