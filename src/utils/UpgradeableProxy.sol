@@ -10,7 +10,6 @@ import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
  * @author ether.fi
  * @notice Factory contract for deploying beacon proxies with deterministic addresses
  * @dev This contract uses CREATE3 for deterministic deployments and implements UUPS upgradeability pattern
- * @custom:security-contact security@ether.fi
  */
 contract UpgradeableProxy is UUPSUpgradeable {
     /// @custom:storage-location erc7201:etherfi.storage.UpgradeableProxy

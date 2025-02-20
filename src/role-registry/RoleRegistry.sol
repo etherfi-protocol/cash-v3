@@ -10,7 +10,6 @@ import { Ownable } from "solady/auth/Ownable.sol";
  * @author ether.fi
  * @notice Provides functionality for managing and querying roles with enumeration capabilities
  * @dev Implements UUPS upgradeability pattern and uses Solady's EnumerableRoles for efficient role management
- * @custom:security-contact security@ether.fi
  */
 contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
     /// @notice Role identifier for pausing cash-related operations

@@ -14,7 +14,6 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @author ether.fi
  * @notice Factory contract for deploying beacon proxies with deterministic addresses
  * @dev This contract uses CREATE3 for deterministic deployments and implements UUPS upgradeability pattern
- * @custom:security-contact security@ether.fi
  */
 contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
     bytes32 public constant FACTORY_ADMIN_ROLE = keccak256("FACTORY_ADMIN_ROLE");
