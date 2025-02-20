@@ -5,9 +5,9 @@ import { BeaconFactory, UpgradeableBeacon } from "../beacon-factory/BeaconFactor
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
+import { DelegateCallLib } from "../libraries/DelegateCallLib.sol";
 import { TopUp } from "./TopUp.sol";
 import { BridgeAdapterBase } from "./bridge/BridgeAdapterBase.sol";
-import {DelegateCallLib} from "../libraries/DelegateCallLib.sol";
 
 /**
  * @title TopUpFactory
