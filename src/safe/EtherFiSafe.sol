@@ -50,20 +50,21 @@ contract EtherFiSafe is ModuleManager, Initializable, EIP712Upgradeable, NoncesU
     function initialize(address[] memory owners, uint8 threshold) external initializer {
         __EIP712_init("EtherFiSafe", "1");
         __Nonces_init();
-    
+
         EtherFiSafeStorage storage $ = _getEtherFiSafeStorage();
         uint256 len = owners.length;
 
         if (len == 0 || len < threshold) revert InvalidInput();
 
-        for (uint256 i = 0; i < len; ){
+        for (uint256 i = 0; i < len;) {
             if (owners[i] == address(0)) revert InvalidOwnerAddress();
             $.owners.add(owners[i]);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         $.threshold = threshold;
-
     }
 
     /**

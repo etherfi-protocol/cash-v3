@@ -162,7 +162,9 @@ contract TopUpFactory is BeaconFactory {
         for (uint256 i = 0; i < addrLength;) {
             if (!$.deployedAddresses.contains(topUpContracts[i])) revert InvalidTopUpAddress();
             TopUp(topUpContracts[i]).processTopUp(tokens);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
