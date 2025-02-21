@@ -3,42 +3,9 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 
-import { ArrayDeDupLib, EtherFiSafe, ModuleManager } from "../../src/safe/EtherFiSafe.sol";
+import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "./SafeTestSetup.t.sol";
 
-contract ModuleManagerTest is Test {
-    EtherFiSafe public safe;
-
-    uint256 owner1Pk;
-    uint256 owner2Pk;
-    uint256 owner3Pk;
-    uint256 notOwnerPk;
-    address public owner1;
-    address public owner2;
-    address public owner3;
-    address public notOwner;
-
-    uint8 threshold;
-
-    address public module1 = makeAddr("module1");
-    address public module2 = makeAddr("module2");
-
-    function setUp() public {
-        (owner1, owner1Pk) = makeAddrAndKey("owner1");
-        (owner2, owner2Pk) = makeAddrAndKey("owner2");
-        (owner3, owner3Pk) = makeAddrAndKey("owner3");
-        (notOwner, notOwnerPk) = makeAddrAndKey("notOwner");
-
-        address[] memory owners = new address[](3);
-        owners[0] = owner1;
-        owners[1] = owner2;
-        owners[2] = owner3;
-
-        threshold = 2;
-
-        safe = new EtherFiSafe();
-        safe.initialize(owners, threshold);
-    }
-
+contract ModuleManagerTest is SafeTestSetup {
     function test_configureModules_addsModulesToWhitelist() public {
         address[] memory modules = new address[](2);
         modules[0] = module1;
@@ -98,7 +65,7 @@ contract ModuleManagerTest is Test {
         signers[0] = owner1;
         signers[1] = owner2;
 
-        vm.expectRevert(ModuleManager.InvalidInput.selector);
+        vm.expectRevert(EtherFiSafeErrors.InvalidInput.selector);
         safe.configureModules(modules, shouldWhitelist, signers, signatures);
     }
 
@@ -121,7 +88,7 @@ contract ModuleManagerTest is Test {
         signers[0] = owner1;
         signers[1] = owner2;
 
-        vm.expectRevert(ModuleManager.ArrayLengthMismatch.selector);
+        vm.expectRevert(EtherFiSafeErrors.ArrayLengthMismatch.selector);
         safe.configureModules(modules, shouldWhitelist, signers, signatures);
     }
 
@@ -147,7 +114,7 @@ contract ModuleManagerTest is Test {
         signers[0] = owner1;
         signers[1] = owner2;
 
-        vm.expectRevert(abi.encodeWithSelector(ModuleManager.InvalidModule.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.InvalidModule.selector, 0));
         safe.configureModules(modules, shouldWhitelist, signers, signatures);
     }
 
@@ -172,7 +139,7 @@ contract ModuleManagerTest is Test {
         signatures[0] = abi.encodePacked(r1, s1, v1);
         signatures[1] = signatures[0];
 
-        vm.expectRevert(EtherFiSafe.InvalidSignatures.selector);
+        vm.expectRevert(EtherFiSafeErrors.InvalidSignatures.selector);
         safe.configureModules(modules, shouldWhitelist, signers, signatures);
     }
 
@@ -198,7 +165,7 @@ contract ModuleManagerTest is Test {
         signatures[0] = abi.encodePacked(r1, s1, v1);
         signatures[1] = abi.encodePacked(r2, s2, v2);
 
-        vm.expectRevert(abi.encodeWithSelector(EtherFiSafe.InvalidSigner.selector, 1));
+        vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.InvalidSigner.selector, 1));
         safe.configureModules(modules, shouldWhitelist, signers, signatures);
     }
 
@@ -245,7 +212,7 @@ contract ModuleManagerTest is Test {
         bytes[] memory signatures = new bytes[](1);
         signatures[0] = abi.encodePacked(r1, s1, v1);
 
-        vm.expectRevert(EtherFiSafe.InsufficientSigners.selector);
+        vm.expectRevert(EtherFiSafeErrors.InsufficientSigners.selector);
         safe.configureModules(modules, shouldWhitelist, signers, signatures);
     }
 

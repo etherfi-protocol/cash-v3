@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+/**
+ * @title IEtherFiDataProvider
+ * @author ether.fi
+ * @notice Interface for the EtherFiDataProvider contract that manages important data for ether.fi
+ */
+interface IEtherFiDataProvider {
+    /**
+     * @notice Configures multiple modules' whitelist status
+     * @dev Only callable by addresses with ADMIN_ROLE
+     * @param modules Array of module addresses to configure
+     * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
+     */
+    function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist) external;
+
+    /**
+     * @notice Updates the hook address
+     * @dev Only callable by addresses with ADMIN_ROLE
+     * @param hook New hook address to set
+     */
+    function setHookAddress(address hook) external;
+
+    /**
+     * @notice Checks if a module address is whitelisted
+     * @param module Address to check
+     * @return bool True if the module is whitelisted, false otherwise
+     */
+    function isWhitelistedModule(address module) external view returns (bool);
+
+    /**
+     * @notice Retrieves all whitelisted module addresses
+     * @return address[] Array of whitelisted module addresses
+     */
+    function getWhitelistedModules() external view returns (address[] memory);
+
+    /**
+     * @notice Returns the current hook address
+     * @return address Current hook address
+     */
+    function getHookAddress() external view returns (address);
+
+    /**
+     * @notice Role identifier for administrative privileges
+     * @return bytes32 The keccak256 hash of "ADMIN_ROLE"
+     */
+    function ADMIN_ROLE() external view returns (bytes32);
+}

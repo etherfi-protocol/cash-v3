@@ -8,63 +8,90 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 import { ModuleManager } from "./ModuleManager.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import {MultiSig} from "./MultiSig.sol";
+import {EtherFiSafeErrors} from "./EtherFiSafeErrors.sol";
 
-contract EtherFiSafe is ModuleManager, Initializable, EIP712Upgradeable, NoncesUpgradeable {
+/**
+ * @title EtherFiSafe
+ * @author ether.fi
+ * @notice Implementation of a multi-signature safe with module management capabilities
+*/
+contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, Initializable, EIP712Upgradeable, NoncesUpgradeable {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
 
-    /// @custom:storage-location erc7201:etherfi.storage.EtherFiSafe
-    struct EtherFiSafeStorage {
-        /// @notice Set containing addresses of all the owners to the safe
-        EnumerableSetLib.AddressSet owners;
-        /// @notice Multisig threshold for the safe
-        uint8 threshold;
-        /// @notice Pre Operation Guard address
-        address preOpGuard;
-        /// @notice Post Operation Guard address
-        address postOpGuard;
-    }
-
-    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiSafe")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant EtherFiSafeStorageLocation = 0x44768873c7c67d9dae2df1ca334431d5cd98fd349ed85d549beecffe9f026500;
+    /// @notice Interface to the data provider contract 
+    IEtherFiDataProvider public immutable dataProvider;
 
     // keccak256("ConfigureModules(address[] modules,bool[] shouldWhitelist,uint256 nonce)")
     bytes32 public constant CONFIGURE_MODULES_TYPEHASH = 0x20263b9194095d902b566d15f1db1d03908706042a5d22118c55a666ec3b992c;
-
-    /// @notice Thrown when a signer at the given index is invalid
-    error InvalidSigner(uint256 index);
-    /// @notice Thrown when the signature verification fails
-    error InvalidSignatures();
-    /// @notice Thrown when there are not enough signers to meet the threshold
-    error InsufficientSigners();
-    /// @notice Thrown when no signers are provided
-    error EmptySigners();
-    /// @notice Thrown when adding address(0) as owner
-    error InvalidOwnerAddress();
+    // keccak256("SetThreshold(uint8 threshold,uint256 nonce)")
+    bytes32 public constant SET_THRESHOLD_TYPEHASH = 0x41b1bc57fb63493212c2d2f75145ff3130ce53c70f867177944887c5cb8e8626;
+    // keccak256("ConfigureOwners(address[] owners,bool[] shouldAdd,uint256 nonce)")
+    bytes32 public constant CONFIGURE_OWNERS_TYPEHASH = 0x93a5e8776e97535ceccfb399fc4015baa8aa11c3e58454ef681f9e144c718f92;
 
     /**
-     * @notice Initializes the safe with EIP712 and nonce management
-     * @dev Sets up the domain separator for EIP712 and initializes nonces
+     * @notice Contract constructor
+     * @param _dataProvider Address of the EtherFiDataProvider contract
      */
-    function initialize(address[] memory owners, uint8 threshold) external initializer {
+    constructor(address _dataProvider) payable {
+        dataProvider = IEtherFiDataProvider(_dataProvider);
+    }
+
+    /**
+     * @notice Initializes the safe with owners and signature threshold
+     * @param _owners Initial array of owner addresses
+     * @param _threshold Initial number of required signatures
+     * @custom:throws AlreadySetup If safe has already been initialized
+     * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
+     * @custom:throws InvalidInput If owners array is empty
+     * @custom:throws InvalidOwnerAddress If any owner address is zero
+     */
+    function initialize(address[] calldata _owners, uint8 _threshold) external initializer {
         __EIP712_init("EtherFiSafe", "1");
         __Nonces_init();
+        _setup(_owners, _threshold);
+    }
 
-        EtherFiSafeStorage storage $ = _getEtherFiSafeStorage();
-        uint256 len = owners.length;
+    /**
+     * @notice Updates the signature threshold with owner signatures
+     * @param threshold New threshold value
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of corresponding signatures
+     * @dev Uses EIP-712 typed data signing
+     * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
+     * @custom:throws InvalidSignatures If signature verification fails
+     */
+    function setThreshold(uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external {
+        bytes32 structHash = keccak256(abi.encode(SET_THRESHOLD_TYPEHASH, threshold, _useNonce(msg.sender)));
 
-        if (len == 0 || len < threshold) revert InvalidInput();
+        bytes32 digestHash = _hashTypedDataV4(structHash);
+        if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+        _setThreshold(threshold);
+    }
 
-        for (uint256 i = 0; i < len;) {
-            if (owners[i] == address(0)) revert InvalidOwnerAddress();
-            $.owners.add(owners[i]);
-            unchecked {
-                ++i;
-            }
-        }
+    /**
+     * @notice Configures safe owners with signature verification
+     * @param owners Array of owner addresses to configure
+     * @param shouldAdd Array indicating whether to add or remove each owner
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of corresponding signatures
+     * @dev Uses EIP-712 typed data signing
+     * @custom:throws InvalidInput If owners array is empty
+     * @custom:throws ArrayLengthMismatch If arrays have different lengths
+     * @custom:throws InvalidOwnerAddress If any owner address is zero
+     * @custom:throws AllOwnersRemoved If operation would remove all owners
+     * @custom:throws OwnersLessThanThreshold If owners would be less than threshold
+     * @custom:throws InvalidSignatures If signature verification fails
+     */
+    function configureOwners(address[] calldata owners, bool[] calldata shouldAdd, address[] calldata signers, bytes[] calldata signatures) external {
+        bytes32 structHash = keccak256(abi.encode(CONFIGURE_OWNERS_TYPEHASH, keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), _useNonce(msg.sender)));
 
-        $.threshold = threshold;
+        bytes32 digestHash = _hashTypedDataV4(structHash);
+        if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+        _configureOwners(owners, shouldAdd);
     }
 
     /**
@@ -73,6 +100,7 @@ contract EtherFiSafe is ModuleManager, Initializable, EIP712Upgradeable, NoncesU
      * @param shouldWhitelist Array of booleans indicating whether to add or remove each module
      * @param signers Array of addresses that signed the transaction
      * @param signatures Array of corresponding signatures
+     * @dev Uses EIP-712 typed data signing
      * @custom:throws InvalidInput If modules array is empty
      * @custom:throws ArrayLengthMismatch If modules and shouldWhitelist arrays have different lengths
      * @custom:throws InvalidModule If any module address is zero
@@ -87,60 +115,10 @@ contract EtherFiSafe is ModuleManager, Initializable, EIP712Upgradeable, NoncesU
     }
 
     /**
-     * @notice Verifies signatures against a digest hash until reaching the required threshold
-     * @param digestHash The hash of the data that was signed
-     * @param signers Array of addresses that supposedly signed the message
-     * @param signatures Array of signatures corresponding to the signers
-     * @return bool True if enough valid signatures are found to meet the threshold
-     * @dev Processes signatures until threshold is met. Invalid signatures are skipped.
-     * @custom:throws EmptySigners If the signers array is empty
-     * @custom:throws ArrayLengthMismatch If the lengths of signers and signatures arrays do not match
-     * @custom:throws InsufficientSigners If the length of signers array is less than the required threshold
-     * @custom:throws DuplicateElementFound If the signers array contains duplicate addresses
-     * @custom:throws InvalidSigner If a signer is the zero address or not an owner of the safe
+     * @notice Returns the EIP-712 domain separator
+     * @return bytes32 Current domain separator value
      */
-    function checkSignatures(bytes32 digestHash, address[] calldata signers, bytes[] calldata signatures) public view returns (bool) {
-        EtherFiSafeStorage storage $ = _getEtherFiSafeStorage();
-
-        uint256 len = signers.length;
-
-        if (len == 0) revert EmptySigners();
-        if (len != signatures.length) revert ArrayLengthMismatch();
-        if (len < $.threshold) revert InsufficientSigners();
-        if (len > 1) signers.checkDuplicates();
-
-        uint256 validSigs = 0;
-
-        for (uint256 i = 0; i < len;) {
-            if (signers[i] == address(0)) revert InvalidSigner(i);
-            if (!$.owners.contains(signers[i])) revert InvalidSigner(i);
-
-            if (digestHash.isValidSignature(signers[i], signatures[i])) {
-                unchecked {
-                    ++validSigs;
-                }
-                if (validSigs == $.threshold) break;
-            }
-
-            unchecked {
-                ++i;
-            }
-        }
-
-        return validSigs == $.threshold;
-    }
-
     function getDomainSeparator() external view returns (bytes32) {
         return _domainSeparatorV4();
-    }
-
-    /**
-     * @dev Returns the storage struct for EtherFiSafe
-     * @return $ Reference to the EtherFiSafeStorage struct
-     */
-    function _getEtherFiSafeStorage() internal pure returns (EtherFiSafeStorage storage $) {
-        assembly {
-            $.slot := EtherFiSafeStorageLocation
-        }
     }
 }

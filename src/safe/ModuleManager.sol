@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
+import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 
 /**
  * @title ModuleManager
@@ -10,7 +11,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
  * @dev Abstract contract that handles module management functionality
  *      Uses ERC-7201 for namespace storage pattern
  */
-abstract contract ModuleManager {
+abstract contract ModuleManager is EtherFiSafeErrors {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
 
     /// @custom:storage-location erc7201:etherfi.storage.ModuleManager
@@ -21,14 +22,6 @@ abstract contract ModuleManager {
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.ModuleManager")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ModuleManagerStorageLocation = 0x6f297332685baf3d7ed2366c1e1996176ab52e89e9bd6ee3d882f5057ea1bd00;
-
-    /// @notice Thrown when an empty modules array is provided
-    error InvalidInput();
-    /// @notice Thrown when modules and shouldWhitelist arrays have different lengths
-    error ArrayLengthMismatch();
-    /// @notice Thrown when a module address is zero
-    /// @param index Index of the invalid module in the array
-    error InvalidModule(uint256 index);
 
     /// @notice Emitted when modules are configured
     /// @param modules Array of module addresses that were configured
@@ -48,32 +41,30 @@ abstract contract ModuleManager {
 
     /**
      * @notice Configures multiple modules at once
-     * @param modules Array of module addresses to configure
-     * @param shouldWhitelist Array of booleans indicating whether to add (true) or remove (false) each module
+     * @param _modules Array of module addresses to configure
+     * @param _shouldWhitelist Array of booleans indicating whether to add (true) or remove (false) each module
      * @dev Efficiently handles multiple module operations in a single transaction
      * @custom:throws InvalidInput If modules array is empty
      * @custom:throws ArrayLengthMismatch If modules and shouldWhitelist arrays have different lengths
      * @custom:throws InvalidModule If any module address is zero
      */
-    function _configureModules(address[] calldata modules, bool[] calldata shouldWhitelist) internal {
+    function _configureModules(address[] calldata _modules, bool[] calldata _shouldWhitelist) internal {
         ModuleManagerStorage storage $ = _getModuleManagerStorage();
 
-        uint256 len = modules.length;
+        uint256 len = _modules.length;
         if (len == 0) revert InvalidInput();
-        if (len != shouldWhitelist.length) revert ArrayLengthMismatch();
+        if (len != _shouldWhitelist.length) revert ArrayLengthMismatch();
 
         for (uint256 i = 0; i < len;) {
-            if (modules[i] == address(0)) revert InvalidModule(i);
+            if (_modules[i] == address(0)) revert InvalidModule(i);
 
-            if (shouldWhitelist[i] && !$.modules.contains(modules[i])) $.modules.add(modules[i]);
-            if (!shouldWhitelist[i] && $.modules.contains(modules[i])) $.modules.remove(modules[i]);
+            if (_shouldWhitelist[i] && !$.modules.contains(_modules[i])) $.modules.add(_modules[i]);
+            if (!_shouldWhitelist[i] && $.modules.contains(_modules[i])) $.modules.remove(_modules[i]);
 
-            unchecked {
-                ++i;
-            }
+            unchecked { ++i; }
         }
 
-        emit ModulesConfigured(modules, shouldWhitelist);
+        emit ModulesConfigured(_modules, _shouldWhitelist);
     }
 
     /**
