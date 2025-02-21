@@ -78,7 +78,9 @@ abstract contract MultiSig is EtherFiSafeErrors {
             if (_owners[i] == address(0)) revert InvalidOwnerAddress(i);
             $.owners.add(_owners[i]);
             _shouldAdd[i] = true;
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         emit OwnersConfigured(_owners, _shouldAdd);
@@ -89,7 +91,7 @@ abstract contract MultiSig is EtherFiSafeErrors {
      * @param _threshold New threshold value
      * @dev Threshold must be greater than 0 and not exceed the number of owners
      * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
-     */    
+     */
     function _setThreshold(uint8 _threshold) internal {
         MultiSigStorage storage $ = _getMultiSigStorage();
         if (_threshold == 0 || _threshold > $.owners.length()) revert InvalidThreshold();
@@ -123,7 +125,9 @@ abstract contract MultiSig is EtherFiSafeErrors {
             if (_shouldAdd[i] && !$.owners.contains(_owners[i])) $.owners.add(_owners[i]);
             if (!_shouldAdd[i] && $.owners.contains(_owners[i])) $.owners.remove(_owners[i]);
 
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         if ($.owners.length() == 0) revert AllOwnersRemoved();

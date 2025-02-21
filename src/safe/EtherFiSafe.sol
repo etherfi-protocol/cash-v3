@@ -5,24 +5,25 @@ import { NoncesUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/Non
 import { EIP712Upgradeable, Initializable } from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
+
+import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 import { ModuleManager } from "./ModuleManager.sol";
-import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
-import {MultiSig} from "./MultiSig.sol";
-import {EtherFiSafeErrors} from "./EtherFiSafeErrors.sol";
+import { MultiSig } from "./MultiSig.sol";
 
 /**
  * @title EtherFiSafe
  * @author ether.fi
  * @notice Implementation of a multi-signature safe with module management capabilities
-*/
+ */
 contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, Initializable, EIP712Upgradeable, NoncesUpgradeable {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
 
-    /// @notice Interface to the data provider contract 
+    /// @notice Interface to the data provider contract
     IEtherFiDataProvider public immutable dataProvider;
 
     // keccak256("ConfigureModules(address[] modules,bool[] shouldWhitelist,uint256 nonce)")

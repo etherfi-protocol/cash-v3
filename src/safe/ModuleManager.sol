@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 /**
  * @title ModuleManager
@@ -61,7 +61,9 @@ abstract contract ModuleManager is EtherFiSafeErrors {
             if (_shouldWhitelist[i] && !$.modules.contains(_modules[i])) $.modules.add(_modules[i]);
             if (!_shouldWhitelist[i] && $.modules.contains(_modules[i])) $.modules.remove(_modules[i]);
 
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         emit ModulesConfigured(_modules, _shouldWhitelist);
