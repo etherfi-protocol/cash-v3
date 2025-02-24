@@ -23,6 +23,13 @@ interface IEtherFiDataProvider {
     function setHookAddress(address hook) external;
 
     /**
+     * @notice Updates the address of the Cash Module
+     * @dev Only callable by addresses with ADMIN_ROLE
+     * @param cashModule New cash module address to set
+     */
+    function setCashModule(address cashModule) external;
+
+    /**
      * @notice Checks if a module address is whitelisted
      * @param module Address to check
      * @return bool True if the module is whitelisted, false otherwise
@@ -34,6 +41,12 @@ interface IEtherFiDataProvider {
      * @return address[] Array of whitelisted module addresses
      */
     function getWhitelistedModules() external view returns (address[] memory);
+
+     /**
+     * @notice Returns the address of the Cash Module
+     * @return Address of the cash module
+     */
+    function getCashModule() external view returns (address);
 
     /**
      * @notice Returns the current hook address

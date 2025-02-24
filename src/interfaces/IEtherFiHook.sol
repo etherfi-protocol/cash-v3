@@ -8,13 +8,6 @@ pragma solidity ^0.8.28;
  */
 interface IEtherFiHook {
     /**
-     * @notice Updates the cash module address
-     * @dev Only callable by addresses with ADMIN_ROLE
-     * @param cashModule New cash module address to set
-     */
-    function setCashModule(address cashModule) external;
-
-    /**
      * @notice Hook called before module operations
      * @dev Currently implemented as a view function with no effects
      * @param module Address of the module being operated on
@@ -27,6 +20,12 @@ interface IEtherFiHook {
      * @param module Address of the module being operated on
      */
     function postOpHook(address module) external view;
+
+    /**
+     * @notice Returns the address of the EtherFiDataProvider contract
+     * @return Address of the EtherFiDataProvider contract
+     */
+    function getEtherFiDataProvider() external view returns (address);
 
     /**
      * @notice Role identifier for administrative privileges

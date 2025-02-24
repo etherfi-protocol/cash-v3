@@ -9,7 +9,7 @@ abstract contract EtherFiSafeErrors {
     error ArrayLengthMismatch();
 
     /// @notice Thrown when a module address is zero
-    /// @param index Index of the invalid module in the array
+    /// @param index Index of the invalid module in the array 
     error InvalidModule(uint256 index);
 
     /// @notice Thrown when a signer at the given index is invalid
@@ -36,6 +36,17 @@ abstract contract EtherFiSafeErrors {
     /// @notice Throws when threshold is either 0 or greater than length of owners
     error InvalidThreshold();
 
-    /// @notice Throws when the safe is already setup
-    error AlreadySetup();
+    /// @notice Throws when the multisig is already setup
+    error MultiSigAlreadySetup();
+
+    /// @notice Throws when trying to remove Cash Module
+    /// @param index Index of the cash module in the array
+    error CannotRemoveCashModule(uint256 index);
+
+    /// @notice Throws when trying to add an unsupported module to whitelist 
+    /// @param index Index of the unsupported module in the array
+    error UnsupportedModule(uint256 index);
+
+    /// @notice Throws when trying to reinit modules
+    error ModulesAlreadySetup();
 }

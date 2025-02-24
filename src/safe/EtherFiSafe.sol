@@ -44,16 +44,18 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, Initializabl
     /**
      * @notice Initializes the safe with owners and signature threshold
      * @param _owners Initial array of owner addresses
+     * @param _modules Initial array of module addresses
      * @param _threshold Initial number of required signatures
      * @custom:throws AlreadySetup If safe has already been initialized
      * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
      * @custom:throws InvalidInput If owners array is empty
      * @custom:throws InvalidOwnerAddress If any owner address is zero
      */
-    function initialize(address[] calldata _owners, uint8 _threshold) external initializer {
+    function initialize(address[] calldata _owners, address[] calldata _modules, uint8 _threshold) external initializer {
         __EIP712_init("EtherFiSafe", "1");
         __Nonces_init();
-        _setup(_owners, _threshold);
+        _setupModules(_modules);
+        _setupMultiSig(_owners, _threshold);
     }
 
     /**
@@ -121,5 +123,13 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, Initializabl
      */
     function getDomainSeparator() external view returns (bytes32) {
         return _domainSeparatorV4();
+    }
+
+    function _isWhitelistedOnDataProvider(address module) internal view override returns (bool){ 
+        return dataProvider.isWhitelistedModule(module);
+    }
+
+    function _isCashModule(address module) internal view override returns (bool) {
+        return dataProvider.getCashModule() == module;
     }
 }

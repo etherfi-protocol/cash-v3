@@ -15,15 +15,11 @@ library ArrayDeDupLib {
 
             for (uint256 j = 0; j < i;) {
                 if (current == seen[j]) revert DuplicateElementFound();
-                unchecked {
-                    ++j;
-                }
+                unchecked { ++j; }
             }
 
             seen[i] = current;
-            unchecked {
-                ++i;
-            }
+            unchecked { ++i; }
         }
     }
 }

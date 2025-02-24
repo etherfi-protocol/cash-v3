@@ -4,6 +4,8 @@ pragma solidity ^0.8.28;
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
+import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
+import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 
 /**
  * @title EtherFiDataProvider
@@ -13,11 +15,14 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  */
 contract EtherFiDataProvider is UpgradeableProxy {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
+    using ArrayDeDupLib for address[];
 
     /// @custom:storage-location erc7201:etherfi.storage.EtherFiDataProvider
     struct EtherFiDataProviderStorage {
         /// @notice Set containing addresses of all the whitelisted modules
         EnumerableSetLib.AddressSet whitelistedModules;
+        /// @notice Address of the Cash Module
+        address cashModule;
         /// @notice Address of the hook contract
         address hook;
     }
@@ -26,7 +31,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
     bytes32 private constant EtherFiDataProviderStorageLocation = 0xb3086c0036ec0314dd613f04f2c0b41c0567e73b5b69f0a0d6acdbce48020e00;
 
     /// @notice Role identifier for administrative privileges
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    bytes32 public constant DATA_PROVIDER_ADMIN_ROLE = keccak256("DATA_PROVIDER_ADMIN_ROLE");
 
     /// @notice Thrown when input parameters are invalid or zero address is provided
     error InvalidInput();
@@ -35,13 +40,26 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @notice Thrown when an invalid module address is provided at the specified index
     /// @param index The index where the invalid module was found
     error InvalidModule(uint256 index);
+    /// @notice Thrown when an invalid Cash module address is provided 
+    error InvalidCashModule();
     /// @notice Thrown when a non-admin address attempts to perform an admin-only operation
     error OnlyAdmin();
+    /// @notice Throws when trying to reinit the modules
+    error ModulesAlreadySetup();
 
     /// @notice Emitted when modules are configured or their whitelist status changes
     /// @param modules Array of module addresses that were configured
     /// @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
     event ModulesConfigured(address[] modules, bool[] shouldWhitelist);
+    
+    /// @notice Emitted when modules are setup initially
+    /// @param modules Array of module addresses that were whitelisted
+    event ModulesSetup(address[] modules);
+
+    /// @notice Emitted when Cash module is configured 
+    /// @param oldCashModule Address of old Cash Module
+    /// @param newCashModule Address of new Cash Module
+    event CashModuleConfigured(address oldCashModule, address newCashModule);
 
     /// @notice Emitted when the hook address is updated
     /// @param oldHookAddress Previous hook address
@@ -63,13 +81,16 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @dev Can only be called once due to initializer modifier
      * @param _roleRegistry Address of the role registry contract
      * @param _modules Array of initial module addresses to configure
-     * @param _shouldWhitelist Array of boolean values indicating which modules to whitelist
      * @param _hook Address of the initial hook contract
      */
-    function initialize(address _roleRegistry, address[] calldata _modules, bool[] calldata _shouldWhitelist, address _hook) external initializer {
+    function initialize(address _roleRegistry, address _cashModule, address[] calldata _modules, address _hook) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
-        _configureModules(_modules, _shouldWhitelist);
-        _setHookAddress(_hook);
+
+        _setupModules(_modules);
+        // The condition applies because the Hook might be present only on specific chains 
+        if (_hook != address(0)) _setHookAddress(_hook);
+        // The condition applies because the Cash Module might be present only on specific chains 
+        if (_cashModule != address(0)) _setCashModule(_cashModule);
     }
 
     /**
@@ -79,7 +100,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
      */
     function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        _onlyAdmin();
+        _onlyDataProviderAdmin();
         _configureModules(modules, shouldWhitelist);
     }
 
@@ -89,8 +110,18 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param hook New hook address to set
      */
     function setHookAddress(address hook) external {
-        _onlyAdmin();
+        _onlyDataProviderAdmin();
         _setHookAddress(hook);
+    }
+
+    /**
+     * @notice Updates the address of the Cash Module
+     * @dev Only callable by addresses with ADMIN_ROLE
+     * @param cashModule New cash module address to set
+     */
+    function setCashModule(address cashModule) external {
+        _onlyDataProviderAdmin();
+        _setCashModule(cashModule);
     }
 
     /**
@@ -108,6 +139,14 @@ contract EtherFiDataProvider is UpgradeableProxy {
      */
     function getWhitelistedModules() public view returns (address[] memory) {
         return _getEtherFiDataProviderStorage().whitelistedModules.values();
+    }
+
+    /**
+     * @notice Returns the address of the Cash Module
+     * @return Address of the cash module
+     */
+    function getCashModule() public view returns (address) {
+        return _getEtherFiDataProviderStorage().cashModule;
     }
 
     /**
@@ -129,6 +168,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
         uint256 len = modules.length;
         if (len == 0) revert InvalidInput();
         if (len != shouldWhitelist.length) revert ArrayLengthMismatch();
+        if (len > 1) modules.checkDuplicates();
 
         for (uint256 i = 0; i < len;) {
             if (modules[i] == address(0)) revert InvalidModule(i);
@@ -142,6 +182,46 @@ contract EtherFiDataProvider is UpgradeableProxy {
         }
 
         emit ModulesConfigured(modules, shouldWhitelist);
+    }
+
+    /**
+     * @notice Sets up multiple modules initially
+     * @param modules Array of module addresses to configure
+     * @custom:throws InvalidInput If modules array is empty
+     * @custom:throws InvalidModule If any module address is zero
+     * @custom:throws UnsupportedModule If a module is not whitelisted on the data provider
+     */
+    function _setupModules(address[] calldata modules) internal {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+
+        if ($.whitelistedModules.length() != 0) revert ModulesAlreadySetup();
+
+        uint256 len = modules.length;
+        if (modules.length == 0) revert InvalidInput();
+        if (len > 1) modules.checkDuplicates();
+
+        for (uint256 i = 0; i < len;) {
+            if (modules[i] == address(0)) revert InvalidModule(i);
+            $.whitelistedModules.add(modules[i]);
+            
+            unchecked { 
+                ++i; 
+            }
+        }
+
+        emit ModulesSetup(modules);
+    }
+
+    /**
+     * @dev Internal function to configure cash module
+     * @param cashModule Cash module address
+     */
+    function _setCashModule(address cashModule) private {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+        if (cashModule == address(0)) revert InvalidCashModule();
+
+        emit CashModuleConfigured($.cashModule, cashModule);
+        $.cashModule = cashModule;
     }
 
     /**
@@ -159,7 +239,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /**
      * @dev Internal function to verify caller has admin role
      */
-    function _onlyAdmin() private view {
-        if (!roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+    function _onlyDataProviderAdmin() private view {
+        if (!roleRegistry().hasRole(DATA_PROVIDER_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
     }
 }

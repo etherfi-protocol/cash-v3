@@ -59,10 +59,10 @@ abstract contract MultiSig is EtherFiSafeErrors {
      * @custom:throws InvalidInput If owners array is empty
      * @custom:throws InvalidOwnerAddress If any owner address is zero
      */
-    function _setup(address[] calldata _owners, uint8 _threshold) internal {
+    function _setupMultiSig(address[] calldata _owners, uint8 _threshold) internal {
         MultiSigStorage storage $ = _getMultiSigStorage();
 
-        if ($.owners.length() > 0) revert AlreadySetup();
+        if ($.owners.length() > 0) revert MultiSigAlreadySetup();
 
         uint256 len = _owners.length;
         if (_threshold == 0 || _threshold > len) revert InvalidThreshold();
@@ -78,9 +78,7 @@ abstract contract MultiSig is EtherFiSafeErrors {
             if (_owners[i] == address(0)) revert InvalidOwnerAddress(i);
             $.owners.add(_owners[i]);
             _shouldAdd[i] = true;
-            unchecked {
-                ++i;
-            }
+            unchecked { ++i; }
         }
 
         emit OwnersConfigured(_owners, _shouldAdd);
@@ -125,9 +123,7 @@ abstract contract MultiSig is EtherFiSafeErrors {
             if (_shouldAdd[i] && !$.owners.contains(_owners[i])) $.owners.add(_owners[i]);
             if (!_shouldAdd[i] && $.owners.contains(_owners[i])) $.owners.remove(_owners[i]);
 
-            unchecked {
-                ++i;
-            }
+            unchecked { ++i; }
         }
 
         if ($.owners.length() == 0) revert AllOwnersRemoved();
@@ -166,15 +162,11 @@ abstract contract MultiSig is EtherFiSafeErrors {
             if (!$.owners.contains(signers[i])) revert InvalidSigner(i);
 
             if (digestHash.isValidSignature(signers[i], signatures[i])) {
-                unchecked {
-                    ++validSigs;
-                }
+                unchecked { ++validSigs; }
                 if (validSigs == $.threshold) break;
             }
 
-            unchecked {
-                ++i;
-            }
+            unchecked { ++i; }
         }
 
         return validSigs == $.threshold;

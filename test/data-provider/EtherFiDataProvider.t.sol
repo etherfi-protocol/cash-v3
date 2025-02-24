@@ -7,6 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { ArrayDeDupLib } from "../../src/libraries/ArrayDedupLib.sol";
 
 contract EtherFiDataProviderTest is Test {
     EtherFiDataProvider public provider;
@@ -20,113 +21,160 @@ contract EtherFiDataProviderTest is Test {
     address public module2 = address(0x200);
     address public module3 = address(0x300);
     address public hookAddress = address(0x400);
-
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+    address public cashModule = address(0x500);
 
     event ModulesConfigured(address[] modules, bool[] shouldWhitelist);
     event HookAddressUpdated(address oldHookAddress, address newHookAddress);
 
     function setUp() public {
-        // Deploy role registry and grant admin role
-        address roleRegistryImpl = address(new RoleRegistry());
-        roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
-
-        vm.prank(owner);
-        roleRegistry.grantRole(ADMIN_ROLE, admin);
-
-        // Deploy provider
-        provider = new EtherFiDataProvider();
-
+        vm.startPrank(owner);
         // Initialize with initial modules
         address[] memory initialModules = new address[](2);
         initialModules[0] = module1;
         initialModules[1] = module2;
 
-        bool[] memory initialWhitelist = new bool[](2);
-        initialWhitelist[0] = true;
-        initialWhitelist[1] = true;
+        // Deploy role registry and grant admin role
+        address roleRegistryImpl = address(new RoleRegistry());
+        roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
 
-        vm.prank(admin);
-        provider.initialize(address(roleRegistry), initialModules, initialWhitelist, hookAddress);
+        // Deploy provider
+        address dataProviderImpl = address(new EtherFiDataProvider());
+        provider = EtherFiDataProvider(address(new UUPSProxy(
+            dataProviderImpl,
+            abi.encodeWithSelector(
+                EtherFiDataProvider.initialize.selector, 
+                roleRegistry, 
+                cashModule, 
+                initialModules, 
+                hookAddress
+            )
+        )));
+
+        roleRegistry.grantRole(provider.DATA_PROVIDER_ADMIN_ROLE(), admin);
+        vm.stopPrank();
     }
 
     // Initialize Tests
 
-    function test_initialize_setsInitialModules() public view {
+    function test_initialize_setsInitialValues() public view {
         assertEq(provider.isWhitelistedModule(module1), true);
         assertEq(provider.isWhitelistedModule(module2), true);
         assertEq(provider.isWhitelistedModule(module3), false);
-    }
 
-    function test_initialize_setsHookAddress() public view {
         assertEq(provider.getHookAddress(), hookAddress);
+        assertEq(provider.getCashModule(), cashModule);
     }
 
     function test_initialize_reverts_whenCalledTwice() public {
         address[] memory modules = new address[](1);
         modules[0] = module1;
 
-        bool[] memory whitelist = new bool[](1);
-        whitelist[0] = true;
-
         vm.prank(admin);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        provider.initialize(address(roleRegistry), modules, whitelist, hookAddress);
+        provider.initialize(address(roleRegistry), address(0), modules, hookAddress);
     }
 
-    function test_initialize_reverts_whenModuleArraysLengthMismatch() public {
-        EtherFiDataProvider newProvider = new EtherFiDataProvider();
-
-        address[] memory modules = new address[](2);
-        modules[0] = module1;
-        modules[1] = module2;
-
-        bool[] memory whitelist = new bool[](1);
-        whitelist[0] = true;
+    function test_initialize_withoutHook() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
+        
+        address[] memory initialModules = new address[](2);
+        initialModules[0] = module1;
+        initialModules[1] = module2;
 
         vm.prank(admin);
-        vm.expectRevert(EtherFiDataProvider.ArrayLengthMismatch.selector);
-        newProvider.initialize(address(roleRegistry), modules, whitelist, hookAddress);
+        newProvider.initialize(address(roleRegistry), cashModule, initialModules, address(0));
+        
+        // Hook should be zero address since we didn't set it
+        assertEq(newProvider.getHookAddress(), address(0));
+        
+        // Other settings should still be set
+        assertEq(newProvider.isWhitelistedModule(module1), true);
+        assertEq(newProvider.getCashModule(), cashModule);
+    }
+
+    function test_initialize_withoutCashModule() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
+        
+        address[] memory initialModules = new address[](2);
+        initialModules[0] = module1;
+        initialModules[1] = module2;
+
+        vm.prank(admin);
+        newProvider.initialize(address(roleRegistry), address(0), initialModules, hookAddress);
+        
+        // Cash module should be zero address since we didn't set it
+        assertEq(newProvider.getCashModule(), address(0));
+        
+        // Other settings should still be set
+        assertEq(newProvider.isWhitelistedModule(module1), true);
+        assertEq(newProvider.getHookAddress(), hookAddress);
     }
 
     function test_initialize_reverts_whenEmptyModuleArray() public {
-        EtherFiDataProvider newProvider = new EtherFiDataProvider();
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
 
         address[] memory modules = new address[](0);
-        bool[] memory whitelist = new bool[](0);
 
         vm.prank(admin);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
-        newProvider.initialize(address(roleRegistry), modules, whitelist, hookAddress);
+        newProvider.initialize(address(roleRegistry), address(0), modules, hookAddress);
     }
 
     function test_initialize_reverts_whenZeroAddressModule() public {
-        EtherFiDataProvider newProvider = new EtherFiDataProvider();
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
 
         address[] memory modules = new address[](1);
         modules[0] = address(0);
 
-        bool[] memory whitelist = new bool[](1);
-        whitelist[0] = true;
-
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(EtherFiDataProvider.InvalidModule.selector, 0));
-        newProvider.initialize(address(roleRegistry), modules, whitelist, hookAddress);
+        newProvider.initialize(address(roleRegistry), address(0), modules, hookAddress);
     }
 
-    function test_initialize_reverts_whenZeroAddressHook() public {
-        EtherFiDataProvider newProvider = new EtherFiDataProvider();
+    function test_initialize_emits_hookAddressUpdatedEvent() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
 
         address[] memory modules = new address[](1);
         modules[0] = module1;
 
-        bool[] memory whitelist = new bool[](1);
-        whitelist[0] = true;
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.HookAddressUpdated(address(0), hookAddress);
+        newProvider.initialize(address(roleRegistry), cashModule, modules, hookAddress);
+    }
+
+    function test_initialize_emits_modulesSetupEvent() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
+
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
 
         vm.prank(admin);
-        vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
-        newProvider.initialize(address(roleRegistry), modules, whitelist, address(0));
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.ModulesSetup(modules);
+        newProvider.initialize(address(roleRegistry), cashModule, modules, hookAddress);
     }
+
+    function test_initialize_emits_cashModuleConfiguredEvent() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
+
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.CashModuleConfigured(address(0), cashModule);
+
+        newProvider.initialize(address(roleRegistry), cashModule, modules, hookAddress);
+    }
+
 
     // Configure Modules Tests
 
@@ -206,6 +254,49 @@ contract EtherFiDataProviderTest is Test {
         provider.configureModules(modules, whitelist);
     }
 
+    function test_configureModules_checksForDuplicates() public {
+        // Create array with duplicate modules
+        address[] memory modules = new address[](2);
+        modules[0] = module3;
+        modules[1] = module3;
+
+        bool[] memory whitelist = new bool[](2);
+        whitelist[0] = true;
+        whitelist[1] = true;
+
+        // Expect revert due to duplicates
+        vm.prank(admin);
+        vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
+        provider.configureModules(modules, whitelist);
+    }
+
+    // Cash Module Tests
+
+    function test_setCashModule_updatesAddress() public {
+        address newCashModule = address(0x600);
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.CashModuleConfigured(cashModule, newCashModule);
+        provider.setCashModule(newCashModule);
+
+        assertEq(provider.getCashModule(), newCashModule);
+    }
+
+    function test_setCashModule_reverts_whenCalledByNonAdmin() public {
+        address newCashModule = address(0x600);
+
+        vm.prank(nonAdmin);
+        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        provider.setCashModule(newCashModule);
+    }
+
+    function test_setCashModule_reverts_whenZeroAddress() public {
+        vm.prank(admin);
+        vm.expectRevert(EtherFiDataProvider.InvalidCashModule.selector);
+        provider.setCashModule(address(0));
+    }
+
     // Set Hook Address Tests
 
     function test_setHookAddress_updatesAddress() public {
@@ -222,7 +313,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectEmit(true, true, true, true);
-        emit HookAddressUpdated(hookAddress, newHook);
+        emit EtherFiDataProvider.HookAddressUpdated(hookAddress, newHook);
         provider.setHookAddress(newHook);
     }
 
@@ -239,6 +330,7 @@ contract EtherFiDataProviderTest is Test {
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
         provider.setHookAddress(address(0));
     }
+
 
     // View Function Tests
 
@@ -260,4 +352,9 @@ contract EtherFiDataProviderTest is Test {
     function test_getHookAddress_returnsCurrentHookAddress() public view {
         assertEq(provider.getHookAddress(), hookAddress);
     }
+
+    function test_getCashModule_returnsCurrentCashModule() public view {
+        assertEq(provider.getCashModule(), cashModule);
+    }
+
 }
