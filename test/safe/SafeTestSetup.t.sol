@@ -2,20 +2,21 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
-
 import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
 import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import {EtherFiSafeFactory} from "../../src/safe/EtherFiSafeFactory.sol";
 
 contract SafeTestSetup is Test {
     using MessageHashUtils for bytes32;
 
+    EtherFiSafeFactory public safeFactory;
     EtherFiSafe public safe;
     EtherFiDataProvider public dataProvider;
     RoleRegistry public roleRegistry;
@@ -74,11 +75,16 @@ contract SafeTestSetup is Test {
         address hookImpl = address(new EtherFiHook(address(dataProvider)));
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
-        dataProvider.initialize(address(roleRegistry), cashModule, modules, address(hook));
+        address safeImpl = address(new EtherFiSafe(address(dataProvider)));
+        address safeFactoryImpl = address(new EtherFiSafeFactory());
+        safeFactory = EtherFiSafeFactory(address(new UUPSProxy(safeFactoryImpl, abi.encodeWithSelector(EtherFiSafeFactory.initialize.selector, address(roleRegistry), safeImpl))));
 
-        safe = new EtherFiSafe(address(dataProvider));
-        safe.initialize(owners, modules, threshold);
+        dataProvider.initialize(address(roleRegistry), cashModule, modules, address(hook), address(safeFactory));
 
+        roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), owner);
+        safeFactory.deployEtherFiSafe(keccak256("safe"), owners, modules, threshold);
+        safe = EtherFiSafe(safeFactory.getDeterministicAddress(keccak256("safe")));
+        
         vm.stopPrank();
     }
 

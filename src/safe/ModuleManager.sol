@@ -135,7 +135,7 @@ abstract contract ModuleManager is EtherFiSafeErrors {
      *      1. It is the cash module (these are always valid), or
      *      2. It is whitelisted on the data provider AND in the local modules set
      */
-    function isModule(address module) public view returns (bool) {
+    function isModuleEnabled(address module) public view returns (bool) {
         if (_isCashModule(module)) return true;
 
         bool isWhitelistedModuleOnDataProvider = _isWhitelistedOnDataProvider(module);

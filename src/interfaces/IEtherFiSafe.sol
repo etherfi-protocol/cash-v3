@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-interface ISafe {
+interface IEtherFiSafe {
     /**
      * @notice Verifies signatures against a digest hash until reaching the required threshold
      * @param digestHash The hash of the data that was signed

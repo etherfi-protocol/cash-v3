@@ -4,9 +4,10 @@ pragma solidity ^0.8.28;
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
-import { ISafe } from "../interfaces/ISafe.sol";
+import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 
 /**
  * @title ModuleBase
@@ -27,6 +28,8 @@ contract ModuleBase {
         mapping(address safe => EnumerableSetLib.AddressSet admins) admins;
         /// @notice Mapping of Safe addresses to their nonces for replay protection
         mapping(address safe => uint256 nonce) nonces;
+        /// @notice Instance of EtherFiDataProvider
+        IEtherFiDataProvider etherFiDataProvider;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.ModuleBaseStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -37,6 +40,9 @@ contract ModuleBase {
 
     /// @notice TypeHash for admin configuration
     bytes32 public constant CONFIG_ADMIN = keccak256("configureAdmins");
+
+    /// @notice Thrown when the input is invalid
+    error InvalidInput();
 
     /// @notice Thrown when the signature verification fails
     error InvalidSignature();
@@ -63,6 +69,13 @@ contract ModuleBase {
     /// @param shouldAdd Array indicating whether each admin was added (true) or removed (false)
     event AdminsConfigured(address indexed safe, address[] admins, bool[] shouldAdd);
 
+    constructor(address _etherFiDataProvider) {
+        ModuleBaseStorage storage $ = _getModuleBaseStorage();
+
+        if (_etherFiDataProvider == address(0)) revert InvalidInput();
+        $.etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
+    }
+
     /**
      * @dev Returns the storage struct from the specified storage slot
      * @return $ Reference to the ModuleBaseStorage struct
@@ -73,13 +86,17 @@ contract ModuleBase {
         }
     }
 
+    function etherFiDataProvider() external view returns (address) {
+        return address(_getModuleBaseStorage().etherFiDataProvider);
+    }
+
     /**
      * @notice Checks if an account has admin role for a specific Safe
      * @param safe The Safe address to check
      * @param account The account address to check
      * @return bool True if the account has admin role, false otherwise
      */
-    function hasAdminRole(address safe, address account) public view returns (bool) {
+    function hasAdminRole(address safe, address account) public view onlyEtherFiSafe(safe) returns (bool) {
         return _getModuleBaseStorage().admins[safe].contains(account);
     }
 
@@ -88,7 +105,7 @@ contract ModuleBase {
      * @param safe The Safe address to query
      * @return Array of admin addresses for the specified Safe
      */
-    function getAdmins(address safe) public view returns (address[] memory) {
+    function getAdmins(address safe) public view onlyEtherFiSafe(safe) returns (address[] memory) {
         return _getModuleBaseStorage().admins[safe].values();
     }
 
@@ -98,7 +115,7 @@ contract ModuleBase {
      * @return Current nonce value
      * @dev Nonces are used to prevent signature replay attacks
      */
-    function getNonce(address safe) public view returns (uint256) {
+    function getNonce(address safe) public view onlyEtherFiSafe(safe) returns (uint256) {
         return _getModuleBaseStorage().nonces[safe];
     }
 
@@ -115,10 +132,10 @@ contract ModuleBase {
      * @custom:throws InvalidAddress If any account address is zero
      * @custom:throws InvalidSignature If signature verification fails
      */
-    function configureAdmins(address safe, address[] calldata accounts, bool[] calldata shouldAdd, address[] calldata signers, bytes[] calldata signatures) external {
+    function configureAdmins(address safe, address[] calldata accounts, bool[] calldata shouldAdd, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
         bytes32 configAdminsHash = keccak256(abi.encode(CONFIG_ADMIN, block.chainid, address(this), _useNonce(safe), safe, accounts, shouldAdd));
         bytes32 digestHash = configAdminsHash.toEthSignedMessageHash();
-        if (!ISafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignature();
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignature();
 
         _configureAdmins(safe, accounts, shouldAdd);
     }
@@ -187,6 +204,15 @@ contract ModuleBase {
      */
     modifier onlyAdmin(address safe) {
         if (!hasAdminRole(safe, msg.sender)) revert OnlyAdmin();
+        _;
+    }
+
+    /**
+     * @dev Ensures that the account is an instance of the deployed EtherfiSafe
+     * @param account The account address to check 
+     */
+    modifier onlyEtherFiSafe(address account) {
+        _getModuleBaseStorage().etherFiDataProvider.onlyEtherFiSafe(account);
         _;
     }
 }

@@ -55,6 +55,13 @@ interface IEtherFiDataProvider {
     function getHookAddress() external view returns (address);
 
     /**
+     * @notice Function to check if an account is an EtherFiSafe, throws otherwise
+     * @param account Address of the account to check
+     * @custom:throws OnlyEtherFiSafe if the account is not an EtherFiSafe
+     */
+    function onlyEtherFiSafe(address account) external view;
+
+    /**
      * @notice Role identifier for administrative privileges
      * @return bytes32 The keccak256 hash of "ADMIN_ROLE"
      */

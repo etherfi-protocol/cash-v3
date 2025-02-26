@@ -6,12 +6,12 @@ import { Test } from "forge-std/Test.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "./SafeTestSetup.t.sol";
 
 contract ModuleManagerTest is SafeTestSetup {
-    function test_isModule_identifiesCashModuleAsWhitelisted() public view {
+    function test_isModuleEnabled_identifiesCashModuleAsWhitelisted() public view {
         // Cash module should be treated as whitelisted even if not in local storage
-        assertTrue(safe.isModule(cashModule));
+        assertTrue(safe.isModuleEnabled(cashModule));
     }
 
-    function test_isModule_requiresModuleToBeWhitlisted() public {
+    function test_isModuleEnabled_requiresModuleToBeWhitlisted() public {
         address nonWhitelistedModule = makeAddr("nonWhitelistedModule");
 
         address[] memory modules = new address[](1);
@@ -23,7 +23,7 @@ contract ModuleManagerTest is SafeTestSetup {
         vm.prank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
 
-        assertFalse(safe.isModule(nonWhitelistedModule));
+        assertFalse(safe.isModuleEnabled(nonWhitelistedModule));
     }
 
     function test_configureModules_reverts_whenRemovingCashModule() public {
@@ -104,7 +104,7 @@ contract ModuleManagerTest is SafeTestSetup {
         shouldWhitelist[0] = true;
 
         _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
-        assertTrue(safe.isModule(newModule));
+        assertTrue(safe.isModuleEnabled(newModule));
     }
 
     function test_configureModules_checksForDuplicates() public {
@@ -145,8 +145,8 @@ contract ModuleManagerTest is SafeTestSetup {
         shouldWhitelist[1] = true;
 
         _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
-        assertTrue(safe.isModule(module1));
-        assertTrue(safe.isModule(module2));
+        assertTrue(safe.isModuleEnabled(module1));
+        assertTrue(safe.isModuleEnabled(module2));
     }
 
     function testFuzz_configureModules_correctlyUpdatesModuleStatus(address[10] calldata moduleAddresses, bool[10] calldata shouldWhitelistFlags) public {
@@ -171,17 +171,17 @@ contract ModuleManagerTest is SafeTestSetup {
         _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
 
         if (modules[0] == cashModule) {
-            assertTrue(safe.isModule(modules[0]));
+            assertTrue(safe.isModuleEnabled(modules[0]));
         } else {
-            if (shouldWhitelist[0]) assertTrue(safe.isModule(modules[0]));
-            else assertFalse(safe.isModule(modules[0]));
+            if (shouldWhitelist[0]) assertTrue(safe.isModuleEnabled(modules[0]));
+            else assertFalse(safe.isModuleEnabled(modules[0]));
         }
 
         if (modules[1] == cashModule) {
-            assertTrue(safe.isModule(modules[1]));
+            assertTrue(safe.isModuleEnabled(modules[1]));
         } else {
-            if (shouldWhitelist[1]) assertTrue(safe.isModule(modules[1]));
-            else assertFalse(safe.isModule(modules[1]));
+            if (shouldWhitelist[1]) assertTrue(safe.isModuleEnabled(modules[1]));
+            else assertFalse(safe.isModuleEnabled(modules[1]));
         }
     }
 

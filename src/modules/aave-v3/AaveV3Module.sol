@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IAavePoolV3 } from "../../interfaces/IAavePoolV3.sol";
-import { ISafe, ModuleBase } from "../ModuleBase.sol";
+import { IEtherFiSafe, ModuleBase } from "../ModuleBase.sol";
 
 /**
  * @title AaveV3Module
@@ -27,10 +27,12 @@ contract AaveV3Module is ModuleBase {
 
     /**
      * @notice Contract constructor
-     * @param aavePool Address of the Aave V3 Pool contract
+     * @param _aavePool Address of the Aave V3 Pool contract
+     * @param _etherFiDataProvider Address of the EtherFiDataProvider contract
      */
-    constructor(address aavePool) {
-        aaveV3Pool = IAavePoolV3(aavePool);
+    constructor(address _aavePool, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
+        if (_aavePool == address(0)) revert InvalidInput();
+        aaveV3Pool = IAavePoolV3(_aavePool);
     }
 
     /**
@@ -41,22 +43,8 @@ contract AaveV3Module is ModuleBase {
      * @dev Executes token approval and supply through the Safe's module execution
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
-    function supplyAdmin(address safe, address asset, uint256 amount) external onlyAdmin(safe) {
-        if (IERC20(asset).balanceOf(safe) < amount) revert InsufficientBalanceOnSafe();
-
-        address[] memory to = new address[](2);
-        to[0] = asset;
-        to[1] = address(aaveV3Pool);
-
-        bytes[] memory data = new bytes[](2);
-        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(aaveV3Pool), amount);
-        data[1] = abi.encodeWithSelector(IAavePoolV3.supply.selector, asset, amount, address(0), 0);
-
-        uint256[] memory values = new uint256[](2);
-        values[0] = 0;
-        values[1] = 0;
-
-        ISafe(safe).execTransactionFromModule(to, values, data);
+    function supplyAdmin(address safe, address asset, uint256 amount) external onlyEtherFiSafe(safe) onlyAdmin(safe) {
+        _supply(safe, asset, amount);
     }
 
     /**
@@ -69,10 +57,13 @@ contract AaveV3Module is ModuleBase {
      * @dev Verifies signature then executes token approval and supply through the Safe's module execution
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
-    function supplyWithSignature(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external {
+    function supplyWithSignature(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) {
         bytes32 digestHash = keccak256(abi.encode(SUPPLY_SIG, block.chainid, address(this), _useNonce(safe), safe, asset, amount)).toEthSignedMessageHash();
         _verifyAdminSig(address(safe), digestHash, signer, signature);
+        _supply(safe, asset, amount);
+    }
 
+    function _supply(address safe, address asset, uint256 amount) internal {
         if (IERC20(asset).balanceOf(safe) < amount) revert InsufficientBalanceOnSafe();
 
         address[] memory to = new address[](2);
@@ -87,6 +78,6 @@ contract AaveV3Module is ModuleBase {
         values[0] = 0;
         values[1] = 0;
 
-        ISafe(safe).execTransactionFromModule(to, values, data);
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
 }

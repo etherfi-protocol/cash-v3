@@ -6,6 +6,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
+import {IEtherFiSafeFactory} from "../interfaces/IEtherFiSafeFactory.sol";
 
 /**
  * @title EtherFiDataProvider
@@ -25,6 +26,8 @@ contract EtherFiDataProvider is UpgradeableProxy {
         address cashModule;
         /// @notice Address of the hook contract
         address hook;
+        /// @notice Instance of the Safe factory
+        IEtherFiSafeFactory etherFiSafeFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
@@ -46,6 +49,8 @@ contract EtherFiDataProvider is UpgradeableProxy {
     error OnlyAdmin();
     /// @notice Throws when trying to reinit the modules
     error ModulesAlreadySetup();
+    /// @notice Throws when the account is not an EtherFiSafe
+    error OnlyEtherFiSafe();
 
     /// @notice Emitted when modules are configured or their whitelist status changes
     /// @param modules Array of module addresses that were configured
@@ -60,6 +65,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param oldCashModule Address of old Cash Module
     /// @param newCashModule Address of new Cash Module
     event CashModuleConfigured(address oldCashModule, address newCashModule);
+    
+    /// @notice Emitted when EtherFiSafeFactory is configured
+    /// @param oldFactory Address of old factory
+    /// @param newFactory Address of new factory
+    event EtherFiSafeFactoryConfigured(address oldFactory, address newFactory);
 
     /// @notice Emitted when the hook address is updated
     /// @param oldHookAddress Previous hook address
@@ -83,10 +93,13 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param _modules Array of initial module addresses to configure
      * @param _hook Address of the initial hook contract
      */
-    function initialize(address _roleRegistry, address _cashModule, address[] calldata _modules, address _hook) external initializer {
+    function initialize(address _roleRegistry, address _cashModule, address[] calldata _modules, address _hook, address _etherFiSafeFactory) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
 
         _setupModules(_modules);
+        
+        if (_etherFiSafeFactory == address(0)) revert InvalidInput();
+        _setEtherFiSafeFactory(_etherFiSafeFactory);
         // The condition applies because the Hook might be present only on specific chains
         if (_hook != address(0)) _setHookAddress(_hook);
         // The condition applies because the Cash Module might be present only on specific chains
@@ -112,6 +125,16 @@ contract EtherFiDataProvider is UpgradeableProxy {
     function setHookAddress(address hook) external {
         _onlyDataProviderAdmin();
         _setHookAddress(hook);
+    }
+
+    /**
+     * @notice Updates the etherFiSafeFactory instance address
+     * @dev Only callable by addresses with ADMIN_ROLE
+     * @param factory New factory address to set
+     */
+    function setEtherFiSafeFactory(address factory) external {
+        _onlyDataProviderAdmin();
+        _setEtherFiSafeFactory(factory);
     }
 
     /**
@@ -155,6 +178,15 @@ contract EtherFiDataProvider is UpgradeableProxy {
      */
     function getHookAddress() public view returns (address) {
         return _getEtherFiDataProviderStorage().hook;
+    }
+
+    /**
+     * @notice Function to check if an account is an EtherFiSafe, throws otherwise
+     * @param account Address of the account to check
+     * @custom:throws OnlyEtherFiSafe if the account is not an EtherFiSafe
+     */
+    function onlyEtherFiSafe(address account) public view {
+        if(!_getEtherFiDataProviderStorage().etherFiSafeFactory.isEtherFiSafe(account)) revert OnlyEtherFiSafe();
     }
 
     /**
@@ -222,6 +254,18 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
         emit CashModuleConfigured($.cashModule, cashModule);
         $.cashModule = cashModule;
+    }
+
+    /**
+     * @dev Internal function to configure EtherFiSafeFactory address
+     * @param etherFiSafeFactory EtherFiSafeFactory address
+     */
+    function _setEtherFiSafeFactory(address etherFiSafeFactory) private {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+        if (etherFiSafeFactory == address(0)) revert InvalidInput();
+
+        emit EtherFiSafeFactoryConfigured(address($.etherFiSafeFactory), etherFiSafeFactory);
+        $.etherFiSafeFactory = IEtherFiSafeFactory(etherFiSafeFactory);
     }
 
     /**

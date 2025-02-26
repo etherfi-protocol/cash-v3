@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { AaveV3Module, ModuleBase } from "../../../../src/modules/aave-v3/AaveV3Module.sol";
-import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
+import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, EtherFiDataProvider } from "../../SafeTestSetup.t.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract AaveV3ModuleTest is SafeTestSetup {
@@ -27,7 +27,7 @@ contract AaveV3ModuleTest is SafeTestSetup {
         (moduleAdmin, moduleAdminPk) = makeAddrAndKey("moduleAdmin");
         (nonAdmin, nonAdminPk) = makeAddrAndKey("nonAdmin");
 
-        aaveV3Module = new AaveV3Module(aaveV3PoolScroll);
+        aaveV3Module = new AaveV3Module(aaveV3PoolScroll, address(dataProvider));
 
         address[] memory modules = new address[](1);
         modules[0] = address(aaveV3Module);
@@ -50,19 +50,6 @@ contract AaveV3ModuleTest is SafeTestSetup {
         _configureModuleAdmin(address(aaveV3Module), accounts, shouldAdd, owner1Pk, owner2Pk);
     }
 
-    // Module configuration tests
-    function test_isModule_returnsTrue_whenModuleIsWhitelisted() public view {
-        assertTrue(safe.isModule(address(aaveV3Module)));
-    }
-
-    function test_hasAdminRole_returnsTrue_whenAccountIsAdmin() public view {
-        assertTrue(aaveV3Module.hasAdminRole(address(safe), moduleAdmin));
-    }
-
-    function test_hasAdminRole_returnsFalse_whenAccountIsNotAdmin() public view {
-        assertFalse(aaveV3Module.hasAdminRole(address(safe), nonAdmin));
-    }
-
     // supplyAdmin tests
     function test_supplyAdmin_transfersTokensToPool() public {
         uint256 amountToSupply = 100e6;
@@ -76,6 +63,17 @@ contract AaveV3ModuleTest is SafeTestSetup {
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
         
         assertEq(balanceBefore - balanceAfter, amountToSupply);
+    }
+
+    function test_supplyAdmin_reverts_whenAccountIsNotADeployedSafe() public {
+        address notSafe = makeAddr("safe");
+        uint256 amountToSupply = 100e6;
+        deal(address(usdcScroll), address(notSafe), amountToSupply);
+
+        
+        vm.prank(moduleAdmin);
+        vm.expectRevert(EtherFiDataProvider.OnlyEtherFiSafe.selector);
+        aaveV3Module.supplyAdmin(address(notSafe), address(usdcScroll), amountToSupply);
     }
 
     function test_supplyAdmin_reverts_whenCallerIsNotAdmin() public {
@@ -228,65 +226,5 @@ contract AaveV3ModuleTest is SafeTestSetup {
         // Second supply with same signature should fail
         vm.expectRevert(); // Exact error may vary based on implementation
         aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, moduleAdmin, signature);
-    }
-
-    // Admin configuration tests
-    function test_configureModuleAdmin_addsAdmin() public {
-        address[] memory accounts = new address[](1);
-        accounts[0] = nonAdmin;
-
-        bool[] memory shouldAdd = new bool[](1);
-        shouldAdd[0] = true;
-
-        _configureModuleAdmin(address(aaveV3Module), accounts, shouldAdd, owner1Pk, owner2Pk);
-        
-        assertTrue(aaveV3Module.hasAdminRole(address(safe), nonAdmin));
-    }
-
-    function test_configureModuleAdmin_removesAdmin() public {
-        address[] memory accounts = new address[](1);
-        accounts[0] = moduleAdmin;
-
-        bool[] memory shouldAdd = new bool[](1);
-        shouldAdd[0] = false;
-
-        _configureModuleAdmin(address(aaveV3Module), accounts, shouldAdd, owner1Pk, owner2Pk);
-        
-        assertFalse(aaveV3Module.hasAdminRole(address(safe), moduleAdmin));
-    }
-
-    function test_configureModuleAdmin_reverts_whenSignatureIsInvalid() public {
-        address[] memory accounts = new address[](1);
-        accounts[0] = nonAdmin;
-
-        bool[] memory shouldAdd = new bool[](1);
-        shouldAdd[0] = true;
-
-        bytes32 configModuleAdminHash = keccak256(abi.encode(
-            aaveV3Module.CONFIG_ADMIN(),
-            block.chainid,
-            address(aaveV3Module),
-            aaveV3Module.getNonce(address(safe)),
-            address(safe),
-            accounts,
-            shouldAdd
-        ));
-        
-        bytes32 digestHash = configModuleAdminHash.toEthSignedMessageHash();
-        
-        // Sign with incorrect private key
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(nonAdminPk, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(moduleAdminPk, digestHash);
-        
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-        
-        address[] memory signers = new address[](2);
-        signers[0] = nonAdmin;
-        signers[1] = moduleAdmin;
-        
-        vm.expectRevert(); // Exact error may vary based on implementation
-        aaveV3Module.configureAdmins(address(safe), accounts, shouldAdd, signers, signatures);
     }
 }

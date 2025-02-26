@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { NoncesUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/NoncesUpgradeable.sol";
-import { EIP712Upgradeable, Initializable } from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
+import { EIP712Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
@@ -18,7 +18,7 @@ import { MultiSig } from "./MultiSig.sol";
  * @author ether.fi
  * @notice Implementation of a multi-signature safe with module management capabilities
  */
-contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, Initializable, EIP712Upgradeable {
+contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgradeable {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
@@ -151,7 +151,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, Initializabl
     }
 
     function execTransactionFromModule(address[] calldata to, uint256[] calldata values, bytes[] calldata data) external {
-        if (!isModule(msg.sender)) revert OnlyModules();
+        if (!isModuleEnabled(msg.sender)) revert OnlyModules();
         IEtherFiHook hook = IEtherFiHook(dataProvider.getHookAddress());
 
         hook.preOpHook(msg.sender);
