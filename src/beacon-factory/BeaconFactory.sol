@@ -16,8 +16,6 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @dev This contract uses CREATE3 for deterministic deployments and implements UUPS upgradeability pattern
  */
 contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
-    bytes32 public constant FACTORY_ADMIN_ROLE = keccak256("FACTORY_ADMIN_ROLE");
-
     /// @custom:storage-location erc7201:etherfi.storage.BeaconFactory
     struct BeaconFactoryStorage {
         /// @notice The address of the beacon contract that stores the implementation
@@ -66,7 +64,7 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
      * @param salt The salt value used for deterministic deployment
      * @param initData The initialization data for the proxy
      * @return The address of the deployed proxy
-     * @custom:restriction Caller must have FACTORY_ADMIN_ROLE
+     * @custom:restriction Caller must have access control restrictions
      */
     function _deployBeacon(bytes32 salt, bytes memory initData) internal returns (address) {
         address expectedAddr = this.getDeterministicAddress(salt);

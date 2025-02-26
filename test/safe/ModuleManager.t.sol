@@ -13,7 +13,7 @@ contract ModuleManagerTest is SafeTestSetup {
 
     function test_isModule_requiresModuleToBeWhitlisted() public {
         address nonWhitelistedModule = makeAddr("nonWhitelistedModule");
-        
+
         address[] memory modules = new address[](1);
         modules[0] = nonWhitelistedModule;
         bool[] memory shouldWhitelist = new bool[](1);
@@ -22,7 +22,7 @@ contract ModuleManagerTest is SafeTestSetup {
         // A module must be whitelisted on dataProvider AND in local storage
         vm.prank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
-        
+
         assertFalse(safe.isModule(nonWhitelistedModule));
     }
 
@@ -38,13 +38,8 @@ contract ModuleManagerTest is SafeTestSetup {
 
         // Now try to remove it
         shouldWhitelist[0] = false;
-        
-        bytes32 structHash = keccak256(abi.encode(
-            safe.CONFIGURE_MODULES_TYPEHASH(), 
-            keccak256(abi.encodePacked(modules)), 
-            keccak256(abi.encodePacked(shouldWhitelist)), 
-            safe.nonces(address(this))
-        ));
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -65,18 +60,13 @@ contract ModuleManagerTest is SafeTestSetup {
 
     function test_configureModules_reverts_whenAddingUnsupportedModule() public {
         address nonWhitelistedModule = makeAddr("nonWhitelistedModule");
-        
+
         address[] memory modules = new address[](1);
         modules[0] = nonWhitelistedModule;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
-        bytes32 structHash = keccak256(abi.encode(
-            safe.CONFIGURE_MODULES_TYPEHASH(), 
-            keccak256(abi.encodePacked(modules)), 
-            keccak256(abi.encodePacked(shouldWhitelist)), 
-            safe.nonces(address(this))
-        ));
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -97,22 +87,22 @@ contract ModuleManagerTest is SafeTestSetup {
 
     function test_configureModules_requiresDataProviderWhitelisting() public {
         address newModule = makeAddr("newModule");
-        
+
         // First whitelist the module in data provider
         address[] memory dpModules = new address[](1);
         dpModules[0] = newModule;
         bool[] memory dpShouldWhitelist = new bool[](1);
         dpShouldWhitelist[0] = true;
-        
+
         vm.prank(owner);
         dataProvider.configureModules(dpModules, dpShouldWhitelist);
-        
+
         // Now add it to the safe
         address[] memory modules = new address[](1);
         modules[0] = newModule;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
+
         _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
         assertTrue(safe.isModule(newModule));
     }
@@ -121,17 +111,12 @@ contract ModuleManagerTest is SafeTestSetup {
         address[] memory modules = new address[](2);
         modules[0] = module1;
         modules[1] = module1; // Duplicate
-        
+
         bool[] memory shouldWhitelist = new bool[](2);
         shouldWhitelist[0] = true;
         shouldWhitelist[1] = true;
-        
-        bytes32 structHash = keccak256(abi.encode(
-            safe.CONFIGURE_MODULES_TYPEHASH(), 
-            keccak256(abi.encodePacked(modules)), 
-            keccak256(abi.encodePacked(shouldWhitelist)), 
-            safe.nonces(address(this))
-        ));
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -172,7 +157,7 @@ contract ModuleManagerTest is SafeTestSetup {
         // Add assumption to exclude the sentinel value (Solady EnumerableSetLib sentinel value)
         vm.assume(uint160(moduleAddresses[0]) != uint160(0xfbb67fda52d4bfb8bf));
         vm.assume(uint160(moduleAddresses[1]) != uint160(0xfbb67fda52d4bfb8bf));
-        
+
         address[] memory modules = new address[](2);
         modules[0] = moduleAddresses[0];
         modules[1] = moduleAddresses[1];
@@ -180,7 +165,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](2);
         shouldWhitelist[0] = shouldWhitelistFlags[0];
         shouldWhitelist[1] = shouldWhitelistFlags[1];
-        
+
         vm.prank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
@@ -204,7 +189,7 @@ contract ModuleManagerTest is SafeTestSetup {
         address[] memory modules = new address[](0);
         bool[] memory shouldWhitelist = new bool[](0);
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -227,7 +212,7 @@ contract ModuleManagerTest is SafeTestSetup {
         address[] memory modules = new address[](2);
         bool[] memory shouldWhitelist = new bool[](1);
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -253,7 +238,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -279,7 +264,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -304,7 +289,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -330,7 +315,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -355,7 +340,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -385,24 +370,5 @@ contract ModuleManagerTest is SafeTestSetup {
         assertEq(registeredModules.length, 2);
         assertTrue(registeredModules[0] == module1);
         assertTrue(registeredModules[1] == module2);
-    }
-
-    function _configureModules(address[] memory modules, bool[] memory shouldWhitelist, uint256 pk1, uint256 pk2) public {
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonces(address(this))));
-
-        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
-
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pk2, digestHash);
-
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-
-        address[] memory signers = new address[](2);
-        signers[0] = owner1;
-        signers[1] = owner2;
-
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
     }
 }

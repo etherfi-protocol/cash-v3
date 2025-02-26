@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
-import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 
 /**
  * @title ModuleManager
@@ -64,9 +64,9 @@ abstract contract ModuleManager is EtherFiSafeErrors {
             if (_modules[i] == address(0)) revert InvalidModule(i);
             if (!_isCashModule(_modules[i]) && !_isWhitelistedOnDataProvider(_modules[i])) revert UnsupportedModule(i);
             $.modules.add(_modules[i]);
-            
-            unchecked { 
-                ++i; 
+
+            unchecked {
+                ++i;
             }
         }
 
@@ -99,8 +99,8 @@ abstract contract ModuleManager is EtherFiSafeErrors {
                 if (!_isCashModule(_modules[i]) && !_isWhitelistedOnDataProvider(_modules[i])) revert UnsupportedModule(i);
                 $.modules.add(_modules[i]);
             }
-            
-            if (!_shouldWhitelist[i] && $.modules.contains(_modules[i])) { 
+
+            if (!_shouldWhitelist[i] && $.modules.contains(_modules[i])) {
                 if (_isCashModule(_modules[i])) revert CannotRemoveCashModule(i);
                 $.modules.remove(_modules[i]);
             }
@@ -119,7 +119,7 @@ abstract contract ModuleManager is EtherFiSafeErrors {
      * @return bool True if the module is whitelisted on the data provider
      */
     function _isWhitelistedOnDataProvider(address module) internal view virtual returns (bool);
-    
+
     /**
      * @notice Checks if a module is the cash module
      * @param module Address of the module to check

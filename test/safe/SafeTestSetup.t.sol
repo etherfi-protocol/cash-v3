@@ -3,15 +3,23 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 
-import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
-import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
-import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
+
+import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
+import { IModule } from "../../src/interfaces/IModule.sol";
+import { ModuleBase } from "../../src/modules/ModuleBase.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract SafeTestSetup is Test {
+    using MessageHashUtils for bytes32;
+
     EtherFiSafe public safe;
     EtherFiDataProvider public dataProvider;
     RoleRegistry public roleRegistry;
+    EtherFiHook public hook;
 
     address owner;
     uint256 owner1Pk;
@@ -24,7 +32,6 @@ contract SafeTestSetup is Test {
     address public notOwner;
     address public pauser;
     address public unpauser;
-    address public hook;
 
     uint8 threshold;
 
@@ -32,10 +39,9 @@ contract SafeTestSetup is Test {
     address public module2 = makeAddr("module2");
     address public cashModule = makeAddr("cashModule");
 
-    function setUp() public {
+    function setUp() public virtual {
         pauser = makeAddr("pauser");
         unpauser = makeAddr("unpauser");
-        hook = makeAddr("hook");
         owner = makeAddr("owner");
         (owner1, owner1Pk) = makeAddrAndKey("owner1");
         (owner2, owner2Pk) = makeAddrAndKey("owner2");
@@ -52,7 +58,7 @@ contract SafeTestSetup is Test {
         address[] memory modules = new address[](2);
         modules[0] = module1;
         modules[1] = module2;
-        
+
         vm.startPrank(owner);
 
         address roleRegistryImpl = address(new RoleRegistry());
@@ -61,22 +67,56 @@ contract SafeTestSetup is Test {
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
         address dataProviderImpl = address(new EtherFiDataProvider());
-        dataProvider = EtherFiDataProvider(address(new UUPSProxy(
-            dataProviderImpl, 
-            abi.encodeWithSelector(
-                EtherFiDataProvider.initialize.selector,
-                address(roleRegistry),
-                cashModule,
-                modules,
-                hook
-            )
-        )));
+        dataProvider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, "")));
 
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
+
+        address hookImpl = address(new EtherFiHook(address(dataProvider)));
+        hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
+
+        dataProvider.initialize(address(roleRegistry), cashModule, modules, address(hook));
 
         safe = new EtherFiSafe(address(dataProvider));
         safe.initialize(owners, modules, threshold);
 
         vm.stopPrank();
+    }
+
+    function _configureModules(address[] memory modules, bool[] memory shouldWhitelist, uint256 pk1, uint256 pk2) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pk2, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+    }
+
+    function _configureModuleAdmin(address module, address[] memory accounts, bool[] memory shouldAdd, uint256 pk1, uint256 pk2) internal {
+        bytes32 digestHash = keccak256(abi.encode(IModule(module).CONFIG_ADMIN(), block.chainid, module, IModule(module).getNonce(address(safe)), address(safe), accounts, shouldAdd)).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pk2, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        vm.expectEmit(true, true, true, true);
+        emit ModuleBase.AdminsConfigured(address(safe), accounts, shouldAdd);
+        IModule(module).configureAdmins(address(safe), accounts, shouldAdd, signers, signatures);
     }
 }

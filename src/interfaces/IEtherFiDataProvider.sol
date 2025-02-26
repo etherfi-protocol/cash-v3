@@ -42,7 +42,7 @@ interface IEtherFiDataProvider {
      */
     function getWhitelistedModules() external view returns (address[] memory);
 
-     /**
+    /**
      * @notice Returns the address of the Cash Module
      * @return Address of the cash module
      */

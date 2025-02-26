@@ -6,8 +6,9 @@ import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
-import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+
 import { ArrayDeDupLib } from "../../src/libraries/ArrayDedupLib.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 
 contract EtherFiDataProviderTest is Test {
     EtherFiDataProvider public provider;
@@ -39,16 +40,7 @@ contract EtherFiDataProviderTest is Test {
 
         // Deploy provider
         address dataProviderImpl = address(new EtherFiDataProvider());
-        provider = EtherFiDataProvider(address(new UUPSProxy(
-            dataProviderImpl,
-            abi.encodeWithSelector(
-                EtherFiDataProvider.initialize.selector, 
-                roleRegistry, 
-                cashModule, 
-                initialModules, 
-                hookAddress
-            )
-        )));
+        provider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, abi.encodeWithSelector(EtherFiDataProvider.initialize.selector, roleRegistry, cashModule, initialModules, hookAddress))));
 
         roleRegistry.grantRole(provider.DATA_PROVIDER_ADMIN_ROLE(), admin);
         vm.stopPrank();
@@ -77,17 +69,17 @@ contract EtherFiDataProviderTest is Test {
     function test_initialize_withoutHook() public {
         address newImpl = address(new EtherFiDataProvider());
         EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
-        
+
         address[] memory initialModules = new address[](2);
         initialModules[0] = module1;
         initialModules[1] = module2;
 
         vm.prank(admin);
         newProvider.initialize(address(roleRegistry), cashModule, initialModules, address(0));
-        
+
         // Hook should be zero address since we didn't set it
         assertEq(newProvider.getHookAddress(), address(0));
-        
+
         // Other settings should still be set
         assertEq(newProvider.isWhitelistedModule(module1), true);
         assertEq(newProvider.getCashModule(), cashModule);
@@ -96,17 +88,17 @@ contract EtherFiDataProviderTest is Test {
     function test_initialize_withoutCashModule() public {
         address newImpl = address(new EtherFiDataProvider());
         EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
-        
+
         address[] memory initialModules = new address[](2);
         initialModules[0] = module1;
         initialModules[1] = module2;
 
         vm.prank(admin);
         newProvider.initialize(address(roleRegistry), address(0), initialModules, hookAddress);
-        
+
         // Cash module should be zero address since we didn't set it
         assertEq(newProvider.getCashModule(), address(0));
-        
+
         // Other settings should still be set
         assertEq(newProvider.isWhitelistedModule(module1), true);
         assertEq(newProvider.getHookAddress(), hookAddress);
@@ -174,7 +166,6 @@ contract EtherFiDataProviderTest is Test {
 
         newProvider.initialize(address(roleRegistry), cashModule, modules, hookAddress);
     }
-
 
     // Configure Modules Tests
 
@@ -331,7 +322,6 @@ contract EtherFiDataProviderTest is Test {
         provider.setHookAddress(address(0));
     }
 
-
     // View Function Tests
 
     function test_isWhitelistedModule_returnsCorrectStatus() public view {
@@ -356,5 +346,4 @@ contract EtherFiDataProviderTest is Test {
     function test_getCashModule_returnsCurrentCashModule() public view {
         assertEq(provider.getCashModule(), cashModule);
     }
-
 }

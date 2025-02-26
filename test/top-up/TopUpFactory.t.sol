@@ -36,8 +36,6 @@ contract TopUpFactoryTest is Test, Constants {
     address weETHOftAddress = 0xcd2eb13D6831d4602D80E5db9230A57596CDCA63;
     address usdcStargatePool = 0xc026395860Db2d07ee33e05fE50ed7bD583189C7;
 
-    bytes32 public constant FACTORY_ADMIN_ROLE = keccak256("FACTORY_ADMIN_ROLE");
-
     function setUp() public {
         vm.createSelectFork("https://ethereum-rpc.publicnode.com");
 
@@ -61,7 +59,7 @@ contract TopUpFactoryTest is Test, Constants {
         implementation = new TopUp();
         address factoryImpl = address(new TopUpFactory());
         factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
-        roleRegistry.grantRole(factory.FACTORY_ADMIN_ROLE(), admin);
+        roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), admin);
 
         vm.stopPrank();
 

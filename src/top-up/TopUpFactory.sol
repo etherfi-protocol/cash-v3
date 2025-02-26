@@ -46,6 +46,9 @@ contract TopUpFactory is BeaconFactory {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpFactory")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant TopUpFactoryStorageLocation = 0xe4e747da44afe6bc45062fa78d7d038abc167c5a78dee3046108b9cc47b1b100;
 
+    /// @notice The ADMIN role for the TopUp factory
+    bytes32 public constant TOPUP_FACTORY_ADMIN_ROLE = keccak256("TOPUP_FACTORY_ADMIN_ROLE");
+
     /// @notice Max slippage allowed for bridging
     uint96 public constant MAX_ALLOWED_SLIPPAGE = 200; // 2%
 
@@ -110,12 +113,12 @@ contract TopUpFactory is BeaconFactory {
 
     /**
      * @notice Deploys a new TopUp contract instance
-     * @dev Only callable by addresses with FACTORY_ADMIN_ROLE
+     * @dev Only callable by addresses with TOPUP_FACTORY_ADMIN_ROLE
      * @param salt The salt value used for deterministic deployment
      * @custom:throws OnlyAdmin if caller doesn't have admin role
      */
     function deployTopUpContract(bytes32 salt) external {
-        if (!roleRegistry().hasRole(FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         bytes memory initData = abi.encodeWithSelector(TopUp.initialize.selector, address(this));
         address deployed = _deployBeacon(salt, initData);
 
@@ -182,7 +185,7 @@ contract TopUpFactory is BeaconFactory {
      * @custom:emits TokenConfigSet when configs are updated
      */
     function setTokenConfig(address[] calldata tokens, TokenConfig[] calldata configs) external {
-        if (!roleRegistry().hasRole(FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
 
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
@@ -236,7 +239,7 @@ contract TopUpFactory is BeaconFactory {
     function recoverFunds(address token, uint256 amount) external {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
-        if (!roleRegistry().hasRole(FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter != address(0)) revert OnlyUnsupportedTokens();
         if ($.recoveryWallet == address(0)) revert RecoveryWalletNotSet();
@@ -256,7 +259,7 @@ contract TopUpFactory is BeaconFactory {
     function setRecoveryWallet(address _recoveryWallet) external {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
-        if (!roleRegistry().hasRole(FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         if (_recoveryWallet == address(0)) revert RecoveryWalletCannotBeZeroAddress();
         emit RecoveryWalletSet($.recoveryWallet, _recoveryWallet);
         $.recoveryWallet = _recoveryWallet;

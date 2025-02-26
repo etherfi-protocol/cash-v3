@@ -14,7 +14,7 @@ contract MultiSigTest is SafeTestSetup {
     function test_setThreshold_reverts_whenThresholdZero() public {
         uint8 newThreshold = 0;
 
-        bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonce()));
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
@@ -35,7 +35,7 @@ contract MultiSigTest is SafeTestSetup {
     function test_setThreshold_reverts_whenThresholdAboveOwnerCount() public {
         uint8 newThreshold = 4; // Only 3 owners exist
 
-        bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonce()));
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
@@ -106,7 +106,7 @@ contract MultiSigTest is SafeTestSetup {
         address[] memory owners = new address[](0);
         bool[] memory shouldAdd = new bool[](0);
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -136,7 +136,7 @@ contract MultiSigTest is SafeTestSetup {
         shouldAdd[1] = false;
         shouldAdd[2] = false;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -164,7 +164,7 @@ contract MultiSigTest is SafeTestSetup {
         shouldAdd[0] = false;
         shouldAdd[1] = false;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -381,7 +381,7 @@ contract MultiSigTest is SafeTestSetup {
     }
 
     function _setThreshold(uint8 newThreshold, uint256 pk1, uint256 pk2) internal {
-        bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonce()));
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
@@ -399,7 +399,7 @@ contract MultiSigTest is SafeTestSetup {
     }
 
     function _configureOwners(address[] memory owners, bool[] memory shouldAdd, uint256 pk1, uint256 pk2) internal {
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonces(address(this))));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 

@@ -78,7 +78,9 @@ abstract contract MultiSig is EtherFiSafeErrors {
             if (_owners[i] == address(0)) revert InvalidOwnerAddress(i);
             $.owners.add(_owners[i]);
             _shouldAdd[i] = true;
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         emit OwnersConfigured(_owners, _shouldAdd);
@@ -123,7 +125,9 @@ abstract contract MultiSig is EtherFiSafeErrors {
             if (_shouldAdd[i] && !$.owners.contains(_owners[i])) $.owners.add(_owners[i]);
             if (!_shouldAdd[i] && $.owners.contains(_owners[i])) $.owners.remove(_owners[i]);
 
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         if ($.owners.length() == 0) revert AllOwnersRemoved();
@@ -162,11 +166,15 @@ abstract contract MultiSig is EtherFiSafeErrors {
             if (!$.owners.contains(signers[i])) revert InvalidSigner(i);
 
             if (digestHash.isValidSignature(signers[i], signatures[i])) {
-                unchecked { ++validSigs; }
+                unchecked {
+                    ++validSigs;
+                }
                 if (validSigs == $.threshold) break;
             }
 
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
 
         return validSigs == $.threshold;
