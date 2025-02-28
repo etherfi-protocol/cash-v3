@@ -36,7 +36,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bytes[] memory setupData = new bytes[](1);
 
         // First add it to whitelist
-        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
+        _configureModules(modules, shouldWhitelist, setupData);
 
         // Now try to remove it
         shouldWhitelist[0] = false;
@@ -109,7 +109,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
+        _configureModules(modules, shouldWhitelist, setupData);
         assertTrue(safe.isModuleEnabled(newModule));
     }
 
@@ -154,7 +154,7 @@ contract ModuleManagerTest is SafeTestSetup {
 
         bytes[] memory setupData = new bytes[](2);
 
-        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
+        _configureModules(modules, shouldWhitelist, setupData);
         assertTrue(safe.isModuleEnabled(module1));
         assertTrue(safe.isModuleEnabled(module2));
     }
@@ -352,7 +352,7 @@ contract ModuleManagerTest is SafeTestSetup {
 
         bytes[] memory setupData = new bytes[](2);
 
-        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
+        _configureModules(modules, shouldWhitelist, setupData);
 
         address[] memory registeredModules = safe.getModules();
         assertEq(registeredModules.length, 2);

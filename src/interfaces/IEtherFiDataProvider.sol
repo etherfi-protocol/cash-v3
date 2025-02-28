@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {IRoleRegistry} from "./IRoleRegistry.sol";
+
 /**
  * @title IEtherFiDataProvider
  * @author ether.fi
@@ -54,6 +56,8 @@ interface IEtherFiDataProvider {
      */
     function getHookAddress() external view returns (address);
 
+    function getEtherFiSafeFactory() external view returns (address);
+
     /**
      * @notice Function to check if an account is an EtherFiSafe, throws otherwise
      * @param account Address of the account to check
@@ -66,4 +70,10 @@ interface IEtherFiDataProvider {
      * @return bytes32 The keccak256 hash of "ADMIN_ROLE"
      */
     function ADMIN_ROLE() external view returns (bytes32);
+
+    /**
+     * @notice Returns the address of the Role Registry contract
+     * @return roleRegistry Reference to the role registry contract
+     */
+    function roleRegistry() external view returns (IRoleRegistry);
 }

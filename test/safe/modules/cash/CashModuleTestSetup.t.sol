@@ -16,10 +16,6 @@ contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
     CashModule public cashModule;
-    uint256 public moduleAdminPk;
-    address public moduleAdmin;
-    uint256 public nonAdminPk;
-    address public nonAdmin;
 
     address public etherFiWallet = makeAddr("etherFiWallet");
 
@@ -41,9 +37,6 @@ contract CashModuleTestSetup is SafeTestSetup {
         vm.createSelectFork("https://rpc.scroll.io");
 
         super.setUp();
-
-        (moduleAdmin, moduleAdminPk) = makeAddrAndKey("moduleAdmin");
-        (nonAdmin, nonAdminPk) = makeAddrAndKey("nonAdmin");
 
         // the cash data provider currently whitelists all user safes
         vm.prank(cashOwnerGnosisSafe);
@@ -78,15 +71,7 @@ contract CashModuleTestSetup is SafeTestSetup {
 
         dataProvider.configureModules(modules, shouldWhitelist);
 
-        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
+        _configureModules(modules, shouldWhitelist, setupData);
         vm.stopPrank();        
-        // Add module admin
-        // address[] memory accounts = new address[](1);
-        // accounts[0] = moduleAdmin;
-
-        // bool[] memory shouldAdd = new bool[](1);
-        // shouldAdd[0] = true;
-
-        // _configureModuleAdmin(address(cashModule), accounts, shouldAdd, owner1Pk, owner2Pk);
     }
 }

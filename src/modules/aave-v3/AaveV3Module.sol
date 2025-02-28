@@ -5,7 +5,8 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IAavePoolV3 } from "../../interfaces/IAavePoolV3.sol";
-import { IEtherFiSafe, ModuleBase } from "../ModuleBase.sol";
+import { ModuleBase } from "../ModuleBase.sol";
+import {IEtherFiSafe} from "../../interfaces/IEtherFiSafe.sol";
 
 /**
  * @title AaveV3Module
@@ -35,8 +36,6 @@ contract AaveV3Module is ModuleBase {
         aaveV3Pool = IAavePoolV3(_aavePool);
     }
 
-    function _setupModule(bytes calldata data) internal override {}
-
     /**
      * @notice Supply tokens to Aave V3 Pool using admin privileges
      * @param safe The Safe address which holds the tokens
@@ -45,7 +44,7 @@ contract AaveV3Module is ModuleBase {
      * @dev Executes token approval and supply through the Safe's module execution
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
-    function supplyAdmin(address safe, address asset, uint256 amount) external onlyEtherFiSafe(safe) onlyAdmin(safe) {
+    function supplyAdmin(address safe, address asset, uint256 amount) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, msg.sender) {
         _supply(safe, asset, amount);
     }
 
@@ -59,9 +58,9 @@ contract AaveV3Module is ModuleBase {
      * @dev Verifies signature then executes token approval and supply through the Safe's module execution
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
-    function supplyWithSignature(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) {
+    function supplyWithSignature(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer)  {
         bytes32 digestHash = keccak256(abi.encode(SUPPLY_SIG, block.chainid, address(this), _useNonce(safe), safe, asset, amount)).toEthSignedMessageHash();
-        _verifyAdminSig(address(safe), digestHash, signer, signature);
+        _verifyAdminSig(digestHash, signer, signature);
         _supply(safe, asset, amount);
     }
 

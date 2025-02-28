@@ -180,6 +180,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
         return _getEtherFiDataProviderStorage().hook;
     }
 
+    function getEtherFiSafeFactory() public view returns (address) {
+        return address(_getEtherFiDataProviderStorage().etherFiSafeFactory);
+    }
+
     /**
      * @notice Function to check if an account is an EtherFiSafe, throws otherwise
      * @param account Address of the account to check

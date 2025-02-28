@@ -72,4 +72,47 @@ interface IRoleRegistry {
      * @custom:throws Reverts if account is not an authorized upgrader
      */
     function onlyUpgrader(address account) external view;
+
+        /**
+     * @notice Generates a unique role identifier for safe administrators
+     * @dev Creates a unique bytes32 identifier by hashing the safe address with a role type
+     * @param safe The address of the safe for which to generate the admin role
+     * @return bytes32 A unique role identifier for the specified safe's admins
+     * @custom:throws InvalidInput if safe is a zero address
+     */
+    function getSafeAdminRole(address safe) external pure returns (bytes32);
+    
+    /**
+     * @notice Configures admin roles for a specific safe
+     * @dev Grants/revokes admin privileges to specified addresses for a particular safe
+     * @param accounts Array of admin addresses to configure
+     * @param shouldAdd Array indicating whether to add or remove each admin
+     * @custom:throws OnlyEtherFiSafe if called by any address other than a registered EtherFiSafe
+     * @custom:throws InvalidInput if the admins array is empty or contains a zero address 
+     * @custom:throws ArrayLengthMismatch if the array lengths mismatch
+     */
+    function configureSafeAdmins(address[] calldata accounts, bool[] calldata shouldAdd) external;
+
+    /**
+     * @notice Verifies if an account has safe admin privileges
+     * @param safe The address of the safe 
+     * @param account The address to check for safe admin role
+     * @custom:throws OnlySafeAdmin if the account does not have the SafeAdmin role
+     */
+    function onlySafeAdmin(address safe, address account) external view;
+
+    /**
+     * @notice Returns if an account has safe admin privileges
+     * @param safe The address of the safe 
+     * @param account The address to check for safe admin role
+     * @return bool suggesting if the account has the safe admin role
+     */
+    function isSafeAdmin(address safe, address account) external view returns (bool);
+
+    /**
+     * @notice Retrieves all addresses that have the safe admin role for a particular safe
+     * @param safe The address of the safe
+     * @return Array of addresses that have the safe admin role
+     */
+    function getSafeAdmins(address safe) external view returns (address[] memory);
 }

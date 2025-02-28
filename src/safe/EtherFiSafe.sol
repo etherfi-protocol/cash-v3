@@ -6,6 +6,7 @@ import { EIP712Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/cry
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { IEtherFiHook } from "../interfaces/IEtherFiHook.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
@@ -15,34 +16,71 @@ import { MultiSig } from "./MultiSig.sol";
 
 /**
  * @title EtherFiSafe
- * @author ether.fi
  * @notice Implementation of a multi-signature safe with module management capabilities
+ * @dev Combines ModuleManager and MultiSig functionality with EIP-712 signature verification
+ * @author ether.fi
  */
 contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgradeable {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
 
-    /// @notice Interface to the data provider contract
+    /**
+     * @notice Interface to the data provider contract
+     * @dev Used to access protocol configuration and validation services
+     */
     IEtherFiDataProvider public immutable dataProvider;
 
-    /// @custom:storage-location erc7201:etherfi.storage.EtherFiSafe
+    /**
+     * @dev Storage structure for EtherFiSafe using ERC-7201 namespaced storage pattern
+     * @custom:storage-location erc7201:etherfi.storage.EtherFiSafe
+     */
     struct EtherFiSafeStorage {
-        /// @notice Current nonce
+        /// @notice Current nonce for replay protection
         uint256 nonce;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiSafe")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant EtherFiSafeStorageLocation = 0x6f297332685baf3d7ed2366c1e1996176ab52e89e9bd6ee3d882f5057ea1bd00;
+    bytes32 private constant EtherFiSafeStorageLocation = 0x44768873c7c67d9dae2df1ca334431d5cd98fd349ed85d549beecffe9f026500;
 
-    // keccak256("ConfigureModules(address[] modules,bool[] shouldWhitelist,uint256 nonce)")
+    /**
+     * @notice TypeHash for module configuration with EIP-712 signatures
+     * @dev keccak256("ConfigureModules(address[] modules,bool[] shouldWhitelist,uint256 nonce)")
+     */
     bytes32 public constant CONFIGURE_MODULES_TYPEHASH = 0x20263b9194095d902b566d15f1db1d03908706042a5d22118c55a666ec3b992c;
-    // keccak256("SetThreshold(uint8 threshold,uint256 nonce)")
+    
+    /**
+     * @notice TypeHash for threshold setting with EIP-712 signatures
+     * @dev keccak256("SetThreshold(uint8 threshold,uint256 nonce)")
+     */
     bytes32 public constant SET_THRESHOLD_TYPEHASH = 0x41b1bc57fb63493212c2d2f75145ff3130ce53c70f867177944887c5cb8e8626;
-    // keccak256("ConfigureOwners(address[] owners,bool[] shouldAdd,uint256 nonce)")
+    
+    /**
+     * @notice TypeHash for owner configuration with EIP-712 signatures
+     * @dev keccak256("ConfigureOwners(address[] owners,bool[] shouldAdd,uint256 nonce)")
+     */
     bytes32 public constant CONFIGURE_OWNERS_TYPEHASH = 0x93a5e8776e97535ceccfb399fc4015baa8aa11c3e58454ef681f9e144c718f92;
+    
+    /**
+     * @notice TypeHash for admin configuration with EIP-712 signatures
+     * @dev keccak256("ConfigureAdmins(address[] accounts,bool[] shouldAdd,uint256 nonce)")
+     */
+    bytes32 public constant CONFIGURE_ADMIN_TYPEHASH = 0x3dfd66efb2a5d3ec63eb6eb270a4a662d28b1e27ce51f3c835ba384215a0ac80;
 
+    /**
+     * @notice Emitted when a transaction is executed through a module
+     * @param to Array of target addresses for the calls
+     * @param value Array of ETH values to send with each call
+     * @param data Array of calldata for each call
+     */
     event ExecTransactionFromModule(address[] to, uint256[] value, bytes[] data);
+    
+    /**
+     * @notice Emitted when admin accounts are configured
+     * @param accounts Array of admin addresses that were configured
+     * @param shouldAdd Array indicating whether each admin was added (true) or removed (false)
+     */
+    event AdminsConfigured(address[] accounts, bool[] shouldAdd);
 
     /**
      * @dev Returns the storage struct for EtherFiSafe
@@ -57,6 +95,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
 
     /**
      * @notice Contract constructor
+     * @dev Sets the immutable data provider reference
      * @param _dataProvider Address of the EtherFiDataProvider contract
      */
     constructor(address _dataProvider) payable {
@@ -64,7 +103,8 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
     }
 
     /**
-     * @notice Initializes the safe with owners and signature threshold
+     * @notice Initializes the safe with owners, modules, and signature threshold
+     * @dev Sets up all components and can only be called once
      * @param _owners Initial array of owner addresses
      * @param _modules Initial array of module addresses
      * @param _moduleSetupData Array of data for setting up individual modules for the safe
@@ -76,16 +116,62 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
      */
     function initialize(address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData, uint8 _threshold) external initializer {
         __EIP712_init("EtherFiSafe", "1");
+        
+        bool[] memory _shouldAdd = new bool[](_owners.length);
+        for (uint256 i = 0; i < _owners.length; ) {
+            _shouldAdd[i] = true;
+
+            unchecked {
+                ++i;
+            }
+        }
+        
         _setupMultiSig(_owners, _threshold);
-        _setupModules(_owners, _modules, _moduleSetupData);
+        _configureAdmin(_owners, _shouldAdd);
+        _setupModules(_modules, _moduleSetupData);
+    }
+
+    /**
+     * @notice Configures admin accounts with signature verification
+     * @dev Uses EIP-712 typed data signing for secure multi-signature authorization
+     * @param accounts Array of admin addresses to configure
+     * @param shouldAdd Array indicating whether to add or remove each admin
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of corresponding signatures
+     * @custom:throws InvalidSignatures If signature verification fails
+     */
+    function configureAdmins(address[] calldata accounts, bool[] calldata shouldAdd, address[] calldata signers, bytes[] calldata signatures) external {
+        bytes32 structHash = keccak256(abi.encode(CONFIGURE_ADMIN_TYPEHASH, keccak256(abi.encodePacked(accounts)), keccak256(abi.encodePacked(shouldAdd)), _useNonce()));
+
+        bytes32 digestHash = _hashTypedDataV4(structHash);
+        if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+        _configureAdmin(accounts, shouldAdd);
+    }   
+
+    /**
+     * @notice Gets all admin addresses for this safe
+     * @dev Retrieves admin information from the role registry
+     * @return Array of admin addresses
+     */
+    function getAdmins() external view returns (address[] memory) {
+        return dataProvider.roleRegistry().getSafeAdmins(address(this));
+    }
+
+    /**
+     * @notice Returns if an account has safe admin privileges
+     * @param account Address of the account
+     * @return bool True if the account has the safe admin role, false otherwise
+     */
+    function isAdmin(address account) external view returns (bool) {
+        return dataProvider.roleRegistry().isSafeAdmin(address(this), account);
     }
 
     /**
      * @notice Updates the signature threshold with owner signatures
+     * @dev Uses EIP-712 typed data signing for secure multi-signature authorization
      * @param threshold New threshold value
      * @param signers Array of addresses that signed the transaction
      * @param signatures Array of corresponding signatures
-     * @dev Uses EIP-712 typed data signing
      * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
      * @custom:throws InvalidSignatures If signature verification fails
      */
@@ -99,11 +185,11 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
 
     /**
      * @notice Configures safe owners with signature verification
+     * @dev Uses EIP-712 typed data signing for secure multi-signature authorization
      * @param owners Array of owner addresses to configure
      * @param shouldAdd Array indicating whether to add or remove each owner
      * @param signers Array of addresses that signed the transaction
      * @param signatures Array of corresponding signatures
-     * @dev Uses EIP-712 typed data signing
      * @custom:throws InvalidInput If owners array is empty
      * @custom:throws ArrayLengthMismatch If arrays have different lengths
      * @custom:throws InvalidOwnerAddress If any owner address is zero
@@ -121,12 +207,12 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
 
     /**
      * @notice Configures module whitelist with signature verification
+     * @dev Uses EIP-712 typed data signing for secure multi-signature authorization
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of booleans indicating whether to add or remove each module
      * @param moduleSetupData Array of data for setting up individual modules for the safe
      * @param signers Array of addresses that signed the transaction
      * @param signatures Array of corresponding signatures
-     * @dev Uses EIP-712 typed data signing
      * @custom:throws InvalidInput If modules array is empty
      * @custom:throws ArrayLengthMismatch If modules and shouldWhitelist arrays have different lengths
      * @custom:throws InvalidModule If any module address is zero
@@ -142,16 +228,31 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
 
     /**
      * @notice Returns the EIP-712 domain separator
+     * @dev Used for signature verification
      * @return bytes32 Current domain separator value
      */
     function getDomainSeparator() external view returns (bytes32) {
         return _domainSeparatorV4();
     }
 
+    /**
+     * @notice Gets the current nonce value
+     * @dev Used for replay protection in signatures
+     * @return Current nonce value
+     */
     function nonce() public view returns (uint256) {
         return _getEtherFiSafeStorage().nonce;
     }
 
+    /**
+     * @notice Executes a transaction from an authorized module
+     * @dev Allows modules to execute arbitrary transactions on behalf of the safe
+     * @param to Array of target addresses for the calls
+     * @param values Array of ETH values to send with each call
+     * @param data Array of calldata for each call
+     * @custom:throws OnlyModules If the caller is not an enabled module
+     * @custom:throws CallFailed If any of the calls fail
+     */
     function execTransactionFromModule(address[] calldata to, uint256[] calldata values, bytes[] calldata data) external {
         if (!isModuleEnabled(msg.sender)) revert OnlyModules();
         IEtherFiHook hook = IEtherFiHook(dataProvider.getHookAddress());
@@ -175,24 +276,45 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
 
     /**
      * @notice Returns all current owners of the safe
+     * @dev Implementation of the abstract function from ModuleManager
      * @return address[] Array containing all owner addresses
      */
     function getOwners() public view override returns (address[] memory) {
         return _getMultiSigStorage().owners.values();
     }
 
+    /**
+     * @dev Checks if a module is whitelisted on the data provider
+     * @param module Address of the module to check
+     * @return bool True if the module is whitelisted on the data provider
+     */
     function _isWhitelistedOnDataProvider(address module) internal view override returns (bool) {
         return dataProvider.isWhitelistedModule(module);
     }
 
+    /**
+     * @dev Checks if a module is the cash module
+     * @param module Address of the module to check
+     * @return bool True if the module is the Cash module
+     */
     function _isCashModule(address module) internal view override returns (bool) {
         return dataProvider.getCashModule() == module;
     }
 
     /**
-     * @dev Consumes a nonce.
-     *
-     * Returns the current value and increments nonce.
+     * @dev Internal function to configure admin accounts
+     * @param accounts Array of admin addresses to configure
+     * @param shouldAdd Array indicating whether to add or remove each admin
+     */
+    function _configureAdmin(address[] calldata accounts, bool[] memory shouldAdd) internal {
+        dataProvider.roleRegistry().configureSafeAdmins(accounts, shouldAdd);
+        emit AdminsConfigured(accounts, shouldAdd);
+    }
+
+
+    /**
+     * @dev Consumes a nonce for replay protection
+     * @return Current nonce value before incrementing
      */
     function _useNonce() internal returns (uint256) {
         EtherFiSafeStorage storage $ = _getEtherFiSafeStorage();

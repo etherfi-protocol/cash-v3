@@ -12,6 +12,7 @@ import { TopUp } from "../../src/top-up/TopUp.sol";
 import { BeaconFactory, TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { EtherFiOFTBridgeAdapter } from "../../src/top-up/bridge/EtherFiOFTBridgeAdapter.sol";
 import { StargateAdapter } from "../../src/top-up/bridge/StargateAdapter.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { Constants } from "../../src/utils/Constants.sol";
 
 contract TopUpFactoryTest is Test, Constants {
@@ -26,7 +27,7 @@ contract TopUpFactoryTest is Test, Constants {
     RoleRegistry public roleRegistry;
     EtherFiOFTBridgeAdapter oftBridgeAdapter;
     StargateAdapter stargateAdapter;
-
+    address public dataProvider = makeAddr("dataProvider");
     uint96 maxSlippage = 100;
 
     IERC20 weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
@@ -51,7 +52,7 @@ contract TopUpFactoryTest is Test, Constants {
         stargateAdapter = new StargateAdapter();
         oftBridgeAdapter = new EtherFiOFTBridgeAdapter();
 
-        address roleRegistryImpl = address(new RoleRegistry());
+        address roleRegistryImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);

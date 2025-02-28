@@ -53,7 +53,7 @@ abstract contract ModuleManager is EtherFiSafeErrors {
      * @custom:throws InvalidModule If any module address is zero
      * @custom:throws UnsupportedModule If a module is not whitelisted on the data provider
      */
-    function _setupModules(address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData) internal {
+    function _setupModules(address[] calldata _modules, bytes[] calldata _moduleSetupData) internal {
         ModuleManagerStorage storage $ = _getModuleManagerStorage();
 
         if ($.modules.length() != 0) revert ModulesAlreadySetup();
@@ -67,7 +67,7 @@ abstract contract ModuleManager is EtherFiSafeErrors {
             if (_modules[i] == address(0)) revert InvalidModule(i);
             if (!_isCashModule(_modules[i]) && !_isWhitelistedOnDataProvider(_modules[i])) revert UnsupportedModule(i);
             $.modules.add(_modules[i]);
-            IModule(_modules[i]).setupModuleForSafe(_owners, _moduleSetupData[i]);
+            IModule(_modules[i]).setupModule(_moduleSetupData[i]);
 
             unchecked {
                 ++i;
@@ -104,8 +104,7 @@ abstract contract ModuleManager is EtherFiSafeErrors {
             if (_shouldWhitelist[i] && !$.modules.contains(_modules[i])) {
                 if (!_isCashModule(_modules[i]) && !_isWhitelistedOnDataProvider(_modules[i])) revert UnsupportedModule(i);
                 $.modules.add(_modules[i]);
-
-                IModule(_modules[i]).setupModuleForSafe(getOwners(), _moduleSetupData[i]);
+                IModule(_modules[i]).setupModule(_moduleSetupData[i]);
             }
 
             if (!_shouldWhitelist[i] && $.modules.contains(_modules[i])) {

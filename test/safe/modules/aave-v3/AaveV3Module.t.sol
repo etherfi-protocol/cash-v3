@@ -12,10 +12,6 @@ contract AaveV3ModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
     AaveV3Module public aaveV3Module;
-    uint256 public moduleAdminPk;
-    address public moduleAdmin;
-    uint256 public nonAdminPk;
-    address public nonAdmin;
     address public aaveV3PoolScroll = 0x11fCfe756c05AD438e312a7fd934381537D3cFfe;
     IERC20 public usdcScroll = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
 
@@ -23,9 +19,6 @@ contract AaveV3ModuleTest is SafeTestSetup {
         vm.createSelectFork("https://rpc.scroll.io");
 
         super.setUp();
-
-        (moduleAdmin, moduleAdminPk) = makeAddrAndKey("moduleAdmin");
-        (nonAdmin, nonAdminPk) = makeAddrAndKey("nonAdmin");
 
         aaveV3Module = new AaveV3Module(aaveV3PoolScroll, address(dataProvider));
 
@@ -40,16 +33,7 @@ contract AaveV3ModuleTest is SafeTestSetup {
 
         bytes[] memory setupData = new bytes[](1);
 
-        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
-        
-        // Add module admin
-        address[] memory accounts = new address[](1);
-        accounts[0] = moduleAdmin;
-
-        bool[] memory shouldAdd = new bool[](1);
-        shouldAdd[0] = true;
-
-        _configureModuleAdmin(address(aaveV3Module), accounts, shouldAdd, owner1Pk, owner2Pk);
+        _configureModules(modules, shouldWhitelist, setupData);
     }
 
     // supplyAdmin tests
@@ -59,7 +43,7 @@ contract AaveV3ModuleTest is SafeTestSetup {
 
         uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
         
-        vm.prank(moduleAdmin);
+        vm.prank(owner1);
         aaveV3Module.supplyAdmin(address(safe), address(usdcScroll), amountToSupply);
         
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
@@ -73,7 +57,7 @@ contract AaveV3ModuleTest is SafeTestSetup {
         deal(address(usdcScroll), address(notSafe), amountToSupply);
 
         
-        vm.prank(moduleAdmin);
+        vm.prank(owner1);
         vm.expectRevert(EtherFiDataProvider.OnlyEtherFiSafe.selector);
         aaveV3Module.supplyAdmin(address(notSafe), address(usdcScroll), amountToSupply);
     }
@@ -82,16 +66,15 @@ contract AaveV3ModuleTest is SafeTestSetup {
         uint256 amountToSupply = 100e6;
         deal(address(usdcScroll), address(safe), amountToSupply);
         
-        vm.prank(nonAdmin);
-        vm.expectRevert(ModuleBase.OnlyAdmin.selector); // Exact error message may vary based on implementation
+        vm.prank(notOwner);
+        vm.expectRevert(ModuleBase.OnlySafeAdmin.selector); 
         aaveV3Module.supplyAdmin(address(safe), address(usdcScroll), amountToSupply);
     }
 
     function test_supplyAdmin_reverts_whenSafeHasInsufficientBalance() public {
         uint256 amountToSupply = 100e6;
-        // Not providing any tokens to the safe
         
-        vm.prank(moduleAdmin);
+        vm.prank(owner1);
         vm.expectRevert(AaveV3Module.InsufficientBalanceOnSafe.selector);
         aaveV3Module.supplyAdmin(address(safe), address(usdcScroll), amountToSupply);
     }
@@ -111,12 +94,12 @@ contract AaveV3ModuleTest is SafeTestSetup {
             amountToSupply
         )).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(moduleAdminPk, digestHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
         
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, moduleAdmin, signature);
+        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
         
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
         
@@ -137,11 +120,11 @@ contract AaveV3ModuleTest is SafeTestSetup {
             amountToSupply
         )).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(moduleAdminPk, digestHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(AaveV3Module.InsufficientBalanceOnSafe.selector);
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, moduleAdmin, signature);
+        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
     }
 
     function test_supplyWithSignature_reverts_whenSignerIsNotAdmin() public {
@@ -158,11 +141,11 @@ contract AaveV3ModuleTest is SafeTestSetup {
             amountToSupply
         )).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(nonAdminPk, digestHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(notOwnerPk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(); // Exact error may vary based on implementation
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, nonAdmin, signature);
+        vm.expectRevert(ModuleBase.OnlySafeAdmin.selector); 
+        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, notOwner, signature);
     }
 
     function test_supplyWithSignature_reverts_whenSignatureIsInvalid() public {
@@ -170,11 +153,11 @@ contract AaveV3ModuleTest is SafeTestSetup {
         deal(address(usdcScroll), address(safe), amountToSupply);
                 
         bytes32 wrongDigestHash = keccak256("wrong message").toEthSignedMessageHash();
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(moduleAdminPk, wrongDigestHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, wrongDigestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(); // Exact error may vary based on implementation
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, moduleAdmin, signature);
+        vm.expectRevert(ModuleBase.InvalidSignature.selector);
+        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
     }
 
     function test_supplyWithSignature_incrementsNonce() public {
@@ -193,10 +176,10 @@ contract AaveV3ModuleTest is SafeTestSetup {
             amountToSupply
         )).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(moduleAdminPk, digestHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, moduleAdmin, signature);
+        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
         
         uint256 nonceAfter = aaveV3Module.getNonce(address(safe));
         
@@ -219,14 +202,14 @@ contract AaveV3ModuleTest is SafeTestSetup {
             amountToSupply
         )).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(moduleAdminPk, digestHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         // First supply should succeed
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, moduleAdmin, signature);
+        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
         
         // Second supply with same signature should fail
-        vm.expectRevert(); // Exact error may vary based on implementation
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, moduleAdmin, signature);
+        vm.expectRevert(ModuleBase.InvalidSignature.selector); 
+        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
     }
 }

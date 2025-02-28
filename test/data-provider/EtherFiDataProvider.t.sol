@@ -35,13 +35,15 @@ contract EtherFiDataProviderTest is Test {
         initialModules[0] = module1;
         initialModules[1] = module2;
 
-        // Deploy role registry and grant admin role
-        address roleRegistryImpl = address(new RoleRegistry());
-        roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
-
         // Deploy provider
         address dataProviderImpl = address(new EtherFiDataProvider());
-        provider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, abi.encodeWithSelector(EtherFiDataProvider.initialize.selector, roleRegistry, cashModule, initialModules, hookAddress, safeFactory))));
+        provider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, "")));
+
+        // Deploy role registry and grant admin role
+        address roleRegistryImpl = address(new RoleRegistry(address(provider)));
+        roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
+
+        provider.initialize(address(roleRegistry), address(cashModule), initialModules, hookAddress, safeFactory);
 
         roleRegistry.grantRole(provider.DATA_PROVIDER_ADMIN_ROLE(), admin);
         vm.stopPrank();

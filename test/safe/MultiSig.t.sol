@@ -7,7 +7,7 @@ import { Test } from "forge-std/Test.sol";
 contract MultiSigTest is SafeTestSetup {
     function test_setThreshold_updatesThreshold() public {
         uint8 newThreshold = 3;
-        _setThreshold(newThreshold, owner1Pk, owner2Pk);
+        _setThreshold(newThreshold);
         assertEq(safe.getThreshold(), newThreshold);
     }
 
@@ -62,7 +62,7 @@ contract MultiSigTest is SafeTestSetup {
         bool[] memory shouldAdd = new bool[](1);
         shouldAdd[0] = true;
 
-        _configureOwners(owners, shouldAdd, owner1Pk, owner2Pk);
+        _configureOwners(owners, shouldAdd);
         assertTrue(safe.isOwner(newOwner));
     }
 
@@ -73,7 +73,7 @@ contract MultiSigTest is SafeTestSetup {
         bool[] memory shouldAdd = new bool[](1);
         shouldAdd[0] = false;
 
-        _configureOwners(owners, shouldAdd, owner1Pk, owner2Pk);
+        _configureOwners(owners, shouldAdd);
         assertFalse(safe.isOwner(owner3));
     }
 
@@ -96,7 +96,7 @@ contract MultiSigTest is SafeTestSetup {
         shouldAdd[0] = shouldAddFlags[0];
         shouldAdd[1] = shouldAddFlags[1];
 
-        _configureOwners(owners, shouldAdd, owner1Pk, owner2Pk);
+        _configureOwners(owners, shouldAdd);
 
         assertEq(safe.isOwner(owners[0]), shouldAdd[0]);
         assertEq(safe.isOwner(owners[1]), shouldAdd[1]);
@@ -378,42 +378,5 @@ contract MultiSigTest is SafeTestSetup {
         signatures[2] = abi.encodePacked(r3, s3, v3);
 
         assertTrue(safe.checkSignatures(testHash, signers, signatures));
-    }
-
-    function _setThreshold(uint8 newThreshold, uint256 pk1, uint256 pk2) internal {
-        bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonce()));
-        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
-
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pk2, digestHash);
-
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-
-        address[] memory signers = new address[](2);
-        signers[0] = owner1;
-        signers[1] = owner2;
-
-        safe.setThreshold(newThreshold, signers, signatures);
-    }
-
-    function _configureOwners(address[] memory owners, bool[] memory shouldAdd, uint256 pk1, uint256 pk2) internal {
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
-
-        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
-
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pk2, digestHash);
-
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-
-        address[] memory signers = new address[](2);
-        signers[0] = owner1;
-        signers[1] = owner2;
-
-        safe.configureOwners(owners, shouldAdd, signers, signatures);
     }
 }

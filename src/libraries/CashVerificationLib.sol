@@ -27,6 +27,20 @@ library CashVerificationLib {
     bytes32 public constant SET_MODE_METHOD = keccak256("setMode");
 
     /**
+     * @notice Verifies the signature for a method 
+     * @param signer Address of the signer to verify against
+     * @param methodHash Method hash for the method called
+     * @param nonce Transaction nonce for replay protection
+     * @param encodedData Encoded data for the operation
+     * @param signature ECDSA signature bytes
+     * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
+     */
+    function verifySignature(address signer, bytes32 methodHash, uint256 nonce, bytes memory encodedData, bytes calldata signature) internal view {
+        bytes32 digestHash = keccak256(abi.encodePacked(methodHash, block.chainid, address(this), nonce, encodedData)).toEthSignedMessageHash();
+        digestHash.checkSignature(signer, signature);
+    }
+
+    /**
      * @notice Verifies a signature for changing the cash mode
      * @dev Creates and validates an EIP-191 signed message hash
      * @param signer Address of the signer to verify against
@@ -41,17 +55,7 @@ library CashVerificationLib {
         Mode mode,
         bytes calldata signature
     ) internal view {
-        bytes32 digestHash = keccak256(
-            abi.encode(
-                SET_MODE_METHOD,
-                block.chainid,
-                address(this),
-                nonce,
-                mode
-            )
-        ).toEthSignedMessageHash();
-
-        digestHash.checkSignature(signer, signature);
+        verifySignature(signer, SET_MODE_METHOD, nonce, abi.encode(mode), signature);
     }
 
     /**
@@ -71,18 +75,7 @@ library CashVerificationLib {
         uint256 monthlyLimitInUsd,
         bytes calldata signature
     ) internal view {
-        bytes32 digestHash = keccak256(
-            abi.encode(
-                UPDATE_SPENDING_LIMIT_METHOD,
-                block.chainid,
-                address(this),
-                nonce,
-                dailyLimitInUsd,
-                monthlyLimitInUsd
-            )
-        ).toEthSignedMessageHash();
-
-        digestHash.checkSignature(signer, signature);
+        verifySignature(signer, UPDATE_SPENDING_LIMIT_METHOD, nonce, abi.encode(dailyLimitInUsd, monthlyLimitInUsd), signature);
     }
 
     /**
@@ -104,18 +97,6 @@ library CashVerificationLib {
         address recipient,
         bytes calldata signature
     ) internal view {
-        bytes32 digestHash = keccak256(
-            abi.encode(
-                REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(this),
-                nonce,
-                tokens,
-                amounts,
-                recipient
-            )
-        ).toEthSignedMessageHash();
-
-        digestHash.checkSignature(signer, signature);
+        verifySignature(signer, REQUEST_WITHDRAWAL_METHOD, nonce, abi.encode(tokens, amounts, recipient), signature);
     }
 }

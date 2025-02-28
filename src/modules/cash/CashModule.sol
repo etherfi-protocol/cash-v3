@@ -104,6 +104,14 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         $.modeDelay = 60; // 1 min
     }
 
+    function setupModule(bytes calldata data) external override onlyEtherFiSafe(msg.sender) {
+        (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset) = abi.decode(data, (uint256, uint256, int256));
+
+        SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
+        $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
+        $.mode = Mode.Debit;        
+    } 
+
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
         CashModuleStorage storage $ = _getCashModuleStorage();
@@ -113,25 +121,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         $.modeDelay = modeDelay;
     }
 
-    /**
-     * @dev Sets spending limits and mode for a user's cash configuration
-     * @dev Initializes spending limits with daily and monthly caps
-     * @param data Data passed on from setupModuleForSafe function in ModuleBase
-     * @custom:contains dailyLimit Daily spending limit
-     * @custom:contains monthlyLimit Monthly spending limit
-     * @custom:contains User's timezone offset for limit calculations
-     */
-    function _setupModule(bytes calldata data) internal override {
-        (uint256 dailyLimit, uint256 monthlyLimit, int256 timezoneOffset) = abi.decode(data, (uint256, uint256, int256));
-        SafeCashConfig storage $ =_getCashModuleStorage().safeCashConfig[msg.sender];
-        $.spendingLimit.initialize(dailyLimit, monthlyLimit, timezoneOffset);
-        $.mode = Mode.Debit;
-    }
-
-
-    function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) {
+    function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ =_getCashModuleStorage();
-        if (!hasAdminRole(safe, signer)) revert OnlyAdmin();
 
         CashVerificationLib.verifySetModeSig(signer, _useNonce(safe), mode, signature);
 
@@ -147,16 +138,12 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         }
     }
 
-    function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) {
-        if (!hasAdminRole(safe, signer)) revert OnlyAdmin();
-
+    function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashVerificationLib.verifyUpdateSpendingLimitSig(signer, _useNonce(safe), dailyLimitInUsd, monthlyLimitInUsd, signature);
         _getCashModuleStorage().safeCashConfig[safe].spendingLimit.updateSpendingLimit(dailyLimitInUsd, monthlyLimitInUsd, _getCashModuleStorage().spendLimitDelay);
     }
 
-    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) {
-        if (!hasAdminRole(safe, signer)) revert OnlyAdmin();
-
+    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         CashVerificationLib.verifyRequestWithdrawalSig(signer, _useNonce(safe), tokens, amounts, recipient, signature);
@@ -167,15 +154,9 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
 
         _checkBalance(safe, tokens, amounts);
-
-        $.safeCashConfig[safe].pendingWithdrawalRequest = WithdrawalRequest({
-            tokens: tokens,
-            amounts: amounts,
-            recipient: recipient,
-            finalizeTime: finalTime
-        });
-
+        _saveWithdrawal($, safe, tokens, amounts, recipient, finalTime);
         IDebtManager(getDebtManager()).ensureHealth(safe);
+
         if ($.withdrawalDelay == 0) processWithdrawal(safe);
     }
 
@@ -524,4 +505,14 @@ contract CashModule is UpgradeableProxy, ModuleBase {
             }
         }
     }
+
+    function _saveWithdrawal(CashModuleStorage storage $ , address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, uint96 finalTime) internal {
+        $.safeCashConfig[safe].pendingWithdrawalRequest = WithdrawalRequest({
+            tokens: tokens,
+            amounts: amounts,
+            recipient: recipient,
+            finalizeTime: finalTime
+        });
+    }
+
 }

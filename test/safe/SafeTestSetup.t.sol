@@ -14,7 +14,6 @@ import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/Et
 import {EtherFiSafeFactory} from "../../src/safe/EtherFiSafeFactory.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 
-
 contract SafeTestSetup is Test {
     using MessageHashUtils for bytes32;
 
@@ -52,14 +51,15 @@ contract SafeTestSetup is Test {
         (notOwner, notOwnerPk) = makeAddrAndKey("notOwner");
 
         vm.startPrank(owner);
+        
+        address dataProviderImpl = address(new EtherFiDataProvider());
+        dataProvider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, "")));
 
-        address roleRegistryImpl = address(new RoleRegistry());
+        address roleRegistryImpl = address(new RoleRegistry(address(dataProvider)));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
-        address dataProviderImpl = address(new EtherFiDataProvider());
-        dataProvider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, "")));
 
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
 
@@ -97,16 +97,15 @@ contract SafeTestSetup is Test {
         vm.stopPrank();
     }
 
-    function _configureModules(address[] memory modules, bool[] memory shouldWhitelist, bytes[] memory setupData, uint256 pk1, uint256 pk2) internal {
+    function _configureModules(address[] memory modules, bool[] memory shouldWhitelist, bytes[] memory setupData) internal {
         bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pk2, digestHash);
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
 
         _sendConfigureModules(modules, shouldWhitelist, setupData, abi.encodePacked(r1, s1, v1), abi.encodePacked(r2, s2, v2));
-        
     }
 
     function _sendConfigureModules(address[] memory modules, bool[] memory shouldWhitelist, bytes[] memory setupData, bytes memory sig1, bytes memory sig2) internal {
@@ -121,11 +120,12 @@ contract SafeTestSetup is Test {
         safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
-    function _configureModuleAdmin(address module, address[] memory accounts, bool[] memory shouldAdd, uint256 pk1, uint256 pk2) internal {
-        bytes32 digestHash = keccak256(abi.encode(IModule(module).CONFIG_ADMIN(), block.chainid, module, IModule(module).getNonce(address(safe)), address(safe), accounts, shouldAdd)).toEthSignedMessageHash();
+    function _configureAdmins(address[] memory accounts, bool[] memory shouldAdd) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_ADMIN_TYPEHASH(), keccak256(abi.encodePacked(accounts)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pk2, digestHash);
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
 
         bytes[] memory signatures = new bytes[](2);
         signatures[0] = abi.encodePacked(r1, s1, v1);
@@ -136,7 +136,45 @@ contract SafeTestSetup is Test {
         signers[1] = owner2;
 
         vm.expectEmit(true, true, true, true);
-        emit ModuleBase.AdminsConfigured(address(safe), accounts, shouldAdd);
-        IModule(module).configureAdmins(address(safe), accounts, shouldAdd, signers, signatures);
+        emit EtherFiSafe.AdminsConfigured(accounts, shouldAdd);
+        safe.configureAdmins(accounts, shouldAdd, signers, signatures);
+    }
+
+    function _configureOwners(address[] memory owners, bool[] memory shouldAdd) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
+
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        safe.configureOwners(owners, shouldAdd, signers, signatures);
+    }
+
+
+    function _setThreshold(uint8 newThreshold) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        safe.setThreshold(newThreshold, signers, signatures);
     }
 }
