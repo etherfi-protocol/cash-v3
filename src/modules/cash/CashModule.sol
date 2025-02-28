@@ -124,7 +124,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ =_getCashModuleStorage();
 
-        CashVerificationLib.verifySetModeSig(signer, _useNonce(safe), mode, signature);
+        CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
         if ($.modeDelay == 0) {
             // If delay = 0, just set the value 
@@ -139,25 +139,13 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     }
 
     function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        CashVerificationLib.verifyUpdateSpendingLimitSig(signer, _useNonce(safe), dailyLimitInUsd, monthlyLimitInUsd, signature);
+        CashVerificationLib.verifyUpdateSpendingLimitSig(safe, signer, _useNonce(safe), dailyLimitInUsd, monthlyLimitInUsd, signature);
         _getCashModuleStorage().safeCashConfig[safe].spendingLimit.updateSpendingLimit(dailyLimitInUsd, monthlyLimitInUsd, _getCashModuleStorage().spendLimitDelay);
     }
 
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-
-        CashVerificationLib.verifyRequestWithdrawalSig(signer, _useNonce(safe), tokens, amounts, recipient, signature);
-
-        if (recipient == address(0)) revert RecipientCannotBeAddressZero();
-        _cancelOldWithdrawal(safe);
-        
-        uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
-
-        _checkBalance(safe, tokens, amounts);
-        _saveWithdrawal($, safe, tokens, amounts, recipient, finalTime);
-        IDebtManager(getDebtManager()).ensureHealth(safe);
-
-        if ($.withdrawalDelay == 0) processWithdrawal(safe);
+        CashVerificationLib.verifyRequestWithdrawalSig(safe, signer, _useNonce(safe), tokens, amounts, recipient, signature);
+        _requestWithdrawal(safe, tokens, amounts, recipient);
     }
 
     function processWithdrawal(address safe) public onlyEtherFiSafe(safe) {
@@ -258,7 +246,6 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         IDebtManager debtManager = $.debtManager;
         
         _setCurrentMode($$);
-
 
         if ($$.transactionCleared[txId]) revert TransactionAlreadyCleared();
         if (!_isBorrowToken(debtManager, token)) revert UnsupportedToken();
@@ -506,13 +493,26 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         }
     }
 
-    function _saveWithdrawal(CashModuleStorage storage $ , address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, uint96 finalTime) internal {
+    function _requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient) internal {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        if (recipient == address(0)) revert RecipientCannotBeAddressZero();
+        _cancelOldWithdrawal(safe);
+        
+        uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
+
+        _checkBalance(safe, tokens, amounts);
+
         $.safeCashConfig[safe].pendingWithdrawalRequest = WithdrawalRequest({
             tokens: tokens,
             amounts: amounts,
             recipient: recipient,
             finalizeTime: finalTime
         });
+
+        IDebtManager(getDebtManager()).ensureHealth(safe);
+
+        if ($.withdrawalDelay == 0) processWithdrawal(safe);
     }
 
 }

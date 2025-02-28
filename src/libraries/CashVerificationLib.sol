@@ -28,6 +28,7 @@ library CashVerificationLib {
 
     /**
      * @notice Verifies the signature for a method 
+     * @param safe Address of the safe
      * @param signer Address of the signer to verify against
      * @param methodHash Method hash for the method called
      * @param nonce Transaction nonce for replay protection
@@ -35,14 +36,15 @@ library CashVerificationLib {
      * @param signature ECDSA signature bytes
      * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
      */
-    function verifySignature(address signer, bytes32 methodHash, uint256 nonce, bytes memory encodedData, bytes calldata signature) internal view {
-        bytes32 digestHash = keccak256(abi.encodePacked(methodHash, block.chainid, address(this), nonce, encodedData)).toEthSignedMessageHash();
+    function verifySignature(address safe, address signer, bytes32 methodHash, uint256 nonce, bytes memory encodedData, bytes calldata signature) internal view {
+        bytes32 digestHash = keccak256(abi.encodePacked(methodHash, block.chainid, safe, nonce, encodedData)).toEthSignedMessageHash();
         digestHash.checkSignature(signer, signature);
     }
 
     /**
      * @notice Verifies a signature for changing the cash mode
      * @dev Creates and validates an EIP-191 signed message hash
+     * @param safe Address of the safe
      * @param signer Address of the signer to verify against
      * @param nonce Transaction nonce for replay protection
      * @param mode New cash mode (Credit or Debit)
@@ -50,17 +52,19 @@ library CashVerificationLib {
      * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
      */
     function verifySetModeSig(
+        address safe,
         address signer,
         uint256 nonce,
         Mode mode,
         bytes calldata signature
     ) internal view {
-        verifySignature(signer, SET_MODE_METHOD, nonce, abi.encode(mode), signature);
+        verifySignature(safe, signer, SET_MODE_METHOD, nonce, abi.encode(mode), signature);
     }
 
     /**
      * @notice Verifies a signature for updating spending limits
      * @dev Creates and validates an EIP-191 signed message hash
+     * @param safe Address of the safe
      * @param signer Address of the signer to verify against
      * @param nonce Transaction nonce for replay protection
      * @param dailyLimitInUsd New daily spending limit in USD
@@ -69,18 +73,20 @@ library CashVerificationLib {
      * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
      */
     function verifyUpdateSpendingLimitSig(
+        address safe,
         address signer,
         uint256 nonce,
         uint256 dailyLimitInUsd,
         uint256 monthlyLimitInUsd,
         bytes calldata signature
     ) internal view {
-        verifySignature(signer, UPDATE_SPENDING_LIMIT_METHOD, nonce, abi.encode(dailyLimitInUsd, monthlyLimitInUsd), signature);
+        verifySignature(safe, signer, UPDATE_SPENDING_LIMIT_METHOD, nonce, abi.encode(dailyLimitInUsd, monthlyLimitInUsd), signature);
     }
 
     /**
      * @notice Verifies a signature for requesting a withdrawal
      * @dev Creates and validates an EIP-191 signed message hash
+     * @param safe Address of the safe
      * @param signer Address of the signer to verify against
      * @param nonce Transaction nonce for replay protection
      * @param tokens Array of token addresses to withdraw
@@ -90,6 +96,7 @@ library CashVerificationLib {
      * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
      */
     function verifyRequestWithdrawalSig(
+        address safe,
         address signer,
         uint256 nonce,
         address[] calldata tokens,
@@ -97,6 +104,6 @@ library CashVerificationLib {
         address recipient,
         bytes calldata signature
     ) internal view {
-        verifySignature(signer, REQUEST_WITHDRAWAL_METHOD, nonce, abi.encode(tokens, amounts, recipient), signature);
+        verifySignature(safe, signer, REQUEST_WITHDRAWAL_METHOD, nonce, abi.encode(tokens, amounts, recipient), signature);
     }
 }
