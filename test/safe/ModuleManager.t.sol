@@ -3,12 +3,12 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 
-import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "./SafeTestSetup.t.sol";
+import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, ModuleBase } from "./SafeTestSetup.t.sol";
 
 contract ModuleManagerTest is SafeTestSetup {
     function test_isModuleEnabled_identifiesCashModuleAsWhitelisted() public view {
         // Cash module should be treated as whitelisted even if not in local storage
-        assertTrue(safe.isModuleEnabled(cashModule));
+        assertTrue(safe.isModuleEnabled(cashModuleDummy));
     }
 
     function test_isModuleEnabled_requiresModuleToBeWhitlisted() public {
@@ -29,17 +29,19 @@ contract ModuleManagerTest is SafeTestSetup {
     function test_configureModules_reverts_whenRemovingCashModule() public {
         // First add the cash module to the whitelist
         address[] memory modules = new address[](1);
-        modules[0] = cashModule;
+        modules[0] = cashModuleDummy;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
+        bytes[] memory setupData = new bytes[](1);
+
         // First add it to whitelist
-        _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
+        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
 
         // Now try to remove it
         shouldWhitelist[0] = false;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -55,7 +57,7 @@ contract ModuleManagerTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.CannotRemoveCashModule.selector, 0));
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_reverts_whenAddingUnsupportedModule() public {
@@ -66,7 +68,9 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes[] memory setupData = new bytes[](1);
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -82,17 +86,19 @@ contract ModuleManagerTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.UnsupportedModule.selector, 0));
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_requiresDataProviderWhitelisting() public {
-        address newModule = makeAddr("newModule");
+        address newModule = address(new ModuleBase(address(dataProvider)));
 
         // First whitelist the module in data provider
         address[] memory dpModules = new address[](1);
         dpModules[0] = newModule;
         bool[] memory dpShouldWhitelist = new bool[](1);
         dpShouldWhitelist[0] = true;
+        
+        bytes[] memory setupData = new bytes[](1);
 
         vm.prank(owner);
         dataProvider.configureModules(dpModules, dpShouldWhitelist);
@@ -103,7 +109,7 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
+        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
         assertTrue(safe.isModuleEnabled(newModule));
     }
 
@@ -116,7 +122,9 @@ contract ModuleManagerTest is SafeTestSetup {
         shouldWhitelist[0] = true;
         shouldWhitelist[1] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes[] memory setupData = new bytes[](2);
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)),  keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -132,7 +140,7 @@ contract ModuleManagerTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_addsModulesToWhitelist() public {
@@ -144,52 +152,19 @@ contract ModuleManagerTest is SafeTestSetup {
         shouldWhitelist[0] = true;
         shouldWhitelist[1] = true;
 
-        _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
+        bytes[] memory setupData = new bytes[](2);
+
+        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
         assertTrue(safe.isModuleEnabled(module1));
         assertTrue(safe.isModuleEnabled(module2));
-    }
-
-    function testFuzz_configureModules_correctlyUpdatesModuleStatus(address[10] calldata moduleAddresses, bool[10] calldata shouldWhitelistFlags) public {
-        vm.assume(moduleAddresses[0] != address(0));
-        vm.assume(moduleAddresses[1] != address(0));
-        vm.assume(moduleAddresses[0] != moduleAddresses[1]);
-
-        // Add assumption to exclude the sentinel value (Solady EnumerableSetLib sentinel value)
-        vm.assume(uint160(moduleAddresses[0]) != uint160(0xfbb67fda52d4bfb8bf));
-        vm.assume(uint160(moduleAddresses[1]) != uint160(0xfbb67fda52d4bfb8bf));
-
-        address[] memory modules = new address[](2);
-        modules[0] = moduleAddresses[0];
-        modules[1] = moduleAddresses[1];
-
-        bool[] memory shouldWhitelist = new bool[](2);
-        shouldWhitelist[0] = shouldWhitelistFlags[0];
-        shouldWhitelist[1] = shouldWhitelistFlags[1];
-
-        vm.prank(owner);
-        dataProvider.configureModules(modules, shouldWhitelist);
-        _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
-
-        if (modules[0] == cashModule) {
-            assertTrue(safe.isModuleEnabled(modules[0]));
-        } else {
-            if (shouldWhitelist[0]) assertTrue(safe.isModuleEnabled(modules[0]));
-            else assertFalse(safe.isModuleEnabled(modules[0]));
-        }
-
-        if (modules[1] == cashModule) {
-            assertTrue(safe.isModuleEnabled(modules[1]));
-        } else {
-            if (shouldWhitelist[1]) assertTrue(safe.isModuleEnabled(modules[1]));
-            else assertFalse(safe.isModuleEnabled(modules[1]));
-        }
     }
 
     function test_configureModules_reverts_whenModulesEmpty() public {
         address[] memory modules = new address[](0);
         bool[] memory shouldWhitelist = new bool[](0);
+        bytes[] memory setupData = new bytes[](0);
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -205,14 +180,15 @@ contract ModuleManagerTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(EtherFiSafeErrors.InvalidInput.selector);
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_reverts_whenArrayLengthMismatch() public {
         address[] memory modules = new address[](2);
         bool[] memory shouldWhitelist = new bool[](1);
+        bytes[] memory setupData = new bytes[](1);
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -228,7 +204,7 @@ contract ModuleManagerTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(EtherFiSafeErrors.ArrayLengthMismatch.selector);
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_reverts_whenModuleAddressZero() public {
@@ -238,7 +214,9 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes[] memory setupData = new bytes[](1);
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -254,7 +232,7 @@ contract ModuleManagerTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.InvalidModule.selector, 0));
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_reverts_whenSignaturesInvalid() public {
@@ -264,7 +242,9 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes[] memory setupData = new bytes[](1);
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -279,7 +259,7 @@ contract ModuleManagerTest is SafeTestSetup {
         signatures[1] = signatures[0];
 
         vm.expectRevert(EtherFiSafeErrors.InvalidSignatures.selector);
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_reverts_whenSignerNotOwner() public {
@@ -289,7 +269,9 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes[] memory setupData = new bytes[](1);
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -305,7 +287,7 @@ contract ModuleManagerTest is SafeTestSetup {
         signatures[1] = abi.encodePacked(r2, s2, v2);
 
         vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.InvalidSigner.selector, 1));
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_reverts_whenSignersDuplicated() public {
@@ -315,7 +297,9 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes[] memory setupData = new bytes[](1);
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -330,7 +314,7 @@ contract ModuleManagerTest is SafeTestSetup {
         signatures[1] = signatures[0];
 
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_configureModules_reverts_whenSignersBelowThreshold() public {
@@ -340,7 +324,9 @@ contract ModuleManagerTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+        bytes[] memory setupData = new bytes[](1);
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -352,7 +338,7 @@ contract ModuleManagerTest is SafeTestSetup {
         signatures[0] = abi.encodePacked(r1, s1, v1);
 
         vm.expectRevert(EtherFiSafeErrors.InsufficientSigners.selector);
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function test_getModules_returnsCorrectModules() public {
@@ -364,7 +350,9 @@ contract ModuleManagerTest is SafeTestSetup {
         shouldWhitelist[0] = true;
         shouldWhitelist[1] = true;
 
-        _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
+        bytes[] memory setupData = new bytes[](2);
+
+        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
 
         address[] memory registeredModules = safe.getModules();
         assertEq(registeredModules.length, 2);

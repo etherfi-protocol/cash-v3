@@ -20,4 +20,6 @@ interface IEtherFiSafe {
     function execTransactionFromModule(address[] calldata to, uint256[] calldata value, bytes[] calldata data) external;
 
     function nonce() external view returns (uint256);
+
+    function getOwners() external view returns (address[] memory);
 }

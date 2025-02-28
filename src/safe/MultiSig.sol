@@ -190,14 +190,6 @@ abstract contract MultiSig is EtherFiSafeErrors {
     }
 
     /**
-     * @notice Returns all current owners of the safe
-     * @return address[] Array containing all owner addresses
-     */
-    function getOwners() public view returns (address[] memory) {
-        return _getMultiSigStorage().owners.values();
-    }
-
-    /**
      * @notice Returns the current signature threshold
      * @return uint8 Current threshold value
      */

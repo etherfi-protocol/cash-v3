@@ -55,4 +55,7 @@ abstract contract EtherFiSafeErrors {
 
     /// @notice Throws when a .call fails
     error CallFailed(uint256 index);
+
+    /// @notice Throws when module setup fails while adding modules to safe
+    error ModuleSetupFailed(uint256 index);
 }

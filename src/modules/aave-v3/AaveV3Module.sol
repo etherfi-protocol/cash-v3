@@ -35,6 +35,8 @@ contract AaveV3Module is ModuleBase {
         aaveV3Pool = IAavePoolV3(_aavePool);
     }
 
+    function _setupModule(bytes calldata data) internal override {}
+
     /**
      * @notice Supply tokens to Aave V3 Pool using admin privileges
      * @param safe The Safe address which holds the tokens

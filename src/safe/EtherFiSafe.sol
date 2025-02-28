@@ -67,16 +67,17 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
      * @notice Initializes the safe with owners and signature threshold
      * @param _owners Initial array of owner addresses
      * @param _modules Initial array of module addresses
+     * @param _moduleSetupData Array of data for setting up individual modules for the safe
      * @param _threshold Initial number of required signatures
      * @custom:throws AlreadySetup If safe has already been initialized
      * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
      * @custom:throws InvalidInput If owners array is empty
      * @custom:throws InvalidOwnerAddress If any owner address is zero
      */
-    function initialize(address[] calldata _owners, address[] calldata _modules, uint8 _threshold) external initializer {
+    function initialize(address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData, uint8 _threshold) external initializer {
         __EIP712_init("EtherFiSafe", "1");
-        _setupModules(_modules);
         _setupMultiSig(_owners, _threshold);
+        _setupModules(_owners, _modules, _moduleSetupData);
     }
 
     /**
@@ -122,6 +123,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
      * @notice Configures module whitelist with signature verification
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of booleans indicating whether to add or remove each module
+     * @param moduleSetupData Array of data for setting up individual modules for the safe
      * @param signers Array of addresses that signed the transaction
      * @param signatures Array of corresponding signatures
      * @dev Uses EIP-712 typed data signing
@@ -130,12 +132,12 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
      * @custom:throws InvalidModule If any module address is zero
      * @custom:throws InvalidSignatures If the signature verification fails
      */
-    function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external {
-        bytes32 structHash = keccak256(abi.encode(CONFIGURE_MODULES_TYPEHASH, keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), _useNonce()));
+    function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist, bytes[] calldata moduleSetupData, address[] calldata signers, bytes[] calldata signatures) external {
+        bytes32 structHash = keccak256(abi.encode(CONFIGURE_MODULES_TYPEHASH, keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(moduleSetupData)), _useNonce()));
 
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
-        _configureModules(modules, shouldWhitelist);
+        _configureModules(modules, shouldWhitelist, moduleSetupData);
     }
 
     /**
@@ -169,6 +171,14 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
         hook.postOpHook(msg.sender);
 
         emit ExecTransactionFromModule(to, values, data);
+    }
+
+    /**
+     * @notice Returns all current owners of the safe
+     * @return address[] Array containing all owner addresses
+     */
+    function getOwners() public view override returns (address[] memory) {
+        return _getMultiSigStorage().owners.values();
     }
 
     function _isWhitelistedOnDataProvider(address module) internal view override returns (bool) {

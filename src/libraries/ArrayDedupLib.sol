@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 library ArrayDeDupLib {
     error DuplicateElementFound();
 
-    function checkDuplicates(address[] calldata addresses) internal pure {
+    function checkDuplicates(address[] memory addresses) internal pure {
         uint256 length = addresses.length;
         if (length <= 1) return;
 

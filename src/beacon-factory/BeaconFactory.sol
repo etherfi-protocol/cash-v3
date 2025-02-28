@@ -89,7 +89,7 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
      * @param salt The salt value used for address prediction
      * @return The predicted deployment address
      */
-    function getDeterministicAddress(bytes32 salt) external view returns (address) {
+    function getDeterministicAddress(bytes32 salt) public view returns (address) {
         return CREATE3.predictDeterministicAddress(salt);
     }
 

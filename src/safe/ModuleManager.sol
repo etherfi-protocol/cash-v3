@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
+import {IModule} from "../interfaces/IModule.sol";
 
 /**
  * @title ModuleManager
@@ -47,23 +48,26 @@ abstract contract ModuleManager is EtherFiSafeErrors {
     /**
      * @notice Sets up multiple modules initially
      * @param _modules Array of module addresses to configure
+     * @param _moduleSetupData Array of data for setting up individual modules for the safe
      * @custom:throws InvalidInput If modules array is empty
      * @custom:throws InvalidModule If any module address is zero
      * @custom:throws UnsupportedModule If a module is not whitelisted on the data provider
      */
-    function _setupModules(address[] calldata _modules) internal {
+    function _setupModules(address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData) internal {
         ModuleManagerStorage storage $ = _getModuleManagerStorage();
 
         if ($.modules.length() != 0) revert ModulesAlreadySetup();
 
         uint256 len = _modules.length;
-        if (_modules.length == 0) revert InvalidInput();
+        if (len == 0) revert InvalidInput();
+        if (len != _moduleSetupData.length) revert ArrayLengthMismatch();
         if (len > 1) _modules.checkDuplicates();
 
         for (uint256 i = 0; i < len;) {
             if (_modules[i] == address(0)) revert InvalidModule(i);
             if (!_isCashModule(_modules[i]) && !_isWhitelistedOnDataProvider(_modules[i])) revert UnsupportedModule(i);
             $.modules.add(_modules[i]);
+            IModule(_modules[i]).setupModuleForSafe(_owners, _moduleSetupData[i]);
 
             unchecked {
                 ++i;
@@ -77,19 +81,21 @@ abstract contract ModuleManager is EtherFiSafeErrors {
      * @notice Configures multiple modules at once
      * @param _modules Array of module addresses to configure
      * @param _shouldWhitelist Array of booleans indicating whether to add (true) or remove (false) each module
+     * @param _moduleSetupData Array of data for setting up individual modules for the safe
      * @dev Efficiently handles multiple module operations in a single transaction
      * @custom:throws InvalidInput If modules array is empty
      * @custom:throws ArrayLengthMismatch If modules and shouldWhitelist arrays have different lengths
      * @custom:throws InvalidModule If any module address is zero
      * @custom:throws UnsupportedModule If a module is not whitelisted on the data provider
      * @custom:throws CannotRemoveCashModule If attempting to remove a protected cash module
+     * @custom:throws ModuleSetupFailed If setting up the module fails
      */
-    function _configureModules(address[] calldata _modules, bool[] calldata _shouldWhitelist) internal {
+    function _configureModules(address[] calldata _modules, bool[] calldata _shouldWhitelist, bytes[] calldata _moduleSetupData) internal {
         ModuleManagerStorage storage $ = _getModuleManagerStorage();
 
         uint256 len = _modules.length;
         if (len == 0) revert InvalidInput();
-        if (len != _shouldWhitelist.length) revert ArrayLengthMismatch();
+        if (len != _shouldWhitelist.length || len != _moduleSetupData.length) revert ArrayLengthMismatch();
         if (len > 1) _modules.checkDuplicates();
 
         for (uint256 i = 0; i < len;) {
@@ -98,6 +104,8 @@ abstract contract ModuleManager is EtherFiSafeErrors {
             if (_shouldWhitelist[i] && !$.modules.contains(_modules[i])) {
                 if (!_isCashModule(_modules[i]) && !_isWhitelistedOnDataProvider(_modules[i])) revert UnsupportedModule(i);
                 $.modules.add(_modules[i]);
+
+                IModule(_modules[i]).setupModuleForSafe(getOwners(), _moduleSetupData[i]);
             }
 
             if (!_shouldWhitelist[i] && $.modules.contains(_modules[i])) {
@@ -150,4 +158,10 @@ abstract contract ModuleManager is EtherFiSafeErrors {
     function getModules() public view returns (address[] memory) {
         return _getModuleManagerStorage().modules.values();
     }
+
+    /**
+     * @notice Returns all current owners of the safe
+     * @return address[] Array containing all owner addresses
+     */
+    function getOwners() public view virtual returns (address[] memory);
 }

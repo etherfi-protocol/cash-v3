@@ -12,6 +12,8 @@ import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
 import {EtherFiSafeFactory} from "../../src/safe/EtherFiSafeFactory.sol";
+import { ModuleBase } from "../../src/modules/ModuleBase.sol";
+
 
 contract SafeTestSetup is Test {
     using MessageHashUtils for bytes32;
@@ -36,9 +38,9 @@ contract SafeTestSetup is Test {
 
     uint8 threshold;
 
-    address public module1 = makeAddr("module1");
-    address public module2 = makeAddr("module2");
-    address public cashModule = makeAddr("cashModule");
+    address public module1;
+    address public module2;
+    address public cashModuleDummy;
 
     function setUp() public virtual {
         pauser = makeAddr("pauser");
@@ -48,17 +50,6 @@ contract SafeTestSetup is Test {
         (owner2, owner2Pk) = makeAddrAndKey("owner2");
         (owner3, owner3Pk) = makeAddrAndKey("owner3");
         (notOwner, notOwnerPk) = makeAddrAndKey("notOwner");
-
-        address[] memory owners = new address[](3);
-        owners[0] = owner1;
-        owners[1] = owner2;
-        owners[2] = owner3;
-
-        threshold = 2;
-
-        address[] memory modules = new address[](2);
-        modules[0] = module1;
-        modules[1] = module2;
 
         vm.startPrank(owner);
 
@@ -79,32 +70,55 @@ contract SafeTestSetup is Test {
         address safeFactoryImpl = address(new EtherFiSafeFactory());
         safeFactory = EtherFiSafeFactory(address(new UUPSProxy(safeFactoryImpl, abi.encodeWithSelector(EtherFiSafeFactory.initialize.selector, address(roleRegistry), safeImpl))));
 
-        dataProvider.initialize(address(roleRegistry), cashModule, modules, address(hook), address(safeFactory));
+        module1 = address(new ModuleBase(address(dataProvider)));
+        module2 = address(new ModuleBase(address(dataProvider)));
+        cashModuleDummy = address(new ModuleBase(address(dataProvider)));
+
+        address[] memory owners = new address[](3);
+        owners[0] = owner1;
+        owners[1] = owner2;
+        owners[2] = owner3;
+
+        threshold = 2;
+
+        address[] memory modules = new address[](2);
+        modules[0] = module1;
+        modules[1] = module2;
+
+        bytes[] memory moduleSetupData = new bytes[](2);
+
+
+        dataProvider.initialize(address(roleRegistry), cashModuleDummy, modules, address(hook), address(safeFactory));
 
         roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), owner);
-        safeFactory.deployEtherFiSafe(keccak256("safe"), owners, modules, threshold);
+        safeFactory.deployEtherFiSafe(keccak256("safe"), owners, modules, moduleSetupData, threshold);
         safe = EtherFiSafe(safeFactory.getDeterministicAddress(keccak256("safe")));
         
         vm.stopPrank();
     }
 
-    function _configureModules(address[] memory modules, bool[] memory shouldWhitelist, uint256 pk1, uint256 pk2) internal {
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), safe.nonce()));
+    function _configureModules(address[] memory modules, bool[] memory shouldWhitelist, bytes[] memory setupData, uint256 pk1, uint256 pk2) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(pk1, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(pk2, digestHash);
 
+        _sendConfigureModules(modules, shouldWhitelist, setupData, abi.encodePacked(r1, s1, v1), abi.encodePacked(r2, s2, v2));
+        
+    }
+
+    function _sendConfigureModules(address[] memory modules, bool[] memory shouldWhitelist, bytes[] memory setupData, bytes memory sig1, bytes memory sig2) internal {
         bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
+        signatures[0] = sig1;
+        signatures[1] = sig2;
 
         address[] memory signers = new address[](2);
         signers[0] = owner1;
         signers[1] = owner2;
 
-        safe.configureModules(modules, shouldWhitelist, signers, signatures);
+        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
     }
 
     function _configureModuleAdmin(address module, address[] memory accounts, bool[] memory shouldAdd, uint256 pk1, uint256 pk2) internal {

@@ -20,4 +20,5 @@ interface IModule {
     function CONFIG_ADMIN() external view returns (bytes32);
     function ADMIN_ROLE() external view returns (bytes32);
     function getNonce(address safe) external view returns (uint256);
+    function setupModuleForSafe(address[] memory admins, bytes calldata data) external;
 }

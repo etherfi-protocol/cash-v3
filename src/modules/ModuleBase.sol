@@ -22,14 +22,14 @@ contract ModuleBase {
     using MessageHashUtils for bytes32;
     using ArrayDeDupLib for address[];
 
+    IEtherFiDataProvider public immutable etherFiDataProvider;
+
     /// @custom:storage-location erc7201:etherfi.storage.ModuleBaseStorage
     struct ModuleBaseStorage {
         /// @notice Mapping of Safe addresses to their admin sets
         mapping(address safe => EnumerableSetLib.AddressSet admins) admins;
         /// @notice Mapping of Safe addresses to their nonces for replay protection
         mapping(address safe => uint256 nonce) nonces;
-        /// @notice Instance of EtherFiDataProvider
-        IEtherFiDataProvider etherFiDataProvider;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.ModuleBaseStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -70,10 +70,8 @@ contract ModuleBase {
     event AdminsConfigured(address indexed safe, address[] admins, bool[] shouldAdd);
 
     constructor(address _etherFiDataProvider) {
-        ModuleBaseStorage storage $ = _getModuleBaseStorage();
-
         if (_etherFiDataProvider == address(0)) revert InvalidInput();
-        $.etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
+        etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
     }
 
     /**
@@ -86,17 +84,13 @@ contract ModuleBase {
         }
     }
 
-    function etherFiDataProvider() external view returns (address) {
-        return address(_getModuleBaseStorage().etherFiDataProvider);
-    }
-
     /**
      * @notice Checks if an account has admin role for a specific Safe
      * @param safe The Safe address to check
      * @param account The account address to check
      * @return bool True if the account has admin role, false otherwise
      */
-    function hasAdminRole(address safe, address account) public view onlyEtherFiSafe(safe) returns (bool) {
+    function hasAdminRole(address safe, address account) public view returns (bool) {
         return _getModuleBaseStorage().admins[safe].contains(account);
     }
 
@@ -118,6 +112,24 @@ contract ModuleBase {
     function getNonce(address safe) public view onlyEtherFiSafe(safe) returns (uint256) {
         return _getModuleBaseStorage().nonces[safe];
     }
+
+    function setupModuleForSafe(address[] memory admins, bytes calldata data) external onlyEtherFiSafe(msg.sender) {
+        address safe = msg.sender;
+        uint256 len = admins.length;
+        bool[] memory shouldAdd = new bool[](len);
+
+        for (uint256 i = 0; i < len; ) {
+            shouldAdd[i] = true;
+            unchecked {
+                ++i;
+            }
+        }
+
+        _configureAdmins(safe, admins, shouldAdd);
+        _setupModule(data);
+    }
+
+    function _setupModule(bytes calldata data) internal virtual {}
 
     /**
      * @notice Configures admins for a Safe with signature verification
@@ -163,7 +175,7 @@ contract ModuleBase {
      * @custom:throws ArrayLengthMismatch If arrays have different lengths
      * @custom:throws InvalidAddress If any admin address is zero
      */
-    function _configureAdmins(address safe, address[] calldata accounts, bool[] calldata shouldAdd) internal {
+    function _configureAdmins(address safe, address[] memory accounts, bool[] memory shouldAdd) internal {
         ModuleBaseStorage storage $ = _getModuleBaseStorage();
         uint256 len = accounts.length;
 
@@ -212,7 +224,7 @@ contract ModuleBase {
      * @param account The account address to check 
      */
     modifier onlyEtherFiSafe(address account) {
-        _getModuleBaseStorage().etherFiDataProvider.onlyEtherFiSafe(account);
+        etherFiDataProvider.onlyEtherFiSafe(account);
         _;
     }
 }

@@ -38,7 +38,9 @@ contract AaveV3ModuleTest is SafeTestSetup {
         vm.prank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
 
-        _configureModules(modules, shouldWhitelist, owner1Pk, owner2Pk);
+        bytes[] memory setupData = new bytes[](1);
+
+        _configureModules(modules, shouldWhitelist, setupData, owner1Pk, owner2Pk);
         
         // Add module admin
         address[] memory accounts = new address[](1);
