@@ -86,6 +86,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     error CannotWithdrawYet();
     error OnlyWhitelistedWithdrawRecipients();
     error InvalidSignatures();
+    error ModeAlreadySet();
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {}
 
@@ -137,6 +138,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ =_getCashModuleStorage();
 
+        if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
+
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
         if ($.modeDelay == 0) {
@@ -145,10 +148,24 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         } else {
             // If delay != 0, debit to credit mode should incur delay
             if (mode == Mode.Credit) $.safeCashConfig[safe].incomingCreditModeStartTime = block.timestamp + $.modeDelay;
-            else $.safeCashConfig[safe].incomingCreditModeStartTime = 0;
-
-            if (mode == Mode.Debit) $.safeCashConfig[safe].mode = mode;
+            else {
+                // If mode is debit, no problem, just set the mode
+                $.safeCashConfig[safe].incomingCreditModeStartTime = 0;
+                $.safeCashConfig[safe].mode = mode;
+            }
         }
+    }
+
+    function getMode(address safe) external view returns (Mode) {
+        SafeCashConfig storage $ =_getCashModuleStorage().safeCashConfig[safe];
+
+        if ($.incomingCreditModeStartTime != 0 && block.timestamp > $.incomingCreditModeStartTime) return Mode.Credit;
+        return $.mode;
+    }
+
+
+    function incomingCreditModeStartTime(address safe) external view returns (uint256) {
+        return _getCashModuleStorage().safeCashConfig[safe].incomingCreditModeStartTime;
     }
 
     function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {

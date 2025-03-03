@@ -12,6 +12,7 @@ import { ICashDataProvider } from "../../../../src/interfaces/ICashDataProvider.
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, EtherFiDataProvider } from "../../SafeTestSetup.t.sol";
+import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 
 contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -152,5 +153,26 @@ contract CashModuleTestSetup is SafeTestSetup {
         );
 
         cashModule.requestWithdrawal(address(safe), tokens, amounts, recipient, signers, signatures);
+    }
+
+    function _setMode(Mode mode) internal {
+        uint256 nonce = cashModule.getNonce(address(safe));
+
+        bytes32 digestHash = keccak256(
+            abi.encodePacked(
+                CashVerificationLib.SET_MODE_METHOD,
+                block.chainid,
+                address(safe),
+                nonce,
+                abi.encode(mode)
+            )
+        ).toEthSignedMessageHash();
+
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        cashModule.setMode(address(safe), mode, owner1, signature);
     }
 }
