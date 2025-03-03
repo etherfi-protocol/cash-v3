@@ -3,10 +3,10 @@ pragma solidity ^0.8.28;
 
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
+import { IEtherFiSafeFactory } from "../interfaces/IEtherFiSafeFactory.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
-import {IEtherFiSafeFactory} from "../interfaces/IEtherFiSafeFactory.sol";
 
 /**
  * @title EtherFiDataProvider
@@ -65,7 +65,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param oldCashModule Address of old Cash Module
     /// @param newCashModule Address of new Cash Module
     event CashModuleConfigured(address oldCashModule, address newCashModule);
-    
+
     /// @notice Emitted when EtherFiSafeFactory is configured
     /// @param oldFactory Address of old factory
     /// @param newFactory Address of new factory
@@ -97,7 +97,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
         __UpgradeableProxy_init(_roleRegistry);
 
         _setupModules(_modules);
-        
+
         if (_etherFiSafeFactory == address(0)) revert InvalidInput();
         _setEtherFiSafeFactory(_etherFiSafeFactory);
         // The condition applies because the Hook might be present only on specific chains
@@ -190,7 +190,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @custom:throws OnlyEtherFiSafe if the account is not an EtherFiSafe
      */
     function onlyEtherFiSafe(address account) public view {
-        if(!_getEtherFiDataProviderStorage().etherFiSafeFactory.isEtherFiSafe(account)) revert OnlyEtherFiSafe();
+        if (!_getEtherFiDataProviderStorage().etherFiSafeFactory.isEtherFiSafe(account)) revert OnlyEtherFiSafe();
     }
 
     /**

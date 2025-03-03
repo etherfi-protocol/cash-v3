@@ -24,7 +24,7 @@ contract EtherFiSafeFactory is BeaconFactory {
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiSafeFactory")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant EtherFiSafeFactoryStorageLocation = 0x7b68bad825be4cff21b93fb4c3affc217a6332ab2a96b5858e70f2a15d9f4300;
-    
+
     /// @notice The ADMIN role for the Safe factory
     bytes32 public constant ETHERFI_SAFE_FACTORY_ADMIN_ROLE = keccak256("ETHERFI_SAFE_FACTORY_ADMIN_ROLE");
 
@@ -67,7 +67,7 @@ contract EtherFiSafeFactory is BeaconFactory {
     function deployEtherFiSafe(bytes32 salt, address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData, uint8 _threshold) external {
         if (!roleRegistry().hasRole(ETHERFI_SAFE_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         bytes memory initData = abi.encodeWithSelector(EtherFiSafe.initialize.selector, _owners, _modules, _moduleSetupData, _threshold);
-        
+
         address deterministicAddr = getDeterministicAddress(salt);
         EtherFiSafeFactoryStorage storage $ = _getEtherFiSafeFactoryStorage();
         $.deployedAddresses.add(deterministicAddr);

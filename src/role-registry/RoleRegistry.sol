@@ -41,27 +41,27 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
      * @notice Thrown when a non-owner attempts to upgrade the contract
      */
     error OnlyUpgrader();
-    
+
     /**
      * @notice Thrown when an account without pauser role attempts to pause operations
      */
     error OnlyPauser();
-    
+
     /**
      * @notice Thrown when an account without unpauser role attempts to unpause operations
      */
     error OnlyUnpauser();
-    
+
     /**
      * @notice Thrown when an invalid input is passed as argument
      */
     error InvalidInput();
-    
+
     /**
      * @notice Thrown when the account is not the safe admin for the particular safe
      */
     error OnlySafeAdmin();
-    
+
     /**
      * @notice Thrown when array lengths mismatch
      */
@@ -102,25 +102,25 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
         if (safe == address(0)) revert InvalidInput();
         return keccak256(abi.encode(SAFE_ADMIN_ROLE_TYPE, safe));
     }
-    
+
     /**
      * @notice Configures admin roles for a specific safe
      * @dev Grants/revokes admin privileges to specified addresses for a particular safe
      * @param accounts Array of admin addresses to configure
      * @param shouldAdd Array indicating whether to add or remove each admin
      * @custom:throws EtherFiDataProvider.OnlyEtherFiSafe if called by any address other than a registered EtherFiSafe
-     * @custom:throws InvalidInput if the admins array is empty or contains a zero address 
+     * @custom:throws InvalidInput if the admins array is empty or contains a zero address
      * @custom:throws ArrayLengthMismatch if the array lengths mismatch
      */
     function configureSafeAdmins(address[] calldata accounts, bool[] calldata shouldAdd) external {
         etherFiDataProvider.onlyEtherFiSafe(msg.sender);
-        
+
         bytes32 role = getSafeAdminRole(msg.sender);
         uint256 len = accounts.length;
         if (len == 0) revert InvalidInput();
         if (len != shouldAdd.length) revert ArrayLengthMismatch();
-        
-        for (uint256 i = 0; i < len; ){ 
+
+        for (uint256 i = 0; i < len;) {
             if (accounts[i] == address(0)) revert InvalidInput();
             _setRole(accounts[i], uint256(role), shouldAdd[i]);
             unchecked {
@@ -132,18 +132,18 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
     /**
      * @notice Verifies if an account has safe admin privileges
      * @dev Reverts if the account does not have the SafeAdmin role
-     * @param safe The address of the safe 
+     * @param safe The address of the safe
      * @param account The address to check for safe admin role
      * @custom:throws OnlySafeAdmin if the account does not have the SafeAdmin role
      */
     function onlySafeAdmin(address safe, address account) external view {
         if (!hasRole(getSafeAdminRole(safe), account)) revert OnlySafeAdmin();
-    } 
+    }
 
     /**
      * @notice Returns if an account has safe admin privileges
      * @dev Non-reverting version of onlySafeAdmin
-     * @param safe The address of the safe 
+     * @param safe The address of the safe
      * @param account The address to check for safe admin role
      * @return bool True if the account has the safe admin role, false otherwise
      */

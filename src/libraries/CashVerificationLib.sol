@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import {SignatureUtils} from "./SignatureUtils.sol";
-import {CashModule, Mode} from "../modules/cash/CashModule.sol";
-import {IEtherFiSafe} from "../interfaces/IEtherFiSafe.sol";
+import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
+import { CashModule, Mode } from "../modules/cash/CashModule.sol";
+import { SignatureUtils } from "./SignatureUtils.sol";
 
 /**
  * @title CashVerificationLib
@@ -20,19 +20,19 @@ library CashVerificationLib {
 
     /// @notice Method identifier for withdrawal requests
     bytes32 public constant REQUEST_WITHDRAWAL_METHOD = keccak256("requestWithdrawal");
-    
+
     bytes32 public constant CONFIGURE_WITHDRAWAL_RECIPIENT = keccak256("configureWithdrawRecipients");
-    
+
     /// @notice Method identifier for spending limit updates
     bytes32 public constant UPDATE_SPENDING_LIMIT_METHOD = keccak256("updateSpendingLimit");
-    
+
     /// @notice Method identifier for mode changes
     bytes32 public constant SET_MODE_METHOD = keccak256("setMode");
 
     error InvalidSignatures();
 
     /**
-     * @notice Verifies the signature for a method 
+     * @notice Verifies the signature for a method
      * @param safe Address of the safe
      * @param signer Address of the signer to verify against
      * @param methodHash Method hash for the method called
@@ -56,13 +56,7 @@ library CashVerificationLib {
      * @param signature ECDSA signature bytes
      * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
      */
-    function verifySetModeSig(
-        address safe,
-        address signer,
-        uint256 nonce,
-        Mode mode,
-        bytes calldata signature
-    ) internal view {
+    function verifySetModeSig(address safe, address signer, uint256 nonce, Mode mode, bytes calldata signature) internal view {
         verifySignature(safe, signer, SET_MODE_METHOD, nonce, abi.encode(mode), signature);
     }
 
@@ -77,14 +71,7 @@ library CashVerificationLib {
      * @param signature ECDSA signature bytes
      * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
      */
-    function verifyUpdateSpendingLimitSig(
-        address safe,
-        address signer,
-        uint256 nonce,
-        uint256 dailyLimitInUsd,
-        uint256 monthlyLimitInUsd,
-        bytes calldata signature
-    ) internal view {
+    function verifyUpdateSpendingLimitSig(address safe, address signer, uint256 nonce, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, bytes calldata signature) internal view {
         verifySignature(safe, signer, UPDATE_SPENDING_LIMIT_METHOD, nonce, abi.encode(dailyLimitInUsd, monthlyLimitInUsd), signature);
     }
 
@@ -100,27 +87,12 @@ library CashVerificationLib {
      * @param signatures ECDSA signatures by signers
      * @custom:throws InvalidSignatures if the signature is invalid
      */
-    function verifyRequestWithdrawalSig(
-        address safe,
-        uint256 nonce,
-        address[] calldata tokens,
-        uint256[] calldata amounts,
-        address recipient,
-        address[] calldata signers,
-        bytes[] calldata signatures
-    ) internal view {
+    function verifyRequestWithdrawalSig(address safe, uint256 nonce, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) internal view {
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, safe, nonce, abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 
-    function verifyConfigureWithdrawRecipients(
-        address safe,
-        uint256 nonce,
-        address[] calldata withdrawRecipients, 
-        bool[] calldata shouldWhitelist,
-        address[] calldata signers,
-        bytes[] calldata signatures
-    ) internal view {
+    function verifyConfigureWithdrawRecipients(address safe, uint256 nonce, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) internal view {
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, safe, nonce, abi.encode(withdrawRecipients, shouldWhitelist))).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }

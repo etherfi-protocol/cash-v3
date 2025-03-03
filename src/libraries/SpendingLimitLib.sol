@@ -38,17 +38,17 @@ library SpendingLimitLib {
      * @notice Error thrown when a spend would exceed the daily limit
      */
     error ExceededDailySpendingLimit();
-    
+
     /**
      * @notice Error thrown when a spend would exceed the monthly limit
      */
     error ExceededMonthlySpendingLimit();
-    
+
     /**
      * @notice Error thrown when daily limit is set higher than monthly limit
      */
     error DailyLimitCannotBeGreaterThanMonthlyLimit();
-    
+
     /**
      * @notice Error thrown when timezone offset is invalid
      */

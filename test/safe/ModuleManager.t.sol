@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 
-import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, ModuleBase } from "./SafeTestSetup.t.sol";
+import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, ModuleBase, SafeTestSetup } from "./SafeTestSetup.t.sol";
 
 contract ModuleManagerTest is SafeTestSetup {
     function test_isModuleEnabled_identifiesCashModuleAsWhitelisted() public view {
@@ -97,7 +97,7 @@ contract ModuleManagerTest is SafeTestSetup {
         dpModules[0] = newModule;
         bool[] memory dpShouldWhitelist = new bool[](1);
         dpShouldWhitelist[0] = true;
-        
+
         bytes[] memory setupData = new bytes[](1);
 
         vm.prank(owner);
@@ -124,7 +124,7 @@ contract ModuleManagerTest is SafeTestSetup {
 
         bytes[] memory setupData = new bytes[](2);
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)),  keccak256(abi.encode(setupData)), safe.nonce()));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 

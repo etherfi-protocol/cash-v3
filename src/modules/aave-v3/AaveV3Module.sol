@@ -5,8 +5,9 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IAavePoolV3 } from "../../interfaces/IAavePoolV3.sol";
+
+import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ModuleBase } from "../ModuleBase.sol";
-import {IEtherFiSafe} from "../../interfaces/IEtherFiSafe.sol";
 
 /**
  * @title AaveV3Module
@@ -58,7 +59,7 @@ contract AaveV3Module is ModuleBase {
      * @dev Verifies signature then executes token approval and supply through the Safe's module execution
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
-    function supplyWithSignature(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer)  {
+    function supplyWithSignature(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         bytes32 digestHash = keccak256(abi.encode(SUPPLY_SIG, block.chainid, address(this), _useNonce(safe), safe, asset, amount)).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _supply(safe, asset, amount);

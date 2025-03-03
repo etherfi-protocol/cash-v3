@@ -6,13 +6,14 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { Test, console } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
+
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUp } from "../../src/top-up/TopUp.sol";
 import { BeaconFactory, TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { EtherFiOFTBridgeAdapter } from "../../src/top-up/bridge/EtherFiOFTBridgeAdapter.sol";
 import { StargateAdapter } from "../../src/top-up/bridge/StargateAdapter.sol";
-import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { Constants } from "../../src/utils/Constants.sol";
 
 contract TopUpFactoryTest is Test, Constants {

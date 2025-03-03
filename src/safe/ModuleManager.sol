@@ -3,9 +3,9 @@ pragma solidity ^0.8.28;
 
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
+import { IModule } from "../interfaces/IModule.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
-import {IModule} from "../interfaces/IModule.sol";
 
 /**
  * @title ModuleManager

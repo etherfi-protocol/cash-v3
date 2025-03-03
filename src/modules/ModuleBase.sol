@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 
 /**
  * @title ModuleBase
@@ -33,7 +33,6 @@ contract ModuleBase {
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.ModuleBaseStorage")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant ModuleBaseStorageLocation = 0x9425b2e03e09da4c20ff7a465da264f7a02bf7079e1dbb47fce0436e1d206d00;
-    
 
     constructor(address _etherFiDataProvider) {
         if (_etherFiDataProvider == address(0)) revert InvalidInput();
@@ -85,7 +84,6 @@ contract ModuleBase {
         if (!digestHash.isValidSignature(signer, signature)) revert InvalidSignature();
     }
 
-
     /**
      * @dev Ensures that the caller is an admin for the specified Safe
      * @param safe The Safe address to check admin status for
@@ -97,12 +95,12 @@ contract ModuleBase {
 
     /**
      * @dev Ensures that the account is an instance of the deployed EtherfiSafe
-     * @param account The account address to check 
+     * @param account The account address to check
      */
     modifier onlyEtherFiSafe(address account) {
         etherFiDataProvider.onlyEtherFiSafe(account);
         _;
     }
 
-    function setupModule(bytes calldata data) external virtual {}
+    function setupModule(bytes calldata data) external virtual { }
 }

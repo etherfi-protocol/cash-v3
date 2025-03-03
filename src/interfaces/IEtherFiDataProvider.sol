@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {IRoleRegistry} from "./IRoleRegistry.sol";
+import { IRoleRegistry } from "./IRoleRegistry.sol";
 
 /**
  * @title IEtherFiDataProvider

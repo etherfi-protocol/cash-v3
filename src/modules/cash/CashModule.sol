@@ -2,21 +2,24 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
-import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
-import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
+
+import { Mode, SafeCashConfig, SafeData, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
-import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
+import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
+
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
-import { SafeCashConfig, WithdrawalRequest, Mode, SafeData } from "../../interfaces/ICashModule.sol";
-import {ModuleBase} from "../ModuleBase.sol";
+import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
+
+import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
-import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
+import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
+import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
+import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
+import { ModuleBase } from "../ModuleBase.sol";
 
 /**
  * @title CashModule
@@ -36,7 +39,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      */
     struct CashModuleStorage {
         /// @notice Safe Cash Config for each safe
-        mapping (address safe => SafeCashConfig cashConfig) safeCashConfig; 
+        mapping(address safe => SafeCashConfig cashConfig) safeCashConfig;
         /// @notice Instance of the DebtManager
         IDebtManager debtManager;
         /// @notice Address of the SettlementDispatcher
@@ -55,30 +58,24 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
     bytes32 public constant CASH_MODULE_CONTROLLER_ROLE = keccak256("CASH_MODULE_CONTROLLER_ROLE");
 
-    
     /// @notice Error thrown when a transaction has already been cleared
     error TransactionAlreadyCleared();
-    
-    
+
     /// @notice Error thrown when a non-EtherFi wallet tries to access restricted functions
     error OnlyEtherFiWallet();
-    
-    
+
     /// @notice Error thrown when an unsupported token is used
     error UnsupportedToken();
-    
-    
+
     /// @notice Error thrown when a token that is not a borrow token is used in certain operations
     error OnlyBorrowToken();
-    
-    
+
     /// @notice Error thrown when an operation amount is zero
     error AmountZero();
-    
-    
+
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
-    
+
     /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
     error BorrowingsExceedMaxBorrowAfterSpending();
     error RecipientCannotBeAddressZero();
@@ -88,7 +85,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     error InvalidSignatures();
     error ModeAlreadySet();
 
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {}
+    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { }
 
     /**
      * @notice Initializes the CashModule contract
@@ -117,7 +114,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
 
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
-        $.mode = Mode.Debit;        
+        $.mode = Mode.Debit;
     }
 
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {
@@ -136,19 +133,20 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     }
 
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        CashModuleStorage storage $ =_getCashModuleStorage();
+        CashModuleStorage storage $ = _getCashModuleStorage();
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
 
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
         if ($.modeDelay == 0) {
-            // If delay = 0, just set the value 
+            // If delay = 0, just set the value
             $.safeCashConfig[safe].mode = mode;
         } else {
             // If delay != 0, debit to credit mode should incur delay
-            if (mode == Mode.Credit) $.safeCashConfig[safe].incomingCreditModeStartTime = block.timestamp + $.modeDelay;
-            else {
+            if (mode == Mode.Credit) {
+                $.safeCashConfig[safe].incomingCreditModeStartTime = block.timestamp + $.modeDelay;
+            } else {
                 // If mode is debit, no problem, just set the mode
                 $.safeCashConfig[safe].incomingCreditModeStartTime = 0;
                 $.safeCashConfig[safe].mode = mode;
@@ -157,12 +155,11 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     }
 
     function getMode(address safe) external view returns (Mode) {
-        SafeCashConfig storage $ =_getCashModuleStorage().safeCashConfig[safe];
+        SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
 
         if ($.incomingCreditModeStartTime != 0 && block.timestamp > $.incomingCreditModeStartTime) return Mode.Credit;
         return $.mode;
     }
-
 
     function incomingCreditModeStartTime(address safe) external view returns (uint256) {
         return _getCashModuleStorage().safeCashConfig[safe].incomingCreditModeStartTime;
@@ -195,7 +192,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         address[] memory to = new address[](len);
         bytes[] memory data = new bytes[](len);
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             to[i] = $.pendingWithdrawalRequest.tokens[i];
             data[i] = abi.encodeWithSelector(IERC20.transfer.selector, recipient, $.pendingWithdrawalRequest.amounts[i]);
 
@@ -227,15 +224,11 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      * @custom:throws If the address is not a valid EtherFi Safe
      */
     function getData(address safe) external view onlyEtherFiSafe(safe) returns (SafeData memory) {
-        SafeCashConfig storage $ =_getCashModuleStorage().safeCashConfig[safe];
-        SafeData memory data = SafeData({
-            spendingLimit: $.spendingLimit,
-            pendingWithdrawalRequest: $.pendingWithdrawalRequest,
-            mode: $.mode
-        });
+        SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
+        SafeData memory data = SafeData({ spendingLimit: $.spendingLimit, pendingWithdrawalRequest: $.pendingWithdrawalRequest, mode: $.mode });
 
         return data;
-    } 
+    }
 
     /**
      * @notice Checks if a transaction has been cleared
@@ -245,7 +238,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      * @return Boolean indicating if the transaction is cleared
      * @custom:throws If the address is not a valid EtherFi Safe
      */
-    function transactionCleared(address safe, bytes32 txId) public view onlyEtherFiSafe(safe) returns(bool) {
+    function transactionCleared(address safe, bytes32 txId) public view onlyEtherFiSafe(safe) returns (bool) {
         return _getCashModuleStorage().safeCashConfig[safe].transactionCleared[txId];
     }
 
@@ -281,7 +274,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         IDebtManager debtManager = $.debtManager;
-        
+
         _setCurrentMode($$);
 
         if ($$.transactionCleared[txId]) revert TransactionAlreadyCleared();
@@ -314,20 +307,20 @@ contract CashModule is UpgradeableProxy, ModuleBase {
             data[0] = abi.encodeWithSelector(IDebtManager.borrow.selector, token, amount);
             values[0] = 0;
 
-            try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) {}
+            try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) { }
             catch {
                 _cancelOldWithdrawal(safe);
                 IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
             }
         } else {
             _updateWithdrawalRequestIfNecessary(safe, token, amount);
-            (IDebtManager.TokenData[] memory collateralTokenAmounts, ) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, token, amount, $$.mode);
-            (uint256 totalMaxBorrow, uint256 totalBorrowings) =  debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
+            (IDebtManager.TokenData[] memory collateralTokenAmounts,) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, token, amount, $$.mode);
+            (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
 
             if (totalBorrowings > totalMaxBorrow && $$.pendingWithdrawalRequest.tokens.length != 0) {
                 _cancelOldWithdrawal(safe);
-                (collateralTokenAmounts, ) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, token, amount, $$.mode);
-                (totalMaxBorrow, totalBorrowings) =  debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
+                (collateralTokenAmounts,) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, token, amount, $$.mode);
+                (totalMaxBorrow, totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
             }
             if (totalBorrowings > totalMaxBorrow) revert BorrowingsExceedMaxBorrowAfterSpending();
 
@@ -335,7 +328,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
             data[0] = abi.encodeWithSelector(IERC20.transfer.selector, _getCashModuleStorage().settlementDispatcher, amount);
             values[0] = 0;
         }
-        
+
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
 
@@ -394,7 +387,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         WithdrawalRequest memory withdrawalRequest = _getCashModuleStorage().safeCashConfig[safe].pendingWithdrawalRequest;
         uint256 len = withdrawalRequest.tokens.length;
         uint256 tokenIndex = len;
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             if (withdrawalRequest.tokens[i] == token) {
                 tokenIndex = i;
                 break;
@@ -422,16 +415,16 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         uint256 len = collateralTokens.length;
         IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
         uint256 m = 0;
-        for (uint256 i = 0; i < len; ) {
-            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe); 
+        for (uint256 i = 0; i < len;) {
+            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
             uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
             if (balance != 0) {
                 balance = balance - pendingWithdrawalAmount;
                 if (__mode == Mode.Debit && token == collateralTokens[i]) {
-                    if (balance == 0 || balance < amount) return(new IDebtManager.TokenData[](0), "Insufficient effective balance after withdrawal to spend with debit mode");
+                    if (balance == 0 || balance < amount) return (new IDebtManager.TokenData[](0), "Insufficient effective balance after withdrawal to spend with debit mode");
                     balance = balance - amount;
                 }
-                tokenAmounts[m] = IDebtManager.TokenData({token: collateralTokens[i], amount: balance});
+                tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
                 unchecked {
                     ++m;
                 }
@@ -474,7 +467,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
 
         uint256 len = safeCashConfig.pendingWithdrawalRequest.tokens.length;
         uint256 tokenIndex = len;
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             if (safeCashConfig.pendingWithdrawalRequest.tokens[i] == token) {
                 tokenIndex = i;
                 break;
@@ -521,7 +514,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     function _checkBalance(address safe, address[] calldata tokens, uint256[] calldata amounts) internal view {
         uint256 len = tokens.length;
         if (len != amounts.length) revert ArrayLengthMismatch();
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             if (IERC20(tokens[i]).balanceOf(safe) < amounts[i]) revert InsufficientBalance();
 
             unchecked {
@@ -534,22 +527,17 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
-        if(!$.safeCashConfig[safe].withdrawRecipients.contains(recipient)) revert OnlyWhitelistedWithdrawRecipients();
-        
+        if (!$.safeCashConfig[safe].withdrawRecipients.contains(recipient)) revert OnlyWhitelistedWithdrawRecipients();
+
         if (tokens.length > 1) tokens.checkDuplicates();
-        
+
         _cancelOldWithdrawal(safe);
-        
+
         uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
 
         _checkBalance(safe, tokens, amounts);
 
-        $.safeCashConfig[safe].pendingWithdrawalRequest = WithdrawalRequest({
-            tokens: tokens,
-            amounts: amounts,
-            recipient: recipient,
-            finalizeTime: finalTime
-        });
+        $.safeCashConfig[safe].pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
 
         getDebtManager().ensureHealth(safe);
 

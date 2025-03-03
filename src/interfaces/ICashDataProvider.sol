@@ -16,7 +16,7 @@ interface ICashDataProvider {
         address userSafeLens;
         address etherFiRecoverySigner;
         address thirdPartyRecoverySigner;
-    } 
+    }
 
     enum UserSafeTiers {
         None,
@@ -28,14 +28,8 @@ interface ICashDataProvider {
 
     event DelayUpdated(uint256 oldDelay, uint256 newDelay);
     event SettlementDispatcherUpdated(address oldDispatcher, address newDispatcher);
-    event CashDebtManagerUpdated(
-        address oldDebtManager,
-        address newDebtManager
-    );
-    event PriceProviderUpdated(
-        address oldPriceProvider,
-        address newPriceProvider
-    );
+    event CashDebtManagerUpdated(address oldDebtManager, address newDebtManager);
+    event PriceProviderUpdated(address oldPriceProvider, address newPriceProvider);
     event SwapperUpdated(address oldSwapper, address newSwapper);
     event UserSafeFactoryUpdated(address oldFactory, address newFactory);
     event UserSafeEventEmitterUpdated(address oldEventEmitter, address newEventEmitter);
@@ -125,7 +119,7 @@ interface ICashDataProvider {
      * @return Address of the EtherFi recovery signer
      */
     function etherFiRecoverySigner() external view returns (address);
-    
+
     /**
      * @notice Function to fetch the address of the third party recovery signerr
      * @return Address of the third party recovery signer
@@ -135,7 +129,7 @@ interface ICashDataProvider {
     /**
      * @notice Function to check if an account is a user safe
      * @param account Address of the account
-     * @return isUserSafe 
+     * @return isUserSafe
      */
     function isUserSafe(address account) external view returns (bool);
 
@@ -171,7 +165,7 @@ interface ICashDataProvider {
      * @param wallet EtherFi Cash wallet address
      */
     function grantEtherFiWalletRole(address wallet) external;
-    
+
     /**
      * @notice Function to revoke ETHER_FI_WALLER_ROLE to an address
      * @dev Can only be called by the admin of the contract
@@ -212,7 +206,7 @@ interface ICashDataProvider {
      * @param factory Address of the new factory
      */
     function setUserSafeFactory(address factory) external;
-    
+
     /**
      * @notice Function to set the address of the user safe event emitter
      * @param eventEmitter Address of the new event emitter
@@ -224,20 +218,19 @@ interface ICashDataProvider {
      * @param dispatcher Address of the new cashback dispatcher
      */
     function setCashbackDispatcher(address dispatcher) external;
-    
+
     /**
      * @notice Function to set the address of the user safe lens
      * @param lens Address of the new user safe lens
      */
     function setUserSafeLens(address lens) external;
 
-    
     /**
      * @notice Function to set the address of the EtherFi recovery signer
      * @param recoverySigner Address of the EtherFi recovery signer
      */
     function setEtherFiRecoverySigner(address recoverySigner) external;
-    
+
     /**
      * @notice Function to set the address of the third party recovery signer
      * @param recoverySigner Address of the third party recovery signer
@@ -249,19 +242,19 @@ interface ICashDataProvider {
      * @notice Can only be called by the user safe factory
      * @param safe Address of the safe
      */
-    function whitelistUserSafe(address safe) external; 
+    function whitelistUserSafe(address safe) external;
 
     /**
      * @notice Function to set user safe tiers
      * @param safes Address of the user safes
      * @param tiers Tier of the user safes
      */
-    function setUserSafeTier(address[] memory safes, UserSafeTiers[] memory tiers) external;   
+    function setUserSafeTier(address[] memory safes, UserSafeTiers[] memory tiers) external;
 
     /**
      * @notice Function to set cashback percentages for different tiers
      * @param tiers Tiers array
-     * @param cashbackPercentages Cashback percentages in bps 
+     * @param cashbackPercentages Cashback percentages in bps
      */
     function setTierCashbackPercentage(UserSafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external;
 }

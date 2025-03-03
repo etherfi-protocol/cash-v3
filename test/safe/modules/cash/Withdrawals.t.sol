@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { CashModuleTestSetup, CashModule, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
-import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
+import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
+import { CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -11,13 +11,13 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_requestWithdrawal_works() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
-        
+
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
@@ -27,26 +27,26 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_processWithdrawals_works() external {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
-        
+
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
-        
+
         uint256 balBeforeSafe = usdcScroll.balanceOf(address(safe));
         uint256 balBeforeWithdrawRecipient = usdcScroll.balanceOf(address(withdrawRecipient));
 
-        (uint64 withdrawalDelay, , ) = cashModule.getDelays();
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay); // withdraw delay is 60 secs
 
         cashModule.processWithdrawal(address(safe));
-        
+
         uint256 balAfterSafe = usdcScroll.balanceOf(address(safe));
         uint256 balAfterWithdrawRecipient = usdcScroll.balanceOf(address(withdrawRecipient));
 
@@ -54,7 +54,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(balAfterSafe, 0);
         assertEq(balBeforeWithdrawRecipient, 0);
         assertEq(balAfterWithdrawRecipient, withdrawalAmount);
-        
+
         // Verify pending withdrawal is 0
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), 0);
     }
@@ -62,32 +62,28 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_processWithdrawals_fails_whenTheDelayIsNotOver() external {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
-        
+
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
-        
+
         vm.expectRevert(CashModule.CannotWithdrawYet.selector);
         cashModule.processWithdrawal(address(safe));
     }
 
     function test_requestWithdrawal_fails_whenAccountBecomesUnhealthy() external {
-        vm.mockCallRevert(
-            address(debtManager),
-            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)),
-            abi.encodeWithSelector(IDebtManager.AccountUnhealthy.selector)
-        );
+        vm.mockCallRevert(address(debtManager), abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), abi.encodeWithSelector(IDebtManager.AccountUnhealthy.selector));
 
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -96,16 +92,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(tokens, amounts, withdrawRecipient)
-            )
-        ).toEthSignedMessageHash();
-
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
@@ -125,20 +112,20 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_requestWithdrawal_resetWithdrawalWithNewRequest() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), 1000e6);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
-        
+
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
 
         uint256 newWithdrawalAmt = 100e6;
-        amounts[0] = newWithdrawalAmt;  
+        amounts[0] = newWithdrawalAmt;
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), newWithdrawalAmt);
     }
@@ -146,7 +133,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_requestWithdrawal_fails_whenWithdrawingToNonWhitelistRecipient() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -155,16 +142,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(tokens, amounts, address(owner1))
-            )
-        ).toEthSignedMessageHash();
-
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, address(owner1)))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
@@ -184,7 +162,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_requestWithdrawal_fails_whenFundsAreInsufficient() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount - 1);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -193,16 +171,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(tokens, amounts, withdrawRecipient)
-            )
-        ).toEthSignedMessageHash();
-
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
@@ -222,7 +191,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_requestWithdrawal_fails_whenRecipientIsNull() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -231,16 +200,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(tokens, amounts, address(0))
-            )
-        ).toEthSignedMessageHash();
-
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, address(0)))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
@@ -260,26 +220,17 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_requestWithdrawal_fails_whenArrayLengthMismatch() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
-        
+
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = withdrawalAmount;
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(tokens, amounts, withdrawRecipient)
-            )
-        ).toEthSignedMessageHash();
-
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
@@ -297,36 +248,23 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     }
 
     function test_requestWithdrawal_fails_whenDuplicateTokens() public {
-        vm.mockCall(
-            address(debtManager),
-            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)),
-            abi.encode()
-        );
+        vm.mockCall(address(debtManager), abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), abi.encode());
 
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), 2 * withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](2);
         tokens[0] = address(usdcScroll);
         tokens[1] = address(usdcScroll);
-        
+
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = withdrawalAmount;
         amounts[1] = withdrawalAmount;
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(tokens, amounts, withdrawRecipient)
-            )
-        ).toEthSignedMessageHash();
-
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
@@ -344,34 +282,21 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     }
 
     function test_requestWithdrawal_fails_whenInvalidSignature() public {
-        vm.mockCall(
-            address(debtManager),
-            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)),
-            abi.encode()
-        );
-    
+        vm.mockCall(address(debtManager), abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), abi.encode());
+
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
-        
+
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
-        
+
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(tokens, amounts, withdrawRecipient)
-            )
-        ).toEthSignedMessageHash();
-
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
 

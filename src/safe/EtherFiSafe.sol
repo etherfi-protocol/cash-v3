@@ -6,8 +6,9 @@ import { EIP712Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/cry
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
-import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
+
 import { IEtherFiHook } from "../interfaces/IEtherFiHook.sol";
+import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
@@ -48,19 +49,19 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
      * @dev keccak256("ConfigureModules(address[] modules,bool[] shouldWhitelist,uint256 nonce)")
      */
     bytes32 public constant CONFIGURE_MODULES_TYPEHASH = 0x20263b9194095d902b566d15f1db1d03908706042a5d22118c55a666ec3b992c;
-    
+
     /**
      * @notice TypeHash for threshold setting with EIP-712 signatures
      * @dev keccak256("SetThreshold(uint8 threshold,uint256 nonce)")
      */
     bytes32 public constant SET_THRESHOLD_TYPEHASH = 0x41b1bc57fb63493212c2d2f75145ff3130ce53c70f867177944887c5cb8e8626;
-    
+
     /**
      * @notice TypeHash for owner configuration with EIP-712 signatures
      * @dev keccak256("ConfigureOwners(address[] owners,bool[] shouldAdd,uint256 nonce)")
      */
     bytes32 public constant CONFIGURE_OWNERS_TYPEHASH = 0x93a5e8776e97535ceccfb399fc4015baa8aa11c3e58454ef681f9e144c718f92;
-    
+
     /**
      * @notice TypeHash for admin configuration with EIP-712 signatures
      * @dev keccak256("ConfigureAdmins(address[] accounts,bool[] shouldAdd,uint256 nonce)")
@@ -74,7 +75,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
      * @param data Array of calldata for each call
      */
     event ExecTransactionFromModule(address[] to, uint256[] value, bytes[] data);
-    
+
     /**
      * @notice Emitted when admin accounts are configured
      * @param accounts Array of admin addresses that were configured
@@ -116,16 +117,16 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
      */
     function initialize(address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData, uint8 _threshold) external initializer {
         __EIP712_init("EtherFiSafe", "1");
-        
+
         bool[] memory _shouldAdd = new bool[](_owners.length);
-        for (uint256 i = 0; i < _owners.length; ) {
+        for (uint256 i = 0; i < _owners.length;) {
             _shouldAdd[i] = true;
 
             unchecked {
                 ++i;
             }
         }
-        
+
         _setupMultiSig(_owners, _threshold);
         _configureAdmin(_owners, _shouldAdd);
         _setupModules(_modules, _moduleSetupData);
@@ -146,7 +147,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _configureAdmin(accounts, shouldAdd);
-    }   
+    }
 
     /**
      * @notice Gets all admin addresses for this safe
@@ -310,7 +311,6 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
         dataProvider.roleRegistry().configureSafeAdmins(accounts, shouldAdd);
         emit AdminsConfigured(accounts, shouldAdd);
     }
-
 
     /**
      * @dev Consumes a nonce for replay protection

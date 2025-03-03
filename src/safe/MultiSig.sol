@@ -4,9 +4,10 @@ pragma solidity ^0.8.28;
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
+
+import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
-import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
 
 /**
  * @title MultiSig

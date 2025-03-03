@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Test } from "forge-std/Test.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
 import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
+
+import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
-import {EtherFiSafeFactory} from "../../src/safe/EtherFiSafeFactory.sol";
-import { ModuleBase } from "../../src/modules/ModuleBase.sol";
+import { EtherFiSafeFactory } from "../../src/safe/EtherFiSafeFactory.sol";
 
 contract SafeTestSetup is Test {
     using MessageHashUtils for bytes32;
@@ -51,7 +52,7 @@ contract SafeTestSetup is Test {
         (notOwner, notOwnerPk) = makeAddrAndKey("notOwner");
 
         vm.startPrank(owner);
-        
+
         address dataProviderImpl = address(new EtherFiDataProvider());
         dataProvider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, "")));
 
@@ -59,7 +60,6 @@ contract SafeTestSetup is Test {
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
-
 
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
 
@@ -87,13 +87,12 @@ contract SafeTestSetup is Test {
 
         bytes[] memory moduleSetupData = new bytes[](2);
 
-
         dataProvider.initialize(address(roleRegistry), cashModuleDummy, modules, address(hook), address(safeFactory));
 
         roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), owner);
         safeFactory.deployEtherFiSafe(keccak256("safe"), owners, modules, moduleSetupData, threshold);
         safe = EtherFiSafe(safeFactory.getDeterministicAddress(keccak256("safe")));
-        
+
         vm.stopPrank();
     }
 
@@ -158,7 +157,6 @@ contract SafeTestSetup is Test {
 
         safe.configureOwners(owners, shouldAdd, signers, signatures);
     }
-
 
     function _setThreshold(uint8 newThreshold) internal {
         bytes32 structHash = keccak256(abi.encode(safe.SET_THRESHOLD_TYPEHASH(), newThreshold, safe.nonce()));

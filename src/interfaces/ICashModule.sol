@@ -3,9 +3,9 @@ pragma solidity ^0.8.28;
 
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
-import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
+import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
 /**
  * @title Mode
@@ -55,7 +55,7 @@ struct SafeCashConfig {
     WithdrawalRequest pendingWithdrawalRequest;
     /// @notice User's chosen mode
     Mode mode;
-    /// @notice Map for deduplication of spends 
+    /// @notice Map for deduplication of spends
     mapping(bytes32 txId => bool cleared) transactionCleared;
     uint256 incomingCreditModeStartTime;
     EnumerableSetLib.AddressSet withdrawRecipients;
@@ -104,21 +104,21 @@ interface ICashModule {
      * @return Safe data structure containing spending limits, withdrawal requests, and more
      */
     function getData(address safe) external view returns (SafeData memory);
-    
+
     /**
      * @notice Checks if a transaction has been cleared
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
      * @return Boolean indicating if the transaction is cleared
      */
-    function transactionCleared(address safe, bytes32 txId) external view returns(bool);
-    
+    function transactionCleared(address safe, bytes32 txId) external view returns (bool);
+
     /**
      * @notice Gets the debt manager contract
      * @return IDebtManager instance
      */
     function getDebtManager() external view returns (IDebtManager);
-    
+
     /**
      * @notice Gets the price provider contract
      * @return IPriceProvider instance
