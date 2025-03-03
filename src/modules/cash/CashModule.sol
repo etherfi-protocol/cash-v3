@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
@@ -14,6 +15,8 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { SafeCashConfig, WithdrawalRequest, Mode, SafeData } from "../../interfaces/ICashModule.sol";
 import {ModuleBase} from "../ModuleBase.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
+import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
+import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 
 /**
  * @title CashModule
@@ -22,7 +25,10 @@ import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
  */
 contract CashModule is UpgradeableProxy, ModuleBase {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
+    using EnumerableAddressWhitelistLib for EnumerableSetLib.AddressSet;
     using SpendingLimitLib for SpendingLimit;
+    using MessageHashUtils for bytes32;
+    using ArrayDeDupLib for address[];
 
     /**
      * @dev Storage structure for CashModule using ERC-7201 namespaced diamond storage pattern
@@ -73,12 +79,13 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
     
-    
     /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
     error BorrowingsExceedMaxBorrowAfterSpending();
     error RecipientCannotBeAddressZero();
     error OnlyCashModuleController();
     error CannotWithdrawYet();
+    error OnlyWhitelistedWithdrawRecipients();
+    error InvalidSignatures();
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {}
 
@@ -110,7 +117,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         $.mode = Mode.Debit;        
-    } 
+    }
 
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
@@ -119,6 +126,12 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         $.withdrawalDelay = withdrawalDelay;
         $.spendLimitDelay = spendLimitDelay;
         $.modeDelay = modeDelay;
+    }
+
+    function getDelays() external view returns (uint64, uint64, uint64) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        return ($.withdrawalDelay, $.spendLimitDelay, $.modeDelay);
     }
 
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
@@ -143,8 +156,15 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         _getCashModuleStorage().safeCashConfig[safe].spendingLimit.updateSpendingLimit(dailyLimitInUsd, monthlyLimitInUsd, _getCashModuleStorage().spendLimitDelay);
     }
 
-    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        CashVerificationLib.verifyRequestWithdrawalSig(safe, signer, _useNonce(safe), tokens, amounts, recipient, signature);
+    function configureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+        CashVerificationLib.verifyConfigureWithdrawRecipients(safe, _useNonce(safe), withdrawRecipients, shouldWhitelist, signers, signatures);
+
+        SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
+        $.withdrawRecipients.configure(withdrawRecipients, shouldWhitelist);
+    }
+
+    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+        CashVerificationLib.verifyRequestWithdrawalSig(safe, _useNonce(safe), tokens, amounts, recipient, signers, signatures);
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
 
@@ -497,6 +517,10 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
+        if(!$.safeCashConfig[safe].withdrawRecipients.contains(recipient)) revert OnlyWhitelistedWithdrawRecipients();
+        
+        if (tokens.length > 1) tokens.checkDuplicates();
+        
         _cancelOldWithdrawal(safe);
         
         uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
@@ -510,9 +534,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
             finalizeTime: finalTime
         });
 
-        IDebtManager(getDebtManager()).ensureHealth(safe);
+        getDebtManager().ensureHealth(safe);
 
         if ($.withdrawalDelay == 0) processWithdrawal(safe);
     }
-
 }

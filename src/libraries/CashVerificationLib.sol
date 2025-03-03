@@ -6,6 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import {SignatureUtils} from "./SignatureUtils.sol";
 import {CashModule, Mode} from "../modules/cash/CashModule.sol";
+import {IEtherFiSafe} from "../interfaces/IEtherFiSafe.sol";
 
 /**
  * @title CashVerificationLib
@@ -20,11 +21,15 @@ library CashVerificationLib {
     /// @notice Method identifier for withdrawal requests
     bytes32 public constant REQUEST_WITHDRAWAL_METHOD = keccak256("requestWithdrawal");
     
+    bytes32 public constant CONFIGURE_WITHDRAWAL_RECIPIENT = keccak256("configureWithdrawRecipients");
+    
     /// @notice Method identifier for spending limit updates
     bytes32 public constant UPDATE_SPENDING_LIMIT_METHOD = keccak256("updateSpendingLimit");
     
     /// @notice Method identifier for mode changes
     bytes32 public constant SET_MODE_METHOD = keccak256("setMode");
+
+    error InvalidSignatures();
 
     /**
      * @notice Verifies the signature for a method 
@@ -87,23 +92,36 @@ library CashVerificationLib {
      * @notice Verifies a signature for requesting a withdrawal
      * @dev Creates and validates an EIP-191 signed message hash
      * @param safe Address of the safe
-     * @param signer Address of the signer to verify against
      * @param nonce Transaction nonce for replay protection
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
      * @param recipient Address to receive the withdrawn tokens
-     * @param signature ECDSA signature bytes
-     * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
+     * @param signers Address of the signers
+     * @param signatures ECDSA signatures by signers
+     * @custom:throws InvalidSignatures if the signature is invalid
      */
     function verifyRequestWithdrawalSig(
         address safe,
-        address signer,
         uint256 nonce,
         address[] calldata tokens,
         uint256[] calldata amounts,
         address recipient,
-        bytes calldata signature
+        address[] calldata signers,
+        bytes[] calldata signatures
     ) internal view {
-        verifySignature(safe, signer, REQUEST_WITHDRAWAL_METHOD, nonce, abi.encode(tokens, amounts, recipient), signature);
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, safe, nonce, abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+    }
+
+    function verifyConfigureWithdrawRecipients(
+        address safe,
+        uint256 nonce,
+        address[] calldata withdrawRecipients, 
+        bool[] calldata shouldWhitelist,
+        address[] calldata signers,
+        bytes[] calldata signatures
+    ) internal view {
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, safe, nonce, abi.encode(withdrawRecipients, shouldWhitelist))).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 }

@@ -15,7 +15,7 @@ import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, EtherFiDa
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import {CashVerificationLib} from "../../../../src/libraries/CashVerificationLib.sol";
 
-contract SpendTest is CashModuleTestSetup {
+contract CashModuleSpendTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
     function test_spend_works_inDebitMode() public {
@@ -85,11 +85,9 @@ contract SpendTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
         
-        address recipient = address(owner1);
         uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
 
-        bytes memory signature = _requestWithdrawal(tokens, amounts, recipient);
-        cashModule.requestWithdrawal(address(safe), tokens, amounts, recipient, owner1, signature);
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         // Verify pending withdrawal was set up correctly
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
@@ -118,12 +116,9 @@ contract SpendTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
         
-        address recipient = address(owner1);
-
         uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
 
-        bytes memory signature = _requestWithdrawal(tokens, amounts, recipient);
-        cashModule.requestWithdrawal(address(safe), tokens, amounts, recipient, owner1, signature);        
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         // Spend should work and cancel the withdrawal
         vm.prank(etherFiWallet);
@@ -152,33 +147,4 @@ contract SpendTest is CashModuleTestSetup {
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
     }
-    
-    
-    function _requestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal returns (bytes memory) {
-        uint256 nonce = cashModule.getNonce(address(safe));
-
-        bytes32 msgHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(tokens, amounts, recipient)
-            )
-        );
-
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            owner1Pk,
-            msgHash.toEthSignedMessageHash()
-        );
-
-        /// TODO: Remove this when debt manager is upgraded
-        vm.mockCall(
-            address(debtManager),
-            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)),
-            abi.encode()
-        );
-
-        bytes memory signature = abi.encodePacked(r, s, v);
-        return signature;
-    }}
+}

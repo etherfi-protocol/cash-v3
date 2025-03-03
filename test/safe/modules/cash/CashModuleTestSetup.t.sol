@@ -7,6 +7,7 @@ import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 import { CashModule } from "../../../../src/modules/cash/CashModule.sol";
+import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 import { ICashDataProvider } from "../../../../src/interfaces/ICashDataProvider.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
@@ -32,6 +33,8 @@ contract CashModuleTestSetup is SafeTestSetup {
     uint256 dailyLimitInUsd = 10000e6;
     uint256 monthlyLimitInUsd = 100000e6;
     int256 timezoneOffset = -4 * 3600;  // cayman timezone
+
+    address public withdrawRecipient = makeAddr("withdrawRecipient");
 
     function setUp() public override {
         vm.createSelectFork("https://rpc.scroll.io");
@@ -72,6 +75,82 @@ contract CashModuleTestSetup is SafeTestSetup {
         dataProvider.configureModules(modules, shouldWhitelist);
 
         _configureModules(modules, shouldWhitelist, setupData);
+
+        address[] memory withdrawRecipients = new address[](1);
+        withdrawRecipients[0] = withdrawRecipient;
+
+        bool[] memory shouldAdd = new bool[](1);
+        shouldAdd[0] = true;
+
+        _configureWithdrawRecipients(withdrawRecipients, shouldAdd);
+        
         vm.stopPrank();        
+    }
+
+    function _configureWithdrawRecipients(address[] memory withdrawRecipients, bool[] memory shouldAdd) internal {
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digestHash = keccak256(
+            abi.encodePacked(
+                CashVerificationLib.CONFIGURE_WITHDRAWAL_RECIPIENT, 
+                block.chainid, 
+                address(safe), 
+                nonce, 
+                abi.encode(withdrawRecipients, shouldAdd)
+            )
+        ).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(
+            owner1Pk,
+            digestHash
+        );
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(
+            owner2Pk,
+            digestHash
+        );
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        cashModule.configureWithdrawRecipients(address(safe), withdrawRecipients, shouldAdd, signers, signatures);
+    }
+
+    function _requestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal {
+        uint256 nonce = cashModule.getNonce(address(safe));
+
+        bytes32 digestHash = keccak256(
+            abi.encodePacked(
+                CashVerificationLib.REQUEST_WITHDRAWAL_METHOD,
+                block.chainid,
+                address(safe),
+                nonce,
+                abi.encode(tokens, amounts, recipient)
+            )
+        ).toEthSignedMessageHash();
+
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        /// TODO: Remove this when debt manager is upgraded
+        vm.mockCall(
+            address(debtManager),
+            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)),
+            abi.encode()
+        );
+
+        cashModule.requestWithdrawal(address(safe), tokens, amounts, recipient, signers, signatures);
     }
 }

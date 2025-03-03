@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
+
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import {IModule} from "../interfaces/IModule.sol";
 
 /**

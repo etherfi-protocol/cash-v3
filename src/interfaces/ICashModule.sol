@@ -58,6 +58,7 @@ struct SafeCashConfig {
     /// @notice Map for deduplication of spends 
     mapping(bytes32 txId => bool cleared) transactionCleared;
     uint256 incomingCreditModeStartTime;
+    EnumerableSetLib.AddressSet withdrawRecipients;
 }
 
 /**

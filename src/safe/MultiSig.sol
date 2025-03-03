@@ -6,6 +6,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
+import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
 
 /**
  * @title MultiSig
@@ -15,6 +16,7 @@ import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 abstract contract MultiSig is EtherFiSafeErrors {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
+    using EnumerableAddressWhitelistLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
 
     /// @custom:storage-location erc7201:etherfi.storage.MultiSig
@@ -114,21 +116,7 @@ abstract contract MultiSig is EtherFiSafeErrors {
     function _configureOwners(address[] calldata _owners, bool[] calldata _shouldAdd) internal {
         MultiSigStorage storage $ = _getMultiSigStorage();
 
-        uint256 len = _owners.length;
-        if (len == 0) revert InvalidInput();
-        if (len > 1) _owners.checkDuplicates();
-        if (len != _shouldAdd.length) revert ArrayLengthMismatch();
-
-        for (uint256 i = 0; i < len;) {
-            if (_owners[i] == address(0)) revert InvalidOwnerAddress(i);
-
-            if (_shouldAdd[i] && !$.owners.contains(_owners[i])) $.owners.add(_owners[i]);
-            if (!_shouldAdd[i] && $.owners.contains(_owners[i])) $.owners.remove(_owners[i]);
-
-            unchecked {
-                ++i;
-            }
-        }
+        $.owners.configure(_owners, _shouldAdd);
 
         if ($.owners.length() == 0) revert AllOwnersRemoved();
         if ($.owners.length() < $.threshold) revert OwnersLessThanThreshold();
