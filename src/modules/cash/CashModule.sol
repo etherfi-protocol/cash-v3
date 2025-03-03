@@ -84,6 +84,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     error OnlyWhitelistedWithdrawRecipients();
     error InvalidSignatures();
     error ModeAlreadySet();
+    error OnlyDebtManager();
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { }
 
@@ -134,6 +135,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
 
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ = _getCashModuleStorage();
+        
+        _setCurrentMode($.safeCashConfig[safe]);
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
 
@@ -168,6 +171,40 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashVerificationLib.verifyUpdateSpendingLimitSig(safe, signer, _useNonce(safe), dailyLimitInUsd, monthlyLimitInUsd, signature);
         _getCashModuleStorage().safeCashConfig[safe].spendingLimit.updateSpendingLimit(dailyLimitInUsd, monthlyLimitInUsd, _getCashModuleStorage().spendLimitDelay);
+    }
+
+    function preLiquidate(address safe) external {
+        if (msg.sender != address(getDebtManager())) revert OnlyDebtManager();
+        _cancelOldWithdrawal(safe);
+    }
+
+    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external {
+        if (msg.sender != address(getDebtManager())) revert OnlyDebtManager();
+
+        uint256 len = tokensToSend.length;
+        address[] memory to = new address[](len);
+        bytes[] memory data = new bytes[](len);
+        uint256 counter = 0;
+
+        for (uint256 i = 0; i < len; ) {
+            if (tokensToSend[i].amount > 0) {
+                to[i] = tokensToSend[i].token;
+                data[i] = abi.encodeWithSelector(IERC20.transfer.selector, liquidator, tokensToSend[i].amount);
+                unchecked {
+                    ++counter;
+                }
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        assembly ("memory-safe") {
+            to := counter
+            data := counter
+        }
+
+        IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](counter), data);
     }
 
     function configureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
@@ -327,9 +364,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
             to[0] = token;
             data[0] = abi.encodeWithSelector(IERC20.transfer.selector, _getCashModuleStorage().settlementDispatcher, amount);
             values[0] = 0;
+            IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
         }
-
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
 
     /**

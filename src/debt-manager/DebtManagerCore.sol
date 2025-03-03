@@ -5,8 +5,8 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
-import { IUserSafe } from "../interfaces/IUserSafe.sol";
 import { DebtManagerStorage } from "./DebtManagerStorage.sol";
+import {IDebtManager} from "../interfaces/IDebtManager.sol";
 
 contract DebtManagerCore is DebtManagerStorage {
     using Math for uint256;
@@ -35,9 +35,9 @@ contract DebtManagerCore is DebtManagerStorage {
         return _supportedBorrowTokens;
     }
 
-    function getUserCollateralForToken(address user, address token) external view returns (uint256, uint256) {
+    function getUserCollateralForToken(address safe, address token) external view returns (uint256, uint256) {
         if (!isCollateralToken(token)) revert UnsupportedCollateralToken();
-        uint256 collateralTokenAmt = IUserSafe(user).getUserCollateralForToken(token);
+        uint256 collateralTokenAmt = cashLens.getUserCollateralForToken(safe, token);
         uint256 collateralAmtInUsd = convertCollateralTokenToUsd(token, collateralTokenAmt);
 
         return (collateralTokenAmt, collateralAmtInUsd);
@@ -81,7 +81,7 @@ contract DebtManagerCore is DebtManagerStorage {
 
     function getMaxBorrowAmount(address user, bool forLtv) public view returns (uint256) {
         uint256 totalMaxBorrow = 0;
-        TokenData[] memory collateralTokens = IUserSafe(user).getUserTotalCollateral();
+        IDebtManager.TokenData[] memory collateralTokens = cashLens.getUserTotalCollateral(user);
         uint256 len = collateralTokens.length;
 
         for (uint256 i = 0; i < len;) {
@@ -101,8 +101,8 @@ contract DebtManagerCore is DebtManagerStorage {
         return totalMaxBorrow;
     }
 
-    function collateralOf(address user) public view returns (TokenData[] memory, uint256) {
-        TokenData[] memory collateralTokens = IUserSafe(user).getUserTotalCollateral();
+    function collateralOf(address user) public view returns (IDebtManager.TokenData[] memory, uint256) {
+        IDebtManager.TokenData[] memory collateralTokens = cashLens.getUserTotalCollateral(user);
         uint256 len = collateralTokens.length;
         uint256 totalCollateralInUsd = 0;
 
@@ -161,7 +161,7 @@ contract DebtManagerCore is DebtManagerStorage {
         totalLiquidStableAmounts = _liquidStableAmounts();
     }
 
-    function getUserCurrentState(address user) external view returns (TokenData[] memory totalCollaterals, uint256 totalCollateralInUsd, TokenData[] memory borrowings, uint256 totalBorrowings) {
+    function getUserCurrentState(address user) external view returns (IDebtManager.TokenData[] memory totalCollaterals, uint256 totalCollateralInUsd, TokenData[] memory borrowings, uint256 totalBorrowings) {
         (totalCollaterals, totalCollateralInUsd) = collateralOf(user);
         (borrowings, totalBorrowings) = borrowingOf(user);
     }
@@ -242,7 +242,7 @@ contract DebtManagerCore is DebtManagerStorage {
 
     function getCollateralValueInUsd(address user) public view returns (uint256) {
         uint256 userCollateralInUsd = 0;
-        TokenData[] memory userCollateral = IUserSafe(user).getUserTotalCollateral();
+        IDebtManager.TokenData[] memory userCollateral = cashLens.getUserTotalCollateral(user);
         uint256 len = userCollateral.length;
 
         for (uint256 i = 0; i < len;) {
@@ -343,14 +343,14 @@ contract DebtManagerCore is DebtManagerStorage {
     }
 
     function _liquidate(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 debtAmountToLiquidateInUsd) internal {
-        IUserSafe(user).preLiquidate();
+        cashModule.preLiquidate(user);
         if (debtAmountToLiquidateInUsd == 0) revert LiquidatableAmountIsZero();
 
         uint256 beforeDebtAmount = _userBorrowings[user][borrowToken];
 
-        (LiquidationTokenData[] memory collateralTokensToSend, uint256 remainingDebt) = _getCollateralTokensForDebtAmount(user, debtAmountToLiquidateInUsd, collateralTokensPreference);
+        (IDebtManager.LiquidationTokenData[] memory collateralTokensToSend, uint256 remainingDebt) = _getCollateralTokensForDebtAmount(user, debtAmountToLiquidateInUsd, collateralTokensPreference);
 
-        IUserSafe(user).postLiquidate(msg.sender, collateralTokensToSend);
+        cashModule.postLiquidate(user, msg.sender, collateralTokensToSend);
 
         uint256 liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt;
         _userBorrowings[user][borrowToken] -= liquidatedAmt;
@@ -370,9 +370,9 @@ contract DebtManagerCore is DebtManagerStorage {
         emit Repaid(user, msg.sender, token, repayDebtUsdAmt);
     }
 
-    function _getCollateralTokensForDebtAmount(address user, uint256 repayDebtUsdAmt, address[] memory collateralTokenPreference) internal view returns (LiquidationTokenData[] memory, uint256 remainingDebt) {
+    function _getCollateralTokensForDebtAmount(address user, uint256 repayDebtUsdAmt, address[] memory collateralTokenPreference) internal view returns (IDebtManager.LiquidationTokenData[] memory, uint256 remainingDebt) {
         uint256 len = collateralTokenPreference.length;
-        LiquidationTokenData[] memory collateral = new LiquidationTokenData[](len);
+        IDebtManager.LiquidationTokenData[] memory collateral = new IDebtManager.LiquidationTokenData[](len);
 
         for (uint256 i = 0; i < len;) {
             address collateralToken = collateralTokenPreference[i];
@@ -384,7 +384,7 @@ contract DebtManagerCore is DebtManagerStorage {
 
             if (totalCollateral - maxBonus < collateralAmountForDebt) {
                 uint256 liquidationBonus = maxBonus;
-                collateral[i] = LiquidationTokenData({ token: collateralToken, amount: totalCollateral, liquidationBonus: liquidationBonus });
+                collateral[i] = IDebtManager.LiquidationTokenData({ token: collateralToken, amount: totalCollateral, liquidationBonus: liquidationBonus });
 
                 uint256 usdValueOfCollateral = convertCollateralTokenToUsd(collateralToken, totalCollateral - liquidationBonus);
 
@@ -392,7 +392,7 @@ contract DebtManagerCore is DebtManagerStorage {
             } else {
                 uint256 liquidationBonus = (collateralAmountForDebt * _collateralTokenConfig[collateralToken].liquidationBonus) / HUNDRED_PERCENT;
 
-                collateral[i] = LiquidationTokenData({ token: collateralToken, amount: collateralAmountForDebt + liquidationBonus, liquidationBonus: liquidationBonus });
+                collateral[i] = IDebtManager.LiquidationTokenData({ token: collateralToken, amount: collateralAmountForDebt + liquidationBonus, liquidationBonus: liquidationBonus });
 
                 repayDebtUsdAmt = 0;
             }

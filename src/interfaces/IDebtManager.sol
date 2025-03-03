@@ -407,4 +407,6 @@ interface IDebtManager {
      * @return totalBorrowings Total borrowing value in USD.
      */
     function getUserCurrentState(address user) external view returns (TokenData[] memory totalCollaterals, uint256 totalCollateralInUsd, TokenData[] memory borrowings, uint256 totalBorrowings);
+
+    function setAdminImpl(address newImpl) external;
 }

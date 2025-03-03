@@ -37,6 +37,30 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(usdcScroll.balanceOf(settlementDispatcher), settlementDispatcherBalBefore + amount);
     }
 
+    function test_spend_works_inCreditMode() public {
+        uint256 initialBalance = 100e6;
+        deal(address(usdcScroll), address(safe), initialBalance);
+
+        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
+        uint256 debtManagerBalBefore = usdcScroll.balanceOf(address(debtManager));
+
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+
+        uint256 amount = 10e6;
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), amount);
+
+        // Verify transaction was cleared
+        assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId")));
+
+        // Verify tokens were transferred to settlement dispatcher
+        assertEq(usdcScroll.balanceOf(address(safe)), initialBalance);
+        assertEq(usdcScroll.balanceOf(settlementDispatcher), settlementDispatcherBalBefore + amount);
+        assertEq(usdcScroll.balanceOf(address(debtManager)), debtManagerBalBefore - amount);
+    }
+
     function test_spend_reverts_whenTransactionAlreadyCleared() public {
         uint256 amount = 100e6;
         deal(address(usdcScroll), address(safe), amount);
@@ -75,7 +99,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), 100e6);
     }
 
-    function test_spend_worksWithPendingWithdrawal() public {
+    function test_spend_worksWithPendingWithdrawalInDebitMode() public {
         uint256 initialAmount = 200e6;
         uint256 spendAmount = 100e6;
         uint256 withdrawalAmount = 50e6;
@@ -104,6 +128,45 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Verify pending withdrawal still exists
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+    }
+
+    function test_spend_cancelsPendingWithdrawalInCreditModeIfBlocked() public {
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        address recipient = withdrawRecipient;
+        uint256 futureBorrowAmt = 10e6;
+        uint256 weETHCollateralAmount = 1 ether;
+        uint256 usdcCollateralAmount = 1000e6;
+        
+        deal(address(weETHScroll), address(safe), weETHCollateralAmount);
+        deal(address(usdcScroll), address(safe), usdcCollateralAmount);
+        deal(address(usdcScroll), address(debtManager), 1 ether); 
+        
+        uint256 totalMaxBorrow = debtManager.getMaxBorrowAmount(address(safe), true);
+        uint256 borrowAmt = totalMaxBorrow - futureBorrowAmt;
+
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), borrowAmt);
+        
+        uint256 maxCanWithdraw = 10e6;
+        tokens[0] = address(usdcScroll);
+        amounts[0] = maxCanWithdraw;
+        _requestWithdrawal(tokens, amounts, recipient);
+
+        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(settlementDispatcher);
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("newTxId"), address(usdcScroll), futureBorrowAmt);
+
+        uint256 settlementDispatcherUsdcBalAfter = usdcScroll.balanceOf(settlementDispatcher);
+
+        assertEq(settlementDispatcherUsdcBalAfter - settlementDispatcherUsdcBalBefore, futureBorrowAmt);
+
+        uint256 withdrawalAmt = cashLens.getPendingWithdrawalAmount(address(safe), address(usdcScroll));
+        assertEq(withdrawalAmt, 0);
     }
 
     function test_spend_updatesWithdrawalRequestIfNecessary() public {
@@ -149,4 +212,25 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
     }
+
+    function test_spend_inDebitMode_fails_whenBorrowExceedsMaxBorrow() public {
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+
+        uint256 safeBalUsdc = 1000e6;
+        deal(address(usdcScroll), address(safe), safeBalUsdc);
+        deal(address(weETHScroll), address(safe), 0);
+        deal(address(usdcScroll), address(debtManager), 1000e6);
+        
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), 10e6);
+
+        _setMode(Mode.Debit);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(CashModule.BorrowingsExceedMaxBorrowAfterSpending.selector);
+        cashModule.spend(address(safe), keccak256("newTxId"), address(usdcScroll), safeBalUsdc);
+    }
+
+
 }

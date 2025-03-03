@@ -10,7 +10,6 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { ICashDataProvider } from "../interfaces/ICashDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
-import { IUserSafe } from "../interfaces/IUserSafe.sol";
 
 /// @title CashbackDispatcher
 /// @author shivam@ether.fi
@@ -87,20 +86,20 @@ contract CashbackDispatcher is Initializable, UUPSUpgradeable, AccessControlDefa
         }
     }
 
-    function clearPendingCashback() external returns (address, uint256, bool) {
-        if (!cashDataProvider.isUserSafe(msg.sender)) revert OnlyUserSafe();
-        uint256 pendingCashbackInUsd = IUserSafe(msg.sender).pendingCashback();
+    // function clearPendingCashback() external returns (address, uint256, bool) {
+    //     if (!cashDataProvider.isUserSafe(msg.sender)) revert OnlyUserSafe();
+    //     uint256 pendingCashbackInUsd = IUserSafe(msg.sender).pendingCashback();
 
-        uint256 cashbackAmount = convertUsdToCashbackToken(pendingCashbackInUsd);
-        if (cashbackAmount == 0) return (cashbackToken, 0, false);
+    //     uint256 cashbackAmount = convertUsdToCashbackToken(pendingCashbackInUsd);
+    //     if (cashbackAmount == 0) return (cashbackToken, 0, false);
 
-        if (IERC20(cashbackToken).balanceOf(address(this)) < cashbackAmount) {
-            return (cashbackToken, cashbackAmount, false);
-        } else {
-            IERC20(cashbackToken).safeTransfer(msg.sender, cashbackAmount);
-            return (cashbackToken, cashbackAmount, true);
-        }
-    }
+    //     if (IERC20(cashbackToken).balanceOf(address(this)) < cashbackAmount) {
+    //         return (cashbackToken, cashbackAmount, false);
+    //     } else {
+    //         IERC20(cashbackToken).safeTransfer(msg.sender, cashbackAmount);
+    //         return (cashbackToken, cashbackAmount, true);
+    //     }
+    // }
 
     function setCashDataProvider(address _cashDataProvider) external onlyRole(ADMIN_ROLE) {
         if (_cashDataProvider == address(0)) revert InvalidValue();

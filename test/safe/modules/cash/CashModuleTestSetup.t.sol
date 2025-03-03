@@ -4,23 +4,25 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Test } from "forge-std/Test.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-
 import { ICashDataProvider } from "../../../../src/interfaces/ICashDataProvider.sol";
-
 import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 import { CashModule } from "../../../../src/modules/cash/CashModule.sol";
-
+import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
+import {DebtManagerStorage, DebtManagerCore} from "../../../../src/debt-manager/DebtManagerCore.sol";
+import {DebtManagerAdmin} from "../../../../src/debt-manager/DebtManagerAdmin.sol";
 
 contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
     CashModule public cashModule;
+    CashLens public cashLens;
 
     address public etherFiWallet = makeAddr("etherFiWallet");
 
@@ -54,6 +56,9 @@ contract CashModuleTestSetup is SafeTestSetup {
         address cashModuleImpl = address(new CashModule(address(dataProvider)));
         cashModule = CashModule(address(new UUPSProxy(cashModuleImpl, abi.encodeWithSelector(CashModule.initialize.selector, address(roleRegistry), address(debtManager), settlementDispatcher, address(priceProvider)))));
 
+        address cashLensImpl = address(new CashLens(address(cashModule)));
+        cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
+
         bytes memory safeCashSetupData = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         bytes[] memory setupData = new bytes[](1);
         setupData[0] = safeCashSetupData;
@@ -79,6 +84,15 @@ contract CashModuleTestSetup is SafeTestSetup {
 
         _configureWithdrawRecipients(withdrawRecipients, shouldAdd);
 
+        vm.stopPrank();
+
+
+        DebtManagerCore debtManagerCore = new DebtManagerCore();
+        DebtManagerAdmin debtManagerAdmin = new DebtManagerAdmin();
+
+        vm.startPrank(cashOwnerGnosisSafe);
+        UUPSUpgradeable(address(debtManager)).upgradeToAndCall(address(debtManagerCore), abi.encodeWithSelector(DebtManagerStorage.initializeOnUpgrade.selector, address(cashModule), address(cashLens)));
+        debtManager.setAdminImpl(address(debtManagerAdmin));
         vm.stopPrank();
     }
 
@@ -116,9 +130,6 @@ contract CashModuleTestSetup is SafeTestSetup {
         signatures[0] = abi.encodePacked(r1, s1, v1);
         signatures[1] = abi.encodePacked(r2, s2, v2);
 
-        /// TODO: Remove this when debt manager is upgraded
-        vm.mockCall(address(debtManager), abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), abi.encode());
-
         cashModule.requestWithdrawal(address(safe), tokens, amounts, recipient, signers, signatures);
     }
 
@@ -132,5 +143,15 @@ contract CashModuleTestSetup is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         cashModule.setMode(address(safe), mode, owner1, signature);
+    }
+
+    function _updateSpendingLimit(uint256 dailyLimit, uint256 monthlyLimit) internal {
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.UPDATE_SPENDING_LIMIT_METHOD, block.chainid, address(safe), nonce, abi.encode(dailyLimit, monthlyLimit))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        cashModule.updateSpendingLimit(address(safe), dailyLimit, monthlyLimit, owner1, signature);
     }
 }

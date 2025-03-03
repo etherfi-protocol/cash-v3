@@ -12,6 +12,8 @@ import { ICashDataProvider } from "../interfaces/ICashDataProvider.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { ReentrancyGuardTransientUpgradeable } from "../utils/ReentrancyGuardTransientUpgradeable.sol";
+import { ICashModule } from "../interfaces/ICashModule.sol";
+import { ICashLens } from "../interfaces/ICashLens.sol";
 
 /**
  * @title L2 Debt Manager
@@ -81,12 +83,15 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
     // Shares have 18 decimals
     mapping(address supplier => mapping(address borrowToken => uint256 shares)) internal _sharesOfBorrowTokens;
 
+    ICashModule public cashModule;
+    ICashLens public cashLens;
+    
     uint256 public constant MAX_BORROW_APY = 1_585_489_599_188; // 50% / (365 days in seconds)
 
     event Supplied(address indexed sender, address indexed user, address indexed token, uint256 amount);
     event Borrowed(address indexed user, address indexed token, uint256 amount);
     event Repaid(address indexed user, address indexed payer, address indexed token, uint256 amount);
-    event Liquidated(address indexed liquidator, address indexed user, address indexed debtTokenToLiquidate, LiquidationTokenData[] userCollateralLiquidated, uint256 beforeDebtAmount, uint256 debtAmountLiquidated);
+    event Liquidated(address indexed liquidator, address indexed user, address indexed debtTokenToLiquidate, IDebtManager.LiquidationTokenData[] userCollateralLiquidated, uint256 beforeDebtAmount, uint256 debtAmountLiquidated);
     event LiquidationThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     event CollateralTokenAdded(address token);
     event CollateralTokenRemoved(address token);
@@ -143,6 +148,11 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
+    }
+
+    function initializeOnUpgrade(address _cashModule, address _cashLens) public reinitializer(2) {
+        cashModule = ICashModule(_cashModule);
+        cashLens = ICashLens(_cashLens);
     }
 
     /**

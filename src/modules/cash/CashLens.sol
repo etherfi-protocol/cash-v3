@@ -33,12 +33,23 @@ contract CashLens is UpgradeableProxy {
     /// @notice Constant representing 100% with 18 decimal places
     uint256 public constant HUNDRED_PERCENT = 100e18;
 
+    error NotACollateralToken();
+
     /**
      * @notice Initializes the CashLens contract with a reference to the CashModule
      * @param _cashModule Address of the deployed CashModule contract
      */
     constructor(address _cashModule) {
         cashModule = ICashModule(_cashModule);
+    }
+
+    function initialize(address _roleRegistry) external initializer {
+        __UpgradeableProxy_init(_roleRegistry);
+    }
+
+    function applicableSpendingLimit(address safe) external view returns (SpendingLimit memory) {
+        SafeData memory safeData = cashModule.getData(address(safe));
+        return safeData.spendingLimit.getCurrentLimit();
     }
 
     /**
@@ -136,11 +147,23 @@ contract CashLens is UpgradeableProxy {
     /**
      * @notice Gets the pending withdrawal amount for a token
      * @dev Searches through the withdrawal request tokens array for the specified token
+     * @param safe Address of the safe
+     * @param token Address of the token to check
+     * @return Amount of tokens pending withdrawal
+     */
+    function getPendingWithdrawalAmount(address safe, address token) public view returns (uint256) {
+        SafeData memory safeData = cashModule.getData(safe);
+        return _getPendingWithdrawalAmount(safeData, token);
+    }
+
+    /**
+     * @notice Gets the pending withdrawal amount for a token
+     * @dev Searches through the withdrawal request tokens array for the specified token
      * @param safeData Safe data structure containing the withdrawal requests
      * @param token Address of the token to check
      * @return Amount of tokens pending withdrawal
      */
-    function getPendingWithdrawalAmount(SafeData memory safeData, address token) public pure returns (uint256) {
+    function _getPendingWithdrawalAmount(SafeData memory safeData, address token) internal pure returns (uint256) {
         uint256 len = safeData.pendingWithdrawalRequest.tokens.length;
         uint256 tokenIndex = len;
         for (uint256 i = 0; i < len;) {
@@ -154,6 +177,44 @@ contract CashLens is UpgradeableProxy {
         }
 
         return tokenIndex != len ? safeData.pendingWithdrawalRequest.amounts[tokenIndex] : 0;
+    }
+
+    function getUserCollateralForToken(address safe, address token) public view returns (uint256) {
+        IDebtManager debtManager = cashModule.getDebtManager();
+
+        if (!debtManager.isCollateralToken(token)) revert NotACollateralToken();
+        uint256 balance = IERC20(token).balanceOf(safe); 
+        uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
+
+        return balance - pendingWithdrawalAmount;
+    }
+
+    function getUserTotalCollateral(address safe) public view returns (IDebtManager.TokenData[] memory) {
+        IDebtManager debtManager = cashModule.getDebtManager();
+        address[] memory collateralTokens = debtManager.getCollateralTokens();
+        uint256 len = collateralTokens.length;
+        IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
+        uint256 m = 0;
+        for (uint256 i = 0; i < len; ) {
+            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe); 
+            uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
+            if (balance != 0) {
+                balance = balance - pendingWithdrawalAmount;
+                tokenAmounts[m] = IDebtManager.TokenData({token: collateralTokens[i], amount: balance});
+                unchecked {
+                    ++m;
+                }
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        assembly ("memory-safe") {
+            mstore(tokenAmounts, m)
+        }
+
+        return tokenAmounts;
     }
 
     /**
@@ -197,7 +258,7 @@ contract CashLens is UpgradeableProxy {
      */
     function _calculateDebitModeAmount(IDebtManager debtManager, address safe, address token, SafeData memory safeData) internal view returns (uint256 debitModeAmount) {
         // Get effective balance - return early if zero
-        uint256 effectiveBal = IERC20(token).balanceOf(safe) - getPendingWithdrawalAmount(safeData, token);
+        uint256 effectiveBal = IERC20(token).balanceOf(safe) - _getPendingWithdrawalAmount(safeData, token);
         if (effectiveBal == 0) {
             return 0;
         }
@@ -251,7 +312,7 @@ contract CashLens is UpgradeableProxy {
         uint256 m = 0;
         for (uint256 i = 0; i < len;) {
             uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
-            uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safeData, collateralTokens[i]);
+            uint256 pendingWithdrawalAmount = _getPendingWithdrawalAmount(safeData, collateralTokens[i]);
             if (balance != 0) {
                 balance = balance - pendingWithdrawalAmount;
                 if (safeData.mode == Mode.Debit && token == collateralTokens[i]) {

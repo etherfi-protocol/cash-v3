@@ -124,4 +124,8 @@ interface ICashModule {
      * @return IPriceProvider instance
      */
     function getPriceProvider() external view returns (IPriceProvider);
+
+    function preLiquidate(address safe) external;
+
+    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
 }

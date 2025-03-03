@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -79,16 +80,23 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     }
 
     function test_requestWithdrawal_fails_whenAccountBecomesUnhealthy() external {
-        vm.mockCallRevert(address(debtManager), abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), abi.encodeWithSelector(IDebtManager.AccountUnhealthy.selector));
-
-        uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
-
-        // Setup a pending withdrawal
-        address[] memory tokens = new address[](1);
+        address[] memory tokens = new address[](2);
         tokens[0] = address(usdcScroll);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = withdrawalAmount;
+        tokens[1] = address(weETHScroll);
+
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 100e6;
+        amounts[1] = 1 ether;
+                
+        deal(tokens[0], address(safe), amounts[0]);
+        deal(tokens[1], address(safe), amounts[1]);
+        deal(address(usdcScroll), address(debtManager), 1 ether);
+
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), 10e6);
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
@@ -248,8 +256,6 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     }
 
     function test_requestWithdrawal_fails_whenDuplicateTokens() public {
-        vm.mockCall(address(debtManager), abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), abi.encode());
-
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), 2 * withdrawalAmount);
 
@@ -282,8 +288,6 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     }
 
     function test_requestWithdrawal_fails_whenInvalidSignature() public {
-        vm.mockCall(address(debtManager), abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), abi.encode());
-
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);
 
