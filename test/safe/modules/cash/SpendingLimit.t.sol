@@ -2,8 +2,10 @@
 pragma solidity ^0.8.28;
 
 import { Mode } from "../../../../src/interfaces/ICashModule.sol";
+
+import { SpendingLimit, SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
-import { SpendingLimitLib, SpendingLimit } from "../../../../src/libraries/SpendingLimitLib.sol";
+
 contract CashModuleSpendingLimitTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
@@ -29,10 +31,10 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
 
         _updateSpendingLimit(dailySpendingLimitInUsd, monthlySpendingLimitInUsd);
 
-        ( , uint64 spendingLimitDelay, ) = cashModule.getDelays();
+        (, uint64 spendingLimitDelay,) = cashModule.getDelays();
 
         SpendingLimit memory spendingLimitAfterUpdate = cashLens.applicableSpendingLimit(address(safe));
-        
+
         assertEq(spendingLimitAfterUpdate.dailyLimit, spendingLimitBefore.dailyLimit);
         assertEq(spendingLimitAfterUpdate.monthlyLimit, spendingLimitBefore.monthlyLimit);
         assertEq(spendingLimitAfterUpdate.newDailyLimit, dailySpendingLimitInUsd);
@@ -60,15 +62,7 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
 
         uint256 nonce = cashModule.getNonce(address(safe));
 
-        bytes32 msgHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.UPDATE_SPENDING_LIMIT_METHOD,
-                block.chainid,
-                address(safe),
-                nonce,
-                abi.encode(newDailyLimit, newMonthlyLimit)
-            )
-        ).toEthSignedMessageHash();
+        bytes32 msgHash = keccak256(abi.encodePacked(CashVerificationLib.UPDATE_SPENDING_LIMIT_METHOD, block.chainid, address(safe), nonce, abi.encode(newDailyLimit, newMonthlyLimit))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, msgHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -98,7 +92,7 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
     function test_SpendingLimitGetsRenewedAutomatically() public {
         SpendingLimit memory spendingLimit = cashLens.applicableSpendingLimit(address(safe));
 
-        uint256 dailyLimit = spendingLimit.dailyLimit;        
+        uint256 dailyLimit = spendingLimit.dailyLimit;
         uint256 amount = dailyLimit / 2;
 
         deal(address(usdcScroll), address(safe), 1 ether);
@@ -127,5 +121,4 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), keccak256("newTxId"), address(usdcScroll), dailyLimit);
     }
-
 }

@@ -183,7 +183,7 @@ contract CashLens is UpgradeableProxy {
         IDebtManager debtManager = cashModule.getDebtManager();
 
         if (!debtManager.isCollateralToken(token)) revert NotACollateralToken();
-        uint256 balance = IERC20(token).balanceOf(safe); 
+        uint256 balance = IERC20(token).balanceOf(safe);
         uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
 
         return balance - pendingWithdrawalAmount;
@@ -195,12 +195,12 @@ contract CashLens is UpgradeableProxy {
         uint256 len = collateralTokens.length;
         IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
         uint256 m = 0;
-        for (uint256 i = 0; i < len; ) {
-            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe); 
+        for (uint256 i = 0; i < len;) {
+            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
             uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
             if (balance != 0) {
                 balance = balance - pendingWithdrawalAmount;
-                tokenAmounts[m] = IDebtManager.TokenData({token: collateralTokens[i], amount: balance});
+                tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
                 unchecked {
                     ++m;
                 }

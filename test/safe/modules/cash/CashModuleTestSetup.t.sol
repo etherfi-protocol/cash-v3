@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Test } from "forge-std/Test.sol";
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
+
+import { DebtManagerAdmin } from "../../../../src/debt-manager/DebtManagerAdmin.sol";
+import { DebtManagerCore, DebtManagerStorage } from "../../../../src/debt-manager/DebtManagerCore.sol";
 import { ICashDataProvider } from "../../../../src/interfaces/ICashDataProvider.sol";
 import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
-import { CashModule } from "../../../../src/modules/cash/CashModule.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
+import { CashModule } from "../../../../src/modules/cash/CashModule.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
-import {DebtManagerStorage, DebtManagerCore} from "../../../../src/debt-manager/DebtManagerCore.sol";
-import {DebtManagerAdmin} from "../../../../src/debt-manager/DebtManagerAdmin.sol";
 
 contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -85,7 +86,6 @@ contract CashModuleTestSetup is SafeTestSetup {
         _configureWithdrawRecipients(withdrawRecipients, shouldAdd);
 
         vm.stopPrank();
-
 
         DebtManagerCore debtManagerCore = new DebtManagerCore();
         DebtManagerAdmin debtManagerAdmin = new DebtManagerAdmin();

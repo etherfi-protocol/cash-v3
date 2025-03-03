@@ -135,7 +135,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
 
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ = _getCashModuleStorage();
-        
+
         _setCurrentMode($.safeCashConfig[safe]);
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
@@ -186,7 +186,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         bytes[] memory data = new bytes[](len);
         uint256 counter = 0;
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             if (tokensToSend[i].amount > 0) {
                 to[i] = tokensToSend[i].token;
                 data[i] = abi.encodeWithSelector(IERC20.transfer.selector, liquidator, tokensToSend[i].amount);

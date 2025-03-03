@@ -9,11 +9,12 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { ICashDataProvider } from "../interfaces/ICashDataProvider.sol";
+
+import { ICashLens } from "../interfaces/ICashLens.sol";
+import { ICashModule } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { ReentrancyGuardTransientUpgradeable } from "../utils/ReentrancyGuardTransientUpgradeable.sol";
-import { ICashModule } from "../interfaces/ICashModule.sol";
-import { ICashLens } from "../interfaces/ICashLens.sol";
 
 /**
  * @title L2 Debt Manager
@@ -85,7 +86,7 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
 
     ICashModule public cashModule;
     ICashLens public cashLens;
-    
+
     uint256 public constant MAX_BORROW_APY = 1_585_489_599_188; // 50% / (365 days in seconds)
 
     event Supplied(address indexed sender, address indexed user, address indexed token, uint256 amount);

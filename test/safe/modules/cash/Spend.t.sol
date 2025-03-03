@@ -137,11 +137,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 futureBorrowAmt = 10e6;
         uint256 weETHCollateralAmount = 1 ether;
         uint256 usdcCollateralAmount = 1000e6;
-        
+
         deal(address(weETHScroll), address(safe), weETHCollateralAmount);
         deal(address(usdcScroll), address(safe), usdcCollateralAmount);
-        deal(address(usdcScroll), address(debtManager), 1 ether); 
-        
+        deal(address(usdcScroll), address(debtManager), 1 ether);
+
         uint256 totalMaxBorrow = debtManager.getMaxBorrowAmount(address(safe), true);
         uint256 borrowAmt = totalMaxBorrow - futureBorrowAmt;
 
@@ -150,7 +150,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), borrowAmt);
-        
+
         uint256 maxCanWithdraw = 10e6;
         tokens[0] = address(usdcScroll);
         amounts[0] = maxCanWithdraw;
@@ -221,7 +221,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(safe), safeBalUsdc);
         deal(address(weETHScroll), address(safe), 0);
         deal(address(usdcScroll), address(debtManager), 1000e6);
-        
+
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), 10e6);
 
@@ -231,6 +231,4 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.expectRevert(CashModule.BorrowingsExceedMaxBorrowAfterSpending.selector);
         cashModule.spend(address(safe), keccak256("newTxId"), address(usdcScroll), safeBalUsdc);
     }
-
-
 }

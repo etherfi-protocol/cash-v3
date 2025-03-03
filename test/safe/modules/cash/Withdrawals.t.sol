@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
-import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -87,7 +87,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = 100e6;
         amounts[1] = 1 ether;
-                
+
         deal(tokens[0], address(safe), amounts[0]);
         deal(tokens[1], address(safe), amounts[1]);
         deal(address(usdcScroll), address(debtManager), 1 ether);
