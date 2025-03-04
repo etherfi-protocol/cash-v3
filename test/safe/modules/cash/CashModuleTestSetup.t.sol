@@ -18,6 +18,7 @@ import { CashVerificationLib } from "../../../../src/libraries/CashVerificationL
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { CashModule } from "../../../../src/modules/cash/CashModule.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
+import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
 
 contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -33,6 +34,20 @@ contract CashModuleTestSetup is SafeTestSetup {
         vm.createSelectFork("https://rpc.scroll.io");
 
         super.setUp();
+    
+        vm.startPrank(cashOwnerGnosisSafe);
+        DebtManagerCore debtManagerCore = new DebtManagerCore();
+        DebtManagerAdmin debtManagerAdmin = new DebtManagerAdmin();
+        CashbackDispatcher cashbackDispatcherImpl = new CashbackDispatcher();
+        CashEventEmitter cashEventEmitterImpl = new CashEventEmitter();
+
+        UUPSUpgradeable(address(debtManager)).upgradeToAndCall(address(debtManagerCore), abi.encodeWithSelector(DebtManagerStorage.initializeOnUpgrade.selector, address(dataProvider)));
+        debtManager.setAdminImpl(address(debtManagerAdmin));
+
+        UUPSUpgradeable(address(cashbackDispatcher)).upgradeToAndCall(address(cashbackDispatcherImpl), abi.encodeWithSelector(CashbackDispatcher.initializeOnUpgrade.selector, address(cashModule)));
+        UUPSUpgradeable(address(cashEventEmitter)).upgradeToAndCall(address(cashEventEmitterImpl), abi.encodeWithSelector(CashEventEmitter.initializeOnUpgrade.selector, address(cashModule)));
+
+        vm.stopPrank();
 
         vm.startPrank(owner);
         bytes memory safeCashSetupData = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
@@ -68,18 +83,6 @@ contract CashModuleTestSetup is SafeTestSetup {
         cashbackPercentages[3] = 400;
 
         cashModule.setTierCashbackPercentage(tiers, cashbackPercentages);
-
-        vm.stopPrank();
-
-        DebtManagerCore debtManagerCore = new DebtManagerCore();
-        DebtManagerAdmin debtManagerAdmin = new DebtManagerAdmin();
-        CashbackDispatcher cashbackDispatcherImpl = new CashbackDispatcher();
-
-        vm.startPrank(cashOwnerGnosisSafe);
-        UUPSUpgradeable(address(debtManager)).upgradeToAndCall(address(debtManagerCore), abi.encodeWithSelector(DebtManagerStorage.initializeOnUpgrade.selector, address(dataProvider)));
-        debtManager.setAdminImpl(address(debtManagerAdmin));
-
-        UUPSUpgradeable(address(cashbackDispatcher)).upgradeToAndCall(address(cashbackDispatcherImpl), abi.encodeWithSelector(CashbackDispatcher.initializeOnUpgrade.selector, address(cashModule)));
 
         vm.stopPrank();
     }

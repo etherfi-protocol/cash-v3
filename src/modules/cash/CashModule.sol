@@ -19,6 +19,7 @@ import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import {ICashEventEmitter} from "../../interfaces/ICashEventEmitter.sol";
 
 /**
  * @title CashModule
@@ -48,6 +49,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         mapping(SafeTiers tier => uint256 cashbackPercentage) tierCashbackPercentage;
         mapping (address account => uint256 pendingCashback) pendingCashbackInUsd;
         ICashbackDispatcher cashbackDispatcher;
+        ICashEventEmitter cashEventEmitter;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -99,16 +101,17 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      * @param _debtManager Address of the debt manager contract
      * @param _settlementDispatcher Address of the settlement dispatcher
      */
-    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher) external {
+    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher, address _cashEventEmitter) external {
         __UpgradeableProxy_init(_roleRegistry);
 
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         $.debtManager = IDebtManager(_debtManager);
 
-        if (_settlementDispatcher == address(0) || _cashbackDispatcher == address(0)) revert InvalidInput();
+        if (_settlementDispatcher == address(0) || _cashbackDispatcher == address(0) || _cashEventEmitter == address(0)) revert InvalidInput();
         $.settlementDispatcher = _settlementDispatcher;
         $.cashbackDispatcher = ICashbackDispatcher(_cashbackDispatcher);
+        $.cashEventEmitter = ICashEventEmitter(_cashEventEmitter);
 
         $.withdrawalDelay = 60; // 1 min
         $.spendLimitDelay = 3600; // 1 hour
@@ -117,7 +120,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
 
     function setupModule(bytes calldata data) external override onlyEtherFiSafe(msg.sender) {
         (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset) = abi.decode(data, (uint256, uint256, int256));
-
+        
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         $.mode = Mode.Debit;
@@ -138,6 +141,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
                 ++i;
             }
         }
+
+        $.cashEventEmitter.emitSetSafeTiers(safes, tiers);
     }
 
     function setTierCashbackPercentage(SafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external {
@@ -154,6 +159,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
                 ++i;
             }
         }
+
+        $.cashEventEmitter.emitSetTierCashbackPercentage(tiers, cashbackPercentages);
     }
 
     function setCashbackSplitToSafeBps(address safe, uint256 splitInBps, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
@@ -163,6 +170,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         if (splitInBps > HUNDRED_PERCENT_IN_BPS) revert InvalidInput();
 
         CashVerificationLib.verifySetCashbackSplitToSafePercentage(safe, signer, _useNonce(safe), splitInBps, signature);
+        
+        $.cashEventEmitter.emitSetCashbackSplitToSafeBps(safe, $.safeCashConfig[safe].cashbackSplitToSafePercentage, splitInBps);
         $.safeCashConfig[safe].cashbackSplitToSafePercentage = splitInBps;
     }
 
@@ -178,6 +187,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         $.withdrawalDelay = withdrawalDelay;
         $.spendLimitDelay = spendLimitDelay;
         $.modeDelay = modeDelay;
+
+        $.cashEventEmitter.emitSetDelays(withdrawalDelay, spendLimitDelay, modeDelay);
     }
 
     function getDelays() external view returns (uint64, uint64, uint64) {
@@ -204,18 +215,22 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
         if ($.modeDelay == 0) {
+            $.cashEventEmitter.emitSetMode(safe, $.safeCashConfig[safe].mode, mode, block.timestamp);
             // If delay = 0, just set the value
             $.safeCashConfig[safe].mode = mode;
         } else {
             // If delay != 0, debit to credit mode should incur delay
             if (mode == Mode.Credit) {
                 $.safeCashConfig[safe].incomingCreditModeStartTime = block.timestamp + $.modeDelay;
+                $.cashEventEmitter.emitSetMode(safe, Mode.Debit, Mode.Credit, $.safeCashConfig[safe].incomingCreditModeStartTime);
             } else {
                 // If mode is debit, no problem, just set the mode
                 $.safeCashConfig[safe].incomingCreditModeStartTime = 0;
                 $.safeCashConfig[safe].mode = mode;
+                $.cashEventEmitter.emitSetMode(safe, Mode.Credit, Mode.Debit, block.timestamp);
             }
         }
+        
     }
 
     function getMode(address safe) external view returns (Mode) {
@@ -231,7 +246,14 @@ contract CashModule is UpgradeableProxy, ModuleBase {
 
     function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashVerificationLib.verifyUpdateSpendingLimitSig(safe, signer, _useNonce(safe), dailyLimitInUsd, monthlyLimitInUsd, signature);
-        _getCashModuleStorage().safeCashConfig[safe].spendingLimit.updateSpendingLimit(dailyLimitInUsd, monthlyLimitInUsd, _getCashModuleStorage().spendLimitDelay);
+        _updateSpendingLimit(safe, dailyLimitInUsd, monthlyLimitInUsd);
+    }
+
+    function _updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd) internal {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        (SpendingLimit memory oldLimit, SpendingLimit memory newLimit)= $.safeCashConfig[safe].spendingLimit.updateSpendingLimit(dailyLimitInUsd, monthlyLimitInUsd, _getCashModuleStorage().spendLimitDelay);
+        $.cashEventEmitter.emitSpendingLimitChanged(safe, oldLimit, newLimit);
     }
 
     function preLiquidate(address safe) external {
@@ -271,8 +293,9 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     function configureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyConfigureWithdrawRecipients(safe, _useNonce(safe), withdrawRecipients, shouldWhitelist, signers, signatures);
 
-        SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
-        EnumerableAddressWhitelistLib.configure($.withdrawRecipients, withdrawRecipients, shouldWhitelist);
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        EnumerableAddressWhitelistLib.configure($.safeCashConfig[safe].withdrawRecipients, withdrawRecipients, shouldWhitelist);
+        $.cashEventEmitter.emitConfigureWithdrawRecipients(safe, withdrawRecipients, shouldWhitelist);
     }
 
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
@@ -310,6 +333,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         delete $.pendingWithdrawalRequest;
 
         IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](len), data);
+        _getCashModuleStorage().cashEventEmitter.emitWithdrawalProcessed(safe, $.pendingWithdrawalRequest.tokens, $.pendingWithdrawalRequest.amounts, recipient);
     }
 
     /**
@@ -390,14 +414,25 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     }
 
     function _retrievePendingCashback(CashModuleStorage storage $, address safe, address spender) internal {
+        ICashEventEmitter eventEmitter = $.cashEventEmitter;
+        address cashbackToken; 
+        uint256 cashbackAmount;
+        bool paid;
+        
         if ($.pendingCashbackInUsd[safe] != 0) {
-            (address cashbackToken, uint256 cashbackAmount, bool paid) = $.cashbackDispatcher.clearPendingCashback(safe);
-            if (paid) delete $.pendingCashbackInUsd[safe];
+            (cashbackToken, cashbackAmount, paid) = $.cashbackDispatcher.clearPendingCashback(safe);
+            if (paid) {
+                delete $.pendingCashbackInUsd[safe];
+                eventEmitter.emitPendingCashbackClearedEvent(safe, cashbackToken, cashbackAmount, $.pendingCashbackInUsd[safe]);
+            }
         } 
 
         if ($.pendingCashbackInUsd[spender] != 0) {
-            (address cashbackToken, uint256 cashbackAmount, bool paid) = $.cashbackDispatcher.clearPendingCashback(spender);
-            if (paid) delete $.pendingCashbackInUsd[spender];
+            (cashbackToken, cashbackAmount, paid) = $.cashbackDispatcher.clearPendingCashback(spender);
+            if (paid){
+                delete $.pendingCashbackInUsd[spender];
+                eventEmitter.emitPendingCashbackClearedEvent(safe, cashbackToken, cashbackAmount, $.pendingCashbackInUsd[safe]);
+            }
         }
     }
 
@@ -443,8 +478,11 @@ contract CashModule is UpgradeableProxy, ModuleBase {
             values[0] = 0;
             IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
 
-            _cashback($, safe, spender, amountInUsd);
+
         }
+
+        _cashback($, safe, spender, amountInUsd);
+        $.cashEventEmitter.emitSpend(safe, token, amount, amountInUsd, $$.mode);
     }
 
     function _cashback(CashModuleStorage storage $, address safe, address spender, uint256 amountInUsd) internal {
@@ -463,6 +501,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
             $.pendingCashbackInUsd[safe] += cashbackInUsdToSafe;
             $.pendingCashbackInUsd[spender] += cashbackInUsdToSpender;
         }
+
+        $.cashEventEmitter.emitCashbackEvent(safe, spender, amountInUsd, cashbackToken, cashbackAmountToSafe, cashbackInUsdToSafe, cashbackAmountToSpender, cashbackInUsdToSpender, paid);
     }
 
     /**
@@ -506,6 +546,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         values[1] = 0;
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
     }
 
     /**
@@ -579,8 +620,15 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      * @param safe Address of the EtherFi Safe
      */
     function _cancelOldWithdrawal(address safe) internal {
+        ICashEventEmitter eventEmitter = _getCashModuleStorage().cashEventEmitter;
         SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
         if (safeCashConfig.pendingWithdrawalRequest.tokens.length > 0) {
+            eventEmitter.emitWithdrawalCancelled(
+                safe,
+                safeCashConfig.pendingWithdrawalRequest.tokens,
+                safeCashConfig.pendingWithdrawalRequest.amounts,
+                safeCashConfig.pendingWithdrawalRequest.recipient
+            );
             delete safeCashConfig.pendingWithdrawalRequest;
         }
     }
@@ -593,6 +641,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      * @custom:throws InsufficientBalance if there is not enough balance for the operation
      */
     function _updateWithdrawalRequestIfNecessary(address safe, address token, uint256 amount) internal {
+        ICashEventEmitter eventEmitter = _getCashModuleStorage().cashEventEmitter;
         SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
         uint256 balance = IERC20(token).balanceOf(safe);
 
@@ -615,7 +664,11 @@ contract CashModule is UpgradeableProxy, ModuleBase {
 
         if (amount + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
             safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] = balance - amount;
+
+            eventEmitter.emitWithdrawalAmountUpdated(safe, token, balance - amount);
         }
+
+
     }
 
     /**
@@ -671,6 +724,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         _checkBalance(safe, tokens, amounts);
 
         $.safeCashConfig[safe].pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
+        $.cashEventEmitter.emitWithdrawalRequested(safe, tokens, amounts, recipient, finalTime);
 
         getDebtManager().ensureHealth(safe);
 

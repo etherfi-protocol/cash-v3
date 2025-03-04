@@ -66,7 +66,6 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(safe), amount);
 
         // Mark transaction as cleared
-        bytes32 txId = txId;
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
 
@@ -135,10 +134,8 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         address recipient = withdrawRecipient;
         uint256 futureBorrowAmt = 10e6;
-        uint256 weETHCollateralAmount = 1 ether;
-        uint256 usdcCollateralAmount = 1000e6;
+        uint256 usdcCollateralAmount = 100e6;
 
-        deal(address(weETHScroll), address(safe), weETHCollateralAmount);
         deal(address(usdcScroll), address(safe), usdcCollateralAmount);
         deal(address(usdcScroll), address(debtManager), 1 ether);
 
