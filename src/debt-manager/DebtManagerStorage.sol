@@ -9,8 +9,9 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { ICashDataProvider } from "../interfaces/ICashDataProvider.sol";
-import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { ReentrancyGuardTransientUpgradeable } from "../utils/ReentrancyGuardTransientUpgradeable.sol";
 

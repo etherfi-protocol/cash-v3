@@ -289,7 +289,6 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         return _getCashModuleStorage().debtManager;
     }
 
-
     /**
      * @notice Processes a spending transaction
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses

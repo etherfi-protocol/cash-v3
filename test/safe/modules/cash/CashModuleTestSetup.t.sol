@@ -21,7 +21,6 @@ import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, Saf
 contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
-
     IERC20 public usdcScroll = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
     IERC20 public weETHScroll = IERC20(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
     IERC20 public scrToken = IERC20(0xd29687c813D741E2F938F4aC377128810E217b1b);

@@ -10,15 +10,14 @@ import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
 import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 
+import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
+import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
-import { CashModule } from "../../src/modules/cash/CashModule.sol";
 import { CashLens } from "../../src/modules/cash/CashLens.sol";
+import { CashModule } from "../../src/modules/cash/CashModule.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiSafeFactory } from "../../src/safe/EtherFiSafeFactory.sol";
-import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
-import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
-
 
 contract SafeTestSetup is Test {
     using MessageHashUtils for bytes32;

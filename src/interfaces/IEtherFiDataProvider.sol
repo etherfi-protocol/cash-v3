@@ -49,7 +49,7 @@ interface IEtherFiDataProvider {
      * @return Address of the cash module
      */
     function getCashModule() external view returns (address);
-    
+
     /**
      * @notice Returns the address of the Cash Lens contract
      * @return Address of the Cash Lens contract

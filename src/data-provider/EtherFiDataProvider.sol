@@ -117,7 +117,6 @@ contract EtherFiDataProvider is UpgradeableProxy {
         if (_cashModule != address(0)) _setCashModule(_cashModule);
         // The condition applies because the Cash Module might be present only on specific chains
         if (_cashLens != address(0)) _getEtherFiDataProviderStorage().cashLens = _cashLens;
-
     }
 
     /**

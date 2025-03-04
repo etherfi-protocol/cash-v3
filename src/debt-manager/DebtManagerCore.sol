@@ -4,10 +4,11 @@ pragma solidity ^0.8.24;
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import { ICashLens } from "../interfaces/ICashLens.sol";
+import { ICashModule } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
-import { ICashModule } from "../interfaces/ICashModule.sol";
-import { ICashLens } from "../interfaces/ICashLens.sol";
+
 import { DebtManagerStorage } from "./DebtManagerStorage.sol";
 
 contract DebtManagerCore is DebtManagerStorage {
@@ -255,7 +256,7 @@ contract DebtManagerCore is DebtManagerStorage {
 
     function supply(address user, address borrowToken, uint256 amount) external nonReentrant {
         if (!isBorrowToken(borrowToken)) revert UnsupportedBorrowToken();
-        if(etherFiDataProvider.isEtherFiSafe(user)) revert EtherFiSafeCannotSupplyDebtTokens();
+        if (etherFiDataProvider.isEtherFiSafe(user)) revert EtherFiSafeCannotSupplyDebtTokens();
 
         uint256 shares = _borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens == 0 ? amount : amount.mulDiv(_borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens, _getTotalBorrowTokenAmount(borrowToken), Math.Rounding.Floor);
 
@@ -291,7 +292,7 @@ contract DebtManagerCore is DebtManagerStorage {
         emit WithdrawBorrowToken(msg.sender, borrowToken, amount);
     }
 
-    function borrow(address token, uint256 amount) external onlyEtherFiSafe() {
+    function borrow(address token, uint256 amount) external onlyEtherFiSafe {
         if (!isBorrowToken(token)) revert UnsupportedBorrowToken();
         _updateBorrowings(msg.sender, token);
 
