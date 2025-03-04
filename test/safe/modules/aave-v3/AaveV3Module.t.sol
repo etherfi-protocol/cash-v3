@@ -57,7 +57,7 @@ contract AaveV3ModuleTest is SafeTestSetup {
         deal(address(usdcScroll), address(notSafe), amountToSupply);
 
         vm.prank(owner1);
-        vm.expectRevert(EtherFiDataProvider.OnlyEtherFiSafe.selector);
+        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
         aaveV3Module.supplyAdmin(address(notSafe), address(usdcScroll), amountToSupply);
     }
 

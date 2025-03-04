@@ -8,7 +8,7 @@ import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, ModuleBase, SafeTestSetu
 contract ModuleManagerTest is SafeTestSetup {
     function test_isModuleEnabled_identifiesCashModuleAsWhitelisted() public view {
         // Cash module should be treated as whitelisted even if not in local storage
-        assertTrue(safe.isModuleEnabled(cashModuleDummy));
+        assertTrue(safe.isModuleEnabled(address(cashModule)));
     }
 
     function test_isModuleEnabled_requiresModuleToBeWhitlisted() public {
@@ -29,11 +29,12 @@ contract ModuleManagerTest is SafeTestSetup {
     function test_configureModules_reverts_whenRemovingCashModule() public {
         // First add the cash module to the whitelist
         address[] memory modules = new address[](1);
-        modules[0] = cashModuleDummy;
+        modules[0] = address(cashModule);
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
         bytes[] memory setupData = new bytes[](1);
+        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
 
         // First add it to whitelist
         _configureModules(modules, shouldWhitelist, setupData);

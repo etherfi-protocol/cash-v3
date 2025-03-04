@@ -44,8 +44,6 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         IDebtManager debtManager;
         /// @notice Address of the SettlementDispatcher
         address settlementDispatcher;
-        /// @notice Instance of the PriceProvider
-        IPriceProvider priceProvider;
         uint64 withdrawalDelay;
         uint64 spendLimitDelay;
         uint64 modeDelay;
@@ -94,16 +92,16 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      * @param _roleRegistry Address of the role registry contract
      * @param _debtManager Address of the debt manager contract
      * @param _settlementDispatcher Address of the settlement dispatcher
-     * @param _priceProvider Address of the price provider
      */
-    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _priceProvider) external {
+    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher) external {
         __UpgradeableProxy_init(_roleRegistry);
 
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         $.debtManager = IDebtManager(_debtManager);
+
+        if (_settlementDispatcher == address(0)) revert InvalidInput();
         $.settlementDispatcher = _settlementDispatcher;
-        $.priceProvider = IPriceProvider(_priceProvider);
 
         $.withdrawalDelay = 60; // 1 min
         $.spendLimitDelay = 3600; // 1 hour
@@ -131,6 +129,10 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         return ($.withdrawalDelay, $.spendLimitDelay, $.modeDelay);
+    }
+
+    function getSettlementDispatcher() external view returns (address) {
+        return _getCashModuleStorage().settlementDispatcher;
     }
 
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
@@ -287,13 +289,6 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         return _getCashModuleStorage().debtManager;
     }
 
-    /**
-     * @notice Gets the price provider contract
-     * @return IPriceProvider instance
-     */
-    function getPriceProvider() external view returns (IPriceProvider) {
-        return _getCashModuleStorage().priceProvider;
-    }
 
     /**
      * @notice Processes a spending transaction

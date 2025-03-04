@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IEtherFiSafeFactory } from "../interfaces/IEtherFiSafeFactory.sol";
+import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
@@ -24,10 +25,14 @@ contract EtherFiDataProvider is UpgradeableProxy {
         EnumerableSetLib.AddressSet whitelistedModules;
         /// @notice Address of the Cash Module
         address cashModule;
+        /// @notice Address of the Cash Lens contract
+        address cashLens;
         /// @notice Address of the hook contract
         address hook;
         /// @notice Instance of the Safe factory
         IEtherFiSafeFactory etherFiSafeFactory;
+        /// @notice Address of the price provider
+        address priceProvider;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
@@ -49,8 +54,6 @@ contract EtherFiDataProvider is UpgradeableProxy {
     error OnlyAdmin();
     /// @notice Throws when trying to reinit the modules
     error ModulesAlreadySetup();
-    /// @notice Throws when the account is not an EtherFiSafe
-    error OnlyEtherFiSafe();
 
     /// @notice Emitted when modules are configured or their whitelist status changes
     /// @param modules Array of module addresses that were configured
@@ -76,6 +79,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param newHookAddress New hook address
     event HookAddressUpdated(address oldHookAddress, address newHookAddress);
 
+    /// @notice Emitted when the price provider is updated
+    /// @param oldPriceProvider Previous price provider address
+    /// @param newPriceProvider New price provider address
+    event PriceProviderUpdated(address oldPriceProvider, address newPriceProvider);
+
     /**
      * @dev Internal function to access the contract's storage
      * @return $ Storage pointer to the EtherFiDataProviderStorage struct
@@ -90,20 +98,26 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @notice Initializes the contract with initial modules and hook address
      * @dev Can only be called once due to initializer modifier
      * @param _roleRegistry Address of the role registry contract
+     * @param _cashModule Address of the Cash Module contract
+     * @param _cashLens Address of the Cash Lens contract
      * @param _modules Array of initial module addresses to configure
      * @param _hook Address of the initial hook contract
      */
-    function initialize(address _roleRegistry, address _cashModule, address[] calldata _modules, address _hook, address _etherFiSafeFactory) external initializer {
+    function initialize(address _roleRegistry, address _cashModule, address _cashLens, address[] calldata _modules, address _hook, address _etherFiSafeFactory, address _priceProvider) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
 
         _setupModules(_modules);
 
-        if (_etherFiSafeFactory == address(0)) revert InvalidInput();
         _setEtherFiSafeFactory(_etherFiSafeFactory);
+        _setPriceProvider(_priceProvider);
+
         // The condition applies because the Hook might be present only on specific chains
         if (_hook != address(0)) _setHookAddress(_hook);
         // The condition applies because the Cash Module might be present only on specific chains
         if (_cashModule != address(0)) _setCashModule(_cashModule);
+        // The condition applies because the Cash Module might be present only on specific chains
+        if (_cashLens != address(0)) _getEtherFiDataProviderStorage().cashLens = _cashLens;
+
     }
 
     /**
@@ -115,6 +129,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
         _onlyDataProviderAdmin();
         _configureModules(modules, shouldWhitelist);
+    }
+
+    function setPriceProvider(address _priceProvider) external {
+        _onlyDataProviderAdmin();
+        _setPriceProvider(_priceProvider);
     }
 
     /**
@@ -166,10 +185,26 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Returns the address of the Cash Module
-     * @return Address of the cash module
+     * @return Address of the Cash Module
      */
     function getCashModule() public view returns (address) {
         return _getEtherFiDataProviderStorage().cashModule;
+    }
+
+    /**
+     * @notice Returns the address of the Cash Lens contract
+     * @return Address of the Cash Lens contract
+     */
+    function getCashLens() public view returns (address) {
+        return _getEtherFiDataProviderStorage().cashLens;
+    }
+
+    /**
+     * @notice Returns the address of the Price Provider contract
+     * @return Address of the Price Provider contract
+     */
+    function getPriceProvider() public view returns (address) {
+        return _getEtherFiDataProviderStorage().priceProvider;
     }
 
     /**
@@ -185,12 +220,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     }
 
     /**
-     * @notice Function to check if an account is an EtherFiSafe, throws otherwise
+     * @notice Function to check if an account is an EtherFiSafe
      * @param account Address of the account to check
-     * @custom:throws OnlyEtherFiSafe if the account is not an EtherFiSafe
      */
-    function onlyEtherFiSafe(address account) public view {
-        if (!_getEtherFiDataProviderStorage().etherFiSafeFactory.isEtherFiSafe(account)) revert OnlyEtherFiSafe();
+    function isEtherFiSafe(address account) public view returns (bool) {
+        return _getEtherFiDataProviderStorage().etherFiSafeFactory.isEtherFiSafe(account);
     }
 
     /**
@@ -282,6 +316,18 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
         emit HookAddressUpdated($.hook, hook);
         $.hook = hook;
+    }
+
+    /**
+     * @dev Internal function to update the Price Provider address
+     * @param _priceProvider New Price Provider address to set
+     */
+    function _setPriceProvider(address _priceProvider) private {
+        if (_priceProvider == address(0)) revert InvalidInput();
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+
+        emit PriceProviderUpdated(address($.priceProvider), _priceProvider);
+        $.priceProvider = _priceProvider;
     }
 
     /**

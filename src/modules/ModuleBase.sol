@@ -24,6 +24,8 @@ contract ModuleBase {
     error InvalidSignature();
     /// @notice Thrown when there is an array length mismatch
     error ArrayLengthMismatch();
+    /// @notice Thrown when the caller is not an EtherFi Safe
+    error OnlyEtherFiSafe();
 
     /// @custom:storage-location erc7201:etherfi.storage.ModuleBaseStorage
     struct ModuleBaseStorage {
@@ -98,7 +100,7 @@ contract ModuleBase {
      * @param account The account address to check
      */
     modifier onlyEtherFiSafe(address account) {
-        etherFiDataProvider.onlyEtherFiSafe(account);
+        if (!etherFiDataProvider.isEtherFiSafe(account)) revert OnlyEtherFiSafe();
         _;
     }
 

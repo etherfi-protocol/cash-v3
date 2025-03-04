@@ -11,9 +11,14 @@ import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
+import { CashModule } from "../../src/modules/cash/CashModule.sol";
+import { CashLens } from "../../src/modules/cash/CashLens.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiSafeFactory } from "../../src/safe/EtherFiSafeFactory.sol";
+import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
+import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
+
 
 contract SafeTestSetup is Test {
     using MessageHashUtils for bytes32;
@@ -23,6 +28,11 @@ contract SafeTestSetup is Test {
     EtherFiDataProvider public dataProvider;
     RoleRegistry public roleRegistry;
     EtherFiHook public hook;
+
+    IDebtManager debtManager = IDebtManager(0x8f9d2Cd33551CE06dD0564Ba147513F715c2F4a0);
+    IPriceProvider priceProvider = IPriceProvider(0x8B4C8c403fc015C46061A8702799490FD616E3bf);
+    address settlementDispatcher = 0x4Dca5093E0bB450D7f7961b5Df0A9d4c24B24786;
+    address cashOwnerGnosisSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     address owner;
     uint256 owner1Pk;
@@ -40,7 +50,14 @@ contract SafeTestSetup is Test {
 
     address public module1;
     address public module2;
-    address public cashModuleDummy;
+    CashModule public cashModule;
+    CashLens public cashLens;
+
+    uint256 dailyLimitInUsd = 10_000e6;
+    uint256 monthlyLimitInUsd = 100_000e6;
+    int256 timezoneOffset = -4 * 3600; // cayman timezone
+
+    address public etherFiWallet = makeAddr("etherFiWallet");
 
     function setUp() public virtual {
         pauser = makeAddr("pauser");
@@ -63,6 +80,14 @@ contract SafeTestSetup is Test {
 
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
 
+        address cashModuleImpl = address(new CashModule(address(dataProvider)));
+        cashModule = CashModule(address(new UUPSProxy(cashModuleImpl, abi.encodeWithSelector(CashModule.initialize.selector, address(roleRegistry), address(debtManager), settlementDispatcher))));
+
+        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
+        cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
+
+        roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
+
         address hookImpl = address(new EtherFiHook(address(dataProvider)));
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
@@ -72,7 +97,6 @@ contract SafeTestSetup is Test {
 
         module1 = address(new ModuleBase(address(dataProvider)));
         module2 = address(new ModuleBase(address(dataProvider)));
-        cashModuleDummy = address(new ModuleBase(address(dataProvider)));
 
         address[] memory owners = new address[](3);
         owners[0] = owner1;
@@ -87,7 +111,7 @@ contract SafeTestSetup is Test {
 
         bytes[] memory moduleSetupData = new bytes[](2);
 
-        dataProvider.initialize(address(roleRegistry), cashModuleDummy, modules, address(hook), address(safeFactory));
+        dataProvider.initialize(address(roleRegistry), address(cashModule), address(cashLens), modules, address(hook), address(safeFactory), address(priceProvider));
 
         roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), owner);
         safeFactory.deployEtherFiSafe(keccak256("safe"), owners, modules, moduleSetupData, threshold);

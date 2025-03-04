@@ -68,6 +68,11 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
     error ArrayLengthMismatch();
 
     /**
+     * @notice Thrown when the caller is not an EtherFi Safe
+     */
+    error OnlyEtherFiSafe();
+
+    /**
      * @notice Sets up the immutable state variables
      * @dev Disables initializers to prevent implementation contract initialization
      * @param _etherFiDataProvider Address of the EtherFi data provider contract
@@ -113,7 +118,7 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
      * @custom:throws ArrayLengthMismatch if the array lengths mismatch
      */
     function configureSafeAdmins(address[] calldata accounts, bool[] calldata shouldAdd) external {
-        etherFiDataProvider.onlyEtherFiSafe(msg.sender);
+        if (!etherFiDataProvider.isEtherFiSafe(msg.sender)) revert OnlyEtherFiSafe();
 
         bytes32 role = getSafeAdminRole(msg.sender);
         uint256 len = accounts.length;

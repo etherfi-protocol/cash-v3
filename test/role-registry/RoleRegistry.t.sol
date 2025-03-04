@@ -45,10 +45,10 @@ contract RoleRegistryTest is Test {
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
         // Set up mock for EtherFiDataProvider
-        vm.mockCall(dataProviderMock, abi.encodeWithSelector(IEtherFiDataProvider.onlyEtherFiSafe.selector, safe), abi.encode());
+        vm.mockCall(dataProviderMock, abi.encodeWithSelector(IEtherFiDataProvider.isEtherFiSafe.selector, safe), abi.encode(true));
 
         // Reverts for non-safe addresses
-        vm.mockCallRevert(dataProviderMock, abi.encodeWithSelector(IEtherFiDataProvider.onlyEtherFiSafe.selector, nonAdmin), abi.encodeWithSelector(EtherFiDataProvider.OnlyEtherFiSafe.selector));
+        vm.mockCall(dataProviderMock, abi.encodeWithSelector(IEtherFiDataProvider.isEtherFiSafe.selector, nonAdmin), abi.encode(false));
 
         vm.stopPrank();
     }
@@ -125,7 +125,7 @@ contract RoleRegistryTest is Test {
         bool[] memory shouldAdd = new bool[](1);
         shouldAdd[0] = true;
 
-        vm.expectRevert(EtherFiDataProvider.OnlyEtherFiSafe.selector);
+        vm.expectRevert(RoleRegistry.OnlyEtherFiSafe.selector);
         vm.prank(nonAdmin);
         roleRegistry.configureSafeAdmins(accounts, shouldAdd);
     }

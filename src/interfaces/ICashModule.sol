@@ -119,13 +119,9 @@ interface ICashModule {
      */
     function getDebtManager() external view returns (IDebtManager);
 
-    /**
-     * @notice Gets the price provider contract
-     * @return IPriceProvider instance
-     */
-    function getPriceProvider() external view returns (IPriceProvider);
-
     function preLiquidate(address safe) external;
 
     function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
+
+    function getSettlementDispatcher() external view returns (address);
 }

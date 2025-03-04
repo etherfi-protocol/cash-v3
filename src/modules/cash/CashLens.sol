@@ -11,6 +11,7 @@ import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol"
 
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
+import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 
@@ -29,6 +30,8 @@ contract CashLens is UpgradeableProxy {
 
     /// @notice Reference to the deployed CashModule contract
     ICashModule public immutable cashModule;
+    /// @notice Reference to the deployed EtherFiDataProvider contract
+    IEtherFiDataProvider public immutable dataProvider;
 
     /// @notice Constant representing 100% with 18 decimal places
     uint256 public constant HUNDRED_PERCENT = 100e18;
@@ -38,9 +41,11 @@ contract CashLens is UpgradeableProxy {
     /**
      * @notice Initializes the CashLens contract with a reference to the CashModule
      * @param _cashModule Address of the deployed CashModule contract
+     * @param _dataProvider Address of the deployed EtherFiDataProvider contract
      */
-    constructor(address _cashModule) {
+    constructor(address _cashModule, address _dataProvider) {
         cashModule = ICashModule(_cashModule);
+        dataProvider = IEtherFiDataProvider(_dataProvider);
     }
 
     function initialize(address _roleRegistry) external initializer {
@@ -120,7 +125,7 @@ contract CashLens is UpgradeableProxy {
      */
     function getSafeCashData(address safe) external view returns (SafeCashData memory safeCashData) {
         IDebtManager debtManager = cashModule.getDebtManager();
-        IPriceProvider priceProvider = cashModule.getPriceProvider();
+        IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
         SafeData memory safeData = cashModule.getData(safe);
 
         (safeCashData.collateralBalances, safeCashData.totalCollateral, safeCashData.borrows, safeCashData.totalBorrow) = debtManager.getUserCurrentState(safe);

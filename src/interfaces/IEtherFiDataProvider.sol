@@ -49,6 +49,18 @@ interface IEtherFiDataProvider {
      * @return Address of the cash module
      */
     function getCashModule() external view returns (address);
+    
+    /**
+     * @notice Returns the address of the Cash Lens contract
+     * @return Address of the Cash Lens contract
+     */
+    function getCashLens() external view returns (address);
+
+    /**
+     * @notice Returns the address of the Price provider contract
+     * @return Address of the Price provider contract
+     */
+    function getPriceProvider() external view returns (address);
 
     /**
      * @notice Returns the current hook address
@@ -59,11 +71,10 @@ interface IEtherFiDataProvider {
     function getEtherFiSafeFactory() external view returns (address);
 
     /**
-     * @notice Function to check if an account is an EtherFiSafe, throws otherwise
+     * @notice Function to check if an account is an EtherFiSafe
      * @param account Address of the account to check
-     * @custom:throws OnlyEtherFiSafe if the account is not an EtherFiSafe
      */
-    function onlyEtherFiSafe(address account) external view;
+    function isEtherFiSafe(address account) external view returns (bool);
 
     /**
      * @notice Role identifier for administrative privileges

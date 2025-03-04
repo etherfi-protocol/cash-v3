@@ -6,15 +6,13 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
+import { ICashModule } from "../interfaces/ICashModule.sol";
+import { ICashLens } from "../interfaces/ICashLens.sol";
 import { DebtManagerStorage } from "./DebtManagerStorage.sol";
 
 contract DebtManagerCore is DebtManagerStorage {
     using Math for uint256;
     using SafeERC20 for IERC20;
-
-    function cashDataProvider() external view returns (address) {
-        return address(_cashDataProvider);
-    }
 
     function borrowTokenConfig(address borrowToken) public view returns (BorrowTokenConfig memory) {
         BorrowTokenConfig memory config = _borrowTokenConfig[borrowToken];
@@ -37,7 +35,7 @@ contract DebtManagerCore is DebtManagerStorage {
 
     function getUserCollateralForToken(address safe, address token) external view returns (uint256, uint256) {
         if (!isCollateralToken(token)) revert UnsupportedCollateralToken();
-        uint256 collateralTokenAmt = cashLens.getUserCollateralForToken(safe, token);
+        uint256 collateralTokenAmt = ICashLens(etherFiDataProvider.getCashLens()).getUserCollateralForToken(safe, token);
         uint256 collateralAmtInUsd = convertCollateralTokenToUsd(token, collateralTokenAmt);
 
         return (collateralTokenAmt, collateralAmtInUsd);
@@ -81,7 +79,7 @@ contract DebtManagerCore is DebtManagerStorage {
 
     function getMaxBorrowAmount(address user, bool forLtv) public view returns (uint256) {
         uint256 totalMaxBorrow = 0;
-        IDebtManager.TokenData[] memory collateralTokens = cashLens.getUserTotalCollateral(user);
+        IDebtManager.TokenData[] memory collateralTokens = ICashLens(etherFiDataProvider.getCashLens()).getUserTotalCollateral(user);
         uint256 len = collateralTokens.length;
 
         for (uint256 i = 0; i < len;) {
@@ -102,7 +100,7 @@ contract DebtManagerCore is DebtManagerStorage {
     }
 
     function collateralOf(address user) public view returns (IDebtManager.TokenData[] memory, uint256) {
-        IDebtManager.TokenData[] memory collateralTokens = cashLens.getUserTotalCollateral(user);
+        IDebtManager.TokenData[] memory collateralTokens = ICashLens(etherFiDataProvider.getCashLens()).getUserTotalCollateral(user);
         uint256 len = collateralTokens.length;
         uint256 totalCollateralInUsd = 0;
 
@@ -237,12 +235,12 @@ contract DebtManagerCore is DebtManagerStorage {
     function convertCollateralTokenToUsd(address collateralToken, uint256 collateralAmount) public view returns (uint256) {
         if (!isCollateralToken(collateralToken)) revert UnsupportedCollateralToken();
 
-        return (collateralAmount * IPriceProvider(_cashDataProvider.priceProvider()).price(collateralToken)) / 10 ** _getDecimals(collateralToken);
+        return (collateralAmount * IPriceProvider(etherFiDataProvider.getPriceProvider()).price(collateralToken)) / 10 ** _getDecimals(collateralToken);
     }
 
     function getCollateralValueInUsd(address user) public view returns (uint256) {
         uint256 userCollateralInUsd = 0;
-        IDebtManager.TokenData[] memory userCollateral = cashLens.getUserTotalCollateral(user);
+        IDebtManager.TokenData[] memory userCollateral = ICashLens(etherFiDataProvider.getCashLens()).getUserTotalCollateral(user);
         uint256 len = userCollateral.length;
 
         for (uint256 i = 0; i < len;) {
@@ -257,7 +255,7 @@ contract DebtManagerCore is DebtManagerStorage {
 
     function supply(address user, address borrowToken, uint256 amount) external nonReentrant {
         if (!isBorrowToken(borrowToken)) revert UnsupportedBorrowToken();
-        if (_cashDataProvider.isUserSafe(user)) revert UserSafeCannotSupplyDebtTokens();
+        if(etherFiDataProvider.isEtherFiSafe(user)) revert EtherFiSafeCannotSupplyDebtTokens();
 
         uint256 shares = _borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens == 0 ? amount : amount.mulDiv(_borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens, _getTotalBorrowTokenAmount(borrowToken), Math.Rounding.Floor);
 
@@ -293,7 +291,7 @@ contract DebtManagerCore is DebtManagerStorage {
         emit WithdrawBorrowToken(msg.sender, borrowToken, amount);
     }
 
-    function borrow(address token, uint256 amount) external onlyUserSafe {
+    function borrow(address token, uint256 amount) external onlyEtherFiSafe() {
         if (!isBorrowToken(token)) revert UnsupportedBorrowToken();
         _updateBorrowings(msg.sender, token);
 
@@ -307,13 +305,14 @@ contract DebtManagerCore is DebtManagerStorage {
         ensureHealth(msg.sender);
 
         if (IERC20(token).balanceOf(address(this)) < amount) revert InsufficientLiquidity();
-        IERC20(token).safeTransfer(_cashDataProvider.settlementDispatcher(), amount);
+        address settlementDispatcher = ICashModule(etherFiDataProvider.getCashModule()).getSettlementDispatcher();
+        IERC20(token).safeTransfer(settlementDispatcher, amount);
 
         emit Borrowed(msg.sender, token, amount);
     }
 
     function repay(address user, address token, uint256 amount) external nonReentrant {
-        if (!_cashDataProvider.isUserSafe(user)) revert NotAUserSafe();
+        _onlyEtherFiSafe(user);
         _updateBorrowings(user, token);
 
         uint256 repayDebtUsdAmt = convertCollateralTokenToUsd(token, amount);
@@ -343,6 +342,8 @@ contract DebtManagerCore is DebtManagerStorage {
     }
 
     function _liquidate(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 debtAmountToLiquidateInUsd) internal {
+        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+
         cashModule.preLiquidate(user);
         if (debtAmountToLiquidateInUsd == 0) revert LiquidatableAmountIsZero();
 
@@ -448,12 +449,12 @@ contract DebtManagerCore is DebtManagerStorage {
         return tokenData;
     }
 
-    function _isUserSafe() internal view {
-        if (!_cashDataProvider.isUserSafe(msg.sender)) revert OnlyUserSafe();
+    function _onlyEtherFiSafe(address account) internal view {
+        if (!etherFiDataProvider.isEtherFiSafe(account)) revert OnlyEtherFiSafe();
     }
 
-    modifier onlyUserSafe() {
-        _isUserSafe();
+    modifier onlyEtherFiSafe() {
+        _onlyEtherFiSafe(msg.sender);
         _;
     }
 

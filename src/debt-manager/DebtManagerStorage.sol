@@ -9,15 +9,13 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { ICashDataProvider } from "../interfaces/ICashDataProvider.sol";
-
-import { ICashLens } from "../interfaces/ICashLens.sol";
-import { ICashModule } from "../interfaces/ICashModule.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { ReentrancyGuardTransientUpgradeable } from "../utils/ReentrancyGuardTransientUpgradeable.sol";
 
 /**
- * @title L2 Debt Manager
+ * @title Debt Manager
  * @author @seongyun-ko @shivam-ef
  * @notice Contract to manage lending and borrowing for Cash protocol
  */
@@ -63,7 +61,7 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
     //keccak256("DebtManager.admin.impl");
     bytes32 constant adminImplPosition = 0x49d4a010ddc5f453173525f0adf6cfb97318b551312f237c11fd9f432a1f5d21;
 
-    ICashDataProvider internal _cashDataProvider;
+    IEtherFiDataProvider public etherFiDataProvider;
 
     address[] internal _supportedCollateralTokens;
     address[] internal _supportedBorrowTokens;
@@ -83,9 +81,6 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
     mapping(address user => mapping(address borrowToken => uint256 interestSnapshot)) internal _usersDebtInterestIndexSnapshots;
     // Shares have 18 decimals
     mapping(address supplier => mapping(address borrowToken => uint256 shares)) internal _sharesOfBorrowTokens;
-
-    ICashModule public cashModule;
-    ICashLens public cashLens;
 
     uint256 public constant MAX_BORROW_APY = 1_585_489_599_188; // 50% / (365 days in seconds)
 
@@ -141,9 +136,9 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
     error SharesCannotBeZero();
     error SharesCannotBeLessThanMinShares();
     error SupplyCapBreached();
-    error OnlyUserSafe();
-    error UserSafeCannotSupplyDebtTokens();
-    error NotAUserSafe();
+    error OnlyEtherFiSafe();
+    error EtherFiSafeCannotSupplyDebtTokens();
+    error NotAEtherFiSafe();
     error BorrowTokenCannotBeRemovedFromCollateral();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -151,9 +146,8 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
         _disableInitializers();
     }
 
-    function initializeOnUpgrade(address _cashModule, address _cashLens) public reinitializer(2) {
-        cashModule = ICashModule(_cashModule);
-        cashLens = ICashLens(_cashLens);
+    function initializeOnUpgrade(address _etherFiDataProvider) public reinitializer(2) {
+        etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
     }
 
     /**
@@ -178,7 +172,7 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
         if (!isCollateralToken(collateralToken)) {
             revert UnsupportedCollateralToken();
         }
-        return (debtUsdAmount * 10 ** _getDecimals(collateralToken)) / IPriceProvider(_cashDataProvider.priceProvider()).price(collateralToken);
+        return (debtUsdAmount * 10 ** _getDecimals(collateralToken)) / IPriceProvider(etherFiDataProvider.getPriceProvider()).price(collateralToken);
     }
 
     function totalBorrowingAmount(address borrowToken) public view returns (uint256) {

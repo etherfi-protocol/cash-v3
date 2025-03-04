@@ -73,7 +73,7 @@ contract DebtManagerAdmin is DebtManagerStorage {
 
         if (_collateralTokenIndexPlusOne[token] != 0) revert AlreadyCollateralToken();
 
-        uint256 price = IPriceProvider(_cashDataProvider.priceProvider()).price(token);
+        uint256 price = IPriceProvider(etherFiDataProvider.getPriceProvider()).price(token);
         if (price == 0) revert OraclePriceZero();
 
         _supportedCollateralTokens.push(token);

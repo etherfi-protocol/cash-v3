@@ -23,7 +23,9 @@ contract EtherFiDataProviderTest is Test {
     address public module3 = address(0x300);
     address public hookAddress = address(0x400);
     address public cashModule = address(0x500);
-    address public safeFactory = address(0x600);
+    address public cashLens = address(0x600);
+    address public safeFactory = address(0x700);
+    address public priceProvider = address(0x800);
 
     event ModulesConfigured(address[] modules, bool[] shouldWhitelist);
     event HookAddressUpdated(address oldHookAddress, address newHookAddress);
@@ -43,7 +45,7 @@ contract EtherFiDataProviderTest is Test {
         address roleRegistryImpl = address(new RoleRegistry(address(provider)));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
 
-        provider.initialize(address(roleRegistry), address(cashModule), initialModules, hookAddress, safeFactory);
+        provider.initialize(address(roleRegistry), address(cashModule), cashLens, initialModules, hookAddress, safeFactory, priceProvider);
 
         roleRegistry.grantRole(provider.DATA_PROVIDER_ADMIN_ROLE(), admin);
         vm.stopPrank();
@@ -66,7 +68,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        provider.initialize(address(roleRegistry), address(0), modules, hookAddress, safeFactory);
+        provider.initialize(address(roleRegistry), address(0), cashModule, modules, hookAddress, safeFactory, priceProvider);
     }
 
     function test_initialize_withoutHook() public {
@@ -78,7 +80,7 @@ contract EtherFiDataProviderTest is Test {
         initialModules[1] = module2;
 
         vm.prank(admin);
-        newProvider.initialize(address(roleRegistry), cashModule, initialModules, address(0), safeFactory);
+        newProvider.initialize(address(roleRegistry), cashModule, cashLens, initialModules, address(0), safeFactory, priceProvider);
 
         // Hook should be zero address since we didn't set it
         assertEq(newProvider.getHookAddress(), address(0));
@@ -97,7 +99,7 @@ contract EtherFiDataProviderTest is Test {
         initialModules[1] = module2;
 
         vm.prank(admin);
-        newProvider.initialize(address(roleRegistry), address(0), initialModules, hookAddress, safeFactory);
+        newProvider.initialize(address(roleRegistry), address(0), cashLens, initialModules, hookAddress, safeFactory, priceProvider);
 
         // Cash module should be zero address since we didn't set it
         assertEq(newProvider.getCashModule(), address(0));
@@ -115,7 +117,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
-        newProvider.initialize(address(roleRegistry), address(0), modules, hookAddress, safeFactory);
+        newProvider.initialize(address(roleRegistry), address(0), cashLens, modules, hookAddress, safeFactory, priceProvider);
     }
 
     function test_initialize_reverts_whenZeroAddressModule() public {
@@ -127,7 +129,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(EtherFiDataProvider.InvalidModule.selector, 0));
-        newProvider.initialize(address(roleRegistry), address(0), modules, hookAddress, safeFactory);
+        newProvider.initialize(address(roleRegistry), address(0), cashLens, modules, hookAddress, safeFactory, priceProvider);
     }
 
     function test_initialize_emits_hookAddressUpdatedEvent() public {
@@ -140,7 +142,7 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.HookAddressUpdated(address(0), hookAddress);
-        newProvider.initialize(address(roleRegistry), cashModule, modules, hookAddress, safeFactory);
+        newProvider.initialize(address(roleRegistry), cashModule, cashLens, modules, hookAddress, safeFactory, priceProvider);
     }
 
     function test_initialize_emits_modulesSetupEvent() public {
@@ -153,7 +155,7 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.ModulesSetup(modules);
-        newProvider.initialize(address(roleRegistry), cashModule, modules, hookAddress, safeFactory);
+        newProvider.initialize(address(roleRegistry), cashModule, cashLens, modules, hookAddress, safeFactory, priceProvider);
     }
 
     function test_initialize_emits_cashModuleConfiguredEvent() public {
@@ -167,7 +169,7 @@ contract EtherFiDataProviderTest is Test {
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.CashModuleConfigured(address(0), cashModule);
 
-        newProvider.initialize(address(roleRegistry), cashModule, modules, hookAddress, safeFactory);
+        newProvider.initialize(address(roleRegistry), cashModule, cashLens, modules, hookAddress, safeFactory, priceProvider);
     }
 
     // Configure Modules Tests
