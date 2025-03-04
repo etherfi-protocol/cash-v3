@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
@@ -44,6 +45,13 @@ struct SafeData {
     uint256 incomingCreditModeStartTime;
 }
 
+enum SafeTiers {
+    Pepe,
+    Wojak,
+    Chad,
+    Whale
+}
+
 /**
  * @title SafeCashConfig
  * @notice Complete storage representation of a Safe's cash configuration
@@ -60,6 +68,8 @@ struct SafeCashConfig {
     mapping(bytes32 txId => bool cleared) transactionCleared;
     uint256 incomingCreditModeStartTime;
     EnumerableSetLib.AddressSet withdrawRecipients;
+    SafeTiers safeTier;
+    uint256 cashbackSplitToSafePercentage;
 }
 
 /**
@@ -125,4 +135,10 @@ interface ICashModule {
     function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
 
     function getSettlementDispatcher() external view returns (address);
+
+    function getSafeCashbackPercentageAndSplit(address safe) external view returns (uint256, uint256);
+
+    function etherFiDataProvider() external view returns (IEtherFiDataProvider);
+
+    function getPendingCashback(address account) external view returns (uint256);
 }

@@ -10,7 +10,8 @@ import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 
 import { DebtManagerAdmin } from "../../../../src/debt-manager/DebtManagerAdmin.sol";
 import { DebtManagerCore, DebtManagerStorage } from "../../../../src/debt-manager/DebtManagerCore.sol";
-import { Mode } from "../../../../src/interfaces/ICashModule.sol";
+import {CashbackDispatcher} from "../../../../src/cashback-dispatcher/CashbackDispatcher.sol";
+import { Mode, SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
@@ -26,12 +27,14 @@ contract CashModuleTestSetup is SafeTestSetup {
     IERC20 public scrToken = IERC20(0xd29687c813D741E2F938F4aC377128810E217b1b);
 
     address public withdrawRecipient = makeAddr("withdrawRecipient");
+    bytes32 txId = keccak256("txId");
 
-    function setUp() public override {
+    function setUp() public virtual override {
         vm.createSelectFork("https://rpc.scroll.io");
 
         super.setUp();
 
+        vm.startPrank(owner);
         bytes memory safeCashSetupData = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         bytes[] memory setupData = new bytes[](1);
         setupData[0] = safeCashSetupData;
@@ -52,14 +55,32 @@ contract CashModuleTestSetup is SafeTestSetup {
 
         _configureWithdrawRecipients(withdrawRecipients, shouldAdd);
 
+        SafeTiers[] memory tiers = new SafeTiers[](4);
+        tiers[0] = SafeTiers.Pepe;
+        tiers[1] = SafeTiers.Wojak;
+        tiers[2] = SafeTiers.Chad;
+        tiers[3] = SafeTiers.Whale;
+
+        uint256[] memory cashbackPercentages = new uint256[](4);
+        cashbackPercentages[0] = 200;
+        cashbackPercentages[1] = 300;
+        cashbackPercentages[2] = 400;
+        cashbackPercentages[3] = 400;
+
+        cashModule.setTierCashbackPercentage(tiers, cashbackPercentages);
+
         vm.stopPrank();
 
         DebtManagerCore debtManagerCore = new DebtManagerCore();
         DebtManagerAdmin debtManagerAdmin = new DebtManagerAdmin();
+        CashbackDispatcher cashbackDispatcherImpl = new CashbackDispatcher();
 
         vm.startPrank(cashOwnerGnosisSafe);
         UUPSUpgradeable(address(debtManager)).upgradeToAndCall(address(debtManagerCore), abi.encodeWithSelector(DebtManagerStorage.initializeOnUpgrade.selector, address(dataProvider)));
         debtManager.setAdminImpl(address(debtManagerAdmin));
+
+        UUPSUpgradeable(address(cashbackDispatcher)).upgradeToAndCall(address(cashbackDispatcherImpl), abi.encodeWithSelector(CashbackDispatcher.initializeOnUpgrade.selector, address(cashModule)));
+
         vm.stopPrank();
     }
 

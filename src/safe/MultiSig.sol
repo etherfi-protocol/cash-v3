@@ -17,7 +17,6 @@ import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 abstract contract MultiSig is EtherFiSafeErrors {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
-    using EnumerableAddressWhitelistLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
 
     /// @custom:storage-location erc7201:etherfi.storage.MultiSig
@@ -117,7 +116,7 @@ abstract contract MultiSig is EtherFiSafeErrors {
     function _configureOwners(address[] calldata _owners, bool[] calldata _shouldAdd) internal {
         MultiSigStorage storage $ = _getMultiSigStorage();
 
-        $.owners.configure(_owners, _shouldAdd);
+        EnumerableAddressWhitelistLib.configure($.owners, _owners, _shouldAdd);
 
         if ($.owners.length() == 0) revert AllOwnersRemoved();
         if ($.owners.length() < $.threshold) revert OwnersLessThanThreshold();

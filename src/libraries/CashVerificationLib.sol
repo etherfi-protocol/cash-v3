@@ -29,6 +29,9 @@ library CashVerificationLib {
     /// @notice Method identifier for mode changes
     bytes32 public constant SET_MODE_METHOD = keccak256("setMode");
 
+    /// @notice Method identifier for cashback split changes for a safe
+    bytes32 public constant SET_CASHBACK_SPLIT_TO_SAFE_PERCENTAGE = keccak256("setCashbackSplitToSafePercentage");
+
     error InvalidSignatures();
 
     /**
@@ -88,12 +91,16 @@ library CashVerificationLib {
      * @custom:throws InvalidSignatures if the signature is invalid
      */
     function verifyRequestWithdrawalSig(address safe, uint256 nonce, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) internal view {
-        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, safe, nonce, abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(REQUEST_WITHDRAWAL_METHOD, block.chainid, safe, nonce, abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 
     function verifyConfigureWithdrawRecipients(address safe, uint256 nonce, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) internal view {
-        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, safe, nonce, abi.encode(withdrawRecipients, shouldWhitelist))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, safe, nonce, abi.encode(withdrawRecipients, shouldWhitelist))).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
+
+    function verifySetCashbackSplitToSafePercentage(address safe, address signer, uint256 nonce, uint256 split, bytes calldata signature) internal view {
+        verifySignature(safe, signer, SET_CASHBACK_SPLIT_TO_SAFE_PERCENTAGE, nonce, abi.encode(split), signature);
+    } 
 }

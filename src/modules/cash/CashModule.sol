@@ -6,13 +6,12 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
-import { Mode, SafeCashConfig, SafeData, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { SafeTiers, Mode, SafeCashConfig, SafeData, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
-
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
-
+import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
@@ -28,7 +27,6 @@ import { ModuleBase } from "../ModuleBase.sol";
  */
 contract CashModule is UpgradeableProxy, ModuleBase {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
-    using EnumerableAddressWhitelistLib for EnumerableSetLib.AddressSet;
     using SpendingLimitLib for SpendingLimit;
     using MessageHashUtils for bytes32;
     using ArrayDeDupLib for address[];
@@ -47,6 +45,9 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         uint64 withdrawalDelay;
         uint64 spendLimitDelay;
         uint64 modeDelay;
+        mapping(SafeTiers tier => uint256 cashbackPercentage) tierCashbackPercentage;
+        mapping (address account => uint256 pendingCashback) pendingCashbackInUsd;
+        ICashbackDispatcher cashbackDispatcher;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -55,6 +56,8 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     /// @notice Role identifier for EtherFi wallet access control
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
     bytes32 public constant CASH_MODULE_CONTROLLER_ROLE = keccak256("CASH_MODULE_CONTROLLER_ROLE");
+    uint256 public constant MAX_CASHBACK_PERCENTAGE = 1000; // 10%
+    uint256 public constant HUNDRED_PERCENT_IN_BPS = 10000;
 
     /// @notice Error thrown when a transaction has already been cleared
     error TransactionAlreadyCleared();
@@ -83,6 +86,9 @@ contract CashModule is UpgradeableProxy, ModuleBase {
     error InvalidSignatures();
     error ModeAlreadySet();
     error OnlyDebtManager();
+    error AlreadyInSameTier(uint256 index);
+    error CashbackPercentageGreaterThanMaxAllowed();
+    error SplitAlreadyTheSame();
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { }
 
@@ -93,15 +99,16 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      * @param _debtManager Address of the debt manager contract
      * @param _settlementDispatcher Address of the settlement dispatcher
      */
-    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher) external {
+    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher) external {
         __UpgradeableProxy_init(_roleRegistry);
 
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         $.debtManager = IDebtManager(_debtManager);
 
-        if (_settlementDispatcher == address(0)) revert InvalidInput();
+        if (_settlementDispatcher == address(0) || _cashbackDispatcher == address(0)) revert InvalidInput();
         $.settlementDispatcher = _settlementDispatcher;
+        $.cashbackDispatcher = ICashbackDispatcher(_cashbackDispatcher);
 
         $.withdrawalDelay = 60; // 1 min
         $.spendLimitDelay = 3600; // 1 hour
@@ -114,6 +121,54 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         $.mode = Mode.Debit;
+        $.cashbackSplitToSafePercentage = 50_00; // 50%
+    }
+
+    function setSafeTier(address[] memory safes, SafeTiers[] memory tiers) external onlyEtherFiWallet {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        uint256 len = safes.length;
+        if (len != tiers.length) revert ArrayLengthMismatch();
+        for (uint256 i = 0; i < len; ) {
+            if (!etherFiDataProvider.isEtherFiSafe(safes[i])) revert OnlyEtherFiSafe();
+            if ($.safeCashConfig[safes[i]].safeTier == tiers[i]) revert AlreadyInSameTier(i);
+
+            $.safeCashConfig[safes[i]].safeTier = tiers[i];
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    function setTierCashbackPercentage(SafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        
+        uint256 len = tiers.length;
+        if (len != cashbackPercentages.length) revert ArrayLengthMismatch();
+        for (uint256 i = 0; i < len; ) {
+            if (cashbackPercentages[i] > MAX_CASHBACK_PERCENTAGE) revert CashbackPercentageGreaterThanMaxAllowed();
+            $.tierCashbackPercentage[tiers[i]] = cashbackPercentages[i];
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    function setCashbackSplitToSafeBps(address safe, uint256 splitInBps, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        if (splitInBps == $.safeCashConfig[safe].cashbackSplitToSafePercentage) revert SplitAlreadyTheSame();
+        if (splitInBps > HUNDRED_PERCENT_IN_BPS) revert InvalidInput();
+
+        CashVerificationLib.verifySetCashbackSplitToSafePercentage(safe, signer, _useNonce(safe), splitInBps, signature);
+        $.safeCashConfig[safe].cashbackSplitToSafePercentage = splitInBps;
+    }
+
+    function getSafeCashbackPercentageAndSplit(address safe) public view onlyEtherFiSafe(safe) returns (uint256, uint256) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        return ($.tierCashbackPercentage[$.safeCashConfig[safe].safeTier], $.safeCashConfig[safe].cashbackSplitToSafePercentage);
     }
 
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {
@@ -129,6 +184,10 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         return ($.withdrawalDelay, $.spendLimitDelay, $.modeDelay);
+    }
+
+    function getPendingCashback(address account) external view returns (uint256) {
+        return _getCashModuleStorage().pendingCashbackInUsd[account];
     }
 
     function getSettlementDispatcher() external view returns (address) {
@@ -213,12 +272,20 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         CashVerificationLib.verifyConfigureWithdrawRecipients(safe, _useNonce(safe), withdrawRecipients, shouldWhitelist, signers, signatures);
 
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
-        $.withdrawRecipients.configure(withdrawRecipients, shouldWhitelist);
+        EnumerableAddressWhitelistLib.configure($.withdrawRecipients, withdrawRecipients, shouldWhitelist);
     }
 
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, _useNonce(safe), tokens, amounts, recipient, signers, signatures);
         _requestWithdrawal(safe, tokens, amounts, recipient);
+    }
+
+    function getWithdrawRecipients(address safe) external view returns (address[] memory) {
+        return _getCashModuleStorage().safeCashConfig[safe].withdrawRecipients.values();
+    }
+
+    function isWhitelistedWithdrawRecipient(address safe, address account) external view returns (bool) {
+        return _getCashModuleStorage().safeCashConfig[safe].withdrawRecipients.contains(account);
     }
 
     function processWithdrawal(address safe) public onlyEtherFiSafe(safe) {
@@ -301,10 +368,12 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, bytes32 txId, address token, uint256 amountInUsd) external onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd) external onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         IDebtManager debtManager = $.debtManager;
+
+        if (spender == safe) revert InvalidInput();
 
         _setCurrentMode($$);
 
@@ -316,19 +385,33 @@ contract CashModule is UpgradeableProxy, ModuleBase {
         $$.transactionCleared[txId] = true;
         $$.spendingLimit.spend(amountInUsd);
 
-        _spend($$, debtManager, safe, token, amount);
+        _retrievePendingCashback($, safe, spender);
+        _spend($, debtManager, safe, spender, token, amountInUsd, amount);
+    }
+
+    function _retrievePendingCashback(CashModuleStorage storage $, address safe, address spender) internal {
+        if ($.pendingCashbackInUsd[safe] != 0) {
+            (address cashbackToken, uint256 cashbackAmount, bool paid) = $.cashbackDispatcher.clearPendingCashback(safe);
+            if (paid) delete $.pendingCashbackInUsd[safe];
+        } 
+
+        if ($.pendingCashbackInUsd[spender] != 0) {
+            (address cashbackToken, uint256 cashbackAmount, bool paid) = $.cashbackDispatcher.clearPendingCashback(spender);
+            if (paid) delete $.pendingCashbackInUsd[spender];
+        }
     }
 
     /**
      * @dev Internal function to execute the spending transaction
-     * @param $$ Storage reference to the SafeCashConfig
+     * @param $ Storage reference to the CashModuleStorage
      * @param debtManager Reference to the debt manager contract
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to spend
      * @param amount Amount of tokens to spend
      * @custom:throws BorrowingsExceedMaxBorrowAfterSpending if spending would exceed borrowing limits
      */
-    function _spend(SafeCashConfig storage $$, IDebtManager debtManager, address safe, address token, uint256 amount) internal {
+    function _spend(CashModuleStorage storage $, IDebtManager debtManager, address safe, address spender, address token, uint256 amountInUsd, uint256 amount) internal {
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
         address[] memory to = new address[](1);
         bytes[] memory data = new bytes[](1);
         uint256[] memory values = new uint256[](1);
@@ -359,6 +442,26 @@ contract CashModule is UpgradeableProxy, ModuleBase {
             data[0] = abi.encodeWithSelector(IERC20.transfer.selector, _getCashModuleStorage().settlementDispatcher, amount);
             values[0] = 0;
             IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+            _cashback($, safe, spender, amountInUsd);
+        }
+    }
+
+    function _cashback(CashModuleStorage storage $, address safe, address spender, uint256 amountInUsd) internal {
+        (uint256 cashbackPercentage, uint256 cashbackSplitToSafePercentage) = getSafeCashbackPercentageAndSplit(safe);
+
+        (
+            address cashbackToken,
+            uint256 cashbackAmountToSafe,
+            uint256 cashbackInUsdToSafe,
+            uint256 cashbackAmountToSpender,
+            uint256 cashbackInUsdToSpender,
+            bool paid
+        ) = $.cashbackDispatcher.cashback(safe, spender, amountInUsd, cashbackPercentage, cashbackSplitToSafePercentage);
+
+        if (!paid) { 
+            $.pendingCashbackInUsd[safe] += cashbackInUsdToSafe;
+            $.pendingCashbackInUsd[spender] += cashbackInUsdToSpender;
         }
     }
 

@@ -11,6 +11,7 @@ import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
+import { ICashbackDispatcher } from "../../src/interfaces/ICashbackDispatcher.sol";
 import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { CashLens } from "../../src/modules/cash/CashLens.sol";
@@ -29,6 +30,7 @@ contract SafeTestSetup is Test {
     EtherFiHook public hook;
 
     IDebtManager debtManager = IDebtManager(0x8f9d2Cd33551CE06dD0564Ba147513F715c2F4a0);
+    ICashbackDispatcher cashbackDispatcher = ICashbackDispatcher(0x7d372C3ca903CA2B6ecd8600D567eb6bAfC5e6c9);
     IPriceProvider priceProvider = IPriceProvider(0x8B4C8c403fc015C46061A8702799490FD616E3bf);
     address settlementDispatcher = 0x4Dca5093E0bB450D7f7961b5Df0A9d4c24B24786;
     address cashOwnerGnosisSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
@@ -80,12 +82,24 @@ contract SafeTestSetup is Test {
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
 
         address cashModuleImpl = address(new CashModule(address(dataProvider)));
-        cashModule = CashModule(address(new UUPSProxy(cashModuleImpl, abi.encodeWithSelector(CashModule.initialize.selector, address(roleRegistry), address(debtManager), settlementDispatcher))));
+        cashModule = CashModule(address(
+            new UUPSProxy(
+                cashModuleImpl, 
+                abi.encodeWithSelector(
+                    CashModule.initialize.selector, 
+                    address(roleRegistry), 
+                    address(debtManager), 
+                    settlementDispatcher, 
+                    address(cashbackDispatcher)
+                )
+            )
+        ));
 
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
+        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
 
         address hookImpl = address(new EtherFiHook(address(dataProvider)));
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));

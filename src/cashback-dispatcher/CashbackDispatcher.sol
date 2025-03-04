@@ -5,11 +5,11 @@ import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contrac
 import { Initializable, UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import { ICashDataProvider } from "../interfaces/ICashDataProvider.sol";
+import { ICashModule } from "../interfaces/ICashModule.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 
 /// @title CashbackDispatcher
 /// @author shivam@ether.fi
@@ -18,43 +18,53 @@ contract CashbackDispatcher is Initializable, UUPSUpgradeable, AccessControlDefa
     using SafeERC20 for IERC20;
     using Math for uint256;
 
-    ICashDataProvider public cashDataProvider;
+    ICashModule public cashModule;
     IPriceProvider public priceProvider;
     address public cashbackToken;
+    IEtherFiDataProvider public etherFiDataProvider;
 
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
-    event CashDataProviderSet(address oldCashDataProvider, address newCashDataProvider);
+    event CashModuleSet(address oldModule, address newModule);
     event PriceProviderSet(address oldPriceProvider, address newPriceProvider);
     event CashbackTokenSet(address oldToken, address newToken);
 
     error CashbackTokenPriceNotConfigured();
     error InvalidValue();
-    error OnlyUserSafe();
+    error OnlyEtherFiSafe();
     error CannotWithdrawZeroAmount();
     error WithdrawFundsFailed();
+    error OnlyCashModule();
+    error InvalidInput();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
 
-    function initialize(address _owner, address _cashDataProvider, address _priceProvider, address _cashbackToken) external initializer {
-        if (_cashDataProvider == address(0) || _priceProvider == address(0) || _cashbackToken == address(0)) revert InvalidValue();
+    function initialize(address _owner, address _cashModule, address _priceProvider, address _cashbackToken) external initializer {
+        if (_cashModule == address(0) || _priceProvider == address(0) || _cashbackToken == address(0)) revert InvalidValue();
 
         __AccessControlDefaultAdminRules_init_unchained(5 * 60, _owner);
         _grantRole(ADMIN_ROLE, _owner);
 
-        cashDataProvider = ICashDataProvider(_cashDataProvider);
+        cashModule = ICashModule(_cashModule);
         priceProvider = IPriceProvider(_priceProvider);
 
         if (priceProvider.price(_cashbackToken) == 0) revert CashbackTokenPriceNotConfigured();
         cashbackToken = _cashbackToken;
 
-        emit CashDataProviderSet(address(0), _cashDataProvider);
+        emit CashModuleSet(address(0), _cashModule);
         emit PriceProviderSet(address(0), _priceProvider);
         emit CashbackTokenSet(address(0), _cashbackToken);
+    }
+
+    function initializeOnUpgrade(address _cashModule) external reinitializer(2) {
+        cashModule = ICashModule(_cashModule);
+        etherFiDataProvider = cashModule.etherFiDataProvider();
+
+        emit CashModuleSet(address(0), _cashModule);
     }
 
     function convertUsdToCashbackToken(uint256 cashbackInUsd) public view returns (uint256) {
@@ -64,47 +74,66 @@ contract CashbackDispatcher is Initializable, UUPSUpgradeable, AccessControlDefa
         return cashbackInUsd.mulDiv(10 ** IERC20Metadata(cashbackToken).decimals(), cashbackTokenPrice);
     }
 
-    function getCashbackAmount(address userSafe, uint256 spentAmountInUsd) public view returns (uint256, uint256) {
-        uint256 cashbackPercentage = cashDataProvider.getUserSafeCashbackPercentage(userSafe);
-        if (cashbackPercentage == 0) return (0, 0);
-
-        uint256 cashbackInUsd = spentAmountInUsd.mulDiv(cashbackPercentage, HUNDRED_PERCENT_IN_BPS);
+    function getCashbackAmount(uint256 cashbackPercentageInBps, uint256 spentAmountInUsd) public view returns (uint256, uint256) {
+        uint256 cashbackInUsd = spentAmountInUsd.mulDiv(cashbackPercentageInBps, HUNDRED_PERCENT_IN_BPS);
         return (convertUsdToCashbackToken(cashbackInUsd), cashbackInUsd);
     }
 
-    function cashback(uint256 spentAmountInUsd) external returns (address token, uint256 cashbackAmount, uint256 cashbackInUsd, bool paid) {
+    function cashback(
+        address safe, 
+        address spender, 
+        uint256 spentAmountInUsd, 
+        uint256 cashbackPercentageInBps, 
+        uint256 cashbackSplitToSafePercentage
+    ) external returns (
+        address token, 
+        uint256 cashbackAmountToSafe, 
+        uint256 cashbackInUsdToSafe, 
+        uint256 cashbackAmountToSpender, 
+        uint256 cashbackInUsdToSpender, 
+        bool paid
+    ) {
+        if (msg.sender != address(cashModule)) revert OnlyCashModule();
+        if (!etherFiDataProvider.isEtherFiSafe(safe)) revert OnlyEtherFiSafe();
+        if (spender == address(0)) cashbackSplitToSafePercentage = 10000; // 100%
+        
         token = cashbackToken;
-        if (!cashDataProvider.isUserSafe(msg.sender)) revert OnlyUserSafe();
-        (cashbackAmount, cashbackInUsd) = getCashbackAmount(msg.sender, spentAmountInUsd);
-        if (cashbackAmount == 0) return (token, cashbackAmount, cashbackInUsd, true);
 
-        if (IERC20(token).balanceOf(address(this)) < cashbackAmount) {
-            paid = false;
-        } else {
+        (uint256 cashbackAmountTotal, uint256 cashbackInUsdTotal) = getCashbackAmount(cashbackPercentageInBps, spentAmountInUsd);
+        if (cashbackAmountTotal == 0) return (cashbackToken, 0, 0, 0, 0, true);
+
+        cashbackAmountToSafe = cashbackAmountTotal.mulDiv(cashbackSplitToSafePercentage, HUNDRED_PERCENT_IN_BPS);
+        cashbackInUsdToSafe = cashbackInUsdTotal.mulDiv(cashbackSplitToSafePercentage, HUNDRED_PERCENT_IN_BPS);
+        cashbackAmountToSpender = cashbackAmountTotal - cashbackAmountToSafe;
+        cashbackInUsdToSpender = cashbackInUsdTotal - cashbackInUsdToSafe;
+
+        if (IERC20(token).balanceOf(address(this)) < cashbackAmountTotal) paid = false;
+        else {
             paid = true;
-            IERC20(token).safeTransfer(msg.sender, cashbackAmount);
+            if (cashbackAmountToSafe > 0) IERC20(token).safeTransfer(safe, cashbackAmountToSafe);
+            if (cashbackAmountToSpender > 0) IERC20(token).safeTransfer(spender, cashbackAmountToSpender);
         }
     }
 
-    // function clearPendingCashback() external returns (address, uint256, bool) {
-    //     if (!cashDataProvider.isUserSafe(msg.sender)) revert OnlyUserSafe();
-    //     uint256 pendingCashbackInUsd = IUserSafe(msg.sender).pendingCashback();
+    function clearPendingCashback(address account) external returns (address, uint256, bool) {
+        if (account == address(0)) revert InvalidInput();
+        uint256 pendingCashbackInUsd = cashModule.getPendingCashback(account);
 
-    //     uint256 cashbackAmount = convertUsdToCashbackToken(pendingCashbackInUsd);
-    //     if (cashbackAmount == 0) return (cashbackToken, 0, false);
+        uint256 cashbackAmount = convertUsdToCashbackToken(pendingCashbackInUsd);
+        if (cashbackAmount == 0) return (cashbackToken, 0, true);
 
-    //     if (IERC20(cashbackToken).balanceOf(address(this)) < cashbackAmount) {
-    //         return (cashbackToken, cashbackAmount, false);
-    //     } else {
-    //         IERC20(cashbackToken).safeTransfer(msg.sender, cashbackAmount);
-    //         return (cashbackToken, cashbackAmount, true);
-    //     }
-    // }
+        if (IERC20(cashbackToken).balanceOf(address(this)) < cashbackAmount) {
+            return (cashbackToken, cashbackAmount, false);
+        } else {
+            IERC20(cashbackToken).safeTransfer(msg.sender, cashbackAmount);
+            return (cashbackToken, cashbackAmount, true);
+        }
+    }
 
-    function setCashDataProvider(address _cashDataProvider) external onlyRole(ADMIN_ROLE) {
-        if (_cashDataProvider == address(0)) revert InvalidValue();
-        emit CashDataProviderSet(address(cashDataProvider), _cashDataProvider);
-        cashDataProvider = ICashDataProvider(_cashDataProvider);
+    function setCashModule(address _cashModule) external onlyRole(ADMIN_ROLE) {
+        if (_cashModule == address(0)) revert InvalidValue();
+        emit CashModuleSet(address(cashModule), _cashModule);
+        cashModule = ICashModule(_cashModule);
     }
 
     function setPriceProvider(address _priceProvider) external onlyRole(ADMIN_ROLE) {

@@ -27,10 +27,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), amount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
 
         // Verify transaction was cleared
-        assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId")));
+        assertTrue(cashModule.transactionCleared(address(safe), txId));
 
         // Verify tokens were transferred to settlement dispatcher
         assertEq(usdcScroll.balanceOf(address(safe)), 0);
@@ -50,10 +50,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 amount = 10e6;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), amount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
 
         // Verify transaction was cleared
-        assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId")));
+        assertTrue(cashModule.transactionCleared(address(safe), txId));
 
         // Verify tokens were transferred to settlement dispatcher
         assertEq(usdcScroll.balanceOf(address(safe)), initialBalance);
@@ -66,14 +66,14 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(safe), amount);
 
         // Mark transaction as cleared
-        bytes32 txId = keccak256("txId");
+        bytes32 txId = txId;
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), txId, address(usdcScroll), amount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
 
         // Try to spend again with the same txId
         vm.prank(etherFiWallet);
         vm.expectRevert(abi.encodeWithSelector(CashModule.TransactionAlreadyCleared.selector));
-        cashModule.spend(address(safe), txId, address(usdcScroll), amount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
     }
 
     function test_spend_reverts_whenUnsupportedToken() public {
@@ -82,13 +82,13 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(abi.encodeWithSelector(CashModule.UnsupportedToken.selector));
-        cashModule.spend(address(safe), keccak256("txId"), mockToken, 100e6);
+        cashModule.spend(address(safe), address(0), txId, mockToken, 100e6);
     }
 
     function test_spend_reverts_whenAmountIsZero() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(abi.encodeWithSelector(CashModule.AmountZero.selector));
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), 0);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 0);
     }
 
     function test_spend_reverts_whenNotEtherFiWallet() public {
@@ -96,7 +96,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         vm.prank(notEtherFiWallet);
         vm.expectRevert(abi.encodeWithSelector(CashModule.OnlyEtherFiWallet.selector));
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), 100e6);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 100e6);
     }
 
     function test_spend_worksWithPendingWithdrawalInDebitMode() public {
@@ -120,7 +120,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Spend should work and account for the pending withdrawal
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), spendAmount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmount);
 
         // Verify tokens were transferred
         assertEq(usdcScroll.balanceOf(address(safe)), initialAmount - spendAmount);
@@ -149,7 +149,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), borrowAmt);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), borrowAmt);
 
         uint256 maxCanWithdraw = 10e6;
         tokens[0] = address(usdcScroll);
@@ -159,7 +159,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(settlementDispatcher);
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), keccak256("newTxId"), address(usdcScroll), futureBorrowAmt);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), futureBorrowAmt);
 
         uint256 settlementDispatcherUsdcBalAfter = usdcScroll.balanceOf(settlementDispatcher);
 
@@ -187,7 +187,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Spend should work and cancel the withdrawal
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), spendAmount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmount);
 
         // Verify tokens were transferred
         assertEq(usdcScroll.balanceOf(address(safe)), initialAmount - spendAmount);
@@ -203,11 +203,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         // Try to spend more than daily limit
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), dailyLimitInUsd + 1);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), dailyLimitInUsd + 1);
 
         // Spend within limit should work
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), keccak256("txId2"), address(usdcScroll), dailyLimitInUsd / 2);
+        cashModule.spend(address(safe), address(0), keccak256("txId2"), address(usdcScroll), dailyLimitInUsd / 2);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
@@ -223,12 +223,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(debtManager), 1000e6);
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), keccak256("txId"), address(usdcScroll), 10e6);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 10e6);
 
         _setMode(Mode.Debit);
 
         vm.prank(etherFiWallet);
         vm.expectRevert(CashModule.BorrowingsExceedMaxBorrowAfterSpending.selector);
-        cashModule.spend(address(safe), keccak256("newTxId"), address(usdcScroll), safeBalUsdc);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), safeBalUsdc);
     }
 }
