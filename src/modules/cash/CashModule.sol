@@ -264,7 +264,7 @@ contract CashModule is UpgradeableProxy, ModuleBase {
      */
     function getData(address safe) external view onlyEtherFiSafe(safe) returns (SafeData memory) {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
-        SafeData memory data = SafeData({ spendingLimit: $.spendingLimit, pendingWithdrawalRequest: $.pendingWithdrawalRequest, mode: $.mode });
+        SafeData memory data = SafeData({ spendingLimit: $.spendingLimit, pendingWithdrawalRequest: $.pendingWithdrawalRequest, mode: $.mode, incomingCreditModeStartTime: $.incomingCreditModeStartTime });
 
         return data;
     }

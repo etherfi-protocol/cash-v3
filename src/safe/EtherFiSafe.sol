@@ -129,7 +129,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
 
         _setupMultiSig(_owners, _threshold);
         _configureAdmin(_owners, _shouldAdd);
-        _setupModules(_modules, _moduleSetupData);
+        if (_modules.length > 0) _setupModules(_modules, _moduleSetupData);
     }
 
     /**

@@ -41,6 +41,7 @@ struct SafeData {
     WithdrawalRequest pendingWithdrawalRequest;
     /// @notice User's chosen mode
     Mode mode;
+    uint256 incomingCreditModeStartTime;
 }
 
 /**

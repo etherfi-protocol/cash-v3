@@ -76,6 +76,8 @@ contract CashLens is UpgradeableProxy {
         if (amount == 0) return (false, "Amount zero");
 
         SafeData memory safeData = cashModule.getData(safe);
+        if (safeData.incomingCreditModeStartTime != 0) safeData.mode = Mode.Credit;
+
         if (safeData.mode == Mode.Debit && IERC20(token).balanceOf(safe) < amount) return (false, "Insufficient balance to spend with Debit flow");
 
         (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, amount);
