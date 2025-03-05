@@ -74,6 +74,12 @@ interface IRoleRegistry {
     function onlyUpgrader(address account) external view;
 
     /**
+     * @notice Returns the owner of the contract
+     * @return result Owner of the contract
+     */
+    function owner() external view returns (address result);
+
+    /**
      * @notice Generates a unique role identifier for safe administrators
      * @dev Creates a unique bytes32 identifier by hashing the safe address with a role type
      * @param safe The address of the safe for which to generate the admin role
