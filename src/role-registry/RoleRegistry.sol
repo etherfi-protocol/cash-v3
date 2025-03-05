@@ -76,13 +76,11 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
      * @notice Sets up the immutable state variables
      * @dev Disables initializers to prevent implementation contract initialization
      * @param _etherFiDataProvider Address of the EtherFi data provider contract
-     * @custom:throws InvalidInput if the data provider address is zero
      * @custom:oz-upgrades-unsafe-allow constructor
      */
     constructor(address _etherFiDataProvider) {
         _disableInitializers();
 
-        if (_etherFiDataProvider == address(0)) revert InvalidInput();
         etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
     }
 

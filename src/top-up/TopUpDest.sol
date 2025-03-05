@@ -81,6 +81,9 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
     /// @notice Error thrown when a caller lacks the required role
     error Unauthorized();
 
+    /// @notice Error thrown when cumulative top-up is wrong
+    error RaceDetected();
+
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
      */
@@ -159,11 +162,11 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws Unauthorized if caller doesn't have the required role
      */
-    function topUpUserSafe(address[] memory users, uint256[] memory chainIds, address[] memory tokens, uint256[] memory amounts) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+    function topUpUserSafeBatch(address[] memory users, uint256[] memory chainIds, address[] memory tokens, uint256[] memory amounts, uint256[] memory expectedCumulativeTopUps) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
         uint256 len = chainIds.length;
         if (len != users.length || len != tokens.length || len != amounts.length) revert ArrayLengthMismatch();
         for (uint256 i = 0; i < len;) {
-            _topUp(users[i], chainIds[i], tokens[i], amounts[i]);
+            _topUp(users[i], chainIds[i], tokens[i], amounts[i], expectedCumulativeTopUps[i]);
             unchecked {
                 ++i;
             }
@@ -179,8 +182,8 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @param amount Amount of tokens to send
      * @custom:throws Unauthorized if caller doesn't have the required role
      */
-    function topUpUserSafe(address user, uint256 chainId, address token, uint256 amount) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
-        _topUp(user, chainId, token, amount);
+    function topUpUserSafe(address user, uint256 chainId, address token, uint256 amount, uint256 expectedCumulativeTopUp) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+        _topUp(user, chainId, token, amount, expectedCumulativeTopUp);
     }
 
     /**
@@ -193,9 +196,10 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @custom:throws NotARegisteredSafe if the user address is not a registered safe
      * @custom:throws BalanceTooLow if the contract has insufficient token balance
      */
-    function _topUp(address user, uint256 chainId, address token, uint256 amount) internal {
+    function _topUp(address user, uint256 chainId, address token, uint256 amount, uint256 expectedCumulativeTopUp) internal {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
         if (!$.etherFiDataProvider.isEtherFiSafe(user)) revert NotARegisteredSafe();
+        if ($.cumulativeTopUps[user][chainId][token] != expectedCumulativeTopUp) revert RaceDetected();
 
         _transfer(user, token, amount);
         $.cumulativeTopUps[user][chainId][token] += amount;

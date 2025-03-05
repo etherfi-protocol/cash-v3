@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Constants } from "../utils/Constants.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable } from "solady/auth/Ownable.sol";
+
+import { Constants } from "../utils/Constants.sol";
 
 /**
  * @title TopUp

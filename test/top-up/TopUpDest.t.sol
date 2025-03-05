@@ -183,7 +183,7 @@ contract TopUpDestTest is Test {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpDest.TopUp(user1, chainId, address(token1), TOP_UP_AMOUNT, TOP_UP_AMOUNT);
-        topUpDest.topUpUserSafe(user1, chainId, address(token1), TOP_UP_AMOUNT);
+        topUpDest.topUpUserSafe(user1, chainId, address(token1), TOP_UP_AMOUNT, 0);
 
         // Check state changes
         assertEq(topUpDest.getCumulativeTopUp(user1, chainId, address(token1)), TOP_UP_AMOUNT);
@@ -223,13 +223,18 @@ contract TopUpDestTest is Test {
         amounts[1] = TOP_UP_AMOUNT;
         amounts[2] = TOP_UP_AMOUNT;
 
+        uint256[] memory cumulativeAmts = new uint256[](3);
+        cumulativeAmts[0] = 0;
+        cumulativeAmts[1] = 0;
+        cumulativeAmts[2] = TOP_UP_AMOUNT;
+
         vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(user1, chainIds[0], address(token1), TOP_UP_AMOUNT, TOP_UP_AMOUNT);
+        emit TopUpDest.TopUp(users[0], chainIds[0], tokens[0], amounts[0], amounts[0]);
         vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(user2, chainIds[1], address(token2), TOP_UP_AMOUNT, TOP_UP_AMOUNT);
+        emit TopUpDest.TopUp(users[1], chainIds[1], tokens[1], amounts[1], amounts[1]);
         vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(user1, chainIds[2], address(token1), TOP_UP_AMOUNT, TOP_UP_AMOUNT + TOP_UP_AMOUNT);
-        topUpDest.topUpUserSafe(users, chainIds, tokens, amounts);
+        emit TopUpDest.TopUp(users[2], chainIds[2], tokens[2], amounts[2], amounts[0] + amounts[2]);
+        topUpDest.topUpUserSafeBatch(users, chainIds, tokens, amounts, cumulativeAmts);
 
         // Check state changes
         assertEq(topUpDest.getCumulativeTopUp(user1, 100, address(token1)), TOP_UP_AMOUNT * 2);
@@ -244,7 +249,7 @@ contract TopUpDestTest is Test {
         vm.startPrank(nonUser);
 
         vm.expectRevert(TopUpDest.Unauthorized.selector);
-        topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT);
+        topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT, 0);
 
         vm.stopPrank();
     }
@@ -257,7 +262,7 @@ contract TopUpDestTest is Test {
         vm.startPrank(topUpRole);
 
         vm.expectRevert(TopUpDest.NotARegisteredSafe.selector);
-        topUpDest.topUpUserSafe(nonUser, 100, address(token1), TOP_UP_AMOUNT);
+        topUpDest.topUpUserSafe(nonUser, 100, address(token1), TOP_UP_AMOUNT, 0);
 
         vm.stopPrank();
     }
@@ -270,7 +275,7 @@ contract TopUpDestTest is Test {
         vm.startPrank(topUpRole);
 
         vm.expectRevert(TopUpDest.BalanceTooLow.selector);
-        topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT);
+        topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT, 0);
 
         vm.stopPrank();
     }
@@ -287,7 +292,7 @@ contract TopUpDestTest is Test {
         vm.startPrank(topUpRole);
 
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT);
+        topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT, 0);
 
         vm.stopPrank();
     }
@@ -311,7 +316,7 @@ contract TopUpDestTest is Test {
         amounts[1] = TOP_UP_AMOUNT;
 
         vm.expectRevert(TopUpDest.ArrayLengthMismatch.selector);
-        topUpDest.topUpUserSafe(users, chainIds, tokens, amounts);
+        topUpDest.topUpUserSafeBatch(users, chainIds, tokens, amounts, amounts);
 
         vm.stopPrank();
     }
@@ -363,7 +368,7 @@ contract TopUpDestTest is Test {
 
         // Top up a user
         vm.prank(topUpRole);
-        topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT);
+        topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT, 0);
 
         // Check getDeposit
         assertEq(topUpDest.getDeposit(address(token1)), DEPOSIT_AMOUNT);

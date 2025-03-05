@@ -1,0 +1,8 @@
+{
+  "addresses": {
+    "RoleRegistry": "",
+    "TopUpSourceFactory": "",
+    "StargateAdapter": "0x8B1F5E9101246F337d8277aE5170C3Aa2a810D12",
+    "EtherFiOFTBridgeAdapter": "0x6C6C72B148f76DD10fE61956b058e5f356907640"
+  }
+}
