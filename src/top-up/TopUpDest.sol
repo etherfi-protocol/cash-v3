@@ -44,14 +44,14 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @param token Address of the deposited token
      * @param amount Amount of tokens deposited
      */
-    event Deposit(address token, uint256 amount);
+    event Deposit(address indexed token, uint256 amount);
 
     /**
      * @notice Emitted when tokens are withdrawn from the contract
      * @param token Address of the withdrawn token
      * @param amount Amount of tokens withdrawn
      */
-    event Withdrawal(address token, uint256 amount);
+    event Withdrawal(address indexed token, uint256 amount);
 
     /**
      * @notice Emitted when tokens are sent to a user's safe
@@ -61,7 +61,7 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @param amount Amount of tokens sent
      * @param cumulativeAmount Total amount of tokens sent to this user on this chain
      */
-    event TopUp(address user, uint256 chainId, address token, uint256 amount, uint256 cumulativeAmount);
+    event TopUp(address indexed user, uint256 indexed chainId, address indexed token, uint256 amount, uint256 cumulativeAmount);
 
     /// @notice Error thrown when the contract has insufficient token balance
     error BalanceTooLow();
