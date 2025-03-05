@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {SafeERC20, IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {ReentrancyGuardTransientUpgradeable} from "../utils/ReentrancyGuardTransientUpgradeable.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { ReentrancyGuardTransientUpgradeable } from "../utils/ReentrancyGuardTransientUpgradeable.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
-import {IEtherFiDataProvider} from "../interfaces/IEtherFiDataProvider.sol";
 
 /**
  * @title TopUpDest
@@ -19,7 +19,7 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
 
     /// @notice Role identifier for accounts authorized to deposit tokens
     bytes32 public constant TOP_UP_DEPOSITOR_ROLE = keccak256("DEPOSITOR_ROLE");
-    
+
     /// @notice Role identifier for accounts authorized to top up user safes
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
@@ -30,10 +30,8 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
     struct TopUpDestStorage {
         /// @notice Reference to the EtherFi data provider for safe verification
         IEtherFiDataProvider etherFiDataProvider;
-        
         /// @notice Tracks the total deposits for each token
         mapping(address token => uint256 deposits) deposits;
-        
         /// @notice Tracks cumulative top-ups for each user for a specific chain and token
         mapping(address user => mapping(uint256 chainId => mapping(address token => uint256 totalTopUp))) cumulativeTopUps;
     }
@@ -47,39 +45,39 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @param amount Amount of tokens deposited
      */
     event Deposit(address token, uint256 amount);
-    
+
     /**
      * @notice Emitted when tokens are withdrawn from the contract
      * @param token Address of the withdrawn token
      * @param amount Amount of tokens withdrawn
      */
     event Withdrawal(address token, uint256 amount);
-    
+
     /**
      * @notice Emitted when tokens are sent to a user's safe
      * @param user Address of the recipient safe
-     * @param chainId ID of the blockchain where the user topped up 
+     * @param chainId ID of the blockchain where the user topped up
      * @param token Address of the token used for top-up
      * @param amount Amount of tokens sent
      * @param cumulativeAmount Total amount of tokens sent to this user on this chain
      */
     event TopUp(address user, uint256 chainId, address token, uint256 amount, uint256 cumulativeAmount);
-    
+
     /// @notice Error thrown when the contract has insufficient token balance
     error BalanceTooLow();
-    
+
     /// @notice Error thrown when withdrawal amount exceeds deposit
     error AmountGreaterThanDeposit();
-    
+
     /// @notice Error thrown when a zero amount is provided
     error AmountCannotBeZero();
-    
+
     /// @notice Error thrown when an operation is attempted on an unregistered safe
     error NotARegisteredSafe();
-    
+
     /// @notice Error thrown when input arrays have different lengths
     error ArrayLengthMismatch();
-    
+
     /// @notice Error thrown when a caller lacks the required role
     error Unauthorized();
 
@@ -100,7 +98,7 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
         __UpgradeableProxy_init(_roleRegistry);
         __ReentrancyGuardTransient_init();
         __Pausable_init_unchained();
-    
+
         _getTopUpDestStorage().etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
     }
 
@@ -125,7 +123,7 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
     function deposit(address token, uint256 amount) external onlyRole(TOP_UP_DEPOSITOR_ROLE) {
         if (amount == 0) revert AmountCannotBeZero();
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-                
+
         _getTopUpDestStorage().deposits[token] += amount;
         emit Deposit(token, amount);
     }
@@ -141,7 +139,7 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
     function withdraw(address token, uint256 amount) external nonReentrant {
         if (msg.sender != roleRegistry().owner()) revert Unauthorized();
         TopUpDestStorage storage $ = _getTopUpDestStorage();
-        
+
         if (amount == 0) revert AmountCannotBeZero();
         if (amount > $.deposits[token]) revert AmountGreaterThanDeposit();
 
@@ -161,15 +159,10 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws Unauthorized if caller doesn't have the required role
      */
-    function topUpUserSafe(
-        address[] memory users,
-        uint256[] memory chainIds, 
-        address[] memory tokens, 
-        uint256[] memory amounts
-    ) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+    function topUpUserSafe(address[] memory users, uint256[] memory chainIds, address[] memory tokens, uint256[] memory amounts) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
         uint256 len = chainIds.length;
-        if (len != users.length || len != tokens.length || len != amounts.length) revert ArrayLengthMismatch();    
-        for (uint256 i = 0; i < len; ) {
+        if (len != users.length || len != tokens.length || len != amounts.length) revert ArrayLengthMismatch();
+        for (uint256 i = 0; i < len;) {
             _topUp(users[i], chainIds[i], tokens[i], amounts[i]);
             unchecked {
                 ++i;
@@ -194,7 +187,7 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @notice Internal implementation of top-up logic
      * @dev Verifies the safe, transfers tokens, and updates cumulative records
      * @param user Address of the safe to top up
-     * @param chainId Chain ID where the user topped-up 
+     * @param chainId Chain ID where the user topped-up
      * @param token Address of the token to send
      * @param amount Amount of tokens to send
      * @custom:throws NotARegisteredSafe if the user address is not a registered safe

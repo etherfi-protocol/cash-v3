@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { Test } from "forge-std/Test.sol";
 
-import { TopUpDest, PausableUpgradeable } from "../../src/top-up/TopUpDest.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { IEtherFiDataProvider } from "../../src/interfaces/IEtherFiDataProvider.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { PausableUpgradeable, TopUpDest } from "../../src/top-up/TopUpDest.sol";
 
 contract TopUpDestTest is Test {
     TopUpDest public topUpDest;
@@ -33,7 +34,7 @@ contract TopUpDestTest is Test {
     uint256 public constant INITIAL_AMOUNT = 1000 ether;
     uint256 public constant DEPOSIT_AMOUNT = 500 ether;
     uint256 public constant TOP_UP_AMOUNT = 100 ether;
-    
+
     function setUp() public {
         owner = makeAddr("owner");
         depositor = makeAddr("depositor");
@@ -63,7 +64,7 @@ contract TopUpDestTest is Test {
 
         token1.mint(depositor, INITIAL_AMOUNT);
         token2.mint(depositor, INITIAL_AMOUNT);
-        
+
         // Grant roles
         roleRegistry.grantRole(TOP_UP_DEPOSITOR_ROLE, depositor);
         roleRegistry.grantRole(TOP_UP_ROLE, topUpRole);
@@ -88,33 +89,33 @@ contract TopUpDestTest is Test {
 
     function test_deposit_succeeds() public {
         vm.startPrank(depositor);
-        
+
         // Deposit token1
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
-        
+
         // Check state changes
         assertEq(topUpDest.getDeposit(address(token1)), DEPOSIT_AMOUNT);
         assertEq(token1.balanceOf(address(topUpDest)), DEPOSIT_AMOUNT);
         assertEq(token1.balanceOf(depositor), INITIAL_AMOUNT - DEPOSIT_AMOUNT);
-        
+
         vm.stopPrank();
     }
 
     function test_deposit_fails_whenCallerNotDepositor() public {
         vm.startPrank(nonUser);
-        
+
         vm.expectRevert(TopUpDest.Unauthorized.selector);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
-        
+
         vm.stopPrank();
     }
 
     function test_deposit_fails_withZeroAmount() public {
         vm.startPrank(depositor);
-        
+
         vm.expectRevert(TopUpDest.AmountCannotBeZero.selector);
         topUpDest.deposit(address(token1), 0);
-        
+
         vm.stopPrank();
     }
 
@@ -122,16 +123,16 @@ contract TopUpDestTest is Test {
         // First deposit some tokens
         vm.prank(depositor);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
-        
+
         // Then withdraw
         vm.startPrank(owner);
         topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 2);
-        
+
         // Check state changes
         assertEq(topUpDest.getDeposit(address(token1)), DEPOSIT_AMOUNT / 2);
         assertEq(token1.balanceOf(address(topUpDest)), DEPOSIT_AMOUNT / 2);
         assertEq(token1.balanceOf(owner), DEPOSIT_AMOUNT / 2);
-        
+
         vm.stopPrank();
     }
 
@@ -139,21 +140,21 @@ contract TopUpDestTest is Test {
         // First deposit some tokens
         vm.prank(depositor);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
-        
+
         vm.startPrank(nonUser);
-        
-        vm.expectRevert(TopUpDest.Unauthorized.selector);  
+
+        vm.expectRevert(TopUpDest.Unauthorized.selector);
         topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 2);
-        
+
         vm.stopPrank();
     }
 
     function test_withdraw_fails_withZeroAmount() public {
         vm.startPrank(owner);
-        
+
         vm.expectRevert(TopUpDest.AmountCannotBeZero.selector);
         topUpDest.withdraw(address(token1), 0);
-        
+
         vm.stopPrank();
     }
 
@@ -161,12 +162,12 @@ contract TopUpDestTest is Test {
         // First deposit some tokens
         vm.prank(depositor);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
-        
+
         vm.startPrank(owner);
-        
+
         vm.expectRevert(TopUpDest.AmountGreaterThanDeposit.selector);
         topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT + 1);
-        
+
         vm.stopPrank();
     }
 
@@ -174,21 +175,21 @@ contract TopUpDestTest is Test {
         // First deposit some tokens
         vm.prank(depositor);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
-        
+
         // Then top up a user
         vm.startPrank(topUpRole);
-        
+
         uint256 chainId = 100;
 
         vm.expectEmit(true, true, true, true);
         emit TopUpDest.TopUp(user1, chainId, address(token1), TOP_UP_AMOUNT, TOP_UP_AMOUNT);
         topUpDest.topUpUserSafe(user1, chainId, address(token1), TOP_UP_AMOUNT);
-        
+
         // Check state changes
         assertEq(topUpDest.getCumulativeTopUp(user1, chainId, address(token1)), TOP_UP_AMOUNT);
         assertEq(token1.balanceOf(user1), TOP_UP_AMOUNT);
         assertEq(token1.balanceOf(address(topUpDest)), DEPOSIT_AMOUNT - TOP_UP_AMOUNT);
-        
+
         vm.stopPrank();
     }
 
@@ -198,30 +199,30 @@ contract TopUpDestTest is Test {
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
         topUpDest.deposit(address(token2), DEPOSIT_AMOUNT);
         vm.stopPrank();
-        
+
         // Then top up multiple users
         vm.startPrank(topUpRole);
-        
+
         address[] memory users = new address[](3);
         users[0] = user1;
         users[1] = user2;
-        users[2] = user1;  // Same user can be topped up multiple times
-        
+        users[2] = user1; // Same user can be topped up multiple times
+
         uint256[] memory chainIds = new uint256[](3);
         chainIds[0] = 100;
         chainIds[1] = 200;
-        chainIds[2] = 100;  // Same chain ID for user1
-        
+        chainIds[2] = 100; // Same chain ID for user1
+
         address[] memory tokens = new address[](3);
         tokens[0] = address(token1);
         tokens[1] = address(token2);
-        tokens[2] = address(token1);  // Same token for user1
-        
+        tokens[2] = address(token1); // Same token for user1
+
         uint256[] memory amounts = new uint256[](3);
         amounts[0] = TOP_UP_AMOUNT;
         amounts[1] = TOP_UP_AMOUNT;
         amounts[2] = TOP_UP_AMOUNT;
-        
+
         vm.expectEmit(true, true, true, true);
         emit TopUpDest.TopUp(user1, chainIds[0], address(token1), TOP_UP_AMOUNT, TOP_UP_AMOUNT);
         vm.expectEmit(true, true, true, true);
@@ -229,22 +230,22 @@ contract TopUpDestTest is Test {
         vm.expectEmit(true, true, true, true);
         emit TopUpDest.TopUp(user1, chainIds[2], address(token1), TOP_UP_AMOUNT, TOP_UP_AMOUNT + TOP_UP_AMOUNT);
         topUpDest.topUpUserSafe(users, chainIds, tokens, amounts);
-        
+
         // Check state changes
         assertEq(topUpDest.getCumulativeTopUp(user1, 100, address(token1)), TOP_UP_AMOUNT * 2);
         assertEq(topUpDest.getCumulativeTopUp(user2, 200, address(token2)), TOP_UP_AMOUNT);
         assertEq(token1.balanceOf(user1), TOP_UP_AMOUNT * 2);
         assertEq(token2.balanceOf(user2), TOP_UP_AMOUNT);
-        
+
         vm.stopPrank();
     }
 
     function test_topUpUserSafe_fails_whenCallerNotTopUpRole() public {
         vm.startPrank(nonUser);
-        
+
         vm.expectRevert(TopUpDest.Unauthorized.selector);
         topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT);
-        
+
         vm.stopPrank();
     }
 
@@ -252,12 +253,12 @@ contract TopUpDestTest is Test {
         // First deposit some tokens
         vm.prank(depositor);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
-        
+
         vm.startPrank(topUpRole);
-        
+
         vm.expectRevert(TopUpDest.NotARegisteredSafe.selector);
         topUpDest.topUpUserSafe(nonUser, 100, address(token1), TOP_UP_AMOUNT);
-        
+
         vm.stopPrank();
     }
 
@@ -265,12 +266,12 @@ contract TopUpDestTest is Test {
         // Deposit less than what we'll try to top up
         vm.prank(depositor);
         topUpDest.deposit(address(token1), TOP_UP_AMOUNT / 2);
-        
+
         vm.startPrank(topUpRole);
-        
+
         vm.expectRevert(TopUpDest.BalanceTooLow.selector);
         topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT);
-        
+
         vm.stopPrank();
     }
 
@@ -278,40 +279,40 @@ contract TopUpDestTest is Test {
         // First deposit some tokens
         vm.prank(depositor);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
-        
+
         // Pause the contract
         vm.prank(pauser);
         topUpDest.pause();
-        
+
         vm.startPrank(topUpRole);
-        
+
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT);
-        
+
         vm.stopPrank();
     }
 
     function test_topUpUserSafe_multiple_fails_whenArrayLengthsMismatch() public {
         vm.startPrank(topUpRole);
-        
+
         address[] memory users = new address[](2);
         users[0] = user1;
         users[1] = user2;
-        
+
         uint256[] memory chainIds = new uint256[](2);
         chainIds[0] = 100;
         chainIds[1] = 200;
-        
-        address[] memory tokens = new address[](1);  // Only one token
+
+        address[] memory tokens = new address[](1); // Only one token
         tokens[0] = address(token1);
-        
+
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = TOP_UP_AMOUNT;
         amounts[1] = TOP_UP_AMOUNT;
-        
+
         vm.expectRevert(TopUpDest.ArrayLengthMismatch.selector);
         topUpDest.topUpUserSafe(users, chainIds, tokens, amounts);
-        
+
         vm.stopPrank();
     }
 
@@ -319,24 +320,24 @@ contract TopUpDestTest is Test {
         // Pause the contract
         vm.prank(pauser);
         topUpDest.pause();
-        
+
         // Check it's paused
         assertTrue(topUpDest.paused());
-        
+
         // Unpause the contract
         vm.prank(unpauser);
         topUpDest.unpause();
-        
+
         // Check it's unpaused
         assertFalse(topUpDest.paused());
     }
 
     function test_pause_fails_whenCallerNotPauser() public {
         vm.startPrank(nonUser);
-        
-        vm.expectRevert();  // Expect the check in onlyPauser to revert
+
+        vm.expectRevert(); // Expect the check in onlyPauser to revert
         topUpDest.pause();
-        
+
         vm.stopPrank();
     }
 
@@ -344,12 +345,12 @@ contract TopUpDestTest is Test {
         // First pause the contract
         vm.prank(pauser);
         topUpDest.pause();
-        
+
         vm.startPrank(nonUser);
-        
-        vm.expectRevert();  // Expect the check in onlyUnpauser to revert
+
+        vm.expectRevert(); // Expect the check in onlyUnpauser to revert
         topUpDest.unpause();
-        
+
         vm.stopPrank();
     }
 
@@ -359,21 +360,21 @@ contract TopUpDestTest is Test {
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
         topUpDest.deposit(address(token2), DEPOSIT_AMOUNT);
         vm.stopPrank();
-        
+
         // Top up a user
         vm.prank(topUpRole);
         topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT);
-        
+
         // Check getDeposit
         assertEq(topUpDest.getDeposit(address(token1)), DEPOSIT_AMOUNT);
         assertEq(topUpDest.getDeposit(address(token2)), DEPOSIT_AMOUNT);
-        
+
         // Check getCumulativeTopUp
         assertEq(topUpDest.getCumulativeTopUp(user1, 100, address(token1)), TOP_UP_AMOUNT);
-        assertEq(topUpDest.getCumulativeTopUp(user1, 200, address(token1)), 0);  // Different chain ID
-        assertEq(topUpDest.getCumulativeTopUp(user1, 100, address(token2)), 0);  // Different token
-        assertEq(topUpDest.getCumulativeTopUp(user2, 100, address(token1)), 0);  // Different user
-        
+        assertEq(topUpDest.getCumulativeTopUp(user1, 200, address(token1)), 0); // Different chain ID
+        assertEq(topUpDest.getCumulativeTopUp(user1, 100, address(token2)), 0); // Different token
+        assertEq(topUpDest.getCumulativeTopUp(user2, 100, address(token1)), 0); // Different user
+
         // Check getEtherFiDataProvider
         assertEq(topUpDest.getEtherFiDataProvider(), address(dataProvider));
     }

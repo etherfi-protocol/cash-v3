@@ -227,7 +227,7 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
     function onlyUpgrader(address account) external view {
         if (owner() != account) revert OnlyUpgrader();
     }
-    
+
     /**
      * @notice Verifies if an account has pauser privileges
      * @dev Reverts if the account does not have the PAUSER role
