@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {AccessControlDefaultAdminRulesUpgradeable} from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
-import {UUPSUpgradeable, Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
+import { Initializable, UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-import {SpendingLimit} from "../../libraries/SpendingLimitLib.sol";
 import { Mode, SafeTiers } from "../../interfaces/ICashModule.sol";
+import { SpendingLimit } from "../../libraries/SpendingLimitLib.sol";
 
 contract CashEventEmitter is Initializable, UUPSUpgradeable, AccessControlDefaultAdminRulesUpgradeable {
     address public cashModule;
@@ -15,7 +15,7 @@ contract CashEventEmitter is Initializable, UUPSUpgradeable, AccessControlDefaul
     constructor() {
         _disableInitializers();
     }
-        
+
     function initialize(address _owner, address _cashModule) external initializer {
         __UUPSUpgradeable_init();
         __AccessControlDefaultAdminRules_init_unchained(5 * 60, _owner);
@@ -35,9 +35,9 @@ contract CashEventEmitter is Initializable, UUPSUpgradeable, AccessControlDefaul
     event ModeSet(address indexed safe, Mode prevMode, Mode newMode, uint256 incomingModeStartTime);
     event Spend(address indexed safe, address indexed token, uint256 amount, uint256 amountInUsd, Mode mode);
     event Cashback(address indexed safe, address indexed spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool indexed paid);
-    event PendingCashbackCleared(address indexed safe, address indexed cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd);
+    event PendingCashbackCleared(address indexed safe, address indexed recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd);
     event SafeTiersSet(address[] safes, SafeTiers[] tiers);
-    event TierCashbackPercentageSet(SafeTiers[]  tiers, uint256[] cashbackPercentages);
+    event TierCashbackPercentageSet(SafeTiers[] tiers, uint256[] cashbackPercentages);
     event CashbackSplitToSafeBpsSet(address safe, uint256 oldSplitInBps, uint256 newSplitInBps);
     event DelaysSet(uint64 withdrawalDelay, uint64 spendingLimitDelay, uint64 modeDelay);
     event WithdrawRecipientsConfigured(address safe, address[] withdrawRecipients, bool[] shouldWhitelist);
@@ -62,8 +62,8 @@ contract CashEventEmitter is Initializable, UUPSUpgradeable, AccessControlDefaul
         emit DelaysSet(withdrawalDelay, spendingLimitDelay, modeDelay);
     }
 
-    function emitPendingCashbackClearedEvent(address safe, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external onlyCashModule {
-        emit PendingCashbackCleared(safe, cashbackToken, cashbackAmount, cashbackInUsd);
+    function emitPendingCashbackClearedEvent(address safe, address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external onlyCashModule {
+        emit PendingCashbackCleared(safe, recipient, cashbackToken, cashbackAmount, cashbackInUsd);
     }
 
     function emitCashbackEvent(address safe, address spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) external onlyCashModule {
@@ -102,10 +102,8 @@ contract CashEventEmitter is Initializable, UUPSUpgradeable, AccessControlDefaul
         emit SpendingLimitChanged(safe, oldLimit, newLimit);
     }
 
-    function _authorizeUpgrade(
-        address newImplementation
-    ) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
-    
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) { }
+
     function _onlyCashModule() private view {
         if (cashModule != msg.sender) revert OnlyCashModule();
     }

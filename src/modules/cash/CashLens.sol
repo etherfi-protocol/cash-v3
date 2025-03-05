@@ -8,11 +8,8 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { ICashModule, Mode, SafeCashData, SafeData, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
-
-import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
-import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
@@ -36,6 +33,7 @@ contract CashLens is UpgradeableProxy {
     /// @notice Constant representing 100% with 18 decimal places
     uint256 public constant HUNDRED_PERCENT = 100e18;
 
+    /// @notice Error thrown when trying to use a token that is not on the collateral whitelist
     error NotACollateralToken();
 
     /**
@@ -48,10 +46,21 @@ contract CashLens is UpgradeableProxy {
         dataProvider = IEtherFiDataProvider(_dataProvider);
     }
 
+    /**
+     * @notice Initializes the UpgradeableProxy base contract
+     * @dev Sets up the role registry for access control
+     * @param _roleRegistry Address of the role registry contract
+     */
     function initialize(address _roleRegistry) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
     }
 
+    /**
+     * @notice Gets the currently applicable spending limit for a safe
+     * @dev Returns the spending limit considering current time and renewal logic
+     * @param safe Address of the EtherFi Safe
+     * @return Current applicable spending limit
+     */
     function applicableSpendingLimit(address safe) external view returns (SpendingLimit memory) {
         SafeData memory safeData = cashModule.getData(address(safe));
         return safeData.spendingLimit.getCurrentLimit();
@@ -149,6 +158,7 @@ contract CashLens is UpgradeableProxy {
 
         (safeCashData.creditMaxSpend, safeCashData.debitMaxSpend, safeCashData.spendingLimitAllowance) = maxCanSpend(safe, debtManager.getBorrowTokens()[0]);
         safeCashData.mode = safeData.mode;
+        safeCashData.totalCashbackEarnedInUsd = safeData.totalCashbackEarnedInUsd;
     }
 
     /**
@@ -164,8 +174,8 @@ contract CashLens is UpgradeableProxy {
     }
 
     /**
-     * @notice Gets the pending withdrawal amount for a token
-     * @dev Searches through the withdrawal request tokens array for the specified token
+     * @notice Gets the pending withdrawal amount for a token from safe data
+     * @dev Internal helper that searches through the withdrawal request tokens array
      * @param safeData Safe data structure containing the withdrawal requests
      * @param token Address of the token to check
      * @return Amount of tokens pending withdrawal
@@ -186,6 +196,14 @@ contract CashLens is UpgradeableProxy {
         return tokenIndex != len ? safeData.pendingWithdrawalRequest.amounts[tokenIndex] : 0;
     }
 
+    /**
+     * @notice Gets the effective collateral amount for a specific token
+     * @dev Returns balance minus pending withdrawals
+     * @param safe Address of the safe
+     * @param token Address of the collateral token to check
+     * @return Effective collateral amount
+     * @custom:throws NotACollateralToken if token is not a valid collateral token
+     */
     function getUserCollateralForToken(address safe, address token) public view returns (uint256) {
         IDebtManager debtManager = cashModule.getDebtManager();
 
@@ -196,6 +214,12 @@ contract CashLens is UpgradeableProxy {
         return balance - pendingWithdrawalAmount;
     }
 
+    /**
+     * @notice Gets all effective collateral balances for a safe
+     * @dev Returns array of token addresses and their effective amounts (balance minus pending withdrawals)
+     * @param safe Address of the safe
+     * @return Array of token data with token addresses and effective amounts
+     */
     function getUserTotalCollateral(address safe) public view returns (IDebtManager.TokenData[] memory) {
         IDebtManager debtManager = cashModule.getDebtManager();
         address[] memory collateralTokens = debtManager.getCollateralTokens();
@@ -225,7 +249,8 @@ contract CashLens is UpgradeableProxy {
     }
 
     /**
-     * @dev Calculate the amount that can be spent in credit mode
+     * @notice Calculate the amount that can be spent in credit mode
+     * @dev Internal helper for maxCanSpend that handles credit mode calculations
      * @param debtManager The debt manager instance
      * @param safe The address of the safe
      * @param token The token address
@@ -256,7 +281,8 @@ contract CashLens is UpgradeableProxy {
     }
 
     /**
-     * @dev Calculate the amount that can be spent in debit mode
+     * @notice Calculate the amount that can be spent in debit mode
+     * @dev Internal helper for maxCanSpend that handles debit mode calculations
      * @param debtManager The debt manager instance
      * @param safe The address of the safe
      * @param token The token address
@@ -303,7 +329,8 @@ contract CashLens is UpgradeableProxy {
     }
 
     /**
-     * @dev Gets collateral balances with a token amount subtracted
+     * @notice Gets collateral balances with a token amount subtracted
+     * @dev Internal helper that calculates effective balances for spending simulation
      * @param debtManager Reference to the debt manager contract
      * @param safe Address of the EtherFi Safe
      * @param safeData Safe data structure containing mode and withdrawal requests

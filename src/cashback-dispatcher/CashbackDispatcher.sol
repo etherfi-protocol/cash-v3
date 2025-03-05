@@ -8,8 +8,9 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { ICashModule } from "../interfaces/ICashModule.sol";
-import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
+
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 
 /// @title CashbackDispatcher
 /// @author shivam@ether.fi
@@ -79,24 +80,11 @@ contract CashbackDispatcher is Initializable, UUPSUpgradeable, AccessControlDefa
         return (convertUsdToCashbackToken(cashbackInUsd), cashbackInUsd);
     }
 
-    function cashback(
-        address safe, 
-        address spender, 
-        uint256 spentAmountInUsd, 
-        uint256 cashbackPercentageInBps, 
-        uint256 cashbackSplitToSafePercentage
-    ) external returns (
-        address token, 
-        uint256 cashbackAmountToSafe, 
-        uint256 cashbackInUsdToSafe, 
-        uint256 cashbackAmountToSpender, 
-        uint256 cashbackInUsdToSpender, 
-        bool paid
-    ) {
+    function cashback(address safe, address spender, uint256 spentAmountInUsd, uint256 cashbackPercentageInBps, uint256 cashbackSplitToSafePercentage) external returns (address token, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) {
         if (msg.sender != address(cashModule)) revert OnlyCashModule();
         if (!etherFiDataProvider.isEtherFiSafe(safe)) revert OnlyEtherFiSafe();
-        if (spender == address(0)) cashbackSplitToSafePercentage = 10000; // 100%
-        
+        if (spender == address(0)) cashbackSplitToSafePercentage = 10_000; // 100%
+
         token = cashbackToken;
 
         (uint256 cashbackAmountTotal, uint256 cashbackInUsdTotal) = getCashbackAmount(cashbackPercentageInBps, spentAmountInUsd);
@@ -107,8 +95,9 @@ contract CashbackDispatcher is Initializable, UUPSUpgradeable, AccessControlDefa
         cashbackAmountToSpender = cashbackAmountTotal - cashbackAmountToSafe;
         cashbackInUsdToSpender = cashbackInUsdTotal - cashbackInUsdToSafe;
 
-        if (IERC20(token).balanceOf(address(this)) < cashbackAmountTotal) paid = false;
-        else {
+        if (IERC20(token).balanceOf(address(this)) < cashbackAmountTotal) {
+            paid = false;
+        } else {
             paid = true;
             if (cashbackAmountToSafe > 0) IERC20(token).safeTransfer(safe, cashbackAmountToSafe);
             if (cashbackAmountToSpender > 0) IERC20(token).safeTransfer(spender, cashbackAmountToSpender);

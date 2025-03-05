@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
-import { CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -46,6 +46,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         (uint64 withdrawalDelay,,) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay); // withdraw delay is 60 secs
 
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.WithdrawalProcessed(address(safe), tokens, amounts, withdrawRecipient);
         cashModule.processWithdrawal(address(safe));
 
         uint256 balAfterSafe = usdcScroll.balanceOf(address(safe));

@@ -214,6 +214,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
         return _getEtherFiDataProviderStorage().hook;
     }
 
+    /**
+     * @notice Returns the EtherFiSafeFactory address
+     * @return address EtherFiSafeFactory address
+     */
     function getEtherFiSafeFactory() public view returns (address) {
         return address(_getEtherFiDataProviderStorage().etherFiSafeFactory);
     }

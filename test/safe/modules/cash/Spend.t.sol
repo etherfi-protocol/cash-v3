@@ -15,7 +15,7 @@ import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 import { CashModule, SpendingLimitLib } from "../../../../src/modules/cash/CashModule.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
-import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleSpendTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -27,6 +27,8 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
 
         vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Spend(address(safe), address(usdcScroll), amount, amount, Mode.Debit);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
 
         // Verify transaction was cleared
@@ -50,6 +52,8 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 amount = 10e6;
 
         vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Spend(address(safe), address(usdcScroll), amount, amount, Mode.Credit);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
 
         // Verify transaction was cleared
@@ -156,6 +160,8 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(settlementDispatcher);
 
         vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.WithdrawalCancelled(address(safe), tokens, amounts, withdrawRecipient);
         cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), futureBorrowAmt);
 
         uint256 settlementDispatcherUsdcBalAfter = usdcScroll.balanceOf(settlementDispatcher);
@@ -184,6 +190,8 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Spend should work and cancel the withdrawal
         vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.WithdrawalAmountUpdated(address(safe), address(usdcScroll), initialAmount - spendAmount);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmount);
 
         // Verify tokens were transferred

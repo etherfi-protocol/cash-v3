@@ -35,20 +35,7 @@ interface ICashbackDispatcher {
      * @return cashbackInUsdToSpender The USD value of cashback sent to the spender
      * @return paid Whether the cashback was paid successfully
      */
-    function cashback(
-        address safe,
-        address spender,
-        uint256 spentAmountInUsd,
-        uint256 cashbackPercentageInBps,
-        uint256 cashbackSplitToSafePercentage
-    ) external returns (
-        address token,
-        uint256 cashbackAmountToSafe,
-        uint256 cashbackInUsdToSafe,
-        uint256 cashbackAmountToSpender,
-        uint256 cashbackInUsdToSpender,
-        bool paid
-    );
+    function cashback(address safe, address spender, uint256 spentAmountInUsd, uint256 cashbackPercentageInBps, uint256 cashbackSplitToSafePercentage) external returns (address token, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid);
 
     /**
      * @notice Clear pending cashback for an account

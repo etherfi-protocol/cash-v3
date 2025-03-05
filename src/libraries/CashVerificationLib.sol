@@ -95,12 +95,33 @@ library CashVerificationLib {
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 
+    /**
+     * @notice Verifies a signature for configuring withdraw recipients
+     * @dev Creates and validates an EIP-191 signed message hash
+     * @param safe Address of the safe
+     * @param nonce Transaction nonce for replay protection
+     * @param withdrawRecipients Array of withdraw recipient addresses
+     * @param shouldWhitelist Array of booleans suggesting whether to whitelist or remove the withdraw recipient
+     * @param signers Address of the signers
+     * @param signatures ECDSA signatures by signers
+     * @custom:throws InvalidSignatures if the signature is invalid
+     */
     function verifyConfigureWithdrawRecipients(address safe, uint256 nonce, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) internal view {
         bytes32 digestHash = keccak256(abi.encodePacked(CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, safe, nonce, abi.encode(withdrawRecipients, shouldWhitelist))).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 
+    /**
+     * @notice Verifies a signature for updating cashback split to safe percentage
+     * @dev Creates and validates an EIP-191 signed message hash
+     * @param safe Address of the safe
+     * @param signer Address of the signer to verify against
+     * @param nonce Transaction nonce for replay protection
+     * @param split Cashback split to safe in bps
+     * @param signature ECDSA signature bytes
+     * @custom:throws SignatureUtils.InvalidSignature if the signature is invalid
+     */
     function verifySetCashbackSplitToSafePercentage(address safe, address signer, uint256 nonce, uint256 split, bytes calldata signature) internal view {
         verifySignature(safe, signer, SET_CASHBACK_SPLIT_TO_SAFE_PERCENTAGE, nonce, abi.encode(split), signature);
-    } 
+    }
 }

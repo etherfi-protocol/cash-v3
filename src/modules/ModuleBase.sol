@@ -104,5 +104,10 @@ contract ModuleBase {
         _;
     }
 
+    /**
+     * @notice Sets up a new Safe's Module with initial configuration
+     * @dev Override this function to configure a module initially
+     * @param data The encoded initialization data
+     */
     function setupModule(bytes calldata data) external virtual { }
 }

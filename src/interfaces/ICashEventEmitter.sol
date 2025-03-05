@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {SpendingLimit} from "../libraries/SpendingLimitLib.sol";
-import {Mode, SafeTiers} from "./ICashModule.sol";
+import { SpendingLimit } from "../libraries/SpendingLimitLib.sol";
+import { Mode, SafeTiers } from "./ICashModule.sol";
 
 /**
  * @title ICashEventEmitter
@@ -15,7 +15,7 @@ interface ICashEventEmitter {
      * @param cashbackAmount Amount of cashback token cleared
      * @param cashbackInUsd USD value of the cashback
      */
-    function emitPendingCashbackClearedEvent(address safe, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external;
+    function emitPendingCashbackClearedEvent(address safe, address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external;
 
     function emitCashbackEvent(address safe, address spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) external;
 

@@ -3,19 +3,21 @@ pragma solidity ^0.8.28;
 
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import { CashModuleTestSetup, CashVerificationLib, CashModule, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 import { SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
-import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
+
 import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
+import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
+import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
+import { CashModule, CashModuleTestSetup, CashVerificationLib, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleCashbackTest is CashModuleTestSetup {
-    using Math for uint256; 
+    using Math for uint256;
     using MessageHashUtils for bytes32;
 
     address spender = makeAddr("spender");
     uint256 initialSplitToSafeBps;
     uint256 initialCashbackPercentage;
-    uint256 HUNDRED_PERCENT_IN_BPS = 10000;
+    uint256 HUNDRED_PERCENT_IN_BPS = 10_000;
     IERC20 cashbackToken = scrToken;
 
     function setUp() public override {
@@ -32,10 +34,16 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         uint256 expectedCashbackToSafe = totalCashback.mulDiv(initialSplitToSafeBps, HUNDRED_PERCENT_IN_BPS);
         uint256 expectedCashbackToSpender = totalCashback - expectedCashbackToSafe;
 
+        uint256 totalCashbackInUsd = amount.mulDiv(initialCashbackPercentage, HUNDRED_PERCENT_IN_BPS);
+        uint256 expectedCashbackToSafeInUsd = totalCashbackInUsd.mulDiv(initialSplitToSafeBps, HUNDRED_PERCENT_IN_BPS);
+        uint256 expectedCashbackToSpenderInUsd = totalCashbackInUsd - expectedCashbackToSafeInUsd;
+
         uint256 cashbackBalSafeBefore = cashbackToken.balanceOf(address(safe));
         uint256 cashbackBalSpenderBefore = cashbackToken.balanceOf(address(spender));
 
         vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), spender, amount, address(scrToken), expectedCashbackToSafe, expectedCashbackToSafeInUsd, expectedCashbackToSpender, expectedCashbackToSpenderInUsd, true);
         cashModule.spend(address(safe), spender, txId, address(usdcScroll), amount);
 
         uint256 cashbackBalSafeAfter = cashbackToken.balanceOf(address(safe));
@@ -55,10 +63,15 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         uint256 expectedCashbackToSafe = totalCashback.mulDiv(initialSplitToSafeBps, HUNDRED_PERCENT_IN_BPS);
         uint256 expectedCashbackToSpender = totalCashback - expectedCashbackToSafe;
 
+        uint256 totalCashbackInUsd = amount.mulDiv(initialCashbackPercentage, HUNDRED_PERCENT_IN_BPS);
+        uint256 expectedCashbackToSafeInUsd = totalCashbackInUsd.mulDiv(initialSplitToSafeBps, HUNDRED_PERCENT_IN_BPS);
+        uint256 expectedCashbackToSpenderInUsd = totalCashbackInUsd - expectedCashbackToSafeInUsd;
         uint256 cashbackBalSafeBefore = cashbackToken.balanceOf(address(safe));
         uint256 cashbackBalSpenderBefore = cashbackToken.balanceOf(address(spender));
 
         vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), spender, amount, address(scrToken), expectedCashbackToSafe, expectedCashbackToSafeInUsd, expectedCashbackToSpender, expectedCashbackToSpenderInUsd, false);
         cashModule.spend(address(safe), spender, txId, address(usdcScroll), amount);
 
         uint256 cashbackBalSafeAfter = cashbackToken.balanceOf(address(safe));
@@ -66,11 +79,11 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         assertEq(cashbackBalSafeAfter - cashbackBalSafeBefore, 0);
         assertEq(cashbackBalSpenderAfter - cashbackBalSpenderBefore, 0);
-        
+
         assertApproxEqAbs(cashModule.getPendingCashback(address(safe)), debtManager.convertCollateralTokenToUsd(address(cashbackToken), expectedCashbackToSafe), 1);
         assertApproxEqAbs(cashModule.getPendingCashback(address(spender)), debtManager.convertCollateralTokenToUsd(address(cashbackToken), expectedCashbackToSpender), 1);
     }
-    
+
     // Test for setSafeTier function
     function test_setSafeTier_succeeds_whenCalledByEtherFiWallet() public {
         address[] memory safes = new address[](1);
@@ -80,9 +93,11 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         safeTiers[0] = SafeTiers.Chad;
 
         vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.SafeTiersSet(safes, safeTiers);
         cashModule.setSafeTier(safes, safeTiers);
 
-        (uint256 cashbackPercentage, ) = cashModule.getSafeCashbackPercentageAndSplit(address(safe));
+        (uint256 cashbackPercentage,) = cashModule.getSafeCashbackPercentageAndSplit(address(safe));
         assertEq(cashbackPercentage, 400); // Chad is 4%
     }
 
@@ -151,6 +166,8 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         percentages[2] = 500; // 5%
 
         vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.TierCashbackPercentageSet(tiers, percentages);
         cashModule.setTierCashbackPercentage(tiers, percentages);
 
         // Set safe to chad tier
@@ -164,7 +181,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         cashModule.setSafeTier(safes, safeTiers);
 
         // Check if the cashback percentage is correctly set
-        (uint256 cashbackPercentage, ) = cashModule.getSafeCashbackPercentageAndSplit(address(safe));
+        (uint256 cashbackPercentage,) = cashModule.getSafeCashbackPercentageAndSplit(address(safe));
         assertEq(cashbackPercentage, 500);
     }
 
@@ -210,7 +227,11 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         uint256 newSplitBps = 7000; // 70%
         bytes memory signature = _setCashbackSplitToSafePercentage(newSplitBps);
 
+        (, uint256 oldSplitBps) = cashModule.getSafeCashbackPercentageAndSplit(address(safe));
+
         vm.prank(address(safe));
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.CashbackSplitToSafeBpsSet(address(safe), oldSplitBps, newSplitBps);
         cashModule.setCashbackSplitToSafeBps(address(safe), newSplitBps, owner1, signature);
 
         // Check if the split percentage is correctly set
@@ -228,7 +249,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
     }
 
     function test_setCashbackSplitToSafeBps_fails_whenCalledWithInvalidPercentage() public {
-        uint256 invalidSplitBps = 11000; // 110%, exceeds 100%
+        uint256 invalidSplitBps = 11_000; // 110%, exceeds 100%
         bytes memory signature = _setCashbackSplitToSafePercentage(invalidSplitBps);
 
         vm.prank(address(safe));
@@ -238,7 +259,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
     function test_setCashbackSplitToSafeBps_fails_whenCalledWithInvalidSignature() public {
         uint256 newSplitBps = 7000; // 70%
-        
+
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, keccak256("abcd"));
         bytes memory invalidSignature = abi.encodePacked(r, s, v);
 
@@ -260,20 +281,28 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         // Verify pending cashback is stored
         uint256 safePendingCashback = cashModule.getPendingCashback(address(safe));
         uint256 spenderPendingCashback = cashModule.getPendingCashback(address(spender));
-        
+
+        uint256 cashbackTokenPrice = priceProvider.price(address(scrToken));
+        uint256 safePendingCashbackInCashbackToken = safePendingCashback.mulDiv(1e18, cashbackTokenPrice);
+        uint256 spenderPendingCashbackInCashbackToken = safePendingCashback.mulDiv(1e18, cashbackTokenPrice);
+
         assertGt(safePendingCashback, 0);
         assertGt(spenderPendingCashback, 0);
 
         // Now add funds to the cashback dispatcher
         deal(address(scrToken), address(cashbackDispatcher), 1000 ether);
-    
+
         // Make another spend which should trigger clearing pending cashback
         bytes32 newTxId = keccak256("newTxId");
 
         uint256 cashbackTokenSafeBalBefore = cashbackToken.balanceOf(address(safe));
         uint256 cashbackTokenSpenderBalBefore = cashbackToken.balanceOf(address(spender));
-        
+
         vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(safe), address(scrToken), safePendingCashbackInCashbackToken, safePendingCashback);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(spender), address(scrToken), spenderPendingCashbackInCashbackToken, spenderPendingCashback);
         cashModule.spend(address(safe), spender, newTxId, address(usdcScroll), amount);
 
         // Verify pending cashback is cleared
@@ -296,13 +325,13 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         // Verify pending cashback is stored
         uint256 safePendingCashback = cashModule.getPendingCashback(address(safe));
         uint256 spenderPendingCashback = cashModule.getPendingCashback(address(spender));
-        
+
         assertGt(safePendingCashback, 0);
         assertGt(spenderPendingCashback, 0);
 
         // Make another spend without adding funds to cashback dispatcher
         bytes32 newTxId = keccak256("newTxId");
-        
+
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), spender, newTxId, address(usdcScroll), amount);
 
@@ -359,58 +388,50 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         uint256 amount = 100e6;
         deal(address(usdcScroll), address(safe), amount * 3); // Enough for 3 tests
-        
+
         uint256 totalSpendInCashbackToken = cashbackDispatcher.convertUsdToCashbackToken(amount);
         uint256 pepeCashback = totalSpendInCashbackToken.mulDiv(100, HUNDRED_PERCENT_IN_BPS);
-        
+
         uint256 cashbackBalSafeBefore = cashbackToken.balanceOf(address(safe));
         uint256 cashbackBalSpenderBefore = cashbackToken.balanceOf(address(spender));
-        
+
         bytes32 pepeTxId = keccak256("pepeTxId");
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), spender, pepeTxId, address(usdcScroll), amount);
-        
+
         uint256 pepeSafeCashback = pepeCashback.mulDiv(initialSplitToSafeBps, HUNDRED_PERCENT_IN_BPS);
         uint256 pepeSpenderCashback = pepeCashback - pepeSafeCashback;
-        
+
         assertEq(cashbackToken.balanceOf(address(safe)) - cashbackBalSafeBefore, pepeSafeCashback);
         assertEq(cashbackToken.balanceOf(address(spender)) - cashbackBalSpenderBefore, pepeSpenderCashback);
-        
+
         // Test chad tier
         safeTiers[0] = SafeTiers.Chad;
         vm.prank(etherFiWallet);
         cashModule.setSafeTier(safes, safeTiers);
-        
+
         uint256 chadCashback = totalSpendInCashbackToken.mulDiv(500, HUNDRED_PERCENT_IN_BPS);
-        
+
         cashbackBalSafeBefore = cashbackToken.balanceOf(address(safe));
         cashbackBalSpenderBefore = cashbackToken.balanceOf(address(spender));
-        
+
         bytes32 chadTxId = keccak256("chadTxId");
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), spender, chadTxId, address(usdcScroll), amount);
-        
+
         uint256 chadSafeCashback = chadCashback.mulDiv(initialSplitToSafeBps, HUNDRED_PERCENT_IN_BPS);
         uint256 chadSpenderCashback = chadCashback - chadSafeCashback;
-        
+
         assertApproxEqAbs(cashbackToken.balanceOf(address(safe)) - cashbackBalSafeBefore, chadSafeCashback, 10);
         assertApproxEqAbs(cashbackToken.balanceOf(address(spender)) - cashbackBalSpenderBefore, chadSpenderCashback, 10);
-        
+
         // chad should be 5 times pepe
         assertApproxEqAbs(chadSafeCashback, pepeSafeCashback * 5, 10);
     }
-    
+
     function _setCashbackSplitToSafePercentage(uint256 splitPercentage) internal view returns (bytes memory) {
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(
-                CashVerificationLib.SET_CASHBACK_SPLIT_TO_SAFE_PERCENTAGE,
-                block.chainid,
-                safe,
-                cashModule.getNonce(address(safe)),
-                abi.encode(splitPercentage)
-            )
-        ).toEthSignedMessageHash();
-        
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.SET_CASHBACK_SPLIT_TO_SAFE_PERCENTAGE, block.chainid, safe, cashModule.getNonce(address(safe)), abi.encode(splitPercentage))).toEthSignedMessageHash();
+
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         return abi.encodePacked(r, s, v);
     }

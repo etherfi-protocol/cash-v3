@@ -10,9 +10,10 @@ import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
 import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 
-import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
-import { ICashbackDispatcher } from "../../src/interfaces/ICashbackDispatcher.sol";
 import { ICashEventEmitter } from "../../src/interfaces/ICashEventEmitter.sol";
+import { ICashbackDispatcher } from "../../src/interfaces/ICashbackDispatcher.sol";
+import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
+
 import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { CashLens } from "../../src/modules/cash/CashLens.sol";
@@ -84,19 +85,7 @@ contract SafeTestSetup is Test {
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
 
         address cashModuleImpl = address(new CashModule(address(dataProvider)));
-        cashModule = CashModule(address(
-            new UUPSProxy(
-                cashModuleImpl, 
-                abi.encodeWithSelector(
-                    CashModule.initialize.selector, 
-                    address(roleRegistry), 
-                    address(debtManager), 
-                    settlementDispatcher, 
-                    address(cashbackDispatcher),
-                    address(cashEventEmitter)
-                )
-            )
-        ));
+        cashModule = CashModule(address(new UUPSProxy(cashModuleImpl, abi.encodeWithSelector(CashModule.initialize.selector, address(roleRegistry), address(debtManager), settlementDispatcher, address(cashbackDispatcher), address(cashEventEmitter)))));
 
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
