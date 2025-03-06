@@ -50,6 +50,8 @@ contract EtherFiDataProvider is UpgradeableProxy {
     error InvalidModule(uint256 index);
     /// @notice Thrown when an invalid Cash module address is provided
     error InvalidCashModule();
+    /// @notice Thrown when an invalid Cash lens address is provided
+    error InvalidCashLens();
     /// @notice Thrown when a non-admin address attempts to perform an admin-only operation
     error OnlyAdmin();
     /// @notice Throws when trying to reinit the modules
@@ -68,6 +70,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param oldCashModule Address of old Cash Module
     /// @param newCashModule Address of new Cash Module
     event CashModuleConfigured(address oldCashModule, address newCashModule);
+
+    /// @notice Emitted when Cash lens is configured
+    /// @param oldCashLens Address of old Cash Lens
+    /// @param newCashLens Address of new Cash Lens
+    event CashLensConfigured(address oldCashLens, address newCashLens);
 
     /// @notice Emitted when EtherFiSafeFactory is configured
     /// @param oldFactory Address of old factory
@@ -116,12 +123,22 @@ contract EtherFiDataProvider is UpgradeableProxy {
         // The condition applies because the Cash Module might be present only on specific chains
         if (_cashModule != address(0)) _setCashModule(_cashModule);
         // The condition applies because the Cash Module might be present only on specific chains
-        if (_cashLens != address(0)) _getEtherFiDataProviderStorage().cashLens = _cashLens;
+        if (_cashLens != address(0)) _setCashLens(_cashLens);
+    }
+
+    /**
+     * @notice Updates the address of the Cash Lens
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @param cashLens New cash lens address to set
+     */
+    function setCashLens(address cashLens) external {
+        _onlyDataProviderAdmin();
+        _setCashLens(cashLens);
     }
 
     /**
      * @notice Configures multiple modules' whitelist status
-     * @dev Only callable by addresses with ADMIN_ROLE
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
      */
@@ -130,6 +147,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
         _configureModules(modules, shouldWhitelist);
     }
 
+    /**
+     * @notice Updates the address of the Price Provider
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @param _priceProvider New price provider address to set
+     */
     function setPriceProvider(address _priceProvider) external {
         _onlyDataProviderAdmin();
         _setPriceProvider(_priceProvider);
@@ -137,7 +159,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the hook address
-     * @dev Only callable by addresses with ADMIN_ROLE
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
      * @param hook New hook address to set
      */
     function setHookAddress(address hook) external {
@@ -147,7 +169,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the etherFiSafeFactory instance address
-     * @dev Only callable by addresses with ADMIN_ROLE
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
      * @param factory New factory address to set
      */
     function setEtherFiSafeFactory(address factory) external {
@@ -157,7 +179,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Cash Module
-     * @dev Only callable by addresses with ADMIN_ROLE
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
      * @param cashModule New cash module address to set
      */
     function setCashModule(address cashModule) external {
@@ -295,6 +317,18 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
         emit CashModuleConfigured($.cashModule, cashModule);
         $.cashModule = cashModule;
+    }
+
+    /**
+     * @dev Internal function to configure cash lens
+     * @param newCashLens Cash lens address
+     */
+    function _setCashLens(address newCashLens) private {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+        if (newCashLens == address(0)) revert InvalidCashLens();
+
+        emit CashLensConfigured($.cashLens, newCashLens);
+        $.cashLens = newCashLens;
     }
 
     /**

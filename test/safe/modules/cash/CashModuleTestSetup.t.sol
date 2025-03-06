@@ -46,7 +46,7 @@ contract CashModuleTestSetup is SafeTestSetup {
         CashbackDispatcher cashbackDispatcherImpl = new CashbackDispatcher();
         CashEventEmitter cashEventEmitterImpl = new CashEventEmitter();
 
-        UUPSUpgradeable(address(debtManager)).upgradeToAndCall(address(debtManagerCore), abi.encodeWithSelector(DebtManagerStorage.initializeOnUpgrade.selector, address(dataProvider)));
+        UUPSUpgradeable(address(debtManager)).upgradeToAndCall(address(debtManagerCore), abi.encodeWithSelector(DebtManagerCore.initializeOnUpgrade.selector, address(dataProvider)));
         debtManager.setAdminImpl(address(debtManagerAdmin));
 
         UUPSUpgradeable(address(cashbackDispatcher)).upgradeToAndCall(address(cashbackDispatcherImpl), abi.encodeWithSelector(CashbackDispatcher.initializeOnUpgrade.selector, address(cashModule)));

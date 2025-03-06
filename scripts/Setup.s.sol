@@ -19,6 +19,8 @@ import {IDebtManager} from "../src/interfaces/IDebtManager.sol";
 import {ICashbackDispatcher} from "../src/interfaces/ICashbackDispatcher.sol";
 import {IPriceProvider} from "../src/interfaces/IPriceProvider.sol";
 import {ICashEventEmitter} from "../src/interfaces/ICashEventEmitter.sol";
+import {CashModuleSetters} from "../src/modules/cash/CashModuleSetters.sol";
+import {CashModuleCore} from "../src/modules/cash/CashModuleCore.sol";
 
 contract Setup is Utils {
     EtherFiSafeFactory safeFactory;
@@ -27,8 +29,8 @@ contract Setup is Utils {
     EtherFiHook hook;
     TopUpDest topUpDest;
     AaveV3Module aaveModule;
-    // ICashModule cashModule;
-    // CashLens cashLens;
+    ICashModule cashModule;
+    CashLens cashLens;
 
     IDebtManager debtManager = IDebtManager(0x8f9d2Cd33551CE06dD0564Ba147513F715c2F4a0);
     ICashbackDispatcher cashbackDispatcher = ICashbackDispatcher(0x7d372C3ca903CA2B6ecd8600D567eb6bAfC5e6c9);
@@ -58,22 +60,24 @@ contract Setup is Utils {
 
         aaveModule = new AaveV3Module{salt: getSalt(AAVE_MODULE)}(chainConfig.aaveV3Pool, address(dataProvider));
 
-        // address cashModuleImpl = address(new CashModule(address(dataProvider)));
-        // cashModule = CashModule(address(new UUPSProxy(cashModuleImpl, "")));
-        // cashModule.initialize(
-        //     address(roleRegistry), 
-        //     address(debtManager), 
-        //     settlementDispatcher, 
-        //     address(cashbackDispatcher), 
-        //     address(cashEventEmitter)
-        // );
+        address cashModuleSettersImpl = address(new CashModuleSetters(address(dataProvider)));
+        address cashModuleCoreImpl = address(new CashModuleCore(address(dataProvider)));
+        cashModule = ICashModule(address(new UUPSProxy(cashModuleCoreImpl, "")));
+        cashModule.initialize(
+            address(roleRegistry), 
+            address(debtManager), 
+            settlementDispatcher, 
+            address(cashbackDispatcher), 
+            address(cashEventEmitter),
+            cashModuleSettersImpl
+        );
 
-        // address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
-        // cashLens = CashLens(address(new UUPSProxy(cashLensImpl, "")));
-        // cashLens.initialize(address(roleRegistry));
+        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
+        cashLens = CashLens(address(new UUPSProxy(cashLensImpl, "")));
+        cashLens.initialize(address(roleRegistry));
 
-        // roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), owner);
-        // roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
+        roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), owner);
+        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
 
         address hookImpl = address(new EtherFiHook{salt: getSalt(ETHER_FI_HOOK_IMPL)}(address(dataProvider)));
         hook = EtherFiHook(address(new UUPSProxy{salt: getSalt(ETHER_FI_HOOK_PROXY)}(hookImpl, "")));
@@ -85,13 +89,14 @@ contract Setup is Utils {
         safeFactory = EtherFiSafeFactory(safeFactoryProxy);
         safeFactory.initialize(address(roleRegistry), safeImpl);
 
-        address[] memory modules = new address[](1);
+        address[] memory modules = new address[](2);
         modules[0] = address(aaveModule);
+        modules[1] = address(cashModule);
 
         dataProvider.initialize(
             address(roleRegistry), 
-            address(0), 
-            address(0), 
+            address(cashModule), 
+            address(cashLens), 
             modules, 
             address(hook), 
             address(safeFactory), 

@@ -147,10 +147,6 @@ contract DebtManagerStorage is Initializable, UUPSUpgradeable, AccessControlDefa
         _disableInitializers();
     }
 
-    function initializeOnUpgrade(address _etherFiDataProvider) public reinitializer(2) {
-        etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
-    }
-
     /**
      * @notice set the implementation for the admin, this needs to be in a base class else we cannot set it
      * @param newImpl address of the implementation

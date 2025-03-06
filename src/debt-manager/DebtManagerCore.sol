@@ -8,12 +8,16 @@ import { ICashLens } from "../interfaces/ICashLens.sol";
 import { ICashModule } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
-
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { DebtManagerStorage } from "./DebtManagerStorage.sol";
 
 contract DebtManagerCore is DebtManagerStorage {
     using Math for uint256;
     using SafeERC20 for IERC20;
+
+     function initializeOnUpgrade(address _etherFiDataProvider) public reinitializer(2) {
+        etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
+    }
 
     function borrowTokenConfig(address borrowToken) public view returns (BorrowTokenConfig memory) {
         BorrowTokenConfig memory config = _borrowTokenConfig[borrowToken];
