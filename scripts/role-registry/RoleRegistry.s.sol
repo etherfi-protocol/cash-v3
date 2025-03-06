@@ -10,16 +10,18 @@ contract DeployRoleRegistry is Utils {
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        ChainConfig chainConfig = getChainConfig(block.chainid);
+
+        address owner = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
 
         vm.startBroadcast(deployerPrivateKey);
 
-        address roleRegistryImpl = address(new RoleRegistry(address(0)));
-        roleRegistry = RoleRegistry(address(new UUPSProxy(
+        address roleRegistryImpl = address(new RoleRegistry{salt: getSalt(ROLE_REGISTRY_IMPL)}(address(0)));
+        roleRegistry = RoleRegistry(address(new UUPSProxy{salt: getSalt(ROLE_REGISTRY_PROXY)}(
             roleRegistryImpl, 
-            abi.encodeWithSelector(RoleRegistry.initialize.selector, chainConfig.owner)
+            ""
         )));
 
+        roleRegistry.initialize(owner);
         vm.stopBroadcast();
     }
 }

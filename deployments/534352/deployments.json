@@ -1,6 +1,14 @@
 {
   "addresses": {
-    "RoleRegistry": "",
-    "TopUpDest": ""
+    "CashbackDispatcher": "0x7d372C3ca903CA2B6ecd8600D567eb6bAfC5e6c9",
+    "DebtManager": "0x8f9d2Cd33551CE06dD0564Ba147513F715c2F4a0",
+    "EtherFiDataProvider": "0xdEE620C11A2E36d7Aa3D657C50BD1BF88fD2197D",
+    "EtherFiHook": "0x07dd7BcAd8254fed2CA2a595Aeaa90E4EA10aaC4",
+    "EtherFiSafeFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
+    "EventEmitter": "0x5423885B376eBb4e6104b8Ab1A908D350F6A162e",
+    "PriceProvider": "0x8B4C8c403fc015C46061A8702799490FD616E3bf",
+    "RoleRegistry": "0xd8d16bE1Fc94d0205cf3243bF97bCe023142d642",
+    "SettlementDispatcher": "0x4Dca5093E0bB450D7f7961b5Df0A9d4c24B24786",
+    "TopUpDest": "0xC8D5ac511dDd7f1166646cD0a9F4E66380447318"
   }
 }

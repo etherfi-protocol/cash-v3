@@ -1,10 +1,11 @@
-// SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.24;
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
 
 import {stdJson} from "forge-std/StdJson.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import {TopUpFactory} from "../../src/top-up/TopUpFactory.sol";
+import {RoleRegistry} from "../../src/role-registry/RoleRegistry.sol";
 import {Utils} from "../utils/Utils.sol";
 
 struct TokenConfig {
@@ -23,7 +24,6 @@ contract TopUpSourceSetConfig is Utils {
     address etherFiOFTBridgeAdapter;
     
     function run() public {
-        // Pulling deployer info from the environment
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
         vm.startBroadcast(deployerPrivateKey);
@@ -35,7 +35,7 @@ contract TopUpSourceSetConfig is Utils {
         if (!vm.exists(file)) revert ("Deployment file not found");
         string memory deployments = vm.readFile(file);
 
-        topUpFactory = TopUpSource(
+        topUpFactory = TopUpFactory(
             payable(
                 stdJson.readAddress(
                     deployments,

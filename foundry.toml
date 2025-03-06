@@ -5,7 +5,7 @@ test = "test"
 libs = ["lib"]
 solc = "0.8.28" 
 optimizer = true
-optimizer_runs = 100000
+optimizer_runs = 1000
 evm_version = "cancun" 
 gas_reports = ["*"]
 bytecode_hash = "none"
@@ -20,10 +20,16 @@ mainnet = "${MAINNET_RPC}"
 scroll = "${SCROLL_RPC}"
 base = "${BASE_RPC}"
 
+scroll_tenderly = "${TENDERLY_VIRTUAL_TESTNET_RPC_URL}"
+
 [etherscan]
 mainnet = { key = "${MAINNET_ETHERSCAN_KEY}" }
 scroll = { key = "${SCROLLSCAN_KEY}" }
 base = { key = "${BASESCAN_KEY}" }
+
+scroll_tenderly = { key = "${TENDERLY_ACCESS_KEY}", chain = 534352, url = "${TENDERLY_VIRTUAL_TESTNET_RPC_URL}/verify/etherscan" }
+
+
 
 [fmt]
 line_length = 500

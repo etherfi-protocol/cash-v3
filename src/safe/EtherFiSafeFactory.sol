@@ -100,6 +100,14 @@ contract EtherFiSafeFactory is BeaconFactory {
     }
 
     /**
+     * @notice Gets the number of contracts deployed
+     * @return Number of contracts deployed
+     */
+    function numContractsDeployed() external view returns (uint256) {
+        return _getEtherFiSafeFactoryStorage().deployedAddresses.length();
+    }
+
+    /**
      * @notice Checks if an address is a deployed EtherFiSafe contract
      * @dev Returns whether the address is in the deployed addresses set
      * @param safeAddr The address to check

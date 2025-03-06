@@ -314,6 +314,14 @@ contract TopUpFactory is BeaconFactory {
     }
 
     /**
+     * @notice Gets the number of contracts deployed
+     * @return Number of contracts deployed
+     */
+    function numContractsDeployed() external view returns (uint256) {
+        return _getTopUpFactoryStorage().deployedAddresses.length();
+    }
+
+    /**
      * @notice Gets the bridge configuration for a specific token
      * @dev Returns the TokenConfig struct containing bridge settings
      * @param token The address of the token to query

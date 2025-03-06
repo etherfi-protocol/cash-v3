@@ -26,10 +26,26 @@ contract Utils is Script {
 
     string internal TOP_UP_SOURCE_FACTORY_PROXY = "TopUpSourceFactoryProxy";
     string internal TOP_UP_SOURCE_FACTORY_IMPL = "TopUpSourceFactoryImpl";
-    string internal ROLE_REGISTRY_FACTORY_PROXY = "RoleRegistryProxy";
-    string internal ROLE_REGISTRY_FACTORY_IMPL = "RoleRegistryImpl";
+    string internal TOP_UP_SOURCE_IMPL = "TopUpSourceImpl";
+    string internal ROLE_REGISTRY_PROXY = "RoleRegistryProxy";
+    string internal ROLE_REGISTRY_IMPL = "RoleRegistryImpl";
     string internal ETHER_FI_OFT_BRIDGE_ADAPTER = "EtherFiOFTBridgeAdapter";
     string internal STARGATE_ADAPTER = "StargateAdapter";
+
+    string internal ETHER_FI_SAFE_IMPL = "EtherFiSafeImpl";
+    string internal ETHER_FI_SAFE_FACTORY_IMPL = TOP_UP_SOURCE_FACTORY_IMPL;
+    string internal ETHER_FI_SAFE_FACTORY_PROXY = TOP_UP_SOURCE_FACTORY_PROXY;
+    string internal ETHER_FI_DATA_PROVIDER_IMPL = "EtherFiDataProviderImpl";
+    string internal ETHER_FI_DATA_PROVIDER_PROXY = "EtherFiDataProviderProxy";
+    string internal ETHER_FI_HOOK_IMPL = "EtherFiHookImpl";
+    string internal ETHER_FI_HOOK_PROXY = "EtherFiHookProxy";
+    string internal TOP_UP_DEST_IMPL = "TopUpDestImpl";
+    string internal TOP_UP_DEST_PROXY = "TopUpDestProxy";
+    string internal AAVE_MODULE = "AaveV3Module";
+    string internal CASH_MODULE_IMPL = "CashModuleImpl";
+    string internal CASH_MODULE_PROXY = "CashModuleProxy";
+    string internal CASH_LENS_IMPL = "CashLensImpl";
+    string internal CASH_LENS_PROXY = "CashLensProxy";
 
     function getChainConfig(
         string memory chainId

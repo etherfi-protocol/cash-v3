@@ -5,7 +5,8 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
-import { CashModule, Mode } from "../modules/cash/CashModule.sol";
+import { CashModule } from "../modules/cash/CashModule.sol";
+import {Mode} from "../interfaces/ICashModule.sol";
 import { SignatureUtils } from "./SignatureUtils.sol";
 
 /**
