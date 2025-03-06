@@ -125,8 +125,7 @@ struct SafeCashData {
  * @author ether.fi
  */
 interface ICashModule {
-
-        /// @notice Error thrown when a transaction has already been cleared
+    /// @notice Error thrown when a transaction has already been cleared
     error TransactionAlreadyCleared();
 
     /// @notice Error thrown when a non-EtherFi wallet tries to access restricted functions
@@ -172,7 +171,6 @@ interface ICashModule {
     function MAX_CASHBACK_PERCENTAGE() external pure returns (uint256);
     function HUNDRED_PERCENT_IN_BPS() external pure returns (uint256);
 
-
     // Core view functions
     function getData(address safe) external view returns (SafeData memory);
     function transactionCleared(address safe, bytes32 txId) external view returns (bool);
@@ -190,14 +188,7 @@ interface ICashModule {
 
     // Setup and initialization
     function setupModule(bytes calldata data) external;
-    function initialize(
-        address _roleRegistry, 
-        address _debtManager, 
-        address _settlementDispatcher, 
-        address _cashbackDispatcher, 
-        address _cashEventEmitter,
-        address _cashModuleSetters
-    ) external;
+    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
 
     // Setter functions
     function setSafeTier(address[] memory safes, SafeTiers[] memory tiers) external;
@@ -205,46 +196,22 @@ interface ICashModule {
     function setCashbackSplitToSafeBps(address safe, uint256 splitInBps, address signer, bytes calldata signature) external;
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external;
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external;
-    function updateSpendingLimit(
-        address safe, 
-        uint256 dailyLimitInUsd, 
-        uint256 monthlyLimitInUsd, 
-        address signer, 
-        bytes calldata signature
-    ) external;
-    
+    function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external;
+
     // Debit/Credit operations
     function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd) external;
     function repay(address safe, address token, uint256 amountInUsd) external;
-    
+
     // Withdrawal operations
-    function configureWithdrawRecipients(
-        address safe, 
-        address[] calldata withdrawRecipients, 
-        bool[] calldata shouldWhitelist, 
-        address[] calldata signers, 
-        bytes[] calldata signatures
-    ) external;
-    function requestWithdrawal(
-        address safe, 
-        address[] calldata tokens, 
-        uint256[] calldata amounts, 
-        address recipient, 
-        address[] calldata signers, 
-        bytes[] calldata signatures
-    ) external;
+    function configureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external;
+    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external;
     function processWithdrawal(address safe) external;
-    
+
     // Liquidation functions
     function preLiquidate(address safe) external;
-    function postLiquidate(
-        address safe, 
-        address liquidator, 
-        IDebtManager.LiquidationTokenData[] memory tokensToSend
-    ) external;
+    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
 
-
-        /**
+    /**
      * @notice Returns the current nonce for a Safe
      * @param safe The Safe address to query
      * @return Current nonce value

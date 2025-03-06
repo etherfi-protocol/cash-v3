@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { CashEventEmitter, ICashModule, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, CashModuleTestSetup, ICashModule } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleSetDelaysTest is CashModuleTestSetup {
     function test_setDelays_succeeds_whenCalledByController() public {

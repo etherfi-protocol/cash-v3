@@ -33,9 +33,9 @@ contract CashModuleCore is CashModuleStorageContract {
     using MessageHashUtils for bytes32;
     using ArrayDeDupLib for address[];
 
-    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) {}
+    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { }
 
-      /**
+    /**
      * @notice Initializes the CashModule contract
      * @dev Sets up the role registry, debt manager, settlement dispatcher, and data providers
      * @param _roleRegistry Address of the role registry contract
@@ -494,7 +494,6 @@ contract CashModuleCore is CashModuleStorageContract {
         return (tokenAmounts, "");
     }
 
-
     function getCashModuleSetters() public view returns (address) {
         return _getCashModuleStorage().cashModuleSetters;
     }
@@ -515,27 +514,15 @@ contract CashModuleCore is CashModuleStorageContract {
 
             // Call the implementation.
             // out and outsize are 0 because we don't know the size yet.
-            let result := delegatecall(
-                gas(),
-                settersImpl,
-                0,
-                calldatasize(),
-                0,
-                0
-            )
+            let result := delegatecall(gas(), settersImpl, 0, calldatasize(), 0, 0)
 
             // Copy the returned data.
             returndatacopy(0, 0, returndatasize())
 
             switch result
             // delegatecall returns 0 on error.
-            case 0 {
-                revert(0, returndatasize())
-            }
-            default {
-                return(0, returndatasize())
-            }
+            case 0 { revert(0, returndatasize()) }
+            default { return(0, returndatasize()) }
         }
     }
-
 }

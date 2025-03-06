@@ -7,10 +7,11 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-import {ICashModule } from "../../../../src/interfaces/ICashModule.sol";
+
 import { CashbackDispatcher } from "../../../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { DebtManagerAdmin } from "../../../../src/debt-manager/DebtManagerAdmin.sol";
 import { DebtManagerCore, DebtManagerStorage } from "../../../../src/debt-manager/DebtManagerCore.sol";
+import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
 import { Mode, SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
 
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";

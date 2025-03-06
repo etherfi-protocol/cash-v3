@@ -30,7 +30,7 @@ contract CashModuleSetters is CashModuleStorageContract {
     using SpendingLimitLib for SpendingLimit;
     using ArrayDeDupLib for address[];
 
-    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) {}
+    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { }
 
     /**
      * @notice Sets the tier for one or more safes
@@ -115,6 +115,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param modeDelay Delay in seconds before a mode change takes effect
      * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
      */
+
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
         CashModuleStorage storage $ = _getCashModuleStorage();
@@ -177,7 +178,6 @@ contract CashModuleSetters is CashModuleStorageContract {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, _useNonce(safe), tokens, amounts, recipient, signers, signatures);
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
-
 
     /**
      * @notice Updates the spending limits for a safe

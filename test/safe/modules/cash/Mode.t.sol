@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Mode } from "../../../../src/interfaces/ICashModule.sol";
-import { ICashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { CashModuleTestSetup, CashVerificationLib, ICashModule, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleModeTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;

@@ -8,7 +8,7 @@ import { SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
 import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
-import { ICashModule, CashModuleTestSetup, CashVerificationLib, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { CashModuleTestSetup, CashVerificationLib, ICashModule, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleCashbackTest is CashModuleTestSetup {
     using Math for uint256;

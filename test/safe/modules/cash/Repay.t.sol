@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { CashEventEmitter, ICashModule, CashModuleTestSetup, Mode } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, CashModuleTestSetup, ICashModule, Mode } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleRepayTest is CashModuleTestSetup {
     uint256 collateralAmount = 0.01 ether;

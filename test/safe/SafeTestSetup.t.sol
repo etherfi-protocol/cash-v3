@@ -87,18 +87,7 @@ contract SafeTestSetup is Test {
 
         address cashModuleSettersImpl = address(new CashModuleSetters(address(dataProvider)));
         address cashModuleCoreImpl = address(new CashModuleCore(address(dataProvider)));
-        cashModule = ICashModule(address(new UUPSProxy(
-            cashModuleCoreImpl, 
-            abi.encodeWithSelector(
-                CashModuleCore.initialize.selector, 
-                address(roleRegistry), 
-                address(debtManager), 
-                settlementDispatcher, 
-                address(cashbackDispatcher), 
-                address(cashEventEmitter),
-                cashModuleSettersImpl
-            )
-        )));
+        cashModule = ICashModule(address(new UUPSProxy(cashModuleCoreImpl, abi.encodeWithSelector(CashModuleCore.initialize.selector, address(roleRegistry), address(debtManager), settlementDispatcher, address(cashbackDispatcher), address(cashEventEmitter), cashModuleSettersImpl))));
 
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
