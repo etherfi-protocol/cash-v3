@@ -11,7 +11,7 @@ import {EtherFiDataProvider} from "../src/data-provider/EtherFiDataProvider.sol"
 import {EtherFiSafe} from "../src/safe/EtherFiSafe.sol";
 import {EtherFiSafeFactory} from "../src/safe/EtherFiSafeFactory.sol";
 import {EtherFiHook} from "../src/hook/EtherFiHook.sol";
-import {CashModule} from "../src/modules/cash/CashModule.sol";
+import {ICashModule} from "../src/interfaces/ICashModule.sol";
 import {AaveV3Module} from "../src/modules/aave-v3/AaveV3Module.sol";
 import {CashLens} from "../src/modules/cash/CashLens.sol";
 import {Utils, ChainConfig} from "./utils/Utils.sol";
@@ -27,7 +27,7 @@ contract Setup is Utils {
     EtherFiHook hook;
     TopUpDest topUpDest;
     AaveV3Module aaveModule;
-    // CashModule cashModule;
+    // ICashModule cashModule;
     // CashLens cashLens;
 
     IDebtManager debtManager = IDebtManager(0x8f9d2Cd33551CE06dD0564Ba147513F715c2F4a0);

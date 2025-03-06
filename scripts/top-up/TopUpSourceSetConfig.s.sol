@@ -121,7 +121,7 @@ contract TopUpSourceSetConfig is Utils {
         return stdJson.readAddress(jsonString, path);
     }
 
-    function getDestRecipientAddress() internal returns (address) {
+    function getDestRecipientAddress() internal pure returns (address) {
         string memory dir = string.concat(vm.projectRoot(), "/deployments/");
         string memory chainDir = string.concat(scrollChainId, "/");
         string memory file = string.concat(dir, chainDir, "deployments", ".json");
