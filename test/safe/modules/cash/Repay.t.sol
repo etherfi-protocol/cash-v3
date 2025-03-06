@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { CashEventEmitter, CashModule, CashModuleTestSetup, Mode } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, ICashModule, CashModuleTestSetup, Mode } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleRepayTest is CashModuleTestSetup {
     uint256 collateralAmount = 0.01 ether;
@@ -44,7 +44,7 @@ contract CashModuleRepayTest is CashModuleTestSetup {
 
     function test_repay_fails_withNonBorrowToken() public {
         vm.prank(etherFiWallet);
-        vm.expectRevert(CashModule.OnlyBorrowToken.selector);
+        vm.expectRevert(ICashModule.OnlyBorrowToken.selector);
         cashModule.repay(address(safe), address(weETHScroll), 1 ether);
     }
 
@@ -71,7 +71,7 @@ contract CashModuleRepayTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(safe), 0);
 
         vm.startPrank(etherFiWallet);
-        vm.expectRevert(CashModule.InsufficientBalance.selector);
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
         cashModule.repay(address(safe), address(usdcScroll), 1);
         vm.stopPrank();
     }

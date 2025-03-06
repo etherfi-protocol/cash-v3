@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
-import { CashEventEmitter, CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, ICashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -77,7 +77,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         // Verify pending withdrawal was set up correctly
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
 
-        vm.expectRevert(CashModule.CannotWithdrawYet.selector);
+        vm.expectRevert(ICashModule.CannotWithdrawYet.selector);
         cashModule.processWithdrawal(address(safe));
     }
 
@@ -165,7 +165,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         signatures[0] = abi.encodePacked(r1, s1, v1);
         signatures[1] = abi.encodePacked(r2, s2, v2);
 
-        vm.expectRevert(CashModule.OnlyWhitelistedWithdrawRecipients.selector);
+        vm.expectRevert(ICashModule.OnlyWhitelistedWithdrawRecipients.selector);
         cashModule.requestWithdrawal(address(safe), tokens, amounts, address(owner1), signers, signatures);
     }
 
@@ -194,7 +194,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         signatures[0] = abi.encodePacked(r1, s1, v1);
         signatures[1] = abi.encodePacked(r2, s2, v2);
 
-        vm.expectRevert(CashModule.InsufficientBalance.selector);
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
         cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, signers, signatures);
     }
 
@@ -223,7 +223,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         signatures[0] = abi.encodePacked(r1, s1, v1);
         signatures[1] = abi.encodePacked(r2, s2, v2);
 
-        vm.expectRevert(CashModule.RecipientCannotBeAddressZero.selector);
+        vm.expectRevert(ICashModule.RecipientCannotBeAddressZero.selector);
         cashModule.requestWithdrawal(address(safe), tokens, amounts, address(0), signers, signatures);
     }
 

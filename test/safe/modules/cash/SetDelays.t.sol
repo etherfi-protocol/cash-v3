@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { CashEventEmitter, CashModule, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, ICashModule, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleSetDelaysTest is CashModuleTestSetup {
     function test_setDelays_succeeds_whenCalledByController() public {
@@ -80,7 +80,7 @@ contract CashModuleSetDelaysTest is CashModuleTestSetup {
         uint64 newModeDelay = 300;
 
         vm.prank(notOwner);
-        vm.expectRevert(CashModule.OnlyCashModuleController.selector);
+        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
         cashModule.setDelays(newWithdrawalDelay, newSpendLimitDelay, newModeDelay);
 
         // Verify the values were not updated

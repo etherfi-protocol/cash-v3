@@ -11,13 +11,14 @@ import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 
 import { ICashEventEmitter } from "../../src/interfaces/ICashEventEmitter.sol";
+import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../src/interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
-
 import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { CashLens } from "../../src/modules/cash/CashLens.sol";
-import { CashModule } from "../../src/modules/cash/CashModule.sol";
+import { CashModuleCore } from "../../src/modules/cash/CashModuleCore.sol";
+import { CashModuleSetters } from "../../src/modules/cash/CashModuleSetters.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiSafeFactory } from "../../src/safe/EtherFiSafeFactory.sol";
@@ -54,7 +55,7 @@ contract SafeTestSetup is Test {
 
     address public module1;
     address public module2;
-    CashModule public cashModule;
+    ICashModule public cashModule;
     CashLens public cashLens;
 
     uint256 dailyLimitInUsd = 10_000e6;
@@ -84,8 +85,20 @@ contract SafeTestSetup is Test {
 
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
 
-        address cashModuleImpl = address(new CashModule(address(dataProvider)));
-        cashModule = CashModule(address(new UUPSProxy(cashModuleImpl, abi.encodeWithSelector(CashModule.initialize.selector, address(roleRegistry), address(debtManager), settlementDispatcher, address(cashbackDispatcher), address(cashEventEmitter)))));
+        address cashModuleSettersImpl = address(new CashModuleSetters(address(dataProvider)));
+        address cashModuleCoreImpl = address(new CashModuleCore(address(dataProvider)));
+        cashModule = ICashModule(address(new UUPSProxy(
+            cashModuleCoreImpl, 
+            abi.encodeWithSelector(
+                CashModuleCore.initialize.selector, 
+                address(roleRegistry), 
+                address(debtManager), 
+                settlementDispatcher, 
+                address(cashbackDispatcher), 
+                address(cashEventEmitter),
+                cashModuleSettersImpl
+            )
+        )));
 
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));

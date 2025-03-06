@@ -6,7 +6,6 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { Mode } from "../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
-import { CashModule } from "../modules/cash/CashModule.sol";
 import { SignatureUtils } from "./SignatureUtils.sol";
 
 /**

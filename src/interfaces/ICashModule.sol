@@ -56,7 +56,8 @@ enum SafeTiers {
     Pepe,
     Wojak,
     Chad,
-    Whale
+    Whale,
+    Business
 }
 
 /**
@@ -124,71 +125,130 @@ struct SafeCashData {
  * @author ether.fi
  */
 interface ICashModule {
-    /**
-     * @notice Retrieves cash configuration data for a Safe
-     * @param safe Address of the EtherFi Safe
-     * @return Safe data structure containing spending limits, withdrawal requests, and more
-     */
+
+        /// @notice Error thrown when a transaction has already been cleared
+    error TransactionAlreadyCleared();
+
+    /// @notice Error thrown when a non-EtherFi wallet tries to access restricted functions
+    error OnlyEtherFiWallet();
+
+    /// @notice Error thrown when an unsupported token is used
+    error UnsupportedToken();
+
+    /// @notice Error thrown when a token that is not a borrow token is used in certain operations
+    error OnlyBorrowToken();
+
+    /// @notice Error thrown when an operation amount is zero
+    error AmountZero();
+
+    /// @notice Error thrown when a balance is insufficient for an operation
+    error InsufficientBalance();
+
+    /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
+    error BorrowingsExceedMaxBorrowAfterSpending();
+    error RecipientCannotBeAddressZero();
+    error OnlyCashModuleController();
+    error CannotWithdrawYet();
+    error OnlyWhitelistedWithdrawRecipients();
+    error InvalidSignatures();
+    error ModeAlreadySet();
+    error OnlyDebtManager();
+    error AlreadyInSameTier(uint256 index);
+    error CashbackPercentageGreaterThanMaxAllowed();
+    error SplitAlreadyTheSame();
+    /// @notice Throws when the msg.sender is not an admin to the safe
+    error OnlySafeAdmin();
+    /// @notice Thrown when the input is invalid
+    error InvalidInput();
+    /// @notice Thrown when the signature verification fails
+    error InvalidSignature();
+    /// @notice Thrown when there is an array length mismatch
+    error ArrayLengthMismatch();
+    /// @notice Thrown when the caller is not an EtherFi Safe
+    error OnlyEtherFiSafe();
+
+    function ETHER_FI_WALLET_ROLE() external pure returns (bytes32);
+    function CASH_MODULE_CONTROLLER_ROLE() external pure returns (bytes32);
+    function MAX_CASHBACK_PERCENTAGE() external pure returns (uint256);
+    function HUNDRED_PERCENT_IN_BPS() external pure returns (uint256);
+
+
+    // Core view functions
     function getData(address safe) external view returns (SafeData memory);
-
-    /**
-     * @notice Checks if a transaction has been cleared
-     * @param safe Address of the EtherFi Safe
-     * @param txId Transaction identifier
-     * @return Boolean indicating if the transaction is cleared
-     */
     function transactionCleared(address safe, bytes32 txId) external view returns (bool);
-
-    /**
-     * @notice Gets the debt manager contract
-     * @return IDebtManager instance
-     */
     function getDebtManager() external view returns (IDebtManager);
-
-    /**
-     * @notice Prepares a safe for liquidation by canceling any pending withdrawals
-     * @dev Only callable by the DebtManager
-     * @param safe Address of the EtherFi Safe being liquidated
-     */
-    function preLiquidate(address safe) external;
-
-    /**
-     * @notice Executes post-liquidation logic to transfer tokens to the liquidator
-     * @dev Only callable by the DebtManager after a successful liquidation
-     * @param safe Address of the EtherFi Safe being liquidated
-     * @param liquidator Address that will receive the liquidated tokens
-     * @param tokensToSend Array of token data with amounts to send to the liquidator
-     */
-    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
-
-    /**
-     * @notice Gets the settlement dispatcher address
-     * @dev The settlement dispatcher processes transactions in debit mode
-     * @return The address of the settlement dispatcher contract
-     */
     function getSettlementDispatcher() external view returns (address);
-
-    /**
-     * @notice Gets the cashback percentage and split percentage for a safe
-     * @dev Returns the tier-based cashback percentage and safe's split configuration
-     * @param safe Address of the EtherFi Safe
-     * @return Cashback percentage in basis points (100 = 1%)
-     * @return Split percentage to safe in basis points (5000 = 50%)
-     */
     function getSafeCashbackPercentageAndSplit(address safe) external view returns (uint256, uint256);
-
-    /**
-     * @notice Returns the EtherFiDataProvider contract reference
-     * @dev Used to access global system configuration and services
-     * @return The EtherFiDataProvider contract instance
-     */
     function etherFiDataProvider() external view returns (IEtherFiDataProvider);
-
-    /**
-     * @notice Gets the pending cashback amount for an account in USD
-     * @dev Returns the amount of cashback waiting to be claimed
-     * @param account Address of the account (safe or spender)
-     * @return Pending cashback amount in USD
-     */
     function getPendingCashback(address account) external view returns (uint256);
+    function getDelays() external view returns (uint64, uint64, uint64);
+    function getMode(address safe) external view returns (Mode);
+    function incomingCreditModeStartTime(address safe) external view returns (uint256);
+    function getWithdrawRecipients(address safe) external view returns (address[] memory);
+    function isWhitelistedWithdrawRecipient(address safe, address account) external view returns (bool);
+    function getPendingWithdrawalAmount(address safe, address token) external view returns (uint256);
+
+    // Setup and initialization
+    function setupModule(bytes calldata data) external;
+    function initialize(
+        address _roleRegistry, 
+        address _debtManager, 
+        address _settlementDispatcher, 
+        address _cashbackDispatcher, 
+        address _cashEventEmitter,
+        address _cashModuleSetters
+    ) external;
+
+    // Setter functions
+    function setSafeTier(address[] memory safes, SafeTiers[] memory tiers) external;
+    function setTierCashbackPercentage(SafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external;
+    function setCashbackSplitToSafeBps(address safe, uint256 splitInBps, address signer, bytes calldata signature) external;
+    function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external;
+    function setMode(address safe, Mode mode, address signer, bytes calldata signature) external;
+    function updateSpendingLimit(
+        address safe, 
+        uint256 dailyLimitInUsd, 
+        uint256 monthlyLimitInUsd, 
+        address signer, 
+        bytes calldata signature
+    ) external;
+    
+    // Debit/Credit operations
+    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd) external;
+    function repay(address safe, address token, uint256 amountInUsd) external;
+    
+    // Withdrawal operations
+    function configureWithdrawRecipients(
+        address safe, 
+        address[] calldata withdrawRecipients, 
+        bool[] calldata shouldWhitelist, 
+        address[] calldata signers, 
+        bytes[] calldata signatures
+    ) external;
+    function requestWithdrawal(
+        address safe, 
+        address[] calldata tokens, 
+        uint256[] calldata amounts, 
+        address recipient, 
+        address[] calldata signers, 
+        bytes[] calldata signatures
+    ) external;
+    function processWithdrawal(address safe) external;
+    
+    // Liquidation functions
+    function preLiquidate(address safe) external;
+    function postLiquidate(
+        address safe, 
+        address liquidator, 
+        IDebtManager.LiquidationTokenData[] memory tokensToSend
+    ) external;
+
+
+        /**
+     * @notice Returns the current nonce for a Safe
+     * @param safe The Safe address to query
+     * @return Current nonce value
+     * @dev Nonces are used to prevent signature replay attacks
+     */
+    function getNonce(address safe) external view returns (uint256);
 }

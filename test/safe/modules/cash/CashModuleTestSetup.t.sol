@@ -7,7 +7,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-
+import {ICashModule } from "../../../../src/interfaces/ICashModule.sol";
 import { CashbackDispatcher } from "../../../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { DebtManagerAdmin } from "../../../../src/debt-manager/DebtManagerAdmin.sol";
 import { DebtManagerCore, DebtManagerStorage } from "../../../../src/debt-manager/DebtManagerCore.sol";
@@ -21,7 +21,6 @@ import { TimeLib } from "../../../../src/libraries/TimeLib.sol";
 
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
-import { CashModule } from "../../../../src/modules/cash/CashModule.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 
 contract CashModuleTestSetup is SafeTestSetup {

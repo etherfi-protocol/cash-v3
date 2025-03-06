@@ -8,7 +8,7 @@ import { SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
 import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
-import { CashModule, CashModuleTestSetup, CashVerificationLib, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { ICashModule, CashModuleTestSetup, CashVerificationLib, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleCashbackTest is CashModuleTestSetup {
     using Math for uint256;
@@ -109,7 +109,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         safeTiers[0] = SafeTiers.Chad;
 
         vm.prank(makeAddr("nonEtherFiWallet"));
-        vm.expectRevert(CashModule.OnlyEtherFiWallet.selector);
+        vm.expectRevert(ICashModule.OnlyEtherFiWallet.selector);
         cashModule.setSafeTier(safes, safeTiers);
     }
 
@@ -124,7 +124,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         cashModule.setSafeTier(safes, safeTiers);
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(abi.encodeWithSelector(CashModule.AlreadyInSameTier.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ICashModule.AlreadyInSameTier.selector, 0));
         cashModule.setSafeTier(safes, safeTiers);
     }
 
@@ -137,7 +137,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         safeTiers[0] = SafeTiers.Chad;
 
         vm.prank(etherFiWallet);
-        vm.expectRevert();
+        vm.expectRevert(ICashModule.ArrayLengthMismatch.selector);
         cashModule.setSafeTier(safes, safeTiers);
     }
 
@@ -193,7 +193,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         percentages[0] = 500; // 5%
 
         vm.prank(makeAddr("nonController"));
-        vm.expectRevert(CashModule.OnlyCashModuleController.selector);
+        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
         cashModule.setTierCashbackPercentage(tiers, percentages);
     }
 
@@ -206,7 +206,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         percentages[0] = 500; // 5%
 
         vm.prank(owner);
-        vm.expectRevert(ModuleBase.ArrayLengthMismatch.selector);
+        vm.expectRevert(ICashModule.ArrayLengthMismatch.selector);
         cashModule.setTierCashbackPercentage(tiers, percentages);
     }
 
@@ -218,7 +218,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         percentages[0] = 1100; // 11%, exceeds 10% max
 
         vm.prank(owner);
-        vm.expectRevert(CashModule.CashbackPercentageGreaterThanMaxAllowed.selector);
+        vm.expectRevert(ICashModule.CashbackPercentageGreaterThanMaxAllowed.selector);
         cashModule.setTierCashbackPercentage(tiers, percentages);
     }
 
@@ -244,7 +244,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         bytes memory signature = _setCashbackSplitToSafePercentage(currentSplitBps);
 
         vm.prank(address(safe));
-        vm.expectRevert(CashModule.SplitAlreadyTheSame.selector);
+        vm.expectRevert(ICashModule.SplitAlreadyTheSame.selector);
         cashModule.setCashbackSplitToSafeBps(address(safe), currentSplitBps, owner1, signature);
     }
 
@@ -253,7 +253,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         bytes memory signature = _setCashbackSplitToSafePercentage(invalidSplitBps);
 
         vm.prank(address(safe));
-        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        vm.expectRevert(ICashModule.InvalidInput.selector);
         cashModule.setCashbackSplitToSafeBps(address(safe), invalidSplitBps, owner1, signature);
     }
 

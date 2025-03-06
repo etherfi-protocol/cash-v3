@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Mode } from "../../../../src/interfaces/ICashModule.sol";
-import { CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { ICashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleModeTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -44,7 +44,7 @@ contract CashModuleModeTest is CashModuleTestSetup {
 
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        vm.expectRevert(CashModule.ModeAlreadySet.selector);
+        vm.expectRevert(ICashModule.ModeAlreadySet.selector);
         cashModule.setMode(address(safe), mode, owner1, signature);
     }
 }

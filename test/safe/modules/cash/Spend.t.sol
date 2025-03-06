@@ -13,7 +13,7 @@ import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
-import { CashModule, SpendingLimitLib } from "../../../../src/modules/cash/CashModule.sol";
+import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
@@ -75,7 +75,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Try to spend again with the same txId
         vm.prank(etherFiWallet);
-        vm.expectRevert(abi.encodeWithSelector(CashModule.TransactionAlreadyCleared.selector));
+        vm.expectRevert(ICashModule.TransactionAlreadyCleared.selector);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
     }
 
@@ -84,13 +84,13 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         address mockToken = makeAddr("mockToken");
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(abi.encodeWithSelector(CashModule.UnsupportedToken.selector));
+        vm.expectRevert(ICashModule.UnsupportedToken.selector);
         cashModule.spend(address(safe), address(0), txId, mockToken, 100e6);
     }
 
     function test_spend_reverts_whenAmountIsZero() public {
         vm.prank(etherFiWallet);
-        vm.expectRevert(abi.encodeWithSelector(CashModule.AmountZero.selector));
+        vm.expectRevert(ICashModule.AmountZero.selector);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 0);
     }
 
@@ -98,7 +98,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         address notEtherFiWallet = makeAddr("notEtherFiWallet");
 
         vm.prank(notEtherFiWallet);
-        vm.expectRevert(abi.encodeWithSelector(CashModule.OnlyEtherFiWallet.selector));
+        vm.expectRevert(abi.encodeWithSelector(ICashModule.OnlyEtherFiWallet.selector));
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 100e6);
     }
 
@@ -233,7 +233,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         _setMode(Mode.Debit);
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(CashModule.BorrowingsExceedMaxBorrowAfterSpending.selector);
+        vm.expectRevert(ICashModule.BorrowingsExceedMaxBorrowAfterSpending.selector);
         cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), safeBalUsdc);
     }
 }

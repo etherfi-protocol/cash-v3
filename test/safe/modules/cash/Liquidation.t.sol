@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
-import { CashEventEmitter, CashModule, CashModuleTestSetup, Mode } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, CashModuleTestSetup, Mode } from "./CashModuleTestSetup.t.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract CashModuleLiquidationTest is CashModuleTestSetup {

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Mode } from "../../../../src/interfaces/ICashModule.sol";
 
 import { SpendingLimit, SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
-import { CashModule, CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleSpendingLimitTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
