@@ -118,12 +118,6 @@ struct SafeCashData {
     uint256 totalCashbackEarnedInUsd;
 }
 
-/**
- * @title ICashModule
- * @notice Interface for interacting with the CashModule contract
- * @dev Provides methods to retrieve Safe data and relevant contract references
- * @author ether.fi
- */
 interface ICashModule {
     /// @notice Error thrown when a transaction has already been cleared
     error TransactionAlreadyCleared();
@@ -145,70 +139,368 @@ interface ICashModule {
 
     /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
     error BorrowingsExceedMaxBorrowAfterSpending();
+
+    /// @notice Error thrown when a recipient address is zero
     error RecipientCannotBeAddressZero();
+
+    /// @notice Error thrown when caller doesn't have the Cash Module Controller role
     error OnlyCashModuleController();
+
+    /// @notice Error thrown when a withdrawal is attempted before the delay period
     error CannotWithdrawYet();
+
+    /// @notice Error thrown when a withdrawal recipient is not whitelisted
     error OnlyWhitelistedWithdrawRecipients();
+
+    /// @notice Error thrown when signature verification fails
     error InvalidSignatures();
+
+    /// @notice Error thrown when trying to set a mode that's already active
     error ModeAlreadySet();
+
+    /// @notice Error thrown when a non-DebtManager contract calls restricted functions
     error OnlyDebtManager();
+
+    /// @notice Error thrown when trying to set a tier that's already set
     error AlreadyInSameTier(uint256 index);
+
+    /// @notice Error thrown when a cashback percentage exceeds max allowed
     error CashbackPercentageGreaterThanMaxAllowed();
+
+    /// @notice Error thrown when trying to set a split percentage that's already set
     error SplitAlreadyTheSame();
+
     /// @notice Throws when the msg.sender is not an admin to the safe
     error OnlySafeAdmin();
+
     /// @notice Thrown when the input is invalid
     error InvalidInput();
+
     /// @notice Thrown when the signature verification fails
     error InvalidSignature();
+
     /// @notice Thrown when there is an array length mismatch
     error ArrayLengthMismatch();
+
     /// @notice Thrown when the caller is not an EtherFi Safe
     error OnlyEtherFiSafe();
 
+    /**
+     * @notice Role identifier for EtherFi wallet access control
+     * @return The role identifier as bytes32
+     */
     function ETHER_FI_WALLET_ROLE() external pure returns (bytes32);
+
+    /**
+     * @notice Role identifier for Cash Module controller access
+     * @return The role identifier as bytes32
+     */
     function CASH_MODULE_CONTROLLER_ROLE() external pure returns (bytes32);
+
+    /**
+     * @notice Maximum allowed cashback percentage (10%)
+     * @return The maximum percentage in basis points
+     */
     function MAX_CASHBACK_PERCENTAGE() external pure returns (uint256);
+
+    /**
+     * @notice Represents 100% in basis points (10,000)
+     * @return 100% value in basis points
+     */
     function HUNDRED_PERCENT_IN_BPS() external pure returns (uint256);
 
-    // Core view functions
+    /**
+     * @notice Retrieves cash configuration data for a Safe
+     * @param safe Address of the EtherFi Safe
+     * @return Data structure containing Safe cash configuration
+     * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
+     */
     function getData(address safe) external view returns (SafeData memory);
+
+    /**
+     * @notice Checks if a transaction has been cleared
+     * @param safe Address of the EtherFi Safe
+     * @param txId Transaction identifier
+     * @return Boolean indicating if the transaction is cleared
+     * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
+     */
     function transactionCleared(address safe, bytes32 txId) external view returns (bool);
+
+    /**
+     * @notice Gets the debt manager contract
+     * @return IDebtManager instance
+     */
     function getDebtManager() external view returns (IDebtManager);
+
+    /**
+     * @notice Gets the settlement dispatcher address
+     * @dev The settlement dispatcher processes transactions in debit mode
+     * @return The address of the settlement dispatcher
+     */
     function getSettlementDispatcher() external view returns (address);
+
+    /**
+     * @notice Gets the cashback percentage and split percentage for a safe
+     * @dev Returns the tier-based cashback percentage and safe's split configuration
+     * @param safe Address of the EtherFi Safe
+     * @return Cashback percentage in basis points (100 = 1%)
+     * @return Split percentage to safe in basis points (5000 = 50%)
+     * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
+     */
     function getSafeCashbackPercentageAndSplit(address safe) external view returns (uint256, uint256);
+
+    /**
+     * @notice Returns the EtherFiDataProvider contract reference
+     * @dev Used to access global system configuration and services
+     * @return The EtherFiDataProvider contract instance
+     */
     function etherFiDataProvider() external view returns (IEtherFiDataProvider);
+
+    /**
+     * @notice Gets the pending cashback amount for an account in USD
+     * @dev Returns the amount of cashback waiting to be claimed
+     * @param account Address of the account (safe or spender)
+     * @return Pending cashback amount in USD
+     */
     function getPendingCashback(address account) external view returns (uint256);
+
+    /**
+     * @notice Gets the current delay settings for the module
+     * @return withdrawalDelay Delay in seconds before a withdrawal can be finalized
+     * @return spendLimitDelay Delay in seconds before spending limit changes take effect
+     * @return modeDelay Delay in seconds before a mode change takes effect
+     */
     function getDelays() external view returns (uint64, uint64, uint64);
+
+    /**
+     * @notice Gets the current operating mode of a safe
+     * @dev Considers pending mode changes that have passed their delay
+     * @param safe Address of the EtherFi Safe
+     * @return The current operating mode (Debit or Credit)
+     */
     function getMode(address safe) external view returns (Mode);
+
+    /**
+     * @notice Gets the timestamp when a pending credit mode change will take effect
+     * @dev Returns 0 if no pending change or if the safe uses debit mode
+     * @param safe Address of the EtherFi Safe
+     * @return Timestamp when credit mode will take effect, or 0 if not applicable
+     */
     function incomingCreditModeStartTime(address safe) external view returns (uint256);
+
+    /**
+     * @notice Gets all whitelisted withdrawal recipients for a safe
+     * @dev Returns an array of approved addresses
+     * @param safe Address of the EtherFi Safe
+     * @return Array of whitelisted recipient addresses
+     */
     function getWithdrawRecipients(address safe) external view returns (address[] memory);
+
+    /**
+     * @notice Checks if an address is a whitelisted withdrawal recipient for a safe
+     * @dev Returns true if the address is approved to receive withdrawals
+     * @param safe Address of the EtherFi Safe
+     * @param account Address to check
+     * @return Boolean indicating if the account is whitelisted
+     */
     function isWhitelistedWithdrawRecipient(address safe, address account) external view returns (bool);
+
+    /**
+     * @notice Gets the pending withdrawal amount for a token
+     * @dev Only callable for valid EtherFi Safe addresses
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to check
+     * @return Amount of tokens pending withdrawal
+     * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
+     */
     function getPendingWithdrawalAmount(address safe, address token) external view returns (uint256);
 
-    // Setup and initialization
+    /**
+     * @notice Sets up a new Safe's Cash Module with initial configuration
+     * @dev Creates default spending limits and sets initial mode to Debit with 50% cashback split
+     * @param data The encoded initialization data containing daily limit, monthly limit, and timezone offset
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     */
     function setupModule(bytes calldata data) external;
+
+    /**
+     * @notice Initializes the CashModule contract
+     * @dev Sets up the role registry, debt manager, settlement dispatcher, and data providers
+     * @param _roleRegistry Address of the role registry contract
+     * @param _debtManager Address of the debt manager contract
+     * @param _settlementDispatcher Address of the settlement dispatcher
+     * @param _cashbackDispatcher Address of the cashback dispatcher
+     * @param _cashEventEmitter Address of the cash event emitter
+     * @param _cashModuleSetters Address of the cash module setters contract
+     * @custom:throws InvalidInput if any essential address is zero
+     */
     function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
 
-    // Setter functions
+    /**
+     * @notice Sets the tier for one or more safes
+     * @dev Assigns tiers which determine cashback percentages
+     * @param safes Array of safe addresses to update
+     * @param tiers Array of tiers to assign to the corresponding safe addresses
+     * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
+     * @custom:throws ArrayLengthMismatch if arrays have different lengths
+     * @custom:throws OnlyEtherFiSafe if any address is not a valid EtherFi Safe
+     * @custom:throws AlreadyInSameTier if a safe is already in the specified tier
+     */
     function setSafeTier(address[] memory safes, SafeTiers[] memory tiers) external;
+
+    /**
+     * @notice Sets the cashback percentage for different tiers
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param tiers Array of tiers to configure
+     * @param cashbackPercentages Array of cashback percentages in basis points (100 = 1%)
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws ArrayLengthMismatch if arrays have different lengths
+     * @custom:throws CashbackPercentageGreaterThanMaxAllowed if any percentage exceeds the maximum allowed
+     */
     function setTierCashbackPercentage(SafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external;
+
+    /**
+     * @notice Sets the percentage of cashback that goes to the safe (versus the spender)
+     * @dev Can only be called by the safe itself with a valid admin signature
+     * @param safe Address of the safe to configure
+     * @param splitInBps Percentage in basis points to allocate to the safe (10000 = 100%)
+     * @param signer Address of the safe admin signing the transaction
+     * @param signature Signature from the signer authorizing this change
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws OnlySafeAdmin if signer is not a safe admin
+     * @custom:throws SplitAlreadyTheSame if the new split is the same as the current one
+     * @custom:throws InvalidInput if the split percentage exceeds 100%
+     * @custom:throws InvalidSignatures if signature verification fails
+     */
     function setCashbackSplitToSafeBps(address safe, uint256 splitInBps, address signer, bytes calldata signature) external;
+
+    /**
+     * @notice Sets the time delays for withdrawals, spending limit changes, and mode changes
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param withdrawalDelay Delay in seconds before a withdrawal can be finalized
+     * @param spendLimitDelay Delay in seconds before spending limit changes take effect
+     * @param modeDelay Delay in seconds before a mode change takes effect
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     */
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external;
+
+    /**
+     * @notice Sets the operating mode for a safe
+     * @dev Switches between Debit and Credit modes, with possible delay for Credit mode
+     * @param safe Address of the EtherFi Safe
+     * @param mode The target mode (Debit or Credit)
+     * @param signer Address of the safe admin signing the transaction
+     * @param signature Signature from the signer authorizing this mode change
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws OnlySafeAdmin if signer is not a safe admin
+     * @custom:throws ModeAlreadySet if the safe is already in the requested mode
+     * @custom:throws InvalidSignatures if signature verification fails
+     */
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external;
+
+    /**
+     * @notice Updates the spending limits for a safe
+     * @dev Can only be called by the safe itself with a valid admin signature
+     * @param safe Address of the EtherFi Safe
+     * @param dailyLimitInUsd New daily spending limit in USD
+     * @param monthlyLimitInUsd New monthly spending limit in USD
+     * @param signer Address of the safe admin signing the transaction
+     * @param signature Signature from the signer authorizing this update
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws OnlySafeAdmin if signer is not a safe admin
+     * @custom:throws InvalidSignatures if signature verification fails
+     */
     function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external;
 
-    // Debit/Credit operations
+    /**
+     * @notice Processes a spending transaction
+     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
+     * @param safe Address of the EtherFi Safe
+     * @param spender Address of the spender initiating the transaction
+     * @param txId Transaction identifier
+     * @param token Address of the token to spend
+     * @param amountInUsd Amount to spend in USD
+     * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
+     * @custom:throws OnlyEtherFiSafe if the safe is not a valid EtherFi Safe
+     * @custom:throws InvalidInput if spender is the safe
+     * @custom:throws TransactionAlreadyCleared if the transaction was already processed
+     * @custom:throws UnsupportedToken if the token is not supported
+     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws BorrowingsExceedMaxBorrowAfterSpending if spending would exceed borrowing limits
+     */
     function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd) external;
+
+    /**
+     * @notice Repays borrowed tokens
+     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to repay
+     * @param amountInUsd Amount to repay in USD
+     * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
+     * @custom:throws OnlyEtherFiSafe if the safe is not a valid EtherFi Safe
+     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws InsufficientBalance if there is not enough balance for the operation
+     */
     function repay(address safe, address token, uint256 amountInUsd) external;
 
-    // Withdrawal operations
+    /**
+     * @notice Configures whitelist of approved withdrawal recipients
+     * @dev Only callable by the safe itself with valid signatures
+     * @param safe Address of the EtherFi Safe
+     * @param withdrawRecipients Array of recipient addresses to configure
+     * @param shouldWhitelist Array of boolean flags indicating whether to add or remove each recipient
+     * @param signers Array of safe admin addresses signing the transaction
+     * @param signatures Array of signatures from the signers
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws InvalidSignatures if signature verification fails
+     */
     function configureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external;
+
+    /**
+     * @notice Requests a withdrawal of tokens to a whitelisted recipient
+     * @dev Creates a pending withdrawal request that can be processed after the delay period
+     * @dev Can only be done by the quorum of owners of the safe
+     * @param safe Address of the EtherFi Safe
+     * @param tokens Array of token addresses to withdraw
+     * @param amounts Array of token amounts to withdraw
+     * @param recipient Address to receive the withdrawn tokens (must be whitelisted)
+     * @param signers Array of safe owner addresses signing the transaction
+     * @param signatures Array of signatures from the safe owners
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws InvalidSignatures if signature verification fails
+     * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
+     * @custom:throws OnlyWhitelistedWithdrawRecipients if recipient is not whitelisted
+     * @custom:throws ArrayLengthMismatch if arrays have different lengths
+     * @custom:throws InsufficientBalance if any token has insufficient balance
+     */
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external;
+
+    /**
+     * @notice Processes a pending withdrawal request after the delay period
+     * @dev Executes the token transfers and clears the request
+     * @param safe Address of the EtherFi Safe
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws CannotWithdrawYet if the withdrawal delay period hasn't passed
+     */
     function processWithdrawal(address safe) external;
 
-    // Liquidation functions
+    /**
+     * @notice Prepares a safe for liquidation by canceling any pending withdrawals
+     * @dev Only callable by the DebtManager
+     * @param safe Address of the EtherFi Safe being liquidated
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
     function preLiquidate(address safe) external;
+
+    /**
+     * @notice Executes post-liquidation logic to transfer tokens to the liquidator
+     * @dev Only callable by the DebtManager after a successful liquidation
+     * @param safe Address of the EtherFi Safe being liquidated
+     * @param liquidator Address that will receive the liquidated tokens
+     * @param tokensToSend Array of token data with amounts to send to the liquidator
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
     function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
 
     /**
@@ -218,4 +510,13 @@ interface ICashModule {
      * @dev Nonces are used to prevent signature replay attacks
      */
     function getNonce(address safe) external view returns (uint256);
+
+    /**
+     * @notice Sets the new CashModuleSetters implementation address
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param newCashModuleSetters Address of the new CashModuleSetters implementation
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws InvalidInput if newCashModuleSetters = address(0)
+     */
+    function setCashModuleSettersAddress(address newCashModuleSetters) external;
 }

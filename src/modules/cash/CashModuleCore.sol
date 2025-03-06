@@ -76,6 +76,19 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Sets the new CashModuleSetters implementation address
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param newCashModuleSetters Address of the new CashModuleSetters implementation
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws InvalidInput if newCashModuleSetters = address(0)
+     */
+    function setCashModuleSettersAddress(address newCashModuleSetters) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (newCashModuleSetters == address(0)) revert InvalidInput();
+        _getCashModuleStorage().cashModuleSetters = newCashModuleSetters;
+    }
+
+    /**
      * @notice Gets the cashback percentage and split percentage for a safe
      * @dev Returns the tier-based cashback percentage and safe's split configuration
      * @param safe Address of the EtherFi Safe
