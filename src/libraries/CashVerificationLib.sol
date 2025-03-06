@@ -4,9 +4,9 @@ pragma solidity ^0.8.24;
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
+import { Mode } from "../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { CashModule } from "../modules/cash/CashModule.sol";
-import {Mode} from "../interfaces/ICashModule.sol";
 import { SignatureUtils } from "./SignatureUtils.sol";
 
 /**
