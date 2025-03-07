@@ -204,6 +204,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _configureOwners(owners, shouldAdd);
+        _configureAdmin(owners, shouldAdd);
     }
 
     /**

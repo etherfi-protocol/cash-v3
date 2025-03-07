@@ -140,6 +140,29 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), newWithdrawalAmt);
     }
 
+    function test_requestWithdrawal_succeeds_whenNoWhitelistedAddress() public {
+        address[] memory withdrawRecipients = new address[](1);
+        withdrawRecipients[0] = withdrawRecipient;
+        bool[] memory shouldAdd = new bool[](1);
+        shouldAdd[0] = false;
+
+        // After this no withdraw recipient exists so can withdraw to any address
+        _configureWithdrawRecipients(withdrawRecipients, shouldAdd);
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, owner1);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+    }
+
+
     function test_requestWithdrawal_fails_whenWithdrawingToNonWhitelistRecipient() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount);

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+
 import { EtherFiSafe, EtherFiSafeFactory, SafeTestSetup } from "./SafeTestSetup.t.sol";
+import { BeaconFactory } from "../../src/beacon-factory/BeaconFactory.sol";
 
 contract SafeFactoryTest is SafeTestSetup {
     address[] public owners;
@@ -208,4 +211,109 @@ contract SafeFactoryTest is SafeTestSetup {
 
         vm.stopPrank();
     }
+
+    function test_upgradeBeaconImplementation_succeeds() public {
+        vm.startPrank(owner);
+        
+        address newImplementation = address(new EtherFiSafe(address(dataProvider)));
+        // Get the current implementation before upgrade
+        address oldImpl = UpgradeableBeacon(safeFactory.beacon()).implementation();
+        
+        // Verify old implementation is not the same as new implementation
+        assertNotEq(oldImpl, newImplementation);
+        
+        // Check for event emission
+        vm.expectEmit(true, true, true, true);
+        emit BeaconFactory.BeaconImplemenationUpgraded(oldImpl, newImplementation);
+        
+        // Upgrade the implementation
+        safeFactory.upgradeBeaconImplementation(newImplementation);
+        
+        // Verify the implementation was updated
+        address updatedImpl = UpgradeableBeacon(safeFactory.beacon()).implementation();
+        assertEq(updatedImpl, newImplementation);
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_reverts_whenCallerIsNotOwner() public {
+        vm.startPrank(notOwner);
+        
+        address newImplementation = address(new EtherFiSafe(address(dataProvider)));
+        // Expect the upgrade to revert because caller is not the owner
+        vm.expectRevert(BeaconFactory.OnlyRoleRegistryOwner.selector);
+        safeFactory.upgradeBeaconImplementation(newImplementation);
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_reverts_whenNewImplIsZeroAddress() public {
+        vm.startPrank(owner);
+        
+        // Expect the upgrade to revert because new implementation is zero address
+        vm.expectRevert(BeaconFactory.InvalidInput.selector);
+        safeFactory.upgradeBeaconImplementation(address(0));
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_affectsNewDeployments() public {
+        // First upgrade the implementation
+        address newImplementation = address(new EtherFiSafe(address(dataProvider)));
+        vm.startPrank(owner);
+        safeFactory.upgradeBeaconImplementation(newImplementation);
+        vm.stopPrank();
+        
+        // Now deploy a new safe
+        vm.startPrank(owner);
+        bytes32 newSalt = keccak256("newImplementationSafe");
+        
+        address[] memory safeOwners = new address[](1);
+        safeOwners[0] = owner1;
+        
+        address[] memory noModules = new address[](0);
+        bytes[] memory noModuleSetupData = new bytes[](0);
+        
+        safeFactory.deployEtherFiSafe(newSalt, safeOwners, noModules, noModuleSetupData, 1);
+        vm.stopPrank();
+        
+        // Get the deployed safe address
+        address newSafeAddress = safeFactory.getDeterministicAddress(newSalt);
+        
+        // Verify the safe was deployed with the new implementation
+        // This is an indirect test as we can't directly check which implementation a proxy uses
+        // but we can verify the safe works as expected
+        EtherFiSafe newSafe = EtherFiSafe(newSafeAddress);
+        assertTrue(newSafe.isOwner(owner1));
+        assertEq(newSafe.getThreshold(), 1);
+    }
+        
+    function test_upgradeBeaconImplementation_maintainsStorage() public {
+        // Set up the initial state
+        vm.startPrank(owner);
+
+        address newImplementation = address(new EtherFiSafe(address(dataProvider)));
+        
+        // Deploy a safe with minimum configuration
+        bytes32 testSalt = keccak256("storageTestSafe");
+        address[] memory initialOwners = new address[](1);
+        initialOwners[0] = owner1;
+        
+        address[] memory noModules = new address[](0);
+        bytes[] memory noModuleSetupData = new bytes[](0);
+        
+        safeFactory.deployEtherFiSafe(testSalt, initialOwners, noModules, noModuleSetupData, 1);
+        address safeAddress = safeFactory.getDeterministicAddress(testSalt);
+        EtherFiSafe testSafe = EtherFiSafe(safeAddress);
+        
+        // Upgrade the implementation
+        safeFactory.upgradeBeaconImplementation(newImplementation);
+        
+        // Verify the safe still maintains its state
+        assertTrue(testSafe.isOwner(owner1));
+        assertEq(testSafe.getThreshold(), 1);
+        
+        vm.stopPrank();
+    }
+
 }

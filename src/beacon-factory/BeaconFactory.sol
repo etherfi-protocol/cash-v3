@@ -25,10 +25,10 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.BeaconFactory")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant BeaconFactoryStorageLocation = 0x644210a929ca6ee03d33c1a1fe361b36b5a9728941782cd06b1139e4cae58200;
 
-    /// @notice Emitted when the beacon address is updated
-    /// @param oldBeacon The previous beacon address
-    /// @param newBeacon The new beacon address
-    event BeaconSet(address oldBeacon, address newBeacon);
+    /// @notice Emitted when the implementation in the beacon address is updated
+    /// @param oldImpl The previous impl address
+    /// @param newImpl The new impl address
+    event BeaconImplemenationUpgraded(address oldImpl, address newImpl);
 
     /// @notice Emitted when a new beacon proxy is deployed
     /// @param deployed The address of the newly deployed proxy
@@ -36,6 +36,12 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
 
     /// @notice Thrown when the deployed address doesn't match the predicted address
     error DeployedAddressDifferentFromExpected();
+
+    /// @notice Thrown when input is invalid
+    error InvalidInput();
+    
+    /// @notice Thrown when msg sender does not have owner role on RoleRegistry
+    error OnlyRoleRegistryOwner();
 
     /**
      * @dev Initializes the contract with required parameters
@@ -83,6 +89,23 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
         BeaconFactoryStorage storage $ = _getBeaconFactoryStorage();
         return $.beacon;
     }
+
+    /**
+     * @notice Function to set the new implementation in the beacon contract
+     * @dev Only callable by owner of RoleRegistry
+     * @param _newImpl New implementation for the beacon contract
+     * @custom:throws OnlyRoleRegistryOwner when msg.sender is not the owner of the RoleRegistry contract
+     * @custom:throws InvalidInput when _beacon == address(0)
+     */
+    function upgradeBeaconImplementation(address _newImpl) external {
+        if (msg.sender != roleRegistry().owner()) revert OnlyRoleRegistryOwner();
+        if (_newImpl == address(0)) revert InvalidInput();
+
+        UpgradeableBeacon upgradeableBeacon = UpgradeableBeacon(_getBeaconFactoryStorage().beacon);
+        emit BeaconImplemenationUpgraded(upgradeableBeacon.implementation(), _newImpl);
+        upgradeableBeacon.upgradeTo(_newImpl);
+    }
+
 
     /**
      * @notice Predicts the deterministic address for a given salt

@@ -4,9 +4,9 @@ pragma solidity ^0.8.28;
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Test, console } from "forge-std/Test.sol";
+import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
-
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
@@ -499,5 +499,99 @@ contract TopUpFactoryTest is Test, Constants {
         vm.prank(user);
         vm.expectRevert(RoleRegistry.OnlyUnpauser.selector);
         factory.unpause();
+    }
+
+    function test_upgradeBeaconImplementation_succeeds() public {
+        vm.startPrank(owner);
+        
+        address newImplementation = address(new TopUp());
+        // Get the current implementation before upgrade
+        address oldImpl = UpgradeableBeacon(factory.beacon()).implementation();
+        
+        // Verify old implementation is not the same as new implementation
+        assertNotEq(oldImpl, address(newImplementation));
+        
+        // Check for event emission
+        vm.expectEmit(true, true, true, true);
+        emit BeaconFactory.BeaconImplemenationUpgraded(oldImpl, address(newImplementation));
+        
+        // Upgrade the implementation
+        factory.upgradeBeaconImplementation(address(newImplementation));
+        
+        // Verify the implementation was updated
+        address updatedImpl = UpgradeableBeacon(factory.beacon()).implementation();
+        assertEq(updatedImpl, address(newImplementation));
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_reverts_whenCallerIsNotOwner() public {
+        vm.startPrank(makeAddr("notOwner"));
+
+        address newImplementation = address(new TopUp());
+        
+        // Expect the upgrade to revert because caller is not the owner
+        vm.expectRevert(BeaconFactory.OnlyRoleRegistryOwner.selector);
+        factory.upgradeBeaconImplementation(address(newImplementation));
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_reverts_whenNewImplIsZeroAddress() public {
+        vm.startPrank(owner);
+        
+        // Expect the upgrade to revert because new implementation is zero address
+        vm.expectRevert(BeaconFactory.InvalidInput.selector);
+        factory.upgradeBeaconImplementation(address(0));
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_affectsNewDeployments() public {
+        // First upgrade the implementation
+        vm.startPrank(owner);
+        address newImplementation = address(new TopUp());
+        factory.upgradeBeaconImplementation(address(newImplementation));
+        vm.stopPrank();
+        
+        // Now deploy a new topUp contract
+        vm.startPrank(admin);
+        bytes32 salt = bytes32(uint256(1));
+        factory.deployTopUpContract(salt);
+        vm.stopPrank();
+        
+        // Get the deployed topUp address
+        address deployedTopUp = factory.getDeterministicAddress(salt);
+        
+        // Verify the topUp contract was deployed correctly
+        assertTrue(factory.isTopUpContract(deployedTopUp), "Address should be a valid TopUp contract");
+        
+        // Check if the topUp is properly initialized (owner should be factory)
+        TopUp topUp = TopUp(deployedTopUp);
+        assertEq(topUp.owner(), address(factory), "Factory should be TopUp owner");
+    }
+    
+    function test_upgradeBeaconImplementation_doesNotAffectExistingDeployments() public {
+        // First deploy a topUp contract
+        vm.startPrank(admin);
+        bytes32 salt = bytes32(uint256(1));
+        factory.deployTopUpContract(salt);
+        address deployedTopUp = factory.getDeterministicAddress(salt);
+        vm.stopPrank();
+        
+        // Note the original topUp state
+        TopUp topUp = TopUp(deployedTopUp);
+        address originalOwner = topUp.owner();
+        address newImplementation = address(new TopUp());
+        // Now upgrade the implementation
+        vm.prank(owner);
+        factory.upgradeBeaconImplementation(address(newImplementation));
+        
+        // Verify the existing topUp still has the same state
+        address postUpgradeOwner = topUp.owner();
+        
+        // Compare owner
+        assertEq(originalOwner, postUpgradeOwner, "Owner should remain the same after upgrade");
+        assertEq(postUpgradeOwner, address(factory), "Owner should still be the factory");
     }
 }

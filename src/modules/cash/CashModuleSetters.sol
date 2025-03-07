@@ -253,13 +253,14 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param amounts Array of token amounts to withdraw
      * @param recipient Address to receive the withdrawn tokens
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
-     * @custom:throws OnlyWhitelistedWithdrawRecipients if recipient is not whitelisted
+     * @custom:throws OnlyWhitelistedWithdrawRecipients if recipient whitelist is enabled and recipient is not whitelisted 
      */
     function _requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
-        if (!$.safeCashConfig[safe].withdrawRecipients.contains(recipient)) revert OnlyWhitelistedWithdrawRecipients();
+        if ($$.withdrawRecipients.length() != 0 && !$$.withdrawRecipients.contains(recipient)) revert OnlyWhitelistedWithdrawRecipients();
 
         if (tokens.length > 1) tokens.checkDuplicates();
 
@@ -269,7 +270,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         _checkBalance(safe, tokens, amounts);
 
-        $.safeCashConfig[safe].pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
+        $$.pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
         $.cashEventEmitter.emitWithdrawalRequested(safe, tokens, amounts, recipient, finalTime);
 
         _getDebtManager().ensureHealth(safe);

@@ -53,7 +53,7 @@ contract MultiSigTest is SafeTestSetup {
         safe.setThreshold(newThreshold, signers, signatures);
     }
 
-    function test_configureOwners_addsNewOwner() public {
+    function test_configureOwners_addsNewOwnerAndWhitelistsThemAsAdmin() public {
         address newOwner = makeAddr("newOwner");
 
         address[] memory owners = new address[](1);
@@ -64,9 +64,11 @@ contract MultiSigTest is SafeTestSetup {
 
         _configureOwners(owners, shouldAdd);
         assertTrue(safe.isOwner(newOwner));
+
+        assertTrue(roleRegistry.isSafeAdmin(address(safe), newOwner));
     }
 
-    function test_configureOwners_removesExistingOwner() public {
+    function test_configureOwners_removesExistingOwnerAndRemovesThemFromAdmin() public {
         address[] memory owners = new address[](1);
         owners[0] = owner3;
 
@@ -75,6 +77,7 @@ contract MultiSigTest is SafeTestSetup {
 
         _configureOwners(owners, shouldAdd);
         assertFalse(safe.isOwner(owner3));
+        assertFalse(roleRegistry.isSafeAdmin(address(safe), owner3));
     }
 
     function testFuzz_configureOwners_correctlyUpdatesOwnerStatus(address[10] calldata ownerAddresses, bool[10] calldata shouldAddFlags) public {
