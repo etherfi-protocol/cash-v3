@@ -98,7 +98,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 10e6);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 10e6, true);
 
         uint256 nonce = cashModule.getNonce(address(safe));
 

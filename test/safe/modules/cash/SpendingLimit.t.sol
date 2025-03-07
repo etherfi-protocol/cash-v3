@@ -23,7 +23,7 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         assertEq(spendingLimitBefore.spentThisMonth, 0);
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), transferAmount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), transferAmount, true);
 
         spendingLimitBefore = cashLens.applicableSpendingLimit(address(safe));
         assertEq(spendingLimitBefore.spentToday, transferAmount);
@@ -98,19 +98,19 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(safe), 1 ether);
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount, true);
 
         assertEq(cashLens.applicableSpendingLimit(address(safe)).spentToday, amount);
         assertEq(cashLens.applicableSpendingLimit(address(safe)).spentThisMonth, amount);
 
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), dailyLimit - amount + 1);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), dailyLimit - amount + 1, true);
 
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp);
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), dailyLimit - amount + 1);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), dailyLimit - amount + 1, true);
 
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
         // Since the time for renewal is in the past, spentToday should be 0
@@ -119,6 +119,6 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
 
         // Since the time for renewal is in the past, we should be able to spend the whole spending limit again
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), dailyLimit);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), dailyLimit, true);
     }
 }

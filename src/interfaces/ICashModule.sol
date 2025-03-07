@@ -420,6 +420,7 @@ interface ICashModule {
      * @param txId Transaction identifier
      * @param token Address of the token to spend
      * @param amountInUsd Amount to spend in USD
+     * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
      * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
      * @custom:throws OnlyEtherFiSafe if the safe is not a valid EtherFi Safe
      * @custom:throws InvalidInput if spender is the safe
@@ -428,7 +429,7 @@ interface ICashModule {
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws BorrowingsExceedMaxBorrowAfterSpending if spending would exceed borrowing limits
      */
-    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd) external;
+    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd, bool shouldReceiveCashback) external;
 
     /**
      * @notice Repays borrowed tokens

@@ -72,7 +72,7 @@ contract CashModuleCore is CashModuleStorageContract {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         $.mode = Mode.Debit;
-        $.cashbackSplitToSafePercentage = 5000; // 50%
+        $.cashbackSplitToSafePercentage = 0; // 0% goes to safe, 100% goes to spender by default
     }
 
     /**
@@ -271,12 +271,13 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param txId Transaction identifier
      * @param token Address of the token to spend
      * @param amountInUsd Amount to spend in USD
+     * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
      * @custom:throws UnsupportedToken if the token is not supported
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd) external onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd, bool shouldReceiveCashback) external onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         IDebtManager debtManager = $.debtManager;
@@ -294,7 +295,7 @@ contract CashModuleCore is CashModuleStorageContract {
         $$.spendingLimit.spend(amountInUsd);
 
         _retrievePendingCashback($, safe, spender);
-        _spend($, debtManager, safe, spender, token, amountInUsd, amount);
+        _spend($, debtManager, safe, spender, token, amountInUsd, amount, shouldReceiveCashback);
     }
 
     /**
@@ -334,9 +335,10 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to spend
      * @param amount Amount of tokens to spend
+     * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
      * @custom:throws BorrowingsExceedMaxBorrowAfterSpending if spending would exceed borrowing limits
      */
-    function _spend(CashModuleStorage storage $, IDebtManager debtManager, address safe, address spender, address token, uint256 amountInUsd, uint256 amount) internal {
+    function _spend(CashModuleStorage storage $, IDebtManager debtManager, address safe, address spender, address token, uint256 amountInUsd, uint256 amount, bool shouldReceiveCashback) internal {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         address[] memory to = new address[](1);
         bytes[] memory data = new bytes[](1);
@@ -370,7 +372,7 @@ contract CashModuleCore is CashModuleStorageContract {
             IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
         }
 
-        _cashback($, safe, spender, amountInUsd);
+        if (shouldReceiveCashback) _cashback($, safe, spender, amountInUsd);
         $.cashEventEmitter.emitSpend(safe, token, amount, amountInUsd, $$.mode);
     }
 

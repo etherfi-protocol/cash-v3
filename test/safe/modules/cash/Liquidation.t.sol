@@ -26,7 +26,7 @@ contract CashModuleLiquidationTest is CashModuleTestSetup {
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), borrowAmt);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), borrowAmt, true);
     }
 
     function test_liquidation_works() public {

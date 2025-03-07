@@ -23,7 +23,7 @@ contract CashModuleRepayTest is CashModuleTestSetup {
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 2;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), borrowAmt);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), borrowAmt, true);
     }
 
     function test_repay_works() public {

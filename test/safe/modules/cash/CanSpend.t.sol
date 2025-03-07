@@ -155,7 +155,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256 amountToSpend = 100e6;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amountToSpend);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amountToSpend, true);
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, address(usdcScroll), amountToSpend);
         assertEq(canSpend, false);
@@ -179,7 +179,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256 amountToSpend = 100e6;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), dailyLimitInUsd - amountToSpend + 1);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), dailyLimitInUsd - amountToSpend + 1, true);
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), keccak256("newTxId"), address(usdcScroll), amountToSpend);
         assertEq(canSpend, false);
@@ -191,7 +191,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256 amountToSpend = 100e6;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), dailyLimitInUsd - amountToSpend + 1);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), dailyLimitInUsd - amountToSpend + 1, true);
 
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), keccak256("newTxId"), address(usdcScroll), amountToSpend);
@@ -217,7 +217,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (, uint64 spendingLimitDelay,) = cashModule.getDelays();
         vm.warp(block.timestamp + spendingLimitDelay + 1);
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 1);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 1, true);
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), keccak256("newTxId"), address(usdcScroll), amountToSpend);
         assertEq(canSpend, false);
@@ -237,7 +237,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (, uint64 spendingLimitDelay,) = cashModule.getDelays();
         vm.warp(block.timestamp + spendingLimitDelay + 1);
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 1);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 1, true);
 
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
 
@@ -251,7 +251,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         uint256 amount = 100e6;
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount, true);
 
         _updateSpendingLimit(amount - 1, 1 ether);
 
@@ -267,7 +267,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         uint256 amount = 100e6;
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount, true);
 
         _updateSpendingLimit(amount - 1, 1 ether);
 
