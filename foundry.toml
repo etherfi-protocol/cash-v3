@@ -1,0 +1,33 @@
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+libs = ["lib"]
+solc = "0.8.28" 
+optimizer = true
+optimizer_runs = 100000
+evm_version = "cancun" 
+gas_reports = ["*"]
+bytecode_hash = "none"
+fs_permissions = [{ access = "read-write", path = "./" }]
+extra_output = ["storageLayout"]
+
+[rpc_endpoints]
+mainnet = "${MAINNET_RPC}"
+scroll = "${SCROLL_RPC}"
+base = "${BASE_RPC}"
+
+[etherscan]
+mainnet = { key = "${MAINNET_ETHERSCAN_KEY}" }
+scroll = { key = "${SCROLLSCAN_KEY}" }
+base = { key = "${BASESCAN_KEY}" }
+
+[fmt]
+line_length = 500
+tab_width = 4
+bracket_spacing = true
+int_types = "long"
+quote_style = "double"
+number_underscore = "thousands"
+wrap_comments = true
+sort_imports = true
