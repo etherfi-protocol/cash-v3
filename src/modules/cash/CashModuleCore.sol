@@ -42,7 +42,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param _debtManager Address of the debt manager contract
      * @param _settlementDispatcher Address of the settlement dispatcher
      */
-    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external {
+    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
 
         CashModuleStorage storage $ = _getCashModuleStorage();

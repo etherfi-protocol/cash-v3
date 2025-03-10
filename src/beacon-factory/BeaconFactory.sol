@@ -48,7 +48,7 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
      * @param _roleRegistry Address of the role registry contract
      * @param _beaconImpl Address of the initial implementation contract
      */
-    function __BeaconFactory_initialize(address _roleRegistry, address _beaconImpl) internal {
+    function __BeaconFactory_initialize(address _roleRegistry, address _beaconImpl) internal onlyInitializing {
         __UpgradeableProxy_init(_roleRegistry);
         __Pausable_init();
         BeaconFactoryStorage storage $ = _getBeaconFactoryStorage();

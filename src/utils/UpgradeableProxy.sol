@@ -34,7 +34,7 @@ contract UpgradeableProxy is UUPSUpgradeable {
      * @dev Initializes the contract with Role Registry
      * @param _roleRegistry Address of the role registry contract
      */
-    function __UpgradeableProxy_init(address _roleRegistry) internal {
+    function __UpgradeableProxy_init(address _roleRegistry) internal onlyInitializing {
         UpgradeableProxyStorage storage $ = _getUpgradeableProxyStorage();
         $.roleRegistry = IRoleRegistry(_roleRegistry);
     }
