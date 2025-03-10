@@ -34,9 +34,10 @@ contract TopUpFactoryTest is Test, Constants {
     IERC20 weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IERC20 weETH = IERC20(0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee);
     IERC20 usdc = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
-
+    
     address weETHOftAddress = 0xcd2eb13D6831d4602D80E5db9230A57596CDCA63;
     address usdcStargatePool = 0xc026395860Db2d07ee33e05fE50ed7bD583189C7;
+    address ethStargatePool = 0x77b2043768d28E9C9aB44E1aBfC95944bcE57931;
 
     function setUp() public {
         vm.createSelectFork("https://ethereum-rpc.publicnode.com");
@@ -65,14 +66,15 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.stopPrank();
 
-        address[] memory tokens = new address[](2);
+        address[] memory tokens = new address[](3);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
+        tokens[2] = address(ETH);
 
-        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](2);
+        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](3);
         tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(usdcStargatePool) });
-
         tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
+        tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
 
         vm.prank(admin);
         factory.setTokenConfig(tokens, tokenConfigs);
@@ -225,13 +227,15 @@ contract TopUpFactoryTest is Test, Constants {
         address topUpAddr = factory.getDeterministicAddress(salt);
 
         // Test topUp contract functionality
-        address[] memory tokens = new address[](2);
+        address[] memory tokens = new address[](3);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
+        tokens[2] = address(ETH);
 
         // Send some tokens and ETH to topUp contract
         deal(address(usdc), topUpAddr, 100);
         deal(address(weETH), topUpAddr, 1 ether);
+        deal(topUpAddr, 1 ether);
 
         // Test processTopUp
         factory.processTopUp(tokens, 0, 1);
@@ -239,8 +243,10 @@ contract TopUpFactoryTest is Test, Constants {
         // Verify balances
         assertEq(usdc.balanceOf(topUpAddr), 0, "TopUp contract should have 0 USDC");
         assertEq(weETH.balanceOf(topUpAddr), 0, "TopUp contract should have 0 weETH");
+        assertEq(address(topUpAddr).balance, 0, "TopUp contract should have 0 ETH");
         assertEq(usdc.balanceOf(address(factory)), 100, "Factory should have received USDC");
         assertEq(weETH.balanceOf(address(factory)), 1 ether, "Factory should have received weETH");
+        assertEq(address(factory).balance, 1 ether, "Factory should have received ETH");
     }
 
     /// @dev Test processTopUp with invalid inputs
@@ -429,6 +435,15 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
+        factory.bridge{ value: fee }(token);
+    }
+
+    function test_bridge_succeeds_withEth() public {
+        address token = ETH;
+        uint256 amount = 1e18;
+        deal(address(factory), amount);
+        (, uint256 fee) = factory.getBridgeFee(token);
+        
         factory.bridge{ value: fee }(token);
     }
 

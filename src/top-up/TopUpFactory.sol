@@ -6,7 +6,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { BeaconFactory, UpgradeableBeacon } from "../beacon-factory/BeaconFactory.sol";
 import { DelegateCallLib } from "../libraries/DelegateCallLib.sol";
-import { TopUp } from "./TopUp.sol";
+import { TopUp, Constants } from "./TopUp.sol";
 import { BridgeAdapterBase } from "./bridge/BridgeAdapterBase.sol";
 
 /**
@@ -15,7 +15,7 @@ import { BridgeAdapterBase } from "./bridge/BridgeAdapterBase.sol";
  * @dev Extends BeaconFactory to provide Beacon Proxy deployment functionality
  * @author ether.fi
  */
-contract TopUpFactory is BeaconFactory {
+contract TopUpFactory is BeaconFactory, Constants {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using SafeERC20 for IERC20;
 
@@ -218,7 +218,8 @@ contract TopUpFactory is BeaconFactory {
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
 
-        uint256 balance = IERC20(token).balanceOf(address(this));
+        // leaving behind 0.01 ether for bridge fee if any
+        uint256 balance = token == ETH ? address(this).balance - 0.01 ether : IERC20(token).balanceOf(address(this));
         if (balance == 0) revert ZeroBalance();
 
         DelegateCallLib.delegateCall($.tokenConfig[token].bridgeAdapter, abi.encodeWithSelector(BridgeAdapterBase.bridge.selector, token, balance, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData));
@@ -283,7 +284,7 @@ contract TopUpFactory is BeaconFactory {
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
 
-        uint256 balance = IERC20(token).balanceOf(address(this));
+        uint256 balance = token == ETH ? address(this).balance : IERC20(token).balanceOf(address(this));
         if (balance == 0) revert ZeroBalance();
 
         return BridgeAdapterBase($.tokenConfig[token].bridgeAdapter).getBridgeFee(token, balance, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData);
