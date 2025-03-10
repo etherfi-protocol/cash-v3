@@ -27,9 +27,6 @@ contract EtherFiOFTBridgeAdapter is BridgeAdapterBase {
      */
     event BridgeOFT(address indexed token, uint256 amount, MessagingReceipt messageReceipt, OFTReceipt oftReceipt);
 
-    /// @notice Error thrown when the bridged amount exceeds OFT limits
-    error AmountOutOfOFTLimit();
-
     /**
      * @notice Bridges tokens using the OFT protocol
      * @dev Executes the bridge operation through LayerZero's OFT interface
