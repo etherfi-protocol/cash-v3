@@ -3,18 +3,16 @@ pragma solidity ^0.8.28;
 
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import {Constants} from "../../utils/Constants.sol";
+
 /**
  * @title BridgeAdapterBase
  * @notice Base contract for bridge adapter implementations
  * @dev Abstract contract providing common bridge adapter functionality
  * @author ether.fi
  */
-abstract contract BridgeAdapterBase {
+abstract contract BridgeAdapterBase is Constants {
     using Math for uint256;
-
-    /// @notice Special address used to represent native ETH in token operations
-    /// @dev Standard ETH placeholder address commonly used in DeFi
-    address ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @notice Error thrown when provided native token fee is insufficient
     error InsufficientNativeFee();
