@@ -20,6 +20,11 @@ contract TopUp is Constants, Ownable {
     /// @notice Error thrown when ETH transfer fails
     error EthTransferFailed();
 
+    constructor() {
+        // initialize with dead so the impl ownership cannot be taken over by someone
+        _initializeOwner(address(0xdead));
+    }
+
     /**
      * @notice Initializes the contract with an owner
      * @dev Can only be called once, sets initial owner
