@@ -175,7 +175,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param signatures Array of signatures from the safe owners
      */
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
-        CashVerificationLib.verifyRequestWithdrawalSig(safe, _useNonce(safe), tokens, amounts, recipient, signers, signatures);
+        CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
 
@@ -217,7 +217,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param signatures Array of signatures from the signers
      */
     function configureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
-        CashVerificationLib.verifyConfigureWithdrawRecipients(safe, _useNonce(safe), withdrawRecipients, shouldWhitelist, signers, signatures);
+        CashVerificationLib.verifyConfigureWithdrawRecipients(safe, IEtherFiSafe(safe).useNonce(), withdrawRecipients, shouldWhitelist, signers, signatures);
 
         CashModuleStorage storage $ = _getCashModuleStorage();
         EnumerableAddressWhitelistLib.configure($.safeCashConfig[safe].withdrawRecipients, withdrawRecipients, shouldWhitelist);

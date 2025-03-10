@@ -93,8 +93,7 @@ contract CashModuleTestSetup is SafeTestSetup {
     }
 
     function _configureWithdrawRecipients(address[] memory withdrawRecipients, bool[] memory shouldAdd) internal {
-        uint256 nonce = cashModule.getNonce(address(safe));
-        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, address(safe), nonce, abi.encode(withdrawRecipients, shouldAdd))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, address(safe), safe.nonce(), abi.encode(withdrawRecipients, shouldAdd))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
@@ -113,7 +112,7 @@ contract CashModuleTestSetup is SafeTestSetup {
     }
 
     function _requestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal {
-        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), cashModule.getNonce(address(safe)), abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);

@@ -22,4 +22,6 @@ interface IEtherFiSafe {
     function nonce() external view returns (uint256);
 
     function getOwners() external view returns (address[] memory);
+
+    function useNonce() external returns (uint256);
 }

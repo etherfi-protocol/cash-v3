@@ -286,6 +286,15 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
     }
 
     /**
+     * @notice Uses a nonce for operations in modules which require a quorum of owners
+     * @return uint256 nonce for the operation
+     */
+    function useNonce() external returns (uint256) {
+        if (!isModuleEnabled(msg.sender)) revert OnlyModules();
+        return _useNonce();
+    }
+
+    /**
      * @dev Checks if a module is whitelisted on the data provider
      * @param module Address of the module to check
      * @return bool True if the module is whitelisted on the data provider

@@ -100,7 +100,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 10e6, true);
 
-        uint256 nonce = cashModule.getNonce(address(safe));
+        uint256 nonce = safe.nonce();
 
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
@@ -173,7 +173,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
-        uint256 nonce = cashModule.getNonce(address(safe));
+        uint256 nonce = safe.nonce();
 
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, address(owner1)))).toEthSignedMessageHash();
 
@@ -202,7 +202,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
-        uint256 nonce = cashModule.getNonce(address(safe));
+        uint256 nonce = safe.nonce();
 
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
@@ -231,7 +231,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
-        uint256 nonce = cashModule.getNonce(address(safe));
+        uint256 nonce = safe.nonce();
 
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, address(0)))).toEthSignedMessageHash();
 
@@ -261,7 +261,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = withdrawalAmount;
 
-        uint256 nonce = cashModule.getNonce(address(safe));
+        uint256 nonce = safe.nonce();
 
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
@@ -293,7 +293,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         amounts[0] = withdrawalAmount;
         amounts[1] = withdrawalAmount;
 
-        uint256 nonce = cashModule.getNonce(address(safe));
+        uint256 nonce = safe.nonce();
 
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
@@ -323,7 +323,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
-        uint256 nonce = cashModule.getNonce(address(safe));
+        uint256 nonce = safe.nonce();
 
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
