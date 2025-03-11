@@ -69,6 +69,12 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
     bytes32 public constant CONFIGURE_ADMIN_TYPEHASH = 0x3dfd66efb2a5d3ec63eb6eb270a4a662d28b1e27ce51f3c835ba384215a0ac80;
 
     /**
+     * @notice TypeHash for cancel nonce with EIP-712 signatures
+     * @dev keccak256("CancelNonce(uint256 nonce)")
+     */
+    bytes32 public constant CANCEL_NONCE_TYPEHASH = 0x911689a040f9425c778a23077912d56c2402a1006cf81f5d629a2c8281b77563;
+
+    /**
      * @notice Emitted when a transaction is executed through a module
      * @param to Array of target addresses for the calls
      * @param value Array of ETH values to send with each call
@@ -82,6 +88,12 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
      * @param shouldAdd Array indicating whether each admin was added (true) or removed (false)
      */
     event AdminsConfigured(address[] accounts, bool[] shouldAdd);
+    
+    /**
+     * @notice Emitted when a nonce is cancelled
+     * @param nonce The cancelled nonce
+     */
+    event NonceCancelled(uint256 nonce);
 
     /**
      * @dev Returns the storage struct for EtherFiSafe
@@ -147,6 +159,21 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _configureAdmin(accounts, shouldAdd);
+    }
+
+    /**
+     * @notice Cancels the next nonce. 
+     * @dev Uses EIP-712 typed data signing for secure multi-signature authorization
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of corresponding signatures
+     * @custom:throws InvalidSignatures If signature verification fails
+     */
+    function cancelNonce(address[] calldata signers, bytes[] calldata signatures) external {
+        uint256 cancelledNonce = _useNonce();
+        bytes32 structHash = keccak256(abi.encode(CANCEL_NONCE_TYPEHASH, cancelledNonce));
+        bytes32 digestHash = _hashTypedDataV4(structHash);
+        if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+        emit NonceCancelled(cancelledNonce);
     }
 
     /**

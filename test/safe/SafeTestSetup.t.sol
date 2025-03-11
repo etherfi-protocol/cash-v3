@@ -170,6 +170,27 @@ contract SafeTestSetup is Test {
         safe.configureAdmins(accounts, shouldAdd, signers, signatures);
     }
 
+    function _cancelNonce() internal {
+        uint256 nonce = safe.nonce();
+        bytes32 structHash = keccak256(abi.encode(safe.CANCEL_NONCE_TYPEHASH(), nonce));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiSafe.NonceCancelled(nonce);
+        safe.cancelNonce(signers, signatures);
+    }
+
     function _configureOwners(address[] memory owners, bool[] memory shouldAdd) internal {
         bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
 
