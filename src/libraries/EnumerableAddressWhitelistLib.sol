@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
-import { ArrayDeDupLib } from "./ArrayDedupLib.sol";
+import { ArrayDeDupLib } from "./ArrayDeDupLib.sol";
 
 library EnumerableAddressWhitelistLib {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
