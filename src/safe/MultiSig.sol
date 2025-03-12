@@ -7,14 +7,14 @@ import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 
 import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
-import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
+import { EtherFiSafeBase } from "./EtherFiSafeBase.sol";
 
 /**
  * @title MultiSig
  * @author ether.fi
  * @notice Implements multi-sig functionality with configurable owners and threshold
  */
-abstract contract MultiSig is EtherFiSafeErrors {
+abstract contract MultiSig is EtherFiSafeBase {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
@@ -25,6 +25,10 @@ abstract contract MultiSig is EtherFiSafeErrors {
         EnumerableSetLib.AddressSet owners;
         /// @notice Multisig threshold for the safe
         uint8 threshold;
+        /// @notice Timelock for new owner after recovery
+        uint256 incomingOwnerStartTime;
+        /// @notice New owner after recovery
+        address incomingOwner;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.MultiSig")) - 1)) & ~bytes32(uint256(0xff))
@@ -39,6 +43,15 @@ abstract contract MultiSig is EtherFiSafeErrors {
     /// @param owners Array of owner addresses that were configured
     /// @param shouldAdd Array indicating whether each owner was added (true) or removed (false)
     event OwnersConfigured(address[] owners, bool[] shouldAdd);
+
+    /// @notice Emitted when a new incoming owner is set after recovery
+    /// @param incomingOwner Address of the incoming owner
+    /// @param startTime Timestamp when the incoming owner can take effect
+    event IncomingOwnerSet(address incomingOwner, uint256 startTime);
+
+    /// @notice Emitted when an account is recovered after timelock period is complete
+    /// @param newOwner Address of the new owner
+    event AccountRecovered(address newOwner);
 
     /**
      * @dev Returns the storage struct for MultiSig
@@ -89,6 +102,48 @@ abstract contract MultiSig is EtherFiSafeErrors {
     }
 
     /**
+     * @notice Updates the signature threshold with owner signatures
+     * @dev Uses EIP-712 typed data signing for secure multi-signature authorization
+     * @param threshold New threshold value
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of corresponding signatures
+     * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
+     * @custom:throws InvalidSignatures If signature verification fails
+     */
+    function setThreshold(uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external {
+        _currentOwner();
+        bytes32 structHash = keccak256(abi.encode(SET_THRESHOLD_TYPEHASH, threshold, _useNonce()));
+
+        bytes32 digestHash = _hashTypedDataV4(structHash);
+        if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+        _setThreshold(threshold);
+    }
+
+    /**
+     * @notice Configures safe owners with signature verification
+     * @dev Uses EIP-712 typed data signing for secure multi-signature authorization
+     * @param owners Array of owner addresses to configure
+     * @param shouldAdd Array indicating whether to add or remove each owner
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of corresponding signatures
+     * @custom:throws InvalidInput If owners array is empty
+     * @custom:throws ArrayLengthMismatch If arrays have different lengths
+     * @custom:throws InvalidOwnerAddress If any owner address is zero
+     * @custom:throws AllOwnersRemoved If operation would remove all owners
+     * @custom:throws OwnersLessThanThreshold If owners would be less than threshold
+     * @custom:throws InvalidSignatures If signature verification fails
+     */
+    function configureOwners(address[] calldata owners, bool[] calldata shouldAdd, address[] calldata signers, bytes[] calldata signatures) external {
+        _currentOwner();
+        bytes32 structHash = keccak256(abi.encode(CONFIGURE_OWNERS_TYPEHASH, keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), _useNonce()));
+
+        bytes32 digestHash = _hashTypedDataV4(structHash);
+        if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+        _configureOwners(owners, shouldAdd);
+        _configureAdmin(owners, shouldAdd);
+    }
+
+    /**
      * @notice Updates the signature threshold
      * @param _threshold New threshold value
      * @dev Threshold must be greater than 0 and not exceed the number of owners
@@ -125,6 +180,30 @@ abstract contract MultiSig is EtherFiSafeErrors {
     }
 
     /**
+     * @notice Sets a new incoming owner with associated timelock
+     * @param incomingOwner Address of the new incoming owner
+     * @param startTime Timestamp from which the new owner can take effect
+     * @dev This is part of the owner recovery mechanism
+     */
+    function _setIncomingOwner(address incomingOwner, uint256 startTime) internal override {
+        MultiSigStorage storage $ = _getMultiSigStorage();
+
+        emit IncomingOwnerSet(incomingOwner, startTime);
+        $.incomingOwner = incomingOwner;
+        $.incomingOwnerStartTime = startTime;
+    }
+
+    /**
+     * @notice Removes the incoming owner and resets recovery timelock
+     * @dev Implementation of abstract function from EtherFiSafeBase
+     * @dev Called during recovery cancellation process
+     * @dev Sets the incoming owner to address(0) and timelock to 0, effectively canceling any pending recovery
+     */
+    function _removeIncomingOwner() internal override {
+        _setIncomingOwner(address(0), 0);
+    }
+
+    /**
      * @notice Verifies signatures against a digest hash until reaching the required threshold
      * @param digestHash The hash of the data that was signed
      * @param signers Array of addresses that supposedly signed the message
@@ -137,13 +216,21 @@ abstract contract MultiSig is EtherFiSafeErrors {
      * @custom:throws DuplicateElementFound If the signers array contains duplicate addresses
      * @custom:throws InvalidSigner If a signer is the zero address or not an owner of the safe
      */
-    function checkSignatures(bytes32 digestHash, address[] calldata signers, bytes[] calldata signatures) public view returns (bool) {
+    function checkSignatures(bytes32 digestHash, address[] calldata signers, bytes[] calldata signatures) public view override returns (bool) {
         MultiSigStorage storage $ = _getMultiSigStorage();
 
         uint256 len = signers.length;
 
         if (len == 0) revert EmptySigners();
         if (len != signatures.length) revert ArrayLengthMismatch();
+
+
+        if ($.incomingOwnerStartTime > 0 && block.timestamp > $.incomingOwnerStartTime) {
+            if (len > 1) revert InvalidInput();
+            if (signers[0] != $.incomingOwner) revert InvalidSigner(0);   
+            return digestHash.isValidSignature(signers[0], signatures[0]);
+        }
+
         if (len < $.threshold) revert InsufficientSigners();
         if (len > 1) signers.checkDuplicates();
 
@@ -169,6 +256,24 @@ abstract contract MultiSig is EtherFiSafeErrors {
     }
 
     /**
+     * @notice Returns the current incoming owner address
+     * @return Address of the incoming owner
+     * @dev Used during recovery process
+     */
+    function getIncomingOwner() public view returns (address) {
+        return _getMultiSigStorage().incomingOwner;
+    }
+
+    /**
+     * @notice Returns the start time for the incoming owner
+     * @return Timestamp when the incoming owner can take effect
+     * @dev Used to check if the recovery timelock has passed
+     */
+    function getIncomingOwnerStartTime() public view returns (uint256) {
+        return _getMultiSigStorage().incomingOwnerStartTime;
+    }
+
+    /**
      * @notice Checks if an address is an owner of the safe
      * @param account Address to check
      * @return bool True if the address is an owner, false otherwise
@@ -183,5 +288,30 @@ abstract contract MultiSig is EtherFiSafeErrors {
      */
     function getThreshold() public view returns (uint8) {
         return _getMultiSigStorage().threshold;
+    }
+
+    /**
+     * @notice Handles owner transitions during recovery process
+     * @dev If the incoming owner timelock has passed, replaces all existing owners
+     *      with the incoming owner and sets threshold to 1
+     */
+    function _currentOwner() internal override {
+        MultiSigStorage storage $ = _getMultiSigStorage();
+
+        if ($.incomingOwnerStartTime > 0 && block.timestamp > $.incomingOwnerStartTime) {
+            address[] memory owners = $.owners.values();
+            uint256 len = owners.length;
+            for (uint256 i = 0; i < len; ) {
+                $.owners.remove(owners[i]);
+                unchecked {
+                    ++i;
+                }
+            }
+
+            $.owners.add($.incomingOwner);
+            $.threshold = 1;
+
+            emit AccountRecovered($.incomingOwner);
+        }
     }
 }

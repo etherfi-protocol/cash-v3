@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 
-import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors, ModuleBase, SafeTestSetup } from "./SafeTestSetup.t.sol";
+import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeBase, EtherFiSafeErrors, ModuleBase, SafeTestSetup } from "./SafeTestSetup.t.sol";
 
 contract SafeAdminsTest is SafeTestSetup {
     address public admin1;
@@ -59,7 +59,7 @@ contract SafeAdminsTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectEmit(true, true, true, true);
-        emit EtherFiSafe.AdminsConfigured(accounts, shouldAdd);
+        emit EtherFiSafeBase.AdminsConfigured(accounts, shouldAdd);
 
         safe.configureAdmins(accounts, shouldAdd, signers, signatures);
 

@@ -58,4 +58,19 @@ abstract contract EtherFiSafeErrors {
 
     /// @notice Throws when module setup fails while adding modules to safe
     error ModuleSetupFailed(uint256 index);
+
+    /// @notice Throws when invalid overriding recovery signer addresses are passed
+    error InvalidOverridingRecoverySigners();
+
+    /// @notice Throws when Recovery Manager is already initialized
+    error RecoveryManagerAlreadyInitialized();
+
+    /// @notice Throws when trying to recover when the signer is index 0 and user recovery signer is address(0) 
+    error InvalidUserRecoverySigner();
+
+    /// @notice Throws when recovery signature is invalid
+    error InvalidRecoverySignature();
+
+    /// @notice Throws when trying to recover but recovery is disabled
+    error RecoveryDisabled();
 }

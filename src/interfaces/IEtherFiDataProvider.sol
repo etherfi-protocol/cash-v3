@@ -51,6 +51,24 @@ interface IEtherFiDataProvider {
     function getCashModule() external view returns (address);
 
     /**
+     * @notice Returns the address of the EtherFi Recovery signer
+     * @return Address of the EtherFi Recovery Signer
+     */
+    function getEtherFiRecoverySigner() external view returns (address);
+
+     /**
+     * @notice Returns the address of the Third Party Recovery signer
+     * @return Address of the Third Party Recovery Signer
+     */
+    function getThirdPartyRecoverySigner() external view returns (address);
+
+    /**
+     * @notice Returns the Recovery delay period in seconds
+     * @return Recovery delay period in seconds
+     */
+    function getRecoveryDelayPeriod() external view returns (uint256);
+
+    /**
      * @notice Returns the address of the Cash Lens contract
      * @return Address of the Cash Lens contract
      */

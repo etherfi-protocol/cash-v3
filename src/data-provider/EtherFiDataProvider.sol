@@ -33,6 +33,12 @@ contract EtherFiDataProvider is UpgradeableProxy {
         IEtherFiSafeFactory etherFiSafeFactory;
         /// @notice Address of the price provider
         address priceProvider;
+        /// @notice Address of the EtherFi Recovery Signer
+        address etherFiRecoverySigner;
+        /// @notice Address of the Third Party Recovery Signer
+        address thirdPartyRecoverySigner;
+        /// @notice Timelock for recovery
+        uint256 recoveryDelayPeriod;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
@@ -81,6 +87,16 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param newFactory Address of new factory
     event EtherFiSafeFactoryConfigured(address oldFactory, address newFactory);
 
+    /// @notice Emitted when EtherFiRecoverySigner is configured
+    /// @param oldSigner Address of old signer
+    /// @param newSigner Address of new signer
+    event EtherFiRecoverySignerConfigured(address oldSigner, address newSigner);
+    
+    /// @notice Emitted when ThirdPartyRecoverySigner is configured
+    /// @param oldSigner Address of old signer
+    /// @param newSigner Address of new signer
+    event ThirdPartyRecoverySignerConfigured(address oldSigner, address newSigner);
+
     /// @notice Emitted when the hook address is updated
     /// @param oldHookAddress Previous hook address
     /// @param newHookAddress New hook address
@@ -90,6 +106,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param oldPriceProvider Previous price provider address
     /// @param newPriceProvider New price provider address
     event PriceProviderUpdated(address oldPriceProvider, address newPriceProvider);
+
+    /// @notice Emitted when the recovery delay period is updated
+    /// @param oldPeriod Old recovery delay period in seconds
+    /// @param newPeriod New recovery delay period in seconds
+    event RecoveryDelayPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
 
     /**
      * @dev Internal function to access the contract's storage
@@ -109,14 +130,30 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param _cashLens Address of the Cash Lens contract
      * @param _modules Array of initial module addresses to configure
      * @param _hook Address of the initial hook contract
+     * @param _etherFiRecoverySigner Address of the EtherFi Recovery Signer
+     * @param _thirdPartyRecoverySigner Address of the Third Party Recovery Signer
      */
-    function initialize(address _roleRegistry, address _cashModule, address _cashLens, address[] calldata _modules, address _hook, address _etherFiSafeFactory, address _priceProvider) external initializer {
+    function initialize(
+        address _roleRegistry, 
+        address _cashModule, 
+        address _cashLens, 
+        address[] calldata _modules, 
+        address _hook, 
+        address _etherFiSafeFactory, 
+        address _priceProvider, 
+        address _etherFiRecoverySigner, 
+        address _thirdPartyRecoverySigner
+    ) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
 
         _setupModules(_modules);
 
         _setEtherFiSafeFactory(_etherFiSafeFactory);
         _setPriceProvider(_priceProvider);
+        _setEtherFiRecoverySigner(_etherFiRecoverySigner);
+        _setThirdPartyRecoverySigner(_thirdPartyRecoverySigner);
+
+        _getEtherFiDataProviderStorage().recoveryDelayPeriod = 3 days;
 
         // The condition applies because the Hook might be present only on specific chains
         if (_hook != address(0)) _setHookAddress(_hook);
@@ -178,6 +215,42 @@ contract EtherFiDataProvider is UpgradeableProxy {
     }
 
     /**
+     * @notice Updates the EtherFi Recovery Signer address
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
+     * @param signer Address of the new signer
+     */
+    function setEtherFiRecoverySigner(address signer) external {
+        _onlyDataProviderAdmin();
+        _setEtherFiRecoverySigner(signer);
+    }
+
+    /**
+     * @notice Updates the EtherFi Recovery Signer address
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
+     * @param signer Address of the new signer
+     */
+    function setThirdPartyRecoverySigner(address signer) external {
+        _onlyDataProviderAdmin();
+        _setThirdPartyRecoverySigner(signer);
+    }
+
+    /**
+     * @notice Updates the Recovery delay period
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
+     * @param period Recovery timelock period in seconds
+     * @custom:throws InvalidInput when period is 0
+     */
+    function setRecoveryDelayPeriod(uint256 period) external {
+        _onlyDataProviderAdmin();
+        if (period == 0) revert InvalidInput();
+
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+
+        emit RecoveryDelayPeriodUpdated($.recoveryDelayPeriod, period);
+        $.recoveryDelayPeriod = period;
+    }
+
+    /**
      * @notice Updates the address of the Cash Module
      * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
      * @param cashModule New cash module address to set
@@ -210,6 +283,30 @@ contract EtherFiDataProvider is UpgradeableProxy {
      */
     function getCashModule() public view returns (address) {
         return _getEtherFiDataProviderStorage().cashModule;
+    }
+
+    /**
+     * @notice Returns the address of the EtherFi Recovery signer
+     * @return Address of the EtherFi Recovery Signer
+     */
+    function getEtherFiRecoverySigner() public view returns (address) {
+        return _getEtherFiDataProviderStorage().etherFiRecoverySigner;
+    }
+
+    /**
+     * @notice Returns the address of the Third Party Recovery signer
+     * @return Address of the Third Party Recovery Signer
+     */
+    function getThirdPartyRecoverySigner() public view returns (address) {
+        return _getEtherFiDataProviderStorage().thirdPartyRecoverySigner;
+    }
+
+    /**
+     * @notice Returns the Recovery delay period in seconds
+     * @return Recovery delay period in seconds
+     */
+    function getRecoveryDelayPeriod() public view returns (uint256) {
+        return _getEtherFiDataProviderStorage().recoveryDelayPeriod;
     }
 
     /**
@@ -341,6 +438,30 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
         emit EtherFiSafeFactoryConfigured(address($.etherFiSafeFactory), etherFiSafeFactory);
         $.etherFiSafeFactory = IEtherFiSafeFactory(etherFiSafeFactory);
+    }
+
+    /**
+     * @dev Internal function to set EtherFi Recovery Signer address
+     * @param etherFiRecoverySigner EtherFi Recovery Signer address
+     */
+    function _setEtherFiRecoverySigner(address etherFiRecoverySigner) private {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+        if (etherFiRecoverySigner == address(0)) revert InvalidInput();
+
+        emit EtherFiRecoverySignerConfigured(address($.etherFiRecoverySigner), etherFiRecoverySigner);
+        $.etherFiRecoverySigner = etherFiRecoverySigner;
+    }
+
+    /**
+     * @dev Internal function to set Third Party Recovery Signer address
+     * @param thirdPartyRecoverySigner Third Party Recovery Signer address
+     */
+    function _setThirdPartyRecoverySigner(address thirdPartyRecoverySigner) private {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+        if (thirdPartyRecoverySigner == address(0)) revert InvalidInput();
+
+        emit ThirdPartyRecoverySignerConfigured(address($.thirdPartyRecoverySigner), thirdPartyRecoverySigner);
+        $.thirdPartyRecoverySigner = thirdPartyRecoverySigner;
     }
 
     /**

@@ -20,7 +20,7 @@ import { CashLens } from "../../src/modules/cash/CashLens.sol";
 import { CashModuleCore } from "../../src/modules/cash/CashModuleCore.sol";
 import { CashModuleSetters } from "../../src/modules/cash/CashModuleSetters.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
-import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
+import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeBase, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiSafeFactory } from "../../src/safe/EtherFiSafeFactory.sol";
 
 contract SafeTestSetup is Test {
@@ -63,6 +63,11 @@ contract SafeTestSetup is Test {
     int256 timezoneOffset = -4 * 3600; // cayman timezone
 
     address public etherFiWallet = makeAddr("etherFiWallet");
+    
+    uint256 public etherFiRecoverySignerPk;
+    address public etherFiRecoverySigner;
+    uint256 public thirdPartyRecoverySignerPk;
+    address public thirdPartyRecoverySigner;
 
     function setUp() public virtual {
         pauser = makeAddr("pauser");
@@ -72,6 +77,8 @@ contract SafeTestSetup is Test {
         (owner2, owner2Pk) = makeAddrAndKey("owner2");
         (owner3, owner3Pk) = makeAddrAndKey("owner3");
         (notOwner, notOwnerPk) = makeAddrAndKey("notOwner");
+        (etherFiRecoverySigner, etherFiRecoverySignerPk) = makeAddrAndKey("etherFiRecoverySigner");
+        (thirdPartyRecoverySigner, thirdPartyRecoverySignerPk) = makeAddrAndKey("thirdPartyRecoverySigner");
 
         vm.startPrank(owner);
 
@@ -118,7 +125,7 @@ contract SafeTestSetup is Test {
 
         bytes[] memory moduleSetupData = new bytes[](2);
 
-        dataProvider.initialize(address(roleRegistry), address(cashModule), address(cashLens), modules, address(hook), address(safeFactory), address(priceProvider));
+        dataProvider.initialize(address(roleRegistry), address(cashModule), address(cashLens), modules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner);
 
         roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), owner);
         safeFactory.deployEtherFiSafe(keccak256("safe"), owners, modules, moduleSetupData, threshold);
@@ -179,7 +186,7 @@ contract SafeTestSetup is Test {
         signers[1] = owner2;
 
         vm.expectEmit(true, true, true, true);
-        emit EtherFiSafe.AdminsConfigured(accounts, shouldAdd);
+        emit EtherFiSafeBase.AdminsConfigured(accounts, shouldAdd);
         safe.configureAdmins(accounts, shouldAdd, signers, signatures);
     }
 
@@ -200,7 +207,7 @@ contract SafeTestSetup is Test {
         signers[1] = owner2;
 
         vm.expectEmit(true, true, true, true);
-        emit EtherFiSafe.NonceCancelled(nonce);
+        emit EtherFiSafeBase.NonceCancelled(nonce);
         safe.cancelNonce(signers, signatures);
     }
 

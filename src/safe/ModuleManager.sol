@@ -5,7 +5,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IModule } from "../interfaces/IModule.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
-import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
+import { EtherFiSafeBase } from "./EtherFiSafeBase.sol";
 
 /**
  * @title ModuleManager
@@ -13,7 +13,7 @@ import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
  * @author ether.fi
  * @dev Abstract contract that handles module management functionality
  */
-abstract contract ModuleManager is EtherFiSafeErrors {
+abstract contract ModuleManager is EtherFiSafeBase {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
 
@@ -77,6 +77,29 @@ abstract contract ModuleManager is EtherFiSafeErrors {
 
         emit ModulesSetup(_modules);
     }
+
+    /**
+     * @notice Configures module whitelist with signature verification
+     * @dev Uses EIP-712 typed data signing for secure multi-signature authorization
+     * @param modules Array of module addresses to configure
+     * @param shouldWhitelist Array of booleans indicating whether to add or remove each module
+     * @param moduleSetupData Array of data for setting up individual modules for the safe
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of corresponding signatures
+     * @custom:throws InvalidInput If modules array is empty
+     * @custom:throws ArrayLengthMismatch If modules and shouldWhitelist arrays have different lengths
+     * @custom:throws InvalidModule If any module address is zero
+     * @custom:throws InvalidSignatures If the signature verification fails
+     */
+    function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist, bytes[] calldata moduleSetupData, address[] calldata signers, bytes[] calldata signatures) external {
+        _currentOwner();
+        bytes32 structHash = keccak256(abi.encode(CONFIGURE_MODULES_TYPEHASH, keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(moduleSetupData)), _useNonce()));
+
+        bytes32 digestHash = _hashTypedDataV4(structHash);
+        if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+        _configureModules(modules, shouldWhitelist, moduleSetupData);
+    }
+
 
     /**
      * @notice Configures multiple modules at once
@@ -158,10 +181,4 @@ abstract contract ModuleManager is EtherFiSafeErrors {
     function getModules() public view returns (address[] memory) {
         return _getModuleManagerStorage().modules.values();
     }
-
-    /**
-     * @notice Returns all current owners of the safe
-     * @return address[] Array containing all owner addresses
-     */
-    function getOwners() public view virtual returns (address[] memory);
 }
