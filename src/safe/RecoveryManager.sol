@@ -159,6 +159,8 @@ abstract contract RecoveryManager is EtherFiSafeBase {
     function recoverSafe(address newOwner, uint256[2] calldata recoverySignerIndices, bytes[2] calldata signatures) external {
         _currentOwner();
         if (!isRecoveryEnabled()) revert RecoveryDisabled();
+        if (newOwner == address(0)) revert InvalidInput();
+        
         bytes32 structHash = keccak256(abi.encode(RECOVER_SAFE_TYPEHASH, newOwner, _useNonce()));
         bytes32 digestHash = _hashTypedDataV4(structHash);
 

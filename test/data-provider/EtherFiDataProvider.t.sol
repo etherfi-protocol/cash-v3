@@ -27,6 +27,12 @@ contract EtherFiDataProviderTest is Test {
     address public priceProvider = address(0x800);
     address public etherFiRecoverySigner = address(0x900);
     address public thirdPartyRecoverySigner = address(0x1100);
+    address public newEtherFiRecoverySigner = address(0x1200);
+    address public newThirdPartyRecoverySigner = address(0x1300);
+
+    uint256 public defaultRecoveryPeriod = 3 days;
+    uint256 public newRecoveryPeriod = 7 days;
+
 
     event ModulesConfigured(address[] modules, bool[] shouldWhitelist);
     event HookAddressUpdated(address oldHookAddress, address newHookAddress);
@@ -352,4 +358,109 @@ contract EtherFiDataProviderTest is Test {
     function test_getCashModule_returnsCurrentCashModule() public view {
         assertEq(provider.getCashModule(), cashModule);
     }
+
+        function test_initialize_setsRecoverySigners() public view {
+        assertEq(provider.getEtherFiRecoverySigner(), etherFiRecoverySigner);
+        assertEq(provider.getThirdPartyRecoverySigner(), thirdPartyRecoverySigner);
+    }
+
+    function test_initialize_setsDefaultRecoveryPeriod() public view {
+        assertEq(provider.getRecoveryDelayPeriod(), defaultRecoveryPeriod);
+    }
+
+    function test_setEtherFiRecoverySigner_updatesAddress() public {
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.EtherFiRecoverySignerConfigured(etherFiRecoverySigner, newEtherFiRecoverySigner);
+        provider.setEtherFiRecoverySigner(newEtherFiRecoverySigner);
+
+        assertEq(provider.getEtherFiRecoverySigner(), newEtherFiRecoverySigner);
+    }
+
+    function test_setEtherFiRecoverySigner_reverts_whenCalledByNonAdmin() public {
+        vm.prank(nonAdmin);
+        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        provider.setEtherFiRecoverySigner(newEtherFiRecoverySigner);
+    }
+
+    function test_setEtherFiRecoverySigner_reverts_whenZeroAddress() public {
+        vm.prank(admin);
+        vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
+        provider.setEtherFiRecoverySigner(address(0));
+    }
+
+    // Third Party Recovery Signer Tests
+
+    function test_setThirdPartyRecoverySigner_updatesAddress() public {
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.ThirdPartyRecoverySignerConfigured(thirdPartyRecoverySigner, newThirdPartyRecoverySigner);
+        provider.setThirdPartyRecoverySigner(newThirdPartyRecoverySigner);
+
+        assertEq(provider.getThirdPartyRecoverySigner(), newThirdPartyRecoverySigner);
+    }
+
+    function test_setThirdPartyRecoverySigner_reverts_whenCalledByNonAdmin() public {
+        vm.prank(nonAdmin);
+        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        provider.setThirdPartyRecoverySigner(newThirdPartyRecoverySigner);
+    }
+
+    function test_setThirdPartyRecoverySigner_reverts_whenZeroAddress() public {
+        vm.prank(admin);
+        vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
+        provider.setThirdPartyRecoverySigner(address(0));
+    }
+
+    // Recovery Delay Period Tests
+
+    function test_setRecoveryDelayPeriod_updatesValue() public {
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.RecoveryDelayPeriodUpdated(defaultRecoveryPeriod, newRecoveryPeriod);
+        provider.setRecoveryDelayPeriod(newRecoveryPeriod);
+
+        assertEq(provider.getRecoveryDelayPeriod(), newRecoveryPeriod);
+    }
+
+    function test_setRecoveryDelayPeriod_reverts_whenZeroValue() public {
+        vm.prank(admin);
+        vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
+        provider.setRecoveryDelayPeriod(0);
+    }
+
+    function test_setRecoveryDelayPeriod_reverts_whenCalledByNonAdmin() public {
+        vm.prank(nonAdmin);
+        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        provider.setRecoveryDelayPeriod(newRecoveryPeriod);
+    }
+
+    // Testing all getter functions
+
+    function test_getAllRecoveryParameters() public view {
+        assertEq(provider.getEtherFiRecoverySigner(), etherFiRecoverySigner);
+        assertEq(provider.getThirdPartyRecoverySigner(), thirdPartyRecoverySigner);
+        assertEq(provider.getRecoveryDelayPeriod(), defaultRecoveryPeriod);
+    }
+
+    // Integration Test - Update all recovery parameters at once
+
+    function test_updateAllRecoveryParameters() public {
+        // Update EtherFi recovery signer
+        vm.startPrank(admin);
+        provider.setEtherFiRecoverySigner(newEtherFiRecoverySigner);
+        
+        // Update third party recovery signer
+        provider.setThirdPartyRecoverySigner(newThirdPartyRecoverySigner);
+        
+        // Update recovery delay period
+        provider.setRecoveryDelayPeriod(newRecoveryPeriod);
+        vm.stopPrank();
+
+        // Verify all parameters were updated correctly
+        assertEq(provider.getEtherFiRecoverySigner(), newEtherFiRecoverySigner);
+        assertEq(provider.getThirdPartyRecoverySigner(), newThirdPartyRecoverySigner);
+        assertEq(provider.getRecoveryDelayPeriod(), newRecoveryPeriod);
+    }
+
 }
