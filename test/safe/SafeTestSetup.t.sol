@@ -122,7 +122,7 @@ contract SafeTestSetup is Test {
 
         roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), owner);
         safeFactory.deployEtherFiSafe(keccak256("safe"), owners, modules, moduleSetupData, threshold);
-        safe = EtherFiSafe(safeFactory.getDeterministicAddress(keccak256("safe")));
+        safe = EtherFiSafe(payable(safeFactory.getDeterministicAddress(keccak256("safe"))));
 
         vm.stopPrank();
     }

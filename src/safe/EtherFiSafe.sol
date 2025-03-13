@@ -363,4 +363,6 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
             return $.nonce++;
         }
     }
+
+    receive() external payable {}
 }

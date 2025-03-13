@@ -37,7 +37,7 @@ contract SafeFactoryTest is SafeTestSetup {
         safeFactory.deployEtherFiSafe(salt, owners, modules, moduleSetupData, testThreshold);
 
         // Verify the safe was deployed correctly
-        address deterministicAddress = safeFactory.getDeterministicAddress(salt);
+        address payable deterministicAddress = payable(safeFactory.getDeterministicAddress(salt));
         assertTrue(safeFactory.isEtherFiSafe(deterministicAddress));
 
         // Check if the safe is properly initialized
@@ -69,7 +69,7 @@ contract SafeFactoryTest is SafeTestSetup {
         safeFactory.deployEtherFiSafe(newSalt, owners, noModules, noModuleSetupData, testThreshold);
 
         // Verify the safe was deployed correctly
-        address deterministicAddress = safeFactory.getDeterministicAddress(newSalt);
+        address payable deterministicAddress = payable(safeFactory.getDeterministicAddress(newSalt));
         assertTrue(safeFactory.isEtherFiSafe(deterministicAddress));
 
         // Check if the safe has no modules
@@ -199,7 +199,7 @@ contract SafeFactoryTest is SafeTestSetup {
         safeFactory.deployEtherFiSafe(newSalt, minOwners, modules, moduleSetupData, 1);
 
         // Verify the safe was deployed correctly
-        address deterministicAddress = safeFactory.getDeterministicAddress(newSalt);
+        address payable deterministicAddress = payable(safeFactory.getDeterministicAddress(newSalt));
         assertTrue(safeFactory.isEtherFiSafe(deterministicAddress));
 
         // Check if the safe is properly initialized
@@ -278,7 +278,7 @@ contract SafeFactoryTest is SafeTestSetup {
         vm.stopPrank();
         
         // Get the deployed safe address
-        address newSafeAddress = safeFactory.getDeterministicAddress(newSalt);
+        address payable newSafeAddress = payable(safeFactory.getDeterministicAddress(newSalt));
         
         // Verify the safe was deployed with the new implementation
         // This is an indirect test as we can't directly check which implementation a proxy uses
@@ -303,7 +303,7 @@ contract SafeFactoryTest is SafeTestSetup {
         bytes[] memory noModuleSetupData = new bytes[](0);
         
         safeFactory.deployEtherFiSafe(testSalt, initialOwners, noModules, noModuleSetupData, 1);
-        address safeAddress = safeFactory.getDeterministicAddress(testSalt);
+        address payable safeAddress = payable(safeFactory.getDeterministicAddress(testSalt));
         EtherFiSafe testSafe = EtherFiSafe(safeAddress);
         
         // Upgrade the implementation

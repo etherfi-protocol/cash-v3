@@ -1,0 +1,10 @@
+{
+	"dependencies": {
+		"axios": "^1.8.3",
+		"dotenv": "^16.4.7",
+		"ethers": "v5"
+	},
+	"devDependencies": {
+		"@types/node": "^22.13.10"
+	}
+}

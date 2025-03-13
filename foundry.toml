@@ -11,6 +11,7 @@ gas_reports = ["*"]
 bytecode_hash = "none"
 fs_permissions = [{ access = "read-write", path = "./" }]
 extra_output = ["storageLayout"]
+ffi = true
 
 [fuzz]
 runs = 10000
