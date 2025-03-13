@@ -180,11 +180,15 @@ abstract contract RecoveryManager is EtherFiSafeBase {
         
         RecoveryManagerStorage storage $ = _getRecoveryManagerStorage();
 
-        emit EtherFiRecoverySignerOverriden(recoverySigners[0]);
-        $.overridenEtherFiRecoverySigner = recoverySigners[0];
+        if ($.overridenEtherFiRecoverySigner != recoverySigners[0]) {
+            emit EtherFiRecoverySignerOverriden(recoverySigners[0]);
+            $.overridenEtherFiRecoverySigner = recoverySigners[0];
+        }
 
-        emit ThirdPartyRecoverySignerOverriden(recoverySigners[1]);
-        $.overridenThirdPartyRecoverySigner = recoverySigners[1];
+        if ($.overridenThirdPartyRecoverySigner != recoverySigners[1]) {
+            emit ThirdPartyRecoverySignerOverriden(recoverySigners[1]);
+            $.overridenThirdPartyRecoverySigner = recoverySigners[1];
+        }
     }
 
     /**
