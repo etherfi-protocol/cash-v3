@@ -73,4 +73,16 @@ abstract contract EtherFiSafeErrors {
 
     /// @notice Throws when trying to recover but recovery is disabled
     error RecoveryDisabled();
+
+    /// @notice Throws when recovery signers length is less than recovery threshold
+    error RecoverySignersLengthLessThanThreshold();
+
+    /// @notice Throws when recovery signatures are less than recovery threshold
+    error InsufficientRecoverySignatures();
+
+    /// @notice Throws when valid recovery signatures is less than recovery threshold
+    error InvalidRecoverySignatures();
+
+    /// @notice Thrown when a recovery signer at the given index is invalid
+    error InvalidRecoverySigner(uint256 index);
 }

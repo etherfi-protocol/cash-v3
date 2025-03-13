@@ -62,10 +62,10 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
     bytes32 public constant CANCEL_NONCE_TYPEHASH = 0x911689a040f9425c778a23077912d56c2402a1006cf81f5d629a2c8281b77563;
 
     /**
-     * @notice TypeHash for setting user recovery signer with EIP-712 signatures
-     * @dev keccak256("SetUserRecoverySigner(address recoverySigner, uint256 nonce)")
+     * @notice TypeHash for setting user recovery signers with EIP-712 signatures
+     * @dev keccak256("SetUserRecoverySigners(address[] recoverySigners, bool[] shouldAdd, uint256 nonce)")
      */
-    bytes32 public constant SET_USER_RECOVERY_SIGNER_TYPEHASH = 0xe76970cd0b46cba940c42ac5bfb0133d577dec410993bff80462d65f9171b9d4;
+    bytes32 public constant SET_USER_RECOVERY_SIGNERS_TYPEHASH = 0x13a92003fda0d03ec95bfceee0b09375118fa2f6b07643738d22bb5ab1624892;
 
     /**
      * @notice TypeHash for toggling recovery enabled flag with EIP-712 signatures
@@ -90,6 +90,12 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
      * @dev keccak256("CancelRecovery(uint256 nonce)")
      */
     bytes32 public constant CANCEL_RECOVERY_TYPEHASH = 0x74bf4a4220866f2d5407c382e8b086ccc8579acc38c68ccbcb96d46432578c8d;
+
+    /**
+     * @notice TypeHash for setting the recovery threshold with EIP-712 signatures
+     * @dev keccak256("SetRecoveryThreshold(uint8 threshold, uint256 nonce)")
+     */
+    bytes32 public constant SET_RECOVERY_THRESHOLD_TYPEHASH = 0x55fbacc2ae7fb06b8e6207b13a0239f651c6c83bbee4bf809286d76d9ee9a8ac;
 
     /**
      * @notice Emitted when a transaction is executed through a module
@@ -182,6 +188,20 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
      * @return address[] Array containing all owner addresses
      */
     function getOwners() public view virtual returns (address[] memory);
+
+    /**
+     * @notice Returns the current incoming owner address
+     * @return Address of the incoming owner
+     * @dev Used during recovery process
+     */
+    function getIncomingOwner() public virtual view returns (address);
+
+    /**
+     * @notice Returns the start time for the incoming owner
+     * @return Timestamp when the incoming owner can take effect
+     * @dev Used to check if the recovery timelock has passed
+     */
+    function getIncomingOwnerStartTime() public virtual view returns (uint256);
 
     /**
      * @dev Internal function to configure admin accounts

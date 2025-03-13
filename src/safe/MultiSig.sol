@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
-
 import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 import { EtherFiSafeBase } from "./EtherFiSafeBase.sol";
@@ -260,7 +259,7 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @return Address of the incoming owner
      * @dev Used during recovery process
      */
-    function getIncomingOwner() public view returns (address) {
+    function getIncomingOwner() public override view returns (address) {
         return _getMultiSigStorage().incomingOwner;
     }
 
@@ -269,7 +268,7 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @return Timestamp when the incoming owner can take effect
      * @dev Used to check if the recovery timelock has passed
      */
-    function getIncomingOwnerStartTime() public view returns (uint256) {
+    function getIncomingOwnerStartTime() public override view returns (uint256) {
         return _getMultiSigStorage().incomingOwnerStartTime;
     }
 
