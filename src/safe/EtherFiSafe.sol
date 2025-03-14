@@ -46,9 +46,9 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
 
     /**
      * @notice TypeHash for module configuration with EIP-712 signatures
-     * @dev keccak256("ConfigureModules(address[] modules,bool[] shouldWhitelist,uint256 nonce)")
+     * @dev keccak256("ConfigureModules(address[] modules,bool[] shouldWhitelist,bytes[] moduleSetupData,uint256 nonce)")
      */
-    bytes32 public constant CONFIGURE_MODULES_TYPEHASH = 0x20263b9194095d902b566d15f1db1d03908706042a5d22118c55a666ec3b992c;
+    bytes32 public constant CONFIGURE_MODULES_TYPEHASH = 0x17e852b97b6d99745122cea2e2c782f5720a732d6f557a0a647b5090fc919667;
 
     /**
      * @notice TypeHash for threshold setting with EIP-712 signatures
@@ -286,7 +286,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
         if (!isModuleEnabled(msg.sender)) revert OnlyModules();
         IEtherFiHook hook = IEtherFiHook(dataProvider.getHookAddress());
 
-        hook.preOpHook(msg.sender);
+        if (address(hook) != address(0)) hook.preOpHook(msg.sender);
 
         uint256 len = to.length;
 
@@ -298,7 +298,7 @@ contract EtherFiSafe is EtherFiSafeErrors, ModuleManager, MultiSig, EIP712Upgrad
             }
         }
 
-        hook.postOpHook(msg.sender);
+        if (address(hook) != address(0)) hook.postOpHook(msg.sender);
 
         emit ExecTransactionFromModule(to, values, data);
     }
