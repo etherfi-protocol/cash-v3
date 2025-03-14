@@ -93,7 +93,28 @@ abstract contract ModuleManager is EtherFiSafeBase {
      */
     function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist, bytes[] calldata moduleSetupData, address[] calldata signers, bytes[] calldata signatures) external {
         _currentOwner();
-        bytes32 structHash = keccak256(abi.encode(CONFIGURE_MODULES_TYPEHASH, keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(moduleSetupData)), _useNonce()));
+        
+        // Hash each bytes element in moduleSetupData individually
+        uint256 len = moduleSetupData.length;
+        bytes32[] memory dataHashes = new bytes32[](len);
+        for (uint256 i = 0; i < len; ) {
+            dataHashes[i] = keccak256(moduleSetupData[i]);
+            unchecked {
+                ++i;
+            }
+        }
+        
+        // Concatenate the hashes and hash again
+        bytes32 moduleSetupDataHash = keccak256(abi.encodePacked(dataHashes));
+        
+        // Use the correct hash in the struct hash calculation
+        bytes32 structHash = keccak256(abi.encode(
+            CONFIGURE_MODULES_TYPEHASH,
+            keccak256(abi.encodePacked(modules)),
+            keccak256(abi.encodePacked(shouldWhitelist)),
+            moduleSetupDataHash,
+            _useNonce()
+        ));
 
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
