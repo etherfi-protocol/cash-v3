@@ -101,6 +101,23 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Fetches the safe tier
+     * @param safe Address of the safe
+     * @return SafeTiers Tier of the safe
+     */
+    function getSafeTier(address safe) external view onlyEtherFiSafe(safe) returns (SafeTiers) {
+        return _getCashModuleStorage().safeCashConfig[safe].safeTier;
+    }
+
+    /**
+     * @notice Fetches Cashback Percentage for a safe tier
+     * @return uint256 Cashback Percentage in bps
+     */
+    function getTierCashbackPercentage(SafeTiers tier) external view returns (uint256) {
+        return _getCashModuleStorage().tierCashbackPercentage[tier];
+    }
+
+    /**
      * @notice Gets the current delay settings for the module
      * @return withdrawalDelay Delay in seconds before a withdrawal can be finalized
      * @return spendLimitDelay Delay in seconds before spending limit changes take effect
@@ -277,7 +294,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd, bool shouldReceiveCashback) external onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd, bool shouldReceiveCashback) external whenNotPaused onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         IDebtManager debtManager = $.debtManager;
@@ -407,7 +424,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param amountInUsd Amount to repay in USD
      * @custom:throws OnlyBorrowToken if token is not a valid borrow token
      */
-    function repay(address safe, address token, uint256 amountInUsd) public onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function repay(address safe, address token, uint256 amountInUsd) public whenNotPaused onlyEtherFiWallet onlyEtherFiSafe(safe) {
         IDebtManager debtManager = getDebtManager();
         if (!_isBorrowToken(debtManager, token)) revert OnlyBorrowToken();
         _repay(safe, debtManager, token, amountInUsd);
@@ -509,6 +526,10 @@ contract CashModuleCore is CashModuleStorageContract {
         return (tokenAmounts, "");
     }
 
+    /**
+     * @notice Fetches the address Cash Module Setters contract
+     * @return address Cash Module Setters
+     */
     function getCashModuleSetters() public view returns (address) {
         return _getCashModuleStorage().cashModuleSetters;
     }

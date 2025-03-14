@@ -38,18 +38,6 @@ contract AaveV3Module is ModuleBase {
     }
 
     /**
-     * @notice Supply tokens to Aave V3 Pool using admin privileges
-     * @param safe The Safe address which holds the tokens
-     * @param asset The address of the ERC20 token to be supplied
-     * @param amount The amount of tokens to be supplied
-     * @dev Executes token approval and supply through the Safe's module execution
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
-     */
-    function supplyAdmin(address safe, address asset, uint256 amount) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, msg.sender) {
-        _supply(safe, asset, amount);
-    }
-
-    /**
      * @notice Supply tokens to Aave V3 Pool using signature verification
      * @param safe The Safe address which holds the tokens
      * @param asset The address of the ERC20 token to be supplied
@@ -59,7 +47,7 @@ contract AaveV3Module is ModuleBase {
      * @dev Verifies signature then executes token approval and supply through the Safe's module execution
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
-    function supplyWithSignature(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+    function supply(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         bytes32 digestHash = keccak256(abi.encode(SUPPLY_SIG, block.chainid, address(this), _useNonce(safe), safe, asset, amount)).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _supply(safe, asset, amount);

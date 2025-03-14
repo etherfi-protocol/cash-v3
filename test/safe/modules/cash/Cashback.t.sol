@@ -17,7 +17,6 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
     address spender = makeAddr("spender");
     uint256 initialSplitToSafeBps;
     uint256 initialCashbackPercentage;
-    uint256 HUNDRED_PERCENT_IN_BPS = 10_000;
     IERC20 cashbackToken = scrToken;
 
     function setUp() public override {

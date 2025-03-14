@@ -23,6 +23,5 @@ contract DebtManagerInitializer is DebtManagerStorageContract {
      */
     function initialize(address _roleRegistry) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
-        __ReentrancyGuardTransient_init_unchained();
     }
 }

@@ -11,6 +11,7 @@ struct ChainConfig {
     address usdc;
     address weETH;
     address scr;
+    address weth;
     address weEthWethOracle;
     address ethUsdcOracle;
     address scrUsdOracle;
@@ -60,6 +61,11 @@ contract Utils is Test {
         config.scr = stdJson.readAddress(
             inputJson,
             string.concat(".", chainId, ".", "scr")
+        );
+
+        config.weth = stdJson.readAddress(
+            inputJson,
+            string.concat(".", chainId, ".", "weth")
         );
 
         config.weEthWethOracle = stdJson.readAddress(

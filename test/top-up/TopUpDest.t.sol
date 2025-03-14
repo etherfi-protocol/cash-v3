@@ -9,8 +9,9 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { IEtherFiDataProvider } from "../../src/interfaces/IEtherFiDataProvider.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
+import { UpgradeableProxy, PausableUpgradeable } from "../../src/utils/UpgradeableProxy.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
-import { PausableUpgradeable, TopUpDest } from "../../src/top-up/TopUpDest.sol";
+import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 
 contract TopUpDestTest is Test {
     TopUpDest public topUpDest;
@@ -59,8 +60,8 @@ contract TopUpDestTest is Test {
         address roleRegistryImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
 
-        token1 = new MockERC20("Token 1", "TK1");
-        token2 = new MockERC20("Token 2", "TK2");
+        token1 = new MockERC20("Token 1", "TK1", 18);
+        token2 = new MockERC20("Token 2", "TK2", 18);
 
         token1.mint(depositor, INITIAL_AMOUNT);
         token2.mint(depositor, INITIAL_AMOUNT);
@@ -104,7 +105,7 @@ contract TopUpDestTest is Test {
     function test_deposit_fails_whenCallerNotDepositor() public {
         vm.startPrank(nonUser);
 
-        vm.expectRevert(TopUpDest.Unauthorized.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
 
         vm.stopPrank();
@@ -120,18 +121,24 @@ contract TopUpDestTest is Test {
     }
 
     function test_withdraw_succeeds() public {
+        deal(address(token1), depositor, DEPOSIT_AMOUNT);
+        
         // First deposit some tokens
         vm.prank(depositor);
         topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
 
+        uint256 ownerBalBefore = token1.balanceOf(owner);
+        uint256 withdrawAmt = DEPOSIT_AMOUNT / 2;
+
         // Then withdraw
         vm.startPrank(owner);
-        topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 2);
+        topUpDest.withdraw(address(token1), withdrawAmt);
 
         // Check state changes
-        assertEq(topUpDest.getDeposit(address(token1)), DEPOSIT_AMOUNT / 2);
-        assertEq(token1.balanceOf(address(topUpDest)), DEPOSIT_AMOUNT / 2);
-        assertEq(token1.balanceOf(owner), DEPOSIT_AMOUNT / 2);
+        assertEq(topUpDest.getDeposit(address(token1)), withdrawAmt);
+        assertEq(token1.balanceOf(address(topUpDest)), withdrawAmt);
+        assertEq(token1.balanceOf(owner), ownerBalBefore + withdrawAmt);
+        assertEq(token1.balanceOf(depositor), 0);
 
         vm.stopPrank();
     }
@@ -143,7 +150,7 @@ contract TopUpDestTest is Test {
 
         vm.startPrank(nonUser);
 
-        vm.expectRevert(TopUpDest.Unauthorized.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 2);
 
         vm.stopPrank();
@@ -248,7 +255,7 @@ contract TopUpDestTest is Test {
     function test_topUpUserSafe_fails_whenCallerNotTopUpRole() public {
         vm.startPrank(nonUser);
 
-        vm.expectRevert(TopUpDest.Unauthorized.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         topUpDest.topUpUserSafe(user1, 100, address(token1), TOP_UP_AMOUNT, 0);
 
         vm.stopPrank();

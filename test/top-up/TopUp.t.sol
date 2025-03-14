@@ -21,7 +21,7 @@ contract TopUpTest is Test, Constants {
         owner = 0x000000000000000000000000000000000000dEaD;
         user = makeAddr("user");
         topUp = new TopUp();
-        token = new MockERC20("Test Token", "TEST");
+        token = new MockERC20("Test Token", "TEST", 18);
 
         // topUp.initialize(owner);
     }

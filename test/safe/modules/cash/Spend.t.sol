@@ -7,11 +7,9 @@ import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 
-import { ICashDataProvider } from "../../../../src/interfaces/ICashDataProvider.sol";
 import { ICashModule, Mode } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
-
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
@@ -24,7 +22,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 amount = 100e6;
         deal(address(usdcScroll), address(safe), amount);
 
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
+        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcher));
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
@@ -36,14 +34,14 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Verify tokens were transferred to settlement dispatcher
         assertEq(usdcScroll.balanceOf(address(safe)), 0);
-        assertEq(usdcScroll.balanceOf(settlementDispatcher), settlementDispatcherBalBefore + amount);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherBalBefore + amount);
     }
 
     function test_spend_works_inCreditMode() public {
         uint256 initialBalance = 100e6;
         deal(address(usdcScroll), address(safe), initialBalance);
 
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
+        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcher));
         uint256 debtManagerBalBefore = usdcScroll.balanceOf(address(debtManager));
 
         _setMode(Mode.Credit);
@@ -61,7 +59,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Verify tokens were transferred to settlement dispatcher
         assertEq(usdcScroll.balanceOf(address(safe)), initialBalance);
-        assertEq(usdcScroll.balanceOf(settlementDispatcher), settlementDispatcherBalBefore + amount);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherBalBefore + amount);
         assertEq(usdcScroll.balanceOf(address(debtManager)), debtManagerBalBefore - amount);
     }
 
@@ -114,7 +112,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
+        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcher));
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
@@ -127,7 +125,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Verify tokens were transferred
         assertEq(usdcScroll.balanceOf(address(safe)), initialAmount - spendAmount);
-        assertEq(usdcScroll.balanceOf(settlementDispatcher), settlementDispatcherBalBefore + spendAmount);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherBalBefore + spendAmount);
 
         // Verify pending withdrawal still exists
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
@@ -157,14 +155,14 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         amounts[0] = maxCanWithdraw;
         _requestWithdrawal(tokens, amounts, recipient);
 
-        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(settlementDispatcher);
+        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcher));
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.WithdrawalCancelled(address(safe), tokens, amounts, withdrawRecipient);
         cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), futureBorrowAmt, true);
 
-        uint256 settlementDispatcherUsdcBalAfter = usdcScroll.balanceOf(settlementDispatcher);
+        uint256 settlementDispatcherUsdcBalAfter = usdcScroll.balanceOf(address(settlementDispatcher));
 
         assertEq(settlementDispatcherUsdcBalAfter - settlementDispatcherUsdcBalBefore, futureBorrowAmt);
 
@@ -184,7 +182,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(settlementDispatcher);
+        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcher));
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
@@ -196,7 +194,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Verify tokens were transferred
         assertEq(usdcScroll.balanceOf(address(safe)), initialAmount - spendAmount);
-        assertEq(usdcScroll.balanceOf(settlementDispatcher), settlementDispatcherBalBefore + spendAmount);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherBalBefore + spendAmount);
 
         // Verify pending withdrawal was cancelled
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), initialAmount - spendAmount);

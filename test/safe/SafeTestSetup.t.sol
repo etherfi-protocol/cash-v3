@@ -12,7 +12,6 @@ import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider
 import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
 import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
-
 import { ICashEventEmitter } from "../../src/interfaces/ICashEventEmitter.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../src/interfaces/ICashbackDispatcher.sol";
@@ -30,9 +29,11 @@ import { DebtManagerInitializer } from "../../src/debt-manager/DebtManagerInitia
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
 import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
-import {Utils, ChainConfig} from "../utils/Utils.sol";
+import { PriceProvider, IAggregatorV3 } from "../../src/oracle/PriceProvider.sol";
+import { SettlementDispatcher } from "../../src/settlement-dispatcher/SettlementDispatcher.sol";
+import { Utils, ChainConfig } from "../utils/Utils.sol";
 
-contract SafeTestSetup is Test {
+contract SafeTestSetup is Utils {
     using MessageHashUtils for bytes32;
 
     EtherFiSafeFactory public safeFactory;
@@ -41,13 +42,10 @@ contract SafeTestSetup is Test {
     RoleRegistry public roleRegistry;
     EtherFiHook public hook;
 
-    // IDebtManager debtManager = IDebtManager(0x8f9d2Cd33551CE06dD0564Ba147513F715c2F4a0);
-    // ICashbackDispatcher cashbackDispatcher = ICashbackDispatcher(0x7d372C3ca903CA2B6ecd8600D567eb6bAfC5e6c9);
-    // ICashEventEmitter cashEventEmitter = ICashEventEmitter(0x5423885B376eBb4e6104b8Ab1A908D350F6A162e);
-    IPriceProvider priceProvider = IPriceProvider(0x8B4C8c403fc015C46061A8702799490FD616E3bf);
-    address settlementDispatcher = 0x4Dca5093E0bB450D7f7961b5Df0A9d4c24B24786;
+    PriceProvider priceProvider;
+    SettlementDispatcher settlementDispatcher;
     IDebtManager debtManager;
-    ICashbackDispatcher cashbackDispatcher;
+    CashbackDispatcher cashbackDispatcher;
     ICashEventEmitter cashEventEmitter;
 
     address owner;
@@ -80,6 +78,10 @@ contract SafeTestSetup is Test {
     IERC20 public weETHScroll = IERC20(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
     IERC20 public scrToken = IERC20(0xd29687c813D741E2F938F4aC377128810E217b1b);
 
+    address weEthWethOracle;
+    address ethUsdcOracle;
+    address usdcUsdOracle;
+    address scrUsdOracle;
 
     uint256 dailyLimitInUsd = 10_000e6;
     uint256 monthlyLimitInUsd = 100_000e6;
@@ -92,8 +94,13 @@ contract SafeTestSetup is Test {
     int256 timezoneOffset = 4 * 60 * 60; // Dubai timezone
     uint128 minShares;
 
-    bytes32 public DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
+    // https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
+    uint32 optimismDestEid = 30111;
+    // https://stargateprotocol.gitbook.io/stargate/v/v2-developer-docs/technical-reference/mainnet-contracts#scroll
+    address stargateUsdcPool = 0x3Fc69CC4A842838bCDC9499178740226062b14E4;
+    address stargateEthPool = 0xC2b638Cb5042c1B3c5d5C969361fB50569840583;
 
+    bytes32 public DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
 
     function setUp() public virtual {
         vm.createSelectFork("https://rpc.scroll.io");
@@ -110,6 +117,12 @@ contract SafeTestSetup is Test {
 
         vm.startPrank(owner);
 
+        chainConfig = getChainConfig(vm.toString(block.chainid));
+        weEthWethOracle = chainConfig.weEthWethOracle;
+        ethUsdcOracle = chainConfig.ethUsdcOracle;
+        scrUsdOracle = chainConfig.scrUsdOracle;
+        usdcUsdOracle = chainConfig.usdcUsdOracle;
+
         address dataProviderImpl = address(new EtherFiDataProvider());
         dataProvider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, "")));
 
@@ -124,26 +137,8 @@ contract SafeTestSetup is Test {
         address cashModuleCoreImpl = address(new CashModuleCore(address(dataProvider)));
         cashModule = ICashModule(address(new UUPSProxy(cashModuleCoreImpl, "")));
 
-        address cashbackDispatcherImpl = address(new CashbackDispatcher(address(dataProvider)));
-        cashbackDispatcher = ICashbackDispatcher(
-            address(
-                new UUPSProxy(
-                    cashbackDispatcherImpl, 
-                    abi.encodeWithSelector(
-                        CashbackDispatcher.initialize.selector,
-                        address(roleRegistry),
-                        address(cashModule),
-                        address(priceProvider),
-                        address(scrToken)
-                    )
-                )
-            )
-        );
-
-        deal(address(scrToken), address(cashbackDispatcher), 100000 ether);
-
-        roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
-
+        _setupPriceProvider();
+        _setupCashbackDispatcher();
 
         module1 = address(new ModuleBase(address(dataProvider)));
         module2 = address(new ModuleBase(address(dataProvider)));
@@ -165,6 +160,7 @@ contract SafeTestSetup is Test {
         dataProvider.initialize(address(roleRegistry), address(cashModule), address(cashLens), modules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner);
 
         _setupDebtManager();
+        _setupSettlementDispatcher();
 
         address cashEventEmitterImpl = address(new CashEventEmitter(address(cashModule)));
         cashEventEmitter = ICashEventEmitter(address(new UUPSProxy(cashEventEmitterImpl, abi.encodeWithSelector(CashEventEmitter.initialize.selector, address(roleRegistry)))));
@@ -172,7 +168,7 @@ contract SafeTestSetup is Test {
         CashModuleCore(address(cashModule)).initialize(
             address(roleRegistry), 
             address(debtManager), 
-            settlementDispatcher, 
+            address(settlementDispatcher), 
             address(cashbackDispatcher), 
             address(cashEventEmitter), 
             cashModuleSettersImpl
@@ -198,6 +194,119 @@ contract SafeTestSetup is Test {
         vm.stopPrank();
     }
 
+    function _setupPriceProvider() internal {
+        PriceProvider.Config memory weETHConfig = PriceProvider.Config({
+            oracle: weEthWethOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: IAggregatorV3(weEthWethOracle).decimals(),
+            maxStaleness: 1 days,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: true,
+            isStableToken: false
+        });
+        
+        PriceProvider.Config memory ethConfig = PriceProvider.Config({
+            oracle: ethUsdcOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: IAggregatorV3(ethUsdcOracle).decimals(),
+            maxStaleness: 1 days,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: false
+        });
+        
+        PriceProvider.Config memory usdcConfig = PriceProvider.Config({
+            oracle: usdcUsdOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: IAggregatorV3(usdcUsdOracle).decimals(),
+            maxStaleness: 10 days,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: true
+        });
+        
+        PriceProvider.Config memory scrollConfig = PriceProvider.Config({
+            oracle: scrUsdOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: IAggregatorV3(scrUsdOracle).decimals(),
+            maxStaleness: 1 days,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: false
+        });
+
+        address[] memory initialTokens = new address[](4);
+        initialTokens[0] = address(weETHScroll);
+        initialTokens[1] = eth;
+        initialTokens[2] = address(usdcScroll);
+        initialTokens[3] = address(scrToken);
+
+        PriceProvider.Config[] memory initialTokensConfig = new PriceProvider.Config[](4);
+        initialTokensConfig[0] = weETHConfig;
+        initialTokensConfig[1] = ethConfig;
+        initialTokensConfig[2] = usdcConfig;
+        initialTokensConfig[3] = scrollConfig;
+
+        priceProvider = PriceProvider(address(new UUPSProxy(
+            address(new PriceProvider()), 
+            abi.encodeWithSelector(
+                PriceProvider.initialize.selector,
+                address(roleRegistry),
+                initialTokens,
+                initialTokensConfig
+            )
+        )));
+        roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
+    }
+    
+    function _setupCashbackDispatcher() internal {
+        address cashbackDispatcherImpl = address(new CashbackDispatcher(address(dataProvider)));
+        cashbackDispatcher = CashbackDispatcher(
+            address(
+                new UUPSProxy(
+                    cashbackDispatcherImpl, 
+                    abi.encodeWithSelector(
+                        CashbackDispatcher.initialize.selector,
+                        address(roleRegistry),
+                        address(cashModule),
+                        address(priceProvider),
+                        address(scrToken)
+                    )
+                )
+            )
+        );
+
+        deal(address(scrToken), address(cashbackDispatcher), 100000 ether);
+
+        roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
+    }
+
+    function _setupSettlementDispatcher() internal {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+
+        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
+        destDatas[0] = SettlementDispatcher.DestinationData({
+            destEid: optimismDestEid,
+            destRecipient: owner,
+            stargate: stargateUsdcPool
+        });
+
+        address settlementDispatcherImpl = address(new SettlementDispatcher());
+        settlementDispatcher = SettlementDispatcher(
+            payable(address(new UUPSProxy(
+                settlementDispatcherImpl, 
+                abi.encodeWithSelector(SettlementDispatcher.initialize.selector, address(roleRegistry), tokens, destDatas)
+            )))
+        );
+
+        roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
+    }
+
     function _setupDebtManager() internal {
         address[] memory collateralTokens = new address[](2);
         collateralTokens[0] = address(weETHScroll);
@@ -205,10 +314,7 @@ contract SafeTestSetup is Test {
         address[] memory borrowTokens = new address[](1);
         borrowTokens[0] = address(usdcScroll);
 
-        DebtManagerCore.CollateralTokenConfig[]
-            memory collateralTokenConfig = new DebtManagerCore.CollateralTokenConfig[](
-                2
-            );
+        IDebtManager.CollateralTokenConfig[] memory collateralTokenConfig = new IDebtManager.CollateralTokenConfig[](2);
 
         collateralTokenConfig[0].ltv = ltv;
         collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
@@ -229,11 +335,11 @@ contract SafeTestSetup is Test {
         debtManager = IDebtManager(address(debtManagerProxy));
         debtManager.setAdminImpl(debtManagerAdminImpl);
 
-        DebtManagerAdmin(address(debtManager)).supportCollateralToken(address(weETHScroll), collateralTokenConfig[0]);
-        DebtManagerAdmin(address(debtManager)).supportCollateralToken(address(usdcScroll), collateralTokenConfig[1]);
+        debtManager.supportCollateralToken(address(weETHScroll), collateralTokenConfig[0]);
+        debtManager.supportCollateralToken(address(usdcScroll), collateralTokenConfig[1]);
         
         minShares = uint128(10 * 10 ** IERC20Metadata(address(usdcScroll)).decimals());
-        DebtManagerAdmin(address(debtManager)).supportBorrowToken(
+        debtManager.supportBorrowToken(
             address(usdcScroll), 
             borrowApyPerSecond, 
             minShares

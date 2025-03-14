@@ -33,50 +33,8 @@ contract AaveV3ModuleTest is SafeTestSetup {
         _configureModules(modules, shouldWhitelist, setupData);
     }
 
-    // supplyAdmin tests
-    function test_supplyAdmin_transfersTokensToPool() public {
-        uint256 amountToSupply = 100e6;
-        deal(address(usdcScroll), address(safe), amountToSupply);
-
-        uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
-
-        vm.prank(owner1);
-        aaveV3Module.supplyAdmin(address(safe), address(usdcScroll), amountToSupply);
-
-        uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
-
-        assertEq(balanceBefore - balanceAfter, amountToSupply);
-    }
-
-    function test_supplyAdmin_reverts_whenAccountIsNotADeployedSafe() public {
-        address notSafe = makeAddr("safe");
-        uint256 amountToSupply = 100e6;
-        deal(address(usdcScroll), address(notSafe), amountToSupply);
-
-        vm.prank(owner1);
-        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
-        aaveV3Module.supplyAdmin(address(notSafe), address(usdcScroll), amountToSupply);
-    }
-
-    function test_supplyAdmin_reverts_whenCallerIsNotAdmin() public {
-        uint256 amountToSupply = 100e6;
-        deal(address(usdcScroll), address(safe), amountToSupply);
-
-        vm.prank(notOwner);
-        vm.expectRevert(ModuleBase.OnlySafeAdmin.selector);
-        aaveV3Module.supplyAdmin(address(safe), address(usdcScroll), amountToSupply);
-    }
-
-    function test_supplyAdmin_reverts_whenSafeHasInsufficientBalance() public {
-        uint256 amountToSupply = 100e6;
-
-        vm.prank(owner1);
-        vm.expectRevert(AaveV3Module.InsufficientBalanceOnSafe.selector);
-        aaveV3Module.supplyAdmin(address(safe), address(usdcScroll), amountToSupply);
-    }
-
-    // supplyWithSignature tests
-    function test_supplyWithSignature_transfersTokensToPool() public {
+    // supply tests
+    function test_supply_transfersTokensToPool() public {
         uint256 amountToSupply = 100e6;
         deal(address(usdcScroll), address(safe), amountToSupply);
 
@@ -87,14 +45,14 @@ contract AaveV3ModuleTest is SafeTestSetup {
 
         uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
 
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
 
         assertEq(balanceBefore - balanceAfter, amountToSupply);
     }
 
-    function test_supplyWithSignature_reverts_whenSafeHasInsufficientBalance() public {
+    function test_supply_reverts_whenSafeHasInsufficientBalance() public {
         uint256 amountToSupply = 100e6;
         // Not providing any tokens to the safe
 
@@ -104,10 +62,10 @@ contract AaveV3ModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(AaveV3Module.InsufficientBalanceOnSafe.selector);
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
     }
 
-    function test_supplyWithSignature_reverts_whenSignerIsNotAdmin() public {
+    function test_supply_reverts_whenSignerIsNotAdmin() public {
         uint256 amountToSupply = 100e6;
         deal(address(usdcScroll), address(safe), amountToSupply);
 
@@ -117,10 +75,10 @@ contract AaveV3ModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ModuleBase.OnlySafeAdmin.selector);
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, notOwner, signature);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, notOwner, signature);
     }
 
-    function test_supplyWithSignature_reverts_whenSignatureIsInvalid() public {
+    function test_supply_reverts_whenSignatureIsInvalid() public {
         uint256 amountToSupply = 100e6;
         deal(address(usdcScroll), address(safe), amountToSupply);
 
@@ -129,10 +87,10 @@ contract AaveV3ModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
     }
 
-    function test_supplyWithSignature_incrementsNonce() public {
+    function test_supply_incrementsNonce() public {
         uint256 amountToSupply = 100e6;
         deal(address(usdcScroll), address(safe), amountToSupply * 2);
 
@@ -143,14 +101,14 @@ contract AaveV3ModuleTest is SafeTestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
 
         uint256 nonceAfter = aaveV3Module.getNonce(address(safe));
 
         assertEq(nonceAfter, nonceBefore + 1);
     }
 
-    function test_supplyWithSignature_reverts_whenReplayingSignature() public {
+    function test_supply_reverts_whenReplayingSignature() public {
         uint256 amountToSupply = 100e6;
         deal(address(usdcScroll), address(safe), amountToSupply * 2);
 
@@ -162,10 +120,10 @@ contract AaveV3ModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         // First supply should succeed
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
 
         // Second supply with same signature should fail
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        aaveV3Module.supplyWithSignature(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
     }
 }

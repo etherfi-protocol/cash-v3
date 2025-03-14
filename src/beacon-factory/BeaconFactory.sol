@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { CREATE3 } from "solady/utils/CREATE3.sol";
@@ -15,7 +14,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @notice Factory contract for deploying beacon proxies with deterministic addresses
  * @dev This contract uses CREATE3 for deterministic deployments and implements UUPS upgradeability pattern
  */
-contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
+contract BeaconFactory is UpgradeableProxy {
     /// @custom:storage-location erc7201:etherfi.storage.BeaconFactory
     struct BeaconFactoryStorage {
         /// @notice The address of the beacon contract that stores the implementation
@@ -39,9 +38,6 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
 
     /// @notice Thrown when input is invalid
     error InvalidInput();
-    
-    /// @notice Thrown when msg sender does not have owner role on RoleRegistry
-    error OnlyRoleRegistryOwner();
 
     /**
      * @dev Initializes the contract with required parameters
@@ -97,8 +93,7 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
      * @custom:throws OnlyRoleRegistryOwner when msg.sender is not the owner of the RoleRegistry contract
      * @custom:throws InvalidInput when _beacon == address(0)
      */
-    function upgradeBeaconImplementation(address _newImpl) external {
-        if (msg.sender != roleRegistry().owner()) revert OnlyRoleRegistryOwner();
+    function upgradeBeaconImplementation(address _newImpl) external onlyRoleRegistryOwner() {
         if (_newImpl == address(0)) revert InvalidInput();
 
         UpgradeableBeacon upgradeableBeacon = UpgradeableBeacon(_getBeaconFactoryStorage().beacon);
@@ -114,27 +109,5 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
      */
     function getDeterministicAddress(bytes32 salt) public view returns (address) {
         return CREATE3.predictDeterministicAddress(salt);
-    }
-
-    /**
-     * @notice Pauses all contract operations
-     * @dev Only callable by addresses with the pauser role in the role registry
-     * @dev Triggers the Paused event from PausableUpgradeable
-     * @custom:restriction Caller must have pauser role
-     */
-    function pause() external {
-        roleRegistry().onlyPauser(msg.sender);
-        _pause();
-    }
-
-    /**
-     * @notice Unpauses all contract operations
-     * @dev Only callable by addresses with the unpauser role in the role registry
-     * @dev Triggers the Unpaused event from PausableUpgradeable
-     * @custom:restriction Caller must have unpauser role
-     */
-    function unpause() external {
-        roleRegistry().onlyUnpauser(msg.sender);
-        _unpause();
     }
 }

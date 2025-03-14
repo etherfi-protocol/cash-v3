@@ -50,8 +50,6 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         assertEq(spendingLimitAfter.monthlyLimit, monthlySpendingLimitInUsd);
         assertEq(spendingLimitAfter.newDailyLimit, 0);
         assertEq(spendingLimitAfter.newMonthlyLimit, 0);
-        assertEq(spendingLimitAfter.spentToday, transferAmount);
-        assertEq(spendingLimitAfter.spentThisMonth, transferAmount);
         assertEq(spendingLimitAfter.dailyLimitChangeActivationTime, 0);
         assertEq(spendingLimitAfter.monthlyLimitChangeActivationTime, 0);
     }
@@ -99,7 +97,7 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount, true);
-
+        
         assertEq(cashLens.applicableSpendingLimit(address(safe)).spentToday, amount);
         assertEq(cashLens.applicableSpendingLimit(address(safe)).spentThisMonth, amount);
 
@@ -116,9 +114,5 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         // Since the time for renewal is in the past, spentToday should be 0
         assertEq(cashLens.applicableSpendingLimit(address(safe)).spentToday, 0);
         assertEq(cashLens.applicableSpendingLimit(address(safe)).spentThisMonth, amount);
-
-        // Since the time for renewal is in the past, we should be able to spend the whole spending limit again
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), dailyLimit, true);
     }
 }

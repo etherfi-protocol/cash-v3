@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import { EtherFiSafe, EtherFiSafeFactory, SafeTestSetup } from "./SafeTestSetup.t.sol";
+import { UpgradeableProxy, PausableUpgradeable } from "../../src/utils/UpgradeableProxy.sol";
 import { BeaconFactory } from "../../src/beacon-factory/BeaconFactory.sol";
 
 contract SafeFactoryTest is SafeTestSetup {
@@ -54,6 +55,16 @@ contract SafeFactoryTest is SafeTestSetup {
         assertTrue(newSafe.isModuleEnabled(module1));
         assertTrue(newSafe.isModuleEnabled(module2));
 
+        vm.stopPrank();
+    }
+
+    function test_deployEtherFiSafe_reverts_whenPaused() public {
+        vm.prank(pauser);
+        safeFactory.pause();
+
+        vm.startPrank(owner);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        safeFactory.deployEtherFiSafe(salt, owners, modules, moduleSetupData, testThreshold);
         vm.stopPrank();
     }
 
@@ -241,7 +252,7 @@ contract SafeFactoryTest is SafeTestSetup {
         
         address newImplementation = address(new EtherFiSafe(address(dataProvider)));
         // Expect the upgrade to revert because caller is not the owner
-        vm.expectRevert(BeaconFactory.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         safeFactory.upgradeBeaconImplementation(newImplementation);
         
         vm.stopPrank();

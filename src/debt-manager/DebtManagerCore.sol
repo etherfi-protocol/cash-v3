@@ -404,7 +404,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param borrowToken Address of the token being supplied
      * @param amount Amount of tokens to supply
      */
-    function supply(address user, address borrowToken, uint256 amount) external nonReentrant {
+    function supply(address user, address borrowToken, uint256 amount) external whenNotPaused nonReentrant {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         if (!isBorrowToken(borrowToken)) revert UnsupportedBorrowToken();
@@ -412,14 +412,11 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
         uint256 shares = $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens == 0 ? amount : amount.mulDiv($.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens, _getTotalBorrowTokenAmount(borrowToken), Math.Rounding.Floor);
 
-        if (shares < $.borrowTokenConfig[borrowToken].minShares) {
-            revert SharesCannotBeLessThanMinShares();
-        }
+        if (shares < $.borrowTokenConfig[borrowToken].minShares) revert SharesCannotBeLessThanMinShares();
 
         $.sharesOfBorrowTokens[user][borrowToken] += shares;
         $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens += shares;
 
-        // Moving this before state update to prevent reentrancy
         IERC20(borrowToken).safeTransferFrom(msg.sender, address(this), amount);
 
         emit Supplied(msg.sender, user, borrowToken, amount);
@@ -431,7 +428,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param borrowToken Address of the token to withdraw
      * @param amount Amount of tokens to withdraw
      */
-    function withdrawBorrowToken(address borrowToken, uint256 amount) external {
+    function withdrawBorrowToken(address borrowToken, uint256 amount) external whenNotPaused {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         uint256 totalBorrowTokenAmt = _getTotalBorrowTokenAmount(borrowToken);
@@ -440,6 +437,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         uint256 shares = amount.mulDiv($.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens, totalBorrowTokenAmt, Math.Rounding.Ceil);
 
         if (shares == 0) revert SharesCannotBeZero();
+
         if ($.sharesOfBorrowTokens[msg.sender][borrowToken] < shares) revert InsufficientBorrowShares();
 
         uint256 sharesLeft = $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens - shares;
@@ -458,7 +456,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param token Address of the token to borrow
      * @param amount Amount of tokens to borrow
      */
-    function borrow(address token, uint256 amount) external onlyEtherFiSafe {
+    function borrow(address token, uint256 amount) external whenNotPaused onlyEtherFiSafe {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         if (!isBorrowToken(token)) revert UnsupportedBorrowToken();
@@ -487,7 +485,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param token Address of the token being repaid
      * @param amount Amount of tokens to repay
      */
-    function repay(address user, address token, uint256 amount) external nonReentrant {
+    function repay(address user, address token, uint256 amount) external whenNotPaused nonReentrant {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         _onlyEtherFiSafe(user);
@@ -511,7 +509,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param borrowToken Address of the borrow token to repay
      * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
      */
-    function liquidate(address user, address borrowToken, address[] memory collateralTokensPreference) external nonReentrant {
+    function liquidate(address user, address borrowToken, address[] memory collateralTokensPreference) external whenNotPaused nonReentrant {
         _updateBorrowings(user);
         if (!isBorrowToken(borrowToken)) revert UnsupportedBorrowToken();
         if (!liquidatable(user)) revert CannotLiquidateYet();

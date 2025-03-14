@@ -117,7 +117,7 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @param salt The salt value used for deterministic deployment
      * @custom:throws OnlyAdmin if caller doesn't have admin role
      */
-    function deployTopUpContract(bytes32 salt) external {
+    function deployTopUpContract(bytes32 salt) external whenNotPaused {
         if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         bytes memory initData = abi.encodeWithSelector(TopUp.initialize.selector, address(this));
         address deployed = _deployBeacon(salt, initData);

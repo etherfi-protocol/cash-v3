@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
-import { ReentrancyGuardTransientUpgradeable } from "../utils/ReentrancyGuardTransientUpgradeable.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
@@ -14,7 +12,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @dev Extends UpgradeableProxy with reentrancy protection and pause functionality
  * @author ether.fi
  */
-contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, PausableUpgradeable {
+contract TopUpDest is UpgradeableProxy {
     using SafeERC20 for IERC20;
 
     /// @notice Role identifier for accounts authorized to deposit tokens
@@ -78,9 +76,6 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
     /// @notice Error thrown when input arrays have different lengths
     error ArrayLengthMismatch();
 
-    /// @notice Error thrown when a caller lacks the required role
-    error Unauthorized();
-
     /// @notice Error thrown when cumulative top-up is wrong
     error RaceDetected();
 
@@ -99,8 +94,6 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      */
     function initialize(address _roleRegistry, address _etherFiDataProvider) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
-        __ReentrancyGuardTransient_init();
-        __Pausable_init_unchained();
 
         _getTopUpDestStorage().etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
     }
@@ -139,8 +132,7 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
      * @custom:throws AmountCannotBeZero if amount is zero
      * @custom:throws AmountGreaterThanDeposit if amount exceeds available deposit
      */
-    function withdraw(address token, uint256 amount) external nonReentrant {
-        if (msg.sender != roleRegistry().owner()) revert Unauthorized();
+    function withdraw(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner() {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
         if (amount == 0) revert AmountCannotBeZero();
@@ -208,24 +200,6 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
     }
 
     /**
-     * @notice Pauses the contract
-     * @dev Only callable by accounts with the pauser role
-     */
-    function pause() external {
-        roleRegistry().onlyPauser(msg.sender);
-        _pause();
-    }
-
-    /**
-     * @notice Unpauses the contract
-     * @dev Only callable by accounts with the unpauser role
-     */
-    function unpause() external {
-        roleRegistry().onlyUnpauser(msg.sender);
-        _unpause();
-    }
-
-    /**
      * @notice Gets the total deposit amount for a specific token
      * @dev Returns the current deposit balance of a token in the contract
      * @param token Address of the token to query
@@ -267,15 +241,5 @@ contract TopUpDest is UpgradeableProxy, ReentrancyGuardTransientUpgradeable, Pau
     function _transfer(address to, address token, uint256 amount) internal {
         if (IERC20(token).balanceOf(address(this)) < amount) revert BalanceTooLow();
         IERC20(token).safeTransfer(to, amount);
-    }
-
-    /**
-     * @dev Modifier to check if the caller has a specific role
-     * @param role The role identifier to check
-     * @custom:throws Unauthorized if caller doesn't have the required role
-     */
-    modifier onlyRole(bytes32 role) {
-        if (!roleRegistry().hasRole(role, msg.sender)) revert Unauthorized();
-        _;
     }
 }

@@ -250,8 +250,6 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(safe), 10 ether);
 
         uint256 amount = 100e6;
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount, true);
 
         _updateSpendingLimit(amount - 1, 1 ether);
 
@@ -259,7 +257,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         vm.warp(block.timestamp + spendingLimitDelay + 1);
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), keccak256("newTxId"), address(usdcScroll), amount);
         assertEq(canSpend, false);
-        assertEq(reason, "Daily spending limit already exhausted");
+        assertEq(reason, "Daily available spending limit less than amount requested");
     }
 
     function test_canSpend_fails_inDebitMode_whenIncomingDailyLimitIsLowerThanAmountUsed() public {

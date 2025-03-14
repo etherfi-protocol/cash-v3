@@ -7,6 +7,7 @@ import { Test, console } from "forge-std/Test.sol";
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
@@ -151,7 +152,7 @@ contract TopUpFactoryTest is Test, Constants {
     /// @dev Test recovery functionality
     function test_recoverFunds_succeeds() public {
         address recoveryWallet = makeAddr("recovery");
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
         vm.startPrank(admin);
         factory.setRecoveryWallet(recoveryWallet);
@@ -169,7 +170,7 @@ contract TopUpFactoryTest is Test, Constants {
 
     function test_recoverFunds_reverts_whenZeroAmount() public {
         address recoveryWallet = makeAddr("recovery");
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
         vm.startPrank(admin);
         factory.setRecoveryWallet(recoveryWallet);
@@ -180,7 +181,7 @@ contract TopUpFactoryTest is Test, Constants {
     }
 
     function test_recoverFunds_reverts_whenNoRecoveryWallet() public {
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
         vm.prank(admin);
         vm.expectRevert(TopUpFactory.RecoveryWalletNotSet.selector);
@@ -392,7 +393,7 @@ contract TopUpFactoryTest is Test, Constants {
     }
 
     function test_bridge_reverts_whenUnsupportedToken() public {
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
         factory.bridge(address(unsupportedToken));
     }
@@ -403,7 +404,7 @@ contract TopUpFactoryTest is Test, Constants {
     }
 
     function test_getBridgeFee_reverts_whenUnsupportedToken() public {
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
         factory.getBridgeFee(address(unsupportedToken));
     }
@@ -413,7 +414,7 @@ contract TopUpFactoryTest is Test, Constants {
         assertTrue(factory.isTokenSupported(address(weETH)), "weETH should be supported");
         assertTrue(factory.isTokenSupported(address(usdc)), "USDC should be supported");
 
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         assertFalse(factory.isTokenSupported(address(unsupportedToken)), "Unsupported token should return false");
     }
 
@@ -546,7 +547,7 @@ contract TopUpFactoryTest is Test, Constants {
         address newImplementation = address(new TopUp());
         
         // Expect the upgrade to revert because caller is not the owner
-        vm.expectRevert(BeaconFactory.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         factory.upgradeBeaconImplementation(address(newImplementation));
         
         vm.stopPrank();

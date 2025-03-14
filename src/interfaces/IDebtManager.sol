@@ -85,8 +85,8 @@ interface IDebtManager {
     error SharesCannotBeZero();
     error SharesCannotBeLessThanMinShares();
     error SupplyCapBreached();
-    error OnlyUserSafe();
-    error UserSafeCannotSupplyDebtTokens();
+    error OnlyEtherFiSafe();
+    error EtherFiSafeCannotSupplyDebtTokens();
     error BorrowTokenCannotBeRemovedFromCollateral();
 
     /**

@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { ReentrancyGuardTransientUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardTransientUpgradeable.sol";
 
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
@@ -17,7 +16,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @notice Contract to manage lending and borrowing for Cash protocol
  * @dev Handles the storage layout and core functionality for the lending and borrowing system
  */
-contract DebtManagerStorageContract is UpgradeableProxy, ReentrancyGuardTransientUpgradeable {
+contract DebtManagerStorageContract is UpgradeableProxy {
     using Math for uint256;
 
     /**
@@ -464,17 +463,7 @@ contract DebtManagerStorageContract is UpgradeableProxy, ReentrancyGuardTransien
      * @notice Error thrown when trying to remove a borrow token from collateral
      */
     error BorrowTokenCannotBeRemovedFromCollateral();
-    
-    /**
-     * @notice Error thrown when caller is not the role registry owner
-     */
-    error OnlyRoleRegistryOwner();
-    
-    /**
-     * @notice Error thrown for unauthorized access
-     */
-    error Unauthorized();
-
+        
     /**
      * @dev Constructor that initializes the contract with the EtherFi data provider
      * @param dataProvider Address of the EtherFi data provider
@@ -490,8 +479,7 @@ contract DebtManagerStorageContract is UpgradeableProxy, ReentrancyGuardTransien
      * @dev This needs to be in a base class for proper implementation
      * @param newImpl Address of the new implementation
      */
-    function setAdminImpl(address newImpl) external {
-        if(roleRegistry().owner() != msg.sender) revert OnlyRoleRegistryOwner();
+    function setAdminImpl(address newImpl) external onlyRoleRegistryOwner() {
         bytes32 position = ADMIN_IMPL_POSITION;
         // solhint-disable-next-line no-inline-assembly
         assembly ("memory-safe") {
@@ -668,14 +656,5 @@ contract DebtManagerStorageContract is UpgradeableProxy, ReentrancyGuardTransien
      */
     function _getDecimals(address token) internal view returns (uint8) {
         return IERC20Metadata(token).decimals();
-    }
-
-    /**
-     * @dev Modifier to restrict access to specific roles
-     * @param role Role identifier
-     */
-    modifier onlyRole(bytes32 role) {
-        if (!roleRegistry().hasRole(role, msg.sender)) revert Unauthorized();
-        _;
     }
 }

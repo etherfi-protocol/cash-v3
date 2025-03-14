@@ -520,4 +520,17 @@ interface ICashModule {
      * @custom:throws InvalidInput if newCashModuleSetters = address(0)
      */
     function setCashModuleSettersAddress(address newCashModuleSetters) external;
+
+    /**
+     * @notice Fetched the safe tier
+     * @param safe Address of the safe
+     * @return SafeTiers Tier of the safe
+     */
+    function getSafeTier(address safe) external view returns (SafeTiers);
+    
+    /**
+     * @notice Fetches Cashback Percentage for a safe tier
+     * @return uint256 Cashback Percentage in bps
+     */
+    function getTierCashbackPercentage(SafeTiers tier) external view returns (uint256);
 }

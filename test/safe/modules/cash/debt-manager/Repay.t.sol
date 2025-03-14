@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { CashEventEmitter, CashModuleTestSetup, ICashModule, Mode } from "./CashModuleTestSetup.t.sol";
+import { CashEventEmitter, CashModuleTestSetup, ICashModule, Mode } from "../CashModuleTestSetup.t.sol";
 
-contract CashModuleRepayTest is CashModuleTestSetup {
+contract DebtManagerRepayTest is CashModuleTestSetup {
     uint256 collateralAmount = 0.01 ether;
     uint256 collateralValueInUsdc;
     uint256 borrowAmt;
@@ -50,8 +50,6 @@ contract CashModuleRepayTest is CashModuleTestSetup {
 
     function test_repay_incursInterest() public {
         uint256 timeElapsed = 10;
-
-        uint256 borrowApyPerSecond = debtManager.borrowApyPerSecond(address(usdcScroll));
 
         vm.warp(block.timestamp + timeElapsed);
         uint256 expectedInterest = (borrowAmt * borrowApyPerSecond * timeElapsed) / 1e20;
