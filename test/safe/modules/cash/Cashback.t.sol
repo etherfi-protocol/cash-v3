@@ -8,7 +8,7 @@ import { SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
 import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
-import { CashModuleTestSetup, CashVerificationLib, ICashModule, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { CashModuleTestSetup, DebtManagerCore, DebtManagerAdmin, CashVerificationLib, ICashModule, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleCashbackTest is CashModuleTestSetup {
     using Math for uint256;
@@ -70,7 +70,20 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         assertEq(cashbackBalSpenderAfter, cashbackBalSpenderBefore);
     }
 
-    function test_spend_storesPendingCashback_ifNotEnoughBalanceOnCashbackDispatcher() public {
+    function test_spend_storesPendingCashback_ifNotEnoughBalanceOnCashbackDispatcher() public {        
+        vm.startPrank(owner);
+        address[] memory collateralTokens = new address[](1);
+        collateralTokens[0] = address(scrToken);
+
+        DebtManagerCore.CollateralTokenConfig[] memory collateralTokenConfig = new DebtManagerCore.CollateralTokenConfig[](1);
+        collateralTokenConfig[0].ltv = ltv;
+        collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
+        collateralTokenConfig[0].liquidationBonus = liquidationBonus;
+
+        DebtManagerAdmin(address(debtManager)).supportCollateralToken(address(scrToken), collateralTokenConfig[0]);
+
+        vm.stopPrank();
+
         uint256 amount = 100e6;
         deal(address(usdcScroll), address(safe), amount);
         deal(address(scrToken), address(cashbackDispatcher), 0);

@@ -30,9 +30,9 @@ contract CashModuleLiquidationTest is CashModuleTestSetup {
     }
 
     function test_liquidation_works() public {
-        vm.startPrank(cashOwnerGnosisSafe);
+        vm.startPrank(owner);
 
-        uint256 liquidatorWeEthBalBefore = weETHScroll.balanceOf(cashOwnerGnosisSafe);
+        uint256 liquidatorWeEthBalBefore = weETHScroll.balanceOf(owner);
 
         IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
         collateralTokenConfig.ltv = 5e18;
@@ -44,7 +44,7 @@ contract CashModuleLiquidationTest is CashModuleTestSetup {
 
         address[] memory collateralTokenPreference = debtManager.getCollateralTokens();
 
-        deal(address(usdcScroll), cashOwnerGnosisSafe, borrowAmt);
+        deal(address(usdcScroll), owner, borrowAmt);
         IERC20(address(usdcScroll)).approve(address(debtManager), borrowAmt);
         debtManager.liquidate(address(safe), address(usdcScroll), collateralTokenPreference);
 
@@ -55,7 +55,7 @@ contract CashModuleLiquidationTest is CashModuleTestSetup {
 
         uint256 safeCollateralAfter = debtManager.getCollateralValueInUsd(address(safe));
         uint256 safeDebtAfter = debtManager.borrowingOf(address(safe), address(usdcScroll));
-        uint256 liquidatorWeEthBalAfter = weETHScroll.balanceOf(cashOwnerGnosisSafe);
+        uint256 liquidatorWeEthBalAfter = weETHScroll.balanceOf(owner);
 
         uint256 liquidatedUsdcCollateralAmt = debtManager.convertUsdToCollateralToken(address(weETHScroll), borrowAmt);
         uint256 liquidationBonusReceived = (liquidatedUsdcCollateralAmt * collateralTokenConfig.liquidationBonus) / HUNDRED_PERCENT;
@@ -78,7 +78,7 @@ contract CashModuleLiquidationTest is CashModuleTestSetup {
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
-        vm.startPrank(cashOwnerGnosisSafe);
+        vm.startPrank(owner);
 
         IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
         collateralTokenConfig.ltv = 5e18;
@@ -90,7 +90,7 @@ contract CashModuleLiquidationTest is CashModuleTestSetup {
 
         address[] memory collateralTokenPreference = debtManager.getCollateralTokens();
 
-        deal(address(usdcScroll), cashOwnerGnosisSafe, borrowAmt);
+        deal(address(usdcScroll), owner, borrowAmt);
         IERC20(address(usdcScroll)).approve(address(debtManager), borrowAmt);
 
         vm.expectEmit(true, true, true, true);

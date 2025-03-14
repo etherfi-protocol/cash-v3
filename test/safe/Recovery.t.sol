@@ -1024,7 +1024,7 @@ contract RecoveryManagerTest is SafeTestSetup {
         }
     }
 
-    function test_getRecoveryStatus_initialState() public {
+    function test_getRecoveryStatus_initialState() public view {
         // Check initial state (should be enabled with no pending recovery)
         (bool isEnabled, bool isPending, address incomingOwner, uint256 timelockExpiration) = safe.getRecoveryStatus();
         
@@ -1107,7 +1107,7 @@ contract RecoveryManagerTest is SafeTestSetup {
         safe.getOwners();
         
         // Check status after timelock expiration and transition
-        (bool isEnabled, bool isPending, address incomingOwner, uint256 timelockExpiration) = safe.getRecoveryStatus();
+        (bool isEnabled, , , ) = safe.getRecoveryStatus();
         
         assertTrue(isEnabled);        // Recovery should still be enabled
         // After ownership has transitioned, isPending might be false if implementation clears these

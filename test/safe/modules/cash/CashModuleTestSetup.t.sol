@@ -10,7 +10,7 @@ import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 
 import { CashbackDispatcher } from "../../../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { DebtManagerAdmin } from "../../../../src/debt-manager/DebtManagerAdmin.sol";
-import { DebtManagerCore, DebtManagerStorage } from "../../../../src/debt-manager/DebtManagerCore.sol";
+import { DebtManagerCore, DebtManagerStorageContract } from "../../../../src/debt-manager/DebtManagerCore.sol";
 import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
 import { Mode, SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
 
@@ -28,29 +28,11 @@ contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
     using TimeLib for uint256;
 
-    IERC20 public usdcScroll = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
-    IERC20 public weETHScroll = IERC20(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
-    IERC20 public scrToken = IERC20(0xd29687c813D741E2F938F4aC377128810E217b1b);
-
     address public withdrawRecipient = makeAddr("withdrawRecipient");
     bytes32 txId = keccak256("txId");
 
     function setUp() public virtual override {
-        vm.createSelectFork("https://rpc.scroll.io");
-
         super.setUp();
-
-        vm.startPrank(cashOwnerGnosisSafe);
-        DebtManagerCore debtManagerCore = new DebtManagerCore();
-        DebtManagerAdmin debtManagerAdmin = new DebtManagerAdmin();
-        CashbackDispatcher cashbackDispatcherImpl = new CashbackDispatcher();
-        CashEventEmitter cashEventEmitterImpl = new CashEventEmitter();
-
-        UUPSUpgradeable(address(debtManager)).upgradeToAndCall(address(debtManagerCore), abi.encodeWithSelector(DebtManagerCore.initializeOnUpgrade.selector, address(dataProvider)));
-        debtManager.setAdminImpl(address(debtManagerAdmin));
-
-        UUPSUpgradeable(address(cashbackDispatcher)).upgradeToAndCall(address(cashbackDispatcherImpl), abi.encodeWithSelector(CashbackDispatcher.initializeOnUpgrade.selector, address(cashModule)));
-        UUPSUpgradeable(address(cashEventEmitter)).upgradeToAndCall(address(cashEventEmitterImpl), abi.encodeWithSelector(CashEventEmitter.initializeOnUpgrade.selector, address(cashModule)));
 
         vm.stopPrank();
 

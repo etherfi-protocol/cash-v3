@@ -7,6 +7,12 @@ pragma solidity ^0.8.24;
  */
 interface ICashbackDispatcher {
     /**
+     * @notice Function to fetch the admin role
+     * @return CASHBACK_DISPATCHER_ADMIN_ROLE
+     */
+    function CASHBACK_DISPATCHER_ADMIN_ROLE() external view returns (bytes32);
+
+    /**
      * @notice Convert a USD amount to the equivalent amount in cashback token
      * @param cashbackInUsd The amount in USD to convert
      * @return The equivalent amount in cashback token

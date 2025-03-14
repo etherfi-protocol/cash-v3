@@ -13,11 +13,8 @@ contract AaveV3ModuleTest is SafeTestSetup {
 
     AaveV3Module public aaveV3Module;
     address public aaveV3PoolScroll = 0x11fCfe756c05AD438e312a7fd934381537D3cFfe;
-    IERC20 public usdcScroll = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
 
     function setUp() public override {
-        vm.createSelectFork("https://rpc.scroll.io");
-
         super.setUp();
 
         aaveV3Module = new AaveV3Module(aaveV3PoolScroll, address(dataProvider));

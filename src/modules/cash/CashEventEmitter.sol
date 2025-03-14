@@ -1,29 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { AccessControlDefaultAdminRulesUpgradeable } from "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlDefaultAdminRulesUpgradeable.sol";
-import { Initializable, UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-
 import { Mode, SafeTiers } from "../../interfaces/ICashModule.sol";
 import { SpendingLimit } from "../../libraries/SpendingLimitLib.sol";
+import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
-contract CashEventEmitter is Initializable, UUPSUpgradeable, AccessControlDefaultAdminRulesUpgradeable {
-    address public cashModule;
+contract CashEventEmitter is UpgradeableProxy {
+    address public immutable cashModule;
 
     error OnlyCashModule();
 
-    constructor() {
+    constructor(address _cashModule) {
+        cashModule = _cashModule;
         _disableInitializers();
     }
 
-    function initialize(address _owner, address _cashModule) external initializer {
-        __UUPSUpgradeable_init();
-        __AccessControlDefaultAdminRules_init_unchained(5 * 60, _owner);
-        cashModule = _cashModule;
-    }
-
-    function initializeOnUpgrade(address _cashModule) external reinitializer(2) {
-        cashModule = _cashModule;
+    function initialize(address _roleRegistry) external initializer {
+        __UpgradeableProxy_init(_roleRegistry);
     }
 
     event WithdrawalRequested(address indexed safe, address[] tokens, uint256[] amounts, address indexed recipient, uint256 finalizeTimestamp);
@@ -101,8 +94,6 @@ contract CashEventEmitter is Initializable, UUPSUpgradeable, AccessControlDefaul
     function emitSpendingLimitChanged(address safe, SpendingLimit memory oldLimit, SpendingLimit memory newLimit) external onlyCashModule {
         emit SpendingLimitChanged(safe, oldLimit, newLimit);
     }
-
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) { }
 
     function _onlyCashModule() private view {
         if (cashModule != msg.sender) revert OnlyCashModule();

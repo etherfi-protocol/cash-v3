@@ -13,13 +13,9 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
     OpenOceanSwapModule public openOceanSwapModule;
     address public openOceanSwapRouter = 0x6352a56caadC4F1E25CD6c75970Fa768A3304e64;
-    IERC20Metadata public usdcScroll = IERC20Metadata(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
-    IERC20Metadata public weETHScroll = IERC20Metadata(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
     address public ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     function setUp() public override {
-        vm.createSelectFork("https://rpc.scroll.io");
-
         super.setUp();
 
         openOceanSwapModule = new OpenOceanSwapModule(openOceanSwapRouter, address(dataProvider));
