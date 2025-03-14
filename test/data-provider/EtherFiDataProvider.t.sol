@@ -6,7 +6,6 @@ import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
-
 import { ArrayDeDupLib } from "../../src/libraries/ArrayDeDupLib.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 

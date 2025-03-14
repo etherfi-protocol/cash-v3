@@ -128,7 +128,20 @@ contract SafeTestSetup is Test {
     }
 
     function _configureModules(address[] memory modules, bool[] memory shouldWhitelist, bytes[] memory setupData) internal {
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), keccak256(abi.encode(setupData)), safe.nonce()));
+        // Hash each bytes element in setupData individually
+        uint256 len = setupData.length;
+        bytes32[] memory dataHashes = new bytes32[](len);
+        for (uint256 i = 0; i < len; ) {
+            dataHashes[i] = keccak256(setupData[i]);
+            unchecked {
+                ++i;
+            }
+        }
+        
+        // Concatenate the hashes and hash again
+        bytes32 setupDataHash = keccak256(abi.encodePacked(dataHashes));
+
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_MODULES_TYPEHASH(), keccak256(abi.encodePacked(modules)), keccak256(abi.encodePacked(shouldWhitelist)), setupDataHash, safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
