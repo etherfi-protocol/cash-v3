@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import {stdJson} from "forge-std/StdJson.sol";
-import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import {Utils} from "../utils/Utils.sol";
@@ -28,9 +27,9 @@ contract DeployTopUpSourceFactory is Utils {
             string.concat(".", "addresses", ".", "RoleRegistry")
         ));
 
-        address factoryImpl = CREATE3.deployDeterministic(abi.encodePacked(type(TopUpFactory).creationCode, ""), getSalt(TOP_UP_SOURCE_FACTORY_IMPL));
-        address topUpImpl = CREATE3.deployDeterministic(abi.encodePacked(type(TopUp).creationCode, ""), getSalt(TOP_UP_SOURCE_IMPL));
-        address topUpFactoryProxy = CREATE3.deployDeterministic(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(factoryImpl, "")), getSalt(TOP_UP_SOURCE_FACTORY_PROXY));
+        address factoryImpl = deployWithCreate3(abi.encodePacked(type(TopUpFactory).creationCode, ""), getSalt(TOP_UP_SOURCE_FACTORY_IMPL));
+        address topUpImpl = deployWithCreate3(abi.encodePacked(type(TopUp).creationCode, ""), getSalt(TOP_UP_SOURCE_IMPL));
+        address topUpFactoryProxy = deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(factoryImpl, "")), getSalt(TOP_UP_SOURCE_FACTORY_PROXY));
         factory = TopUpFactory(payable(topUpFactoryProxy));
 
         factory.initialize(address(roleRegistry), topUpImpl);

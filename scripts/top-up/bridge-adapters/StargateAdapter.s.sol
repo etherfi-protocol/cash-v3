@@ -12,8 +12,7 @@ contract DeployStargateAdapter is Utils {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
         vm.startBroadcast(deployerPrivateKey);
-        bytes32 salt = getSalt(STARGATE_ADAPTER);
-        stargateAdapter = new StargateAdapter{salt: salt}(); 
+        stargateAdapter = deployWithCreate3(abi.encodePacked(type(StargateAdapter).creationCode), getSalt(STARGATE_ADAPTER));
 
         vm.stopBroadcast();
     }

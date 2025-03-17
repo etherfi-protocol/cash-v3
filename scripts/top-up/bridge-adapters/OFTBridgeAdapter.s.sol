@@ -13,8 +13,7 @@ contract DeployOFTBridgeAdapter is Utils {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        bytes32 salt = getSalt(ETHER_FI_OFT_BRIDGE_ADAPTER);
-        etherFiOFTBridgeAdapter = new EtherFiOFTBridgeAdapter{salt: salt}(); 
+        etherFiOFTBridgeAdapter = deployWithCreate3(abi.encodePacked(type(EtherFiOFTBridgeAdapter).creationCode), getSalt(ETHER_FI_OFT_BRIDGE_ADAPTER));
 
         vm.stopBroadcast();
     }

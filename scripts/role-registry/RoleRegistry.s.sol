@@ -15,11 +15,8 @@ contract DeployRoleRegistry is Utils {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        address roleRegistryImpl = address(new RoleRegistry{salt: getSalt(ROLE_REGISTRY_IMPL)}(address(0)));
-        roleRegistry = RoleRegistry(address(new UUPSProxy{salt: getSalt(ROLE_REGISTRY_PROXY)}(
-            roleRegistryImpl, 
-            ""
-        )));
+        address roleRegistryImpl = deployWithCreate3(abi.encodePacked(type(RoleRegistry).creationCode, abi.encode(address(0))), getSalt(ROLE_REGISTRY_IMPL));
+        roleRegistry = RoleRegistry(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(roleRegistryImpl, "")), getSalt(ROLE_REGISTRY_PROXY)));
 
         roleRegistry.initialize(owner);
         vm.stopBroadcast();

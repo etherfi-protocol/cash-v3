@@ -65,7 +65,7 @@ contract TopUpSourceSetConfig is Utils {
     }   
 
     // Helper function to parse token configs from JSON
-    function parseTokenConfigs(string memory jsonString, string memory chainId) internal returns (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) {
+    function parseTokenConfigs(string memory jsonString, string memory chainId) internal view returns (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) {
         uint256 count = getTokenConfigsLength(jsonString, chainId);
         tokens = new address[](count);
         tokenConfig = new TopUpFactory.TokenConfig[](count);
@@ -121,7 +121,7 @@ contract TopUpSourceSetConfig is Utils {
         return stdJson.readAddress(jsonString, path);
     }
 
-    function getDestRecipientAddress() internal pure returns (address) {
+    function getDestRecipientAddress() internal view returns (address) {
         string memory dir = string.concat(vm.projectRoot(), "/deployments/");
         string memory chainDir = string.concat(scrollChainId, "/");
         string memory file = string.concat(dir, chainDir, "deployments", ".json");
