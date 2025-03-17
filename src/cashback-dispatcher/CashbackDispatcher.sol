@@ -105,6 +105,7 @@ contract CashbackDispatcher is Initializable, UUPSUpgradeable, AccessControlDefa
     }
 
     function clearPendingCashback(address account) external returns (address, uint256, bool) {
+        if (msg.sender != address(cashModule)) revert OnlyCashModule();
         if (account == address(0)) revert InvalidInput();
         uint256 pendingCashbackInUsd = cashModule.getPendingCashback(account);
 
@@ -114,7 +115,7 @@ contract CashbackDispatcher is Initializable, UUPSUpgradeable, AccessControlDefa
         if (IERC20(cashbackToken).balanceOf(address(this)) < cashbackAmount) {
             return (cashbackToken, cashbackAmount, false);
         } else {
-            IERC20(cashbackToken).safeTransfer(msg.sender, cashbackAmount);
+            IERC20(cashbackToken).safeTransfer(account, cashbackAmount);
             return (cashbackToken, cashbackAmount, true);
         }
     }
