@@ -2,11 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { AaveV3Module, ModuleBase } from "../../../../src/modules/aave-v3/AaveV3Module.sol";
-import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
 
 contract AaveV3ModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -124,6 +124,27 @@ contract AaveV3ModuleTest is SafeTestSetup {
 
         // Second supply with same signature should fail
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
+    }
+
+    function test_supply_reverts_whenUserCashPositionNotHealthy() public {
+        vm.mockCallRevert(
+            address(debtManager), 
+            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), 
+            abi.encodeWithSelector(IDebtManager.AccountUnhealthy.selector)
+        );
+
+        uint256 amountToSupply = 100e6;
+        deal(address(usdcScroll), address(safe), amountToSupply * 2);
+
+        uint256 nonce = aaveV3Module.getNonce(address(safe));
+
+        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), nonce, address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
         aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
     }
 }

@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { ICashModule } from "../interfaces/ICashModule.sol";
+import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
@@ -46,5 +48,11 @@ contract EtherFiHook is UpgradeableProxy {
      * @dev Currently implemented as a view function with no effects
      * @param module Address of the module being operated on
      */
-    function postOpHook(address module) external view { }
+    function postOpHook(address module) external view { 
+        ICashModule cashModule = ICashModule(dataProvider.getCashModule());
+        if (module == address(cashModule)) return;
+
+        IDebtManager debtManager = cashModule.getDebtManager();
+        debtManager.ensureHealth(msg.sender);
+    }
 }

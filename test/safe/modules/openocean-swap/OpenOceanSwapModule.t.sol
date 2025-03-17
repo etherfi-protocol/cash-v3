@@ -2,11 +2,11 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { OpenOceanSwapModule, ModuleBase } from "../../../../src/modules/openocean-swap/OpenOceanSwapModule.sol";
-import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
 
 contract OpenOceanSwapModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -343,6 +343,39 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
         vm.expectRevert();
         openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
     }
+
+    function test_swap_reverts_whenUserCashPositionNotHealthy() public {
+        vm.mockCallRevert(
+            address(debtManager), 
+            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), 
+            abi.encodeWithSelector(IDebtManager.AccountUnhealthy.selector)
+        );
+
+        address fromAsset = address(usdcScroll);
+        uint256 fromAssetAmount = 100e6;
+        address toAsset = address(weETHScroll);
+        uint256 minToAssetAmount = 1;
+        uint256 guaranteedAmount = 1;
+        bytes memory swapData = getQuoteOpenOcean(
+            vm.toString(block.chainid), 
+            address(safe), 
+            address(safe), 
+            fromAsset, 
+            toAsset, 
+            fromAssetAmount, 
+            IERC20Metadata(fromAsset).decimals()
+        );
+
+        deal(address(usdcScroll), address(safe), fromAssetAmount);
+        
+        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+
+        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+
+        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+    }
+
     
     function _createSwapSignature(
         uint256 nonceBefore, 
