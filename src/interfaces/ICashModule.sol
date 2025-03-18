@@ -114,6 +114,8 @@ struct SafeCashData {
     uint256 spendingLimitAllowance;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
+    /// @notice Timestamp when a pending change to Credit mode will take effect (0 if no pending change)
+    uint256 incomingCreditModeStartTime;
 }
 
 interface ICashModule {

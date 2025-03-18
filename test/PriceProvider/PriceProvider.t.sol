@@ -34,7 +34,9 @@ contract PriceProviderTest is Test {
     PriceProvider.Config ethConfig;
     PriceProvider.Config maticConfig;
     function setUp() public {
-        string memory mainnet = "https://rpc.ankr.com/eth";
+        string memory mainnet = vm.envString("MAINNET_RPC");
+        if (bytes(mainnet).length == 0) mainnet = "https://rpc.ankr.com/eth";
+        
         vm.createSelectFork(mainnet);
 
         vm.startPrank(owner);
