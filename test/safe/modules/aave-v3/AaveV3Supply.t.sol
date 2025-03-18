@@ -1,37 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import { Test } from "forge-std/Test.sol";
+import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, IDebtManager } from "./AaveV3TestSetup.t.sol";
 
-import { AaveV3Module, ModuleBase } from "../../../../src/modules/aave-v3/AaveV3Module.sol";
-import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
-
-contract AaveV3ModuleTest is SafeTestSetup {
+contract AaveV3SupplyTest is AaveV3TestSetup {
     using MessageHashUtils for bytes32;
-
-    AaveV3Module public aaveV3Module;
-    address public aaveV3PoolScroll = 0x11fCfe756c05AD438e312a7fd934381537D3cFfe;
-
-    function setUp() public override {
-        super.setUp();
-
-        aaveV3Module = new AaveV3Module(aaveV3PoolScroll, address(dataProvider));
-
-        address[] memory modules = new address[](1);
-        modules[0] = address(aaveV3Module);
-
-        bool[] memory shouldWhitelist = new bool[](1);
-        shouldWhitelist[0] = true;
-
-        vm.prank(owner);
-        dataProvider.configureModules(modules, shouldWhitelist);
-
-        bytes[] memory setupData = new bytes[](1);
-
-        _configureModules(modules, shouldWhitelist, setupData);
-    }
 
     // supply tests
     function test_supply_transfersTokensToPool() public {
@@ -48,6 +21,38 @@ contract AaveV3ModuleTest is SafeTestSetup {
         aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
+
+        assertEq(balanceBefore - balanceAfter, amountToSupply);
+    }
+
+    function test_supply_revertsForAmountZero() public {
+        uint256 amountToSupply = 0;
+        deal(address(usdcScroll), address(safe), amountToSupply);
+
+        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
+    }
+
+    // supply tests
+    function test_supply_transfersEthToPool() public {
+        uint256 amountToSupply = 1 ether;
+        deal(address(safe), amountToSupply);
+
+        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), ETH, amountToSupply)).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        uint256 balanceBefore = address(safe).balance;
+
+        aaveV3Module.supply(address(safe), ETH, amountToSupply, owner1, signature);
+
+        uint256 balanceAfter = address(safe).balance;
 
         assertEq(balanceBefore - balanceAfter, amountToSupply);
     }
