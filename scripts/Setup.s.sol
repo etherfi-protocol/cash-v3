@@ -170,6 +170,7 @@ contract Setup is Utils {
         vm.serializeAddress(deployedAddresses, "CashbackDispatcher", address(cashbackDispatcher));
         vm.serializeAddress(deployedAddresses, "CashModule", address(cashModule));
         vm.serializeAddress(deployedAddresses, "CashEventEmitter", address(cashEventEmitter));
+        vm.serializeAddress(deployedAddresses, "CashLens", address(cashLens));
         string memory addressOutput = vm.serializeAddress(deployedAddresses, "SettlementDispatcher", address(settlementDispatcher));
         string memory finalJson = vm.serializeString(
             parentObject,
