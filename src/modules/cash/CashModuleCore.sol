@@ -88,6 +88,10 @@ contract CashModuleCore is CashModuleStorageContract {
         _getCashModuleStorage().cashModuleSetters = newCashModuleSetters;
     }
 
+    function getCashEventEmitter() external view returns (address) {
+        return address(_getCashModuleStorage().cashEventEmitter);
+    }
+
     /**
      * @notice Gets the cashback percentage and split percentage for a safe
      * @dev Returns the tier-based cashback percentage and safe's split configuration
