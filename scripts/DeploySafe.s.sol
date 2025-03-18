@@ -10,7 +10,7 @@ contract DeploySafe is Utils {
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = 0x9628d9F9956E6C9c91463ebdDbc9249F54D7e3Fb;
+        address deployer = vm.addr(deployerPrivateKey);
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -41,6 +41,12 @@ contract DeploySafe is Utils {
         moduleSetupData[0] = abi.encode(10000e6, 10000e6, -5 * 3600);
         uint8 threshold = 1;
 
+        address[] memory modules = new address[](2);
+        modules[0] = cashModule;
+        modules[1] = swapModule;
+        bytes[] memory moduleSetupData = new bytes[](2);
+        moduleSetupData[0] = abi.encode(dailySpendLimit, monthlySpendLimit, timezoneOffset);
+        
         
         bytes32 salt = keccak256("user1");
         factory.deployEtherFiSafe(salt, owners, modules, moduleSetupData, threshold);
