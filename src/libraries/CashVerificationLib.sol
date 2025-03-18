@@ -21,8 +21,6 @@ library CashVerificationLib {
     /// @notice Method identifier for withdrawal requests
     bytes32 public constant REQUEST_WITHDRAWAL_METHOD = keccak256("requestWithdrawal");
 
-    bytes32 public constant CONFIGURE_WITHDRAWAL_RECIPIENT = keccak256("configureWithdrawRecipients");
-
     /// @notice Method identifier for spending limit updates
     bytes32 public constant UPDATE_SPENDING_LIMIT_METHOD = keccak256("updateSpendingLimit");
 
@@ -92,22 +90,6 @@ library CashVerificationLib {
      */
     function verifyRequestWithdrawalSig(address safe, uint256 nonce, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) internal view {
         bytes32 digestHash = keccak256(abi.encodePacked(REQUEST_WITHDRAWAL_METHOD, block.chainid, safe, nonce, abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
-        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
-    }
-
-    /**
-     * @notice Verifies a signature for configuring withdraw recipients
-     * @dev Creates and validates an EIP-191 signed message hash
-     * @param safe Address of the safe
-     * @param nonce Transaction nonce for replay protection
-     * @param withdrawRecipients Array of withdraw recipient addresses
-     * @param shouldWhitelist Array of booleans suggesting whether to whitelist or remove the withdraw recipient
-     * @param signers Address of the signers
-     * @param signatures ECDSA signatures by signers
-     * @custom:throws InvalidSignatures if the signature is invalid
-     */
-    function verifyConfigureWithdrawRecipients(address safe, uint256 nonce, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) internal view {
-        bytes32 digestHash = keccak256(abi.encodePacked(CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, safe, nonce, abi.encode(withdrawRecipients, shouldWhitelist))).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 

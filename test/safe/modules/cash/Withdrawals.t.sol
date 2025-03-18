@@ -139,59 +139,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), newWithdrawalAmt);
     }
-
-    function test_requestWithdrawal_succeeds_whenNoWhitelistedAddress() public {
-        address[] memory withdrawRecipients = new address[](1);
-        withdrawRecipients[0] = withdrawRecipient;
-        bool[] memory shouldAdd = new bool[](1);
-        shouldAdd[0] = false;
-
-        // After this no withdraw recipient exists so can withdraw to any address
-        _configureWithdrawRecipients(withdrawRecipients, shouldAdd);
-
-        uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
-
-        // Setup a pending withdrawal
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = withdrawalAmount;
-
-        _requestWithdrawal(tokens, amounts, owner1);
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
-    }
-
-
-    function test_requestWithdrawal_fails_whenWithdrawingToNonWhitelistRecipient() public {
-        uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
-
-        // Setup a pending withdrawal
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = withdrawalAmount;
-
-        uint256 nonce = safe.nonce();
-
-        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, address(owner1)))).toEthSignedMessageHash();
-
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
-
-        address[] memory signers = new address[](2);
-        signers[0] = owner1;
-        signers[1] = owner2;
-
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-
-        vm.expectRevert(ICashModule.OnlyWhitelistedWithdrawRecipients.selector);
-        cashModule.requestWithdrawal(address(safe), tokens, amounts, address(owner1), signers, signatures);
-    }
-
+    
     function test_requestWithdrawal_fails_whenFundsAreInsufficient() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdcScroll), address(safe), withdrawalAmount - 1);

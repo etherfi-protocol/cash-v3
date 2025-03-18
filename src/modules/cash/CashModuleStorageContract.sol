@@ -15,7 +15,6 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
-import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
@@ -66,8 +65,11 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Role identifier for EtherFi wallet access control
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
+    /// @notice Role identifier for Cash Moudle controller access control
     bytes32 public constant CASH_MODULE_CONTROLLER_ROLE = keccak256("CASH_MODULE_CONTROLLER_ROLE");
+    // @notice Limit for maximum cashback percentage at 10%
     uint256 public constant MAX_CASHBACK_PERCENTAGE = 1000; // 10%
+    // @notice 100% in bps
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
 
     /// @notice Error thrown when a transaction has already been cleared
@@ -90,15 +92,33 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
     error BorrowingsExceedMaxBorrowAfterSpending();
+
+    /// @notice Error thrown when a recipient address is set to zero
     error RecipientCannotBeAddressZero();
+
+    /// @notice Error thrown when a function restricted to the Cash Module Controller is called by another address
     error OnlyCashModuleController();
+
+    /// @notice Error thrown when attempting to process a withdrawal before the delay period has elapsed
     error CannotWithdrawYet();
-    error OnlyWhitelistedWithdrawRecipients();
+
+    /// @notice Error thrown when transaction or withdrawal signatures are invalid or unauthorized
     error InvalidSignatures();
+
+    /// @notice Error thrown when attempting to set a mode that is already active
     error ModeAlreadySet();
+
+    /// @notice Error thrown when a function restricted to the Debt Manager is called by another address
     error OnlyDebtManager();
+
+    /// @notice Error thrown when trying to change a safe's tier to its current tier
+    /// @param index The index of the safe for which tier that is the same
     error AlreadyInSameTier(uint256 index);
+
+    /// @notice Error thrown when a cashback percentage exceeds the maximum allowed value
     error CashbackPercentageGreaterThanMaxAllowed();
+
+    /// @notice Error thrown when attempting to set a split ratio that is identical to the current split
     error SplitAlreadyTheSame();
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { }
@@ -201,6 +221,12 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         }
     }
 
+    /**
+     * @notice Processes a pending withdrawal request for a Safe after delay period
+     * @dev Transfers tokens to the designated recipient if the finalize time has passed
+     * @param safe Address of the EtherFi Safe processing the withdrawal
+     * @custom:throws CannotWithdrawYet if the withdrawal delay period has not elapsed
+     */
     function _processWithdrawal(address safe) internal {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
 

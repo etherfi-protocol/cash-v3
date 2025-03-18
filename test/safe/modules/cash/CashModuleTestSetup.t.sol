@@ -28,7 +28,7 @@ contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
     using TimeLib for uint256;
 
-    address public withdrawRecipient = makeAddr("withdrawRecipient");
+    address withdrawRecipient = makeAddr("withdrawRecipient");
     bytes32 txId = keccak256("txId");
 
     function setUp() public virtual override {
@@ -49,14 +49,6 @@ contract CashModuleTestSetup is SafeTestSetup {
 
         _configureModules(modules, shouldWhitelist, setupData);
 
-        address[] memory withdrawRecipients = new address[](1);
-        withdrawRecipients[0] = withdrawRecipient;
-
-        bool[] memory shouldAdd = new bool[](1);
-        shouldAdd[0] = true;
-
-        _configureWithdrawRecipients(withdrawRecipients, shouldAdd);
-
         SafeTiers[] memory tiers = new SafeTiers[](4);
         tiers[0] = SafeTiers.Pepe;
         tiers[1] = SafeTiers.Wojak;
@@ -72,25 +64,6 @@ contract CashModuleTestSetup is SafeTestSetup {
         cashModule.setTierCashbackPercentage(tiers, cashbackPercentages);
 
         vm.stopPrank();
-    }
-
-    function _configureWithdrawRecipients(address[] memory withdrawRecipients, bool[] memory shouldAdd) internal {
-        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CONFIGURE_WITHDRAWAL_RECIPIENT, block.chainid, address(safe), safe.nonce(), abi.encode(withdrawRecipients, shouldAdd))).toEthSignedMessageHash();
-
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
-
-        address[] memory signers = new address[](2);
-        signers[0] = owner1;
-        signers[1] = owner2;
-
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.WithdrawRecipientsConfigured(address(safe), withdrawRecipients, shouldAdd);
-        cashModule.configureWithdrawRecipients(address(safe), withdrawRecipients, shouldAdd, signers, signatures);
     }
 
     function _requestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal {

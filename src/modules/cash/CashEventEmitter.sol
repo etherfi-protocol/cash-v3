@@ -166,25 +166,6 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param modeDelay Delay period for mode changes
      */
     event DelaysSet(uint64 withdrawalDelay, uint64 spendingLimitDelay, uint64 modeDelay);
-    
-    /**
-     * @notice Emitted when withdrawal recipients are configured
-     * @param safe Address of the safe
-     * @param withdrawRecipients Array of recipient addresses
-     * @param shouldWhitelist Array of boolean flags indicating whether each recipient should be whitelisted
-     */
-    event WithdrawRecipientsConfigured(address safe, address[] withdrawRecipients, bool[] shouldWhitelist);
-
-    /**
-     * @notice Emits the WithdrawRecipientsConfigured event
-     * @dev Can only be called by the Cash Module
-     * @param safe Address of the safe
-     * @param withdrawRecipients Array of recipient addresses
-     * @param shouldWhitelist Array of boolean flags
-     */
-    function emitConfigureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist) external onlyCashModule {
-        emit WithdrawRecipientsConfigured(safe, withdrawRecipients, shouldWhitelist);
-    }
 
     /**
      * @notice Emits the SafeTiersSet event

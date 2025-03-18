@@ -15,7 +15,6 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
-import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
@@ -218,27 +217,6 @@ contract CashModuleCore is CashModuleStorageContract {
         }
 
         IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](counter), data);
-    }
-
-    /**
-     * @notice Gets all whitelisted withdrawal recipients for a safe
-     * @dev Returns an array of approved addresses
-     * @param safe Address of the EtherFi Safe
-     * @return Array of whitelisted recipient addresses
-     */
-    function getWithdrawRecipients(address safe) external view returns (address[] memory) {
-        return _getCashModuleStorage().safeCashConfig[safe].withdrawRecipients.values();
-    }
-
-    /**
-     * @notice Checks if an address is a whitelisted withdrawal recipient for a safe
-     * @dev Returns true if the address is approved to receive withdrawals
-     * @param safe Address of the EtherFi Safe
-     * @param account Address to check
-     * @return Boolean indicating if the account is whitelisted
-     */
-    function isWhitelistedWithdrawRecipient(address safe, address account) external view returns (bool) {
-        return _getCashModuleStorage().safeCashConfig[safe].withdrawRecipients.contains(account);
     }
 
     /**

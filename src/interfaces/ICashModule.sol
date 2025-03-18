@@ -72,14 +72,12 @@ struct SafeCashConfig {
     WithdrawalRequest pendingWithdrawalRequest;
     /// @notice Current operating mode (Credit or Debit) for spending transactions
     Mode mode;
-    /// @notice Mapping of transaction IDs to cleared status to prevent replay attacks
-    mapping(bytes32 txId => bool cleared) transactionCleared;
     /// @notice Timestamp when a pending change to Credit mode will take effect (0 if no pending change)
     uint256 incomingCreditModeStartTime;
-    /// @notice Set of whitelisted addresses that can receive withdrawals from this safe
-    EnumerableSetLib.AddressSet withdrawRecipients;
     /// @notice Tier level of the safe that determines cashback percentages
     SafeTiers safeTier;
+    /// @notice Mapping of transaction IDs to cleared status to prevent replay attacks
+    mapping(bytes32 txId => bool cleared) transactionCleared;
     /// @notice Percentage of cashback allocated to the safe vs. the spender (in basis points, 5000 = 50%)
     uint256 cashbackSplitToSafePercentage;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
@@ -148,9 +146,6 @@ interface ICashModule {
 
     /// @notice Error thrown when a withdrawal is attempted before the delay period
     error CannotWithdrawYet();
-
-    /// @notice Error thrown when a withdrawal recipient is not whitelisted
-    error OnlyWhitelistedWithdrawRecipients();
 
     /// @notice Error thrown when signature verification fails
     error InvalidSignatures();
@@ -287,23 +282,6 @@ interface ICashModule {
      * @return Timestamp when credit mode will take effect, or 0 if not applicable
      */
     function incomingCreditModeStartTime(address safe) external view returns (uint256);
-
-    /**
-     * @notice Gets all whitelisted withdrawal recipients for a safe
-     * @dev Returns an array of approved addresses
-     * @param safe Address of the EtherFi Safe
-     * @return Array of whitelisted recipient addresses
-     */
-    function getWithdrawRecipients(address safe) external view returns (address[] memory);
-
-    /**
-     * @notice Checks if an address is a whitelisted withdrawal recipient for a safe
-     * @dev Returns true if the address is approved to receive withdrawals
-     * @param safe Address of the EtherFi Safe
-     * @param account Address to check
-     * @return Boolean indicating if the account is whitelisted
-     */
-    function isWhitelistedWithdrawRecipient(address safe, address account) external view returns (bool);
 
     /**
      * @notice Gets the pending withdrawal amount for a token
@@ -446,32 +424,18 @@ interface ICashModule {
     function repay(address safe, address token, uint256 amountInUsd) external;
 
     /**
-     * @notice Configures whitelist of approved withdrawal recipients
-     * @dev Only callable by the safe itself with valid signatures
-     * @param safe Address of the EtherFi Safe
-     * @param withdrawRecipients Array of recipient addresses to configure
-     * @param shouldWhitelist Array of boolean flags indicating whether to add or remove each recipient
-     * @param signers Array of safe admin addresses signing the transaction
-     * @param signatures Array of signatures from the signers
-     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
-     * @custom:throws InvalidSignatures if signature verification fails
-     */
-    function configureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external;
-
-    /**
-     * @notice Requests a withdrawal of tokens to a whitelisted recipient
+     * @notice Requests a withdrawal of tokens to a recipient
      * @dev Creates a pending withdrawal request that can be processed after the delay period
      * @dev Can only be done by the quorum of owners of the safe
      * @param safe Address of the EtherFi Safe
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
-     * @param recipient Address to receive the withdrawn tokens (must be whitelisted)
+     * @param recipient Address to receive the withdrawn tokens 
      * @param signers Array of safe owner addresses signing the transaction
      * @param signatures Array of signatures from the safe owners
      * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
      * @custom:throws InvalidSignatures if signature verification fails
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
-     * @custom:throws OnlyWhitelistedWithdrawRecipients if recipient is not whitelisted
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws InsufficientBalance if any token has insufficient balance
      */

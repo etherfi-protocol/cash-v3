@@ -13,7 +13,6 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
-import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
@@ -164,15 +163,20 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
-     * @notice Requests a withdrawal of tokens to a whitelisted recipient
+     * @notice Requests a withdrawal of tokens to a recipient
      * @dev Creates a pending withdrawal request that can be processed after the delay period
      * @dev Can only be done by the quorum of owners of the safe
      * @param safe Address of the EtherFi Safe
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
-     * @param recipient Address to receive the withdrawn tokens (must be whitelisted)
+     * @param recipient Address to receive the withdrawn tokens 
      * @param signers Array of safe owner addresses signing the transaction
      * @param signatures Array of signatures from the safe owners
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws InvalidSignatures if signature verification fails
+     * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
+     * @custom:throws ArrayLengthMismatch if arrays have different lengths
+     * @custom:throws InsufficientBalance if any token has insufficient balance
      */
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
@@ -208,23 +212,6 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
-     * @notice Configures whitelist of approved withdrawal recipients
-     * @dev Only callable by the safe itself with valid signatures
-     * @param safe Address of the EtherFi Safe
-     * @param withdrawRecipients Array of recipient addresses to configure
-     * @param shouldWhitelist Array of boolean flags indicating whether to add or remove each recipient
-     * @param signers Array of safe admin addresses signing the transaction
-     * @param signatures Array of signatures from the signers
-     */
-    function configureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
-        CashVerificationLib.verifyConfigureWithdrawRecipients(safe, IEtherFiSafe(safe).useNonce(), withdrawRecipients, shouldWhitelist, signers, signatures);
-
-        CashModuleStorage storage $ = _getCashModuleStorage();
-        EnumerableAddressWhitelistLib.configure($.safeCashConfig[safe].withdrawRecipients, withdrawRecipients, shouldWhitelist);
-        $.cashEventEmitter.emitConfigureWithdrawRecipients(safe, withdrawRecipients, shouldWhitelist);
-    }
-
-    /**
      * @notice Checks if a safe has sufficient balance for all tokens and amounts
      * @dev Called before creating a withdrawal request to prevent invalid requests
      * @param safe Address of the EtherFi Safe
@@ -253,15 +240,12 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param amounts Array of token amounts to withdraw
      * @param recipient Address to receive the withdrawn tokens
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
-     * @custom:throws OnlyWhitelistedWithdrawRecipients if recipient whitelist is enabled and recipient is not whitelisted 
      */
     function _requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
-        if ($$.withdrawRecipients.length() != 0 && !$$.withdrawRecipients.contains(recipient)) revert OnlyWhitelistedWithdrawRecipients();
-
         if (tokens.length > 1) tokens.checkDuplicates();
 
         _cancelOldWithdrawal(safe);

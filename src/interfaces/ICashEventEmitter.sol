@@ -17,6 +17,19 @@ interface ICashEventEmitter {
      */
     function emitPendingCashbackClearedEvent(address safe, address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external;
 
+    /**
+     * @notice Emits the Cashback event
+     * @dev Can only be called by the Cash Module
+     * @param safe Address of the safe
+     * @param spender Address of the spender
+     * @param spendingInUsd USD value of the spending
+     * @param cashbackToken Address of the cashback token
+     * @param cashbackAmountToSafe Amount to the safe
+     * @param cashbackInUsdToSafe USD value to the safe
+     * @param cashbackAmountToSpender Amount to the spender
+     * @param cashbackInUsdToSpender USD value to the spender
+     * @param paid Whether the cashback was paid
+     */
     function emitCashbackEvent(address safe, address spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) external;
 
     /**
@@ -97,9 +110,37 @@ interface ICashEventEmitter {
      */
     function emitSpendingLimitChanged(address safe, SpendingLimit memory oldLimit, SpendingLimit memory newLimit) external;
 
+    /**
+     * @notice Emits the SafeTiersSet event
+     * @dev Can only be called by the Cash Module
+     * @param safes Array of safe addresses
+     * @param safeTiers Array of tier configurations
+     */
     function emitSetSafeTiers(address[] memory safes, SafeTiers[] memory safeTiers) external;
+    
+    /**
+     * @notice Emits the TierCashbackPercentageSet event
+     * @dev Can only be called by the Cash Module
+     * @param safeTiers Array of tiers
+     * @param cashbackPercentages Array of cashback percentages
+     */
     function emitSetTierCashbackPercentage(SafeTiers[] memory safeTiers, uint256[] memory cashbackPercentages) external;
+    
+    /**
+     * @notice Emits the CashbackSplitToSafeBpsSet event
+     * @dev Can only be called by the Cash Module
+     * @param safe Address of the safe
+     * @param oldSplitInBps Previous split percentage
+     * @param newSplitInBps New split percentage
+     */
     function emitSetCashbackSplitToSafeBps(address safe, uint256 oldSplitInBps, uint256 newSplitInBps) external;
+    
+    /**
+     * @notice Emits the DelaysSet event
+     * @dev Can only be called by the Cash Module
+     * @param withdrawalDelay Delay period for withdrawals
+     * @param spendingLimitDelay Delay period for spending limit changes
+     * @param modeDelay Delay period for mode changes
+     */
     function emitSetDelays(uint64 withdrawalDelay, uint64 spendingLimitDelay, uint64 modeDelay) external;
-    function emitConfigureWithdrawRecipients(address safe, address[] calldata withdrawRecipients, bool[] calldata shouldWhitelist) external;
 }

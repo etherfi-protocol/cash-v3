@@ -103,7 +103,9 @@ contract SafeTestSetup is Utils {
     bytes32 public DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
 
     function setUp() public virtual {
-        vm.createSelectFork("https://rpc.scroll.io");
+        string memory scrollRpc = vm.envString("SCROLL_RPC");
+        if (bytes(scrollRpc).length != 0) vm.createSelectFork(scrollRpc);
+        else vm.createSelectFork("https://rpc.scroll.io");
 
         pauser = makeAddr("pauser");
         unpauser = makeAddr("unpauser");
