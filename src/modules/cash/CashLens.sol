@@ -172,10 +172,10 @@ contract CashLens is UpgradeableProxy {
         }
 
         (safeCashData.creditMaxSpend, safeCashData.debitMaxSpend, safeCashData.spendingLimitAllowance) = maxCanSpend(safe, debtManager.getBorrowTokens()[0]);
-        safeCashData.mode = safeData.mode;
         safeCashData.totalCashbackEarnedInUsd = safeData.totalCashbackEarnedInUsd;
         safeCashData.incomingCreditModeStartTime = safeData.incomingCreditModeStartTime;
-
+        safeCashData.mode = safeData.mode;
+        
         if (safeCashData.incomingCreditModeStartTime > 0 && block.timestamp > safeCashData.incomingCreditModeStartTime) safeCashData.mode = Mode.Credit;
     }
 
