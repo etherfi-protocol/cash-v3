@@ -115,4 +115,11 @@ contract Utils is Test {
 
         return config;
     }
+
+    function readDeploymentFile() internal view returns (string memory) {
+        string memory dir = string.concat(vm.projectRoot(), "/deployments/");
+        string memory chainDir = string.concat(vm.toString(block.chainid), "/");
+        string memory file = string.concat("deployments", ".json");
+        return vm.readFile(string.concat(dir, chainDir, file));
+    }
 }

@@ -165,7 +165,6 @@ contract Setup is Utils {
         vm.serializeAddress(deployedAddresses, "EtherFiSafeFactory", address(safeFactory));
         vm.serializeAddress(deployedAddresses, "EtherFiHook", address(hook));
         vm.serializeAddress(deployedAddresses, "DebtManager", address(debtManager));
-        vm.serializeAddress(deployedAddresses, "EventEmitter", address(cashEventEmitter));
         vm.serializeAddress(deployedAddresses, "PriceProvider", address(priceProvider));
         vm.serializeAddress(deployedAddresses, "CashbackDispatcher", address(cashbackDispatcher));
         vm.serializeAddress(deployedAddresses, "CashModule", address(cashModule));
@@ -190,7 +189,6 @@ contract Setup is Utils {
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
         roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), owner);
-        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
         roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);

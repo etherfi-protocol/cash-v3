@@ -16,9 +16,6 @@ contract EtherFiHook is UpgradeableProxy {
     /// @notice Interface to the data provider contract
     IEtherFiDataProvider public immutable dataProvider;
 
-    /// @notice Role identifier for administrative privileges
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
     /// @notice Thrown when a non-admin address attempts to perform an admin-only operation
     error OnlyAdmin();
     /// @notice Thrown when input parameters are invalid or zero address is provided
