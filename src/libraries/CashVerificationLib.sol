@@ -30,6 +30,7 @@ library CashVerificationLib {
     /// @notice Method identifier for cashback split changes for a safe
     bytes32 public constant SET_CASHBACK_SPLIT_TO_SAFE_PERCENTAGE = keccak256("setCashbackSplitToSafePercentage");
 
+    /// @notice Error for Invalid Owner quorum signatures
     error InvalidSignatures();
 
     /**

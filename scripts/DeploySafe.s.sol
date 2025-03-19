@@ -10,7 +10,7 @@ contract DeploySafe is Utils {
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+        address deployer = 0x9628d9F9956E6C9c91463ebdDbc9249F54D7e3Fb;
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -21,11 +21,24 @@ contract DeploySafe is Utils {
             string.concat(".", "addresses", ".", "EtherFiSafeFactory")
         ));
 
+        address cashModule = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "CashModule")
+        );
+
+        address swapModule = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "OpenOceanSwapModule")
+        );
+
         address[] memory owners = new address[](1);
         owners[0] = deployer;
 
-        address[] memory modules = new address[](0);
-        bytes[] memory moduleSetupData = new bytes[](0);
+        address[] memory modules = new address[](2);
+        modules[0] = cashModule;
+        modules[1] = swapModule;
+        bytes[] memory moduleSetupData = new bytes[](2);
+        moduleSetupData[0] = abi.encode(10000e6, 10000e6, -5 * 3600);
         uint8 threshold = 1;
 
         

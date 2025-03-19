@@ -9,7 +9,6 @@ import { IAaveWrappedTokenGateway } from "../../interfaces/IAaveWrappedTokenGate
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { ModuleBase } from "../ModuleBase.sol";
-import { Constants } from "../../utils/Constants.sol";
 
 /**
  * @title AaveV3Module
@@ -17,7 +16,7 @@ import { Constants } from "../../utils/Constants.sol";
  * @notice Module for interacting with Aave V3 Protocol from a Safe
  * @dev Extends ModuleBase to provide Aave V3 integration for Safes
  */
-contract AaveV3Module is ModuleBase, Constants {
+contract AaveV3Module is ModuleBase {
     using MessageHashUtils for bytes32;
 
     /// @notice Aave V3 Pool contract interface for lending/borrowing operations

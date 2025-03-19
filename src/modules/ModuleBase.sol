@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
+import { Constants } from "../utils/Constants.sol";
 
 /**
  * @title ModuleBase
@@ -11,7 +12,7 @@ import { SignatureUtils } from "../libraries/SignatureUtils.sol";
  * @dev Provides common functionality for modules including admin management and signature verification
  *      Uses ERC-7201 for namespace storage pattern
  */
-contract ModuleBase {
+contract ModuleBase is Constants {
     using SignatureUtils for bytes32;
 
     IEtherFiDataProvider public immutable etherFiDataProvider;

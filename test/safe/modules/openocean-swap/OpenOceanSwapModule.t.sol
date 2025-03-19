@@ -386,19 +386,15 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
         uint256 guaranteedAmount, 
         bytes memory swapData
     ) internal view returns (bytes memory) {
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             openOceanSwapModule.SWAP_SIG(), 
             block.chainid, 
             address(openOceanSwapModule), 
             nonceBefore, 
             address(safe), 
-            fromAsset, 
-            toAsset,
-            fromAssetAmount, 
-            minToAssetAmount,
-            guaranteedAmount,
-            swapData
+            abi.encode(fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData)
         )).toEthSignedMessageHash();
+
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 

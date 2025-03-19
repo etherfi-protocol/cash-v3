@@ -7,7 +7,6 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import {OpenOceanSwapDescription, IOpenOceanCaller, IOpenOceanRouter} from "../../interfaces/IOpenOcean.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ModuleBase } from "../ModuleBase.sol";
-import { Constants } from "../../utils/Constants.sol";
 
 /**
  * @title OpenOceanSwapModule
@@ -15,7 +14,7 @@ import { Constants } from "../../utils/Constants.sol";
  * @notice Module for executing token swaps through OpenOcean exchange
  * @dev Extends ModuleBase to integrate with the EtherFi ecosystem
  */
-contract OpenOceanSwapModule is ModuleBase, Constants {
+contract OpenOceanSwapModule is ModuleBase {
     using MessageHashUtils for bytes32;
 
     /// @notice OpenOcean router contract to give allowance to perform swaps
@@ -93,18 +92,13 @@ contract OpenOceanSwapModule is ModuleBase, Constants {
         uint256 guaranteedAmount,
         bytes calldata data
     ) internal returns(bytes32) {
-        return keccak256(abi.encode(
+        return keccak256(abi.encodePacked(
             SWAP_SIG, 
             block.chainid, 
             address(this), 
             _useNonce(safe), 
             safe, 
-            fromAsset, 
-            toAsset, 
-            fromAssetAmount, 
-            minToAssetAmount, 
-            guaranteedAmount, 
-            data
+            abi.encode(fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data)
         )).toEthSignedMessageHash();
     }
 
