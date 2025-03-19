@@ -160,6 +160,8 @@ contract CashLens is UpgradeableProxy {
         safeCashData.mode = safeData.mode;
         safeCashData.totalCashbackEarnedInUsd = safeData.totalCashbackEarnedInUsd;
         safeCashData.incomingCreditModeStartTime = safeData.incomingCreditModeStartTime;
+
+        if (safeCashData.incomingCreditModeStartTime > 0 && block.timestamp > safeCashData.incomingCreditModeStartTime) safeCashData.mode = Mode.Credit;
     }
 
     /**
