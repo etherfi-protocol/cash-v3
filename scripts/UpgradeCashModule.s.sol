@@ -29,10 +29,10 @@ contract UpgradeCashModule is Utils {
         );
 
         CashModuleCore cashModuleCoreImpl = new CashModuleCore(dataProvider);
-        CashModuleSetters cashModuleSettersImpl = new CashModuleSetters(dataProvider);
+        // CashModuleSetters cashModuleSettersImpl = new CashModuleSetters(dataProvider);
 
         cashModule.upgradeToAndCall(address(cashModuleCoreImpl), "");
-        ICashModule(address(cashModule)).setCashModuleSettersAddress(address(cashModuleSettersImpl));
+        // ICashModule(address(cashModule)).setCashModuleSettersAddress(address(cashModuleSettersImpl));
 
         vm.stopBroadcast();
     }
