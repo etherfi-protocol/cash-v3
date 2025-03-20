@@ -421,18 +421,17 @@ contract CashModuleCore is CashModuleStorageContract {
         if (amount == 0) revert AmountZero();
         _updateWithdrawalRequestIfNecessary(safe, token, amount);
 
-        address[] memory to = new address[](2);
-        bytes[] memory data = new bytes[](2);
-        uint256[] memory values = new uint256[](2);
+        address[] memory to = new address[](3);
+        bytes[] memory data = new bytes[](3);
+        uint256[] memory values = new uint256[](3);
 
         to[0] = token;
-        to[1] = address(debtManager);
+        to[1] = token;
+        to[2] = address(debtManager);
 
-        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
-        data[1] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
-
-        values[0] = 0;
-        values[1] = 0;
+        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), 0);
+        data[1] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
+        data[2] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
         _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
