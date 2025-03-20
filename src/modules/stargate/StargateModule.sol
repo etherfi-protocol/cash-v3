@@ -11,12 +11,20 @@ import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { IOFT, MessagingFee, MessagingReceipt, OFTFeeDetail, OFTLimit, OFTReceipt, SendParam, SendParam } from "../../interfaces/IOFT.sol";
 import { IStargate, Ticket } from "../../interfaces/IStargate.sol";
 
+/**
+ * @title StargateModule
+ * @author EtherFi
+ * @notice Module for interacting with Stargate Protocol to bridge assets across chains
+ * @dev Extends ModuleBase to inherit common functionality
+ * @custom:security-contact security@etherfi.io
+ */
 contract StargateModule is ModuleBase {
     using MessageHashUtils for bytes32;
     using Math for uint256;
 
     /**
      * @dev Configuration parameters for supported assets and their bridge settings
+     * @param isOFT Whether the asset is an OFT (Omnichain Fungible Token)
      * @param pool Stargate pool address for non-OFTs, OFT address for OFTs
      */
     struct AssetConfig {
@@ -34,6 +42,7 @@ contract StargateModule is ModuleBase {
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StargateModule")) - 1)) & ~bytes32(uint256(0xff))
+    /// @dev Storage location for the module's storage
     bytes32 private constant StargateModuleStorageLocation = 0xeafa2356b7fab3fae77872025a25cb67884d7667f22b14ae60e3f63732a39c00;
 
     /// @notice The ADMIN role for the Stargate module
@@ -42,7 +51,7 @@ contract StargateModule is ModuleBase {
     /// @notice TypeHash for bridge function signature used in EIP-712 signatures
     bytes32 public constant BRIDGE_SIG = keccak256("bridge");
 
-    /// @notice 100% in bps
+    /// @notice 100% in basis points (10,000)
     uint256 public constant HUNDRES_PERCENT_IN_BPS = 10_000;
     
     /// @notice Error for Invalid Owner quorum signatures
@@ -62,10 +71,23 @@ contract StargateModule is ModuleBase {
 
     /// @notice Error when native transfer fails
     error NativeTransferFailed();
+
+    /// @notice Error thrown when caller is not authorized
     error Unauthorized();
 
+    /**
+     * @notice Emitted when asset configurations are set
+     * @param assets Array of asset addresses that were configured
+     * @param assetConfigs Array of corresponding asset configurations
+     */
     event AssetConfigSet(address[] assets, AssetConfig[] assetConfigs);
 
+    /**
+     * @notice Constructor for StargateModule
+     * @param _assets Array of asset addresses to configure
+     * @param _assetConfigs Array of corresponding asset configurations
+     * @param _etherFiDataProvider Address of the EtherFi data provider
+     */
     constructor(address[] memory _assets, AssetConfig[] memory _assetConfigs, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         _setAssetConfigs(_assets, _assetConfigs);
     }
@@ -80,10 +102,25 @@ contract StargateModule is ModuleBase {
         }
     }
 
+    /**
+     * @notice Gets the configuration for a specific asset
+     * @param asset Address of the asset
+     * @return AssetConfig configuration for the asset
+     */
     function getAssetConfig(address asset) external view returns (AssetConfig memory) {
         return _getStargateModuleStorage().assetConfig[asset];
     }
 
+    /**
+     * @notice Sets configuration for multiple assets
+     * @dev Only callable by addresses with STARGATE_MODULE_ADMIN_ROLE
+     * @param assets Array of asset addresses to configure
+     * @param assetConfigs Array of corresponding asset configurations
+     * @custom:throws Unauthorized if caller doesn't have admin role
+     * @custom:throws ArrayLengthMismatch if arrays have different lengths
+     * @custom:throws InvalidInput if any asset address is zero
+     * @custom:throws InvalidStargatePool if pool doesn't match the token
+     */
     function setAssetConfig(address[] memory assets, AssetConfig[] memory assetConfigs) external {
         IRoleRegistry roleRegistry = IRoleRegistry(etherFiDataProvider.roleRegistry());
         if (!roleRegistry.hasRole(STARGATE_MODULE_ADMIN_ROLE, msg.sender)) revert Unauthorized();
@@ -91,16 +128,58 @@ contract StargateModule is ModuleBase {
         _setAssetConfigs(assets, assetConfigs);
     }
 
+    /**
+     * @notice Bridges assets from the safe to another chain
+     * @dev Only callable by the EtherFiSafe contract
+     * @param safe Address of the EtherFiSafe
+     * @param destEid Destination chain ID in LayerZero format
+     * @param asset Address of the asset to bridge
+     * @param amount Amount of the asset to bridge
+     * @param destRecipient Recipient address on the destination chain
+     * @param maxSlippageInBps Maximum slippage allowed in basis points (10,000 = 100%)
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of signatures from the signers
+     * @custom:throws InvalidSignatures if the signatures are invalid
+     * @custom:throws InvalidInput if destination, asset, or amount is invalid
+     * @custom:throws InsufficientAmount if the safe doesn't have enough assets
+     * @custom:throws InsufficientMinAmount if slippage exceeds the maximum allowed
+     * @custom:throws InsufficientNativeFee if not enough native tokens for fees
+     * @custom:throws NativeTransferFailed if native token transfer fails
+     * @custom:throws InvalidStargatePool if pool configuration is invalid
+     */
     function bridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
         _checkSignature(safe, destEid, asset, amount, destRecipient, maxSlippageInBps, signers, signatures);
         _bridge(safe, destEid, asset, amount, destRecipient, maxSlippageInBps);
     }
 
+    /**
+     * @dev Verifies that the transaction has been properly signed by the required signers
+     * @param safe Address of the EtherFiSafe
+     * @param destEid Destination chain ID
+     * @param asset Address of the asset to bridge
+     * @param amount Amount of the asset to bridge
+     * @param destRecipient Recipient address on the destination chain
+     * @param maxSlippageInBps Maximum slippage allowed in basis points
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of signatures from the signers
+     * @custom:throws InvalidSignatures if the signatures are invalid
+     */
     function _checkSignature(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps, address[] calldata signers, bytes[] calldata signatures) internal {
         bytes32 digestHash = keccak256(abi.encodePacked(BRIDGE_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe, abi.encode(destEid, asset, amount, destRecipient, maxSlippageInBps))).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 
+    /**
+     * @dev Handles the bridging of assets, dispatching to the appropriate bridging method
+     * @param safe Address of the EtherFiSafe
+     * @param destEid Destination chain ID
+     * @param asset Address of the asset to bridge
+     * @param amount Amount of the asset to bridge
+     * @param destRecipient Recipient address on the destination chain
+     * @param maxSlippageInBps Maximum slippage allowed in basis points
+     * @custom:throws InvalidInput if destination, asset, or amount is invalid
+     * @custom:throws InsufficientAmount if the safe doesn't have enough assets
+     */
     function _bridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps) internal {
         if (destRecipient == address(0) || asset == address(0) || amount == 0) revert InvalidInput();
         _checkBalance(safe, asset, amount);
@@ -111,6 +190,18 @@ contract StargateModule is ModuleBase {
         else _bridgeNonOft(safe, destEid, asset, amount, destRecipient, minAmount);
     }
 
+    /**
+     * @dev Bridges non-OFT tokens through Stargate Protocol
+     * @param safe Address of the EtherFiSafe
+     * @param destEid Destination chain ID
+     * @param asset Address of the asset to bridge
+     * @param amount Amount of the asset to bridge
+     * @param destRecipient Recipient address on the destination chain
+     * @param minReturnAmount Minimum amount to receive after slippage
+     * @custom:throws InsufficientNativeFee if not enough native tokens for fees
+     * @custom:throws NativeTransferFailed if native token transfer fails
+     * @custom:throws InvalidStargatePool if pool configuration is invalid
+     */
     function _bridgeNonOft(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 minReturnAmount) internal {
         (IStargate stargate, uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) = prepareRideBus(destEid, asset, amount, destRecipient, minReturnAmount);
         if (address(this).balance < messagingFee.nativeFee) revert InsufficientNativeFee();
@@ -149,9 +240,20 @@ contract StargateModule is ModuleBase {
         }
         
         IEtherFiSafe(safe).execTransactionFromModule(to, value, data);
-
     }
 
+    /**
+     * @dev Bridges OFT tokens through the OFT contract
+     * @param safe Address of the EtherFiSafe
+     * @param destEid Destination chain ID
+     * @param asset Address of the asset to bridge
+     * @param amount Amount of the asset to bridge
+     * @param destRecipient Recipient address on the destination chain
+     * @param minReturnAmount Minimum amount to receive after slippage
+     * @custom:throws InsufficientMinAmount if expected received amount is below minimum
+     * @custom:throws InsufficientNativeFee if not enough native tokens for fees
+     * @custom:throws NativeTransferFailed if native token transfer fails
+     */
     function _bridgeOft(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 minReturnAmount) internal {
         IOFT oft = IOFT(_getStargateModuleStorage().assetConfig[asset].pool);
         SendParam memory sendParam = SendParam({ dstEid: destEid, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minReturnAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
@@ -196,17 +298,27 @@ contract StargateModule is ModuleBase {
     /**
      * @notice Calculates the fee required for bridging through Stargate
      * @dev Returns the native token fee required for the bridge operation
-     * @param asset Unused in this implementation
+     * @param destEid Destination chain ID in LayerZero format
+     * @param asset Address of the asset to bridge
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
      * @param maxSlippage Maximum allowed slippage in basis points
-     * @return ETH address and the required native token fee amount
+     * @return Address of the fee token (always ETH) and the required native token fee amount
      */
     function getBridgeFee(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippage) external view returns (address, uint256) {
         if (_getStargateModuleStorage().assetConfig[asset].isOFT) return _getOftBridgeFee(destEid, asset, amount, destRecipient, maxSlippage);
         else return _getNonOftBridgeFee(destEid, asset, amount, destRecipient, maxSlippage);
     }
 
+    /**
+     * @dev Gets the bridge fee for OFT tokens
+     * @param destEid Destination chain ID
+     * @param asset Address of the asset to bridge
+     * @param amount Amount of the asset to bridge
+     * @param destRecipient Recipient address on the destination chain
+     * @param maxSlippage Maximum slippage allowed in basis points
+     * @return Address of the fee token (ETH) and the fee amount
+     */
     function _getOftBridgeFee(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippage) internal view returns (address, uint256) {
         IOFT oft = IOFT(_getStargateModuleStorage().assetConfig[asset].pool);
         uint256 minAmount = _deductSlippage(amount, maxSlippage);
@@ -216,6 +328,15 @@ contract StargateModule is ModuleBase {
         return (ETH, messagingFee.nativeFee);
     }
 
+    /**
+     * @dev Gets the bridge fee for non-OFT tokens
+     * @param destEid Destination chain ID
+     * @param asset Address of the asset to bridge
+     * @param amount Amount of the asset to bridge
+     * @param destRecipient Recipient address on the destination chain
+     * @param maxSlippage Maximum slippage allowed in basis points
+     * @return Address of the fee token (ETH) and the fee amount
+     */
     function _getNonOftBridgeFee(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippage) internal view returns (address, uint256) {
         uint256 minAmount = _deductSlippage(amount, maxSlippage);
         (, , , MessagingFee memory messagingFee,) = prepareRideBus(destEid, asset, amount, destRecipient, minAmount);
@@ -223,10 +344,11 @@ contract StargateModule is ModuleBase {
         return (ETH, messagingFee.nativeFee);
     }
 
-    // from https://stargateprotocol.gitbook.io/stargate/v/v2-developer-docs/integrate-with-stargate/how-to-swap#ride-the-bus
     /**
      * @notice Prepares parameters for Stargate bridging
      * @dev Implements the "Ride the Bus" pattern from Stargate documentation
+     * @param destEid Destination chain ID
+     * @param asset Address of the asset to bridge
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
      * @param minAmount Minimum amount to receive after slippage
@@ -264,6 +386,14 @@ contract StargateModule is ModuleBase {
         return amount.mulDiv(HUNDRES_PERCENT_IN_BPS - slippage, HUNDRES_PERCENT_IN_BPS);
     }
 
+    /**
+     * @dev Sets configurations for multiple assets
+     * @param assets Array of asset addresses to configure
+     * @param assetConfigs Array of corresponding asset configurations
+     * @custom:throws ArrayLengthMismatch if arrays have different lengths
+     * @custom:throws InvalidInput if any asset address is zero
+     * @custom:throws InvalidStargatePool if pool doesn't match the token
+     */
     function _setAssetConfigs(address[] memory assets, AssetConfig[] memory assetConfigs) internal {
         uint256 len = assets.length;
         if (len != assetConfigs.length) revert ArrayLengthMismatch();
@@ -289,6 +419,13 @@ contract StargateModule is ModuleBase {
         emit AssetConfigSet(assets, assetConfigs);
     }
 
+    /**
+     * @dev Checks if the safe has sufficient balance of the asset
+     * @param safe Address of the EtherFiSafe
+     * @param asset Address of the asset to check
+     * @param amount Required amount of the asset
+     * @custom:throws InsufficientAmount if the safe doesn't have enough assets
+     */
     function _checkBalance(address safe, address asset, uint256 amount) internal view {
         if (asset == ETH) {
             if (safe.balance < amount) revert InsufficientAmount();    
@@ -297,5 +434,9 @@ contract StargateModule is ModuleBase {
         }
     }
 
+    /**
+     * @notice Allows the contract to receive ETH
+     * @dev Required to handle native token operations
+     */
     receive() external payable {}
 }

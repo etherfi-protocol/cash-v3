@@ -132,7 +132,20 @@ contract CashLens is UpgradeableProxy {
      * @notice Gets comprehensive cash data for a Safe
      * @dev Aggregates data from multiple sources including DebtManager and CashModule
      * @param safe Address of the EtherFi Safe
-     * @return safeCashData Comprehensive data structure with collateral, borrows, limits, and more
+     * @return safeCashData Comprehensive data structure containing:
+     *   - mode: Current operating mode (Credit or Debit)
+     *   - collateralBalances: Array of collateral token balances
+     *   - borrows: Array of borrowed token balances
+     *   - tokenPrices: Array of token prices
+     *   - withdrawalRequest: Current withdrawal request
+     *   - totalCollateral: Total value of collateral in USD
+     *   - totalBorrow: Total value of borrows in USD
+     *   - maxBorrow: Maximum borrowing power in USD
+     *   - creditMaxSpend: Maximum spendable amount in Credit mode (USD)
+     *   - debitMaxSpend: Maximum spendable amount in Debit mode (USD)
+     *   - spendingLimitAllowance: Remaining spending limit allowance
+     *   - totalCashbackEarnedInUsd: Running total of all cashback earned by this safe (and its spenders) in USD
+     *   - incomingCreditModeStartTime: Timestamp when a pending change to Credit mode will take effect (0 if no pending change)
      */
     function getSafeCashData(address safe) external view returns (SafeCashData memory safeCashData) {
         IDebtManager debtManager = cashModule.getDebtManager();
