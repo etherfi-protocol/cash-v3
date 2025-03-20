@@ -5,12 +5,12 @@ import {stdJson} from "forge-std/StdJson.sol";
 import {CREATE3} from "solady/utils/CREATE3.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-import {CashModuleSetters} from "../src/modules/cash/CashModuleSetters.sol";
-import {CashModuleCore} from "../src/modules/cash/CashModuleCore.sol";
-import {ICashModule} from "../src/interfaces/ICashModule.sol";
+import {DebtManagerAdmin} from "../src/debt-manager/DebtManagerAdmin.sol";
+import {DebtManagerCore} from "../src/debt-manager/DebtManagerCore.sol";
+import {IDebtManager} from "../src/interfaces/IDebtManager.sol";
 import {Utils, ChainConfig} from "./utils/Utils.sol";
 
-contract UpgradeCashModule is Utils {
+contract UpgradeDebtManager is Utils {
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
@@ -18,9 +18,9 @@ contract UpgradeCashModule is Utils {
 
         string memory deployments = readDeploymentFile();
 
-        UUPSUpgradeable cashModule = UUPSUpgradeable(stdJson.readAddress(
+        UUPSUpgradeable debtManager = UUPSUpgradeable(stdJson.readAddress(
             deployments, 
-            string(abi.encodePacked(".", "addresses", ".", "CashModule"))
+            string(abi.encodePacked(".", "addresses", ".", "DebtManager"))
         ));
 
         address dataProvider = stdJson.readAddress(
@@ -28,11 +28,11 @@ contract UpgradeCashModule is Utils {
             string(abi.encodePacked(".", "addresses", ".", "EtherFiDataProvider"))
         );
 
-        CashModuleCore cashModuleCoreImpl = new CashModuleCore(dataProvider);
-        CashModuleSetters cashModuleSettersImpl = new CashModuleSetters(dataProvider);
+        DebtManagerCore debtManagerCoreImpl = new DebtManagerCore(dataProvider);
+        DebtManagerAdmin debtManagerAdminImpl = new DebtManagerAdmin(dataProvider);
 
-        cashModule.upgradeToAndCall(address(cashModuleCoreImpl), "");
-        ICashModule(address(cashModule)).setCashModuleSettersAddress(address(cashModuleSettersImpl));
+        debtManager.upgradeToAndCall(address(debtManagerCoreImpl), "");
+        IDebtManager(address(cashModule)).setAdminImpl(address(debtManagerAdminImpl));
 
         vm.stopBroadcast();
     }
