@@ -412,10 +412,10 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
         uint256 shares = $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens == 0 ? amount : amount.mulDiv($.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens, _getTotalBorrowTokenAmount(borrowToken), Math.Rounding.Floor);
 
-        if (shares < $.borrowTokenConfig[borrowToken].minShares) revert SharesCannotBeLessThanMinShares();
-
         $.sharesOfBorrowTokens[user][borrowToken] += shares;
         $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens += shares;
+
+        if ($.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens < $.borrowTokenConfig[borrowToken].minShares) revert SharesCannotBeLessThanMinShares();
 
         IERC20(borrowToken).safeTransferFrom(msg.sender, address(this), amount);
 
