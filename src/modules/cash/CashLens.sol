@@ -323,7 +323,7 @@ contract CashLens is UpgradeableProxy {
         }
 
         // Get borrowing power and total borrowing
-        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(address(0), collateralTokenAmounts);
+        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(address(safe), collateralTokenAmounts);
 
         // Calculate debit mode amount based on borrowing status
         if (totalMaxBorrow < totalBorrowings) {
