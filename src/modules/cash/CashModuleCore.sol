@@ -200,8 +200,8 @@ contract CashModuleCore is CashModuleStorageContract {
 
         for (uint256 i = 0; i < len;) {
             if (tokensToSend[i].amount > 0) {
-                to[i] = tokensToSend[i].token;
-                data[i] = abi.encodeWithSelector(IERC20.transfer.selector, liquidator, tokensToSend[i].amount);
+                to[counter] = tokensToSend[i].token;
+                data[counter] = abi.encodeWithSelector(IERC20.transfer.selector, liquidator, tokensToSend[i].amount);
                 unchecked {
                     ++counter;
                 }
