@@ -32,7 +32,9 @@ contract CashModuleCore is CashModuleStorageContract {
     using MessageHashUtils for bytes32;
     using ArrayDeDupLib for address[];
 
-    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { }
+    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { 
+        _disableInitializers();
+    }
 
     /**
      * @notice Initializes the CashModule contract

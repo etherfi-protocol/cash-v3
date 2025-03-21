@@ -29,7 +29,9 @@ contract CashModuleSetters is CashModuleStorageContract {
     using SpendingLimitLib for SpendingLimit;
     using ArrayDeDupLib for address[];
 
-    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { }
+    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { 
+        _disableInitializers();
+    }
 
     /**
      * @notice Sets the tier for one or more safes

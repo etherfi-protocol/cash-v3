@@ -33,7 +33,9 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
      * @dev Sets the immutable data provider reference
      * @param _dataProvider Address of the EtherFiDataProvider contract
      */
-    constructor(address _dataProvider) payable EtherFiSafeBase(_dataProvider) {}
+    constructor(address _dataProvider) payable EtherFiSafeBase(_dataProvider) {
+        _disableInitializers();
+    }
 
     /**
      * @notice Initializes the safe with owners, modules, and signature threshold

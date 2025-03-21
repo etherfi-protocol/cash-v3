@@ -122,6 +122,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
         }
     }
 
+    constructor() {
+        _disableInitializers();
+    }
+
     /**
      * @notice Initializes the contract with initial modules and hook address
      * @dev Can only be called once due to initializer modifier

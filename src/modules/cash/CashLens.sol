@@ -44,6 +44,8 @@ contract CashLens is UpgradeableProxy {
     constructor(address _cashModule, address _dataProvider) {
         cashModule = ICashModule(_cashModule);
         dataProvider = IEtherFiDataProvider(_dataProvider);
+
+        _disableInitializers();
     }
 
     /**
