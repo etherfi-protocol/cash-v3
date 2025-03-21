@@ -91,7 +91,7 @@ contract CashLens is UpgradeableProxy {
 
         if (safeData.mode == Mode.Debit && IERC20(token).balanceOf(safe) < amount) return (false, "Insufficient balance to spend with Debit flow");
 
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, amount);
+        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, safeData.mode, amount);
         if (bytes(error).length != 0) return (false, error);
         (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
         if (totalBorrowings > totalMaxBorrow) return (false, "Borrowings greater than max borrow after spending");
@@ -279,7 +279,7 @@ contract CashLens is UpgradeableProxy {
      */
     function _calculateCreditModeAmount(IDebtManager debtManager, address safe, address token, SafeData memory safeData, uint256 amountToSubtract) internal view returns (uint256 creditModeAmount, bool isValid) {
         // Get collateral balance with token subtracted
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, amountToSubtract);
+        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, Mode.Credit, amountToSubtract);
 
         // Check for errors - short circuit to save gas
         if (bytes(error).length != 0 || collateralTokenAmounts.length == 0) {
@@ -315,7 +315,7 @@ contract CashLens is UpgradeableProxy {
         }
 
         // Get collateral balance with token subtracted
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, effectiveBal);
+        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, Mode.Debit, effectiveBal);
 
         // Check for errors - return early if invalid
         if (bytes(error).length != 0 || collateralTokenAmounts.length == 0) {
@@ -357,7 +357,7 @@ contract CashLens is UpgradeableProxy {
      * @return tokenAmounts Array of token data with updated balances
      * @return error Error message if calculation fails
      */
-    function _getCollateralBalanceWithTokenSubtracted(IDebtManager debtManager, address safe, SafeData memory safeData, address token, uint256 amount) internal view returns (IDebtManager.TokenData[] memory, string memory error) {
+    function _getCollateralBalanceWithTokenSubtracted(IDebtManager debtManager, address safe, SafeData memory safeData, address token, Mode mode, uint256 amount) internal view returns (IDebtManager.TokenData[] memory, string memory error) {
         address[] memory collateralTokens = debtManager.getCollateralTokens();
         uint256 len = collateralTokens.length;
         IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
@@ -367,7 +367,7 @@ contract CashLens is UpgradeableProxy {
             uint256 pendingWithdrawalAmount = _getPendingWithdrawalAmount(safeData, collateralTokens[i]);
             if (balance != 0) {
                 balance = balance - pendingWithdrawalAmount;
-                if (safeData.mode == Mode.Debit && token == collateralTokens[i]) {
+                if (mode == Mode.Debit && token == collateralTokens[i]) {
                     if (balance == 0 || balance < amount) return (new IDebtManager.TokenData[](0), "Insufficient effective balance after withdrawal to spend with debit mode");
                     balance = balance - amount;
                 }
