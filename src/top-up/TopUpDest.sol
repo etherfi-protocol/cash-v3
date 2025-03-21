@@ -21,13 +21,13 @@ contract TopUpDest is UpgradeableProxy {
     /// @notice Role identifier for accounts authorized to top up user safes
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
+    IEtherFiDataProvider public immutable etherFiDataProvider;
+
     /**
      * @dev Storage structure for TopUpDest using ERC-7201 namespaced diamond storage pattern
      * @custom:storage-location erc7201:etherfi.storage.TopUpDest
      */
     struct TopUpDestStorage {
-        /// @notice Reference to the EtherFi data provider for safe verification
-        IEtherFiDataProvider etherFiDataProvider;
         /// @notice Tracks the total deposits for each token
         mapping(address token => uint256 deposits) deposits;
         /// @notice Tracks cumulative top-ups for each user for a specific chain and token
@@ -82,7 +82,8 @@ contract TopUpDest is UpgradeableProxy {
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
      */
-    constructor() {
+    constructor(address _etherFiDataProvider) {
+        etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
         _disableInitializers();
     }
 
@@ -90,12 +91,9 @@ contract TopUpDest is UpgradeableProxy {
      * @notice Initializes the TopUpDest contract
      * @dev Sets up role registry, reentrancy guard, and data provider
      * @param _roleRegistry Address of the role registry contract
-     * @param _etherFiDataProvider Address of the EtherFi data provider
      */
-    function initialize(address _roleRegistry, address _etherFiDataProvider) external initializer {
+    function initialize(address _roleRegistry) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
-
-        _getTopUpDestStorage().etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
     }
 
     /**
@@ -156,7 +154,7 @@ contract TopUpDest is UpgradeableProxy {
      */
     function topUpUserSafeBatch(address[] memory users, uint256[] memory chainIds, address[] memory tokens, uint256[] memory amounts, uint256[] memory expectedCumulativeTopUps) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
         uint256 len = chainIds.length;
-        if (len != users.length || len != tokens.length || len != amounts.length) revert ArrayLengthMismatch();
+        if (len != users.length || len != tokens.length || len != amounts.length || len != expectedCumulativeTopUps.length) revert ArrayLengthMismatch();
         for (uint256 i = 0; i < len;) {
             _topUp(users[i], chainIds[i], tokens[i], amounts[i], expectedCumulativeTopUps[i]);
             unchecked {
@@ -190,7 +188,7 @@ contract TopUpDest is UpgradeableProxy {
      */
     function _topUp(address user, uint256 chainId, address token, uint256 amount, uint256 expectedCumulativeTopUp) internal {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
-        if (!$.etherFiDataProvider.isEtherFiSafe(user)) revert NotARegisteredSafe();
+        if (!etherFiDataProvider.isEtherFiSafe(user)) revert NotARegisteredSafe();
         if ($.cumulativeTopUps[user][chainId][token] != expectedCumulativeTopUp) revert RaceDetected();
 
         _transfer(user, token, amount);
@@ -219,15 +217,6 @@ contract TopUpDest is UpgradeableProxy {
      */
     function getCumulativeTopUp(address user, uint256 chainId, address token) external view returns (uint256) {
         return _getTopUpDestStorage().cumulativeTopUps[user][chainId][token];
-    }
-
-    /**
-     * @notice Gets the EtherFi data provider address
-     * @dev Returns the reference to the data provider used for safe verification
-     * @return The address of the EtherFi data provider contract
-     */
-    function getEtherFiDataProvider() external view returns (address) {
-        return address(_getTopUpDestStorage().etherFiDataProvider);
     }
 
     /**

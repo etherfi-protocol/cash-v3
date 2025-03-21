@@ -73,8 +73,8 @@ contract TopUpDestTest is Test {
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
         // Deploy TopUpDest
-        address topUpDestImpl = address(new TopUpDest());
-        topUpDest = TopUpDest(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry), address(dataProvider)))));
+        address topUpDestImpl = address(new TopUpDest(address(dataProvider)));
+        topUpDest = TopUpDest(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry)))));
         vm.stopPrank();
 
         // Approve tokens for depositing
@@ -82,10 +82,6 @@ contract TopUpDestTest is Test {
         token1.approve(address(topUpDest), INITIAL_AMOUNT);
         token2.approve(address(topUpDest), INITIAL_AMOUNT);
         vm.stopPrank();
-    }
-
-    function test_initialize() public view {
-        assertEq(topUpDest.getEtherFiDataProvider(), address(dataProvider));
     }
 
     function test_deposit_succeeds() public {
@@ -388,6 +384,6 @@ contract TopUpDestTest is Test {
         assertEq(topUpDest.getCumulativeTopUp(user2, 100, address(token1)), 0); // Different user
 
         // Check getEtherFiDataProvider
-        assertEq(topUpDest.getEtherFiDataProvider(), address(dataProvider));
+        assertEq(address(topUpDest.etherFiDataProvider()), address(dataProvider));
     }
 }

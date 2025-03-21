@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import { BeaconFactory, UpgradeableBeacon } from "../beacon-factory/BeaconFactory.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
-import { DelegateCallLib } from "../libraries/DelegateCallLib.sol";
 import { EtherFiSafe } from "./EtherFiSafe.sol";
 
 /**

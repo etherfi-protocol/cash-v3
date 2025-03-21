@@ -68,10 +68,11 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @param _owners Array of initial owner addresses
      * @param _threshold Initial signature threshold
      * @dev Can only be called once when owners set is empty
-     * @custom:throws AlreadySetup If the safe has already been set up
+     * @custom:throws MultiSigAlreadySetup If the safe has already been set up
      * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
      * @custom:throws InvalidInput If owners array is empty
-     * @custom:throws InvalidOwnerAddress If any owner address is zero
+     * @custom:throws InvalidOwnerAddress(index) If any owner address is zero
+     * @custom:throws DuplicateElementFound If owner addresses are repeated int the array
      */
     function _setupMultiSig(address[] calldata _owners, uint8 _threshold) internal {
         MultiSigStorage storage $ = _getMultiSigStorage();
@@ -127,7 +128,8 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @param signatures Array of corresponding signatures
      * @custom:throws InvalidInput If owners array is empty
      * @custom:throws ArrayLengthMismatch If arrays have different lengths
-     * @custom:throws InvalidOwnerAddress If any owner address is zero
+     * @custom:throws InvalidAddress(index) If any owner address is zero
+     * @custom:throws DuplicateElementFound If owner addresses are repeated int the array
      * @custom:throws AllOwnersRemoved If operation would remove all owners
      * @custom:throws OwnersLessThanThreshold If owners would be less than threshold
      * @custom:throws InvalidSignatures If signature verification fails
@@ -163,7 +165,8 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @dev Cannot remove all owners or reduce owners below threshold
      * @custom:throws InvalidInput If owners array is empty
      * @custom:throws ArrayLengthMismatch If owners and shouldAdd arrays have different lengths
-     * @custom:throws InvalidOwnerAddress If any owner address is zero
+     * @custom:throws InvalidAddress(index) If any owner address is zero
+     * @custom:throws DuplicateElementFound If owner addresses are repeated int the array
      * @custom:throws AllOwnersRemoved If operation would remove all owners
      * @custom:throws OwnersLessThanThreshold If operation would reduce owners below threshold
      */

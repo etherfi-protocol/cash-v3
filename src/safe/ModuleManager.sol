@@ -50,6 +50,9 @@ abstract contract ModuleManager is EtherFiSafeBase {
      * @notice Sets up multiple modules initially
      * @param _modules Array of module addresses to configure
      * @param _moduleSetupData Array of data for setting up individual modules for the safe
+     * @custom:throws ModulesAlreadySetup If the module manager is already setup
+     * @custom:throws ArrayLengthMismatch If the arrays have a length mismatch
+     * @custom:throws DuplicateElementFound If the module addresses are repeated in the array
      * @custom:throws InvalidInput If modules array is empty
      * @custom:throws InvalidModule If any module address is zero
      * @custom:throws UnsupportedModule If a module is not whitelisted on the data provider
@@ -90,6 +93,7 @@ abstract contract ModuleManager is EtherFiSafeBase {
      * @custom:throws ArrayLengthMismatch If modules and shouldWhitelist arrays have different lengths
      * @custom:throws InvalidModule If any module address is zero
      * @custom:throws InvalidSignatures If the signature verification fails
+     * @custom:throws DuplicateElementFound If the module addresses are repeated in the array
      */
     function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist, bytes[] calldata moduleSetupData, address[] calldata signers, bytes[] calldata signatures) external {
         _currentOwner();
@@ -133,7 +137,7 @@ abstract contract ModuleManager is EtherFiSafeBase {
      * @custom:throws InvalidModule If any module address is zero
      * @custom:throws UnsupportedModule If a module is not whitelisted on the data provider
      * @custom:throws CannotRemoveCashModule If attempting to remove a protected cash module
-     * @custom:throws ModuleSetupFailed If setting up the module fails
+     * @custom:throws DuplicateElementFound If the module addresses are repeated in the array
      */
     function _configureModules(address[] calldata _modules, bool[] calldata _shouldWhitelist, bytes[] calldata _moduleSetupData) internal {
         ModuleManagerStorage storage $ = _getModuleManagerStorage();
