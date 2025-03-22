@@ -214,7 +214,7 @@ contract SafeTestSetup is Utils {
             priceFunctionCalldata: hex"",
             isChainlinkType: true,
             oraclePriceDecimals: IAggregatorV3(weEthWethOracle).decimals(),
-            maxStaleness: 1 days,
+            maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: true,
             isStableToken: false
@@ -225,7 +225,7 @@ contract SafeTestSetup is Utils {
             priceFunctionCalldata: hex"",
             isChainlinkType: true,
             oraclePriceDecimals: IAggregatorV3(ethUsdcOracle).decimals(),
-            maxStaleness: 1 days,
+            maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
             isStableToken: false
@@ -236,7 +236,7 @@ contract SafeTestSetup is Utils {
             priceFunctionCalldata: hex"",
             isChainlinkType: true,
             oraclePriceDecimals: IAggregatorV3(usdcUsdOracle).decimals(),
-            maxStaleness: 10 days,
+            maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
             isStableToken: true
@@ -247,7 +247,7 @@ contract SafeTestSetup is Utils {
             priceFunctionCalldata: hex"",
             isChainlinkType: true,
             oraclePriceDecimals: IAggregatorV3(scrUsdOracle).decimals(),
-            maxStaleness: 1 days,
+            maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
             isStableToken: false

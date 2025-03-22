@@ -32,7 +32,7 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     /**
      * @notice Extended configuration for borrow tokens with accounting data
      * @param interestIndexSnapshot Current interest index for accurate interest calculation
-     * @param totalBorrowingAmount Total amount of this token borrowed across all users
+     * @param totalNormalizedBorrowingAmount Total amount of this token borrowed across all users normalized with interest index
      * @param totalSharesOfBorrowTokens Total shares representing ownership of the borrow token pool
      * @param lastUpdateTimestamp Timestamp of the last update to this configuration
      * @param borrowApy Annual percentage yield for borrowing this token
@@ -40,7 +40,7 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      */
     struct BorrowTokenConfig {
         uint256 interestIndexSnapshot;
-        uint256 totalBorrowingAmount;
+        uint256 totalNormalizedBorrowingAmount;
         uint256 totalSharesOfBorrowTokens;
         uint64 lastUpdateTimestamp;
         uint64 borrowApy;
@@ -97,7 +97,7 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     bytes32 constant ADMIN_IMPL_POSITION = 0x49d4a010ddc5f453173525f0adf6cfb97318b551312f237c11fd9f432a1f5d21;
     
     /// @notice Maximum borrowing APY (50% / (365 days in seconds))
-    uint256 public constant MAX_BORROW_APY = 1_585_489_599_188;
+    uint64 public constant MAX_BORROW_APY = 1_585_489_599_188;
     
     /// @notice Interface for accessing EtherFi data
     IEtherFiDataProvider public immutable etherFiDataProvider;
@@ -122,12 +122,9 @@ contract DebtManagerStorageContract is UpgradeableProxy {
         /// @notice Mapping from collateral token address to its configuration
         mapping(address token => CollateralTokenConfig config) collateralTokenConfig;
         
-        /// @notice User borrowings in USD with 6 decimals precision
-        mapping(address user => mapping(address borrowToken => uint256 borrowing)) userBorrowings;
-        
-        /// @notice Snapshot of interest already paid by users
-        mapping(address user => mapping(address borrowToken => uint256 interestSnapshot)) usersDebtInterestIndexSnapshots;
-        
+        /// @notice User borrowings in USD normalized
+        mapping(address user => mapping(address borrowToken => uint256 normalizedBorrowing)) userNormalizedBorrowings;
+                
         /// @notice Shares of borrow tokens with 18 decimals precision
         mapping(address supplier => mapping(address borrowToken => uint256 shares)) sharesOfBorrowTokens;
     }
@@ -268,6 +265,19 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @param amount Amount withdrawn
      */
     event WithdrawBorrowToken(address indexed withdrawer, address indexed borrowToken, uint256 amount);
+
+    /**
+     * @notice Emitted when debt token interest index is updated
+     * @param borrowToken Address of the borrow token
+     * @param oldIndex Old index
+     * @param newIndex New index
+     */
+    event InterestIndexUpdated(address indexed borrowToken, uint256 oldIndex, uint256 newIndex);
+
+    /**
+     * @notice Error thrown when collateral token preference array is empty while liquidating
+     */
+    error CollateralPreferenceIsEmpty();
 
     /**
      * @notice Error thrown when an unsupported collateral token is used
@@ -475,19 +485,6 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     }
 
     /**
-     * @notice Sets the implementation for the admin
-     * @dev This needs to be in a base class for proper implementation
-     * @param newImpl Address of the new implementation
-     */
-    function setAdminImpl(address newImpl) external onlyRoleRegistryOwner() {
-        bytes32 position = ADMIN_IMPL_POSITION;
-        // solhint-disable-next-line no-inline-assembly
-        assembly ("memory-safe") {
-            sstore(position, newImpl)
-        }
-    }
-
-    /**
      * @dev Returns the total amount of borrow tokens
      * @param borrowToken Address of the borrow token
      * @return Total amount of the borrow token
@@ -503,9 +500,8 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @return Equivalent amount in collateral token
      */
     function convertUsdToCollateralToken(address collateralToken, uint256 debtUsdAmount) public view returns (uint256) {
-        if (!isCollateralToken(collateralToken)) {
-            revert UnsupportedCollateralToken();
-        }
+        if (!isCollateralToken(collateralToken))  revert UnsupportedCollateralToken();
+    
         return (debtUsdAmount * 10 ** _getDecimals(collateralToken)) / IPriceProvider(etherFiDataProvider.getPriceProvider()).price(collateralToken);
     }
 
@@ -515,72 +511,63 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @return Total borrowing amount with accrued interest
      */
     function totalBorrowingAmount(address borrowToken) public view returns (uint256) {
-        DebtManagerStorage storage $ = _getDebtManagerStorage();
-        return _getAmountWithInterest(borrowToken, $.borrowTokenConfig[borrowToken].totalBorrowingAmount, $.borrowTokenConfig[borrowToken].interestIndexSnapshot);
+        BorrowTokenConfig memory borrowTokenConfig = _getDebtManagerStorage().borrowTokenConfig[borrowToken];
+        return _getActualBorrowAmount(borrowTokenConfig.totalNormalizedBorrowingAmount, getCurrentIndex(borrowToken));
     }
 
     /**
      * @dev Calculates amount with accrued interest
-     * @param borrowToken Address of the borrow token
-     * @param amountBefore Amount before interest
-     * @param accInterestAlreadyAdded Accumulated interest already added
+     * @param normalizedAmount Amount before interest
+     * @param interestIndex Accumulated interest already added
      * @return Amount with accrued interest
      */
-    function _getAmountWithInterest(address borrowToken, uint256 amountBefore, uint256 accInterestAlreadyAdded) internal view returns (uint256) {
-        return ((PRECISION * (amountBefore * (debtInterestIndexSnapshot(borrowToken) - accInterestAlreadyAdded))) / HUNDRED_PERCENT + PRECISION * amountBefore) / PRECISION;
+    function _getActualBorrowAmount(uint256 normalizedAmount, uint256 interestIndex) internal pure returns (uint256) {
+        return normalizedAmount.mulDiv(interestIndex, PRECISION, Math.Rounding.Floor);
     }
 
     /**
-     * @notice Returns the current debt interest index snapshot for a borrow token
+     * @dev Calculates the normalized amount of debt by removing accrued interest
+     * @param actualAmount The actual amount of debt with interest
+     * @param interestIndex The current interest index to normalize against
+     * @return The normalized amount without accrued interest
+     */
+    function _getNormalizedAmount(uint256 actualAmount, uint256 interestIndex) internal pure returns (uint256) {
+        return actualAmount.mulDiv(PRECISION, interestIndex, Math.Rounding.Floor);
+    }
+
+    /**
+     * @notice Updates the interest index for a specific borrow token
+     * @dev Calculates the current index, updates storage, and emits an event
+     * @param borrowToken Address of the borrow token to update
+     * @return The updated interest index value
+     */
+    function _updateInterestIndex(address borrowToken) internal returns (uint256) {
+        BorrowTokenConfig storage config = _getDebtManagerStorage().borrowTokenConfig[borrowToken];
+        if (config.lastUpdateTimestamp == block.timestamp) return config.interestIndexSnapshot;
+        
+        uint256 currentIndex = config.interestIndexSnapshot;
+        config.interestIndexSnapshot = getCurrentIndex(borrowToken);
+        config.lastUpdateTimestamp = uint64(block.timestamp);
+
+        emit InterestIndexUpdated(borrowToken, currentIndex, config.interestIndexSnapshot);
+
+        return config.interestIndexSnapshot;
+    }
+
+    /**
+     * @notice Calculates the current interest index for a borrow token
+     * @dev Computes accrued interest based on time elapsed since last update
      * @param borrowToken Address of the borrow token
-     * @return Current interest index snapshot
+     * @return The current interest index including all accrued interest
      */
-    function debtInterestIndexSnapshot(address borrowToken) public view returns (uint256) {
-        DebtManagerStorage storage $ = _getDebtManagerStorage();
-        return $.borrowTokenConfig[borrowToken].interestIndexSnapshot + (block.timestamp - $.borrowTokenConfig[borrowToken].lastUpdateTimestamp) * $.borrowTokenConfig[borrowToken].borrowApy;
-    }
-
-    /**
-     * @dev Updates borrowings for all borrow tokens for a user
-     * @param user Address of the user
-     */
-    function _updateBorrowings(address user) internal {
-        DebtManagerStorage storage $ = _getDebtManagerStorage();
-        uint256 len = $.supportedBorrowTokens.length;
-        for (uint256 i = 0; i < len;) {
-            _updateBorrowings(user, $.supportedBorrowTokens[i]);
-            unchecked {
-                ++i;
-            }
-        }
-    }
-
-    /**
-     * @dev Updates borrowings for a specific borrow token for a user
-     * @param user Address of the user
-     * @param borrowToken Address of the borrow token
-     */
-    function _updateBorrowings(address user, address borrowToken) internal {
-        DebtManagerStorage storage $ = _getDebtManagerStorage();
-        uint256 totalBorrowingAmtBeforeInterest = $.borrowTokenConfig[borrowToken].totalBorrowingAmount;
-
-        $.borrowTokenConfig[borrowToken].interestIndexSnapshot = debtInterestIndexSnapshot(borrowToken);
-        $.borrowTokenConfig[borrowToken].totalBorrowingAmount = totalBorrowingAmount(borrowToken);
-        $.borrowTokenConfig[borrowToken].lastUpdateTimestamp = uint64(block.timestamp);
-
-        if (totalBorrowingAmtBeforeInterest != $.borrowTokenConfig[borrowToken].totalBorrowingAmount) {
-            emit TotalBorrowingUpdated(borrowToken, totalBorrowingAmtBeforeInterest, $.borrowTokenConfig[borrowToken].totalBorrowingAmount);
-        }
-
-        if (user != address(0)) {
-            uint256 userBorrowingsBefore = $.userBorrowings[user][borrowToken];
-            $.userBorrowings[user][borrowToken] = borrowingOf(user, borrowToken);
-            $.usersDebtInterestIndexSnapshots[user][borrowToken] = $.borrowTokenConfig[borrowToken].interestIndexSnapshot;
-
-            if (userBorrowingsBefore != $.userBorrowings[user][borrowToken]) {
-                emit UserInterestAdded(user, userBorrowingsBefore, $.userBorrowings[user][borrowToken]);
-            }
-        }
+    function getCurrentIndex(address borrowToken) public view returns (uint256) {
+        BorrowTokenConfig memory config = _getDebtManagerStorage().borrowTokenConfig[borrowToken];
+        
+        uint256 timeElapsed = block.timestamp - config.lastUpdateTimestamp;
+        if (timeElapsed == 0) return config.interestIndexSnapshot;
+        
+        uint256 interestAccumulated = config.interestIndexSnapshot.mulDiv(config.borrowApy * timeElapsed, HUNDRED_PERCENT);
+        return config.interestIndexSnapshot + interestAccumulated;
     }
 
     /**
@@ -628,7 +615,7 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      */
     function borrowingOf(address user, address borrowToken) public view returns (uint256) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
-        return _getAmountWithInterest(borrowToken, $.userBorrowings[user][borrowToken], $.usersDebtInterestIndexSnapshots[user][borrowToken]);
+        return _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken], getCurrentIndex(borrowToken));
     }
 
     /**

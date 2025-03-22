@@ -154,4 +154,63 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         debtManager.unsupportCollateralToken(address(0));
         vm.stopPrank();
     }
+
+    function test_supportCollateralToken_reverts_whenOraclePriceZero() public {
+        vm.startPrank(owner);
+        
+        address zeroValueToken = address(new MockERC20("ZeroToken", "ZTK", 18));
+        
+        // Create a mock price provider that returns zero for the token
+        MockPriceProvider mockPriceProviderZero = new MockPriceProvider(0, address(usdcScroll));
+        dataProvider.setPriceProvider(address(mockPriceProviderZero));
+        
+        IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
+        collateralTokenConfig.ltv = newLtv;
+        collateralTokenConfig.liquidationThreshold = newLiquidationThreshold;
+        collateralTokenConfig.liquidationBonus = newLiquidationBonus;
+        
+        vm.expectRevert(IDebtManager.OraclePriceZero.selector);
+        debtManager.supportCollateralToken(zeroValueToken, collateralTokenConfig);
+        
+        vm.stopPrank();
+    }
+
+    function test_setCollateralTokenConfig_updatesConfig_forExistingToken() public {
+        vm.startPrank(owner);
+        
+        IDebtManager.CollateralTokenConfig memory originalConfig = debtManager.collateralTokenConfig(address(weETHScroll));
+        
+        IDebtManager.CollateralTokenConfig memory newConfig;
+        newConfig.ltv = newLtv; // 80e18
+        newConfig.liquidationThreshold = newLiquidationThreshold; // 85e18
+        newConfig.liquidationBonus = newLiquidationBonus; // 10e18
+
+        debtManager.setCollateralTokenConfig(address(weETHScroll), newConfig);
+        
+        IDebtManager.CollateralTokenConfig memory updatedConfig = debtManager.collateralTokenConfig(address(weETHScroll));
+        
+        assertEq(updatedConfig.ltv, newLtv);
+        assertEq(updatedConfig.liquidationThreshold, newLiquidationThreshold);
+        assertEq(updatedConfig.liquidationBonus, newLiquidationBonus);
+        
+        assertTrue(updatedConfig.ltv != originalConfig.ltv);
+        assertTrue(updatedConfig.liquidationThreshold != originalConfig.liquidationThreshold);
+        assertTrue(updatedConfig.liquidationBonus != originalConfig.liquidationBonus);
+        
+        vm.stopPrank();
+    }
+
+    function test_setCollateralTokenConfig_reverts_whenThresholdPlusBonusGreaterThan100Percent() public {
+        vm.startPrank(owner);
+        
+        IDebtManager.CollateralTokenConfig memory invalidConfig;
+        invalidConfig.ltv = 50e18;
+        invalidConfig.liquidationThreshold = 90e18;
+        invalidConfig.liquidationBonus = 15e18; // This makes threshold + bonus = 105%, which exceeds 100%
+        
+        vm.expectRevert(IDebtManager.InvalidValue.selector);
+        debtManager.setCollateralTokenConfig(address(weETHScroll), invalidConfig);
+        
+        vm.stopPrank();
+    }
 }

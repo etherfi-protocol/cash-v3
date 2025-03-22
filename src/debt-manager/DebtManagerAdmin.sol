@@ -187,7 +187,7 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
 
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
-        BorrowTokenConfig memory cfg = BorrowTokenConfig({ interestIndexSnapshot: 0, totalBorrowingAmount: 0, totalSharesOfBorrowTokens: 0, lastUpdateTimestamp: uint64(block.timestamp), borrowApy: borrowApy, minShares: minShares });
+        BorrowTokenConfig memory cfg = BorrowTokenConfig({ interestIndexSnapshot: PRECISION, totalNormalizedBorrowingAmount: 0, totalSharesOfBorrowTokens: 0, lastUpdateTimestamp: uint64(block.timestamp), borrowApy: borrowApy, minShares: minShares });
 
         $.borrowTokenConfig[borrowToken] = cfg;
         emit BorrowTokenConfigSet(borrowToken, cfg);
@@ -204,7 +204,7 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
 
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
-        _updateBorrowings(address(0));
+        _updateInterestIndex(token);
         emit BorrowApySet(token, $.borrowTokenConfig[token].borrowApy, apy);
         $.borrowTokenConfig[token].borrowApy = apy;
     }
@@ -220,7 +220,7 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
 
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
-        _updateBorrowings(address(0));
+        _updateInterestIndex(token);
         emit MinSharesOfBorrowTokenSet(token, $.borrowTokenConfig[token].minShares, shares);
         $.borrowTokenConfig[token].minShares = shares;
     }

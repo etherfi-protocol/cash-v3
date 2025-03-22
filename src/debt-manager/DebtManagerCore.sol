@@ -34,11 +34,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @return BorrowTokenConfig configuration for the specified token
      */
     function borrowTokenConfig(address borrowToken) public view returns (BorrowTokenConfig memory) {
-        DebtManagerStorage storage $ = _getDebtManagerStorage();
-        BorrowTokenConfig memory config = $.borrowTokenConfig[borrowToken];
-        config.totalBorrowingAmount = _getAmountWithInterest(borrowToken, config.totalBorrowingAmount, config.interestIndexSnapshot);
-
-        return config;
+        return _getDebtManagerStorage().borrowTokenConfig[borrowToken];
     }
 
     /**
@@ -95,10 +91,12 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
         for (uint256 i = 0; i < len;) {
             BorrowTokenConfig memory config = borrowTokenConfig(supportedBorrowTokens[i]);
+            uint256 indexSnapshot = getCurrentIndex(supportedBorrowTokens[i]);
+            uint256 totalBorrowInToken = _getActualBorrowAmount(config.totalNormalizedBorrowingAmount, indexSnapshot);
 
-            if (config.totalBorrowingAmount > 0) {
-                tokenData[m] = TokenData({ token: supportedBorrowTokens[i], amount: config.totalBorrowingAmount });
-                totalBorrowingAmt += config.totalBorrowingAmount;
+            if (totalBorrowInToken > 0) {
+                tokenData[m] = TokenData({ token: supportedBorrowTokens[i], amount: totalBorrowInToken });
+                totalBorrowingAmt += totalBorrowInToken;
 
                 unchecked {
                     ++m;
@@ -146,9 +144,10 @@ contract DebtManagerCore is DebtManagerStorageContract {
         for (uint256 i = 0; i < len;) {
             uint256 collateral = convertCollateralTokenToUsd(collateralTokens[i].token, collateralTokens[i].amount);
             if (forLtv) {
-                // user collateral for token in USD * 100 / liquidation threshold
+                // user collateral for token in USD * ltv  / 100
                 totalMaxBorrow += collateral.mulDiv($.collateralTokenConfig[collateralTokens[i].token].ltv, HUNDRED_PERCENT, Math.Rounding.Floor);
             } else {
+                // user collateral for token in USD * liquidation threshold / 100
                 totalMaxBorrow += collateral.mulDiv($.collateralTokenConfig[collateralTokens[i].token].liquidationThreshold, HUNDRED_PERCENT, Math.Rounding.Floor);
             }
 
@@ -460,14 +459,15 @@ contract DebtManagerCore is DebtManagerStorageContract {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         if (!isBorrowToken(token)) revert UnsupportedBorrowToken();
-        _updateBorrowings(msg.sender, token);
+        uint256 newInterestIndex = _updateInterestIndex(token);
 
         // Convert amount to 6 decimals before adding to borrowings
         uint256 borrowAmt = convertCollateralTokenToUsd(token, amount);
-        if (borrowAmt == 0) revert BorrowAmountZero();
+        uint256 normalizedAmount = _getNormalizedAmount(borrowAmt, newInterestIndex);
+        if (normalizedAmount == 0) revert BorrowAmountZero();
 
-        $.userBorrowings[msg.sender][token] += borrowAmt;
-        $.borrowTokenConfig[token].totalBorrowingAmount += borrowAmt;
+        $.userNormalizedBorrowings[msg.sender][token] += normalizedAmount;
+        $.borrowTokenConfig[token].totalNormalizedBorrowingAmount += normalizedAmount;
 
         ensureHealth(msg.sender);
 
@@ -489,17 +489,23 @@ contract DebtManagerCore is DebtManagerStorageContract {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         _onlyEtherFiSafe(user);
-        _updateBorrowings(user, token);
+        _updateInterestIndex(token);
+
+        uint256 interestIndex = $.borrowTokenConfig[token].interestIndexSnapshot;
 
         uint256 repayDebtUsdAmt = convertCollateralTokenToUsd(token, amount);
-        if ($.userBorrowings[user][token] < repayDebtUsdAmt) {
-            repayDebtUsdAmt = $.userBorrowings[user][token];
+
+        uint256 totalUserBorrowing = _getActualBorrowAmount($.userNormalizedBorrowings[user][token], interestIndex);
+        if (totalUserBorrowing < repayDebtUsdAmt) {
+            repayDebtUsdAmt = totalUserBorrowing;
             amount = convertUsdToCollateralToken(token, repayDebtUsdAmt);
         }
-        if (repayDebtUsdAmt == 0) revert RepaymentAmountIsZero();
+
+        uint256 normalizedAmount = _getNormalizedAmount(repayDebtUsdAmt, interestIndex);        
+        if (normalizedAmount == 0) revert RepaymentAmountIsZero();
 
         // if (!isBorrowToken(token)) revert UnsupportedRepayToken();
-        _repayWithBorrowToken(token, user, amount, repayDebtUsdAmt);
+        _repayWithBorrowToken(token, user, amount, repayDebtUsdAmt, normalizedAmount);
     }
 
     /**
@@ -510,11 +516,13 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
      */
     function liquidate(address user, address borrowToken, address[] memory collateralTokensPreference) external whenNotPaused nonReentrant {
-        _updateBorrowings(user);
+        if (collateralTokensPreference.length == 0) revert CollateralPreferenceIsEmpty();
+        _updateInterestIndex(borrowToken);
+        uint256 interestIndex = _getDebtManagerStorage().borrowTokenConfig[borrowToken].interestIndexSnapshot;
         if (!isBorrowToken(borrowToken)) revert UnsupportedBorrowToken();
         if (!liquidatable(user)) revert CannotLiquidateYet();
-
-        _liquidateUser(user, borrowToken, collateralTokensPreference);
+        
+        _liquidateUser(user, borrowToken, collateralTokensPreference, interestIndex);
     }
 
     /**
@@ -523,13 +531,13 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param borrowToken Address of the borrow token to repay
      * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
      */
-    function _liquidateUser(address user, address borrowToken, address[] memory collateralTokensPreference) internal {
+    function _liquidateUser(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 interestIndex) internal {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
-        uint256 debtAmountToLiquidateInUsd = $.userBorrowings[user][borrowToken].ceilDiv(2);
-        _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd);
+        uint256 debtAmountToLiquidateInUsd = _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken].ceilDiv(2), interestIndex);
+        _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
 
-        if (liquidatable(user)) _liquidate(user, borrowToken, collateralTokensPreference, $.userBorrowings[user][borrowToken]);
+        if (liquidatable(user)) _liquidate(user, borrowToken, collateralTokensPreference, $.userNormalizedBorrowings[user][borrowToken], interestIndex);
     }
 
     /**
@@ -539,22 +547,23 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
      * @param debtAmountToLiquidateInUsd Amount of debt to liquidate in USD with 6 decimals
      */
-    function _liquidate(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 debtAmountToLiquidateInUsd) internal {
+    function _liquidate(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 debtAmountToLiquidateInUsd, uint256 interestIndex) internal {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
 
         cashModule.preLiquidate(user);
         if (debtAmountToLiquidateInUsd == 0) revert LiquidatableAmountIsZero();
 
-        uint256 beforeDebtAmount = $.userBorrowings[user][borrowToken];
+        uint256 beforeDebtAmount = _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken], interestIndex);
 
         (IDebtManager.LiquidationTokenData[] memory collateralTokensToSend, uint256 remainingDebt) = _getCollateralTokensForDebtAmount(user, debtAmountToLiquidateInUsd, collateralTokensPreference);
 
         cashModule.postLiquidate(user, msg.sender, collateralTokensToSend);
 
         uint256 liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt;
-        $.userBorrowings[user][borrowToken] -= liquidatedAmt;
-        $.borrowTokenConfig[borrowToken].totalBorrowingAmount -= liquidatedAmt;
+        uint256 normalizedLiquidatedAmount = _getNormalizedAmount(liquidatedAmt, interestIndex);
+        $.userNormalizedBorrowings[user][borrowToken] -= normalizedLiquidatedAmount;
+        $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= normalizedLiquidatedAmount;
 
         IERC20(borrowToken).safeTransferFrom(msg.sender, address(this), convertUsdToCollateralToken(borrowToken, liquidatedAmt));
 
@@ -566,16 +575,17 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param token Address of the token being repaid
      * @param user Address of the user whose debt is being repaid
      * @param amount Amount of tokens being repaid
-     * @param repayDebtUsdAmt USD value of the repayment with 6 decimals
+     * @param repayDebtusdAmount USD amount in 6 decimals
+     * @param normalizedAmount Normalized amount 
      */
-    function _repayWithBorrowToken(address token, address user, uint256 amount, uint256 repayDebtUsdAmt) internal {
+    function _repayWithBorrowToken(address token, address user, uint256 amount, uint256 repayDebtusdAmount, uint256 normalizedAmount) internal {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
         
-        $.userBorrowings[user][token] -= repayDebtUsdAmt;
-        $.borrowTokenConfig[token].totalBorrowingAmount -= repayDebtUsdAmt;
+        $.userNormalizedBorrowings[user][token] -= normalizedAmount;
+        $.borrowTokenConfig[token].totalNormalizedBorrowingAmount -= normalizedAmount;
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
-        emit Repaid(user, msg.sender, token, repayDebtUsdAmt);
+        emit Repaid(user, msg.sender, token, repayDebtusdAmount);
     }
 
     /**
@@ -664,6 +674,19 @@ contract DebtManagerCore is DebtManagerStorageContract {
         }
 
         return tokenData;
+    }
+
+    /**
+     * @notice Sets a new DebtManagerAdmin implementation
+     * @dev Can only be called by the owner of the role registry contract.
+     * @param newImpl Address of the new DebtManagerAdmin contract
+     */
+    function setAdminImpl(address newImpl) external onlyRoleRegistryOwner() {
+        bytes32 position = ADMIN_IMPL_POSITION;
+        // solhint-disable-next-line no-inline-assembly
+        assembly ("memory-safe") {
+            sstore(position, newImpl)
+        }
     }
 
     /**

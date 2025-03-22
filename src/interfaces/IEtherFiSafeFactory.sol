@@ -3,12 +3,17 @@ pragma solidity ^0.8.28;
 
 interface IEtherFiSafeFactory {
     /**
-     * @notice Deploys a new EtherFiSafe instance
-     * @dev Only callable by addresses with ETHERFI_SAFE_FACTORY_ADMIN_ROLE
-     * @param salt The salt value used for deterministic deployment
-     * @custom:throws OnlyAdmin if caller doesn't have admin role
-     */
-    function deployEtherFiSafe(bytes32 salt, address[] calldata _owners, address[] calldata _modules, uint8 _threshold) external;
+    * @notice Deploys a new EtherFiSafe instance
+    * @dev Only callable by addresses with ETHERFI_SAFE_FACTORY_ADMIN_ROLE
+    * @param salt The salt value used for deterministic deployment
+    * @param _owners Array of addresses that will be owners of the safe
+    * @param _modules Array of module addresses to be enabled on the safe
+    * @param _moduleSetupData Array of setup data corresponding to each module
+    * @param _threshold Number of required confirmations for safe transactions
+    * @custom:throws OnlyAdmin if caller doesn't have admin role
+    * @custom:throws ArrayLengthMismatch if modules and moduleSetupData arrays have different lengths
+    */
+    function deployEtherFiSafe(bytes32 salt, address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData, uint8 _threshold) external;
 
     /**
      * @notice Gets deployed EtherFiSafe addresses
@@ -27,4 +32,11 @@ interface IEtherFiSafeFactory {
      * @return True if the address is a deployed EtherFiSafe contract, false otherwise
      */
     function isEtherFiSafe(address safeAddr) external view returns (bool);
+
+    /**
+     * @notice Predicts the deterministic address for a given salt
+     * @param salt The salt value used for address prediction
+     * @return The predicted deployment address
+     */
+    function getDeterministicAddress(bytes32 salt) external view returns (address);
 }

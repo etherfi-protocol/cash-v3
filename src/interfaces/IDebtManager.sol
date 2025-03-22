@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IEtherFiDataProvider } from "./IEtherFiDataProvider.sol";
+
 interface IDebtManager {
     struct BorrowTokenConfigData {
         uint64 borrowApy;
@@ -49,7 +51,9 @@ interface IDebtManager {
     event BorrowTokenConfigSet(address indexed token, BorrowTokenConfig config);
     event CollateralTokenConfigSet(address indexed collateralToken, CollateralTokenConfig oldConfig, CollateralTokenConfig newConfig);
     event WithdrawBorrowToken(address indexed withdrawer, address indexed borrowToken, uint256 amount);
+    event InterestIndexUpdated(address indexed borrowToken, uint256 oldIndex, uint256 newIndex);
 
+    error CollateralPreferenceIsEmpty();
     error UnsupportedCollateralToken();
     error UnsupportedRepayToken();
     error UnsupportedBorrowToken();
@@ -94,6 +98,18 @@ interface IDebtManager {
      * @return DEBT_MANAGER_ADMIN_ROLE
      */
     function DEBT_MANAGER_ADMIN_ROLE() external view returns (bytes32);
+
+    /**
+     * @notice Returns the max borrow apy
+     * @return Max borrow APY
+     */
+    function MAX_BORROW_APY() external view returns (uint64);
+
+    /**
+     * @notice Returns an instance of the EtherFiDataProvider 
+     * @return EtherFiDataProvider instance
+     */
+    function etherFiDataProvider() external view returns (IEtherFiDataProvider);
 
     /**
      * @notice Function to fetch the address of the Cash Data Provider.
@@ -186,7 +202,7 @@ interface IDebtManager {
 
     /**
      * @notice Function to add support for a new borrow token.
-     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE.
+     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE. 
      * @param token Address of the token to be supported as borrow.
      * @param borrowApy Borrow APY per second in 18 decimals.
      */
@@ -408,5 +424,18 @@ interface IDebtManager {
      */
     function getUserCurrentState(address user) external view returns (TokenData[] memory totalCollaterals, uint256 totalCollateralInUsd, TokenData[] memory borrowings, uint256 totalBorrowings);
 
+    /**
+     * @notice Sets a new DebtManagerAdmin implementation
+     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE.
+     * @param newImpl Address of the new DebtManagerAdmin implementation
+     */
     function setAdminImpl(address newImpl) external;
+
+    /**
+     * @notice Calculates the current interest index for a borrow token
+     * @dev Computes accrued interest based on time elapsed since last update
+     * @param borrowToken Address of the borrow token
+     * @return The current interest index including all accrued interest
+     */
+    function getCurrentIndex(address borrowToken) external view returns (uint256);
 }

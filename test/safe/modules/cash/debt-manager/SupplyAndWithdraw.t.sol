@@ -67,11 +67,11 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         debtManager.supply(notOwner, address(usdcScroll), principle);
         vm.stopPrank();
 
-        assertEq(debtManager.supplierBalance(notOwner, address(usdcScroll)), principle);
+        assertApproxEqAbs(debtManager.supplierBalance(notOwner, address(usdcScroll)), principle, 1);
 
         uint256 earnings = _borrowAndRepay();
 
-        assertEq(debtManager.supplierBalance(notOwner, address(usdcScroll)), principle + earnings);
+        assertApproxEqAbs(debtManager.supplierBalance(notOwner, address(usdcScroll)), principle + earnings, 1);
 
         vm.prank(notOwner);
         debtManager.withdrawBorrowToken(address(usdcScroll), principle + earnings);
@@ -202,6 +202,91 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         vm.prank(notOwner);
         vm.expectRevert(IDebtManager.ZeroTotalBorrowTokens.selector);
         debtManager.withdrawBorrowToken(address(weETHScroll), 1 ether);
+    }
+
+    function test_withdrawBorrowToken_reverts_whenAmountIsZero() public {
+        deal(address(usdcScroll), notOwner, 1 ether);
+        uint256 principle = 0.01 ether;
+        
+        vm.startPrank(notOwner);
+        IERC20(address(usdcScroll)).forceApprove(address(debtManager), principle);
+        debtManager.supply(notOwner, address(usdcScroll), principle);
+        
+        vm.expectRevert(IDebtManager.SharesCannotBeZero.selector); 
+        debtManager.withdrawBorrowToken(address(usdcScroll), 0);
+        vm.stopPrank();
+    }
+
+    function test_withdrawBorrowToken_reverts_whenWithdrawingMoreThanSupplied() public {
+        deal(address(usdcScroll), notOwner, 1 ether);
+        uint256 principle = 0.01 ether;
+        
+        vm.startPrank(notOwner);
+        IERC20(address(usdcScroll)).forceApprove(address(debtManager), principle);
+        debtManager.supply(notOwner, address(usdcScroll), principle);
+        
+        // Try to withdraw more than supplied
+        vm.expectRevert(IDebtManager.InsufficientBorrowShares.selector);
+        debtManager.withdrawBorrowToken(address(usdcScroll), principle * 2);
+        vm.stopPrank();
+    }
+
+    function test_supply_onBehalfOfOtherUser_succeeds() public {
+        address beneficiary = makeAddr("beneficiary");
+        deal(address(usdcScroll), notOwner, 1 ether);
+        uint256 principle = 0.01 ether;
+        
+        vm.startPrank(notOwner);
+        IERC20(address(usdcScroll)).forceApprove(address(debtManager), principle);
+        
+        vm.expectEmit(true, true, true, true);
+        emit IDebtManager.Supplied(notOwner, beneficiary, address(usdcScroll), principle);
+        debtManager.supply(beneficiary, address(usdcScroll), principle);
+        vm.stopPrank();
+        
+        // Verify beneficiary received the supplied tokens, not the sender
+        assertApproxEqAbs(debtManager.supplierBalance(beneficiary, address(usdcScroll)), principle, 1);
+        assertEq(debtManager.supplierBalance(notOwner, address(usdcScroll)), 0);
+    }
+
+    function test_multipleSuppliers_receiveProportionalInterest() public {
+        // Setup two suppliers with different amounts
+        address supplier1 = makeAddr("supplier1");
+        address supplier2 = makeAddr("supplier2");
+        uint256 amount1 = 0.01 ether;
+        uint256 amount2 = 2 * amount1; // Supplier2 adds twice as much
+        
+        deal(address(usdcScroll), supplier1, amount1);
+        deal(address(usdcScroll), supplier2, amount2);
+        
+        // Supplier 1 adds funds
+        vm.startPrank(supplier1);
+        IERC20(address(usdcScroll)).forceApprove(address(debtManager), amount1);
+        debtManager.supply(supplier1, address(usdcScroll), amount1);
+        vm.stopPrank();
+        
+        // Supplier 2 adds funds
+        vm.startPrank(supplier2);
+        IERC20(address(usdcScroll)).forceApprove(address(debtManager), amount2);
+        debtManager.supply(supplier2, address(usdcScroll), amount2);
+        vm.stopPrank();
+        
+        // Record initial balances
+        uint256 initialBalance1 = debtManager.supplierBalance(supplier1, address(usdcScroll));
+        uint256 initialBalance2 = debtManager.supplierBalance(supplier2, address(usdcScroll));
+        
+        // Generate some interest by borrowing and repaying
+        _borrowAndRepay();
+        
+        // Check final balances
+        uint256 finalBalance1 = debtManager.supplierBalance(supplier1, address(usdcScroll));
+        uint256 finalBalance2 = debtManager.supplierBalance(supplier2, address(usdcScroll));
+        
+        uint256 earned1 = finalBalance1 - initialBalance1;
+        uint256 earned2 = finalBalance2 - initialBalance2;
+        
+        // Supplier2 should earn twice as much interest as supplier1
+        assertApproxEqRel(earned2, earned1 * 2, 0.01e18); // 1% tolerance
     }
 
     function _borrowAndRepay() internal returns (uint256) {

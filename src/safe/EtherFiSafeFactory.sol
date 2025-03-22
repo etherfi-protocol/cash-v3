@@ -58,11 +58,16 @@ contract EtherFiSafeFactory is BeaconFactory {
     }
 
     /**
-     * @notice Deploys a new EtherFiSafe instance
-     * @dev Only callable by addresses with ETHERFI_SAFE_FACTORY_ADMIN_ROLE
-     * @param salt The salt value used for deterministic deployment
-     * @custom:throws OnlyAdmin if caller doesn't have admin role
-     */
+    * @notice Deploys a new EtherFiSafe instance
+    * @dev Only callable by addresses with ETHERFI_SAFE_FACTORY_ADMIN_ROLE
+    * @param salt The salt value used for deterministic deployment
+    * @param _owners Array of addresses that will be owners of the safe
+    * @param _modules Array of module addresses to be enabled on the safe
+    * @param _moduleSetupData Array of setup data corresponding to each module
+    * @param _threshold Number of required confirmations for safe transactions
+    * @custom:throws OnlyAdmin if caller doesn't have admin role
+    * @custom:throws ArrayLengthMismatch if modules and moduleSetupData arrays have different lengths
+    */
     function deployEtherFiSafe(bytes32 salt, address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData, uint8 _threshold) external whenNotPaused {
         if (!roleRegistry().hasRole(ETHERFI_SAFE_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         bytes memory initData = abi.encodeWithSelector(EtherFiSafe.initialize.selector, _owners, _modules, _moduleSetupData, _threshold);

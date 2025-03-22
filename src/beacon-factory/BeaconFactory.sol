@@ -69,7 +69,7 @@ contract BeaconFactory is UpgradeableProxy {
      * @custom:restriction Caller must have access control restrictions
      */
     function _deployBeacon(bytes32 salt, bytes memory initData) internal returns (address) {
-        address expectedAddr = this.getDeterministicAddress(salt);
+        address expectedAddr = getDeterministicAddress(salt);
         address deployedAddr = address(CREATE3.deployDeterministic(abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon(), initData)), salt));
         if (expectedAddr != deployedAddr) revert DeployedAddressDifferentFromExpected();
 

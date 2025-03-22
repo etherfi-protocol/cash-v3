@@ -393,4 +393,208 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         assertEq(aliceDebtBefore, borrowAmt);
         assertEq(aliceDebtAfter, 0);
     }
+
+    function test_liquidate_reverts_whenEmptyCollateralPreferenceProvided() public {
+        vm.startPrank(owner);
+        IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
+        collateralTokenConfig.ltv = 5e18;
+        collateralTokenConfig.liquidationThreshold = 10e18;
+        collateralTokenConfig.liquidationBonus = 5e18;
+        debtManager.setCollateralTokenConfig(address(weETHScroll), collateralTokenConfig);
+        
+        address[] memory emptyPreference = new address[](0);
+        
+        vm.expectRevert(IDebtManager.CollateralPreferenceIsEmpty.selector); 
+        debtManager.liquidate(address(safe), address(usdcScroll), emptyPreference);
+        vm.stopPrank();
+    }
+
+    function test_liquidate_reverts_whenUnsupportedRepayToken() public {
+        vm.startPrank(owner);
+        IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
+        collateralTokenConfig.ltv = 5e18;
+        collateralTokenConfig.liquidationThreshold = 10e18;
+        collateralTokenConfig.liquidationBonus = 5e18;
+        debtManager.setCollateralTokenConfig(address(weETHScroll), collateralTokenConfig);
+        
+        address randomToken = address(new MockERC20("random", "RND", 18));        
+        address[] memory collateralTokenPreference = debtManager.getCollateralTokens();
+        
+        vm.expectRevert(IDebtManager.UnsupportedBorrowToken.selector);
+        debtManager.liquidate(address(safe), randomToken, collateralTokenPreference);
+        vm.stopPrank();
+    }
+
+    function test_liquidate_honorsChangedLiquidationBonus_withInsufficientCollateral() public {
+        deal(address(usdcScroll), address(safe), borrowAmt);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdcScroll), borrowAmt);
+        
+        priceProvider = PriceProvider(
+            address(new MockPriceProvider(mockWeETHPriceInUsd, address(usdcScroll)))
+        );
+        vm.prank(owner);
+        dataProvider.setPriceProvider(address(priceProvider));
+        
+        borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), borrowAmt, false);
+        
+        vm.startPrank(owner);
+        uint256 newPrice = 1000e6; // 1000 USD per weETH
+        MockPriceProvider(address(priceProvider)).setPrice(newPrice);
+        
+        // Set a very high liquidation bonus (30%)
+        IDebtManager.CollateralTokenConfig memory collateralTokenConfigWeETH;
+        collateralTokenConfigWeETH.ltv = 5e18;
+        collateralTokenConfigWeETH.liquidationThreshold = 10e18;
+        collateralTokenConfigWeETH.liquidationBonus = 30e18; // 30% bonus instead of 5%
+        debtManager.setCollateralTokenConfig(address(weETHScroll), collateralTokenConfigWeETH);
+        
+        address[] memory collateralTokenPreference = new address[](1);
+        collateralTokenPreference[0] = address(weETHScroll);
+        
+        uint256 ownerWeETHBalBefore = weETHScroll.balanceOf(owner);
+        
+        IERC20(address(usdcScroll)).approve(address(debtManager), borrowAmt);
+        debtManager.liquidate(address(safe), address(usdcScroll), collateralTokenPreference);
+        
+        uint256 ownerWeETHBalAfter = weETHScroll.balanceOf(owner);
+        
+        // Since the price dropped significantly and the total collateral is likely less than 
+        // the debt after the price change, the liquidator gets the entire collateral amount
+        uint256 expectedToReceive = collateralAmount; // 0.01 ether
+        
+        // The liquidator should receive the entire collateral
+        assertApproxEqAbs(
+            ownerWeETHBalAfter - ownerWeETHBalBefore,
+            expectedToReceive,
+            0.0001 ether
+        );
+        
+        vm.stopPrank();
+    }
+
+    function test_liquidate_honorsChangedLiquidationBonus_withSufficientCollateral() public {
+        deal(address(usdcScroll), address(safe), borrowAmt);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdcScroll), borrowAmt);
+        
+        // Setup mock price provider with high initial price
+        priceProvider = PriceProvider(
+            address(new MockPriceProvider(mockWeETHPriceInUsd, address(usdcScroll)))
+        );
+        vm.prank(owner);
+        dataProvider.setPriceProvider(address(priceProvider));
+        
+        // Set up a scenario with MORE collateral
+        uint256 largerCollateralAmount = 0.05 ether; // 5x more than the default 0.01 ether
+        deal(address(weETHScroll), address(safe), largerCollateralAmount);
+        
+        // Borrow a smaller amount relative to collateral
+        uint256 smallerBorrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 4; // Only borrow 25% of capacity
+        
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), smallerBorrowAmt, false);
+        
+        vm.startPrank(owner);
+        
+        // Set a moderate price drop that makes user liquidatable but still leaves sufficient collateral
+        uint256 newPrice = 2000e6; // 2000 USD per weETH (33% drop instead of 66%)
+        MockPriceProvider(address(priceProvider)).setPrice(newPrice);
+        
+        // Set a high liquidation bonus (30%)
+        IDebtManager.CollateralTokenConfig memory collateralTokenConfigWeETH;
+        collateralTokenConfigWeETH.ltv = 5e18; // 5%
+        collateralTokenConfigWeETH.liquidationThreshold = 10e18; // 10%
+        collateralTokenConfigWeETH.liquidationBonus = 30e18; // 30% bonus
+        debtManager.setCollateralTokenConfig(address(weETHScroll), collateralTokenConfigWeETH);
+        
+        // Confirm the position is liquidatable
+        assertTrue(debtManager.liquidatable(address(safe)), "Position should be liquidatable");
+        
+        address[] memory collateralTokenPreference = new address[](1);
+        collateralTokenPreference[0] = address(weETHScroll);
+        
+        uint256 ownerWeETHBalBefore = weETHScroll.balanceOf(owner);
+        
+        // Account for the fact that _liquidateUser liquidates in two steps
+        // Half in the first step, and potentially the rest in a second step if still liquidatable
+        uint256 debtToLiquidate = smallerBorrowAmt;
+        
+        // Amount of collateral needed to cover the debt (for both liquidation steps)
+        uint256 collateralNeededForDebt = debtManager.convertUsdToCollateralToken(address(weETHScroll), debtToLiquidate);
+        
+        // Liquidation bonus (30% of collateral needed)
+        uint256 expectedBonus = (collateralNeededForDebt * collateralTokenConfigWeETH.liquidationBonus) / HUNDRED_PERCENT;
+        
+        // Expected total collateral to receive
+        uint256 expectedCollateralToReceive = collateralNeededForDebt + expectedBonus;
+        
+        // Approve more than needed USDC for liquidation
+        IERC20(address(usdcScroll)).approve(address(debtManager), smallerBorrowAmt);
+        
+        // Execute liquidation
+        debtManager.liquidate(address(safe), address(usdcScroll), collateralTokenPreference);
+        
+        uint256 ownerWeETHBalAfter = weETHScroll.balanceOf(owner);
+        uint256 actualReceived = ownerWeETHBalAfter - ownerWeETHBalBefore;
+                
+        // The liquidator should receive exactly the debt plus the bonus
+        assertApproxEqAbs(
+            actualReceived,
+            expectedCollateralToReceive,
+            0.0001 ether
+        );
+        
+        vm.stopPrank();
+    }
+
+    function test_liquidate_reverts_afterPriceRecovery() public {
+        deal(address(usdcScroll), address(safe), borrowAmt);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdcScroll), borrowAmt);
+        
+        // Setup mock price provider
+        priceProvider = PriceProvider(
+            address(new MockPriceProvider(mockWeETHPriceInUsd, address(usdcScroll)))
+        );
+        vm.prank(owner);
+        dataProvider.setPriceProvider(address(priceProvider));
+        
+        borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), borrowAmt, false);
+        
+        vm.startPrank(owner);
+        // Drop price to make position liquidatable
+        uint256 lowPrice = 1000e6; // 1000 USD per weETH
+        MockPriceProvider(address(priceProvider)).setPrice(lowPrice);
+        
+        // Lower thresholds
+        IDebtManager.CollateralTokenConfig memory collateralTokenConfigWeETH;
+        collateralTokenConfigWeETH.ltv = 5e18;
+        collateralTokenConfigWeETH.liquidationThreshold = 10e18;
+        collateralTokenConfigWeETH.liquidationBonus = 5e18;
+        debtManager.setCollateralTokenConfig(address(weETHScroll), collateralTokenConfigWeETH);
+        
+        // Verify position is liquidatable
+        assertTrue(debtManager.liquidatable(address(safe)));
+        
+        // Recover price
+        uint256 recoveredPrice = 20000e6; // Price jumped to 20000 USD per weETH
+        MockPriceProvider(address(priceProvider)).setPrice(recoveredPrice);
+        
+        // Position should no longer be liquidatable
+        assertFalse(debtManager.liquidatable(address(safe)));
+        
+        // Attempt to liquidate should fail
+        address[] memory collateralTokenPreference = new address[](1);
+        collateralTokenPreference[0] = address(weETHScroll);
+        
+        vm.expectRevert(IDebtManager.CannotLiquidateYet.selector);
+        debtManager.liquidate(address(safe), address(usdcScroll), collateralTokenPreference);
+        
+        vm.stopPrank();
+    }
 }

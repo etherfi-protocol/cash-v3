@@ -427,12 +427,12 @@ contract CashModuleCore is CashModuleStorageContract {
         uint256[] memory values = new uint256[](3);
 
         to[0] = token;
-        to[1] = token;
-        to[2] = address(debtManager);
+        to[1] = address(debtManager);
+        to[2] = token;
 
-        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), 0);
-        data[1] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
-        data[2] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
+        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
+        data[1] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
+        data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), 0);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
         _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
