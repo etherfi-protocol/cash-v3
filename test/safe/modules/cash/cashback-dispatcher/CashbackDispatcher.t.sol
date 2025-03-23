@@ -25,6 +25,10 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
     uint256 chadCashbackPercentage = 400;
     uint256 whaleCashbackPercentage = 500;
 
+    address newCashModuleAddress = makeAddr("newCashModuleAddress");
+
+    ETHRejecter ethRejecter;
+
     function setUp() public override {
         super.setUp();
 
@@ -43,6 +47,8 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         cashbackPercentages[3] = whaleCashbackPercentage;
 
         cashModule.setTierCashbackPercentage(userSafeTiers, cashbackPercentages);
+
+        ethRejecter = new ETHRejecter();
 
         vm.stopPrank();
     }
@@ -501,6 +507,172 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         cashbackDispatcher.withdrawFunds(address(0), owner, 1);
     }
 
+    // Test direct cashback function with invalid parameters
+    function test_cashback_reverts_whenNotCalledByCashModule() public {
+        vm.expectRevert(CashbackDispatcher.OnlyCashModule.selector);
+        cashbackDispatcher.cashback(address(safe), address(0), 100e6, 200, 10000);
+    }
+
+    // Test direct cashback function with non-EtherFiSafe address
+    function test_cashback_reverts_whenSafeIsNotEtherFiSafe() public {
+        address randomAddress = makeAddr("randomAddress");
+        
+        // Mock the call as if coming from CashModule
+        vm.prank(address(cashModule));
+        vm.expectRevert(CashbackDispatcher.OnlyEtherFiSafe.selector);
+        cashbackDispatcher.cashback(randomAddress, address(0), 100e6, 200, 10000);
+    }
+
+    // Test the clearPendingCashback function
+    function test_clearPendingCashback_success() public {
+        // First create pending cashback by doing a spend with no tokens in the dispatcher
+        deal(address(scrToken), address(cashbackDispatcher), 0);
+        uint256 spendAmt = 100e6;
+        deal(address(usdcScroll), address(safe), spendAmt);
+        
+        uint256 cashbackPercentage = cashModule.getTierCashbackPercentage(SafeTiers.Pepe);
+        uint256 cashbackInUsdc = (spendAmt * cashbackPercentage) / 10000;
+        
+        // Spend to create pending cashback
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        
+        // Verify pending cashback exists
+        assertEq(cashModule.getPendingCashback(address(safe)), cashbackInUsdc);
+        
+        // Now add tokens to the dispatcher
+        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(cashbackInUsdc);
+        deal(address(scrToken), address(cashbackDispatcher), cashbackInScroll);
+        
+        // Test clearing the pending cashback directly
+        vm.prank(address(cashModule));
+        (address token, uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe));
+        
+        // Check results
+        assertEq(token, address(scrToken), "Token should be SCR token");
+        assertGt(amount, 0, "Amount should be positive");
+        assertTrue(success, "Should successfully clear cashback");
+        
+        // Check balance was transferred to safe
+        assertApproxEqAbs(scrToken.balanceOf(address(safe)), cashbackInScroll, 1000, "Safe should receive tokens");
+    }
+
+    // Test clearPendingCashback when there's no pending cashback
+    function test_clearPendingCashback_noPendingCashback() public {
+        // Ensure safe has no pending cashback
+        assertEq(cashModule.getPendingCashback(address(safe)), 0);
+        
+        vm.prank(address(cashModule));
+        (address token, uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe));
+        
+        assertEq(token, address(scrToken), "Token should be SCR token");
+        assertEq(amount, 0, "Amount should be zero");
+        assertTrue(success, "Should return success even with zero amount");
+    }
+
+    // Test clearPendingCashback with insufficient tokens
+    function test_clearPendingCashback_insufficientTokens() public {
+        // First create pending cashback by doing a spend with no tokens in the dispatcher
+        deal(address(scrToken), address(cashbackDispatcher), 0);
+        uint256 spendAmt = 100e6;
+        deal(address(usdcScroll), address(safe), spendAmt);
+        
+        uint256 cashbackPercentage = cashModule.getTierCashbackPercentage(SafeTiers.Pepe);
+        uint256 cashbackInUsdc = (spendAmt * cashbackPercentage) / 10000;
+        
+        // Spend to create pending cashback
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        
+        // Verify pending cashback exists
+        assertEq(cashModule.getPendingCashback(address(safe)), cashbackInUsdc);
+        
+        // Try to clear pending cashback with no tokens in dispatcher
+        vm.prank(address(cashModule));
+        (address token, uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe));
+        
+        // Check results
+        assertEq(token, address(scrToken), "Token should be SCR token");
+        assertGt(amount, 0, "Amount should be positive");
+        assertFalse(success, "Should fail due to insufficient tokens");
+        
+        // Verify no tokens were transferred
+        assertEq(scrToken.balanceOf(address(safe)), 0, "Safe should not receive tokens");
+    }
+
+    // Test clearPendingCashback when called by non-CashModule
+    function test_clearPendingCashback_reverts_whenNotCalledByCashModule() public {
+        vm.expectRevert(CashbackDispatcher.OnlyCashModule.selector);
+        cashbackDispatcher.clearPendingCashback(address(safe));
+    }
+
+    // Test clearPendingCashback with address(0)
+    function test_clearPendingCashback_reverts_withInvalidInput() public {
+        vm.prank(address(cashModule));
+        vm.expectRevert(CashbackDispatcher.InvalidInput.selector);
+        cashbackDispatcher.clearPendingCashback(address(0));
+    }
+
+    // Test setCashModule function
+    function test_setCashModule_success() public {
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit CashbackDispatcher.CashModuleSet(address(cashModule), newCashModuleAddress);
+        cashbackDispatcher.setCashModule(newCashModuleAddress);
+        
+        // Verify the cashModule address was updated
+        assertEq(cashbackDispatcher.cashModule(), newCashModuleAddress);
+    }
+
+    // Test setCashModule with zero address
+    function test_setCashModule_reverts_withZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(CashbackDispatcher.InvalidValue.selector);
+        cashbackDispatcher.setCashModule(address(0));
+    }
+
+    // Test setCashModule with unauthorized caller
+    function test_setCashModule_reverts_whenCallerNotOwner() public {
+        vm.prank(notOwner);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        cashbackDispatcher.setCashModule(newCashModuleAddress);
+    }
+
+    // Test withdrawFunds with a contract that rejects ETH transfers
+    function test_withdrawFunds_reverts_whenETHTransferIsRejected() public {
+        // Fund the cashback dispatcher with ETH
+        deal(address(cashbackDispatcher), 1 ether);
+        
+        // Try to withdraw ETH to a contract that rejects transfers
+        vm.prank(owner);
+        vm.expectRevert(CashbackDispatcher.WithdrawFundsFailed.selector);
+        cashbackDispatcher.withdrawFunds(address(0), address(ethRejecter), 0.5 ether);
+    }
+
+    // Test convertUsdToCashbackToken function
+    function test_convertUsdToCashbackToken_withZeroAmount() public view {
+        uint256 result = cashbackDispatcher.convertUsdToCashbackToken(0);
+        assertEq(result, 0, "Should return 0 for 0 input");
+    }
+
+    // Test getCashbackAmount function
+    function test_getCashbackAmount_calculatesCorrectly() public view {
+        uint256 spentAmountInUsd = 1000e6; // 1000 USD
+        uint256 cashbackPercentageInBps = 250; // 2.5%
+        
+        (uint256 tokenAmount, uint256 usdAmount) = cashbackDispatcher.getCashbackAmount(
+            cashbackPercentageInBps, 
+            spentAmountInUsd
+        );
+        
+        // Expected USD amount is 2.5% of 1000 USD = 25 USD
+        assertEq(usdAmount, 25e6, "USD amount should be 25 USD");
+        
+        // Token amount should match the converted value
+        uint256 expectedTokenAmount = cashbackDispatcher.convertUsdToCashbackToken(25e6);
+        assertEq(tokenAmount, expectedTokenAmount, "Token amount should match converted value");
+    }
+
     function setTier(SafeTiers tier) internal {
         address[] memory safes = new address[](1);
         safes[0] = address(safe);
@@ -511,4 +683,12 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         cashModule.setSafeTier(safes, tiers);
     }
 
+}
+
+// Helper contract to test ETH transfer rejection
+contract ETHRejecter {
+    // This fallback function will revert when receiving ETH
+    receive() external payable {
+        revert("ETH transfer rejected");
+    }
 }
