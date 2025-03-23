@@ -26,6 +26,7 @@ contract EtherFiHook is UpgradeableProxy {
 
     constructor(address _dataProvider) payable {
         dataProvider = IEtherFiDataProvider(_dataProvider);
+        _disableInitializers();
     }
 
     /**
