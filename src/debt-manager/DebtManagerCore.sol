@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashLens } from "../interfaces/ICashLens.sol";
 import { ICashModule } from "../interfaces/ICashModule.sol";
@@ -19,6 +20,7 @@ import { DebtManagerStorageContract } from "./DebtManagerStorageContract.sol";
  */
 contract DebtManagerCore is DebtManagerStorageContract {
     using Math for uint256;
+    using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using SafeERC20 for IERC20;
 
     /**
@@ -51,7 +53,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @return Array of addresses representing supported collateral tokens
      */
     function getCollateralTokens() public view returns (address[] memory) {
-        return _getDebtManagerStorage().supportedCollateralTokens;
+        return _getDebtManagerStorage().supportedCollateralTokens.values();
     }
 
     /**
@@ -59,7 +61,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @return Array of addresses representing supported borrow tokens
      */
     function getBorrowTokens() public view returns (address[] memory) {
-        return _getDebtManagerStorage().supportedBorrowTokens;
+        return _getDebtManagerStorage().supportedBorrowTokens.values();
     }
 
     /**
@@ -83,7 +85,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @return totalBorrowingAmt Total borrowing amount in USD with 6 decimals
      */
     function totalBorrowingAmounts() public view returns (TokenData[] memory, uint256) {
-        address[] memory supportedBorrowTokens = _getDebtManagerStorage().supportedBorrowTokens;
+        address[] memory supportedBorrowTokens = _getDebtManagerStorage().supportedBorrowTokens.values();
         uint256 len = supportedBorrowTokens.length;
         TokenData[] memory tokenData = new TokenData[](len);
         uint256 totalBorrowingAmt = 0;
@@ -291,7 +293,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @return amountInUsd Total supplied value in USD with 6 decimals
      */
     function supplierBalance(address supplier) public view returns (TokenData[] memory, uint256) {
-        address[] memory supportedBorrowTokens = _getDebtManagerStorage().supportedBorrowTokens;
+        address[] memory supportedBorrowTokens = _getDebtManagerStorage().supportedBorrowTokens.values();
         uint256 len = supportedBorrowTokens.length;
         TokenData[] memory suppliesData = new TokenData[](len);
         uint256 amountInUsd = 0;
@@ -336,7 +338,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @return amountInUsd Total supply value in USD with 6 decimals
      */
     function totalSupplies() external view returns (TokenData[] memory, uint256) {
-        address[] memory supportedBorrowTokens = _getDebtManagerStorage().supportedBorrowTokens;
+        address[] memory supportedBorrowTokens = _getDebtManagerStorage().supportedBorrowTokens.values();
         uint256 len = supportedBorrowTokens.length;
         TokenData[] memory suppliesData = new TokenData[](len);
         uint256 amountInUsd = 0;
@@ -647,7 +649,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @return Array of TokenData containing tokens and their available balances
      */
     function _liquidStableAmounts() internal view returns (TokenData[] memory) {
-        address[] memory supportedBorrowTokens = _getDebtManagerStorage().supportedBorrowTokens;
+        address[] memory supportedBorrowTokens = _getDebtManagerStorage().supportedBorrowTokens.values();
         uint256 len = supportedBorrowTokens.length;
         TokenData[] memory tokenData = new TokenData[](len);
         uint256 m = 0;
@@ -675,6 +677,21 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
         return tokenData;
     }
+
+    /**
+     * @notice Returns the address of DebtManagerAdmin implementation
+     * @return address DebtManagerAdmin implmentaion
+     */
+    function getDebtManagerAdmin() external view returns (address) {
+        address addr;
+        // solhint-disable-next-line no-inline-assembly
+        assembly ("memory-safe") {
+            addr := sload(ADMIN_IMPL_POSITION)
+        }
+
+        return addr;
+    }
+
 
     /**
      * @notice Sets a new DebtManagerAdmin implementation

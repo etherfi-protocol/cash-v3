@@ -18,7 +18,7 @@ contract UpgradeDebtManager is Utils {
 
         string memory deployments = readDeploymentFile();
 
-        UUPSUpgradeable debtManager = UUPSUpgradeable(stdJson.readAddress(
+        IDebtManager debtManager = IDebtManager(stdJson.readAddress(
             deployments, 
             string(abi.encodePacked(".", "addresses", ".", "DebtManager"))
         ));
@@ -31,9 +31,8 @@ contract UpgradeDebtManager is Utils {
         DebtManagerCore debtManagerCoreImpl = new DebtManagerCore(dataProvider);
         DebtManagerAdmin debtManagerAdminImpl = new DebtManagerAdmin(dataProvider);
 
-        debtManager.upgradeToAndCall(address(debtManagerCoreImpl), "");
-        IDebtManager(address(cashModule)).setAdminImpl(address(debtManagerAdminImpl));
-
+        UUPSUpgradeable(address(debtManager)).upgradeToAndCall(address(debtManagerCoreImpl), "");
+        IDebtManager(address(debtManager)).setAdminImpl(address(debtManagerAdminImpl));
         vm.stopBroadcast();
     }
 }

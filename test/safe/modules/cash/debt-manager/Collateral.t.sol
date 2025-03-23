@@ -70,14 +70,15 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         assertEq(configFromContract.liquidationBonus, newLiquidationBonus);
         
         assertEq(debtManager.getCollateralTokens().length, 3);
-        assertEq(debtManager.getCollateralTokens()[0], address(weETHScroll));
-        assertEq(debtManager.getCollateralTokens()[1], address(usdcScroll));
-        assertEq(debtManager.getCollateralTokens()[2], newCollateralToken);
+        assertTrue(debtManager.isCollateralToken(address(weETHScroll)));
+        assertTrue(debtManager.isCollateralToken(address(usdcScroll)));
+        assertTrue(debtManager.isCollateralToken(address(newCollateralToken)));
 
         debtManager.unsupportCollateralToken(address(weETHScroll));
         assertEq(debtManager.getCollateralTokens().length, 2);
-        assertEq(debtManager.getCollateralTokens()[0], newCollateralToken);
-        assertEq(debtManager.getCollateralTokens()[1], address(usdcScroll));
+        assertTrue(debtManager.isCollateralToken(address(usdcScroll)));
+        assertTrue(debtManager.isCollateralToken(address(newCollateralToken)));
+        assertFalse(debtManager.isCollateralToken(address(weETHScroll)));
 
         IDebtManager.CollateralTokenConfig memory configWethFromContract = debtManager
             .collateralTokenConfig(address(weETHScroll));

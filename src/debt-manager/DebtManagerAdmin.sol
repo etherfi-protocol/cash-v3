@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
+
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { DebtManagerStorageContract } from "./DebtManagerStorageContract.sol";
 
@@ -11,6 +13,8 @@ import { DebtManagerStorageContract } from "./DebtManagerStorageContract.sol";
  * @dev Handles admin functions like token support/removal and configuration updates
  */
 contract DebtManagerAdmin is DebtManagerStorageContract {
+    using EnumerableSetLib for EnumerableSetLib.AddressSet;
+
     /**
      * @dev Constructor that initializes the base DebtManagerStorageContract
      * @param dataProvider Address of the EtherFi data provider
@@ -38,19 +42,10 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
 
         if (token == address(0)) revert InvalidValue();
         if (isBorrowToken(token)) revert BorrowTokenCannotBeRemovedFromCollateral();
-        uint256 indexPlusOneForTokenToBeRemoved = $.collateralTokenIndexPlusOne[token];
-        if (indexPlusOneForTokenToBeRemoved == 0) revert NotACollateralToken();
-
-        uint256 len = $.supportedCollateralTokens.length;
-        if (len == 1) revert NoCollateralTokenLeft();
-
-        $.collateralTokenIndexPlusOne[$.supportedCollateralTokens[len - 1]] = indexPlusOneForTokenToBeRemoved;
-        $.supportedCollateralTokens[indexPlusOneForTokenToBeRemoved - 1] = $.supportedCollateralTokens[len - 1];
-        $.supportedCollateralTokens.pop();
-        delete $.collateralTokenIndexPlusOne[token];
-
-        CollateralTokenConfig memory config;
-        _setCollateralTokenConfig(token, config);
+        if (!isCollateralToken(token)) revert NotACollateralToken();
+        
+        $.supportedCollateralTokens.remove(token);
+        delete $.collateralTokenConfig[token];
 
         emit CollateralTokenRemoved(token);
     }
@@ -75,20 +70,16 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
      */
     function unsupportBorrowToken(address token) external onlyRole(DEBT_MANAGER_ADMIN_ROLE) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
-        uint256 indexPlusOneForTokenToBeRemoved = $.borrowTokenIndexPlusOne[token];
-        if (indexPlusOneForTokenToBeRemoved == 0) revert NotABorrowToken();
+        if (!isBorrowToken(token)) revert NotABorrowToken();
 
         if (_getTotalBorrowTokenAmount(token) != 0) {
             revert BorrowTokenStillInTheSystem();
         }
 
-        uint256 len = $.supportedBorrowTokens.length;
+        uint256 len = $.supportedBorrowTokens.length();
         if (len == 1) revert NoBorrowTokenLeft();
 
-        $.borrowTokenIndexPlusOne[$.supportedBorrowTokens[len - 1]] = indexPlusOneForTokenToBeRemoved;
-        $.supportedBorrowTokens[indexPlusOneForTokenToBeRemoved - 1] = $.supportedBorrowTokens[len - 1];
-        $.supportedBorrowTokens.pop();
-        delete $.borrowTokenIndexPlusOne[token];
+        $.supportedBorrowTokens.remove(token);
         delete $.borrowTokenConfig[token];
 
         emit BorrowTokenRemoved(token);
@@ -133,13 +124,12 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
 
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
-        if ($.collateralTokenIndexPlusOne[token] != 0) revert AlreadyCollateralToken();
+        if (isCollateralToken(token)) revert AlreadyCollateralToken();
 
         uint256 price = IPriceProvider(etherFiDataProvider.getPriceProvider()).price(token);
         if (price == 0) revert OraclePriceZero();
-
-        $.supportedCollateralTokens.push(token);
-        $.collateralTokenIndexPlusOne[token] = $.supportedCollateralTokens.length;
+        
+        $.supportedCollateralTokens.add(token);
 
         emit CollateralTokenAdded(token);
     }
@@ -153,10 +143,9 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
 
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
-        if ($.borrowTokenIndexPlusOne[token] != 0) revert AlreadyBorrowToken();
+        if (isBorrowToken(token)) revert AlreadyBorrowToken();
 
-        $.supportedBorrowTokens.push(token);
-        $.borrowTokenIndexPlusOne[token] = $.supportedBorrowTokens.length;
+        $.supportedBorrowTokens.add(token);
 
         emit BorrowTokenAdded(token);
     }

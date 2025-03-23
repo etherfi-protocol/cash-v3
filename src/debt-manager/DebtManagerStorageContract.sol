@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
@@ -18,6 +19,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  */
 contract DebtManagerStorageContract is UpgradeableProxy {
     using Math for uint256;
+    using EnumerableSetLib for EnumerableSetLib.AddressSet;
 
     /**
      * @notice Configuration data for borrow tokens
@@ -105,17 +107,11 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     /// @custom:storage-location erc7201:etherfi.storage.DebtManager
     struct DebtManagerStorage {
         /// @notice List of supported collateral tokens
-        address[] supportedCollateralTokens;
+        EnumerableSetLib.AddressSet supportedCollateralTokens;
         
         /// @notice List of supported borrow tokens
-        address[] supportedBorrowTokens;
-        
-        /// @notice Mapping from token address to its index (plus one) in supportedCollateralTokens
-        mapping(address token => uint256 index) collateralTokenIndexPlusOne;
-        
-        /// @notice Mapping from token address to its index (plus one) in supportedBorrowTokens
-        mapping(address token => uint256 index) borrowTokenIndexPlusOne;
-        
+        EnumerableSetLib.AddressSet supportedBorrowTokens;
+                
         /// @notice Mapping from borrow token address to its configuration
         mapping(address borrowToken => BorrowTokenConfig config) borrowTokenConfig;
         
@@ -578,13 +574,13 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      */
     function borrowingOf(address user) public view returns (TokenData[] memory, uint256) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
-        uint256 len = $.supportedBorrowTokens.length;
+        uint256 len = $.supportedBorrowTokens.length();
         TokenData[] memory borrowTokenData = new TokenData[](len);
         uint256 totalBorrowingInUsd = 0;
         uint256 m = 0;
 
         for (uint256 i = 0; i < len;) {
-            address borrowToken = $.supportedBorrowTokens[i];
+            address borrowToken = $.supportedBorrowTokens.at(i);
             uint256 amount = borrowingOf(user, borrowToken);
             if (amount != 0) {
                 totalBorrowingInUsd += amount;
@@ -624,7 +620,7 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @return True if the token is a collateral token, false otherwise
      */
     function isCollateralToken(address token) public view returns (bool) {
-        return _getDebtManagerStorage().collateralTokenIndexPlusOne[token] != 0;
+        return _getDebtManagerStorage().supportedCollateralTokens.contains(token);
     }
 
     /**
@@ -633,7 +629,7 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @return True if the token is a borrow token, false otherwise
      */
     function isBorrowToken(address token) public view returns (bool) {
-        return _getDebtManagerStorage().borrowTokenIndexPlusOne[token] != 0;
+        return _getDebtManagerStorage().supportedBorrowTokens.contains(token);
     }
 
     /**
