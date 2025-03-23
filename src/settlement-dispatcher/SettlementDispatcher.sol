@@ -47,7 +47,7 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Storage location for SettlementDispatcher (ERC-7201 compliant)
      * @dev keccak256(abi.encode(uint256(keccak256("etherfi.storage.SettlementDispatcher")) - 1)) & ~bytes32(uint256(0xff))
      */
-    bytes32 private constant SettlementDispatcherStorageLocation = 0xb3086c0036ec0314dd613f04f2c0b41c0567e73b5b69f0a0d6acdbce48020e00;
+    bytes32 private constant SettlementDispatcherStorageLocation = 0x78555946a409defb00fb08ff23c8988ad687a02e1525a4fc9b7fd83443409e00;
 
     /**
      * @notice Emitted when destination data is set for tokens

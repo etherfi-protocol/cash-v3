@@ -66,9 +66,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
     /// @notice Role identifier for Cash Moudle controller access control
     bytes32 public constant CASH_MODULE_CONTROLLER_ROLE = keccak256("CASH_MODULE_CONTROLLER_ROLE");
-    // @notice Limit for maximum cashback percentage at 10%
+    /// @notice Limit for maximum cashback percentage at 10%
     uint256 public constant MAX_CASHBACK_PERCENTAGE = 1000; // 10%
-    // @notice 100% in bps
+    /// @notice 100% in bps
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
 
     /// @notice Error thrown when a transaction has already been cleared

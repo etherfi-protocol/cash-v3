@@ -61,7 +61,7 @@ contract PriceProvider is UpgradeableProxy {
      * @notice Storage location for PriceProvider (ERC-7201 compliant)
      * @dev keccak256(abi.encode(uint256(keccak256("etherfi.storage.PriceProvider")) - 1)) & ~bytes32(uint256(0xff))
      */
-    bytes32 private constant PriceProviderStorageLocation = 0xb3086c0036ec0314dd613f04f2c0b41c0567e73b5b69f0a0d6acdbce48020e00;
+    bytes32 private constant PriceProviderStorageLocation = 0x41562816b7fe3348550ae5f01054abee62ae4ec684cc33be93b5202283b5ba00;
 
     /**
      * @notice Role identifier for administrative privileges over the price provider
