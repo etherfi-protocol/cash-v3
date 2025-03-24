@@ -54,8 +54,9 @@ contract Setup is Utils {
     address debtManagerAdminImpl;
     address debtManagerInitializer;
 
-    address etherFiRecoverySigner = 0x7fEd99d0aA90423de55e238Eb5F9416FF7Cc58eF;
-    address thirdPartyRecoverySigner = 0x24e311DA50784Cf9DB1abE59725e4A1A110220FA;
+    address etherFiRecoverySigner = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address thirdPartyRecoverySigner = 0x4F5eB42edEce3285B97245f56b64598191b5A58E;
+    address etherFiWallet = 0xdC45DB93c3fC37272f40812bBa9C4Bad91344b46;
 
     address usdcScroll = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
     address weETHScroll = 0x01f0a31698C4d065659b9bdC21B3610292a1c506;
@@ -69,13 +70,14 @@ contract Setup is Utils {
     uint80 ltv = 50e18; // 50%
     uint80 liquidationThreshold = 80e18; // 80%
     uint96 liquidationBonus = 1e18; // 1%
-    uint64 borrowApyPerSecond = 317097919837; // 10% / (365 days in seconds)
+    uint64 borrowApyPerSecond = 0; // 10% / (365 days in seconds)
     ChainConfig chainConfig;
-    uint256 supplyCap = 10000 ether;
+    uint256 supplyCap = 1 ether;
     uint128 minShares;
 
     // https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
     uint32 optimismDestEid = 30111;
+    address rykiOpAddress = 0x6f7F522075AA5483d049dF0Ef81FcdD3b0ace7f4;
     // https://stargateprotocol.gitbook.io/stargate/v/v2-developer-docs/technical-reference/mainnet-contracts#scroll
     address stargateUsdcPool = 0x3Fc69CC4A842838bCDC9499178740226062b14E4;
     address stargateEthPool = 0xC2b638Cb5042c1B3c5d5C969361fB50569840583;
@@ -187,13 +189,14 @@ contract Setup is Utils {
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), owner);
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
-        roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), owner);
         roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, owner);
+        roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
+        roleRegistry.grantRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), owner);
 
+        roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
+        roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), etherFiWallet);
         if (deployer != owner) roleRegistry.transferOwnership(owner);
     }
 
@@ -272,7 +275,7 @@ contract Setup is Utils {
         SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
         destDatas[0] = SettlementDispatcher.DestinationData({
             destEid: optimismDestEid,
-            destRecipient: owner,
+            destRecipient: rykiOpAddress,
             stargate: stargateUsdcPool
         });
 

@@ -26,43 +26,43 @@ contract Utils is Script {
     address eth = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     string scrollChainId = "534352";
 
-    string internal TOP_UP_SOURCE_FACTORY_PROXY = "Dev1:TopUpSourceFactoryProxy";
-    string internal TOP_UP_SOURCE_FACTORY_IMPL = "Dev1:TopUpSourceFactoryImpl";
-    string internal TOP_UP_SOURCE_IMPL = "Dev1:TopUpSourceImpl";
-    string internal ROLE_REGISTRY_PROXY = "Dev1:RoleRegistryProxy";
-    string internal ROLE_REGISTRY_IMPL = "Dev1:RoleRegistryImpl";
-    string internal ETHER_FI_OFT_BRIDGE_ADAPTER = "Dev1:EtherFiOFTBridgeAdapter";
-    string internal STARGATE_ADAPTER = "Dev1:StargateAdapter";
+    string internal TOP_UP_SOURCE_FACTORY_PROXY = "TopUpSourceFactoryProxy";
+    string internal TOP_UP_SOURCE_FACTORY_IMPL = "TopUpSourceFactoryImpl";
+    string internal TOP_UP_SOURCE_IMPL = "TopUpSourceImpl";
+    string internal ROLE_REGISTRY_PROXY = "RoleRegistryProxy";
+    string internal ROLE_REGISTRY_IMPL = "RoleRegistryImpl";
+    string internal ETHER_FI_OFT_BRIDGE_ADAPTER = "EtherFiOFTBridgeAdapter";
+    string internal STARGATE_ADAPTER = "StargateAdapter";
 
-    string internal ETHER_FI_SAFE_IMPL = "Dev1:EtherFiSafeImpl";
+    string internal ETHER_FI_SAFE_IMPL = "EtherFiSafeImpl";
     string internal ETHER_FI_SAFE_FACTORY_IMPL = TOP_UP_SOURCE_FACTORY_IMPL;
     string internal ETHER_FI_SAFE_FACTORY_PROXY = TOP_UP_SOURCE_FACTORY_PROXY;
-    string internal ETHER_FI_DATA_PROVIDER_IMPL = "Dev1:EtherFiDataProviderImpl";
-    string internal ETHER_FI_DATA_PROVIDER_PROXY = "Dev1:EtherFiDataProviderProxy";
-    string internal ETHER_FI_HOOK_IMPL = "Dev1:EtherFiHookImpl";
-    string internal ETHER_FI_HOOK_PROXY = "Dev1:EtherFiHookProxy";
-    string internal TOP_UP_DEST_IMPL = "Dev1:TopUpDestImpl";
-    string internal TOP_UP_DEST_PROXY = "Dev1:TopUpDestProxy";
-    string internal AAVE_MODULE = "Dev1:AaveV3Module";
-    string internal CASH_MODULE_SETTERS_IMPL = "Dev1:CashModuleSettersImpl";
-    string internal CASH_MODULE_CORE_IMPL = "Dev1:CashModuleCoreImpl";
-    string internal CASH_MODULE_PROXY = "Dev1:CashModuleProxy";
-    string internal CASH_LENS_IMPL = "Dev1:CashLensImpl";
-    string internal CASH_LENS_PROXY = "Dev1:CashLensProxy";
-    string internal OPEN_OCEAN_SWAP_MODULE = "Dev1:OpenOceanSwapModule";
+    string internal ETHER_FI_DATA_PROVIDER_IMPL = "EtherFiDataProviderImpl";
+    string internal ETHER_FI_DATA_PROVIDER_PROXY = "EtherFiDataProviderProxy";
+    string internal ETHER_FI_HOOK_IMPL = "EtherFiHookImpl";
+    string internal ETHER_FI_HOOK_PROXY = "EtherFiHookProxy";
+    string internal TOP_UP_DEST_IMPL = "TopUpDestImpl";
+    string internal TOP_UP_DEST_PROXY = "TopUpDestProxy";
+    string internal AAVE_MODULE = "AaveV3Module";
+    string internal CASH_MODULE_SETTERS_IMPL = "CashModuleSettersImpl";
+    string internal CASH_MODULE_CORE_IMPL = "CashModuleCoreImpl";
+    string internal CASH_MODULE_PROXY = "CashModuleProxy";
+    string internal CASH_LENS_IMPL = "CashLensImpl";
+    string internal CASH_LENS_PROXY = "CashLensProxy";
+    string internal OPEN_OCEAN_SWAP_MODULE = "OpenOceanSwapModule";
 
-    string internal CASH_EVENT_EMITTER_IMPL = "Dev1:CashEventEmitterImpl";
-    string internal CASH_EVENT_EMITTER_PROXY = "Dev1:CashEventEmitterProxy";
-    string internal PRICE_PROVIDER_IMPL = "Dev1:PriceProviderImpl";
-    string internal PRICE_PROVIDER_PROXY = "Dev1:PriceProviderProxy";
-    string internal CASHBACK_DISPATCHER_IMPL = "Dev1:CashbackDispatcherImpl";
-    string internal CASHBACK_DISPATCHER_PROXY = "Dev1:CashbackDispatcherProxy";
-    string internal SETTLEMENT_DISPATCHER_IMPL = "Dev1:SettlementDispatcherImpl";
-    string internal SETTLEMENT_DISPATCHER_PROXY = "Dev1:SettlementDispatcherProxy";
-    string internal DEBT_MANAGER_ADMIN_IMPL = "Dev1:DebtManagerAdminImpl";
-    string internal DEBT_MANAGER_CORE_IMPL = "Dev1:DebtManagerCoreImpl";
-    string internal DEBT_MANAGER_INITIALIZER_IMPL = "Dev1:DebtManagerInitializerImpl";
-    string internal DEBT_MANAGER_PROXY = "Dev1:DebtManagerProxy";
+    string internal CASH_EVENT_EMITTER_IMPL = "CashEventEmitterImpl";
+    string internal CASH_EVENT_EMITTER_PROXY = "CashEventEmitterProxy";
+    string internal PRICE_PROVIDER_IMPL = "PriceProviderImpl";
+    string internal PRICE_PROVIDER_PROXY = "PriceProviderProxy";
+    string internal CASHBACK_DISPATCHER_IMPL = "CashbackDispatcherImpl";
+    string internal CASHBACK_DISPATCHER_PROXY = "CashbackDispatcherProxy";
+    string internal SETTLEMENT_DISPATCHER_IMPL = "SettlementDispatcherImpl";
+    string internal SETTLEMENT_DISPATCHER_PROXY = "SettlementDispatcherProxy";
+    string internal DEBT_MANAGER_ADMIN_IMPL = "DebtManagerAdminImpl";
+    string internal DEBT_MANAGER_CORE_IMPL = "DebtManagerCoreImpl";
+    string internal DEBT_MANAGER_INITIALIZER_IMPL = "DebtManagerInitializerImpl";
+    string internal DEBT_MANAGER_PROXY = "DebtManagerProxy";
 
     function getChainConfig(
         string memory chainId

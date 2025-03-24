@@ -54,9 +54,9 @@ contract CashModuleCore is CashModuleStorageContract {
         $.cashbackDispatcher = ICashbackDispatcher(_cashbackDispatcher);
         $.cashEventEmitter = ICashEventEmitter(_cashEventEmitter);
 
-        $.withdrawalDelay = 60; // 1 min
+        $.withdrawalDelay = 1; // 1 sec
         $.spendLimitDelay = 3600; // 1 hour
-        $.modeDelay = 60; // 1 min
+        $.modeDelay = 1; // 1 sec
 
         $.cashModuleSetters = _cashModuleSetters;
 
@@ -64,7 +64,7 @@ contract CashModuleCore is CashModuleStorageContract {
         $.tierCashbackPercentage[SafeTiers.Wojak] = 3_00; // 3%
         $.tierCashbackPercentage[SafeTiers.Chad] = 4_00; // 4%
         $.tierCashbackPercentage[SafeTiers.Whale] = 4_00; // 4%
-        $.tierCashbackPercentage[SafeTiers.Business] = 3_00; // 3%
+        $.tierCashbackPercentage[SafeTiers.Business] = 2_00; // 2%
     }
 
     /**
