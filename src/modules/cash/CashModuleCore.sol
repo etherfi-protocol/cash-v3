@@ -59,6 +59,12 @@ contract CashModuleCore is CashModuleStorageContract {
         $.modeDelay = 60; // 1 min
 
         $.cashModuleSetters = _cashModuleSetters;
+
+        $.tierCashbackPercentage[SafeTiers.Pepe] = 2_00; // 2%
+        $.tierCashbackPercentage[SafeTiers.Wojak] = 3_00; // 3%
+        $.tierCashbackPercentage[SafeTiers.Chad] = 4_00; // 4%
+        $.tierCashbackPercentage[SafeTiers.Whale] = 4_00; // 4%
+        $.tierCashbackPercentage[SafeTiers.Business] = 3_00; // 3%
     }
 
     /**
