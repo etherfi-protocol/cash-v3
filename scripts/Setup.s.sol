@@ -70,7 +70,7 @@ contract Setup is Utils {
     uint80 ltv = 50e18; // 50%
     uint80 liquidationThreshold = 80e18; // 80%
     uint96 liquidationBonus = 1e18; // 1%
-    uint64 borrowApyPerSecond = 0; // 10% / (365 days in seconds)
+    uint64 borrowApyPerSecond = 1; // 10% / (365 days in seconds)
     ChainConfig chainConfig;
     uint256 supplyCap = 1 ether;
     uint128 minShares;
@@ -86,10 +86,10 @@ contract Setup is Utils {
     bytes32 public DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
 
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        deployer = vm.addr(deployerPrivateKey);
+        // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        deployer = 0x8D5AAc5d3d5cda4c404fA7ee31B0822B648Bb150;
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
 
         chainConfig = getChainConfig(vm.toString(block.chainid));
 
@@ -101,7 +101,7 @@ contract Setup is Utils {
 
         address dataProviderImpl = deployWithCreate3(abi.encodePacked(type(EtherFiDataProvider).creationCode), getSalt(ETHER_FI_DATA_PROVIDER_IMPL));
         dataProvider = EtherFiDataProvider(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(dataProviderImpl, "")), getSalt(ETHER_FI_DATA_PROVIDER_PROXY)));
-        
+
         address roleRegistryImpl = deployWithCreate3(abi.encodePacked(type(RoleRegistry).creationCode, abi.encode(address(dataProvider))), getSalt(ROLE_REGISTRY_IMPL));
         roleRegistry = RoleRegistry(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(roleRegistryImpl, "")), getSalt(ROLE_REGISTRY_PROXY)));
         roleRegistry.initialize(deployer);
@@ -142,17 +142,18 @@ contract Setup is Utils {
         cashEventEmitter.initialize(address(roleRegistry));
 
         cashModule.initialize(
-            address(roleRegistry), 
-            address(debtManager), 
-            address(settlementDispatcher), 
-            address(cashbackDispatcher), 
+            address(roleRegistry),
+            address(debtManager),
+            address(settlementDispatcher),
+            address(cashbackDispatcher),
             address(cashEventEmitter),
             cashModuleSettersImpl
         );
 
-        address topUpDestImpl = deployWithCreate3(abi.encodePacked(type(TopUpDest).creationCode), getSalt(TOP_UP_DEST_IMPL));
+        address topUpDestImpl = deployWithCreate3(abi.encodePacked(type(TopUpDest).creationCode,abi.encode(address(dataProvider))), getSalt(TOP_UP_DEST_IMPL));
+
         topUpDest = TopUpDest(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(topUpDestImpl, "")), getSalt(TOP_UP_DEST_PROXY)));
-        topUpDest.initialize(address(roleRegistry), address(dataProvider));
+        topUpDest.initialize(address(roleRegistry));
 
         _grantRoles();
         _configureDebtManager();
@@ -179,6 +180,9 @@ contract Setup is Utils {
             addressOutput
         );
 
+        roleRegistry.revokeRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
+        if (deployer != owner) roleRegistry.transferOwnership(owner);
+
         writeDeploymentFile(finalJson);
 
         vm.stopBroadcast();
@@ -192,12 +196,13 @@ contract Setup is Utils {
         roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, owner);
+        roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
         roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
         roleRegistry.grantRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), owner);
 
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
         roleRegistry.grantRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), etherFiWallet);
-        if (deployer != owner) roleRegistry.transferOwnership(owner);
+        // if (deployer != owner) roleRegistry.transferOwnership(owner);
     }
 
     function _setupPriceProvider() internal {
@@ -211,7 +216,7 @@ contract Setup is Utils {
             isBaseTokenEth: true,
             isStableToken: false
         });
-        
+
         PriceProvider.Config memory ethConfig = PriceProvider.Config({
             oracle: ethUsdcOracle,
             priceFunctionCalldata: hex"",
@@ -222,7 +227,7 @@ contract Setup is Utils {
             isBaseTokenEth: false,
             isStableToken: false
         });
-        
+
         PriceProvider.Config memory usdcConfig = PriceProvider.Config({
             oracle: usdcUsdOracle,
             priceFunctionCalldata: hex"",
@@ -233,7 +238,7 @@ contract Setup is Utils {
             isBaseTokenEth: false,
             isStableToken: true
         });
-        
+
         PriceProvider.Config memory scrollConfig = PriceProvider.Config({
             oracle: scrUsdOracle,
             priceFunctionCalldata: hex"",
@@ -261,7 +266,7 @@ contract Setup is Utils {
         priceProvider = PriceProvider(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(priceProviderImpl, "")), getSalt(PRICE_PROVIDER_PROXY)));
         priceProvider.initialize(address(roleRegistry), initialTokens, initialTokensConfig);
     }
-    
+
     function _setupCashbackDispatcher() internal {
         address cashbackDispatcherImpl = deployWithCreate3(abi.encodePacked(type(CashbackDispatcher).creationCode, abi.encode(address(dataProvider))), getSalt(CASHBACK_DISPATCHER_IMPL));
         cashbackDispatcher = CashbackDispatcher(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(cashbackDispatcherImpl, "")), getSalt(CASHBACK_DISPATCHER_PROXY)));
@@ -306,14 +311,14 @@ contract Setup is Utils {
             liquidationThreshold: liquidationThreshold, // 95%
             liquidationBonus: liquidationBonus // 1%
         });
-        
+
         UUPSUpgradeable(address(debtManager)).upgradeToAndCall(debtManagerCoreImpl, "");
         debtManager.setAdminImpl(debtManagerAdminImpl);
 
         debtManager.supportCollateralToken(address(usdcScroll), usdcCollateralTokenConfig);
         debtManager.supportCollateralToken(address(weETHScroll), nonStableCollateralTokenConfig);
         debtManager.supportCollateralToken(address(scrToken), nonStableCollateralTokenConfig);
-        
+
         minShares = uint128(10 * 10 ** IERC20Metadata(address(usdcScroll)).decimals());
         debtManager.supportBorrowToken(address(usdcScroll), borrowApyPerSecond, minShares);
     }
