@@ -169,6 +169,7 @@ contract Setup is Utils {
         vm.serializeAddress(deployedAddresses, "EtherFiHook", address(hook));
         vm.serializeAddress(deployedAddresses, "DebtManager", address(debtManager));
         vm.serializeAddress(deployedAddresses, "PriceProvider", address(priceProvider));
+        vm.serializeAddress(deployedAddresses, "OpenOceanSwapModule", address(openOceanSwapModule));
         vm.serializeAddress(deployedAddresses, "CashbackDispatcher", address(cashbackDispatcher));
         vm.serializeAddress(deployedAddresses, "CashModule", address(cashModule));
         vm.serializeAddress(deployedAddresses, "CashEventEmitter", address(cashEventEmitter));
