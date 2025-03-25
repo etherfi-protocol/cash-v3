@@ -173,7 +173,13 @@ abstract contract RecoveryManager is EtherFiSafeBase {
      */
     function overrideRecoverySigners(address[2] calldata recoverySigners, address[] calldata signers, bytes[] calldata signatures) external {
         _currentOwner();
-        bytes32 structHash = keccak256(abi.encode(OVERRIDE_RECOVERY_SIGNERS_TYPEHASH, recoverySigners, _useNonce()));
+
+        bytes32 recoverySignersHash = keccak256(abi.encodePacked(
+            keccak256(abi.encode(recoverySigners[0])),
+            keccak256(abi.encode(recoverySigners[1]))
+        ));
+
+        bytes32 structHash = keccak256(abi.encode(OVERRIDE_RECOVERY_SIGNERS_TYPEHASH, recoverySignersHash, _useNonce()));
 
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();

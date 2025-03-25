@@ -1135,7 +1135,12 @@ contract RecoveryManagerTest is SafeTestSetup {
     }
 
     function _overrideRecoverySigners(address[2] memory newSigners) internal {
-        bytes32 structHash = keccak256(abi.encode(safe.OVERRIDE_RECOVERY_SIGNERS_TYPEHASH(), newSigners, safe.nonce()));
+        bytes32 recoverySignersHash = keccak256(abi.encodePacked(
+            keccak256(abi.encode(newSigners[0])),
+            keccak256(abi.encode(newSigners[1]))
+        ));
+
+        bytes32 structHash = keccak256(abi.encode(safe.OVERRIDE_RECOVERY_SIGNERS_TYPEHASH(), recoverySignersHash, safe.nonce()));
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
