@@ -9,10 +9,10 @@ contract DeployStargateAdapter is Utils {
     StargateAdapter stargateAdapter;
 
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        vm.startBroadcast(deployerPrivateKey);
-        stargateAdapter = deployWithCreate3(abi.encodePacked(type(StargateAdapter).creationCode), getSalt(STARGATE_ADAPTER));
+        vm.startBroadcast();
+        stargateAdapter = StargateAdapter(deployWithCreate3(abi.encodePacked(type(StargateAdapter).creationCode), getSalt(STARGATE_ADAPTER)));
 
         vm.stopBroadcast();
     }

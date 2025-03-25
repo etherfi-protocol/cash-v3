@@ -9,11 +9,11 @@ contract DeployOFTBridgeAdapter is Utils {
     EtherFiOFTBridgeAdapter etherFiOFTBridgeAdapter;
 
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
 
-        etherFiOFTBridgeAdapter = deployWithCreate3(abi.encodePacked(type(EtherFiOFTBridgeAdapter).creationCode), getSalt(ETHER_FI_OFT_BRIDGE_ADAPTER));
+        etherFiOFTBridgeAdapter = EtherFiOFTBridgeAdapter(deployWithCreate3(abi.encodePacked(type(EtherFiOFTBridgeAdapter).creationCode), getSalt(ETHER_FI_OFT_BRIDGE_ADAPTER)));
 
         vm.stopBroadcast();
     }

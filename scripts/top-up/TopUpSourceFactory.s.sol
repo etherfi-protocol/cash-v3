@@ -14,13 +14,18 @@ contract DeployTopUpSourceFactory is Utils {
     RoleRegistry roleRegistry; 
 
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        address owner = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
+        address owner = 0x8D5AAc5d3d5cda4c404fA7ee31B0822B648Bb150;
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
 
-        string memory deployments = readDeploymentFile();
+        string memory dir = string.concat(vm.projectRoot(), "/deployments/");
+        string memory chainDir = string.concat(vm.toString(block.chainid), "/");
+        string memory file = string.concat(dir, chainDir, "deployments", ".json");
+
+        if (!vm.exists(file)) revert ("Deployment file not found");
+        string memory deployments = vm.readFile(file);
 
         roleRegistry = RoleRegistry(stdJson.readAddress(
             deployments,
@@ -30,7 +35,7 @@ contract DeployTopUpSourceFactory is Utils {
         address factoryImpl = deployWithCreate3(abi.encodePacked(type(TopUpFactory).creationCode, ""), getSalt(TOP_UP_SOURCE_FACTORY_IMPL));
         address topUpImpl = deployWithCreate3(abi.encodePacked(type(TopUp).creationCode, ""), getSalt(TOP_UP_SOURCE_IMPL));
         address topUpFactoryProxy = deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(factoryImpl, "")), getSalt(TOP_UP_SOURCE_FACTORY_PROXY));
-        factory = TopUpFactory(payable(topUpFactoryProxy));
+        factory = TopUpFactory(payable(0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF));
 
         factory.initialize(address(roleRegistry), topUpImpl);
         roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), owner);

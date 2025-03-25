@@ -24,9 +24,9 @@ contract TopUpSourceSetConfig is Utils {
     address etherFiOFTBridgeAdapter;
     
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
         string memory chainId = vm.toString(block.chainid);
         string memory dir = string.concat(vm.projectRoot(), "/deployments/");
         string memory chainDir = string.concat(vm.toString(block.chainid), "/");
