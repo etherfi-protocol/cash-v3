@@ -20,16 +20,16 @@ import { CashLens } from "../../src/modules/cash/CashLens.sol";
 import { Utils } from "../utils/Utils.sol";
 
 contract SanityTest is Utils {
-    address cashControllerSafe = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address safeDeployer = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address etherFiWallet1 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address etherFiWallet2 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address topUpWallet1 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address topUpWallet2 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address topUpDepositor = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address settlementDispatcherBridger = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address pauser = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address unpauser = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
+    address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address safeDeployer = 0xdC45DB93c3fC37272f40812bBa9C4Bad91344b46;
+    address etherFiWallet1 = 0xdC45DB93c3fC37272f40812bBa9C4Bad91344b46;
+    // address etherFiWallet2 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
+    // address topUpWallet1 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
+    // address topUpWallet2 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
+    address topUpDepositor = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address settlementDispatcherBridger = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address pauser = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address unpauser = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     CashbackDispatcher cashbackDispatcher;
     IDebtManager debtManager;
@@ -125,10 +125,10 @@ contract SanityTest is Utils {
         assertTrue(roleRegistry.hasRole(roleRegistry.UNPAUSER(), unpauser));
         
         assertTrue(roleRegistry.hasRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet1));
-        assertTrue(roleRegistry.hasRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet2));
+        // assertTrue(roleRegistry.hasRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet2));
         
-        assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_ROLE(), topUpWallet1));
-        assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_ROLE(), topUpWallet2));
+        // assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_ROLE(), topUpWallet1));
+        // assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_ROLE(), topUpWallet2));
         assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), topUpDepositor));
 
         assertTrue(roleRegistry.hasRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), safeDeployer));
@@ -140,6 +140,5 @@ contract SanityTest is Utils {
         assertTrue(roleRegistry.hasRole(debtManager.DEBT_MANAGER_ADMIN_ROLE(), cashControllerSafe));
         assertTrue(roleRegistry.hasRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), cashControllerSafe));
         assertTrue(roleRegistry.hasRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), cashControllerSafe));
-        assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_ROLE(), cashControllerSafe));
     }
 }

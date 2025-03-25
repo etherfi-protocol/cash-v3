@@ -1,32 +1,30 @@
 <h1> <img src="public/etherfi-logo.svg" width="60" height="60" alt="Logo" style="vertical-align:middle; margin-right: 10px;"/> EtherFi Cash Smart Contracts </h1> 
 
+Cash transcends the limitations of neo-banks by rebuilding financial services from first principles using blockchain technology. Where neo-banks only digitize traditional banking, Cash delivers true asset ownership, programmable finance, and transparent operations without compromising on security or user experience.
 
-Cash powers ether.fi's crypto neo-banking experience, bringing traditional banking services to Web3 through a secure, modular and infinitely extensible smart contract architecture.
 
 ## Key Features
 
-- **Smart Contract Accounts**: Self-custodial wallets with multi-signature security and account recovery
-- **Banking Services**: Spending limits, cashback rewards, and flexible credit/debit modes
-- **Yield Generation**: Supply assets to earn interest through secure lending markets
-- **Cross-Chain Transfers**: Bridge assets across blockchain networks seamlessly
-- **Fiat Integration**: Settlement infrastructure for crypto-fiat interactions
+- **True Self-Custody**: Unlike neo-banks that still control your assets, Cash gives users full ownership through smart contract wallets with multi-signature security
+- **Programmable Finance**: Beyond the rigid limits of neo-banking apps, Cash enables customizable spending rules and automated financial management
+- **Real Rewards**: Earn substantial cashback and actual yield on assets, not the minimal interest rates offered by traditional financial services
+- **Censorship Resistance**: Financial freedom without the account freezes and arbitrary limitations common in centralized financial services
 
 ## Core Components
 
 - **EtherFiSafe**: Smart contract accounts with multi-signature capabilities
-- **CashModule**: Core banking functionality for spending and cashback
-- **DebtManager**: Lending and borrowing with configurable parameters
-- **PriceProvider**: Secure oracles for accurate asset pricing
-- **SettlementDispatcher**: Manages settlement between on-chain and off-chain systems
+- **CashModule**: Core financial functionality for spending and rewards
+- **DebtManager**: Self-governing lending and borrowing with transparent parameters
+- **PriceProvider**: Decentralized oracles for accurate asset pricing
+- **SettlementDispatcher**: Permissionless settlement between on-chain and off-chain systems
 
-## Security
+## Security Advantages
 
-- Multi-signature transaction authorization
-- Whitelisting and secure integration of modules
-- Account recovery with timelock protection
-- Automated health checks for loan positions
-- Role-based access control
-
+- Cryptographic multi-signature authorization (not password-based like neo-banks)
+- Transparent integration of financial services modules
+- Community-controlled recovery mechanisms
+- Open-source risk management for lending
+- Decentralized permission systems
 
 ## For Developers
 

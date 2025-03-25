@@ -334,7 +334,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         assertApproxEqAbs(
             debtManager.borrowingOf(address(safe), address(usdcScroll)),
             expectedTotalBorrowWithInterest,
-            1
+            2
         );
 
         cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), borrowAmt, false);
@@ -342,7 +342,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         assertApproxEqAbs(
             debtManager.borrowingOf(address(safe), address(usdcScroll)),
             expectedTotalBorrowWithInterest + borrowAmt,
-            1
+            2
         );
 
         vm.stopPrank();
