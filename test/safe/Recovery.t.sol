@@ -585,52 +585,6 @@ contract RecoveryManagerTest is SafeTestSetup {
         safe.checkSignatures(testHash, testSigners, testSignatures);
     }
 
-    function test_originalOwnersCannotCallFunctions_afterRecovery_revertsWithInvalidInput() public {
-        address newOwner = makeAddr("newOwner");
-        
-        // Start recovery
-        address[] memory recoverySigners = new address[](2);
-        recoverySigners[0] = etherFiRecoverySigner;
-        recoverySigners[1] = thirdPartyRecoverySigner;
-        
-        _recoverSafeWithSigners(newOwner, recoverySigners);
-        
-        // Mock timelock passage
-        uint256 delayPeriod = dataProvider.getRecoveryDelayPeriod();
-        vm.warp(block.timestamp + delayPeriod + 1);
-        
-        // Try to call a function with original owners (should fail)
-        address otherSigner = makeAddr("otherSigner");
-        address[] memory signerAddresses = new address[](1);
-        signerAddresses[0] = otherSigner;
-        
-        bool[] memory shouldAdd = new bool[](1);
-        shouldAdd[0] = true;
-        
-        bytes32 structHash = keccak256(abi.encode(
-            safe.SET_USER_RECOVERY_SIGNERS_TYPEHASH(),
-            keccak256(abi.encodePacked(signerAddresses)), 
-            keccak256(abi.encodePacked(shouldAdd)), 
-            safe.nonce()
-        ));
-        
-        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
-        
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
-        
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-        
-        address[] memory oldOwners = new address[](2);
-        oldOwners[0] = owner1;
-        oldOwners[1] = owner2;
-        
-        vm.expectRevert(EtherFiSafeErrors.InvalidInput.selector);
-        safe.setUserRecoverySigners(signerAddresses, shouldAdd, oldOwners, signatures);
-    }
-
     function test_originalOwnersCannotCallFunctions_afterRecovery_revertsWithInvalidSigners() public {
         address newOwner = makeAddr("newOwner");
         
@@ -834,40 +788,6 @@ contract RecoveryManagerTest is SafeTestSetup {
         // Verify recovery was canceled
         assertEq(safe.getIncomingOwner(), address(0));
         assertEq(safe.getIncomingOwnerStartTime(), 0);
-    }
-
-    function test_cancelRecovery_failsAfterTimelockPeriod_revertsWithInvalidInput() public {
-        address newOwner = makeAddr("newOwner");
-        
-        // Start recovery
-        address[] memory recoverySigners = new address[](2);
-        recoverySigners[0] = etherFiRecoverySigner;
-        recoverySigners[1] = thirdPartyRecoverySigner;
-        
-        _recoverSafeWithSigners(newOwner, recoverySigners);
-        
-        // Advance time past the timelock period
-        uint256 delayPeriod = dataProvider.getRecoveryDelayPeriod();
-        vm.warp(block.timestamp + delayPeriod + 1);
-        
-        // Try to cancel with original owners
-        bytes32 structHash = keccak256(abi.encode(safe.CANCEL_RECOVERY_TYPEHASH(), safe.nonce()));
-        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
-        
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
-        
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-        
-        address[] memory signers = new address[](2);
-        signers[0] = owner1;
-        signers[1] = owner2;
-        
-        // This should fail because ownership has already transitioned
-        vm.expectRevert(EtherFiSafeErrors.InvalidInput.selector);
-        safe.cancelRecovery(signers, signatures);
     }
 
     function test_cancelRecovery_failsAfterTimelockPeriod_revertsWithInvalidSigner() public {

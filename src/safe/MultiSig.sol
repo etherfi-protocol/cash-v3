@@ -313,6 +313,9 @@ abstract contract MultiSig is EtherFiSafeBase {
             $.owners.add($.incomingOwner);
             $.threshold = 1;
 
+            delete $.incomingOwnerStartTime;
+            delete $.incomingOwner;
+
             emit AccountRecovered($.incomingOwner);
         }
     }
