@@ -102,6 +102,18 @@ contract SafeTestSetup is Utils {
 
     bytes32 public DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
 
+    // User recovery signers
+    address userRecoverySigner1;
+    address userRecoverySigner2;
+    uint256 userRecoverySigner1Pk;
+    uint256 userRecoverySigner2Pk;
+
+    // Override recovery signers
+    address overriddenEtherFiSigner;
+    address overriddenThirdPartySigner;
+    uint256 overriddenEtherFiSignerPk;
+    uint256 overriddenThirdPartySignerPk;
+
     function setUp() public virtual {
         string memory scrollRpc = vm.envString("SCROLL_RPC");
         if (bytes(scrollRpc).length != 0) vm.createSelectFork(scrollRpc);
@@ -464,5 +476,134 @@ contract SafeTestSetup is Utils {
         signers[1] = owner2;
 
         safe.setThreshold(newThreshold, signers, signatures);
+    }
+
+        function _setUserRecoverySigners(address[] memory signers, bool[] memory shouldAdd) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.SET_USER_RECOVERY_SIGNERS_TYPEHASH(), keccak256(abi.encodePacked(signers)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory ownerSigners = new address[](2);
+        ownerSigners[0] = owner1;
+        ownerSigners[1] = owner2;
+
+        safe.setUserRecoverySigners(signers, shouldAdd, ownerSigners, signatures);
+    }
+
+    function _setRecoveryThreshold(uint8 recoveryThreshold) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.SET_RECOVERY_THRESHOLD_TYPEHASH(), recoveryThreshold, safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        safe.setRecoveryThreshold(recoveryThreshold, signers, signatures);
+    }
+
+    function _toggleRecoveryEnabled(bool shouldEnable) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.TOGGLE_RECOVERY_ENABLED_TYPEHASH(), shouldEnable, safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        safe.toggleRecoveryEnabled(shouldEnable, signers, signatures);
+    }
+
+    function _overrideRecoverySigners(address[2] memory newSigners) internal {
+        bytes32 recoverySignersHash = keccak256(abi.encodePacked(
+            keccak256(abi.encode(newSigners[0])),
+            keccak256(abi.encode(newSigners[1]))
+        ));
+
+        bytes32 structHash = keccak256(abi.encode(safe.OVERRIDE_RECOVERY_SIGNERS_TYPEHASH(), recoverySignersHash, safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        safe.overrideRecoverySigners(newSigners, signers, signatures);
+    }
+
+    function _recoverSafe(address newOwner, address[] memory recoverySigners, bytes[] memory signatures) internal {
+        safe.recoverSafe(newOwner, recoverySigners, signatures);
+    }
+
+    function _recoverSafeWithSigners(address newOwner, address[] memory recoverySigners) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.RECOVER_SAFE_TYPEHASH(), newOwner, safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+        
+        bytes[] memory signatures = new bytes[](recoverySigners.length);
+        
+        for (uint i = 0; i < recoverySigners.length; i++) {
+            uint256 signerKey;
+            
+            if (recoverySigners[i] == etherFiRecoverySigner) signerKey = etherFiRecoverySignerPk;
+            else if (recoverySigners[i] == thirdPartyRecoverySigner) signerKey = thirdPartyRecoverySignerPk;
+            else if (recoverySigners[i] == userRecoverySigner1) signerKey = userRecoverySigner1Pk;
+            else if (recoverySigners[i] == userRecoverySigner2) signerKey = userRecoverySigner2Pk;
+            else if (recoverySigners[i] == overriddenEtherFiSigner) signerKey = overriddenEtherFiSignerPk;
+            else if (recoverySigners[i] == overriddenThirdPartySigner) signerKey = overriddenThirdPartySignerPk;
+            else revert("Unknown recovery signer in test");
+            
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digestHash);
+            signatures[i] = abi.encodePacked(r, s, v);
+        }
+        
+        safe.recoverSafe(newOwner, recoverySigners, signatures);
+    }
+
+    function _cancelRecovery() internal {
+        bytes32 structHash = keccak256(abi.encode(safe.CANCEL_RECOVERY_TYPEHASH(), safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        safe.cancelRecovery(signers, signatures);
+    }
+
+    // Helper function for signing with new owner after recovery
+    function _signWithNewOwner(uint256 newOwnerPk, bytes32 message) internal pure returns (bytes memory signature) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(newOwnerPk, message);
+        return abi.encodePacked(r, s, v);
     }
 }

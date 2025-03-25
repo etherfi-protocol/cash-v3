@@ -281,14 +281,29 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @return bool True if the address is an owner, false otherwise
      */
     function isOwner(address account) public view returns (bool) {
-        return _getMultiSigStorage().owners.contains(account);
+        uint256 incomingOwnerStartTime = getIncomingOwnerStartTime();
+        if (incomingOwnerStartTime > 0 && block.timestamp > incomingOwnerStartTime) {
+            return account == getIncomingOwner();
+        }
+        
+        return _isOwner(account);
     }
+
+    /**
+     * @notice Checks if an address is an owner of the safe
+     * @param account Address to check
+     */
+    function _isOwner(address account) internal view returns (bool) {
+        return _getMultiSigStorage().owners.contains(account);
+    } 
 
     /**
      * @notice Returns the current signature threshold
      * @return uint8 Current threshold value
      */
     function getThreshold() public view returns (uint8) {
+        uint256 incomingOwnerStartTime = getIncomingOwnerStartTime();
+        if (incomingOwnerStartTime > 0 && block.timestamp > incomingOwnerStartTime) return 1;
         return _getMultiSigStorage().threshold;
     }
 
@@ -301,20 +316,34 @@ abstract contract MultiSig is EtherFiSafeBase {
         MultiSigStorage storage $ = _getMultiSigStorage();
 
         if ($.incomingOwnerStartTime > 0 && block.timestamp > $.incomingOwnerStartTime) {
+
             address[] memory owners = $.owners.values();
             uint256 len = owners.length;
+
+            address[] memory accounts = new address[](len + 1);
+            accounts[len] = $.incomingOwner;
+
+            bool[] memory shouldAdd = new bool[](len + 1);
+            shouldAdd[len] = true;
+
             for (uint256 i = 0; i < len; ) {
                 $.owners.remove(owners[i]);
+                accounts[i] = owners[i];
+                shouldAdd[i] = false;
+
                 unchecked {
                     ++i;
                 }
             }
+
+            _configureAdmin(accounts, shouldAdd);
 
             $.owners.add($.incomingOwner);
             $.threshold = 1;
 
             delete $.incomingOwnerStartTime;
             delete $.incomingOwner;
+
 
             emit AccountRecovered($.incomingOwner);
         }

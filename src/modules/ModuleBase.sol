@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -92,7 +93,7 @@ contract ModuleBase is Constants {
      * @param safe The Safe address to check admin status for
      */
     modifier onlySafeAdmin(address safe, address account) {
-        if (!etherFiDataProvider.roleRegistry().isSafeAdmin(safe, account)) revert OnlySafeAdmin();
+        if (!IEtherFiSafe(safe).isAdmin(account)) revert OnlySafeAdmin();
         _;
     }
 

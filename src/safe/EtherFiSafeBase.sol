@@ -208,7 +208,7 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
      * @param accounts Array of admin addresses to configure
      * @param shouldAdd Array indicating whether to add or remove each admin
      */
-    function _configureAdmin(address[] calldata accounts, bool[] memory shouldAdd) internal {
+    function _configureAdmin(address[] memory accounts, bool[] memory shouldAdd) internal {
         dataProvider.roleRegistry().configureSafeAdmins(accounts, shouldAdd);
         emit AdminsConfigured(accounts, shouldAdd);
     }

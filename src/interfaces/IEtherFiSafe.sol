@@ -24,4 +24,6 @@ interface IEtherFiSafe {
     function getOwners() external view returns (address[] memory);
 
     function useNonce() external returns (uint256);
+
+    function isAdmin(address account) external view returns (bool); 
 }

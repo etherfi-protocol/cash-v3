@@ -107,6 +107,37 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
      * @return Array of admin addresses
      */
     function getAdmins() external view returns (address[] memory) {
+        uint256 incomingOwnerStartTime = getIncomingOwnerStartTime();
+        if (incomingOwnerStartTime > 0 && block.timestamp > incomingOwnerStartTime) {
+            address[] memory admins = dataProvider.roleRegistry().getSafeAdmins(address(this));
+            uint256 len = admins.length;
+            address[] memory currentAdmins = new address[](len + 1);
+            uint256 counter = 0;
+
+            for (uint256 i = 0; i < len; ) {
+                if (!_isOwner(admins[i])) {
+                    currentAdmins[counter] = admins[i];
+                    unchecked {
+                        ++counter;
+                    }
+                }
+                unchecked {
+                    ++i;
+                }
+            }
+
+            currentAdmins[counter] = getIncomingOwner();
+            unchecked {
+                ++counter; 
+            }
+
+            assembly ("memory-safe") {
+                mstore(currentAdmins, counter)
+            }
+
+            return currentAdmins;
+        }
+
         return dataProvider.roleRegistry().getSafeAdmins(address(this));
     }
 
@@ -116,6 +147,12 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
      * @return bool True if the account has the safe admin role, false otherwise
      */
     function isAdmin(address account) external view returns (bool) {
+        uint256 incomingOwnerStartTime = getIncomingOwnerStartTime();
+
+        if (incomingOwnerStartTime > 0 && block.timestamp > incomingOwnerStartTime) {
+            if (account == getIncomingOwner()) return true;
+            if (_isOwner(account)) return false;
+        }
         return dataProvider.roleRegistry().isSafeAdmin(address(this), account);
     }
 
@@ -179,7 +216,7 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
             owners[0] = getIncomingOwner();
 
             return owners;
-        } 
+        }
         
         return _getMultiSigStorage().owners.values();
     }
