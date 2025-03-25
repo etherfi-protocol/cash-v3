@@ -35,7 +35,7 @@ contract DeployTopUpSourceFactory is Utils {
         address factoryImpl = deployWithCreate3(abi.encodePacked(type(TopUpFactory).creationCode, ""), getSalt(TOP_UP_SOURCE_FACTORY_IMPL));
         address topUpImpl = deployWithCreate3(abi.encodePacked(type(TopUp).creationCode, ""), getSalt(TOP_UP_SOURCE_IMPL));
         address topUpFactoryProxy = deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(factoryImpl, "")), getSalt(TOP_UP_SOURCE_FACTORY_PROXY));
-        factory = TopUpFactory(payable(0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF));
+        factory = TopUpFactory(payable(topUpFactoryProxy));
 
         factory.initialize(address(roleRegistry), topUpImpl);
         roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), owner);
