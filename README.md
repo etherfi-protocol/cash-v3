@@ -1,12 +1,7 @@
-<h1>
-  <img src="public/etherfi-logo.svg" alt="Cash V3 Logo" width="80" height="80" style="vertical-align:middle;" />
-  Cash V3 Smart Contracts
-</h1>
+<h1> <img src="public/etherfi-logo.svg" width="60" height="60" alt="Logo" style="vertical-align:middle; margin-right: 10px;"/> EtherFi Cash Smart Contracts </h1> 
 
 
-
-
-Cash V3 powers ether.fi's crypto neo-banking experience, bringing traditional banking services to Web3 through a secure, modular and infinitely extensible smart contract architecture.
+Cash powers ether.fi's crypto neo-banking experience, bringing traditional banking services to Web3 through a secure, modular and infinitely extensible smart contract architecture.
 
 ## Key Features
 
