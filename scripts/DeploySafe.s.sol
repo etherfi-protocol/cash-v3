@@ -39,16 +39,9 @@ contract DeploySafe is Utils {
         modules[1] = swapModule;
         bytes[] memory moduleSetupData = new bytes[](2);
         moduleSetupData[0] = abi.encode(10000e6, 10000e6, -5 * 3600);
-        uint8 threshold = 1;
-
-        address[] memory modules = new address[](2);
-        modules[0] = cashModule;
-        modules[1] = swapModule;
-        bytes[] memory moduleSetupData = new bytes[](2);
-        moduleSetupData[0] = abi.encode(dailySpendLimit, monthlySpendLimit, timezoneOffset);
+        uint8 threshold = 1;        
         
-        
-        bytes32 salt = keccak256("user1");
+        bytes32 salt = keccak256("user5");
         factory.deployEtherFiSafe(salt, owners, modules, moduleSetupData, threshold);
 
         vm.stopBroadcast();

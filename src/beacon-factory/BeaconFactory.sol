@@ -39,6 +39,9 @@ contract BeaconFactory is UpgradeableProxy {
     /// @notice Thrown when input is invalid
     error InvalidInput();
 
+    /// @notice Thrown when initialize fails on the deployed contract
+    error InitializationFailed();
+
     /**
      * @dev Initializes the contract with required parameters
      * @param _roleRegistry Address of the role registry contract
@@ -70,7 +73,11 @@ contract BeaconFactory is UpgradeableProxy {
      */
     function _deployBeacon(bytes32 salt, bytes memory initData) internal returns (address) {
         address expectedAddr = getDeterministicAddress(salt);
-        address deployedAddr = address(CREATE3.deployDeterministic(abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon(), initData)), salt));
+        address deployedAddr = address(CREATE3.deployDeterministic(abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon(), "")), salt));
+        if (initData.length > 0) {
+            (bool success, ) = deployedAddr.call(initData);
+            if (!success) revert InitializationFailed();
+        }
         if (expectedAddr != deployedAddr) revert DeployedAddressDifferentFromExpected();
 
         emit BeaconProxyDeployed(deployedAddr);

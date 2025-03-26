@@ -163,10 +163,12 @@ contract Utils is Script {
     }
 
     function readTopUpSourceDeployment() internal view returns (string memory) {
-        string memory dir = string.concat(vm.projectRoot(), string(abi.encodePacked("/deployments", getEnv(), "/")));
+        string memory dir = string.concat(vm.projectRoot(), string(abi.encodePacked("/deployments/", getEnv(), "/")));
         string memory chainDir = string.concat(vm.toString(block.chainid), "/");
         string memory file = string.concat(dir, chainDir, "deployments", ".json");
         string memory deployments = vm.readFile(file);
+
+        return deployments;
     }
 
     function writeDeploymentFile(string memory output) internal {
