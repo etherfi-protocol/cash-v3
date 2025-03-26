@@ -12,14 +12,13 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
         uint256 collateralAmount = 10 ether;
         deal(address(safe), collateralAmount);
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.SUPPLY_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            ETH,
-            collateralAmount
+            abi.encode(ETH, collateralAmount)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -33,14 +32,13 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
             
         uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            amountToBorrow
+            abi.encode(address(usdcScroll), amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -57,14 +55,13 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
     function test_borrow_revertsForAmountZero() public {
         uint256 amountToBorrow = 0;
             
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            amountToBorrow
+            abi.encode(address(usdcScroll), amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -77,14 +74,13 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
     function test_borrow_reverts_whenSignerIsNotAdmin() public {
         uint256 amountToBorrow = 100e6;
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            amountToBorrow
+            abi.encode(address(usdcScroll), amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(notOwnerPk, digestHash);
@@ -111,14 +107,13 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
 
         uint256 nonceBefore = aaveV3Module.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             nonceBefore, 
             address(safe), 
-            address(usdcScroll), 
-            amountToBorrow
+            abi.encode(address(usdcScroll), amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -137,14 +132,13 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
 
         uint256 nonce = aaveV3Module.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             nonce, 
             address(safe), 
-            address(usdcScroll), 
-            amountToBorrow
+            abi.encode(address(usdcScroll), amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -163,14 +157,13 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
         
         uint256 balanceBefore = address(safe).balance;
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            ETH, 
-            amountToBorrow
+            abi.encode(ETH, amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -195,14 +188,13 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
 
         uint256 nonce = aaveV3Module.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             nonce, 
             address(safe), 
-            address(usdcScroll), 
-            amountToBorrow
+            abi.encode(address(usdcScroll), amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);

@@ -14,14 +14,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         uint256 collateralAmount = 10 ether;
         deal(address(safe), collateralAmount);
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.SUPPLY_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            ETH,
-            collateralAmount
+            abi.encode(ETH, collateralAmount)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -32,14 +31,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         uint256 amountToBorrow = 100e6;
         deal(address(usdcScroll), aaveV3PoolScroll, amountToBorrow * 10);
         
-        bytes32 borrowDigestHash = keccak256(abi.encode(
+        bytes32 borrowDigestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            amountToBorrow
+            abi.encode(address(usdcScroll), amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 bv, bytes32 br, bytes32 bs) = vm.sign(owner1Pk, borrowDigestHash);
@@ -54,14 +52,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
 
         uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.REPAY_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            amountToRepay
+            abi.encode(address(usdcScroll), amountToRepay)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -77,14 +74,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         uint256 amountToRepay = 0;
         deal(address(usdcScroll), address(safe), amountToRepay);
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.REPAY_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            amountToRepay
+            abi.encode(address(usdcScroll), amountToRepay)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -99,14 +95,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         uint256 collateralAmount = 1000e6;
         deal(address(usdcScroll), address(safe), collateralAmount);
 
-        bytes32 supplyDigestHash = keccak256(abi.encode(
+        bytes32 supplyDigestHash = keccak256(abi.encodePacked(
             aaveV3Module.SUPPLY_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            collateralAmount
+            abi.encode(address(usdcScroll), collateralAmount)
         )).toEthSignedMessageHash();
 
         (uint8 sv, bytes32 sr, bytes32 ss) = vm.sign(owner1Pk, supplyDigestHash);
@@ -118,14 +113,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         uint256 amountToBorrow = 1 ether;
         deal(address(wethScroll), aaveV3PoolScroll, amountToBorrow * 10);
         
-        bytes32 borrowDigestHash = keccak256(abi.encode(
+        bytes32 borrowDigestHash = keccak256(abi.encodePacked(
             aaveV3Module.BORROW_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            ETH, 
-            amountToBorrow
+            abi.encode(ETH, amountToBorrow)
         )).toEthSignedMessageHash();
 
         (uint8 bv, bytes32 br, bytes32 bs) = vm.sign(owner1Pk, borrowDigestHash);
@@ -137,14 +131,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         uint256 amountToRepay = 0.5 ether;
         uint256 balanceBefore = address(safe).balance;
         
-        bytes32 repayDigestHash = keccak256(abi.encode(
+        bytes32 repayDigestHash = keccak256(abi.encodePacked(
             aaveV3Module.REPAY_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            ETH, 
-            amountToRepay
+            abi.encode(ETH, amountToRepay)
         )).toEthSignedMessageHash();
 
         (uint8 rv, bytes32 rr, bytes32 rs) = vm.sign(owner1Pk, repayDigestHash);
@@ -161,14 +154,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         uint256 currentBalance = 50e6;
         deal(address(usdcScroll), address(safe), currentBalance); // Not enough balance
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.REPAY_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            amountToRepay
+            abi.encode(address(usdcScroll), amountToRepay)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -200,14 +192,13 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         uint256 amountToRepay = 50e6;
         deal(address(usdcScroll), address(safe), amountToRepay);
 
-        bytes32 digestHash = keccak256(abi.encode(
+        bytes32 digestHash = keccak256(abi.encodePacked(
             aaveV3Module.REPAY_SIG(), 
             block.chainid, 
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            address(usdcScroll), 
-            amountToRepay
+            abi.encode(address(usdcScroll), amountToRepay)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);

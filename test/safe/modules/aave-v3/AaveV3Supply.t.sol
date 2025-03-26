@@ -11,7 +11,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
         uint256 amountToSupply = 100e6;
         deal(address(usdcScroll), address(safe), amountToSupply);
 
-        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), abi.encode(address(usdcScroll), amountToSupply))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -29,7 +29,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
         uint256 amountToSupply = 0;
         deal(address(usdcScroll), address(safe), amountToSupply);
 
-        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), abi.encode(address(usdcScroll), amountToSupply))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -43,7 +43,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
         uint256 amountToSupply = 1 ether;
         deal(address(safe), amountToSupply);
 
-        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), ETH, amountToSupply)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), abi.encode(ETH, amountToSupply))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -61,7 +61,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
         uint256 amountToSupply = 100e6;
         // Not providing any tokens to the safe
 
-        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), abi.encode(address(usdcScroll), amountToSupply))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -74,7 +74,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
         uint256 amountToSupply = 100e6;
         deal(address(usdcScroll), address(safe), amountToSupply);
 
-        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), aaveV3Module.getNonce(address(safe)), address(safe), abi.encode(address(usdcScroll), amountToSupply))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(notOwnerPk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -101,7 +101,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
 
         uint256 nonceBefore = aaveV3Module.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), nonceBefore, address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), nonceBefore, address(safe), abi.encode(address(usdcScroll), amountToSupply))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -119,7 +119,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
 
         uint256 nonce = aaveV3Module.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), nonce, address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), nonce, address(safe), abi.encode(address(usdcScroll), amountToSupply))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -144,7 +144,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
 
         uint256 nonce = aaveV3Module.getNonce(address(safe));
 
-        bytes32 digestHash = keccak256(abi.encode(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), nonce, address(safe), address(usdcScroll), amountToSupply)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(aaveV3Module.SUPPLY_SIG(), block.chainid, address(aaveV3Module), nonce, address(safe), abi.encode(address(usdcScroll), amountToSupply))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);

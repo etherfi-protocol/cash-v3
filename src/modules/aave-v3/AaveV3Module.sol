@@ -72,7 +72,7 @@ contract AaveV3Module is ModuleBase {
      * @custom:throws InvalidSignature If the signature is invalid
      */
     function supply(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = keccak256(abi.encode(SUPPLY_SIG, block.chainid, address(this), _useNonce(safe), safe, asset, amount)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(SUPPLY_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _supply(safe, asset, amount);
     }
@@ -90,7 +90,7 @@ contract AaveV3Module is ModuleBase {
      * @custom:throws InvalidSignature If the signature is invalid
      */
     function borrow(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = keccak256(abi.encode(BORROW_SIG, block.chainid, address(this), _useNonce(safe), safe, asset, amount)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(BORROW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _borrow(safe, asset, amount);
     }
@@ -108,7 +108,7 @@ contract AaveV3Module is ModuleBase {
      * @custom:throws InvalidSignature If the signature is invalid
      */
     function withdraw(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = keccak256(abi.encode(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, asset, amount)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _withdraw(safe, asset, amount);
     }
@@ -127,7 +127,7 @@ contract AaveV3Module is ModuleBase {
      * @custom:throws InvalidSignature If the signature is invalid
      */
     function repay(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = keccak256(abi.encode(REPAY_SIG, block.chainid, address(this), _useNonce(safe), safe, asset, amount)).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(REPAY_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _repay(safe, asset, amount);
     }
