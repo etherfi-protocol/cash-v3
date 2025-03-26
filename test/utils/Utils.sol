@@ -33,7 +33,7 @@ contract Utils is Test {
     function getChainConfig(
         string memory chainId
     ) internal view returns (ChainConfig memory) {
-        string memory file = string.concat(vm.projectRoot(), "/deployments/fixtures/fixtures.json");
+        string memory file = string.concat(vm.projectRoot(), string(abi.encodePacked("/deployments/", getEnv(), "/fixtures/fixtures.json")));
         string memory inputJson = vm.readFile(file);
 
         ChainConfig memory config;
@@ -117,9 +117,23 @@ contract Utils is Test {
     }
 
     function readDeploymentFile() internal view returns (string memory) {
-        string memory dir = string.concat(vm.projectRoot(), "/deployments/");
+        string memory dir = string.concat(vm.projectRoot(), string(abi.encodePacked("/deployments/", getEnv(), "/")));
         string memory chainDir = string.concat(vm.toString(block.chainid), "/");
         string memory file = string.concat("deployments", ".json");
         return vm.readFile(string.concat(dir, chainDir, file));
+    }
+
+    function getEnv() internal view returns (string memory) {
+        try vm.envString("ENV") returns (string memory env) {
+            if (bytes(env).length == 0) env = "mainnet";
+            if (!isEqualString(env, "mainnet") && !isEqualString(env, "dev")) revert ("ENV can only be \"mainnet\" or \"dev\"");
+            return env;
+        } catch {
+            return "mainnet";
+        }
+    }
+
+    function isEqualString(string memory a, string memory b) internal pure returns (bool) {
+        return keccak256(bytes(a)) == keccak256(bytes(b));
     }
 }

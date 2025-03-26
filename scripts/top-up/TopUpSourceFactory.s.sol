@@ -19,13 +19,7 @@ contract DeployTopUpSourceFactory is Utils {
         address owner = 0x8D5AAc5d3d5cda4c404fA7ee31B0822B648Bb150;
 
         vm.startBroadcast();
-
-        string memory dir = string.concat(vm.projectRoot(), "/deployments/");
-        string memory chainDir = string.concat(vm.toString(block.chainid), "/");
-        string memory file = string.concat(dir, chainDir, "deployments", ".json");
-
-        if (!vm.exists(file)) revert ("Deployment file not found");
-        string memory deployments = vm.readFile(file);
+        string memory deployments = readTopUpSourceDeployment();
 
         roleRegistry = RoleRegistry(stdJson.readAddress(
             deployments,

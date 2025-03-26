@@ -14,7 +14,7 @@ contract DeployTopUpSource is Utils {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        string memory deployments = readDeploymentFile();
+        string memory deployments = readTopUpSourceDeployment();
 
         topUpSourceFactory = TopUpFactory(payable(stdJson.readAddress(
             deployments,

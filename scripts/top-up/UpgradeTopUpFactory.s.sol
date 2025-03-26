@@ -13,7 +13,7 @@ contract UpgradeTopUpFactory is Utils {
 
         vm.startBroadcast(deployerPrivateKey);  
 
-        string memory deployments = readDeploymentFile();
+        string memory deployments = readTopUpSourceDeployment();
 
         TopUpFactory factoryImpl = new TopUpFactory();
 

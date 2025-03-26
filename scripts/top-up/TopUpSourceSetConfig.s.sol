@@ -27,13 +27,8 @@ contract TopUpSourceSetConfig is Utils {
         // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
         vm.startBroadcast();
-        string memory chainId = vm.toString(block.chainid);
-        string memory dir = string.concat(vm.projectRoot(), "/deployments/");
-        string memory chainDir = string.concat(vm.toString(block.chainid), "/");
-        string memory file = string.concat(dir, chainDir, "deployments", ".json");
-
-        if (!vm.exists(file)) revert ("Deployment file not found");
-        string memory deployments = vm.readFile(file);
+        
+        string memory deployments = readTopUpSourceDeployment();
 
         topUpFactory = TopUpFactory(
             payable(
