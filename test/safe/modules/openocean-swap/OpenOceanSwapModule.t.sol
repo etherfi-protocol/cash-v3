@@ -7,6 +7,7 @@ import { Test } from "forge-std/Test.sol";
 
 import { OpenOceanSwapModule, ModuleBase } from "../../../../src/modules/openocean-swap/OpenOceanSwapModule.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
+import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 
 contract OpenOceanSwapModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -52,16 +53,18 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         uint256 balanceBefore = weETHScroll.balanceOf(address(safe));
 
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
 
+        uint256 nonceAfter = safe.nonce();
         uint256 balanceAfter = weETHScroll.balanceOf(address(safe));
 
+        assertEq(nonceBefore + 1, nonceAfter);
         assertGt(balanceAfter, balanceBefore);
     }
 
@@ -83,13 +86,13 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         uint256 balanceBefore = address(safe).balance;
 
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
 
         uint256 balanceAfter = address(safe).balance;
 
@@ -114,13 +117,13 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
 
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
 
@@ -137,12 +140,12 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         vm.expectRevert(OpenOceanSwapModule.SwappingToSameAsset.selector);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
     }
 
     function test_swap_revertsWhenInsufficientERC20Balance() public {
@@ -163,12 +166,12 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         // Not providing any balance to the safe
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         vm.expectRevert(OpenOceanSwapModule.InsufficientBalanceOnSafe.selector);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
     }
 
     function test_swap_revertsWhenInsufficientNativeBalance() public {
@@ -189,12 +192,12 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         // Not providing any ETH to the safe
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         vm.expectRevert(OpenOceanSwapModule.InsufficientBalanceOnSafe.selector);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
     }
 
     function test_swap_revertsWhenZeroMinimumOutput() public {
@@ -215,12 +218,12 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
     }
 
     function test_swap_revertsWithInvalidSignature() public {
@@ -241,13 +244,13 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
         // Create signature with wrong parameters (different amount)
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount + 1, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount + 1, minToAssetAmount, guaranteedAmount, swapData);
 
-        vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        vm.expectRevert(OpenOceanSwapModule.InvalidSignatures.selector);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
     }
 
     function test_swap_revertsWhenNonAdminSigner() public {
@@ -268,14 +271,16 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         // Try with non-admin signer
         address nonAdmin = makeAddr("nonAdmin");
-        vm.expectRevert(ModuleBase.OnlySafeAdmin.selector);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, nonAdmin, signature);
+        owners[0] = nonAdmin;
+
+        vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.InvalidSigner.selector, 0));
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
     }
 
     function test_swap_correctlyIncrementsNonce() public {
@@ -296,24 +301,24 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount * 2);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
 
-        uint256 nonceAfter = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceAfter = safe.nonce();
         assertEq(nonceAfter, nonceBefore + 1);
 
         // Try to reuse the same signature (should fail)
-        vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        vm.expectRevert(OpenOceanSwapModule.InvalidSignatures.selector);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
 
         // Create a new signature with updated nonce and try again
-        bytes memory newSignature = _createSwapSignature(nonceAfter, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, newSignature);
+        (address[] memory owners2, bytes[] memory signatures2) = _createSwapSignatures(nonceAfter, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners2, signatures2);
 
-        uint256 nonceFinal = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceFinal = safe.nonce();
         assertEq(nonceFinal, nonceAfter + 1);
     }
 
@@ -336,12 +341,12 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         vm.expectRevert();
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
     }
 
     function test_swap_reverts_whenUserCashPositionNotHealthy() public {
@@ -368,16 +373,16 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         deal(address(usdcScroll), address(safe), fromAssetAmount);
         
-        uint256 nonceBefore = openOceanSwapModule.getNonce(address(safe));
+        uint256 nonceBefore = safe.nonce();
 
-        bytes memory signature = _createSwapSignature(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData);
 
         vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
-        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owner1, signature);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData, owners, signatures);
     }
 
     
-    function _createSwapSignature(
+    function _createSwapSignatures(
         uint256 nonceBefore, 
         address fromAsset, 
         address toAsset, 
@@ -385,7 +390,7 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
         uint256 minToAssetAmount, 
         uint256 guaranteedAmount, 
         bytes memory swapData
-    ) internal view returns (bytes memory) {
+    ) internal view returns (address[] memory, bytes[] memory) {
         bytes32 digestHash = keccak256(abi.encodePacked(
             openOceanSwapModule.SWAP_SIG(), 
             block.chainid, 
@@ -395,10 +400,20 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
             abi.encode(fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, swapData)
         )).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature1 = abi.encodePacked(r1, s1, v1);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+        bytes memory signature2 = abi.encodePacked(r2, s2, v2);
 
-        return signature;
+        address[] memory owners = new address[](2);
+        owners[0] = owner1;
+        owners[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = signature1;
+        signatures[1] = signature2;
+
+        return (owners, signatures);
     }
 
     function getQuoteOpenOcean(

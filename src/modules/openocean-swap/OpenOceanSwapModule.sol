@@ -29,6 +29,8 @@ contract OpenOceanSwapModule is ModuleBase {
     error SwappingToSameAsset();
     /// @notice Thrown when swap returns less than the minimum expected amount
     error OutputLessThanMinAmount();
+    /// @notice Error for Invalid Owner quorum signatures
+    error InvalidSignatures();
 
     /**
      * @notice Initializes the OpenOceanSwapModule
@@ -48,8 +50,8 @@ contract OpenOceanSwapModule is ModuleBase {
      * @param minToAssetAmount Minimum amount of the destination token to receive
      * @param guaranteedAmount Guaranteed amount as per OpenOcean's protocol
      * @param data Additional data needed for the swap, encoded as (bytes4, address, CallDescription[])
-     * @param signer Address of the safe admin authorizing this swap
-     * @param signature Signature from the signer authorizing this transaction
+     * @param signers Addresses of the safe owners authorizing this swap
+     * @param signatures Signatures from the signers authorizing this transaction
      * @dev Can only be called by an EtherFi safe, and requires signature from a safe admin
      * @custom:throws InsufficientBalanceOnSafe If safe doesn't have enough source tokens
      * @custom:throws SwappingToSameAsset If trying to swap a token for itself
@@ -63,12 +65,39 @@ contract OpenOceanSwapModule is ModuleBase {
         uint256 minToAssetAmount, 
         uint256 guaranteedAmount, 
         bytes calldata data, 
-        address signer, 
-        bytes calldata signature
-    ) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = _createDigest(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
-        _verifyAdminSig(digestHash, signer, signature);
+        address[] calldata signers, 
+        bytes[] calldata signatures
+    ) external onlyEtherFiSafe(safe) {
+        _checkSignatures(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data, signers, signatures);
         _swap(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
+    }
+
+    /**
+     * @notice Checks if the owner signatures are valid
+     * @param safe Address of the EtherFi safe to execute the swap from
+     * @param fromAsset Address of the token being sold (or ETH address for native swaps)
+     * @param toAsset Address of the token being purchased (or ETH address for native swaps)
+     * @param fromAssetAmount Amount of the source token to swap
+     * @param minToAssetAmount Minimum amount of the destination token to receive
+     * @param guaranteedAmount Guaranteed amount as per OpenOcean's protocol
+     * @param data Additional data needed for the swap, encoded as (bytes4, address, CallDescription[])
+     * @param signers Addresses of the safe owners authorizing this swap
+     * @param signatures Signatures from the signers authorizing this transaction
+     * @custom:throws InvalidSignatures if the signatures are invalid
+     */
+    function _checkSignatures(
+        address safe, 
+        address fromAsset, 
+        address toAsset, 
+        uint256 fromAssetAmount, 
+        uint256 minToAssetAmount, 
+        uint256 guaranteedAmount, 
+        bytes calldata data, 
+        address[] calldata signers, 
+        bytes[] calldata signatures
+    ) internal {
+        bytes32 digestHash = _createDigest(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 
     /**
@@ -96,7 +125,7 @@ contract OpenOceanSwapModule is ModuleBase {
             SWAP_SIG, 
             block.chainid, 
             address(this), 
-            _useNonce(safe), 
+            IEtherFiSafe(safe).useNonce(), 
             safe, 
             abi.encode(fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data)
         )).toEthSignedMessageHash();
