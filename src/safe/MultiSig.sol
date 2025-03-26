@@ -134,13 +134,13 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @custom:throws OwnersLessThanThreshold If owners would be less than threshold
      * @custom:throws InvalidSignatures If signature verification fails
      */
-    function configureOwners(address[] calldata owners, bool[] calldata shouldAdd, address[] calldata signers, bytes[] calldata signatures) external {
+    function configureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external {
         _currentOwner();
-        bytes32 structHash = keccak256(abi.encode(CONFIGURE_OWNERS_TYPEHASH, keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), _useNonce()));
+        bytes32 structHash = keccak256(abi.encode(CONFIGURE_OWNERS_TYPEHASH, keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), threshold, _useNonce()));
 
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
-        _configureOwners(owners, shouldAdd);
+        _configureOwners(owners, shouldAdd, threshold);
         _configureAdmin(owners, shouldAdd);
     }
 
@@ -162,18 +162,23 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @notice Configures safe owners by adding or removing them
      * @param _owners Array of owner addresses to configure
      * @param _shouldAdd Array indicating whether to add (true) or remove (false) each owner
+     * @param _threshold New threshold value
      * @dev Cannot remove all owners or reduce owners below threshold
      * @custom:throws InvalidInput If owners array is empty
+     * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
      * @custom:throws ArrayLengthMismatch If owners and shouldAdd arrays have different lengths
      * @custom:throws InvalidAddress(index) If any owner address is zero
      * @custom:throws DuplicateElementFound If owner addresses are repeated int the array
      * @custom:throws AllOwnersRemoved If operation would remove all owners
      * @custom:throws OwnersLessThanThreshold If operation would reduce owners below threshold
      */
-    function _configureOwners(address[] calldata _owners, bool[] calldata _shouldAdd) internal {
+    function _configureOwners(address[] calldata _owners, bool[] calldata _shouldAdd, uint8 _threshold) internal {
         MultiSigStorage storage $ = _getMultiSigStorage();
 
+        if (_threshold == 0) revert InvalidThreshold();
+
         EnumerableAddressWhitelistLib.configure($.owners, _owners, _shouldAdd);
+        $.threshold = _threshold;
 
         if ($.owners.length() == 0) revert AllOwnersRemoved();
         if ($.owners.length() < $.threshold) revert OwnersLessThanThreshold();

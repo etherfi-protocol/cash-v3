@@ -441,8 +441,8 @@ contract SafeTestSetup is Utils {
         safe.cancelNonce(signers, signatures);
     }
 
-    function _configureOwners(address[] memory owners, bool[] memory shouldAdd) internal {
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
+    function _configureOwners(address[] memory owners, bool[] memory shouldAdd, uint8 newThreshold) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), newThreshold, safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -457,7 +457,7 @@ contract SafeTestSetup is Utils {
         signers[0] = owner1;
         signers[1] = owner2;
 
-        safe.configureOwners(owners, shouldAdd, signers, signatures);
+        safe.configureOwners(owners, shouldAdd, newThreshold, signers, signatures);
     }
 
     function _setThreshold(uint8 newThreshold) internal {

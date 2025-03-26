@@ -45,9 +45,9 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
 
     /**
      * @notice TypeHash for owner configuration with EIP-712 signatures
-     * @dev keccak256("ConfigureOwners(address[] owners,bool[] shouldAdd,uint256 nonce)")
+     * @dev keccak256("ConfigureOwners(address[] owners,bool[] shouldAdd,uint8 threshold,uint256 nonce)")
      */
-    bytes32 public constant CONFIGURE_OWNERS_TYPEHASH = 0x93a5e8776e97535ceccfb399fc4015baa8aa11c3e58454ef681f9e144c718f92;
+    bytes32 public constant CONFIGURE_OWNERS_TYPEHASH = 0x7ae209fa0e1cd2808f119c4a89c36952d3ac8521e0be463a9bdab5449b4ee419;
 
     /**
      * @notice TypeHash for admin configuration with EIP-712 signatures

@@ -62,7 +62,7 @@ contract MultiSigTest is SafeTestSetup {
         bool[] memory shouldAdd = new bool[](1);
         shouldAdd[0] = true;
 
-        _configureOwners(owners, shouldAdd);
+        _configureOwners(owners, shouldAdd, threshold);
         assertTrue(safe.isOwner(newOwner));
 
         assertTrue(roleRegistry.isSafeAdmin(address(safe), newOwner));
@@ -75,7 +75,7 @@ contract MultiSigTest is SafeTestSetup {
         bool[] memory shouldAdd = new bool[](1);
         shouldAdd[0] = false;
 
-        _configureOwners(owners, shouldAdd);
+        _configureOwners(owners, shouldAdd, threshold);
         assertFalse(safe.isOwner(owner3));
         assertFalse(roleRegistry.isSafeAdmin(address(safe), owner3));
     }
@@ -99,7 +99,7 @@ contract MultiSigTest is SafeTestSetup {
         shouldAdd[0] = shouldAddFlags[0];
         shouldAdd[1] = shouldAddFlags[1];
 
-        _configureOwners(owners, shouldAdd);
+        _configureOwners(owners, shouldAdd, threshold);
 
         assertEq(safe.isOwner(owners[0]), shouldAdd[0]);
         assertEq(safe.isOwner(owners[1]), shouldAdd[1]);
@@ -109,7 +109,7 @@ contract MultiSigTest is SafeTestSetup {
         address[] memory owners = new address[](0);
         bool[] memory shouldAdd = new bool[](0);
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), threshold, safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -125,7 +125,7 @@ contract MultiSigTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(EtherFiSafeErrors.InvalidInput.selector);
-        safe.configureOwners(owners, shouldAdd, signers, signatures);
+        safe.configureOwners(owners, shouldAdd, threshold, signers, signatures);
     }
 
     function test_configureOwners_reverts_whenAllOwnersRemoved() public {
@@ -139,7 +139,7 @@ contract MultiSigTest is SafeTestSetup {
         shouldAdd[1] = false;
         shouldAdd[2] = false;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), threshold, safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -155,7 +155,7 @@ contract MultiSigTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(EtherFiSafeErrors.AllOwnersRemoved.selector);
-        safe.configureOwners(owners, shouldAdd, signers, signatures);
+        safe.configureOwners(owners, shouldAdd, threshold, signers, signatures);
     }
 
     function test_configureOwners_reverts_whenOwnersLessThanThreshold() public {
@@ -167,7 +167,7 @@ contract MultiSigTest is SafeTestSetup {
         shouldAdd[0] = false;
         shouldAdd[1] = false;
 
-        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), safe.nonce()));
+        bytes32 structHash = keccak256(abi.encode(safe.CONFIGURE_OWNERS_TYPEHASH(), keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), threshold, safe.nonce()));
 
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
@@ -183,7 +183,7 @@ contract MultiSigTest is SafeTestSetup {
         signers[1] = owner2;
 
         vm.expectRevert(EtherFiSafeErrors.OwnersLessThanThreshold.selector);
-        safe.configureOwners(owners, shouldAdd, signers, signatures);
+        safe.configureOwners(owners, shouldAdd, threshold, signers, signatures);
     }
 
     function test_checkSignatures_verifyValidSignatures() public view {
