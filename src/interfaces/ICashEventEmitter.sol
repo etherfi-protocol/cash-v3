@@ -34,12 +34,14 @@ interface ICashEventEmitter {
 
     /**
      * @notice Emits an event for a spending transaction
+     * @param safe Address of the safe
+     * @param txId Transaction identifier
      * @param token Address of the token spent
      * @param amount Amount of token spent
      * @param amountInUsd USD value of the amount spent
      * @param mode Mode used for the spending (Debit or Credit)
      */
-    function emitSpend(address safe, address token, uint256 amount, uint256 amountInUsd, Mode mode) external;
+    function emitSpend(address safe, bytes32 txId, address token, uint256 amount, uint256 amountInUsd, Mode mode) external;
 
     /**
      * @notice Emits an event when the mode is changed

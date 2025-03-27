@@ -106,12 +106,13 @@ contract CashEventEmitter is UpgradeableProxy {
     /**
      * @notice Emitted when tokens are spent from a safe
      * @param safe Address of the safe spending the tokens
+     * @param txId Transaction identifier
      * @param token Address of the token being spent
      * @param amount Amount of tokens being spent
      * @param amountInUsd USD value of the tokens being spent
      * @param mode Operational mode in which the spending occurs
      */
-    event Spend(address indexed safe, address indexed token, uint256 amount, uint256 amountInUsd, Mode mode);
+    event Spend(address indexed safe, bytes32 indexed txId, address indexed token, uint256 amount, uint256 amountInUsd, Mode mode);
     
     /**
      * @notice Emitted when cashback is calculated and potentially distributed
@@ -243,13 +244,14 @@ contract CashEventEmitter is UpgradeableProxy {
      * @notice Emits the Spend event
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
+     * @param txId Transaction identifier
      * @param token Address of the token
      * @param amount Amount of tokens
      * @param amountInUsd USD value
      * @param mode Operational mode
      */
-    function emitSpend(address safe, address token, uint256 amount, uint256 amountInUsd, Mode mode) external onlyCashModule {
-        emit Spend(safe, token, amount, amountInUsd, mode);
+    function emitSpend(address safe, bytes32 txId, address token, uint256 amount, uint256 amountInUsd, Mode mode) external onlyCashModule {
+        emit Spend(safe, txId, token, amount, amountInUsd, mode);
     }
 
     /**

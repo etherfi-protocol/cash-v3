@@ -301,7 +301,7 @@ contract CashModuleCore is CashModuleStorageContract {
         $$.spendingLimit.spend(amountInUsd);
 
         _retrievePendingCashback($, safe, spender);
-        _spend($, debtManager, safe, spender, token, amountInUsd, amount, shouldReceiveCashback);
+        _spend($, debtManager, safe, txId, spender, token, amountInUsd, amount, shouldReceiveCashback);
     }
 
     /**
@@ -339,12 +339,13 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param $ Storage reference to the CashModuleStorage
      * @param debtManager Reference to the debt manager contract
      * @param safe Address of the EtherFi Safe
+     * @param txId Transaction identifier
      * @param token Address of the token to spend
      * @param amount Amount of tokens to spend
      * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
      * @custom:throws BorrowingsExceedMaxBorrowAfterSpending if spending would exceed borrowing limits
      */
-    function _spend(CashModuleStorage storage $, IDebtManager debtManager, address safe, address spender, address token, uint256 amountInUsd, uint256 amount, bool shouldReceiveCashback) internal {
+    function _spend(CashModuleStorage storage $, IDebtManager debtManager, address safe, bytes32 txId, address spender, address token, uint256 amountInUsd, uint256 amount, bool shouldReceiveCashback) internal {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         address[] memory to = new address[](1);
         bytes[] memory data = new bytes[](1);
@@ -379,7 +380,7 @@ contract CashModuleCore is CashModuleStorageContract {
         }
 
         if (shouldReceiveCashback) _cashback($, safe, spender, amountInUsd);
-        $.cashEventEmitter.emitSpend(safe, token, amount, amountInUsd, $$.mode);
+        $.cashEventEmitter.emitSpend(safe, txId, token, amount, amountInUsd, $$.mode);
     }
 
     /**

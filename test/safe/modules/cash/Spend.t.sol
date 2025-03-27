@@ -26,7 +26,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Spend(address(safe), address(usdcScroll), amount, amount, Mode.Debit);
+        emit CashEventEmitter.Spend(address(safe), txId, address(usdcScroll), amount, amount, Mode.Debit);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount, true);
 
         // Verify transaction was cleared
@@ -51,7 +51,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Spend(address(safe), address(usdcScroll), amount, amount, Mode.Credit);
+        emit CashEventEmitter.Spend(address(safe), txId, address(usdcScroll), amount, amount, Mode.Credit);
         cashModule.spend(address(safe), address(0), txId, address(usdcScroll), amount, true);
 
         // Verify transaction was cleared
