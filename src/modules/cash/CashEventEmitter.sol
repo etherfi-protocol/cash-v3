@@ -158,7 +158,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param oldSplitInBps Previous split percentage in basis points
      * @param newSplitInBps New split percentage in basis points
      */
-    event CashbackSplitToSafeBpsSet(address safe, uint256 oldSplitInBps, uint256 newSplitInBps);
+    event CashbackSplitToSafeBpsSet(address indexed safe, uint256 oldSplitInBps, uint256 newSplitInBps);
     
     /**
      * @notice Emitted when system delays are set
