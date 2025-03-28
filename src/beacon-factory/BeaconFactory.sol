@@ -32,7 +32,7 @@ contract BeaconFactory is UpgradeableProxy {
     /// @notice Emitted when a new beacon proxy is deployed
     /// @param salt The salt for deterministic deployment
     /// @param deployed The address of the newly deployed proxy
-    event BeaconProxyDeployed(bytes32 salt, address deployed);
+    event BeaconProxyDeployed(bytes32 salt, address indexed deployed);
 
     /// @notice Thrown when the deployed address doesn't match the predicted address
     error DeployedAddressDifferentFromExpected();
