@@ -217,7 +217,8 @@ contract SafeTestSetup is Utils {
             maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: true,
-            isStableToken: false
+            isStableToken: false,
+            isBaseTokenBtc: false
         });
         
         PriceProvider.Config memory ethConfig = PriceProvider.Config({
@@ -228,7 +229,8 @@ contract SafeTestSetup is Utils {
             maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: false
+            isStableToken: false,
+            isBaseTokenBtc: false
         });
         
         PriceProvider.Config memory usdcConfig = PriceProvider.Config({
@@ -239,7 +241,8 @@ contract SafeTestSetup is Utils {
             maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: true
+            isStableToken: true,
+            isBaseTokenBtc: false
         });
         
         PriceProvider.Config memory scrollConfig = PriceProvider.Config({
@@ -250,7 +253,8 @@ contract SafeTestSetup is Utils {
             maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: false
+            isStableToken: false,
+            isBaseTokenBtc: false
         });
 
         address[] memory initialTokens = new address[](4);

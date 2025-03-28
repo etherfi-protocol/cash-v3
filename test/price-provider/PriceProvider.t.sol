@@ -6,6 +6,7 @@ import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol"
 
 import {PriceProvider} from "../../src/oracle/PriceProvider.sol";
 import {IAggregatorV3} from "../../src/interfaces/IAggregatorV3.sol";
+import {ILayerZeroTeller, AccountantWithRateProviders} from "../../src/interfaces/ILayerZeroTeller.sol";
 import {IWeETH} from "../../src/interfaces/IWeETH.sol";
 import {UUPSProxy} from "../../src/UUPSProxy.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
@@ -25,14 +26,18 @@ contract PriceProviderTest is Test {
     address matic = 0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0;
 
     address weETHOracle = 0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee;
-    address btcEthOracle = 0xdeb288F737066589598e9214E782fa5A8eD689e8;
+    address btcUsdOracle = 0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c;
     address ethUsdOracle = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
     address maticUsdOracle = 0x7bAC85A8a13A4BcD8abb3eB7d6b4d632c5a57676;
+
+    address liquidBtc = 0x5f46d540b6eD704C3c8789105F30E075AA900726;
+    ILayerZeroTeller public liquidBtcTeller = ILayerZeroTeller(0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353);
 
     PriceProvider.Config weETHConfig;
     PriceProvider.Config btcConfig;
     PriceProvider.Config ethConfig;
     PriceProvider.Config maticConfig;
+    PriceProvider.Config liquidBtcConfig;
     function setUp() public {
         string memory mainnet = vm.envString("MAINNET_RPC");
         if (bytes(mainnet).length == 0) mainnet = "https://rpc.ankr.com/eth";
@@ -55,18 +60,20 @@ contract PriceProviderTest is Test {
             maxStaleness: 0,
             dataType: PriceProvider.ReturnType.Uint256,
             isBaseTokenEth: true,
-            isStableToken: false
+            isStableToken: false,
+            isBaseTokenBtc: false
         });
 
         btcConfig = PriceProvider.Config({
-            oracle: btcEthOracle,
+            oracle: btcUsdOracle,
             priceFunctionCalldata: hex"",
             isChainlinkType: true,
-            oraclePriceDecimals: IAggregatorV3(btcEthOracle).decimals(),
+            oraclePriceDecimals: IAggregatorV3(btcUsdOracle).decimals(),
             maxStaleness: 1 days,
             dataType: PriceProvider.ReturnType.Int256,
-            isBaseTokenEth: true,
-            isStableToken: false
+            isBaseTokenEth: false,
+            isStableToken: false,
+            isBaseTokenBtc: false
         });
 
         ethConfig = PriceProvider.Config({
@@ -77,7 +84,8 @@ contract PriceProviderTest is Test {
             maxStaleness: 1 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: false
+            isStableToken: false,
+            isBaseTokenBtc: false
         });
 
         maticConfig = PriceProvider.Config({
@@ -88,18 +96,35 @@ contract PriceProviderTest is Test {
             maxStaleness: 1 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: false
+            isStableToken: false,
+            isBaseTokenBtc: false
         });
 
-        address[] memory initialTokens = new address[](3);
+        AccountantWithRateProviders liquidBtcAccountant = liquidBtcTeller.accountant();
+
+        liquidBtcConfig = PriceProvider.Config({
+            oracle: address(liquidBtcAccountant),
+            priceFunctionCalldata: abi.encodeWithSelector(AccountantWithRateProviders.getRate.selector),
+            isChainlinkType: false,
+            oraclePriceDecimals: liquidBtcAccountant.decimals(),
+            maxStaleness: 2 days,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: false,
+            isBaseTokenBtc: true
+        });
+
+        address[] memory initialTokens = new address[](4);
         initialTokens[0] = weETH;
         initialTokens[1] = btc;
         initialTokens[2] = eth;
+        initialTokens[3] = liquidBtc;
 
-        PriceProvider.Config[] memory initialTokensConfig = new PriceProvider.Config[](3);
+        PriceProvider.Config[] memory initialTokensConfig = new PriceProvider.Config[](4);
         initialTokensConfig[0] = weETHConfig;
         initialTokensConfig[1] = btcConfig;
         initialTokensConfig[2] = ethConfig;
+        initialTokensConfig[3] = liquidBtcConfig;
 
         priceProvider = PriceProvider(address(new UUPSProxy(
             address(new PriceProvider()), 
@@ -114,6 +139,31 @@ contract PriceProviderTest is Test {
         roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
 
         vm.stopPrank();
+    }
+
+    function test_price_calculatesCorrectly_forLiquidBtc() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = priceProvider.WBTC_USD_ORACLE_SELECTOR();
+
+        PriceProvider.Config[] memory config = new PriceProvider.Config[](1);
+        config[0] = btcConfig;
+
+        vm.prank(owner);
+        priceProvider.setTokenConfig(tokens, config);
+
+        uint256 priceOfLiquidBtc = liquidBtcTeller.accountant().getRate();
+        uint256 decimalsLiquidBtc = liquidBtcTeller.accountant().decimals();
+        (, int256 ans, , , ) = IAggregatorV3(btcUsdOracle).latestRoundData();
+        uint256 oracleDecimals = IAggregatorV3(btcUsdOracle).decimals();
+        uint256 price = (priceOfLiquidBtc * uint256(ans) * 10 ** priceProvider.decimals()) / 10 ** (decimalsLiquidBtc + oracleDecimals);
+
+        vm.mockCall(
+            address(priceProvider), 
+            abi.encodeWithSelector(PriceProvider.price.selector, priceProvider.WBTC_USD_ORACLE_SELECTOR()), 
+            abi.encode(IAggregatorV3(btcUsdOracle).latestAnswer())
+        );
+
+        assertEq(priceProvider.price(liquidBtc), price);
     }
 
     function test_price_calculatesCorrectly_forExchangeRate() public view {
@@ -170,16 +220,11 @@ contract PriceProviderTest is Test {
         vm.stopPrank();
     }
 
-    function test_price_calculatesCorrectly_forBtcWithEthAsBase() public view {
-        (, int256 btcAns, , , ) = IAggregatorV3(btcEthOracle).latestRoundData();
-        uint256 btcOracleDecimals = IAggregatorV3(btcEthOracle).decimals();
+    function test_price_calculatesCorrectly_forBtc() public view {
+        (, int256 btcAns, , , ) = IAggregatorV3(btcUsdOracle).latestRoundData();
+        uint256 btcOracleDecimals = IAggregatorV3(btcUsdOracle).decimals();
 
-        (, int256 ethAns, , , ) = IAggregatorV3(ethUsdOracle).latestRoundData();
-        uint256 ethOracleDecimals = IAggregatorV3(ethUsdOracle).decimals();
-
-        uint256 finalPrice = 
-            (uint256(btcAns) * uint256(ethAns) * 10 ** priceProvider.decimals()) /
-            10 ** (btcOracleDecimals + ethOracleDecimals);
+        uint256 finalPrice = (uint256(btcAns) * 10 ** priceProvider.decimals()) / 10 ** btcOracleDecimals;
         assertEq(priceProvider.price(btc), finalPrice);
     }
 

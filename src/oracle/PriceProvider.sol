@@ -46,6 +46,8 @@ contract PriceProvider is UpgradeableProxy {
         bool isBaseTokenEth;
         /// @notice Whether the token is a stablecoin (special price handling)
         bool isStableToken;
+        /// @notice Whether the price is denominated in BTC (needs conversion to USD)
+        bool isBaseTokenBtc;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.PriceProvider
@@ -79,6 +81,12 @@ contract PriceProvider is UpgradeableProxy {
      * @dev Similar to ETH_USD_ORACLE_SELECTOR but for wrapped ETH
      */
     address public constant WETH_USD_ORACLE_SELECTOR = 0x5300000000000000000000000000000000000004;
+    
+    /**
+     * @notice Special address used to request WBTC/USD price
+     * @dev Similar to ETH_USD_ORACLE_SELECTOR but for wrapped BTC
+     */
+    address public constant WBTC_USD_ORACLE_SELECTOR = 0x3C1BCa5a656e69edCD0D4E36BEbb3FcDAcA60Cf1;
     
     /**
      * @notice Decimal precision used for all price outputs from this contract
@@ -198,12 +206,21 @@ contract PriceProvider is UpgradeableProxy {
             (uint256 ethUsdPrice, uint8 ethPriceDecimals) = _getEthUsdPrice();
             return ethUsdPrice.mulDiv(10 ** decimals(), 10 ** ethPriceDecimals, Math.Rounding.Floor);
         }
+        if (token == WBTC_USD_ORACLE_SELECTOR) {
+            (uint256 btcUsdPrice, uint8 btcPriceDecimals) = _getBtcUsdPrice();
+            return btcUsdPrice.mulDiv(10 ** decimals(), 10 ** btcPriceDecimals, Math.Rounding.Floor);
+        }
 
-        (uint256 tokenPrice, bool isBaseEth, uint8 priceDecimals) = _getPrice(token);
+        (uint256 tokenPrice, bool isBaseEth, bool isBaseBtc, uint8 priceDecimals) = _getPrice(token);
 
         if (isBaseEth) {
             (uint256 ethUsdPrice, uint8 ethPriceDecimals) = _getEthUsdPrice();
             return tokenPrice.mulDiv(ethUsdPrice * 10 ** decimals(), 10 ** (ethPriceDecimals + priceDecimals), Math.Rounding.Floor);
+        }
+
+        if (isBaseBtc) {
+            (uint256 btcUsdPrice, uint8 btcPriceDecimals) = _getBtcUsdPrice();
+            return tokenPrice.mulDiv(btcUsdPrice * 10 ** decimals(), 10 ** (btcPriceDecimals + priceDecimals), Math.Rounding.Floor);
         }
 
         return tokenPrice.mulDiv(10 ** decimals(), 10 ** priceDecimals, Math.Rounding.Floor);
@@ -215,7 +232,17 @@ contract PriceProvider is UpgradeableProxy {
      * @return Price of ETH in USD and the decimal precision of that price
      */
     function _getEthUsdPrice() internal view returns (uint256, uint8) {
-        (uint256 tokenPrice, , uint8 priceDecimals) = _getPrice(ETH_USD_ORACLE_SELECTOR);
+        (uint256 tokenPrice, , , uint8 priceDecimals) = _getPrice(ETH_USD_ORACLE_SELECTOR);
+        return (tokenPrice, priceDecimals);
+    }
+
+    /**
+     * @notice Internal function to get the ETH/USD price
+     * @dev Uses the configured ETH/USD oracle
+     * @return Price of ETH in USD and the decimal precision of that price
+     */
+    function _getBtcUsdPrice() internal view returns (uint256, uint8) {
+        (uint256 tokenPrice, , , uint8 priceDecimals) = _getPrice(WBTC_USD_ORACLE_SELECTOR);
         return (tokenPrice, priceDecimals);
     }
 
@@ -238,7 +265,7 @@ contract PriceProvider is UpgradeableProxy {
      * @custom:throws OraclePriceTooOld If the oracle data is stale
      * @custom:throws StablePriceCannotBeZero If a stablecoin price resolves to zero
      */
-    function _getPrice(address token) internal view returns (uint256, bool, uint8) {
+    function _getPrice(address token) internal view returns (uint256, bool, bool, uint8) {
         Config memory config = _getPriceProviderStorage().tokenConfig[token];
         if (config.oracle == address(0)) revert TokenOracleNotSet();
         uint256 tokenPrice;
@@ -248,8 +275,8 @@ contract PriceProvider is UpgradeableProxy {
             if (block.timestamp > updatedAt + config.maxStaleness) revert OraclePriceTooOld();
             if (priceInt256 <= 0) revert InvalidPrice();
             tokenPrice = uint256(priceInt256);
-            if (config.isStableToken) return (_getStablePrice(tokenPrice, config.oraclePriceDecimals), false, decimals());
-            return (tokenPrice, config.isBaseTokenEth, config.oraclePriceDecimals);
+            if (config.isStableToken) return (_getStablePrice(tokenPrice, config.oraclePriceDecimals), false, false, decimals());
+            return (tokenPrice, config.isBaseTokenEth, config.isBaseTokenBtc, config.oraclePriceDecimals);
         }
 
         (bool success, bytes memory data) = address(config.oracle).staticcall(config.priceFunctionCalldata);
@@ -261,8 +288,8 @@ contract PriceProvider is UpgradeableProxy {
             tokenPrice = uint256(priceInt256);
         } else tokenPrice = abi.decode(data, (uint256));
 
-        if (config.isStableToken) return (_getStablePrice(tokenPrice, config.oraclePriceDecimals), false, decimals());
-        return (tokenPrice, config.isBaseTokenEth, config.oraclePriceDecimals);
+        if (config.isStableToken) return (_getStablePrice(tokenPrice, config.oraclePriceDecimals), false, false, decimals());
+        return (tokenPrice, config.isBaseTokenEth, config.isBaseTokenBtc, config.oraclePriceDecimals);
     }
 
     /**

@@ -148,7 +148,8 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
             maxStaleness: 1 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: true
+            isStableToken: true,
+            isBaseTokenBtc: false
         });
         
         priceProvider.setTokenConfig(tokens, configs);

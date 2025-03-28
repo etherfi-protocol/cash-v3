@@ -219,7 +219,8 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
             maxStaleness: type(uint24).max,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: true
+            isStableToken: true,
+            isBaseTokenBtc: false
         });
         address[] memory tokens = new address[](1);
         tokens[0] = address(token);
