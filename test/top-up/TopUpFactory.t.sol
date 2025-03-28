@@ -88,7 +88,7 @@ contract TopUpFactoryTest is Test, Constants {
         bytes32 salt = bytes32(uint256(1));
 
         vm.expectEmit(true, true, true, true);
-        emit BeaconFactory.BeaconProxyDeployed(factory.getDeterministicAddress(salt));
+        emit BeaconFactory.BeaconProxyDeployed(salt, factory.getDeterministicAddress(salt));
         factory.deployTopUpContract(salt);
         vm.stopPrank();
     }

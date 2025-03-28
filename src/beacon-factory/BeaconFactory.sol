@@ -30,8 +30,9 @@ contract BeaconFactory is UpgradeableProxy {
     event BeaconImplemenationUpgraded(address oldImpl, address newImpl);
 
     /// @notice Emitted when a new beacon proxy is deployed
+    /// @param salt The salt for deterministic deployment
     /// @param deployed The address of the newly deployed proxy
-    event BeaconProxyDeployed(address deployed);
+    event BeaconProxyDeployed(bytes32 salt, address deployed);
 
     /// @notice Thrown when the deployed address doesn't match the predicted address
     error DeployedAddressDifferentFromExpected();
@@ -80,7 +81,7 @@ contract BeaconFactory is UpgradeableProxy {
         }
         if (expectedAddr != deployedAddr) revert DeployedAddressDifferentFromExpected();
 
-        emit BeaconProxyDeployed(deployedAddr);
+        emit BeaconProxyDeployed(salt, deployedAddr);
         return deployedAddr;
     }
 
