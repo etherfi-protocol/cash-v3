@@ -9,8 +9,6 @@ import { EtherFiLiquidModule } from "../../../../src/modules/etherfi/EtherFiLiqu
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { ILayerZeroTeller } from "../../../../src/interfaces/ILayerZeroTeller.sol";
-import { Test } from "forge-std/Test.sol";
-import { IWETH } from "../../../../src/interfaces/IWETH.sol";
 
 contract EtherFiLiquidModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
