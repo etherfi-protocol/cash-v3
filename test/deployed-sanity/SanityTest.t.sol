@@ -21,15 +21,15 @@ import { Utils } from "../utils/Utils.sol";
 
 contract SanityTest is Utils {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-    address safeDeployer = 0xdC45DB93c3fC37272f40812bBa9C4Bad91344b46;
     address etherFiWallet1 = 0xdC45DB93c3fC37272f40812bBa9C4Bad91344b46;
-    // address etherFiWallet2 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    // address topUpWallet1 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    // address topUpWallet2 = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
-    address topUpDepositor = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address etherFiWallet2 = 0xB42833d6edd1241474D33ea99906fD4CBE893730;
+    address topUpDepositor1 = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address topUpDepositor2 = 0x86fBaEB3D6b5247F420590D303a6ffC9cd523790;
     address settlementDispatcherBridger = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
     address pauser = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
     address unpauser = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+
+    address[] topUpWallets;
 
     CashbackDispatcher cashbackDispatcher;
     IDebtManager debtManager;
@@ -117,6 +117,17 @@ contract SanityTest is Utils {
             deployments, 
             string.concat(".", "addresses", ".", "OpenOceanSwapModule")
         ));
+
+        topUpWallets.push(0xf96f8E03615f7b71e0401238D28bb08CceECBae7);
+        topUpWallets.push(0xB82C61E4A4b4E5524376BC54013a154b2e55C5c8);
+        topUpWallets.push(0xC73019F991dCBCc899d6B76000FdcCc99a208235);
+        topUpWallets.push(0x93D540Dd6893bF9eA8ECD57fce32cB49b2D1B510);
+        topUpWallets.push(0x29ebBC872CE1AF08508A65053b725Beadba43C48);
+        topUpWallets.push(0x957a670ecE294dDf71c6A9C030432Db013082fd1);
+        topUpWallets.push(0xFb5e703DAe21C594246f0311AE0361D1dFe250b1);
+        topUpWallets.push(0xab00819212917dA43A81b696877Cc0BcA798b613);
+        topUpWallets.push(0x5609BB231ec547C727D65eb6811CCd0C731339De);
+        topUpWallets.push(0xcf1369d6CdD148AF5Af04F4002dee9A00c7F8Ae9);
     }
 
     function test_sanity_roles() public view {
@@ -125,13 +136,16 @@ contract SanityTest is Utils {
         assertTrue(roleRegistry.hasRole(roleRegistry.UNPAUSER(), unpauser));
         
         assertTrue(roleRegistry.hasRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet1));
-        // assertTrue(roleRegistry.hasRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet2));
+        assertTrue(roleRegistry.hasRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet2));
         
-        // assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_ROLE(), topUpWallet1));
-        // assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_ROLE(), topUpWallet2));
-        assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), topUpDepositor));
+        for (uint256 i = 0; i < topUpWallets.length; i++) {
+            assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_ROLE(), topUpWallets[i]));
+        }
+        assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), topUpDepositor1));
+        assertTrue(roleRegistry.hasRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), topUpDepositor2));
 
-        assertTrue(roleRegistry.hasRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), safeDeployer));
+        assertTrue(roleRegistry.hasRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), etherFiWallet1));
+        assertTrue(roleRegistry.hasRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), etherFiWallet2));
         
         assertTrue(roleRegistry.hasRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), cashControllerSafe));
         assertTrue(roleRegistry.hasRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), settlementDispatcherBridger));

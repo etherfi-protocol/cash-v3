@@ -189,7 +189,17 @@ contract UpgradeMainnet is GnosisHelpers, Utils {
         string memory grantTopUpDepositorRole = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, TOP_UP_DEPOSITOR_ROLE, topUpDepositorWallet));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantTopUpDepositorRole, false)));
 
-        topUpWallets.push(0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE); // TODO: swap out 0xeee with new keys
+        topUpWallets.push(0xf96f8E03615f7b71e0401238D28bb08CceECBae7);
+        topUpWallets.push(0xB82C61E4A4b4E5524376BC54013a154b2e55C5c8);
+        topUpWallets.push(0xC73019F991dCBCc899d6B76000FdcCc99a208235);
+        topUpWallets.push(0x93D540Dd6893bF9eA8ECD57fce32cB49b2D1B510);
+        topUpWallets.push(0x29ebBC872CE1AF08508A65053b725Beadba43C48);
+        topUpWallets.push(0x957a670ecE294dDf71c6A9C030432Db013082fd1);
+        topUpWallets.push(0xFb5e703DAe21C594246f0311AE0361D1dFe250b1);
+        topUpWallets.push(0xab00819212917dA43A81b696877Cc0BcA798b613);
+        topUpWallets.push(0x5609BB231ec547C727D65eb6811CCd0C731339De);
+        topUpWallets.push(0xcf1369d6CdD148AF5Af04F4002dee9A00c7F8Ae9);
+
         for (uint256 i = 0; i < topUpWallets.length; ++i) {
             bool isLast = i == topUpWallets.length - 1;
             string memory grantTopUpRole = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, TOP_UP_ROLE, topUpWallets[i]));
@@ -322,6 +332,3 @@ contract UpgradeMainnet is GnosisHelpers, Utils {
         return txs;
     }
 }
-
-// 80, 90, 1
-// 50, 80, 1
