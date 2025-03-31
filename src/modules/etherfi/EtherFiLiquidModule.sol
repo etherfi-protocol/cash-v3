@@ -41,6 +41,12 @@ contract EtherFiLiquidModule is ModuleBase {
     
     /// @notice Emitted when liquid assets are removed from the module
     event LiquidAssetsRemoved(address[] liquidAssets);
+
+    /// @notice Emitted when safe deposits into Liquid
+    event LiquidDeposit(address indexed safe, address indexed inputToken, address indexed outputToken, uint256 inputAmount, uint256 outputAmount);
+    
+    /// @notice Emitted when safe bridge Liquid assets to other chains
+    event LiquidBridged(address indexed safe, address indexed liquidAsset, address indexed destRecipient, uint32 destEid, uint256 amount, uint256 bridgeFee);
     
     /// @notice Thrown when the Safe doesn't have sufficient token balance for an operation
     error InsufficientBalanceOnSafe();
@@ -65,6 +71,9 @@ contract EtherFiLiquidModule is ModuleBase {
 
     /// @notice Error when native transfer fails
     error NativeTransferFailed();
+
+    /// @notice Error when the return amount is less than min return
+    error InsufficientReturnAmount();
 
     /**
      * @notice Contract constructor
@@ -107,6 +116,7 @@ contract EtherFiLiquidModule is ModuleBase {
      * @custom:throws InvalidInput If amount is zero
      * @custom:throws OnlySafeAdmin If signer is not an admin of the Safe
      * @custom:throws InvalidSignature If the signature is invalid
+     * @custom:throws InsufficientReturnAmount If the return amount is less than min return
      */
     function deposit(address safe, address assetToDeposit, address liquidAsset, uint256 amountToDeposit, uint256 minReturn, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         bytes32 digestHash = _getDepositDigestHash(safe, assetToDeposit, liquidAsset, amountToDeposit, minReturn);
@@ -135,15 +145,16 @@ contract EtherFiLiquidModule is ModuleBase {
      * @param amountToDeposit The amount of tokens to deposit
      * @param minReturn The minimum amount of liquid tokens to receive
      * @custom:throws UnsupportedLiquidAsset If the liquid asset is not supported
-     * @custom:throws InvalidInput If amount is zero
+     * @custom:throws InvalidInput If amount or min return is zero
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      * @custom:throws AssetNotSupportedForDeposit If the asset cannot be deposited to the teller
+     * @custom:throws InsufficientReturnAmount If the return amount is less than min return
      */
     function _deposit(address safe, address assetToDeposit, address liquidAsset, uint256 amountToDeposit, uint256 minReturn) internal {
         ILayerZeroTeller teller = liquidAssetToTeller[liquidAsset];
         if (address(teller) == address(0)) revert UnsupportedLiquidAsset();
         
-        if (amountToDeposit == 0) revert InvalidInput();
+        if (amountToDeposit == 0 || minReturn == 0) revert InvalidInput();
         
         uint256 bal;
         if (assetToDeposit == ETH) bal = safe.balance;        
@@ -185,7 +196,14 @@ contract EtherFiLiquidModule is ModuleBase {
             data[1] = abi.encodeWithSelector(ILayerZeroTeller.deposit.selector, ERC20(assetToDeposit), amountToDeposit, minReturn);
         }
 
+        uint256 liquidTokenBalBefore = ERC20(liquidAsset).balanceOf(safe);
+
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        
+        uint256 liquidTokenReceived = ERC20(liquidAsset).balanceOf(safe) - liquidTokenBalBefore;
+        if (liquidTokenReceived < minReturn) revert InsufficientReturnAmount();
+
+        emit LiquidDeposit(safe, assetToDeposit, liquidAsset, amountToDeposit, liquidTokenReceived);
     }
 
     /**
@@ -263,6 +281,8 @@ contract EtherFiLiquidModule is ModuleBase {
         data[0] = abi.encodeWithSelector(ILayerZeroTeller.bridge.selector, amount, destRecipient, bridgeWildCard, ERC20(ETH), fee);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        emit LiquidBridged(safe, liquidAsset, destRecipient, destEid, amount, fee);
     }
 
     /**

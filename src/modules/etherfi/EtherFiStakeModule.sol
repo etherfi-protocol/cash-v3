@@ -30,6 +30,8 @@ contract EtherFiStakeModule is ModuleBase {
     /// @notice TypeHash for deposit function signature 
     bytes32 public constant DEPOSIT_SIG = keccak256("deposit");
 
+    event StakeDeposit(address indexed safe, address indexed inputAsset, address indexed outputAsset, uint256 inputAmount, uint256 outputAmount);
+
     /// @notice Thrown when an unsupported asset is provided for staking
     error UnsupportedAsset();
     
@@ -136,8 +138,10 @@ contract EtherFiStakeModule is ModuleBase {
 
         uint256 weETHBalBefore = IERC20(weETH).balanceOf(safe);
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-        uint256 weETHBalAfter = IERC20(weETH).balanceOf(safe);
+        uint256 weETHAmtReceived = IERC20(weETH).balanceOf(safe) - weETHBalBefore;
 
-        if (weETHBalAfter < weETHBalBefore + minReturn) revert InsufficientReturnAmount();
+        if (weETHAmtReceived < minReturn) revert InsufficientReturnAmount();
+
+        emit StakeDeposit(safe, assetToDeposit, weETH, amountToDeposit, weETHAmtReceived);
     }
 }

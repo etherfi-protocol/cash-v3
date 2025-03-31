@@ -29,7 +29,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     address public liquidEthTeller = 0x9AA79C84b79816ab920bBcE20f8f74557B514734;
     
     IERC20 public liquidUsd = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
-    address public liquidUsdTeller = 0x3f820576912165600dD2E0630dfFC29F76880f4A;
+    address public liquidUsdTeller = 0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387;
     
     IERC20 public liquidBtc = IERC20(0x5f46d540b6eD704C3c8789105F30E075AA900726);
     address public liquidBtcTeller = 0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353 ;
@@ -195,6 +195,8 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         signatures[0] = signature1;
         signatures[1] = signature2;
 
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidBridged(address(safe), address(liquidAsset), owner, destEid, amountToBridge, fee);
         liquidModule.bridge{value: fee}(address(safe), address(liquidAsset), destEid, owner, amountToBridge, owners, signatures);
     }
 

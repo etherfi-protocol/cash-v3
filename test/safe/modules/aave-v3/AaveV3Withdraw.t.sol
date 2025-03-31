@@ -60,6 +60,8 @@ contract AaveV3WithdrawTest is AaveV3TestSetup {
         (uint8 wv, bytes32 wr, bytes32 ws) = vm.sign(owner1Pk, withdrawDigestHash);
         bytes memory withdrawSignature = abi.encodePacked(wr, ws, wv);
 
+        vm.expectEmit(true, true, true, true);
+        emit AaveV3Module.WithdrawFromAave(address(safe), address(usdcScroll), amountToWithdraw);
         aaveV3Module.withdraw(address(safe), address(usdcScroll), amountToWithdraw, owner1, withdrawSignature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));

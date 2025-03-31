@@ -53,6 +53,9 @@ contract StargateModule is ModuleBase {
 
     /// @notice 100% in basis points (10,000)
     uint256 public constant HUNDRES_PERCENT_IN_BPS = 10_000;
+
+    /// @notice Emitted when a safe bridges funds with stargate
+    event BridgeWithStargate(address indexed safe, uint32 indexed destEid, address indexed asset, uint256 amount, address destRecipient);
     
     /// @notice Error for Invalid Owner quorum signatures
     error InvalidSignatures();
@@ -150,6 +153,8 @@ contract StargateModule is ModuleBase {
     function bridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
         _checkSignature(safe, destEid, asset, amount, destRecipient, maxSlippageInBps, signers, signatures);
         _bridge(safe, destEid, asset, amount, destRecipient, maxSlippageInBps);
+        
+        emit BridgeWithStargate(safe, destEid, asset, amount, destRecipient);
     }
 
     /**
