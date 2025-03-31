@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { BeaconFactory, UpgradeableBeacon } from "../beacon-factory/BeaconFactory.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
+import { BeaconFactory, UpgradeableBeacon } from "../beacon-factory/BeaconFactory.sol";
 import { DelegateCallLib } from "../libraries/DelegateCallLib.sol";
-import { TopUp } from "./TopUp.sol";
+import { TopUp, Constants } from "./TopUp.sol";
 import { BridgeAdapterBase } from "./bridge/BridgeAdapterBase.sol";
 
 /**
@@ -15,7 +15,7 @@ import { BridgeAdapterBase } from "./bridge/BridgeAdapterBase.sol";
  * @dev Extends BeaconFactory to provide Beacon Proxy deployment functionality
  * @author ether.fi
  */
-contract TopUpFactory is BeaconFactory {
+contract TopUpFactory is BeaconFactory, Constants {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using SafeERC20 for IERC20;
 
@@ -45,6 +45,9 @@ contract TopUpFactory is BeaconFactory {
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpFactory")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant TopUpFactoryStorageLocation = 0xe4e747da44afe6bc45062fa78d7d038abc167c5a78dee3046108b9cc47b1b100;
+
+    /// @notice The ADMIN role for the TopUp factory
+    bytes32 public constant TOPUP_FACTORY_ADMIN_ROLE = keccak256("TOPUP_FACTORY_ADMIN_ROLE");
 
     /// @notice Max slippage allowed for bridging
     uint96 public constant MAX_ALLOWED_SLIPPAGE = 200; // 2%
@@ -110,12 +113,12 @@ contract TopUpFactory is BeaconFactory {
 
     /**
      * @notice Deploys a new TopUp contract instance
-     * @dev Only callable by addresses with FACTORY_ADMIN_ROLE
+     * @dev Only callable by addresses with TOPUP_FACTORY_ADMIN_ROLE
      * @param salt The salt value used for deterministic deployment
      * @custom:throws OnlyAdmin if caller doesn't have admin role
      */
-    function deployTopUpContract(bytes32 salt) external {
-        if (!roleRegistry().hasRole(FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+    function deployTopUpContract(bytes32 salt) external whenNotPaused {
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         bytes memory initData = abi.encodeWithSelector(TopUp.initialize.selector, address(this));
         address deployed = _deployBeacon(salt, initData);
 
@@ -162,7 +165,9 @@ contract TopUpFactory is BeaconFactory {
         for (uint256 i = 0; i < addrLength;) {
             if (!$.deployedAddresses.contains(topUpContracts[i])) revert InvalidTopUpAddress();
             TopUp(topUpContracts[i]).processTopUp(tokens);
-            unchecked { ++i; }
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -180,7 +185,7 @@ contract TopUpFactory is BeaconFactory {
      * @custom:emits TokenConfigSet when configs are updated
      */
     function setTokenConfig(address[] calldata tokens, TokenConfig[] calldata configs) external {
-        if (!roleRegistry().hasRole(FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
 
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
@@ -213,7 +218,8 @@ contract TopUpFactory is BeaconFactory {
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
 
-        uint256 balance = IERC20(token).balanceOf(address(this));
+        // leaving behind 0.01 ether for bridge fee if any
+        uint256 balance = token == ETH ? address(this).balance - 0.01 ether : IERC20(token).balanceOf(address(this));
         if (balance == 0) revert ZeroBalance();
 
         DelegateCallLib.delegateCall($.tokenConfig[token].bridgeAdapter, abi.encodeWithSelector(BridgeAdapterBase.bridge.selector, token, balance, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData));
@@ -234,7 +240,7 @@ contract TopUpFactory is BeaconFactory {
     function recoverFunds(address token, uint256 amount) external {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
-        if (!roleRegistry().hasRole(FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter != address(0)) revert OnlyUnsupportedTokens();
         if ($.recoveryWallet == address(0)) revert RecoveryWalletNotSet();
@@ -254,7 +260,7 @@ contract TopUpFactory is BeaconFactory {
     function setRecoveryWallet(address _recoveryWallet) external {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
-        if (!roleRegistry().hasRole(FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         if (_recoveryWallet == address(0)) revert RecoveryWalletCannotBeZeroAddress();
         emit RecoveryWalletSet($.recoveryWallet, _recoveryWallet);
         $.recoveryWallet = _recoveryWallet;
@@ -278,7 +284,7 @@ contract TopUpFactory is BeaconFactory {
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
 
-        uint256 balance = IERC20(token).balanceOf(address(this));
+        uint256 balance = token == ETH ? address(this).balance : IERC20(token).balanceOf(address(this));
         if (balance == 0) revert ZeroBalance();
 
         return BridgeAdapterBase($.tokenConfig[token].bridgeAdapter).getBridgeFee(token, balance, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData);
@@ -306,6 +312,14 @@ contract TopUpFactory is BeaconFactory {
             }
         }
         return addresses;
+    }
+
+    /**
+     * @notice Gets the number of contracts deployed
+     * @return Number of contracts deployed
+     */
+    function numContractsDeployed() external view returns (uint256) {
+        return _getTopUpFactoryStorage().deployedAddresses.length();
     }
 
     /**

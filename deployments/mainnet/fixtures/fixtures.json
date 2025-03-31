@@ -1,0 +1,20 @@
+{
+    "534352": {
+      "owner": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
+      "rpc": "https://rpc.scroll.io",
+      "weth": "0x5300000000000000000000000000000000000004",
+      "usdc": "0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4",
+      "usdt": "0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df",
+      "weETH": "0x01f0a31698C4d065659b9bdC21B3610292a1c506",
+      "scr": "0xd29687c813d741e2f938f4ac377128810e217b1b",
+      "weEthWethOracle": "0x800Ca870416CDFEf77991036B8e1f2E51623996E",
+      "ethUsdcOracle": "0x66A8cb6c4230B044378aC3676D47Ed4fE18e3cFB",
+      "scrUsdOracle": "0x145234c9C1f1583E710bdC2926d6E97e4523ef93",
+      "usdcUsdOracle": "0x9Cf01269e491375DBe3C725927Aa025BAc47bEeB",
+      "swapRouterOpenOcean": "0x6352a56caadC4F1E25CD6c75970Fa768A3304e64",
+      "aaveV3Pool": "0x11fCfe756c05AD438e312a7fd934381537D3cFfe",
+      "aaveV3PoolDataProvider": "0xa99F4E69acF23C6838DE90dD1B5c02EA928A53ee",
+      "stargateUsdcPool": "0x3Fc69CC4A842838bCDC9499178740226062b14E4"
+    }
+  }
+  

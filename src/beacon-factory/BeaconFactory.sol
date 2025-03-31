@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { BeaconProxy } from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import { CREATE3 } from "solady/utils/CREATE3.sol";
@@ -15,9 +14,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @notice Factory contract for deploying beacon proxies with deterministic addresses
  * @dev This contract uses CREATE3 for deterministic deployments and implements UUPS upgradeability pattern
  */
-contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
-    bytes32 public constant FACTORY_ADMIN_ROLE = keccak256("FACTORY_ADMIN_ROLE");
-
+contract BeaconFactory is UpgradeableProxy {
     /// @custom:storage-location erc7201:etherfi.storage.BeaconFactory
     struct BeaconFactoryStorage {
         /// @notice The address of the beacon contract that stores the implementation
@@ -27,24 +24,31 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.BeaconFactory")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant BeaconFactoryStorageLocation = 0x644210a929ca6ee03d33c1a1fe361b36b5a9728941782cd06b1139e4cae58200;
 
-    /// @notice Emitted when the beacon address is updated
-    /// @param oldBeacon The previous beacon address
-    /// @param newBeacon The new beacon address
-    event BeaconSet(address oldBeacon, address newBeacon);
+    /// @notice Emitted when the implementation in the beacon address is updated
+    /// @param oldImpl The previous impl address
+    /// @param newImpl The new impl address
+    event BeaconImplemenationUpgraded(address oldImpl, address newImpl);
 
     /// @notice Emitted when a new beacon proxy is deployed
+    /// @param salt The salt for deterministic deployment
     /// @param deployed The address of the newly deployed proxy
-    event BeaconProxyDeployed(address deployed);
+    event BeaconProxyDeployed(bytes32 salt, address indexed deployed);
 
     /// @notice Thrown when the deployed address doesn't match the predicted address
     error DeployedAddressDifferentFromExpected();
+
+    /// @notice Thrown when input is invalid
+    error InvalidInput();
+
+    /// @notice Thrown when initialize fails on the deployed contract
+    error InitializationFailed();
 
     /**
      * @dev Initializes the contract with required parameters
      * @param _roleRegistry Address of the role registry contract
      * @param _beaconImpl Address of the initial implementation contract
      */
-    function __BeaconFactory_initialize(address _roleRegistry, address _beaconImpl) internal {
+    function __BeaconFactory_initialize(address _roleRegistry, address _beaconImpl) internal onlyInitializing {
         __UpgradeableProxy_init(_roleRegistry);
         __Pausable_init();
         BeaconFactoryStorage storage $ = _getBeaconFactoryStorage();
@@ -66,14 +70,18 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
      * @param salt The salt value used for deterministic deployment
      * @param initData The initialization data for the proxy
      * @return The address of the deployed proxy
-     * @custom:restriction Caller must have FACTORY_ADMIN_ROLE
+     * @custom:restriction Caller must have access control restrictions
      */
     function _deployBeacon(bytes32 salt, bytes memory initData) internal returns (address) {
-        address expectedAddr = this.getDeterministicAddress(salt);
-        address deployedAddr = address(CREATE3.deployDeterministic(abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon(), initData)), salt));
+        address expectedAddr = getDeterministicAddress(salt);
+        address deployedAddr = address(CREATE3.deployDeterministic(abi.encodePacked(type(BeaconProxy).creationCode, abi.encode(beacon(), "")), salt));
+        if (initData.length > 0) {
+            (bool success, ) = deployedAddr.call(initData);
+            if (!success) revert InitializationFailed();
+        }
         if (expectedAddr != deployedAddr) revert DeployedAddressDifferentFromExpected();
 
-        emit BeaconProxyDeployed(deployedAddr);
+        emit BeaconProxyDeployed(salt, deployedAddr);
         return deployedAddr;
     }
 
@@ -87,33 +95,27 @@ contract BeaconFactory is UpgradeableProxy, PausableUpgradeable {
     }
 
     /**
+     * @notice Function to set the new implementation in the beacon contract
+     * @dev Only callable by owner of RoleRegistry
+     * @param _newImpl New implementation for the beacon contract
+     * @custom:throws OnlyRoleRegistryOwner when msg.sender is not the owner of the RoleRegistry contract
+     * @custom:throws InvalidInput when _beacon == address(0)
+     */
+    function upgradeBeaconImplementation(address _newImpl) external onlyRoleRegistryOwner() {
+        if (_newImpl == address(0)) revert InvalidInput();
+
+        UpgradeableBeacon upgradeableBeacon = UpgradeableBeacon(_getBeaconFactoryStorage().beacon);
+        emit BeaconImplemenationUpgraded(upgradeableBeacon.implementation(), _newImpl);
+        upgradeableBeacon.upgradeTo(_newImpl);
+    }
+
+
+    /**
      * @notice Predicts the deterministic address for a given salt
      * @param salt The salt value used for address prediction
      * @return The predicted deployment address
      */
-    function getDeterministicAddress(bytes32 salt) external view returns (address) {
+    function getDeterministicAddress(bytes32 salt) public view returns (address) {
         return CREATE3.predictDeterministicAddress(salt);
-    }
-
-    /**
-     * @notice Pauses all contract operations
-     * @dev Only callable by addresses with the pauser role in the role registry
-     * @dev Triggers the Paused event from PausableUpgradeable
-     * @custom:restriction Caller must have pauser role
-     */
-    function pause() external {
-        roleRegistry().onlyPauser(msg.sender);
-        _pause();
-    }
-
-    /**
-     * @notice Unpauses all contract operations
-     * @dev Only callable by addresses with the unpauser role in the role registry
-     * @dev Triggers the Unpaused event from PausableUpgradeable
-     * @custom:restriction Caller must have unpauser role
-     */
-    function unpause() external {
-        roleRegistry().onlyUnpauser(msg.sender);
-        _unpause();
     }
 }

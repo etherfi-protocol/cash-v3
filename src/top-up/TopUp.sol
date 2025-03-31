@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Constants } from "../utils/Constants.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable } from "solady/auth/Ownable.sol";
+
+import { Constants } from "../utils/Constants.sol";
 
 /**
  * @title TopUp
@@ -18,6 +19,11 @@ contract TopUp is Constants, Ownable {
     error OnlyOwner();
     /// @notice Error thrown when ETH transfer fails
     error EthTransferFailed();
+
+    constructor() {
+        // initialize with dead so the impl ownership cannot be taken over by someone
+        _initializeOwner(address(0xdead));
+    }
 
     /**
      * @notice Initializes the contract with an owner

@@ -4,8 +4,11 @@ pragma solidity ^0.8.28;
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Test, console } from "forge-std/Test.sol";
+import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUp } from "../../src/top-up/TopUp.sol";
@@ -26,17 +29,16 @@ contract TopUpFactoryTest is Test, Constants {
     RoleRegistry public roleRegistry;
     EtherFiOFTBridgeAdapter oftBridgeAdapter;
     StargateAdapter stargateAdapter;
-
+    address public dataProvider = makeAddr("dataProvider");
     uint96 maxSlippage = 100;
 
     IERC20 weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IERC20 weETH = IERC20(0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee);
     IERC20 usdc = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
-
+    
     address weETHOftAddress = 0xcd2eb13D6831d4602D80E5db9230A57596CDCA63;
     address usdcStargatePool = 0xc026395860Db2d07ee33e05fE50ed7bD583189C7;
-
-    bytes32 public constant FACTORY_ADMIN_ROLE = keccak256("FACTORY_ADMIN_ROLE");
+    address ethStargatePool = 0x77b2043768d28E9C9aB44E1aBfC95944bcE57931;
 
     function setUp() public {
         vm.createSelectFork("https://ethereum-rpc.publicnode.com");
@@ -53,7 +55,7 @@ contract TopUpFactoryTest is Test, Constants {
         stargateAdapter = new StargateAdapter();
         oftBridgeAdapter = new EtherFiOFTBridgeAdapter();
 
-        address roleRegistryImpl = address(new RoleRegistry());
+        address roleRegistryImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
@@ -61,18 +63,19 @@ contract TopUpFactoryTest is Test, Constants {
         implementation = new TopUp();
         address factoryImpl = address(new TopUpFactory());
         factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
-        roleRegistry.grantRole(factory.FACTORY_ADMIN_ROLE(), admin);
+        roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), admin);
 
         vm.stopPrank();
 
-        address[] memory tokens = new address[](2);
+        address[] memory tokens = new address[](3);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
+        tokens[2] = address(ETH);
 
-        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](2);
+        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](3);
         tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(usdcStargatePool) });
-
         tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
+        tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
 
         vm.prank(admin);
         factory.setTokenConfig(tokens, tokenConfigs);
@@ -85,7 +88,7 @@ contract TopUpFactoryTest is Test, Constants {
         bytes32 salt = bytes32(uint256(1));
 
         vm.expectEmit(true, true, true, true);
-        emit BeaconFactory.BeaconProxyDeployed(factory.getDeterministicAddress(salt));
+        emit BeaconFactory.BeaconProxyDeployed(salt, factory.getDeterministicAddress(salt));
         factory.deployTopUpContract(salt);
         vm.stopPrank();
     }
@@ -149,7 +152,7 @@ contract TopUpFactoryTest is Test, Constants {
     /// @dev Test recovery functionality
     function test_recoverFunds_succeeds() public {
         address recoveryWallet = makeAddr("recovery");
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
         vm.startPrank(admin);
         factory.setRecoveryWallet(recoveryWallet);
@@ -167,7 +170,7 @@ contract TopUpFactoryTest is Test, Constants {
 
     function test_recoverFunds_reverts_whenZeroAmount() public {
         address recoveryWallet = makeAddr("recovery");
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
         vm.startPrank(admin);
         factory.setRecoveryWallet(recoveryWallet);
@@ -178,7 +181,7 @@ contract TopUpFactoryTest is Test, Constants {
     }
 
     function test_recoverFunds_reverts_whenNoRecoveryWallet() public {
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
         vm.prank(admin);
         vm.expectRevert(TopUpFactory.RecoveryWalletNotSet.selector);
@@ -225,13 +228,15 @@ contract TopUpFactoryTest is Test, Constants {
         address topUpAddr = factory.getDeterministicAddress(salt);
 
         // Test topUp contract functionality
-        address[] memory tokens = new address[](2);
+        address[] memory tokens = new address[](3);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
+        tokens[2] = address(ETH);
 
         // Send some tokens and ETH to topUp contract
         deal(address(usdc), topUpAddr, 100);
         deal(address(weETH), topUpAddr, 1 ether);
+        deal(topUpAddr, 1 ether);
 
         // Test processTopUp
         factory.processTopUp(tokens, 0, 1);
@@ -239,8 +244,10 @@ contract TopUpFactoryTest is Test, Constants {
         // Verify balances
         assertEq(usdc.balanceOf(topUpAddr), 0, "TopUp contract should have 0 USDC");
         assertEq(weETH.balanceOf(topUpAddr), 0, "TopUp contract should have 0 weETH");
+        assertEq(address(topUpAddr).balance, 0, "TopUp contract should have 0 ETH");
         assertEq(usdc.balanceOf(address(factory)), 100, "Factory should have received USDC");
         assertEq(weETH.balanceOf(address(factory)), 1 ether, "Factory should have received weETH");
+        assertEq(address(factory).balance, 1 ether, "Factory should have received ETH");
     }
 
     /// @dev Test processTopUp with invalid inputs
@@ -386,7 +393,7 @@ contract TopUpFactoryTest is Test, Constants {
     }
 
     function test_bridge_reverts_whenUnsupportedToken() public {
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
         factory.bridge(address(unsupportedToken));
     }
@@ -397,7 +404,7 @@ contract TopUpFactoryTest is Test, Constants {
     }
 
     function test_getBridgeFee_reverts_whenUnsupportedToken() public {
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
         factory.getBridgeFee(address(unsupportedToken));
     }
@@ -407,7 +414,7 @@ contract TopUpFactoryTest is Test, Constants {
         assertTrue(factory.isTokenSupported(address(weETH)), "weETH should be supported");
         assertTrue(factory.isTokenSupported(address(usdc)), "USDC should be supported");
 
-        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS");
+        MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         assertFalse(factory.isTokenSupported(address(unsupportedToken)), "Unsupported token should return false");
     }
 
@@ -429,6 +436,15 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
+        factory.bridge{ value: fee }(token);
+    }
+
+    function test_bridge_succeeds_withEth() public {
+        address token = ETH;
+        uint256 amount = 1e18;
+        deal(address(factory), amount);
+        (, uint256 fee) = factory.getBridgeFee(token);
+        
         factory.bridge{ value: fee }(token);
     }
 
@@ -499,5 +515,99 @@ contract TopUpFactoryTest is Test, Constants {
         vm.prank(user);
         vm.expectRevert(RoleRegistry.OnlyUnpauser.selector);
         factory.unpause();
+    }
+
+    function test_upgradeBeaconImplementation_succeeds() public {
+        vm.startPrank(owner);
+        
+        address newImplementation = address(new TopUp());
+        // Get the current implementation before upgrade
+        address oldImpl = UpgradeableBeacon(factory.beacon()).implementation();
+        
+        // Verify old implementation is not the same as new implementation
+        assertNotEq(oldImpl, address(newImplementation));
+        
+        // Check for event emission
+        vm.expectEmit(true, true, true, true);
+        emit BeaconFactory.BeaconImplemenationUpgraded(oldImpl, address(newImplementation));
+        
+        // Upgrade the implementation
+        factory.upgradeBeaconImplementation(address(newImplementation));
+        
+        // Verify the implementation was updated
+        address updatedImpl = UpgradeableBeacon(factory.beacon()).implementation();
+        assertEq(updatedImpl, address(newImplementation));
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_reverts_whenCallerIsNotOwner() public {
+        vm.startPrank(makeAddr("notOwner"));
+
+        address newImplementation = address(new TopUp());
+        
+        // Expect the upgrade to revert because caller is not the owner
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        factory.upgradeBeaconImplementation(address(newImplementation));
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_reverts_whenNewImplIsZeroAddress() public {
+        vm.startPrank(owner);
+        
+        // Expect the upgrade to revert because new implementation is zero address
+        vm.expectRevert(BeaconFactory.InvalidInput.selector);
+        factory.upgradeBeaconImplementation(address(0));
+        
+        vm.stopPrank();
+    }
+    
+    function test_upgradeBeaconImplementation_affectsNewDeployments() public {
+        // First upgrade the implementation
+        vm.startPrank(owner);
+        address newImplementation = address(new TopUp());
+        factory.upgradeBeaconImplementation(address(newImplementation));
+        vm.stopPrank();
+        
+        // Now deploy a new topUp contract
+        vm.startPrank(admin);
+        bytes32 salt = bytes32(uint256(1));
+        factory.deployTopUpContract(salt);
+        vm.stopPrank();
+        
+        // Get the deployed topUp address
+        address deployedTopUp = factory.getDeterministicAddress(salt);
+        
+        // Verify the topUp contract was deployed correctly
+        assertTrue(factory.isTopUpContract(deployedTopUp), "Address should be a valid TopUp contract");
+        
+        // Check if the topUp is properly initialized (owner should be factory)
+        TopUp topUp = TopUp(deployedTopUp);
+        assertEq(topUp.owner(), address(factory), "Factory should be TopUp owner");
+    }
+    
+    function test_upgradeBeaconImplementation_doesNotAffectExistingDeployments() public {
+        // First deploy a topUp contract
+        vm.startPrank(admin);
+        bytes32 salt = bytes32(uint256(1));
+        factory.deployTopUpContract(salt);
+        address deployedTopUp = factory.getDeterministicAddress(salt);
+        vm.stopPrank();
+        
+        // Note the original topUp state
+        TopUp topUp = TopUp(deployedTopUp);
+        address originalOwner = topUp.owner();
+        address newImplementation = address(new TopUp());
+        // Now upgrade the implementation
+        vm.prank(owner);
+        factory.upgradeBeaconImplementation(address(newImplementation));
+        
+        // Verify the existing topUp still has the same state
+        address postUpgradeOwner = topUp.owner();
+        
+        // Compare owner
+        assertEq(originalOwner, postUpgradeOwner, "Owner should remain the same after upgrade");
+        assertEq(postUpgradeOwner, address(factory), "Owner should still be the factory");
     }
 }
