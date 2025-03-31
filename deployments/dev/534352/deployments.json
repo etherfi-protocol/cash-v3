@@ -1,0 +1,17 @@
+{
+  "addresses": {
+    "CashbackDispatcher": "0x88758BDA231b8d989AFA0B408FfFD1dF67021F10",
+    "DebtManager": "0x92adCa2e95Eb9aCcA65a7dBa1A03ad5246d8f4F4",
+    "EtherFiDataProvider": "0x4a9c44c97BBf6079db37C4769AebE425bBcDD09a",
+    "EtherFiHook": "0xD517Cd9196a4F71Fe80178E96E5faF73B60bD764",
+    "EtherFiSafeFactory": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
+    "PriceProvider": "0x7d7947D1ace9088048AaB067cF2F54eA1F762a4f",
+    "RoleRegistry": "0xa322a04d1e2Cb44672473740F9F35B057FA29CFB",
+    "SettlementDispatcher": "0xea6e574886797A65eD22CcF2307e48a83C355771",
+    "TopUpDest": "0x06fe42Cf3C63412f1955758ce2798709476a38fd",
+    "OpenOceanSwapModule": "0xC979c6184310158541B4b424A22a3434D01CCD88",
+    "CashModule": "0xBc5e1a8cdC14b286A8f5F523059cf02A7fFE9A6d",
+    "CashEventEmitter": "0x357b440CfcD9677A99f2f85D5297c141B8837A9b",
+    "CashLens": "0xdFa3089466fD8Ce1c55E998cA3FdffC3371bc106"
+  }
+}

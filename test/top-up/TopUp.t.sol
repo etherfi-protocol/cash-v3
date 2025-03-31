@@ -18,12 +18,12 @@ contract TopUpTest is Test, Constants {
     MockERC20 public token;
 
     function setUp() public {
-        owner = makeAddr("owner");
+        owner = 0x000000000000000000000000000000000000dEaD;
         user = makeAddr("user");
         topUp = new TopUp();
-        token = new MockERC20("Test Token", "TEST");
+        token = new MockERC20("Test Token", "TEST", 18);
 
-        topUp.initialize(owner);
+        // topUp.initialize(owner);
     }
 
     /// @dev Test processTopUp functionality

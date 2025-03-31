@@ -22,7 +22,7 @@ contract StargateAdapter is BridgeAdapterBase {
      * @param amount The amount of tokens being bridged
      * @param ticket The Stargate bridging ticket containing transaction details
      */
-    event BridgeViaStargate(address token, uint256 amount, Ticket ticket);
+    event BridgeViaStargate(address indexed token, uint256 amount, Ticket ticket);
 
     /// @notice LayerZero endpoint ID for Scroll network
     // https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
