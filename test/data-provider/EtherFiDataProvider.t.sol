@@ -43,7 +43,9 @@ contract EtherFiDataProviderTest is Test {
         address[] memory initialModules = new address[](2);
         initialModules[0] = module1;
         initialModules[1] = module2;
-
+        address[] memory defaultModules = new address[](1);
+        defaultModules[0] = module1;
+        
         // Deploy provider
         address dataProviderImpl = address(new EtherFiDataProvider());
         provider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, "")));
@@ -52,7 +54,7 @@ contract EtherFiDataProviderTest is Test {
         address roleRegistryImpl = address(new RoleRegistry(address(provider)));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
 
-        provider.initialize(address(roleRegistry), address(cashModule), cashLens, initialModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        provider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), cashLens, initialModules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
 
         roleRegistry.grantRole(provider.DATA_PROVIDER_ADMIN_ROLE(), admin);
         vm.stopPrank();
@@ -72,10 +74,12 @@ contract EtherFiDataProviderTest is Test {
     function test_initialize_reverts_whenCalledTwice() public {
         address[] memory modules = new address[](1);
         modules[0] = module1;
+        address[] memory defaultModules = new address[](1);
+        defaultModules[0] = module1;
 
         vm.prank(admin);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        provider.initialize(address(roleRegistry), address(0), cashModule, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        provider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashModule, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
     }
 
     function test_initialize_withoutHook() public {
@@ -85,9 +89,11 @@ contract EtherFiDataProviderTest is Test {
         address[] memory initialModules = new address[](2);
         initialModules[0] = module1;
         initialModules[1] = module2;
+        address[] memory defaultModules = new address[](1);
+        defaultModules[0] = module1;
 
         vm.prank(admin);
-        newProvider.initialize(address(roleRegistry), cashModule, cashLens, initialModules, address(0), safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, initialModules, defaultModules, address(0), safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
 
         // Hook should be zero address since we didn't set it
         assertEq(newProvider.getHookAddress(), address(0));
@@ -104,9 +110,11 @@ contract EtherFiDataProviderTest is Test {
         address[] memory initialModules = new address[](2);
         initialModules[0] = module1;
         initialModules[1] = module2;
+        address[] memory defaultModules = new address[](1);
+        defaultModules[0] = module1;
 
         vm.prank(admin);
-        newProvider.initialize(address(roleRegistry), address(0), cashLens, initialModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, initialModules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
 
         // Cash module should be zero address since we didn't set it
         assertEq(newProvider.getCashModule(), address(0));
@@ -124,7 +132,19 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
-        newProvider.initialize(address(roleRegistry), address(0), cashLens, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+    }
+    function test_initialize_reverts_whenEmptyDefaultModuleArray() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
+
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
+        address[] memory defaultModules = new address[](0);
+
+        vm.prank(admin);
+        vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
     }
 
     function test_initialize_reverts_whenZeroAddressModule() public {
@@ -136,7 +156,21 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(EtherFiDataProvider.InvalidModule.selector, 0));
-        newProvider.initialize(address(roleRegistry), address(0), cashLens, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+    }
+
+    function test_initialize_reverts_whenZeroAddressDefaultModule() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
+
+        address[] memory modules = new address[](1);
+        modules[0] = address(1);
+        address[] memory defaultModules = new address[](1);
+        modules[0] = address(0);
+
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(EtherFiDataProvider.InvalidModule.selector, 0));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
     }
 
     function test_initialize_emits_hookAddressUpdatedEvent() public {
@@ -149,7 +183,7 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.HookAddressUpdated(address(0), hookAddress);
-        newProvider.initialize(address(roleRegistry), cashModule, cashLens, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
     }
 
     function test_initialize_emits_modulesSetupEvent() public {
@@ -162,7 +196,24 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.ModulesSetup(modules);
-        newProvider.initialize(address(roleRegistry), cashModule, cashLens, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+    }
+
+    function test_initialize_emits_defaultModulesSetupEvent() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
+
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
+
+        address[] memory defaultModules = new address[](2);
+        defaultModules[0] = module1;
+        defaultModules[1] = module2;
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.DefaultModulesSetup(defaultModules);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
     }
 
     function test_initialize_emits_cashModuleConfiguredEvent() public {
@@ -176,7 +227,7 @@ contract EtherFiDataProviderTest is Test {
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.CashModuleConfigured(address(0), cashModule);
 
-        newProvider.initialize(address(roleRegistry), cashModule, cashLens, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner);
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
     }
 
     // Configure Modules Tests
@@ -209,6 +260,25 @@ contract EtherFiDataProviderTest is Test {
         provider.configureModules(modules, whitelist);
 
         assertEq(provider.isWhitelistedModule(module1), false);
+    }
+
+    function test_configureModules_removesExistingModuleFromDefaultModule() public {
+        assertEq(provider.isWhitelistedModule(module1), true);
+        assertEq(provider.isDefaultModule(module1), true);
+
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = false;
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit ModulesConfigured(modules, whitelist);
+        provider.configureModules(modules, whitelist);
+
+        assertEq(provider.isWhitelistedModule(module1), false);
+        assertEq(provider.isDefaultModule(module1), false);
     }
 
     function test_configureModules_reverts_whenCalledByNonAdmin() public {
@@ -271,6 +341,101 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
         provider.configureModules(modules, whitelist);
+    }
+
+    // Configure Default Modules Tests
+    function test_configureDefaultModules_addsNewModule() public {
+        address[] memory modules = new address[](1);
+        modules[0] = module3;
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.DefaultModulesConfigured(modules, whitelist);
+        provider.configureDefaultModules(modules, whitelist);
+
+        assertEq(provider.isDefaultModule(module3), true);
+        assertEq(provider.isWhitelistedModule(module3), true);
+    }
+
+    function test_configureDefaultModules_removesExistingModuleFromDefaultModules() public {
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = false;
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.DefaultModulesConfigured(modules, whitelist);
+        provider.configureDefaultModules(modules, whitelist);
+
+        assertEq(provider.isDefaultModule(module1), false);
+        assertEq(provider.isWhitelistedModule(module1), true);
+    }
+
+    function test_configureDefaultModules_reverts_whenCalledByNonAdmin() public {
+        address[] memory modules = new address[](1);
+        modules[0] = module3;
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+
+        vm.prank(nonAdmin);
+        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        provider.configureDefaultModules(modules, whitelist);
+    }
+
+    function test_configureDefaultModules_reverts_whenArrayLengthMismatch() public {
+        address[] memory modules = new address[](2);
+        modules[0] = module1;
+        modules[1] = module2;
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+
+        vm.prank(admin);
+        vm.expectRevert(EtherFiDataProvider.ArrayLengthMismatch.selector);
+        provider.configureDefaultModules(modules, whitelist);
+    }
+
+    function test_configureDefaultModules_reverts_whenEmptyArray() public {
+        address[] memory modules = new address[](0);
+        bool[] memory whitelist = new bool[](0);
+
+        vm.prank(admin);
+        vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
+        provider.configureDefaultModules(modules, whitelist);
+    }
+
+    function test_configureDefaultModules_reverts_whenZeroAddressModule() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(0);
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(EtherFiDataProvider.InvalidModule.selector, 0));
+        provider.configureDefaultModules(modules, whitelist);
+    }
+
+    function test_configureDefaultModules_checksForDuplicates() public {
+        // Create array with duplicate modules
+        address[] memory modules = new address[](2);
+        modules[0] = module3;
+        modules[1] = module3;
+
+        bool[] memory whitelist = new bool[](2);
+        whitelist[0] = true;
+        whitelist[1] = true;
+
+        // Expect revert due to duplicates
+        vm.prank(admin);
+        vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
+        provider.configureDefaultModules(modules, whitelist);
     }
 
     // Cash Module Tests
