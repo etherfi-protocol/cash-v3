@@ -8,7 +8,7 @@ import { ILayerZeroTeller } from "../src/interfaces/ILayerZeroTeller.sol";
 import { Utils } from "./utils/Utils.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 
-contract SetCollateralConfig is Utils {
+contract SupportCollateralToken is Utils {
     IERC20 public liquidEth = IERC20(0xf0bb20865277aBd641a307eCe5Ee04E79073416C);
     ILayerZeroTeller public liquidEthTeller = ILayerZeroTeller(0x9AA79C84b79816ab920bBcE20f8f74557B514734);
     
@@ -53,10 +53,10 @@ contract SetCollateralConfig is Utils {
             liquidationBonus: 1e18
         }); 
 
-        debtManager.setCollateralTokenConfig(address(liquidEth), liquidEthConfig);
-        debtManager.setCollateralTokenConfig(address(liquidBtc), liquidBtcConfig);
-        debtManager.setCollateralTokenConfig(address(liquidUsd), liquidUsdConfig);
-        debtManager.setCollateralTokenConfig(address(eUsd), eUsdConfig);
+        debtManager.supportCollateralToken(address(liquidEth), liquidEthConfig);
+        debtManager.supportCollateralToken(address(liquidBtc), liquidBtcConfig);
+        debtManager.supportCollateralToken(address(liquidUsd), liquidUsdConfig);
+        debtManager.supportCollateralToken(address(eUsd), eUsdConfig);
 
         vm.stopBroadcast();
     }
