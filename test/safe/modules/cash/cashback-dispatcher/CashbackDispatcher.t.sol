@@ -76,10 +76,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+        
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
@@ -99,10 +105,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
@@ -119,10 +131,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
@@ -143,10 +161,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
@@ -163,10 +187,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
@@ -187,10 +217,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+        
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
@@ -207,10 +243,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+        
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
@@ -231,10 +273,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
@@ -254,10 +302,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertEq(safePendingCashbackBefore, 0);
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertEq(safeScrBalAfter, safeScrBalBefore);
@@ -279,10 +333,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertEq(safePendingCashbackBefore, 0);
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertEq(safeScrBalAfter, safeScrBalBefore);
@@ -294,7 +354,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), spendTokens, spendAmounts, true);
 
         safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
         assertEq(safePendingCashbackAfter, cashbackInUsdc * 2);
@@ -313,10 +373,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertEq(safePendingCashbackBefore, 0);
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertEq(safeScrBalAfter, safeScrBalBefore);
@@ -334,7 +400,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         emit CashEventEmitter.PendingCashbackCleared(address(safe), address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), spendTokens, spendAmounts, true);
 
         safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
         assertEq(safePendingCashbackAfter, 0);
@@ -357,10 +423,16 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertEq(safePendingCashbackBefore, 0);
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertEq(safeScrBalAfter, safeScrBalBefore);
@@ -378,7 +450,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         emit CashEventEmitter.PendingCashbackCleared(address(safe), address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), keccak256("newTxId"), spendTokens, spendAmounts, true);
 
         safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
         assertEq(safePendingCashbackAfter, cashbackInUsdc);
@@ -532,10 +604,15 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         
         uint256 cashbackPercentage = cashModule.getTierCashbackPercentage(SafeTiers.Pepe);
         uint256 cashbackInUsdc = (spendAmt * cashbackPercentage) / 10000;
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
         
         // Spend to create pending cashback
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
         
         // Verify pending cashback exists
         assertEq(cashModule.getPendingCashback(address(safe)), cashbackInUsdc);
@@ -579,10 +656,15 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         
         uint256 cashbackPercentage = cashModule.getTierCashbackPercentage(SafeTiers.Pepe);
         uint256 cashbackInUsdc = (spendAmt * cashbackPercentage) / 10000;
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmt;
         
         // Spend to create pending cashback
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmt, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
         
         // Verify pending cashback exists
         assertEq(cashModule.getPendingCashback(address(safe)), cashbackInUsdc);

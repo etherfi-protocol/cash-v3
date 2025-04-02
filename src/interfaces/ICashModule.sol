@@ -182,6 +182,9 @@ interface ICashModule {
     /// @notice Thrown when the caller is not an EtherFi Safe
     error OnlyEtherFiSafe();
 
+    /// @notice Error thrown when trying to use multiple tokens in credit mode
+    error OnlyOneTokenAllowedInCreditMode();
+
     /**
      * @notice Role identifier for EtherFi wallet access control
      * @return The role identifier as bytes32
@@ -393,23 +396,21 @@ interface ICashModule {
     function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external;
 
     /**
-     * @notice Processes a spending transaction
+     * @notice Processes a spending transaction with multiple tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
-     * @param spender Address of the spender initiating the transaction
      * @param txId Transaction identifier
-     * @param token Address of the token to spend
-     * @param amountInUsd Amount to spend in USD
+     * @param tokens Array of addresses of the tokens to spend
+     * @param amountsInUsd Array of amounts to spend in USD (must match tokens array length)
      * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
-     * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
-     * @custom:throws OnlyEtherFiSafe if the safe is not a valid EtherFi Safe
-     * @custom:throws InvalidInput if spender is the safe
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
-     * @custom:throws UnsupportedToken if the token is not supported
-     * @custom:throws AmountZero if the converted amount is zero
-     * @custom:throws BorrowingsExceedMaxBorrowAfterSpending if spending would exceed borrowing limits
+     * @custom:throws UnsupportedToken if any token is not supported
+     * @custom:throws AmountZero if any converted amount is zero
+     * @custom:throws ArrayLengthMismatch if token and amount arrays have different lengths
+     * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
+     * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd, bool shouldReceiveCashback) external;
+    function spend(address safe,  address spender,  bytes32 txId,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external;
 
     /**
      * @notice Repays borrowed tokens

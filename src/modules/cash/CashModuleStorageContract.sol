@@ -120,6 +120,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when attempting to set a split ratio that is identical to the current split
     error SplitAlreadyTheSame();
 
+    /// @notice Error thrown when trying to use multiple tokens in credit mode
+    error OnlyOneTokenAllowedInCreditMode();
+
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { 
         _disableInitializers();
     }

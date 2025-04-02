@@ -65,9 +65,14 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
 
     // Test getUserCurrentState comprehensive function
     function test_getUserCurrentState() public {
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
         // Borrow some tokens first to have both collateral and borrows
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), borrowAmt, false);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, false);
         
         // Get user state
         (

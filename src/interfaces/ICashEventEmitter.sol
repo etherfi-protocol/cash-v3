@@ -33,16 +33,17 @@ interface ICashEventEmitter {
     function emitCashbackEvent(address safe, address spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) external;
 
     /**
-     * @notice Emits an event for a spending transaction
+     * @notice Emits the Spend event
+     * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
      * @param txId Transaction identifier
-     * @param token Address of the token spent
-     * @param amount Amount of token spent
-     * @param amountInUsd USD value of the amount spent
-     * @param mode Mode used for the spending (Debit or Credit)
+     * @param tokens Addresses of the tokens
+     * @param amounts Amounts of tokens
+     * @param amountsInUsd Amounts in USD value
+     * @param totalUsdAmt Total amount in USD
+     * @param mode Operational mode
      */
-    function emitSpend(address safe, bytes32 txId, address token, uint256 amount, uint256 amountInUsd, Mode mode) external;
-
+    function emitSpend(address safe, bytes32 txId, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external;
     /**
      * @notice Emits an event when the mode is changed
      * @param prevMode Previous mode

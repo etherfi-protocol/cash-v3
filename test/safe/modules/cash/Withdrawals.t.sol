@@ -97,26 +97,35 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
 
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), 10e6, true);
+        {
+            address[] memory spendTokens = new address[](1);
+            spendTokens[0] = address(usdcScroll);
+            uint256[] memory spendAmounts = new uint256[](1);
+            spendAmounts[0] = 10e6;
 
-        uint256 nonce = safe.nonce();
+            vm.prank(etherFiWallet);
+            cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+        }
 
-        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
+        {
+            uint256 nonce = safe.nonce();
 
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+            bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
 
-        address[] memory signers = new address[](2);
-        signers[0] = owner1;
-        signers[1] = owner2;
+            (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+            (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
 
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
+            address[] memory signers = new address[](2);
+            signers[0] = owner1;
+            signers[1] = owner2;
 
-        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
-        cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, signers, signatures);
+            bytes[] memory signatures = new bytes[](2);
+            signatures[0] = abi.encodePacked(r1, s1, v1);
+            signatures[1] = abi.encodePacked(r2, s2, v2);
+
+            vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+            cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, signers, signatures);
+        }
     }
 
     function test_requestWithdrawal_resetWithdrawalWithNewRequest() public {

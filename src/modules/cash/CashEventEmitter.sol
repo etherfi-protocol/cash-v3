@@ -107,12 +107,13 @@ contract CashEventEmitter is UpgradeableProxy {
      * @notice Emitted when tokens are spent from a safe
      * @param safe Address of the safe spending the tokens
      * @param txId Transaction identifier
-     * @param token Address of the token being spent
-     * @param amount Amount of tokens being spent
+     * @param tokens Addresses of the tokens being spent
+     * @param amounts Amounts of tokens being spent
      * @param amountInUsd USD value of the tokens being spent
+     * @param totalUsdAmt Total USD value spent
      * @param mode Operational mode in which the spending occurs
      */
-    event Spend(address indexed safe, bytes32 indexed txId, address indexed token, uint256 amount, uint256 amountInUsd, Mode mode);
+    event Spend(address indexed safe, bytes32 indexed txId, address[] tokens, uint256[] amounts, uint256[] amountInUsd, uint256 totalUsdAmt, Mode mode);
     
     /**
      * @notice Emitted when cashback is calculated and potentially distributed
@@ -245,13 +246,14 @@ contract CashEventEmitter is UpgradeableProxy {
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
      * @param txId Transaction identifier
-     * @param token Address of the token
-     * @param amount Amount of tokens
-     * @param amountInUsd USD value
+     * @param tokens Addresses of the tokens
+     * @param amounts Amounts of tokens
+     * @param amountsInUsd Amounts in USD value
+     * @param totalUsdAmt Total amount in USD
      * @param mode Operational mode
      */
-    function emitSpend(address safe, bytes32 txId, address token, uint256 amount, uint256 amountInUsd, Mode mode) external onlyCashModule {
-        emit Spend(safe, txId, token, amount, amountInUsd, mode);
+    function emitSpend(address safe, bytes32 txId, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external onlyCashModule {
+        emit Spend(safe, txId, tokens, amounts, amountsInUsd, totalUsdAmt, mode);
     }
 
     /**

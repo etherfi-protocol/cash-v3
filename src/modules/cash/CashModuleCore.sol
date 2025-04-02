@@ -271,39 +271,148 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Processes a spending transaction
+     * @notice Processes a spending transaction with multiple tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
-     * @param token Address of the token to spend
-     * @param amountInUsd Amount to spend in USD
+     * @param tokens Array of addresses of the tokens to spend
+     * @param amountsInUsd Array of amounts to spend in USD (must match tokens array length)
      * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
-     * @custom:throws UnsupportedToken if the token is not supported
-     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws UnsupportedToken if any token is not supported
+     * @custom:throws AmountZero if any converted amount is zero
+     * @custom:throws ArrayLengthMismatch if token and amount arrays have different lengths
+     * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd, bool shouldReceiveCashback) external whenNotPaused onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe,  address spender,  bytes32 txId,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external whenNotPaused onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
-        IDebtManager debtManager = $.debtManager;
 
-        if (spender == safe) revert InvalidInput();
-
-        _setCurrentMode($$);
-
-        if ($$.transactionCleared[txId]) revert TransactionAlreadyCleared();
-        if (!_isBorrowToken(debtManager, token)) revert UnsupportedToken();
-        uint256 amount = debtManager.convertUsdToCollateralToken(token, amountInUsd);
-        if (amount == 0) revert AmountZero();
-
-        $$.transactionCleared[txId] = true;
-        $$.spendingLimit.spend(amountInUsd);
-
-        _retrievePendingCashback($, safe, spender);
-        _spend($, debtManager, safe, txId, spender, token, amountInUsd, amount, shouldReceiveCashback);
+        uint256 totalSpendingInUsd = _validateSpend($, $$, safe, spender, txId, tokens, amountsInUsd);        
+                
+        // Process all token transfers based on mode
+        if ($$.mode == Mode.Credit)  _spendCredit($, $.debtManager, safe, txId, spender, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
+        else _spendMultipleDebit($, $.debtManager, safe, txId, spender, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
     }
 
+    function _validateSpend(CashModuleStorage storage $, SafeCashConfig storage $$, address safe,  address spender,  bytes32 txId, address[] calldata tokens,  uint256[] calldata amountsInUsd) internal returns(uint256) {
+        // Input validation
+        if (tokens.length == 0) revert InvalidInput();
+        if (tokens.length != amountsInUsd.length) revert ArrayLengthMismatch();
+        if (spender == safe) revert InvalidInput();
+
+        // Set current mode and check transaction status
+        _setCurrentMode($$);
+        if ($$.transactionCleared[txId]) revert TransactionAlreadyCleared();
+        
+        // In Credit mode, only one token is allowed
+        if ($$.mode == Mode.Credit && tokens.length > 1) revert OnlyOneTokenAllowedInCreditMode();
+
+        // Calculate total spending amount in USD
+        uint256 totalSpendingInUsd = 0;
+        for (uint256 i = 0; i < amountsInUsd.length; i++) {
+            totalSpendingInUsd += amountsInUsd[i];
+        }
+
+        if (totalSpendingInUsd == 0) revert AmountZero();
+        
+        // Update spending limit
+        $$.transactionCleared[txId] = true;
+        $$.spendingLimit.spend(totalSpendingInUsd);
+
+        // Retrieve any pending cashback
+        _retrievePendingCashback($, safe, spender);
+
+        return totalSpendingInUsd;
+    }
+
+    /**
+     * @dev Internal function to execute credit mode spending transaction (single token)
+     * @param $ Storage reference to the CashModuleStorage
+     * @param debtManager Reference to the debt manager contract
+     * @param safe Address of the EtherFi Safe
+     * @param txId Transaction identifier
+     * @param spender Address of the spender
+     * @param tokens Addresses of the tokens to spend
+     * @param amountsInUsd Amounts to spend in USD
+     * @param shouldReceiveCashback Flag indicating if cashback should be processed
+     */
+    function _spendCredit(CashModuleStorage storage $, IDebtManager debtManager, address safe, bytes32 txId, address spender, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd, bool shouldReceiveCashback) internal {
+        // Credit mode validation
+        if (!_isBorrowToken(debtManager, tokens[0])) revert UnsupportedToken();
+        uint256 amount = debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
+        if (amount == 0) revert AmountZero();
+        
+        address[] memory to = new address[](1);
+        bytes[] memory data = new bytes[](1);
+        uint256[] memory values = new uint256[](1);
+
+        to[0] = address(debtManager);
+        data[0] = abi.encodeWithSelector(IDebtManager.borrow.selector, tokens[0], amount);
+        values[0] = 0;
+
+        try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) { }
+        catch {
+            _cancelOldWithdrawal(safe);
+            IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        }
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amount;
+
+        if (shouldReceiveCashback) _cashback($, safe, spender, amountsInUsd[0]);
+        $.cashEventEmitter.emitSpend(safe, txId, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
+    }
+
+    /**
+     * @dev Internal function to execute debit mode spending transactions (multiple tokens)
+     * @param $ Storage reference to the CashModuleStorage
+     * @param debtManager Reference to the debt manager contract
+     * @param safe Address of the EtherFi Safe
+     * @param txId Transaction identifier
+     * @param spender Address of the spender
+     * @param tokens Array of addresses of the tokens to spend
+     * @param amountsInUsd Array of amounts to spend in USD
+     * @param shouldReceiveCashback Flag indicating if cashback should be processed
+     */
+    function _spendMultipleDebit(CashModuleStorage storage $, IDebtManager debtManager, address safe, bytes32 txId, address spender, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd, bool shouldReceiveCashback) internal {
+        uint256[] memory amounts = new uint256[](tokens.length);
+        
+        // Convert USD amounts to token amounts and validate
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (!_isBorrowToken(debtManager, tokens[i])) revert UnsupportedToken();
+            amounts[i] = debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
+            if (IERC20(tokens[i]).balanceOf(safe) < amounts[i]) revert InsufficientBalance();
+            
+            _updateWithdrawalRequestIfNecessary(safe, tokens[i], amounts[i]);
+        }
+
+        _spendDebit($, safe, tokens, amounts);
+
+        $.cashEventEmitter.emitSpend(safe, txId, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
+        debtManager.ensureHealth(safe);
+        if (shouldReceiveCashback) _cashback($, safe, spender, totalSpendingInUsd);
+    }
+
+    function _spendDebit(CashModuleStorage storage $, address safe,  address[] calldata tokens, uint256[] memory amounts) internal {
+        // Execute transfers to settlement dispatcher for all tokens
+        address[] memory to = new address[](tokens.length);
+        bytes[] memory data = new bytes[](tokens.length);
+        uint256[] memory values = new uint256[](tokens.length);
+        
+        for (uint256 i = 0; i < tokens.length; i++) {
+            to[i] = tokens[i];
+            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, $.settlementDispatcher, amounts[i]);
+            values[i] = 0;
+        }
+        try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) {}
+        catch {
+            _cancelOldWithdrawal(safe);
+            IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        }
+    }
+    
     /**
      * @notice Attempts to retrieve pending cashback for a safe and/or spender
      * @dev Calls the cashback dispatcher to clear pending cashback and updates storage if successful
@@ -332,55 +441,6 @@ contract CashModuleCore is CashModuleStorageContract {
                 delete $.pendingCashbackInUsd[spender];
             }
         }
-    }
-
-    /**
-     * @dev Internal function to execute the spending transaction
-     * @param $ Storage reference to the CashModuleStorage
-     * @param debtManager Reference to the debt manager contract
-     * @param safe Address of the EtherFi Safe
-     * @param txId Transaction identifier
-     * @param token Address of the token to spend
-     * @param amount Amount of tokens to spend
-     * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
-     * @custom:throws BorrowingsExceedMaxBorrowAfterSpending if spending would exceed borrowing limits
-     */
-    function _spend(CashModuleStorage storage $, IDebtManager debtManager, address safe, bytes32 txId, address spender, address token, uint256 amountInUsd, uint256 amount, bool shouldReceiveCashback) internal {
-        SafeCashConfig storage $$ = $.safeCashConfig[safe];
-        address[] memory to = new address[](1);
-        bytes[] memory data = new bytes[](1);
-        uint256[] memory values = new uint256[](1);
-
-        if ($$.mode == Mode.Credit) {
-            to[0] = address(debtManager);
-            data[0] = abi.encodeWithSelector(IDebtManager.borrow.selector, token, amount);
-            values[0] = 0;
-
-            try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) { }
-            catch {
-                _cancelOldWithdrawal(safe);
-                IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-            }
-        } else {
-            _updateWithdrawalRequestIfNecessary(safe, token, amount);
-            (IDebtManager.TokenData[] memory collateralTokenAmounts,) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, token, amount, $$.mode);
-            (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
-
-            if (totalBorrowings > totalMaxBorrow && $$.pendingWithdrawalRequest.tokens.length != 0) {
-                _cancelOldWithdrawal(safe);
-                (collateralTokenAmounts,) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, token, amount, $$.mode);
-                (totalMaxBorrow, totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
-            }
-            if (totalBorrowings > totalMaxBorrow) revert BorrowingsExceedMaxBorrowAfterSpending();
-
-            to[0] = token;
-            data[0] = abi.encodeWithSelector(IERC20.transfer.selector, _getCashModuleStorage().settlementDispatcher, amount);
-            values[0] = 0;
-            IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-        }
-
-        if (shouldReceiveCashback) _cashback($, safe, spender, amountInUsd);
-        $.cashEventEmitter.emitSpend(safe, txId, token, amount, amountInUsd, $$.mode);
     }
 
     /**

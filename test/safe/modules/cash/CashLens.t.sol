@@ -213,11 +213,17 @@ contract CashLensTest is CashModuleTestSetup {
         // Set to credit mode and wait for it to activate
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+
+        uint256 spendAmount = 1000e6;
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmount;
         
         // Spend in credit mode to create a borrow
-        uint256 spendAmount = 1000e6;
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), spendAmount, true);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
         
         // Get safe cash data
         SafeCashData memory data = cashLens.getSafeCashData(address(safe));
