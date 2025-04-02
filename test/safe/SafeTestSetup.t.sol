@@ -116,9 +116,9 @@ contract SafeTestSetup is Utils {
 
     function setUp() public virtual {
         string memory scrollRpc = vm.envString("SCROLL_RPC");
-        if (bytes(scrollRpc).length != 0) vm.createSelectFork(scrollRpc);
-        else vm.createSelectFork("https://rpc.scroll.io");
-
+        if (bytes(scrollRpc).length != 0) scrollRpc = "https://rpc.scroll.io"; 
+        vm.createSelectFork(scrollRpc);
+        
         pauser = makeAddr("pauser");
         unpauser = makeAddr("unpauser");
         owner = makeAddr("owner");

@@ -69,38 +69,131 @@ contract CashLens is UpgradeableProxy {
     }
 
     /**
-     * @notice Checks if a spending transaction can be executed
-     * @dev Simulates the spending process and checks for potential issues
+     * @notice Checks if a spending transaction can be executed with multiple tokens
+     * @dev In debit mode, allows spending multiple tokens; in credit mode, only one token
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
-     * @param token Address of the token to spend
-     * @param amountInUsd Amount to spend in USD
+     * @param tokens Array of addresses of the tokens to spend
+     * @param amountsInUsd Array of amounts to spend in USD (must match tokens array length)
      * @return canSpend Boolean indicating if the spending is allowed
      * @return message Error message if spending is not allowed
      */
-    function canSpend(address safe, bytes32 txId, address token, uint256 amountInUsd) public view returns (bool, string memory) {
-        IDebtManager debtManager = cashModule.getDebtManager();
+    function canSpend(address safe, bytes32 txId, address[] calldata tokens,uint256[] calldata amountsInUsd) public view returns (bool, string memory) {
+        // Basic validation
+        if (tokens.length == 0) return (false, "No tokens provided");
+        if (tokens.length != amountsInUsd.length) return (false, "Tokens and amounts arrays length mismatch");
         if (cashModule.transactionCleared(safe, txId)) return (false, "Transaction already cleared");
-        if (!debtManager.isBorrowToken(token)) return (false, "Not a supported stable token");
-
-        uint256 amount = debtManager.convertUsdToCollateralToken(token, amountInUsd);
-        if (amount == 0) return (false, "Amount zero");
-
-        SafeData memory safeData = cashModule.getData(safe);
-        if (safeData.incomingCreditModeStartTime != 0) safeData.mode = Mode.Credit;
-
-        if (safeData.mode == Mode.Debit && IERC20(token).balanceOf(safe) < amount) return (false, "Insufficient balance to spend with Debit flow");
-
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, safeData.mode, amount);
-        if (bytes(error).length != 0) return (false, error);
-        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
-        if (totalBorrowings > totalMaxBorrow) return (false, "Borrowings greater than max borrow after spending");
-        if (safeData.mode == Mode.Credit) {
-            if (amountInUsd > totalMaxBorrow - totalBorrowings) return (false, "Insufficient borrowing power");
-            if (IERC20(token).balanceOf(address(debtManager)) < amount) return (false, "Insufficient liquidity in debt manager to cover the loan");
+        
+        // Check total spending amount
+        uint256 totalSpendingInUsd = 0;
+        for (uint256 i = 0; i < amountsInUsd.length; i++) {
+            totalSpendingInUsd += amountsInUsd[i];
         }
+        if (totalSpendingInUsd == 0) return (false, "Total amount zero in USD");
+        
+        // Validate mode and spending limits
+        return _validateSpending(safe, tokens, amountsInUsd, totalSpendingInUsd);
+    }
 
-        return safeData.spendingLimit.canSpend(amountInUsd);
+    /**
+     * @notice Validates mode, limits and completes spending checks
+     */
+    function _validateSpending(address safe, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
+        IDebtManager debtManager = cashModule.getDebtManager();
+        SafeData memory safeData = cashModule.getData(safe);
+        
+        // Update mode if necessary
+        if (safeData.incomingCreditModeStartTime != 0) safeData.mode = Mode.Credit;
+        
+        // In Credit mode, only one token is allowed
+        if (safeData.mode == Mode.Credit && tokens.length > 1) return (false, "Only one token allowed in Credit mode");
+        
+        // Check spending limit
+        (bool withinLimit, string memory limitMessage) = safeData.spendingLimit.canSpend(totalSpendingInUsd);
+        if (!withinLimit) return (false, limitMessage);
+        
+        // Validate tokens
+        return _processTokensAndMode(safe, tokens, amountsInUsd, totalSpendingInUsd, debtManager, safeData);
+    }
+
+    /**
+     * @notice Process tokens and check mode-specific rules
+     */
+    function _processTokensAndMode(address safe, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
+        // Convert USD to token amounts and validate each token
+        uint256[] memory amounts = new uint256[](tokens.length);
+        
+        for (uint256 i = 0; i < tokens.length; i++) {
+            // Check if token is supported
+            if (!debtManager.isBorrowToken(tokens[i])) {
+                return (false, "Not a supported stable token");
+            }
+            
+            // Convert USD to token amount
+            amounts[i] = debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
+            
+            // In Debit mode, check each token's balance
+            if (safeData.mode == Mode.Debit && IERC20(tokens[i]).balanceOf(safe) < amounts[i]) {
+                return (false, "Insufficient token balance for debit mode spending");
+            }
+        }
+        
+        // Check mode-specific conditions
+        if (safeData.mode == Mode.Credit) {
+            return _creditModeCheck(safe, tokens, amounts, totalSpendingInUsd, debtManager, safeData);
+        } else {
+            return _debitModeCheck(safe, tokens, amounts, debtManager, safeData);
+        }
+    }
+
+    /**
+     * @notice Credit mode specific checks
+     */
+    function _creditModeCheck(address safe, address[] memory tokens, uint256[] memory amounts, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
+        // credit mode should only have 1 token
+        // Check if debt manager has enough liquidity
+        if (IERC20(tokens[0]).balanceOf(address(debtManager)) < amounts[0]) return (false, "Insufficient liquidity in debt manager to cover the loan");
+        
+        // Get collateral balances with pending withdrawals factored in
+        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, tokens, amounts);
+        
+        if (bytes(error).length != 0) return (false, error);
+        
+        return _checkBorrowingPower(safe, collateralTokenAmounts, totalSpendingInUsd, debtManager);
+    }
+
+    /**
+     * @notice Debit mode specific checks
+     */
+    function _debitModeCheck(address safe, address[] calldata tokens, uint256[] memory amounts, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
+        // Simulate the spending of multiple tokens
+        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) =  _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, tokens, amounts);
+        
+        if (bytes(error).length != 0) return (false, error);
+        
+        // Check if spending would cause collateral ratio issues
+        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
+        
+        if (totalBorrowings > totalMaxBorrow) return (false, "Borrowings greater than max borrow after spending");
+        
+        return (true, "");
+    }
+
+    /**
+     * @notice Check borrowing power for credit mode
+     */
+    function _checkBorrowingPower(address safe, IDebtManager.TokenData[] memory collateralTokenAmounts, uint256 totalSpendingInUsd, IDebtManager debtManager) internal view returns (bool, string memory) {
+        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
+        
+        if (totalBorrowings > totalMaxBorrow) {
+            return (false, "Borrowings greater than max borrow");
+        }
+        
+        if (totalSpendingInUsd > totalMaxBorrow - totalBorrowings) {
+            return (false, "Insufficient borrowing power");
+        }
+        
+        return (true, "");
     }
 
     /**
@@ -121,11 +214,13 @@ contract CashLens is UpgradeableProxy {
         bool isValidCredit;
 
         // Handle credit mode calculation
+        safeData.mode = Mode.Credit;
         (returnAmtInCreditModeUsd, isValidCredit) = _calculateCreditModeAmount(debtManager, safe, token, safeData, 0);
         if (!isValidCredit) {
             return (0, 0, spendingLimitAllowance);
         }
 
+        safeData.mode = Mode.Debit;
         // Handle debit mode calculation - only if credit mode was valid
         returnAmtInDebitModeUsd = _calculateDebitModeAmount(debtManager, safe, token, safeData);
     }
@@ -279,7 +374,12 @@ contract CashLens is UpgradeableProxy {
      */
     function _calculateCreditModeAmount(IDebtManager debtManager, address safe, address token, SafeData memory safeData, uint256 amountToSubtract) internal view returns (uint256 creditModeAmount, bool isValid) {
         // Get collateral balance with token subtracted
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, Mode.Credit, amountToSubtract);
+        address[] memory tokens = new address[](1);
+        tokens[0] = token;
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amountToSubtract;
+
+        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, tokens, amounts);
 
         // Check for errors - short circuit to save gas
         if (bytes(error).length != 0 || collateralTokenAmounts.length == 0) {
@@ -308,14 +408,15 @@ contract CashLens is UpgradeableProxy {
      * @return debitModeAmount The amount that can be spent in debit mode
      */
     function _calculateDebitModeAmount(IDebtManager debtManager, address safe, address token, SafeData memory safeData) internal view returns (uint256 debitModeAmount) {
-        // Get effective balance - return early if zero
-        uint256 effectiveBal = IERC20(token).balanceOf(safe) - _getPendingWithdrawalAmount(safeData, token);
-        if (effectiveBal == 0) {
-            return 0;
-        }
+        address[] memory tokens = new address[](1);
+        tokens[0] = token;
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = IERC20(token).balanceOf(safe);
 
         // Get collateral balance with token subtracted
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokenSubtracted(debtManager, safe, safeData, token, Mode.Debit, effectiveBal);
+        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, tokens, amounts);
+
+        uint256 effectiveBal = amounts[0] - getPendingWithdrawalAmount(safe, token);
 
         // Check for errors - return early if invalid
         if (bytes(error).length != 0 || collateralTokenAmounts.length == 0) {
@@ -347,30 +448,51 @@ contract CashLens is UpgradeableProxy {
     }
 
     /**
-     * @notice Gets collateral balances with a token amount subtracted
-     * @dev Internal helper that calculates effective balances for spending simulation
+     * @notice Gets collateral balances with multiple token amounts subtracted
+     * @dev Internal helper for simulating multi-token debit spending
      * @param debtManager Reference to the debt manager contract
      * @param safe Address of the EtherFi Safe
-     * @param safeData Safe data structure containing mode and withdrawal requests
-     * @param token Address of the token to subtract
-     * @param amount Amount to subtract
+     * @param safeData Safe data structure containing withdrawal requests
+     * @param tokens Array of addresses of tokens to subtract
+     * @param amounts Array of amounts to subtract (must match tokens array)
      * @return tokenAmounts Array of token data with updated balances
      * @return error Error message if calculation fails
      */
-    function _getCollateralBalanceWithTokenSubtracted(IDebtManager debtManager, address safe, SafeData memory safeData, address token, Mode mode, uint256 amount) internal view returns (IDebtManager.TokenData[] memory, string memory error) {
+    function _getCollateralBalanceWithTokensSubtracted(
+        IDebtManager debtManager,
+        address safe,
+        SafeData memory safeData,
+        address[] memory tokens,
+        uint256[] memory amounts
+    ) internal view returns (IDebtManager.TokenData[] memory, string memory) {
         address[] memory collateralTokens = debtManager.getCollateralTokens();
         uint256 len = collateralTokens.length;
         IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
         uint256 m = 0;
+        
         for (uint256 i = 0; i < len;) {
             uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
             uint256 pendingWithdrawalAmount = _getPendingWithdrawalAmount(safeData, collateralTokens[i]);
+            
             if (balance != 0) {
                 balance = balance - pendingWithdrawalAmount;
-                if (mode == Mode.Debit && token == collateralTokens[i]) {
-                    if (balance == 0 || balance < amount) return (new IDebtManager.TokenData[](0), "Insufficient effective balance after withdrawal to spend with debit mode");
-                    balance = balance - amount;
+
+                if (safeData.mode == Mode.Debit) {
+                    // Check if this token is in the tokens array
+                    for (uint256 j = 0; j < tokens.length; j++) {
+                        if (collateralTokens[i] == tokens[j]) {
+                            if (balance < amounts[j]) {
+                                return (
+                                    new IDebtManager.TokenData[](0), 
+                                    "Insufficient effective balance after withdrawal to spend with debit mode"
+                                );
+                            }
+                            balance = balance - amounts[j];
+                            break;
+                        }
+                    }
                 }
+                
                 tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
                 unchecked {
                     ++m;
@@ -380,11 +502,11 @@ contract CashLens is UpgradeableProxy {
                 ++i;
             }
         }
-
+        
         assembly ("memory-safe") {
             mstore(tokenAmounts, m)
         }
-
+        
         return (tokenAmounts, "");
     }
 }

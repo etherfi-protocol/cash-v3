@@ -3,7 +3,8 @@ pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { Mode, SafeCashData } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, SafeCashData, SafeData } from "../../../../src/interfaces/ICashModule.sol";
+import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -291,5 +292,97 @@ contract CashLensTest is CashModuleTestSetup {
         // Check non-existent withdrawal
         amount = cashLens.getPendingWithdrawalAmount(address(safe), address(weETHScroll));
         assertEq(amount, 0, "Should have no pending withdrawal for weETH");
+    }
+
+    function test_calculateCreditModeAmount_noCollateral() public {
+        // Create a new safe with no collateral
+        address safeDummy = makeAddr("safeDummy");
+
+        vm.mockCall(
+            address(safeFactory),
+            abi.encodeWithSelector(IEtherFiSafeFactory.isEtherFiSafe.selector, safeDummy),
+            abi.encode(true)
+        );
+        
+        // Get the safe data structure
+        SafeData memory safeData = cashModule.getData(address(safe));
+        safeData.mode = Mode.Credit;
+        
+        address token = address(usdcScroll);
+        
+        // Call through maxCanSpend to test the internal _calculateCreditModeAmount
+        (uint256 creditMaxSpend, , ) = cashLens.maxCanSpend(safeDummy, token);
+        
+        assertEq(creditMaxSpend, 0, "Credit max spend should be zero with no collateral");
+    }
+
+    function test_calculateDebitModeAmount_zeroBalance() public {
+        // Set up a safe with insufficient collateral
+        address[] memory owners = new address[](1);
+        owners[0] = owner1;
+        
+        address[] memory modules = new address[](1);
+        modules[0] = address(cashModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        
+        bytes[] memory setupData = new bytes[](1);
+        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
+        
+        vm.prank(owner);
+        safeFactory.deployEtherFiSafe(keccak256("insufficientSafe"), owners, modules, setupData, 1);
+        address insufficientSafe = safeFactory.getDeterministicAddress(keccak256("insufficientSafe"));
+                
+        // Set to credit mode and borrow more than collateral value
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        
+        
+        // Calculate max debit spend - should be zero due to 0 collateral
+        (, uint256 debitMaxSpend, ) = cashLens.maxCanSpend(insufficientSafe, address(usdcScroll));
+        
+        assertEq(debitMaxSpend, 0, "Debit max spend should be zero with insufficient collateral");
+    }
+
+    function test_getUserTotalCollateral_zeroBalance() public {
+        // Create a new safe with no balance
+        address safeDummy = makeAddr("safeDummy");
+
+        vm.mockCall(
+            address(safeFactory),
+            abi.encodeWithSelector(IEtherFiSafeFactory.isEtherFiSafe.selector, safeDummy),
+            abi.encode(true)
+        );
+        
+        // Get collateral
+        IDebtManager.TokenData[] memory collateral = cashLens.getUserTotalCollateral(safeDummy);
+        
+        // Should have zero entries
+        assertEq(collateral.length, 0, "Should have no collateral entries with zero balance");
+    }
+
+    function test_getCollateralBalanceWithTokensSubtracted_allTokens() public {
+        // Setup test state with multiple tokens
+        deal(address(weETHScroll), address(safe), 5 ether);
+        deal(address(usdcScroll), address(safe), 10000e6);
+        
+        // Simulate spending all tokens
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdcScroll);
+        tokens[1] = address(weETHScroll);
+        
+        uint256[] memory amountsInUsd = new uint256[](2);
+        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdcScroll), 10000e6);
+        amountsInUsd[1] = debtManager.convertCollateralTokenToUsd(address(weETHScroll), 5 ether);
+        
+        // Set to debit mode to test subtraction
+        SafeData memory safeData = cashModule.getData(address(safe));
+        safeData.mode = Mode.Debit;
+        
+        // Test through canSpend which calls _getCollateralBalanceWithTokensSubtracted
+        (bool canSpend, ) = cashLens.canSpend(address(safe), txId, tokens, amountsInUsd);
+        
+        assertFalse(canSpend, "Cannot spend all tokens as it would leave no collateral");
     }
 }
