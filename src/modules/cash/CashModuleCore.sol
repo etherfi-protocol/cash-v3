@@ -289,14 +289,14 @@ contract CashModuleCore is CashModuleStorageContract {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
-        uint256 totalSpendingInUsd = _validateSpend($, $$, safe, spender, txId, tokens, amountsInUsd);        
+        uint256 totalSpendingInUsd = _validateSpend($$, safe, spender, txId, tokens, amountsInUsd);        
                 
         // Process all token transfers based on mode
         if ($$.mode == Mode.Credit)  _spendCredit($, $.debtManager, safe, txId, spender, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
         else _spendMultipleDebit($, $.debtManager, safe, txId, spender, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
     }
 
-    function _validateSpend(CashModuleStorage storage $, SafeCashConfig storage $$, address safe,  address spender,  bytes32 txId, address[] calldata tokens,  uint256[] calldata amountsInUsd) internal returns(uint256) {
+    function _validateSpend(SafeCashConfig storage $$, address safe,  address spender,  bytes32 txId, address[] calldata tokens,  uint256[] calldata amountsInUsd) internal returns(uint256) {
         // Input validation
         if (tokens.length == 0) revert InvalidInput();
         if (tokens.length != amountsInUsd.length) revert ArrayLengthMismatch();
@@ -321,8 +321,9 @@ contract CashModuleCore is CashModuleStorageContract {
         $$.transactionCleared[txId] = true;
         $$.spendingLimit.spend(totalSpendingInUsd);
 
-        // Retrieve any pending cashback
-        _retrievePendingCashback($, safe, spender);
+        // Retrieve any pending cashback for safe and spender
+        _retrievePendingCashback(spender);
+        _retrievePendingCashback(safe);
 
         return totalSpendingInUsd;
     }
@@ -414,31 +415,36 @@ contract CashModuleCore is CashModuleStorageContract {
     }
     
     /**
-     * @notice Attempts to retrieve pending cashback for a safe and/or spender
-     * @dev Calls the cashback dispatcher to clear pending cashback and updates storage if successful
-     * @param $ Storage reference to the CashModuleStorage
-     * @param safe Address of the EtherFi Safe
-     * @param spender Address of the spender who may have pending cashback
+     * @notice Clears pending cashback for users
+     * @param users Addresses of users to clear the pending cashback for
      */
-    function _retrievePendingCashback(CashModuleStorage storage $, address safe, address spender) internal {
-        ICashEventEmitter eventEmitter = $.cashEventEmitter;
-        address cashbackToken;
-        uint256 cashbackAmount;
-        bool paid;
-
-        if ($.pendingCashbackInUsd[safe] != 0) {
-            (cashbackToken, cashbackAmount, paid) = $.cashbackDispatcher.clearPendingCashback(safe);
-            if (paid) {
-                eventEmitter.emitPendingCashbackClearedEvent(safe, safe, cashbackToken, cashbackAmount, $.pendingCashbackInUsd[safe]);
-                delete $.pendingCashbackInUsd[safe];
+    function clearPendingCashback(address[] calldata users) external whenNotPaused {
+        uint256 len = users.length;
+        if (len == 0) revert InvalidInput();
+        
+        for (uint256 i = 0; i < len; ) {
+            if (users[i] == address(0)) revert InvalidInput();
+            
+            _retrievePendingCashback(users[i]);
+            unchecked {
+                ++i;
             }
         }
+    }
 
-        if ($.pendingCashbackInUsd[spender] != 0) {
-            (cashbackToken, cashbackAmount, paid) = $.cashbackDispatcher.clearPendingCashback(spender);
+    /**
+     * @notice Attempts to retrieve pending cashback for a user
+     * @dev Calls the cashback dispatcher to clear pending cashback and updates storage if successful
+     * @param user Address of the user who may have pending cashback
+     */
+    function _retrievePendingCashback(address user) internal {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        if ($.pendingCashbackInUsd[user] != 0) {
+            (address cashbackToken, uint256 cashbackAmount, bool paid) = $.cashbackDispatcher.clearPendingCashback(user);
             if (paid) {
-                eventEmitter.emitPendingCashbackClearedEvent(safe, spender, cashbackToken, cashbackAmount, $.pendingCashbackInUsd[spender]);
-                delete $.pendingCashbackInUsd[spender];
+                $.cashEventEmitter.emitPendingCashbackClearedEvent(user, cashbackToken, cashbackAmount, $.pendingCashbackInUsd[user]);
+                delete $.pendingCashbackInUsd[user];
             }
         }
     }

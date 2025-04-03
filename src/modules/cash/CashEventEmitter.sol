@@ -131,13 +131,12 @@ contract CashEventEmitter is UpgradeableProxy {
     
     /**
      * @notice Emitted when pending cashback is cleared
-     * @param safe Address of the safe with pending cashback
      * @param recipient Address receiving the cashback
      * @param cashbackToken Address of the token used for cashback
      * @param cashbackAmount Amount of cashback tokens paid
      * @param cashbackInUsd USD value of the cashback paid
      */
-    event PendingCashbackCleared(address indexed safe, address indexed recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd);
+    event PendingCashbackCleared(address indexed recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd);
     
     /**
      * @notice Emitted when safe tiers are set for multiple safes
@@ -214,14 +213,13 @@ contract CashEventEmitter is UpgradeableProxy {
     /**
      * @notice Emits the PendingCashbackCleared event
      * @dev Can only be called by the Cash Module
-     * @param safe Address of the safe
      * @param recipient Address receiving the cashback
      * @param cashbackToken Address of the cashback token
      * @param cashbackAmount Amount of cashback tokens
      * @param cashbackInUsd USD value of the cashback
      */
-    function emitPendingCashbackClearedEvent(address safe, address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external onlyCashModule {
-        emit PendingCashbackCleared(safe, recipient, cashbackToken, cashbackAmount, cashbackInUsd);
+    function emitPendingCashbackClearedEvent(address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external onlyCashModule {
+        emit PendingCashbackCleared(recipient, cashbackToken, cashbackAmount, cashbackInUsd);
     }
 
     /**

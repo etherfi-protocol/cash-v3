@@ -11,11 +11,12 @@ import { Mode, SafeTiers } from "./ICashModule.sol";
 interface ICashEventEmitter {
     /**
      * @notice Emits an event when pending cashback is cleared
+     * @param recipient Address receiving the cashback
      * @param cashbackToken Address of the cashback token
      * @param cashbackAmount Amount of cashback token cleared
      * @param cashbackInUsd USD value of the cashback
      */
-    function emitPendingCashbackClearedEvent(address safe, address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external;
+    function emitPendingCashbackClearedEvent(address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external;
 
     /**
      * @notice Emits the Cashback event

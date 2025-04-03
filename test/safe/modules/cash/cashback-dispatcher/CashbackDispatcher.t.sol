@@ -397,7 +397,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
         cashModule.spend(address(safe), address(0), keccak256("newTxId"), spendTokens, spendAmounts, true);
@@ -447,7 +447,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
         cashModule.spend(address(safe), address(0), keccak256("newTxId"), spendTokens, spendAmounts, true);

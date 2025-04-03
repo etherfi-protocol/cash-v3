@@ -352,9 +352,9 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(safe), address(scrToken), safePendingCashbackInCashbackToken, safePendingCashback);
+        emit CashEventEmitter.PendingCashbackCleared(address(spender), address(scrToken), spenderPendingCashbackInCashbackToken, spenderPendingCashback);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(spender), address(scrToken), spenderPendingCashbackInCashbackToken, spenderPendingCashback);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(scrToken), safePendingCashbackInCashbackToken, safePendingCashback);
         cashModule.spend(address(safe), spender, newTxId, spendTokens, spendAmounts, true);
 
         // Verify pending cashback is cleared

@@ -413,6 +413,12 @@ interface ICashModule {
     function spend(address safe,  address spender,  bytes32 txId,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external;
 
     /**
+     * @notice Clears pending cashback for users
+     * @param users Addresses of users to clear the pending cashback for
+     */
+    function clearPendingCashback(address[] calldata users) external;
+
+    /**
      * @notice Repays borrowed tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe

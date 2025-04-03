@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
@@ -13,6 +14,7 @@ import { CashVerificationLib } from "../../../../src/libraries/CashVerificationL
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
+import { UpgradeableProxy } from "../../../../src/utils/UpgradeableProxy.sol";
 
 contract CashModuleSpendTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -356,5 +358,158 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
         cashModule.spend(address(safe), address(0), keccak256("newTxId"), spendTokens, spendAmounts, true);
+    }
+
+    function test_spend_reverts_whenArrayLengthMismatch() public {
+        // Create mismatched arrays
+        address[] memory spendTokens = new address[](2);
+        spendTokens[0] = address(usdcScroll);
+        spendTokens[1] = address(weETHScroll);
+        
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 100e6;
+        
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.ArrayLengthMismatch.selector);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+    }
+    
+    function test_spend_reverts_whenEmptyTokensArray() public {
+        // Create empty tokens array
+        address[] memory spendTokens = new address[](0);
+        uint256[] memory spendAmounts = new uint256[](0);
+        
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.InvalidInput.selector);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+    }
+    
+    function test_spend_withNoCashback() public {
+        uint256 amount = 100e6;
+        deal(address(usdcScroll), address(safe), amount);
+        
+        // Get initial token balances
+        uint256 safeTokenBalBefore = scrToken.balanceOf(address(safe));
+        
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+        
+        vm.prank(etherFiWallet);
+        // Spend with shouldReceiveCashback set to false
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, false);
+        
+        // Verify no cashback was received
+        assertEq(scrToken.balanceOf(address(safe)), safeTokenBalBefore);
+    }
+    
+    function test_spend_withSpecificSpender() public {
+        uint256 amount = 100e6;
+        deal(address(usdcScroll), address(safe), amount);
+        
+        address spender = makeAddr("spender");
+        uint256 spenderTokenBalBefore = scrToken.balanceOf(spender);
+        
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+        
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), spender, txId, spendTokens, spendAmounts, true);
+        
+        // Check if the spender received some cashback
+        // The exact amount depends on configuration but should be greater than initial
+        assertGt(scrToken.balanceOf(spender), spenderTokenBalBefore);
+    }
+    
+    function test_spend_whenPaused() public {
+        uint256 amount = 100e6;
+        deal(address(usdcScroll), address(safe), amount);
+        
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+        
+        // Pause the contract
+        vm.prank(pauser);
+        UpgradeableProxy(address(cashModule)).pause();
+        
+        // Attempt to spend while paused
+        vm.prank(etherFiWallet);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+        
+        // Unpause and verify it works again
+        vm.prank(unpauser);
+        UpgradeableProxy(address(cashModule)).unpause();
+        
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+    }
+    
+    function test_spend_multiplesWithinLimits() public {
+        uint256 smallAmount = dailyLimitInUsd / 5;
+        deal(address(usdcScroll), address(safe), 1 ether);
+        
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        
+        // Perform multiple spends
+        for (uint i = 0; i < 4; i++) {
+            spendAmounts[0] = smallAmount;
+            bytes32 currentTxId = keccak256(abi.encodePacked("txId", i));
+            
+            vm.prank(etherFiWallet);
+            cashModule.spend(address(safe), address(0), currentTxId, spendTokens, spendAmounts, true);
+        }
+        
+        // This spend should exceed the daily limit
+        spendAmounts[0] = smallAmount + 1;
+        bytes32 finalTxId = keccak256(abi.encodePacked("txId-final"));
+        
+        vm.prank(etherFiWallet);
+        vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
+        cashModule.spend(address(safe), address(0), finalTxId, spendTokens, spendAmounts, true);
+        
+        // Advance time to next day (considering timezone offset)
+        uint256 timeToAdd = 24 hours;
+        vm.warp(block.timestamp + timeToAdd);
+        
+        // Now the spend should work as daily limit resets
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), finalTxId, spendTokens, spendAmounts, true);
+    }
+        
+    function test_spend_revertWhenSafeIsSpender() public {
+        uint256 amount = 100e6;
+        deal(address(usdcScroll), address(safe), amount);
+        
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+        
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.InvalidInput.selector);
+        cashModule.spend(address(safe), address(safe), txId, spendTokens, spendAmounts, true);
+    }
+    
+    function test_spend_inDebitModeWithInsufficientBalance() public {
+        uint256 amount = 100e6;
+        uint256 availableAmount = 50e6;
+        deal(address(usdcScroll), address(safe), availableAmount);
+        
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+        
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
+        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
     }
 }
