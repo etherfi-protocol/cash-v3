@@ -1,7 +1,6 @@
 [profile.default]
 src = "src"
 out = "out"
-<<<<<<< HEAD
 test = "test"
 libs = ["lib"]
 solc = "0.8.28" 
@@ -38,8 +37,3 @@ quote_style = "double"
 number_underscore = "thousands"
 wrap_comments = true
 sort_imports = true
-=======
-libs = ["lib"]
-
-# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
->>>>>>> 6c08960 (chore: forge init)

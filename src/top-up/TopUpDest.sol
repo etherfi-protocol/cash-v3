@@ -30,8 +30,9 @@ contract TopUpDest is UpgradeableProxy {
     struct TopUpDestStorage {
         /// @notice Tracks the total deposits for each token
         mapping(address token => uint256 deposits) deposits;
-        /// @notice Tracks cumulative top-ups for each user for a specific chain and token
-        mapping(address user => mapping(uint256 chainId => mapping(address token => uint256 totalTopUp))) cumulativeTopUps;
+
+        /// @notice Tracks whether a transaction has been processed
+        mapping(bytes32 txId => bool completed) transactionCompleted;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpDest")) - 1)) & ~bytes32(uint256(0xff))
@@ -53,13 +54,13 @@ contract TopUpDest is UpgradeableProxy {
 
     /**
      * @notice Emitted when tokens are sent to a user's safe
+     * @param txId TxId created for deduplication = keccak256(txhash || token || user)
      * @param user Address of the recipient safe
      * @param chainId ID of the blockchain where the user topped up
      * @param token Address of the token used for top-up
      * @param amount Amount of tokens sent
-     * @param cumulativeAmount Total amount of tokens sent to this user on this chain
      */
-    event TopUp(address indexed user, uint256 indexed chainId, address indexed token, uint256 amount, uint256 cumulativeAmount);
+    event TopUp(bytes32 indexed txId, address indexed user, address indexed token, uint256 chainId, uint256 amount);
 
     /// @notice Error thrown when the contract has insufficient token balance
     error BalanceTooLow();
@@ -76,8 +77,8 @@ contract TopUpDest is UpgradeableProxy {
     /// @notice Error thrown when input arrays have different lengths
     error ArrayLengthMismatch();
 
-    /// @notice Error thrown when cumulative top-up is wrong
-    error RaceDetected();
+    /// @notice Error thrown when the topup is already processed
+    error TopUpAlreadyProcessed();
 
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
@@ -145,6 +146,7 @@ contract TopUpDest is UpgradeableProxy {
     /**
      * @notice Tops up multiple user safes in a single transaction
      * @dev Only callable by accounts with TOP_UP_ROLE when contract is not paused
+     * @param txHashes Array of transaction hashes for source transactions
      * @param users Array of safe addresses to top up
      * @param chainIds Array of chain IDs where the user topped-up
      * @param tokens Array of token addresses to send
@@ -152,11 +154,12 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws Unauthorized if caller doesn't have the required role
      */
-    function topUpUserSafeBatch(address[] memory users, uint256[] memory chainIds, address[] memory tokens, uint256[] memory amounts, uint256[] memory expectedCumulativeTopUps) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
-        uint256 len = chainIds.length;
-        if (len != users.length || len != tokens.length || len != amounts.length || len != expectedCumulativeTopUps.length) revert ArrayLengthMismatch();
+    function topUpUserSafeBatch(bytes32[] memory txHashes, address[] memory users, uint256[] memory chainIds, address[] memory tokens, uint256[] memory amounts) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+        uint256 len = txHashes.length;
+        if (len != users.length || len != chainIds.length || len != tokens.length || len != amounts.length) revert ArrayLengthMismatch();
+            
         for (uint256 i = 0; i < len;) {
-            _topUp(users[i], chainIds[i], tokens[i], amounts[i], expectedCumulativeTopUps[i]);
+            _topUp(txHashes[i], users[i], chainIds[i], tokens[i], amounts[i]);
             unchecked {
                 ++i;
             }
@@ -166,35 +169,40 @@ contract TopUpDest is UpgradeableProxy {
     /**
      * @notice Tops up a single user safe
      * @dev Only callable by accounts with TOP_UP_ROLE when contract is not paused
+     * @param txHash Transaction hash on source chain
      * @param user Address of the safe to top up
      * @param chainId Chain ID where the user topped-up
      * @param token Address of the token to send
      * @param amount Amount of tokens to send
      * @custom:throws Unauthorized if caller doesn't have the required role
      */
-    function topUpUserSafe(address user, uint256 chainId, address token, uint256 amount, uint256 expectedCumulativeTopUp) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
-        _topUp(user, chainId, token, amount, expectedCumulativeTopUp);
+    function topUpUserSafe(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+        _topUp(txHash, user, chainId, token, amount);
     }
 
     /**
      * @notice Internal implementation of top-up logic
-     * @dev Verifies the safe, transfers tokens, and updates cumulative records
+     * @dev Verifies the safe, transfers tokens, and updates transaction records
+     * @param txHash Transaction hash on source chain
      * @param user Address of the safe to top up
      * @param chainId Chain ID where the user topped-up
      * @param token Address of the token to send
      * @param amount Amount of tokens to send
      * @custom:throws NotARegisteredSafe if the user address is not a registered safe
+     * @custom:throws TopUpAlreadyProcessed if the transaction has already been processed
      * @custom:throws BalanceTooLow if the contract has insufficient token balance
      */
-    function _topUp(address user, uint256 chainId, address token, uint256 amount, uint256 expectedCumulativeTopUp) internal {
+    function _topUp(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) internal {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
+
+        bytes32 txId = getTxId(txHash, user, token);
         if (!etherFiDataProvider.isEtherFiSafe(user)) revert NotARegisteredSafe();
-        if ($.cumulativeTopUps[user][chainId][token] != expectedCumulativeTopUp) revert RaceDetected();
+        if ($.transactionCompleted[txId]) revert TopUpAlreadyProcessed();
 
+        $.transactionCompleted[txId] = true;
         _transfer(user, token, amount);
-        $.cumulativeTopUps[user][chainId][token] += amount;
 
-        emit TopUp(user, chainId, token, amount, $.cumulativeTopUps[user][chainId][token]);
+        emit TopUp(txId, user, token, chainId, amount);
     }
 
     /**
@@ -208,15 +216,36 @@ contract TopUpDest is UpgradeableProxy {
     }
 
     /**
-     * @notice Gets the cumulative top-up amount for a user on a specific chain and token
-     * @dev Returns the total amount of tokens sent to a user's safe
-     * @param user Address of the user's safe
-     * @param chainId ID of the blockchain where the top-ups were recorded
-     * @param token Address of the token that was sent
-     * @return Total amount of tokens sent to the user on the specified chain
+     * @notice Calculates txId based on the input parameters
+     * @param txHash Transaction hash on source chain
+     * @param user Address of the safe to top up
+     * @param token Address of the token to send
+     * @return bytes32 txId
      */
-    function getCumulativeTopUp(address user, uint256 chainId, address token) external view returns (uint256) {
-        return _getTopUpDestStorage().cumulativeTopUps[user][chainId][token];
+    function getTxId(bytes32 txHash, address user, address token) public pure returns (bytes32) {
+        return keccak256(abi.encode(txHash, user, token));
+    }
+
+    /**
+     * @notice Checks if a transaction has been processed
+     * @dev Returns boolean indicating transaction status
+     * @param txHash Transaction hash on source chain
+     * @param user Address of the safe to top up
+     * @param token Address of the token to send
+     * @return Boolean indicating whether the transaction has been processed
+     */
+    function isTransactionCompleted(bytes32 txHash, address user, address token) external view returns (bool) {
+        return _getTopUpDestStorage().transactionCompleted[getTxId(txHash, user, token)];
+    }
+
+    /**
+     * @notice Checks if a transaction has been processed based on txId
+     * @dev Returns boolean indicating transaction status
+     * @param txId Unique transaction identifier
+     * @return Boolean indicating whether the transaction has been processed
+     */
+    function isTransactionCompletedByTxId(bytes32 txId) external view returns (bool) {
+        return _getTopUpDestStorage().transactionCompleted[txId];
     }
 
     /**
