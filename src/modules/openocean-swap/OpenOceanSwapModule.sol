@@ -23,6 +23,17 @@ contract OpenOceanSwapModule is ModuleBase {
     /// @notice TypeHash for swap function signature
     bytes32 public constant SWAP_SIG = keccak256("swap");
 
+    /**
+     * @notice Emitted when a swap is executed on a Safe
+     * @param safe Address of the EtherFi safe to execute the swap from
+     * @param fromAsset Address of the token being sold (or ETH address for native swaps)
+     * @param toAsset Address of the token being purchased (or ETH address for native swaps)
+     * @param fromAssetAmount Amount of the source token to swap
+     * @param minToAssetAmount Min return amount
+     * @param returnAmt Final return amount
+     */
+    event SwapOnOpenOcean(address indexed safe, address indexed fromAsset, address indexed toAsset, uint256 fromAssetAmount, uint256 minToAssetAmount, uint256 returnAmt);
+
     /// @notice Thrown when trying to swap more tokens than available in the safe
     error InsufficientBalanceOnSafe();
     /// @notice Thrown when trying to swap a token for the same token
@@ -110,7 +121,6 @@ contract OpenOceanSwapModule is ModuleBase {
      * @param guaranteedAmount Guaranteed amount as per OpenOcean
      * @param data Additional swap data
      * @return Digest hash for signature verification
-     * @dev Uses EIP-191 personal_sign format for the digest
      */
     function _createDigest(
         address safe,
@@ -173,7 +183,10 @@ contract OpenOceanSwapModule is ModuleBase {
         if (toAsset == ETH) balAfter = address(safe).balance;
         else balAfter = IERC20(toAsset).balanceOf(safe);
 
-        if (balAfter - balBefore < minToAssetAmount) revert OutputLessThanMinAmount();
+        uint256 receivedAmt = balAfter - balBefore;
+        if (receivedAmt < minToAssetAmount) revert OutputLessThanMinAmount();
+
+        emit SwapOnOpenOcean(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, receivedAmt);
     }
 
     /**

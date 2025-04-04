@@ -64,6 +64,8 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
+        vm.expectEmit(true, true, true, true);
+        emit AaveV3Module.RepayOnAave(address(safe), address(usdcScroll), amountToRepay);
         aaveV3Module.repay(address(safe), address(usdcScroll), amountToRepay, owner1, signature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));

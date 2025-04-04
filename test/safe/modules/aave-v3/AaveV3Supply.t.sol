@@ -18,6 +18,8 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
 
         uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
 
+        vm.expectEmit(true, true, true, true);
+        emit AaveV3Module.SupplyOnAave(address(safe), address(usdcScroll), amountToSupply);
         aaveV3Module.supply(address(safe), address(usdcScroll), amountToSupply, owner1, signature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));

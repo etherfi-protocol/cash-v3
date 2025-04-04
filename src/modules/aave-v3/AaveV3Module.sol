@@ -41,6 +41,18 @@ contract AaveV3Module is ModuleBase {
     /// @notice TypeHash for repay function signature used in EIP-712 signatures
     bytes32 public constant REPAY_SIG = keccak256("repay");
 
+    /// @notice Emitted when a safe supplies assets on Aave
+    event SupplyOnAave(address indexed safe, address indexed asset, uint256 amount);
+    
+    /// @notice Emitted when a safe borrows assets from Aave
+    event BorrowFromAave(address indexed safe, address indexed asset, uint256 amount);
+    
+    /// @notice Emitted when a safe withdraws assets from Aave
+    event WithdrawFromAave(address indexed safe, address indexed asset, uint256 amount);
+    
+    /// @notice Emitted when a safe repays assets on Aave
+    event RepayOnAave(address indexed safe, address indexed asset, uint256 amount);
+
     /// @notice Thrown when the Safe doesn't have sufficient token balance for an operation
     error InsufficientBalanceOnSafe();
 
@@ -75,6 +87,8 @@ contract AaveV3Module is ModuleBase {
         bytes32 digestHash = keccak256(abi.encodePacked(SUPPLY_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _supply(safe, asset, amount);
+
+        emit SupplyOnAave(safe, asset, amount);
     }
 
     /**
@@ -93,6 +107,7 @@ contract AaveV3Module is ModuleBase {
         bytes32 digestHash = keccak256(abi.encodePacked(BORROW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _borrow(safe, asset, amount);
+        emit BorrowFromAave(safe, asset, amount);
     }
 
     /**
@@ -111,6 +126,8 @@ contract AaveV3Module is ModuleBase {
         bytes32 digestHash = keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _withdraw(safe, asset, amount);
+
+        emit WithdrawFromAave(safe, asset, amount);
     }
 
     /**
@@ -130,6 +147,8 @@ contract AaveV3Module is ModuleBase {
         bytes32 digestHash = keccak256(abi.encodePacked(REPAY_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _repay(safe, asset, amount);
+
+        emit RepayOnAave(safe, asset, amount);
     }
 
     /**

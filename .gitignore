@@ -15,4 +15,6 @@ docs/
 
 coverage_report
 node_modules
+coverage_report
+broadcast
 **/*/.DS_Store

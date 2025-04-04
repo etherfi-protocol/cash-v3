@@ -39,6 +39,13 @@ interface IEtherFiDataProvider {
     function isWhitelistedModule(address module) external view returns (bool);
 
     /**
+     * @notice Checks if a module address is a whitelisted default module
+     * @param module Address to check
+     * @return bool True if the module is a whitelisted default module, false otherwise
+     */
+    function isDefaultModule(address module) external view returns (bool);
+
+    /**
      * @notice Retrieves all whitelisted module addresses
      * @return address[] Array of whitelisted module addresses
      */

@@ -238,18 +238,8 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
      * @param module Address of the module to check
      * @return bool True if the module is whitelisted on the data provider
      */
-    function _isWhitelistedOnDataProvider(address module) internal view override returns (bool) {
-        return dataProvider.isWhitelistedModule(module);
-    }
-
-    /**
-     * @dev Implementation of abstract function from ModuleManager
-     * @dev Checks if a module is the cash module
-     * @param module Address of the module to check
-     * @return bool True if the module is the Cash module
-     */
-    function _isCashModule(address module) internal view override returns (bool) {
-        return dataProvider.getCashModule() == module;
+    function _isWhitelistedOnDataProvider(address module) internal view override returns (bool, bool) {
+        return (dataProvider.isWhitelistedModule(module), dataProvider.isDefaultModule(module));
     }
 
     receive() external payable {}
