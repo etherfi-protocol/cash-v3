@@ -13,9 +13,8 @@ docs/
 # Dotenv file
 .env
 
-.DS_Store
-**/.DS_Store
-
+coverage_report
 node_modules
 coverage_report
 broadcast
+**/*/.DS_Store
