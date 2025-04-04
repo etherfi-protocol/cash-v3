@@ -48,7 +48,7 @@ contract StargateModule is ModuleBase {
     /// @notice The ADMIN role for the Stargate module
     bytes32 public constant STARGATE_MODULE_ADMIN_ROLE = keccak256("STARGATE_MODULE_ADMIN_ROLE");
 
-    /// @notice TypeHash for bridge function signature used in EIP-712 signatures
+    /// @notice TypeHash for bridge function signature 
     bytes32 public constant BRIDGE_SIG = keccak256("bridge");
 
     /// @notice 100% in basis points (10,000)

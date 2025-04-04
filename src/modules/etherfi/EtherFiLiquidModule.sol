@@ -132,7 +132,7 @@ contract EtherFiLiquidModule is ModuleBase {
      * @param liquidAsset The address of the liquid staking token
      * @param amountToDeposit The amount to deposit
      * @param minReturn The minimum amount of liquid tokens to receive
-     * @return The EIP-712 compatible digest hash for signature verification
+     * @return The digest hash for signature verification
      */
     function _getDepositDigestHash(address safe, address assetToDeposit, address liquidAsset, uint256 amountToDeposit, uint256 minReturn) internal returns (bytes32) {
         return keccak256(abi.encodePacked(DEPOSIT_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(assetToDeposit, liquidAsset, amountToDeposit, minReturn))).toEthSignedMessageHash();

@@ -121,7 +121,6 @@ contract OpenOceanSwapModule is ModuleBase {
      * @param guaranteedAmount Guaranteed amount as per OpenOcean
      * @param data Additional swap data
      * @return Digest hash for signature verification
-     * @dev Uses EIP-191 personal_sign format for the digest
      */
     function _createDigest(
         address safe,
