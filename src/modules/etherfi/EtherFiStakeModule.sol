@@ -50,6 +50,7 @@ contract EtherFiStakeModule is ModuleBase {
      * @dev Initializes the contract with required contract references
      */
     constructor(address _dataProvider, address _syncPool, address _weth, address _weETH) ModuleBase(_dataProvider) {
+        if (_syncPool == address(0) || _weth == address(0) || _weETH == address(0)) revert InvalidInput();
         syncPool = IL2SyncPool(_syncPool);
         weth = _weth;
         weETH = _weETH;
@@ -84,7 +85,7 @@ contract EtherFiStakeModule is ModuleBase {
      * @param assetToDeposit The address of the asset to deposit
      * @param amountToDeposit The amount to deposit
      * @param minReturn The minimum amount of weETH to receive
-     * @return The EIP-712 compatible digest hash for signature verification
+     * @return The digest hash for signature verification
      */
     function _getDepositDigestHash(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturn) internal returns (bytes32) {
         return keccak256(abi.encodePacked(DEPOSIT_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(assetToDeposit, amountToDeposit, minReturn))).toEthSignedMessageHash();

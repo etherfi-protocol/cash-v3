@@ -69,7 +69,9 @@ abstract contract ModuleManager is EtherFiSafeBase {
 
         for (uint256 i = 0; i < len;) {
             if (_modules[i] == address(0)) revert InvalidModule(i);
-            if (!_isCashModule(_modules[i]) && !_isWhitelistedOnDataProvider(_modules[i])) revert UnsupportedModule(i);
+            (bool isWhitelisteModuleOnDataProvider, ) = _isWhitelistedOnDataProvider(_modules[i]);
+            if (!isWhitelisteModuleOnDataProvider) revert UnsupportedModule(i);
+            
             $.modules.add(_modules[i]);
             IModule(_modules[i]).setupModule(_moduleSetupData[i]);
 
@@ -136,7 +138,6 @@ abstract contract ModuleManager is EtherFiSafeBase {
      * @custom:throws ArrayLengthMismatch If modules and shouldWhitelist arrays have different lengths
      * @custom:throws InvalidModule If any module address is zero
      * @custom:throws UnsupportedModule If a module is not whitelisted on the data provider
-     * @custom:throws CannotRemoveCashModule If attempting to remove a protected cash module
      * @custom:throws DuplicateElementFound If the module addresses are repeated in the array
      */
     function _configureModules(address[] calldata _modules, bool[] calldata _shouldWhitelist, bytes[] calldata _moduleSetupData) internal {
@@ -151,15 +152,13 @@ abstract contract ModuleManager is EtherFiSafeBase {
             if (_modules[i] == address(0)) revert InvalidModule(i);
 
             if (_shouldWhitelist[i] && !$.modules.contains(_modules[i])) {
-                if (!_isCashModule(_modules[i]) && !_isWhitelistedOnDataProvider(_modules[i])) revert UnsupportedModule(i);
+                (bool isWhitelisteModuleOnDataProvider, ) = _isWhitelistedOnDataProvider(_modules[i]);
+                if (!isWhitelisteModuleOnDataProvider) revert UnsupportedModule(i);
                 $.modules.add(_modules[i]);
                 IModule(_modules[i]).setupModule(_moduleSetupData[i]);
             }
 
-            if (!_shouldWhitelist[i] && $.modules.contains(_modules[i])) {
-                if (_isCashModule(_modules[i])) revert CannotRemoveCashModule(i);
-                $.modules.remove(_modules[i]);
-            }
+            if (!_shouldWhitelist[i] && $.modules.contains(_modules[i])) $.modules.remove(_modules[i]);
 
             unchecked {
                 ++i;
@@ -173,35 +172,28 @@ abstract contract ModuleManager is EtherFiSafeBase {
      * @notice Checks if a module is whitelisted on the external data provider
      * @param module Address of the module to check
      * @return bool True if the module is whitelisted on the data provider
+     * @return bool True if the module is a default module on the data provider
      */
-    function _isWhitelistedOnDataProvider(address module) internal view virtual returns (bool);
-
-    /**
-     * @notice Checks if a module is the cash module
-     * @param module Address of the module to check
-     * @return bool True if the module is the Cash module
-     */
-    function _isCashModule(address module) internal view virtual returns (bool);
+    function _isWhitelistedOnDataProvider(address module) internal view virtual returns (bool, bool);
 
     /**
      * @notice Checks if an address is a valid whitelisted module
      * @param module Address to check
      * @return bool True if the address is a whitelisted module, false otherwise
      * @dev A module is considered valid if:
-     *      1. It is the cash module (these are always valid), or
+     *      1. It is a default module (these are always valid), or
      *      2. It is whitelisted on the data provider AND in the local modules set
      */
     function isModuleEnabled(address module) public view returns (bool) {
-        if (_isCashModule(module)) return true;
-
-        bool isWhitelistedModuleOnDataProvider = _isWhitelistedOnDataProvider(module);
+        (bool isWhitelistedModuleOnDataProvider, bool isDefaultModuleOnDataProvider) = _isWhitelistedOnDataProvider(module);
+        if (isDefaultModuleOnDataProvider) return true;
         return isWhitelistedModuleOnDataProvider && _getModuleManagerStorage().modules.contains(module);
     }
 
     /**
      * @notice Returns all locally whitelisted modules
      * @return address[] Array containing all whitelisted module addresses
-     * Note: This may not include cash module if it's not explicitly added to storage
+     * Note: This may not include default module if it's not explicitly added to storage
      */
     function getModules() public view returns (address[] memory) {
         return _getModuleManagerStorage().modules.values();

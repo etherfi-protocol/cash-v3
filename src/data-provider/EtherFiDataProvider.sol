@@ -39,6 +39,8 @@ contract EtherFiDataProvider is UpgradeableProxy {
         address thirdPartyRecoverySigner;
         /// @notice Timelock for recovery
         uint256 recoveryDelayPeriod;
+        /// @notice Default modules
+        EnumerableSetLib.AddressSet defaultModules;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
@@ -46,6 +48,30 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /// @notice Role identifier for administrative privileges
     bytes32 public constant DATA_PROVIDER_ADMIN_ROLE = keccak256("DATA_PROVIDER_ADMIN_ROLE");
+
+    /** 
+     * @notice Struct for intiialize params
+     * @param _roleRegistry Address of the role registry contract
+     * @param _cashModule Address of the Cash Module contract
+     * @param _cashLens Address of the Cash Lens contract
+     * @param _modules Array of initial module addresses to configure
+     * @param _defaultModules Array of initial default module addresses to configure
+     * @param _hook Address of the initial hook contract
+     * @param _etherFiRecoverySigner Address of the EtherFi Recovery Signer
+     * @param _thirdPartyRecoverySigner Address of the Third Party Recovery Signer
+     */
+    struct InitParams {
+        address _roleRegistry;
+        address _cashModule;
+        address _cashLens;
+        address[] _modules;
+        address[] _defaultModules;
+        address _hook;
+        address _etherFiSafeFactory;
+        address _priceProvider;
+        address _etherFiRecoverySigner;
+        address _thirdPartyRecoverySigner;
+    }
 
     /// @notice Thrown when input parameters are invalid or zero address is provided
     error InvalidInput();
@@ -68,9 +94,18 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
     event ModulesConfigured(address[] modules, bool[] shouldWhitelist);
 
+    /// @notice Emitted when default modules are configured or their whitelist status changes
+    /// @param modules Array of default module addresses that were configured
+    /// @param shouldWhitelist Array of boolean values indicating whether each module should be a whitelisted default module
+    event DefaultModulesConfigured(address[] modules, bool[] shouldWhitelist);
+
     /// @notice Emitted when modules are setup initially
     /// @param modules Array of module addresses that were whitelisted
     event ModulesSetup(address[] modules);
+
+    /// @notice Emitted when default modules are setup initially
+    /// @param modules Array of default module addresses that were whitelisted
+    event DefaultModulesSetup(address[] modules);
 
     /// @notice Emitted when Cash module is configured
     /// @param oldCashModule Address of old Cash Module
@@ -129,42 +164,26 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /**
      * @notice Initializes the contract with initial modules and hook address
      * @dev Can only be called once due to initializer modifier
-     * @param _roleRegistry Address of the role registry contract
-     * @param _cashModule Address of the Cash Module contract
-     * @param _cashLens Address of the Cash Lens contract
-     * @param _modules Array of initial module addresses to configure
-     * @param _hook Address of the initial hook contract
-     * @param _etherFiRecoverySigner Address of the EtherFi Recovery Signer
-     * @param _thirdPartyRecoverySigner Address of the Third Party Recovery Signer
+     * @param initParams Init params for initialize function
      */
-    function initialize(
-        address _roleRegistry, 
-        address _cashModule, 
-        address _cashLens, 
-        address[] calldata _modules, 
-        address _hook, 
-        address _etherFiSafeFactory, 
-        address _priceProvider, 
-        address _etherFiRecoverySigner, 
-        address _thirdPartyRecoverySigner
-    ) external initializer {
-        __UpgradeableProxy_init(_roleRegistry);
+    function initialize(InitParams calldata initParams) external initializer {
+        __UpgradeableProxy_init(initParams._roleRegistry);
+        _setupModules(initParams._modules);
+        _setupDefaultModules(initParams._defaultModules);
 
-        _setupModules(_modules);
-
-        _setEtherFiSafeFactory(_etherFiSafeFactory);
-        _setPriceProvider(_priceProvider);
-        _setEtherFiRecoverySigner(_etherFiRecoverySigner);
-        _setThirdPartyRecoverySigner(_thirdPartyRecoverySigner);
+        _setEtherFiSafeFactory(initParams._etherFiSafeFactory);
+        _setPriceProvider(initParams._priceProvider);
+        _setEtherFiRecoverySigner(initParams._etherFiRecoverySigner);
+        _setThirdPartyRecoverySigner(initParams._thirdPartyRecoverySigner);
 
         _getEtherFiDataProviderStorage().recoveryDelayPeriod = 3 days;
 
         // The condition applies because the Hook might be present only on specific chains
-        if (_hook != address(0)) _setHookAddress(_hook);
+        if (initParams._hook != address(0)) _setHookAddress(initParams._hook);
         // The condition applies because the Cash Module might be present only on specific chains
-        if (_cashModule != address(0)) _setCashModule(_cashModule);
+        if (initParams._cashModule != address(0)) _setCashModule(initParams._cashModule);
         // The condition applies because the Cash Module might be present only on specific chains
-        if (_cashLens != address(0)) _setCashLens(_cashLens);
+        if (initParams._cashLens != address(0)) _setCashLens(initParams._cashLens);
     }
 
     /**
@@ -186,6 +205,17 @@ contract EtherFiDataProvider is UpgradeableProxy {
     function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
         _onlyDataProviderAdmin();
         _configureModules(modules, shouldWhitelist);
+    }
+
+    /**
+     * @notice Configures multiple modules' whitelist status
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @param modules Array of module addresses to configure
+     * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
+     */
+    function configureDefaultModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
+        _onlyDataProviderAdmin();
+        _configureDefaultModules(modules, shouldWhitelist);
     }
 
     /**
@@ -274,11 +304,28 @@ contract EtherFiDataProvider is UpgradeableProxy {
     }
 
     /**
+     * @notice Checks if a module address is a whitelisted default module
+     * @param module Address to check
+     * @return bool True if the module is a whitelisted default module, false otherwise
+     */
+    function isDefaultModule(address module) public view returns (bool) {
+        return _getEtherFiDataProviderStorage().defaultModules.contains(module);
+    }
+
+    /**
      * @notice Retrieves all whitelisted module addresses
      * @return address[] Array of whitelisted module addresses
      */
     function getWhitelistedModules() public view returns (address[] memory) {
         return _getEtherFiDataProviderStorage().whitelistedModules.values();
+    }
+
+    /**
+     * @notice Retrieves all default module addresses
+     * @return address[] Array of default module addresses
+     */
+    function getDefaultModules() public view returns (address[] memory) {
+        return _getEtherFiDataProviderStorage().defaultModules.values();
     }
 
     /**
@@ -370,7 +417,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
             if (modules[i] == address(0)) revert InvalidModule(i);
 
             if (shouldWhitelist[i] && !$.whitelistedModules.contains(modules[i])) $.whitelistedModules.add(modules[i]);
-            if (!shouldWhitelist[i] && $.whitelistedModules.contains(modules[i])) $.whitelistedModules.remove(modules[i]);
+            if (!shouldWhitelist[i]){
+                if ($.whitelistedModules.contains(modules[i])) $.whitelistedModules.remove(modules[i]);
+                if ($.defaultModules.contains(modules[i])) $.defaultModules.remove(modules[i]);
+            }
 
             unchecked {
                 ++i;
@@ -378,6 +428,38 @@ contract EtherFiDataProvider is UpgradeableProxy {
         }
 
         emit ModulesConfigured(modules, shouldWhitelist);
+    }
+
+    /**
+     * @dev Internal function to configure default modules' whitelist status
+     * @param modules Array of module addresses to configure
+     * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
+     */
+    function _configureDefaultModules(address[] calldata modules, bool[] calldata shouldWhitelist) private {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+
+        uint256 len = modules.length;
+        if (len == 0) revert InvalidInput();
+        if (len != shouldWhitelist.length) revert ArrayLengthMismatch();
+        if (len > 1) modules.checkDuplicates();
+
+        for (uint256 i = 0; i < len;) {
+            if (modules[i] == address(0)) revert InvalidModule(i);
+
+            if (shouldWhitelist[i]) {
+                if (!$.whitelistedModules.contains(modules[i])) $.whitelistedModules.add(modules[i]);
+                if (!$.defaultModules.contains(modules[i])) $.defaultModules.add(modules[i]);
+            } 
+            if (!shouldWhitelist[i] && $.defaultModules.contains(modules[i])) $.defaultModules.remove(modules[i]);
+            
+
+            unchecked {
+                ++i;
+            }
+        }
+        
+        emit ModulesConfigured(modules, shouldWhitelist);
+        emit DefaultModulesConfigured(modules, shouldWhitelist);
     }
 
     /**
@@ -406,6 +488,35 @@ contract EtherFiDataProvider is UpgradeableProxy {
         }
 
         emit ModulesSetup(modules);
+    }
+
+    /**
+     * @notice Sets up multiple modules initially
+     * @param modules Array of module addresses to configure
+     * @custom:throws InvalidInput If modules array is empty
+     * @custom:throws InvalidModule If any module address is zero
+     * @custom:throws UnsupportedModule If a module is not whitelisted on the data provider
+     */
+    function _setupDefaultModules(address[] calldata modules) internal {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+
+        if ($.defaultModules.length() != 0) revert ModulesAlreadySetup();
+
+        uint256 len = modules.length;
+        if (modules.length == 0) revert InvalidInput();
+        if (len > 1) modules.checkDuplicates();
+
+        for (uint256 i = 0; i < len;) {
+            if (modules[i] == address(0)) revert InvalidModule(i);
+            $.defaultModules.add(modules[i]);
+            if (!$.whitelistedModules.contains(modules[i])) $.whitelistedModules.add(modules[i]);
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        emit DefaultModulesSetup(modules);
     }
 
     /**

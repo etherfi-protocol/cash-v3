@@ -161,6 +161,9 @@ contract SafeTestSetup is Utils {
         modules[0] = module1;
         modules[1] = module2;
 
+        address[] memory defaultModules = new address[](1);
+        defaultModules[0] = address(cashModule);
+
         address safeImpl = address(new EtherFiSafe(address(dataProvider)));
         address safeFactoryImpl = address(new EtherFiSafeFactory());
         safeFactory = EtherFiSafeFactory(address(new UUPSProxy(safeFactoryImpl, abi.encodeWithSelector(EtherFiSafeFactory.initialize.selector, address(roleRegistry), safeImpl))));
@@ -171,7 +174,7 @@ contract SafeTestSetup is Utils {
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
-        dataProvider.initialize(address(roleRegistry), address(cashModule), address(cashLens), modules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner);
+        dataProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), address(cashLens), modules, defaultModules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner));
 
         _setupDebtManager();
         _setupSettlementDispatcher();
