@@ -223,7 +223,7 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Spend in credit mode to create a borrow
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
         
         // Get safe cash data
         SafeCashData memory data = cashLens.getSafeCashData(address(safe));

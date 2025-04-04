@@ -130,6 +130,18 @@ contract CashEventEmitter is UpgradeableProxy {
     event Cashback(address indexed safe, address indexed spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool indexed paid);
     
     /**
+     * @notice Emitted when referral cashback is calculated and potentially distributed
+     * @param safe Address of the safe receiving cashback
+     * @param referrer Address of the referrer
+     * @param spendingInUsd USD value of the spending that generated the cashback
+     * @param cashbackToken Address of the token used for cashback
+     * @param referrerCashbackAmt Amount of cashback tokens sent to the referrer
+     * @param referrerCashbackInUsd USD value of cashback sent to the referrer
+     * @param paid Whether the cashback was successfully paid
+     */
+    event ReferrerCashback(address indexed safe, address indexed referrer, uint256 spendingInUsd, address cashbackToken, uint256 referrerCashbackAmt, uint256 referrerCashbackInUsd, bool indexed paid);
+    
+    /**
      * @notice Emitted when pending cashback is cleared
      * @param recipient Address receiving the cashback
      * @param cashbackToken Address of the token used for cashback
@@ -169,6 +181,13 @@ contract CashEventEmitter is UpgradeableProxy {
     event DelaysSet(uint64 withdrawalDelay, uint64 spendingLimitDelay, uint64 modeDelay);
 
     /**
+     * @notice Emitted when the referrer cashback percentage is set
+     * @param oldCashbackPercentage Old cashback percentage for referrer
+     * @param newCashbackPercentage New cashback percentage for referrer
+     */
+    event ReferrerCashbackPercentageSet(uint64 oldCashbackPercentage, uint64 newCashbackPercentage);
+
+    /**
      * @notice Emits the SafeTiersSet event
      * @dev Can only be called by the Cash Module
      * @param safes Array of safe addresses
@@ -176,6 +195,15 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitSetSafeTiers(address[] memory safes, SafeTiers[] memory safeTiers) external onlyCashModule {
         emit SafeTiersSet(safes, safeTiers);
+    }
+
+    /**
+     * @notice Emits the ReferrerCashbackPercentageSet event
+     * @param oldPercentage Old cashback percentage
+     * @param newPercentage New cashback percentage
+     */
+    function emitReferrerCashbackPercentageSet(uint64 oldPercentage, uint64 newPercentage) external onlyCashModule {
+        emit ReferrerCashbackPercentageSet(oldPercentage, newPercentage);
     }
 
     /**
@@ -237,6 +265,20 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitCashbackEvent(address safe, address spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) external onlyCashModule {
         emit Cashback(safe, spender, spendingInUsd, cashbackToken, cashbackAmountToSafe, cashbackInUsdToSafe, cashbackAmountToSpender, cashbackInUsdToSpender, paid);
+    }
+
+    /**
+     * @notice Emits the ReferrerCashback event
+     * @param safe Address of the safe
+     * @param referrer Address of the referrer
+     * @param spendingInUsd USD value of the spending
+     * @param cashbackToken Address of the cashback token
+     * @param referrerCashbackAmt Cashback amount to referrer
+     * @param referrerCashbackInUsd USD value to the referrer
+     * @param paid Whether the cashback was paid
+     */
+    function emitReferrerCashbackEvent(address safe, address referrer, uint256 spendingInUsd, address cashbackToken, uint256 referrerCashbackAmt, uint256 referrerCashbackInUsd, bool paid) external onlyCashModule {
+        emit ReferrerCashback(safe, referrer, spendingInUsd, cashbackToken, referrerCashbackAmt, referrerCashbackInUsd, paid);
     }
 
     /**

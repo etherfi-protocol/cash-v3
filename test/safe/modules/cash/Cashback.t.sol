@@ -48,7 +48,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), spender, amount, address(scrToken), expectedCashbackToSafe, expectedCashbackToSafeInUsd, expectedCashbackToSpender, expectedCashbackToSpenderInUsd, true);
-        cashModule.spend(address(safe), spender, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 cashbackBalSafeAfter = cashbackToken.balanceOf(address(safe));
         uint256 cashbackBalSpenderAfter = cashbackToken.balanceOf(address(spender));
@@ -70,7 +70,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), spender, address(0), txId, spendTokens, spendAmounts, false);
 
         uint256 cashbackBalSafeAfter = cashbackToken.balanceOf(address(safe));
         uint256 cashbackBalSpenderAfter = cashbackToken.balanceOf(address(spender));
@@ -116,7 +116,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), spender, amount, address(scrToken), expectedCashbackToSafe, expectedCashbackToSafeInUsd, expectedCashbackToSpender, expectedCashbackToSpenderInUsd, false);
-        cashModule.spend(address(safe), spender, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 cashbackBalSafeAfter = cashbackToken.balanceOf(address(safe));
         uint256 cashbackBalSpenderAfter = cashbackToken.balanceOf(address(spender));
@@ -328,7 +328,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), txId, spendTokens, spendAmounts, true);
 
         // Verify pending cashback is stored
         uint256 safePendingCashback = cashModule.getPendingCashback(address(safe));
@@ -355,7 +355,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         emit CashEventEmitter.PendingCashbackCleared(address(spender), address(scrToken), spenderPendingCashbackInCashbackToken, spenderPendingCashback);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.PendingCashbackCleared(address(safe), address(scrToken), safePendingCashbackInCashbackToken, safePendingCashback);
-        cashModule.spend(address(safe), spender, newTxId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), newTxId, spendTokens, spendAmounts, true);
 
         // Verify pending cashback is cleared
         assertEq(cashModule.getPendingCashback(address(safe)), 0);
@@ -381,7 +381,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), txId, spendTokens, spendAmounts, true);
 
         // Verify pending cashback is stored
         uint256 safePendingCashback = cashModule.getPendingCashback(address(safe));
@@ -394,7 +394,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         bytes32 newTxId = keccak256("newTxId");
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, newTxId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), newTxId, spendTokens, spendAmounts, true);
 
         // Verify pending cashback is accumulated
         assertGt(cashModule.getPendingCashback(address(safe)), safePendingCashback);
@@ -417,7 +417,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
 
         uint256 cashbackBalSafeAfter = cashbackToken.balanceOf(address(safe));
 
@@ -468,7 +468,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         bytes32 pepeTxId = keccak256("pepeTxId");
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, pepeTxId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), pepeTxId, spendTokens, spendAmounts, true);
 
         uint256 pepeSafeCashback = pepeCashback.mulDiv(initialSplitToSafeBps, HUNDRED_PERCENT_IN_BPS);
         uint256 pepeSpenderCashback = pepeCashback - pepeSafeCashback;
@@ -488,7 +488,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         bytes32 chadTxId = keccak256("chadTxId");
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, chadTxId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), chadTxId, spendTokens, spendAmounts, true);
 
         uint256 chadSafeCashback = chadCashback.mulDiv(initialSplitToSafeBps, HUNDRED_PERCENT_IN_BPS);
         uint256 chadSpenderCashback = chadCashback - chadSafeCashback;

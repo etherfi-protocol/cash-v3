@@ -72,7 +72,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
 
         // Borrow some tokens first to have both collateral and borrows
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, false);
         
         // Get user state
         (

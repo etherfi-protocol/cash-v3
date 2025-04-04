@@ -299,7 +299,7 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
-        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, false);
 
         // 1 day after, there should be some interest accumulated
         vm.warp(block.timestamp + 24 * 60 * 60);

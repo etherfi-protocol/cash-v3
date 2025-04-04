@@ -86,7 +86,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         
         for (uint i = 0; i < users.length; i++) {
             vm.prank(etherFiWallet);
-            cashModule.spend(address(safe), users[i], keccak256(abi.encodePacked("spend", i)), spendTokens, spendAmounts, true);
+            cashModule.spend(address(safe), users[i], address(0), keccak256(abi.encodePacked("spend", i)), spendTokens, spendAmounts, true);
         }
         
         // Verify pending cashback exists for the users
@@ -123,7 +123,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = spendAmount;
         
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), user1, keccak256("spend"), spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), user1, address(0), keccak256("spend"), spendTokens, spendAmounts, true);
         
         // Verify pending cashback exists
         assertGt(cashModule.getPendingCashback(user1), 0);
@@ -166,7 +166,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = spendAmount;
         
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), user1, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), user1, address(0), txId, spendTokens, spendAmounts, true);
         
         // Verify pending cashback was created
         uint256 pendingCashback = cashModule.getPendingCashback(user1);

@@ -104,7 +104,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
             spendAmounts[0] = 10e6;
 
             vm.prank(etherFiWallet);
-            cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+            cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
         }
 
         {

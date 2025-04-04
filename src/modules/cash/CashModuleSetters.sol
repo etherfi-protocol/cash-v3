@@ -87,6 +87,21 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
+     * @notice Sets the referrer cashback percentage in bps
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param cashbackPercentage New cashback percentage in bps
+     */
+    function setReferrerCashbackPercentageInBps(uint64 cashbackPercentage) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+
+        if (cashbackPercentage > HUNDRED_PERCENT_IN_BPS) revert InvalidInput();
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        $.cashEventEmitter.emitReferrerCashbackPercentageSet($.referrerCashbackPercentageInBps, cashbackPercentage);
+        $.referrerCashbackPercentageInBps = cashbackPercentage;
+    }
+
+    /**
      * @notice Sets the percentage of cashback that goes to the safe (versus the spender)
      * @dev Can only be called by the safe itself with a valid admin signature
      * @param safe Address of the safe to configure

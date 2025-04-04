@@ -28,7 +28,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         spendAmounts[0] = borrowAmt;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
     }
 
     function test_repay_works() public {

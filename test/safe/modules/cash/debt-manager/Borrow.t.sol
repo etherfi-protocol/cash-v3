@@ -228,7 +228,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         spendAmounts[0] = borrowAmt;
 
         vm.startPrank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, false);
 
         uint256 borrowInUsdc = debtManager.borrowingOf(address(safe), address(usdcScroll));
         assertApproxEqAbs(borrowInUsdc, borrowAmt, 1);
@@ -254,7 +254,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         spendAmounts[0] = borrowAmt;
 
         vm.startPrank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, false);
         vm.stopPrank();
 
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdcScroll)), borrowAmt, 1);
@@ -320,7 +320,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         spendAmounts[0] = remainingBorrowCapacityInUsdc;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0),  txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), address(0), address(0),  txId, spendTokens, spendAmounts, false);
 
         (, totalBorrowingsOfAliceSafe) = debtManager.borrowingOf(address(safe));
         assertEq(totalBorrowingsOfAliceSafe, remainingBorrowCapacityInUsdc);
@@ -340,7 +340,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         spendAmounts[0] = borrowAmt;
 
         vm.startPrank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, false);
 
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdcScroll)), borrowAmt, 1);
 
@@ -359,7 +359,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
             2
         );
 
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), spendTokens, spendAmounts, false);
 
         assertApproxEqAbs(
             debtManager.borrowingOf(address(safe), address(usdcScroll)),

@@ -57,6 +57,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         ICashEventEmitter cashEventEmitter;
         /// @notice Address of cash module setters contract
         address cashModuleSetters;
+        /// @notice Cashback percentage for referrer in bps
+        uint64 referrerCashbackPercentageInBps;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))

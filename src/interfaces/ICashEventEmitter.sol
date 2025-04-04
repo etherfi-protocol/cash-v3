@@ -10,6 +10,25 @@ import { Mode, SafeTiers } from "./ICashModule.sol";
  */
 interface ICashEventEmitter {
     /**
+     * @notice Emits the ReferrerCashback event
+     * @param safe Address of the safe
+     * @param referrer Address of the referrer
+     * @param spendingInUsd USD value of the spending
+     * @param cashbackToken Address of the cashback token
+     * @param referrerCashbackAmt Cashback amount to referrer
+     * @param referrerCashbackInUsd USD value to the referrer
+     * @param paid Whether the cashback was paid
+     */
+    function emitReferrerCashbackEvent(address safe, address referrer, uint256 spendingInUsd, address cashbackToken, uint256 referrerCashbackAmt, uint256 referrerCashbackInUsd, bool paid) external;
+
+    /**
+     * @notice Emits the ReferrerCashbackPercentageSet event
+     * @param oldPercentage Old cashback percentage
+     * @param newPercentage New cashback percentage
+     */
+    function emitReferrerCashbackPercentageSet(uint64 oldPercentage, uint64 newPercentage) external;
+
+    /**
      * @notice Emits an event when pending cashback is cleared
      * @param recipient Address receiving the cashback
      * @param cashbackToken Address of the cashback token

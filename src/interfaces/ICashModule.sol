@@ -281,6 +281,12 @@ interface ICashModule {
     function getMode(address safe) external view returns (Mode);
 
     /**
+     * @notice Gets the referrer cashback percentage in bps
+     * @return uint64 referrer cashback percentage in bps
+     */
+    function getReferrerCashbackPercentage() external view returns (uint64);
+
+    /**
      * @notice Gets the timestamp when a pending credit mode change will take effect
      * @dev Returns 0 if no pending change or if the safe uses debit mode
      * @param safe Address of the EtherFi Safe
@@ -341,6 +347,13 @@ interface ICashModule {
      * @custom:throws CashbackPercentageGreaterThanMaxAllowed if any percentage exceeds the maximum allowed
      */
     function setTierCashbackPercentage(SafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external;
+
+    /**
+     * @notice Sets the referrer cashback percentage in bps
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param cashbackPercentage New cashback percentage in bps
+     */
+    function setReferrerCashbackPercentageInBps(uint64 cashbackPercentage) external;
 
     /**
      * @notice Sets the percentage of cashback that goes to the safe (versus the spender)
@@ -410,7 +423,7 @@ interface ICashModule {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe,  address spender,  bytes32 txId,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external;
+    function spend(address safe,  address spender, address referrer,  bytes32 txId,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external;
 
     /**
      * @notice Clears pending cashback for users

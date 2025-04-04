@@ -65,6 +65,7 @@ contract CashModuleCore is CashModuleStorageContract {
         $.tierCashbackPercentage[SafeTiers.Chad] = 4_00; // 4%
         $.tierCashbackPercentage[SafeTiers.Whale] = 4_00; // 4%
         $.tierCashbackPercentage[SafeTiers.Business] = 2_00; // 2%
+        $.referrerCashbackPercentageInBps = 1_00; // 1%
     }
 
     /**
@@ -156,6 +157,14 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function getSettlementDispatcher() external view returns (address) {
         return _getCashModuleStorage().settlementDispatcher;
+    }
+
+    /**
+     * @notice Gets the referrer cashback percentage in bps
+     * @return uint64 referrer cashback percentage in bps
+     */
+    function getReferrerCashbackPercentage() external view returns (uint64) {
+        return _getCashModuleStorage().referrerCashbackPercentageInBps;
     }
 
     /**
@@ -285,15 +294,14 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe,  address spender,  bytes32 txId,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external whenNotPaused onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe,  address spender, address referrer,  bytes32 txId,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external whenNotPaused onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
-        SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
-        uint256 totalSpendingInUsd = _validateSpend($$, safe, spender, txId, tokens, amountsInUsd);        
+        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], safe, spender, txId, tokens, amountsInUsd);        
                 
         // Process all token transfers based on mode
-        if ($$.mode == Mode.Credit)  _spendCredit($, $.debtManager, safe, txId, spender, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
-        else _spendMultipleDebit($, $.debtManager, safe, txId, spender, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
+        if ($.safeCashConfig[safe].mode == Mode.Credit)  _spendCredit($, $.debtManager, safe, txId, spender, referrer, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
+        else _spendDebit($, $.debtManager, safe, txId, spender, referrer, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
     }
 
     function _validateSpend(SafeCashConfig storage $$, address safe,  address spender,  bytes32 txId, address[] calldata tokens,  uint256[] calldata amountsInUsd) internal returns(uint256) {
@@ -339,7 +347,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param amountsInUsd Amounts to spend in USD
      * @param shouldReceiveCashback Flag indicating if cashback should be processed
      */
-    function _spendCredit(CashModuleStorage storage $, IDebtManager debtManager, address safe, bytes32 txId, address spender, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd, bool shouldReceiveCashback) internal {
+    function _spendCredit(CashModuleStorage storage $, IDebtManager debtManager, address safe, bytes32 txId, address spender, address referrer, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd, bool shouldReceiveCashback) internal {
         // Credit mode validation
         if (!_isBorrowToken(debtManager, tokens[0])) revert UnsupportedToken();
         uint256 amount = debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
@@ -362,8 +370,11 @@ contract CashModuleCore is CashModuleStorageContract {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
 
-        if (shouldReceiveCashback) _cashback($, safe, spender, amountsInUsd[0]);
         $.cashEventEmitter.emitSpend(safe, txId, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
+        if (shouldReceiveCashback) {
+            _cashback($, safe, spender, amountsInUsd[0]);
+            if (referrer != address(0)) _referrerCashback($, safe, referrer, totalSpendingInUsd);
+        }
     }
 
     /**
@@ -377,7 +388,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param amountsInUsd Array of amounts to spend in USD
      * @param shouldReceiveCashback Flag indicating if cashback should be processed
      */
-    function _spendMultipleDebit(CashModuleStorage storage $, IDebtManager debtManager, address safe, bytes32 txId, address spender, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd, bool shouldReceiveCashback) internal {
+    function _spendDebit(CashModuleStorage storage $, IDebtManager debtManager, address safe, bytes32 txId, address spender, address referrer, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd, bool shouldReceiveCashback) internal {
         uint256[] memory amounts = new uint256[](tokens.length);
         
         // Convert USD amounts to token amounts and validate
@@ -393,7 +404,10 @@ contract CashModuleCore is CashModuleStorageContract {
 
         $.cashEventEmitter.emitSpend(safe, txId, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
         debtManager.ensureHealth(safe);
-        if (shouldReceiveCashback) _cashback($, safe, spender, totalSpendingInUsd);
+        if (shouldReceiveCashback) {
+            _cashback($, safe, spender, totalSpendingInUsd);
+            if (referrer != address(0)) _referrerCashback($, safe, referrer, totalSpendingInUsd);
+        } 
     }
 
     function _spendDebit(CashModuleStorage storage $, address safe,  address[] calldata tokens, uint256[] memory amounts) internal {
@@ -470,6 +484,22 @@ contract CashModuleCore is CashModuleStorageContract {
         $.safeCashConfig[safe].totalCashbackEarnedInUsd += cashbackInUsdToSafe + cashbackInUsdToSpender;
 
         $.cashEventEmitter.emitCashbackEvent(safe, spender, amountInUsd, cashbackToken, cashbackAmountToSafe, cashbackInUsdToSafe, cashbackAmountToSpender, cashbackInUsdToSpender, paid);
+    }
+
+    /**
+     * @notice Processes referrer cashback for a spending transaction
+     * @dev Calculates and distributes cashback to the referrer
+     * @param $ Storage reference to the CashModuleStorage
+     * @param safe Address of the EtherFi Safe
+     * @param referrer Address of the referrer 
+     * @param amountInUsd Amount spent in USD that is eligible for cashback
+     */
+    function _referrerCashback(CashModuleStorage storage $, address safe, address referrer, uint256 amountInUsd) internal {
+        if ($.referrerCashbackPercentageInBps > 0) {
+            (address cashbackToken, , , uint256 cashbackAmountToReferrer, uint256 cashbackInUsdToReferrer, bool paid) = $.cashbackDispatcher.cashback(safe, referrer, amountInUsd, $.referrerCashbackPercentageInBps, 0);
+            if (!paid) $.pendingCashbackInUsd[referrer] += cashbackInUsdToReferrer;
+            $.cashEventEmitter.emitReferrerCashbackEvent(safe, referrer, amountInUsd, cashbackToken, cashbackAmountToReferrer, cashbackInUsdToReferrer, paid);
+        }
     }
 
     /**
