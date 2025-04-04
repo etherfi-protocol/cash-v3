@@ -3,6 +3,7 @@
       "RoleRegistry": "0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B",
       "TopUpSourceFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
       "StargateAdapter": "0x998425e6e5181DeCfA3971251bDCA4a669Ef0EAC",
-      "EtherFiOFTBridgeAdapter": "0x3E0ccbce6c3beC4826397005c877BE66C39D9912"
+      "EtherFiOFTBridgeAdapter": "0x3E0ccbce6c3beC4826397005c877BE66C39D9912",
+      "EtherFiLiquidBridgeAdapter": "0x86016539796E660d4cD333459378763FaFFa6Eee"
     }
 }

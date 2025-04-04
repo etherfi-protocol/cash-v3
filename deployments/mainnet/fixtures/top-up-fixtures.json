@@ -20,6 +20,34 @@
               "bridge": "oftBridgeAdapter",
               "maxSlippageInBps": "50",
               "oftAdapter": "0xcd2eb13D6831d4602D80E5db9230A57596CDCA63"
+          },
+          {
+              "token": "liquidEth",
+              "address": "0xf0bb20865277aBd641a307eCe5Ee04E79073416C",
+              "bridge": "liquidBridgeAdapter",
+              "maxSlippageInBps": "50",
+              "teller": "0x9AA79C84b79816ab920bBcE20f8f74557B514734"
+          },
+          {
+              "token": "liquidUsd",
+              "address": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+              "bridge": "liquidBridgeAdapter",
+              "maxSlippageInBps": "50",
+              "teller": "0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387"
+          },
+          {
+              "token": "liquidBtc",
+              "address": "0x5f46d540b6eD704C3c8789105F30E075AA900726",
+              "bridge": "liquidBridgeAdapter",
+              "maxSlippageInBps": "50",
+              "teller": "0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353"
+          },
+          {
+              "token": "eUsd",
+              "address": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+              "bridge": "liquidBridgeAdapter",
+              "maxSlippageInBps": "50",
+              "teller": "0xCc9A7620D0358a521A068B444846E3D5DebEa8fA"
           }
         ]
     },

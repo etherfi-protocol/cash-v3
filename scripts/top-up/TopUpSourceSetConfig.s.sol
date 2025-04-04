@@ -22,6 +22,7 @@ contract TopUpSourceSetConfig is Utils {
     RoleRegistry roleRegistry;
     address stargateAdapter;
     address etherFiOFTBridgeAdapter;
+    address etherFiLiquidBridgeAdapter;
     
     function run() public {
         // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -48,11 +49,18 @@ contract TopUpSourceSetConfig is Utils {
             deployments,
             string.concat(".", "addresses", ".", "EtherFiOFTBridgeAdapter")
         );
+
+        if (block.chainid == 1) {
+            etherFiLiquidBridgeAdapter = stdJson.readAddress(
+                deployments,
+                string.concat(".", "addresses", ".", "EtherFiLiquidBridgeAdapter")
+            );
+        }  
         
-        string memory fixturesFile = string.concat(vm.projectRoot(), "/deployments/fixtures/top-up-fixtures.json");
+        string memory fixturesFile = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv() ,"/fixtures/top-up-fixtures.json"));
         string memory fixtures = vm.readFile(fixturesFile);
 
-        (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, chainId);
+        (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, vm.toString(block.chainid));
 
         topUpFactory.setTokenConfig(tokens, tokenConfig);
     
@@ -79,6 +87,9 @@ contract TopUpSourceSetConfig is Utils {
             } else if (keccak256(bytes(bridge)) == keccak256(bytes("oftBridgeAdapter"))) {
                 tokenConfig[i].bridgeAdapter = etherFiOFTBridgeAdapter;
                 tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".oftAdapter")));
+            } else if (block.chainid == 1 && keccak256(bytes(bridge)) == keccak256(bytes("liquidBridgeAdapter"))) {
+                tokenConfig[i].bridgeAdapter = etherFiLiquidBridgeAdapter;
+                tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".teller")));
             } else revert ("Unknown bridge");
 
             if (tokenConfig[i].recipientOnDestChain == address(0)) revert (string.concat("Invalid recipientOnDestChain for token ", stdJson.readString(jsonString, string.concat(base, ".token"))));
@@ -117,7 +128,7 @@ contract TopUpSourceSetConfig is Utils {
     }
 
     function getDestRecipientAddress() internal view returns (address) {
-        string memory dir = string.concat(vm.projectRoot(), "/deployments/");
+        string memory dir = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv(), "/"));
         string memory chainDir = string.concat(scrollChainId, "/");
         string memory file = string.concat(dir, chainDir, "deployments", ".json");
 
