@@ -12,6 +12,7 @@ import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider
 import { EtherFiSafe } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiSafeFactory, BeaconFactory } from "../../src/safe/EtherFiSafeFactory.sol";
 import { ILayerZeroTeller } from "../../src/interfaces/ILayerZeroTeller.sol";
+import { IRoleRegistry } from "../../src/interfaces/IRoleRegistry.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
@@ -46,6 +47,7 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
     EtherFiStakeModule stakeModule;
     EtherFiLiquidModule liquidModule;
     OpenOceanSwapModule swapModule;
+    IRoleRegistry roleRegistry;
     string chainId;
     string deployments;
 
@@ -70,6 +72,11 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
             deployments,
             string.concat(".", "addresses", ".", "CashModule")
         );
+
+        roleRegistry = IRoleRegistry(stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "RoleRegistry")
+        ));
 
         dataProviderImpl = new EtherFiDataProvider();
         safeImpl = new EtherFiSafe(dataProvider);
@@ -116,7 +123,7 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
         string memory safeImplUpgrade = iToHex(abi.encodeWithSelector(BeaconFactory.upgradeBeaconImplementation.selector, safeImpl));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(factory), safeImplUpgrade, false)));
 
-                address[] memory defaultModules = new address[](4);
+        address[] memory defaultModules = new address[](4);
         defaultModules[0] = cashModule;
         defaultModules[1] = address(liquidModule);
         defaultModules[2] = address(stakeModule);
@@ -141,7 +148,10 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
         dewhitelistModuleShouldWhitelist[0] = false;        
 
         string memory removeOldOpenOceanModule = iToHex(abi.encodeWithSelector(EtherFiDataProvider.configureModules.selector, dewhitelistModules, dewhitelistModuleShouldWhitelist));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), removeOldOpenOceanModule, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), removeOldOpenOceanModule, false)));
+
+        string memory roleForLiquid = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, liquidModule.ETHERFI_LIQUID_MODULE_ADMIN(), cashControllerSafe));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(roleRegistry)), roleForLiquid, true)));
 
         return txs;
     }
