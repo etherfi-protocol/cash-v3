@@ -93,6 +93,7 @@ contract EtherFiLiquidModule is ModuleBase {
         weth = _weth;
         for (uint256 i = 0; i < len; ) {
             if (_assets[i] == address(0) || _tellers[i] == address(0)) revert InvalidInput();
+            if (address(ILayerZeroTeller(_tellers[i]).vault()) != _assets[i]) revert InvalidConfiguration();
             liquidAssetToTeller[_assets[i]] = ILayerZeroTeller(_tellers[i]);
             unchecked {
                 ++i;
