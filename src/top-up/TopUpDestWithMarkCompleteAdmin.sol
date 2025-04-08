@@ -56,11 +56,12 @@ contract TopUpDestWithMarkCompleteAdmin is UpgradeableProxy {
      * @notice Emitted when tokens are sent to a user's safe
      * @param txId TxId created for deduplication = keccak256(txhash || token || user)
      * @param user Address of the recipient safe
+     * @param sourceTxHash Tx hash for the source tx
      * @param chainId ID of the blockchain where the user topped up
      * @param token Address of the token used for top-up
      * @param amount Amount of tokens sent
      */
-    event TopUp(bytes32 indexed txId, address indexed user, address indexed token, uint256 chainId, uint256 amount);
+    event TopUp(bytes32 indexed txId, address indexed user, address indexed token, bytes32 sourceTxHash, uint256 chainId, uint256 amount);
 
     /// @notice Error thrown when the contract has insufficient token balance
     error BalanceTooLow();
@@ -202,7 +203,7 @@ contract TopUpDestWithMarkCompleteAdmin is UpgradeableProxy {
         $.transactionCompleted[txId] = true;
         _transfer(user, token, amount);
 
-        emit TopUp(txId, user, token, chainId, amount);
+        emit TopUp(txId, user, token, txHash, chainId, amount);
     }
 
     /**
@@ -245,7 +246,7 @@ contract TopUpDestWithMarkCompleteAdmin is UpgradeableProxy {
         for (uint256 i = 0; i < len;) {
             bytes32 txId = getTxId(txHashes[i], users[i], tokens[i]);
             _getTopUpDestStorage().transactionCompleted[txId] = true;
-            emit TopUp(txId, users[i], tokens[i], chainIds[i], amounts[i]);
+            emit TopUp(txId, users[i], tokens[i], txHashes[i], chainIds[i], amounts[i]);
             unchecked {
                 ++i;
             }

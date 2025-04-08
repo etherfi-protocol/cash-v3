@@ -187,7 +187,7 @@ contract TopUpDestTest is Test {
         bytes32 txId = topUpDest.getTxId(txHash, user1, address(token1));
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(txId, user1, address(token1), chainId, TOP_UP_AMOUNT);
+        emit TopUpDest.TopUp(txId, user1, address(token1), txHash, chainId, TOP_UP_AMOUNT);
         topUpDest.topUpUserSafe(txHash, user1, chainId, address(token1), TOP_UP_AMOUNT);
 
         // Check state changes
@@ -239,11 +239,11 @@ contract TopUpDestTest is Test {
         bytes32 txId3 = topUpDest.getTxId(txHashes[2], users[2], tokens[2]);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(txId1, users[0], tokens[0], chainIds[0], amounts[0]);
+        emit TopUpDest.TopUp(txId1, users[0], tokens[0], txHashes[0], chainIds[0], amounts[0]);
         vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(txId2, users[1], tokens[1], chainIds[1], amounts[1]);
+        emit TopUpDest.TopUp(txId2, users[1], tokens[1], txHashes[1], chainIds[1], amounts[1]);
         vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(txId3, users[2], tokens[2], chainIds[2], amounts[2]);
+        emit TopUpDest.TopUp(txId3, users[2], tokens[2], txHashes[2], chainIds[2], amounts[2]);
         
         topUpDest.topUpUserSafeBatch(txHashes, users, chainIds, tokens, amounts);
 
