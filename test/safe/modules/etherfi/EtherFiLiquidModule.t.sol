@@ -439,6 +439,36 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertGt(liquidBtcBalAfter, liquidBtcBalBefore);
     }
 
+    // Test for eBTC with WBTC
+    function test_deposit_worksWithEbtc_forLiquidBtc() public {
+        uint256 amountToDeposit = 1 * 10**8; // 1 WBTC (8 decimals)
+        uint256 minReturn = 0.95 * 10**8; // 0.95 LiquidBTC (18 decimals)
+        deal(address(wbtc), address(safe), amountToDeposit);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.DEPOSIT_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(wbtc), address(ebtc), amountToDeposit, minReturn)
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v); 
+        
+        uint256 wbtcBalBefore = wbtc.balanceOf(address(safe));
+        uint256 eBtcBalBefore = ebtc.balanceOf(address(safe));
+        
+        liquidModule.deposit(address(safe), address(wbtc), address(ebtc), amountToDeposit, minReturn, owner1, signature);
+        
+        uint256 wbtcBalAfter = wbtc.balanceOf(address(safe));
+        uint256 eBtcBalAfter = ebtc.balanceOf(address(safe));
+        
+        assertEq(wbtcBalAfter, wbtcBalBefore - amountToDeposit);
+        assertGt(eBtcBalAfter, eBtcBalBefore);
+    }
+
     // Test for eUSD with USDe
     function test_deposit_worksWithUsde_forEUsd() public {
         uint256 amountToDeposit = 1000 * 10**18; // 1000 USDe (18 decimals)
