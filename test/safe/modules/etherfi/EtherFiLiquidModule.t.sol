@@ -37,7 +37,10 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     address public liquidBtcTeller = 0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353 ;
 
     IERC20 public eUsd = IERC20(0x939778D83b46B456224A33Fb59630B11DEC56663);
-    address public eUsdTeller = 0xCc9A7620D0358a521A068B444846E3D5DebEa8fA ;
+    address public eUsdTeller = 0xCc9A7620D0358a521A068B444846E3D5DebEa8fA;
+
+    IERC20 public ebtc = IERC20(0x657e8C867D8B37dCC18fA4Caead9C45EB088C642);
+    address public ebtcTeller = address(0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268);
 
     address public ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     
@@ -46,17 +49,19 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         
         vm.startPrank(owner);
         
-        address[] memory assets = new address[](4);
+        address[] memory assets = new address[](5);
         assets[0] = address(liquidEth);
         assets[1] = address(liquidBtc);
         assets[2] = address(liquidUsd);
         assets[3] = address(eUsd);
+        assets[4] = address(ebtc);
         
-        address[] memory tellers = new address[](4);
+        address[] memory tellers = new address[](5);
         tellers[0] = liquidEthTeller;
         tellers[1] = liquidBtcTeller;
         tellers[2] = liquidUsdTeller;
         tellers[3] = eUsdTeller;
+        tellers[4] = ebtcTeller;
         
         liquidModule = new EtherFiLiquidModule(assets, tellers, address(dataProvider), address(weth));
         
@@ -102,6 +107,33 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         uint256 liquidAssetBalBefore = liquidEth.balanceOf(address(safe));
         _bridgeLiquid(address(liquidEth), mainnetEid, amountToBridge, signature1, signature2, fee);
         uint256 liquidAssetBalAfter = liquidEth.balanceOf(address(safe));
+        assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
+    }
+
+    function test_bridge_worksforEBtc() public {
+        uint256 amountToBridge = 1e6;
+        deal(address(ebtc), address(safe), amountToBridge);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.BRIDGE_SIG(),
+            block.chainid,
+            address(liquidModule),
+            safe.nonce(),
+            address(safe),
+            abi.encode(address(ebtc), mainnetEid, owner, amountToBridge)
+        )).toEthSignedMessageHash();
+
+        uint256 fee = liquidModule.getBridgeFee(address(ebtc), mainnetEid, owner, amountToBridge);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature1 = abi.encodePacked(r, s, v); 
+        
+        (v, r, s) = vm.sign(owner2Pk, digestHash);
+        bytes memory signature2 = abi.encodePacked(r, s, v); 
+
+        uint256 liquidAssetBalBefore = ebtc.balanceOf(address(safe));
+        _bridgeLiquid(address(ebtc), mainnetEid, amountToBridge, signature1, signature2, fee);
+        uint256 liquidAssetBalAfter = ebtc.balanceOf(address(safe));
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
     }
 

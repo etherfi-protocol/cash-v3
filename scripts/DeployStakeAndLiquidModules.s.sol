@@ -23,6 +23,9 @@ contract DeployStakeAndLiquidModules is Utils {
     address public eUsd = address(0x939778D83b46B456224A33Fb59630B11DEC56663);
     address public eUsdTeller = address(0xCc9A7620D0358a521A068B444846E3D5DebEa8fA);
 
+    address public ebtc = address(0x657e8C867D8B37dCC18fA4Caead9C45EB088C642);
+    address public ebtcTeller = address(0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268);
+
     address weEth = address(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
     address syncPool = 0x750cf0fd3bc891D8D864B732BC4AD340096e5e68;
 
@@ -37,17 +40,19 @@ contract DeployStakeAndLiquidModules is Utils {
             string(abi.encodePacked(".", "addresses", ".", "EtherFiDataProvider"))
         );  
 
-        address[] memory assets = new address[](4);
+        address[] memory assets = new address[](5);
         assets[0] = liquidEth;
         assets[1] = liquidBtc;
         assets[2] = liquidUsd;
         assets[3] = eUsd;
+        assets[4] = ebtc;
 
-        address[] memory tellers = new address[](4);
+        address[] memory tellers = new address[](5);
         tellers[0] = liquidEthTeller;
         tellers[1] = liquidBtcTeller;
         tellers[2] = liquidUsdTeller;
         tellers[3] = eUsdTeller;
+        tellers[4] = ebtcTeller;
 
         EtherFiLiquidModule liquidModule = new EtherFiLiquidModule(assets, tellers, dataProvider, weth);
         EtherFiStakeModule stakeModule = new EtherFiStakeModule(dataProvider, syncPool, weth, weEth);

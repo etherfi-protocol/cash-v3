@@ -21,6 +21,9 @@ contract SupportCollateralToken is Utils {
     IERC20 public eUsd = IERC20(0x939778D83b46B456224A33Fb59630B11DEC56663);
     ILayerZeroTeller public eUsdTeller = ILayerZeroTeller(0xCc9A7620D0358a521A068B444846E3D5DebEa8fA);
 
+    IERC20 public ebtc = IERC20(0x657e8C867D8B37dCC18fA4Caead9C45EB088C642);
+    ILayerZeroTeller public ebtcTeller = ILayerZeroTeller(0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268);
+
     function run() public {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(privateKey);
@@ -52,11 +55,17 @@ contract SupportCollateralToken is Utils {
             liquidationThreshold: 90e18,
             liquidationBonus: 1e18
         }); 
+        IDebtManager.CollateralTokenConfig memory eBtcConfig = IDebtManager.CollateralTokenConfig({
+            ltv: 50e18,
+            liquidationThreshold: 80e18,
+            liquidationBonus: 1e18
+        }); 
 
         debtManager.supportCollateralToken(address(liquidEth), liquidEthConfig);
         debtManager.supportCollateralToken(address(liquidBtc), liquidBtcConfig);
         debtManager.supportCollateralToken(address(liquidUsd), liquidUsdConfig);
         debtManager.supportCollateralToken(address(eUsd), eUsdConfig);
+        debtManager.supportCollateralToken(address(ebtc), eBtcConfig);
 
         vm.stopBroadcast();
     }
