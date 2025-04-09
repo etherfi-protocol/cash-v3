@@ -5,6 +5,7 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 
 import { MessagingFee, OFTReceipt, SendParam } from "../../interfaces/IOFT.sol";
 import { IStargate, Ticket } from "../../interfaces/IStargate.sol";
+import { IWETH } from "../../interfaces/IWETH.sol";
 import { BridgeAdapterBase } from "./BridgeAdapterBase.sol";
 
 /**
@@ -28,8 +29,14 @@ contract StargateAdapter is BridgeAdapterBase {
     // https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
     uint32 public constant DEST_EID_SCROLL = 30_214;
 
+    address public immutable weth;
+
     /// @notice Error thrown when the provided Stargate pool doesn't match the token
     error InvalidStargatePool();
+
+    constructor(address _weth) {
+        weth = _weth; 
+    }
 
     /**
      * @notice Bridges tokens using the Stargate protocol
@@ -49,12 +56,14 @@ contract StargateAdapter is BridgeAdapterBase {
 
         (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) = prepareRideBus(stargatePool, amount, destRecipient, minAmount);
 
+        if (token == weth) IWETH(weth).withdraw(amount);
         if (address(this).balance < valueToSend) revert InsufficientNativeFee();
 
         if (poolToken != address(0)) {
             if (poolToken != token) revert InvalidStargatePool();
             IERC20(token).forceApprove(stargatePool, amount);
         }
+
         (,, Ticket memory ticket) = IStargate(stargatePool).sendToken{ value: valueToSend }(sendParam, messagingFee, payable(address(this)));
         emit BridgeViaStargate(token, amount, ticket);
     }
