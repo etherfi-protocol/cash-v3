@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { Mode, SafeCashData, SafeData } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, SafeCashData, BinSponsor, SafeData } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
@@ -223,7 +223,7 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Spend in credit mode to create a borrow
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
         
         // Get safe cash data
         SafeCashData memory data = cashLens.getSafeCashData(address(safe));

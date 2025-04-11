@@ -9,6 +9,15 @@ import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
 /**
+ * @title BinSponsor
+ * @notice Defines the bin sponsors or card issuers
+ */
+enum BinSponsor {
+    Reap,
+    Rain
+}
+
+/**
  * @title Mode
  * @notice Defines the operating mode for cash spending operations
  * @dev Credit mode borrows tokens, Debit mode uses balance from the safe
@@ -234,10 +243,11 @@ interface ICashModule {
 
     /**
      * @notice Gets the settlement dispatcher address
-     * @dev The settlement dispatcher processes transactions in debit mode
-     * @return The address of the settlement dispatcher
+     * @dev The settlement dispatcher receives the funds that are spent
+     * @param binSponsor Bin sponsor for which the settlement dispatcher needs to be returned
+     * @return settlementDispatcher The address of the settlement dispatcher
      */
-    function getSettlementDispatcher() external view returns (address);
+    function getSettlementDispatcher(BinSponsor binSponsor) external view returns (address settlementDispatcher);
 
     /**
      * @notice Gets the cashback percentage and split percentage for a safe
@@ -317,13 +327,23 @@ interface ICashModule {
      * @dev Sets up the role registry, debt manager, settlement dispatcher, and data providers
      * @param _roleRegistry Address of the role registry contract
      * @param _debtManager Address of the debt manager contract
-     * @param _settlementDispatcher Address of the settlement dispatcher
+     * @param _settlementDispatcherReap Address of the settlement dispatcher for Reap
+     * @param _settlementDispatcherRain Address of the settlement dispatcher for Rain
      * @param _cashbackDispatcher Address of the cashback dispatcher
      * @param _cashEventEmitter Address of the cash event emitter
      * @param _cashModuleSetters Address of the cash module setters contract
      * @custom:throws InvalidInput if any essential address is zero
      */
-    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
+    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcherReap, address _settlementDispatcherRain, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
+
+    /**
+     * @notice Sets the settlement dispatcher address for a bin sponsor
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
+     * @custom:throws InvalidInput if caller doesn't have the controller role
+     */
+    function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external;
 
     /**
      * @notice Sets the tier for one or more safes
@@ -412,7 +432,10 @@ interface ICashModule {
      * @notice Processes a spending transaction with multiple tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
+     * @param spender Address of the spendeer
+     * @param referrer Address of the referrer 
      * @param txId Transaction identifier
+     * @param binSponsor Bin sponsor used for spending
      * @param tokens Array of addresses of the tokens to spend
      * @param amountsInUsd Array of amounts to spend in USD (must match tokens array length)
      * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
@@ -423,7 +446,7 @@ interface ICashModule {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe,  address spender, address referrer,  bytes32 txId,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external;
+    function spend(address safe,  address spender, address referrer,  bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external;
 
     /**
      * @notice Clears pending cashback for users

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Mode } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter, CashModuleTestSetup, CashVerificationLib, ICashModule, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
@@ -104,7 +104,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
             spendAmounts[0] = 10e6;
 
             vm.prank(etherFiWallet);
-            cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+            cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
         }
 
         {

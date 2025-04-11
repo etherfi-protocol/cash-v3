@@ -6,7 +6,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
-import { Mode } from "../../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { MockPriceProvider } from "../../../../../src/mocks/MockPriceProvider.sol";
 import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PriceProvider.sol";
@@ -72,7 +72,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
 
         // Borrow some tokens first to have both collateral and borrows
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
         
         // Get user state
         (
@@ -156,7 +156,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         
         // Borrow some tokens (but less than max)
         vm.prank(address(safe));
-        debtManager.borrow(address(usdcScroll), borrowAmt);
+        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), borrowAmt);
         
         // Position should still be healthy
         debtManager.ensureHealth(address(safe));
@@ -166,7 +166,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         // Borrow maximum amount
         uint256 maxBorrowAmount = debtManager.getMaxBorrowAmount(address(safe), true);
         vm.prank(address(safe));
-        debtManager.borrow(address(usdcScroll), maxBorrowAmount);
+        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), maxBorrowAmount);
         
         // Manipulate price to make position unhealthy
         MockPriceProvider mockPriceProvider = new MockPriceProvider(1500e6, address(usdcScroll)); // Half the original price
@@ -278,7 +278,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         
         // Borrow half
         vm.prank(address(safe));
-        debtManager.borrow(address(usdcScroll), initialCapacity / 2);
+        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), initialCapacity / 2);
         
         // Check remaining capacity
         uint256 remainingCapacity = debtManager.remainingBorrowingCapacityInUSD(address(safe));
@@ -286,7 +286,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         
         // Borrow remaining amount
         vm.prank(address(safe));
-        debtManager.borrow(address(usdcScroll), remainingCapacity);
+        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), remainingCapacity);
         
         // Should have no remaining capacity
         uint256 finalCapacity = debtManager.remainingBorrowingCapacityInUSD(address(safe));

@@ -2,13 +2,21 @@
 pragma solidity ^0.8.28;
 
 import { SpendingLimit } from "../libraries/SpendingLimitLib.sol";
-import { Mode, SafeTiers } from "./ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor } from "./ICashModule.sol";
 
 /**
  * @title ICashEventEmitter
  * @notice Interface for the CashEventEmitter contract that emits events for the Cash Module
  */
 interface ICashEventEmitter {
+    /**
+     * @notice Emits the SettlementDispatcheUpdated event
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param oldDispatcher Address of the old dispatcher for the bin sponsor
+     * @param newDispatcher Address of the new dispatcher for the bin sponsor
+     */
+    function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external;
+
     /**
      * @notice Emits the ReferrerCashback event
      * @param safe Address of the safe
@@ -57,13 +65,15 @@ interface ICashEventEmitter {
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
      * @param txId Transaction identifier
+     * @param binSponsor Bin sponsor for the transaction
      * @param tokens Addresses of the tokens
      * @param amounts Amounts of tokens
      * @param amountsInUsd Amounts in USD value
      * @param totalUsdAmt Total amount in USD
      * @param mode Operational mode
      */
-    function emitSpend(address safe, bytes32 txId, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external;
+    function emitSpend(address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external;
+    
     /**
      * @notice Emits an event when the mode is changed
      * @param prevMode Previous mode

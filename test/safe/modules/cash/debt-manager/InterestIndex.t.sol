@@ -8,6 +8,7 @@ import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
 import { IAggregatorV3 } from "../../../../../src/interfaces/IAggregatorV3.sol"; 
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol"; 
+import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol"; 
 
 contract DebtManagerInterestIndexTest is CashModuleTestSetup {
     using Math for uint256;
@@ -42,7 +43,7 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
         uint256 borrowAmt = 1000e6; // 1000 USDC
         
         vm.startPrank(address(safe));
-        debtManager.borrow(address(usdcScroll), borrowAmt);
+        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), borrowAmt);
         vm.stopPrank();
         
         // Get the updated index

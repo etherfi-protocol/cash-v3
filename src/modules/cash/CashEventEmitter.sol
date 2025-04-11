@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Mode, SafeTiers } from "../../interfaces/ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor } from "../../interfaces/ICashModule.sol";
 import { SpendingLimit } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
@@ -107,13 +107,14 @@ contract CashEventEmitter is UpgradeableProxy {
      * @notice Emitted when tokens are spent from a safe
      * @param safe Address of the safe spending the tokens
      * @param txId Transaction identifier
+     * @param binSponsor Bin sponsor for the card
      * @param tokens Addresses of the tokens being spent
      * @param amounts Amounts of tokens being spent
      * @param amountInUsd USD value of the tokens being spent
      * @param totalUsdAmt Total USD value spent
      * @param mode Operational mode in which the spending occurs
      */
-    event Spend(address indexed safe, bytes32 indexed txId, address[] tokens, uint256[] amounts, uint256[] amountInUsd, uint256 totalUsdAmt, Mode mode);
+    event Spend(address indexed safe, bytes32 indexed txId, BinSponsor indexed binSponsor, address[] tokens, uint256[] amounts, uint256[] amountInUsd, uint256 totalUsdAmt, Mode mode);
     
     /**
      * @notice Emitted when cashback is calculated and potentially distributed
@@ -186,6 +187,24 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param newCashbackPercentage New cashback percentage for referrer
      */
     event ReferrerCashbackPercentageSet(uint64 oldCashbackPercentage, uint64 newCashbackPercentage);
+
+    /**
+     * @notice Emitted when settlement dispatcher is updated
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param oldDispatcher Address of the old dispatcher for the bin sponsor
+     * @param newDispatcher Address of the new dispatcher for the bin sponsor
+     */
+    event SettlementDispatcheUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher);
+
+    /**
+     * @notice Emits the SettlementDispatcheUpdated event
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param oldDispatcher Address of the old dispatcher for the bin sponsor
+     * @param newDispatcher Address of the new dispatcher for the bin sponsor
+     */
+    function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external onlyCashModule {
+        emit SettlementDispatcheUpdated(binSponsor, oldDispatcher, newDispatcher);
+    }
 
     /**
      * @notice Emits the SafeTiersSet event
@@ -286,14 +305,15 @@ contract CashEventEmitter is UpgradeableProxy {
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
      * @param txId Transaction identifier
+     * @param binSponsor Bin sponsor for the transaction
      * @param tokens Addresses of the tokens
      * @param amounts Amounts of tokens
      * @param amountsInUsd Amounts in USD value
      * @param totalUsdAmt Total amount in USD
      * @param mode Operational mode
      */
-    function emitSpend(address safe, bytes32 txId, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external onlyCashModule {
-        emit Spend(safe, txId, tokens, amounts, amountsInUsd, totalUsdAmt, mode);
+    function emitSpend(address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external onlyCashModule {
+        emit Spend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalUsdAmt, mode);
     }
 
     /**

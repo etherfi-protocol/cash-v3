@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { Mode } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
 contract CashLensCanSpendTest is CashModuleTestSetup {
@@ -199,7 +199,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         amounts[0] = amountToSpend;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, tokens, amounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, tokens, amounts, true);
 
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
@@ -234,7 +234,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         spendAmounts[0] = dailyLimitInUsd - amountToSpend + 1;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -256,7 +256,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         spendAmounts[0] = dailyLimitInUsd - amountToSpend + 1;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -297,7 +297,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (, uint64 spendingLimitDelay,) = cashModule.getDelays();
         vm.warp(block.timestamp + spendingLimitDelay + 1);
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -327,7 +327,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (, uint64 spendingLimitDelay,) = cashModule.getDelays();
         vm.warp(block.timestamp + spendingLimitDelay + 1);
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
 
@@ -370,7 +370,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         _updateSpendingLimit(amount - 1, 1 ether);
 
@@ -559,7 +559,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         // Spend to clear the transaction
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, tokens, amounts, false);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, tokens, amounts, false);
         
         // Try to spend with the same txId
         uint256[] memory amountsInUsd = new uint256[](1);

@@ -7,6 +7,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { CashModuleTestSetup, IERC20 } from "../CashModuleTestSetup.t.sol"; // Assuming a base test file exists;
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { IEtherFiSafe } from "../../../../../src/interfaces/IEtherFiSafe.sol";
+import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
 import { IAggregatorV3 } from "../../../../../src/interfaces/IAggregatorV3.sol";
 import { Mode } from "../../../../../src/interfaces/ICashModule.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
@@ -71,7 +72,7 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
         // Have each user borrow with different time gaps between borrows
         for (uint256 i = 0; i < safes.length; i++) {
             vm.startPrank(address(safes[i]));
-            debtManager.borrow(borrowToken, BORROW_AMOUNT);
+            debtManager.borrow(BinSponsor.Reap, borrowToken, BORROW_AMOUNT);
             vm.stopPrank();
             
             // Fast forward time between borrows to accrue interest differently
@@ -96,7 +97,7 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
         
         // Additional verification: try an extra borrow after significant time has passed
         vm.startPrank(address(safes[0]));
-        debtManager.borrow(borrowToken, BORROW_AMOUNT);
+        debtManager.borrow(BinSponsor.Reap, borrowToken, BORROW_AMOUNT);
         vm.stopPrank();
         
         // Recalculate and verify the invariant again
@@ -116,7 +117,7 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
         // First have each user borrow
         for (uint256 i = 0; i < safes.length; i++) {
             vm.startPrank(address(safes[i]));
-            debtManager.borrow(borrowToken, BORROW_AMOUNT);
+            debtManager.borrow(BinSponsor.Reap, borrowToken, BORROW_AMOUNT);
             vm.stopPrank();
             
             // Fast forward time between borrows
@@ -171,13 +172,13 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
             vm.startPrank(address(safes[i]));
             
             // Borrow first token
-            debtManager.borrow(borrowToken, BORROW_AMOUNT);
+            debtManager.borrow(BinSponsor.Reap, borrowToken, BORROW_AMOUNT);
             
             // Warp time
             vm.warp(block.timestamp + 1 days);
             
             // Borrow second token
-            debtManager.borrow(address(secondToken), secondTokenBorrowAmt); // Different amount
+            debtManager.borrow(BinSponsor.Reap, address(secondToken), secondTokenBorrowAmt); // Different amount
             
             vm.stopPrank();
             
