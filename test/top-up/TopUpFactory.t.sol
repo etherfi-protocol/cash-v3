@@ -66,7 +66,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.startPrank(owner);
 
-        stargateAdapter = new StargateAdapter();
+        stargateAdapter = new StargateAdapter(address(weth));
         oftBridgeAdapter = new EtherFiOFTBridgeAdapter();
         liquidBridgeAdapter = new EtherFiLiquidBridgeAdapter();
 
@@ -82,7 +82,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.stopPrank();
 
-        address[] memory tokens = new address[](7);
+        address[] memory tokens = new address[](8);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
         tokens[2] = address(ETH);
@@ -90,8 +90,9 @@ contract TopUpFactoryTest is Test, Constants {
         tokens[4] = address(liquidBtc);
         tokens[5] = address(liquidUsd);
         tokens[6] = address(eUsd);
+        tokens[7] = address(weth);
 
-        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](7);
+        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](8);
         tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(usdcStargatePool) });
         tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
         tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
@@ -99,6 +100,7 @@ contract TopUpFactoryTest is Test, Constants {
         tokenConfigs[4] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidBtcTeller) });
         tokenConfigs[5] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidUsdTeller) });
         tokenConfigs[6] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(eUsdTeller) });
+        tokenConfigs[7] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
 
         vm.prank(admin);
         factory.setTokenConfig(tokens, tokenConfigs);
@@ -454,6 +456,17 @@ contract TopUpFactoryTest is Test, Constants {
     function test_bridge_succeeds_withUsdc() public {
         address token = address(usdc);
         uint256 amount = 100e6;
+        deal(token, address(factory), amount);
+        (, uint256 fee) = factory.getBridgeFee(token);
+
+        vm.expectEmit(true, true, true, true);
+        emit TopUpFactory.Bridge(token, amount);
+        factory.bridge{ value: fee }(token);
+    }
+
+    function test_bridge_succeeds_withWeth() public {
+        address token = address(weth);
+        uint256 amount = 1 ether;
         deal(token, address(factory), amount);
         (, uint256 fee) = factory.getBridgeFee(token);
 
