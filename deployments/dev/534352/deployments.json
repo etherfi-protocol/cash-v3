@@ -9,6 +9,7 @@
     "RoleRegistry": "0xa322a04d1e2Cb44672473740F9F35B057FA29CFB",
     "SettlementDispatcher": "0xea6e574886797A65eD22CcF2307e48a83C355771",
     "TopUpDest": "0x06fe42Cf3C63412f1955758ce2798709476a38fd",
+    "TopUpDestNativeGateway": "0x023aA54c7bcC6257733Db28bc5b9C11b886a4578",
     "OpenOceanSwapModule": "0x0AD4ddaDFedeD397740544500DC3b29b1819c78E",
     "CashModule": "0xBc5e1a8cdC14b286A8f5F523059cf02A7fFE9A6d",
     "CashEventEmitter": "0x357b440CfcD9677A99f2f85D5297c141B8837A9b",

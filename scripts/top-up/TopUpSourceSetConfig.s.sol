@@ -72,12 +72,16 @@ contract TopUpSourceSetConfig is Utils {
         uint256 count = getTokenConfigsLength(jsonString, chainId);
         tokens = new address[](count);
         tokenConfig = new TopUpFactory.TokenConfig[](count);
+
+        (address topUpDest, address topUpDestNativeGateway) = getTopUpDestAndNativeGateway();
+        address weth = stdJson.readAddress(jsonString, string.concat(".", chainId, ".weth"));
         
         for (uint256 i = 0; i < count; i++) {
             string memory base = string.concat(".", chainId, ".tokenConfigs[", vm.toString(i), "]");
             
             tokens[i] = stdJson.readAddress(jsonString, string.concat(base, ".address"));
-            tokenConfig[i].recipientOnDestChain = getDestRecipientAddress();
+            tokenConfig[i].recipientOnDestChain = (tokens[i] == weth) ? topUpDestNativeGateway : topUpDest;
+
             tokenConfig[i].maxSlippageInBps = uint96(stdJson.readUint(jsonString, string.concat(base, ".maxSlippageInBps")));
             string memory bridge = stdJson.readString(jsonString, string.concat(base, ".bridge"));
 
@@ -127,7 +131,7 @@ contract TopUpSourceSetConfig is Utils {
         return stdJson.readAddress(jsonString, path);
     }
 
-    function getDestRecipientAddress() internal view returns (address) {
+    function getTopUpDestAndNativeGateway() internal view returns (address, address) {
         string memory dir = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv(), "/"));
         string memory chainDir = string.concat(scrollChainId, "/");
         string memory file = string.concat(dir, chainDir, "deployments", ".json");
@@ -135,9 +139,15 @@ contract TopUpSourceSetConfig is Utils {
         if (!vm.exists(file)) revert ("Scroll deployment file not found");
         string memory deployments = vm.readFile(file);
 
-        return stdJson.readAddress(
+        address topUpDest = stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "TopUpDest")
         );
+        address topUpDestNativeGateway = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "TopUpDestNativeGateway")
+        );
+
+        return (topUpDest, topUpDestNativeGateway);
     }
 }

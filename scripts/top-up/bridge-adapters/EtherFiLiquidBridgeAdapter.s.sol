@@ -9,9 +9,9 @@ contract DeployEtherFiLiquidBridgeAdapter is Utils {
     EtherFiLiquidBridgeAdapter liquidBridgeAdapter;
 
     function run() public {
-        // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        vm.startBroadcast();
+        vm.startBroadcast(deployerPrivateKey);
 
         liquidBridgeAdapter = EtherFiLiquidBridgeAdapter(deployWithCreate3(abi.encodePacked(type(EtherFiLiquidBridgeAdapter).creationCode), getSalt(ETHER_FI_LIQUID_BRIDGE_ADAPTER)));
 
