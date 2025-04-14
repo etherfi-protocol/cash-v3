@@ -1,5 +1,8 @@
 {
 	"dependencies": {
+		"@safe-global/api-kit": "^3.0.1",
+		"@safe-global/protocol-kit": "^6.0.3",
+		"@safe-global/types-kit": "^2.0.1",
 		"axios": "^1.8.3",
 		"dotenv": "^16.4.7",
 		"ethers": "v5"

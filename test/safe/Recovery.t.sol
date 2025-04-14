@@ -254,7 +254,7 @@ contract RecoveryManagerTest is SafeTestSetup {
         safe.isRecoverySigner(address(0));
     }
 
-        function test_recoverSafe_initiatesRecoveryProcess() public {
+    function test_recoverSafe_initiatesRecoveryProcess() public {
         address newOwner = makeAddr("newOwner");
         
         address[] memory recoverySigners = new address[](2);
