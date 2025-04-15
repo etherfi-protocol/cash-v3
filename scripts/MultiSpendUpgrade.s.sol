@@ -10,6 +10,7 @@ import { CashModuleCore, BinSponsor } from "../src/modules/cash/CashModuleCore.s
 import { CashModuleSetters } from "../src/modules/cash/CashModuleSetters.sol";
 import { CashLens } from "../src/modules/cash/CashLens.sol";
 import { DebtManagerCore } from "../src/debt-manager/DebtManagerCore.sol";
+import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 import { TopUpDestNativeGateway } from "../src/top-up/TopUpDestNativeGateway.sol";
 import { SettlementDispatcher } from "../src/settlement-dispatcher/SettlementDispatcher.sol";
 import { UUPSProxy } from "../src/UUPSProxy.sol";

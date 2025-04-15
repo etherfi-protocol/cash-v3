@@ -8,6 +8,7 @@
     "PriceProvider": "0x7d7947D1ace9088048AaB067cF2F54eA1F762a4f",
     "RoleRegistry": "0xa322a04d1e2Cb44672473740F9F35B057FA29CFB",
     "SettlementDispatcherReap": "0xea6e574886797A65eD22CcF2307e48a83C355771",
+    "SettlementDispatcherRain": "0x26d90676C6aeF2a09Cf383af499cc67E9D6ad7CA",
     "TopUpDest": "0x06fe42Cf3C63412f1955758ce2798709476a38fd",
     "TopUpDestNativeGateway": "0x023aA54c7bcC6257733Db28bc5b9C11b886a4578",
     "OpenOceanSwapModule": "0x0AD4ddaDFedeD397740544500DC3b29b1819c78E",
