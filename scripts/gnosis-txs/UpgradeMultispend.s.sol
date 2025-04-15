@@ -40,6 +40,14 @@ contract UpgradeMultispend is GnosisHelpers, Utils, Test {
     address payable settlementDispatcherRain;
     address roleRegistry;
 
+    address cashModuleCoreImpl;
+    address cashModuleSettersImpl;
+    address cashEventEmitterImpl;
+    address cashLensImpl;
+    address settlementDispatcherReapImpl;
+    address settlementDispatcherRainImpl;
+    address debtManagerCoreImpl;
+
     function run() public {
         string memory deployments = readDeploymentFile();
 
@@ -80,13 +88,13 @@ contract UpgradeMultispend is GnosisHelpers, Utils, Test {
 
         vm.startBroadcast();
 
-        address cashModuleCoreImpl = address(new CashModuleCore(dataProvider));
-        address cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
-        address cashEventEmitterImpl = address(new CashEventEmitter(cashModule));
-        address cashLensImpl = address(new CashLens(cashModule, dataProvider));
-        address settlementDispatcherReapImpl = address(new SettlementDispatcher(BinSponsor.Reap));
-        address settlementDispatcherRainImpl = address(new SettlementDispatcher(BinSponsor.Rain));
-        address debtManagerCoreImpl = address(new DebtManagerCore(dataProvider));
+        cashModuleCoreImpl = address(new CashModuleCore(dataProvider));
+        cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
+        cashEventEmitterImpl = address(new CashEventEmitter(cashModule));
+        cashLensImpl = address(new CashLens(cashModule, dataProvider));
+        settlementDispatcherReapImpl = address(new SettlementDispatcher(BinSponsor.Reap));
+        settlementDispatcherRainImpl = address(new SettlementDispatcher(BinSponsor.Rain));
+        debtManagerCoreImpl = address(new DebtManagerCore(dataProvider));
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -109,6 +117,32 @@ contract UpgradeMultispend is GnosisHelpers, Utils, Test {
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
+        txs = upgrades(txs);
+
+        string memory setReferrerCashbackPercentage = iToHex(abi.encodeWithSelector(CashModuleSetters.setReferrerCashbackPercentageInBps.selector, 1_00));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setReferrerCashbackPercentage, false)));
+        
+        string memory setSettlementDispatcherRain = iToHex(abi.encodeWithSelector(CashModuleSetters.setSettlementDispatcher.selector, BinSponsor.Rain, settlementDispatcherRain));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setSettlementDispatcherRain, false)));
+        
+        string memory setWETHConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, address(weth), collateralConfig));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(debtManager)), setWETHConfig, true)));
+        
+        vm.createDir("./output", true);
+        string memory path = "./output/UpgradeMultispendAndSettlementDispatcher.json";
+        vm.writeFile(path, txs);
+
+        vm.stopBroadcast();
+
+        /// below here is just a test
+        executeGnosisTransactionBundle(path);
+        assert(CashModuleCore(cashModule).getReferrerCashbackPercentage() == 1_00);
+        assert(CashModuleCore(cashModule).getSettlementDispatcher(BinSponsor.Reap) == settlementDispatcherReap);
+        assert(CashModuleCore(cashModule).getSettlementDispatcher(BinSponsor.Rain) == settlementDispatcherRain);
+        assert(IDebtManager(debtManager).isCollateralToken(weth));
+    }   
+
+    function upgrades(string memory txs) public view returns (string memory) {
         string memory settlementDispatcherReapUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, settlementDispatcherReapImpl, ""));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(settlementDispatcherReap), settlementDispatcherReapUpgrade, false)));
         
@@ -124,29 +158,9 @@ contract UpgradeMultispend is GnosisHelpers, Utils, Test {
         string memory cashEventEmitterUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cashEventEmitterImpl, ""));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(eventEmitter), cashEventEmitterUpgrade, false)));
 
-        string memory setReferrerCashbackPercentage = iToHex(abi.encodeWithSelector(CashModuleSetters.setReferrerCashbackPercentageInBps.selector, 1_00));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setReferrerCashbackPercentage, false)));
-        
-        string memory setSettlementDispatcherRain = iToHex(abi.encodeWithSelector(CashModuleSetters.setSettlementDispatcher.selector, BinSponsor.Rain, settlementDispatcherRain));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setSettlementDispatcherRain, false)));
-        
-        string memory setWETHConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, address(weth), collateralConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(debtManager)), setWETHConfig, false)));
-        
         string memory cashLensUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cashLensImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashLens), cashLensUpgrade, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashLens), cashLensUpgrade, false)));
 
-        vm.createDir("./output", true);
-        string memory path = "./output/UpgradeMultispendAndSettlementDispatcher.json";
-        vm.writeFile(path, txs);
-
-        vm.stopBroadcast();
-
-        /// below here is just a test
-        executeGnosisTransactionBundle(path);
-        assert(CashModuleCore(cashModule).getReferrerCashbackPercentage() == 1_00);
-        assert(CashModuleCore(cashModule).getSettlementDispatcher(BinSponsor.Reap) == settlementDispatcherReap);
-        assert(CashModuleCore(cashModule).getSettlementDispatcher(BinSponsor.Rain) == settlementDispatcherRain);
-        assert(IDebtManager(debtManager).isCollateralToken(weth));
-    }   
+        return txs;
+    }
 }

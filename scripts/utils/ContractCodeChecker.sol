@@ -132,7 +132,7 @@ contract ContractCodeChecker {
         }
     }
 
-    function verifyLengthMatch(address deployedImpl, address localDeployed) public {
+    function verifyLengthMatch(address deployedImpl, address localDeployed) public view {
         console2.log("Verifying length match...");
         bytes memory localBytecode = localDeployed.code;
         bytes memory onchainRuntimeBytecode = deployedImpl.code;

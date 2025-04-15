@@ -60,8 +60,8 @@ contract Utils is Script {
     string internal CASHBACK_DISPATCHER_PROXY = "CashbackDispatcherProxy";
     string internal SETTLEMENT_DISPATCHER_IMPL = "SettlementDispatcherImpl";
     string internal SETTLEMENT_DISPATCHER_PROXY = "SettlementDispatcherProxy";
-    string internal SETTLEMENT_DISPATCHER_RAIN_IMPL = "SettlementDispatcherRainImpl";
-    string internal SETTLEMENT_DISPATCHER_RAIN_PROXY = "SettlementDispatcherRainProxy";
+    string internal SETTLEMENT_DISPATCHER_RAIN_IMPL = "ProdSettlementDispatcherRainImpl";
+    string internal SETTLEMENT_DISPATCHER_RAIN_PROXY = "ProdSettlementDispatcherRainProxy";
     string internal DEBT_MANAGER_ADMIN_IMPL = "DebtManagerAdminImpl";
     string internal DEBT_MANAGER_CORE_IMPL = "DebtManagerCoreImpl";
     string internal DEBT_MANAGER_INITIALIZER_IMPL = "DebtManagerInitializerImpl";
