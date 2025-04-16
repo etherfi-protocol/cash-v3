@@ -7,7 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-import { ICashModule, Mode } from "../../../../src/interfaces/ICashModule.sol";
+import { ICashModule, Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -26,100 +26,108 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
     }
 
     function test_spend_variousTokenProportions_inDebitMode() public {
-        // Setup: Different token amounts with same USD value
-        uint256 usdcAmountInUsd = 50e6; // $50 in USDC
-        uint256 weETHAmountInUsd = 50e6; // $50 in weETH
-        
-        // Convert to token amounts
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
-        
-        // Fund the safe with both tokens
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount);
-        
-        // Create spending transaction with multiple tokens
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
-        
         uint256[] memory spendAmounts = new uint256[](2);
-        spendAmounts[0] = usdcAmountInUsd;
-        spendAmounts[1] = weETHAmountInUsd;
-
         uint256[] memory tokenAmounts = new uint256[](2);
-        tokenAmounts[0] = usdcAmount;
-        tokenAmounts[1] = weETHAmount;
+        {
+            // Setup: Different token amounts with same USD value
+            uint256 usdcAmountInUsd = 50e6; // $50 in USDC
+            uint256 weETHAmountInUsd = 50e6; // $50 in weETH
+            
+            // Convert to token amounts
+            uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
+            uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+            
+            // Fund the safe with both tokens
+            deal(address(usdcScroll), address(safe), usdcAmount);
+            deal(address(weETHScroll), address(safe), weETHAmount);
+            
+            // Create spending transaction with multiple tokens
+            spendTokens[0] = address(usdcScroll);
+            spendTokens[1] = address(weETHScroll);
+            
+            spendAmounts[0] = usdcAmountInUsd;
+            spendAmounts[1] = weETHAmountInUsd;
+
+            tokenAmounts[0] = usdcAmount;
+            tokenAmounts[1] = weETHAmount;
+        }
         
         // Track initial balances
-        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcher));
-        uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcher));
+        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
         
         // Execute spend
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Spend(address(safe), txId, spendTokens, tokenAmounts, spendAmounts, usdcAmountInUsd + weETHAmountInUsd, Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, spendAmounts[0] + spendAmounts[1], Mode.Debit);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
         
         // Verify tokens were transferred to settlement dispatcher
         assertEq(usdcScroll.balanceOf(address(safe)), 0);
         assertEq(weETHScroll.balanceOf(address(safe)), 0);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherUsdcBalBefore + usdcAmount);
-        assertEq(weETHScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherWeETHBalBefore + weETHAmount);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0]);
+        assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1]);
     }
 
-    function test_spend_asymmetricalTokenDistribution_inDebitMode() public {
-        // Setup: Asymmetrical token distribution (80% USDC, 20% weETH)
-        uint256 usdcAmountInUsd = 80e6; // $80 in USDC
-        uint256 weETHAmountInUsd = 20e6; // $20 in weETH
-        
-        // Convert to token amounts
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
-        
-        // Fund the safe with both tokens
-        deal(address(usdcScroll), address(safe), usdcAmount * 2); // Give extra for follow-up test
-        deal(address(weETHScroll), address(safe), weETHAmount * 2); // Give extra for follow-up test
-        
+    function test_spend_asymmetricalTokenDistribution_inDebitMode() public {        
         // Create spending transaction with multiple tokens
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
-        
         uint256[] memory spendAmounts = new uint256[](2);
-        spendAmounts[0] = usdcAmountInUsd;
-        spendAmounts[1] = weETHAmountInUsd;
-
         uint256[] memory tokenAmounts = new uint256[](2);
-        tokenAmounts[0] = usdcAmount;
-        tokenAmounts[1] = weETHAmount;
-        
-        // Track initial balances
-        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcher));
-        uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcher));
-        
-        // Execute spend
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Spend(address(safe), txId, spendTokens, tokenAmounts, spendAmounts, usdcAmountInUsd + weETHAmountInUsd, Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
-        
-        // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), usdcAmount);
-        assertEq(weETHScroll.balanceOf(address(safe)), weETHAmount);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherUsdcBalBefore + usdcAmount);
-        assertEq(weETHScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherWeETHBalBefore + weETHAmount);
 
-        // Execute another spend with different transaction ID
-        bytes32 txId2 = keccak256("txId2");
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId2, spendTokens, spendAmounts, true);
+        {
+            // Setup: Asymmetrical token distribution (80% USDC, 20% weETH)
+            uint256 usdcAmountInUsd = 80e6; // $80 in USDC
+            uint256 weETHAmountInUsd = 20e6; // $20 in weETH
+            
+            // Convert to token amounts
+            uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
+            uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+            
+            // Fund the safe with both tokens
+            deal(address(usdcScroll), address(safe), usdcAmount * 2); // Give extra for follow-up test
+            deal(address(weETHScroll), address(safe), weETHAmount * 2); // Give extra for follow-up test
+
+            spendTokens[0] = address(usdcScroll);
+            spendTokens[1] = address(weETHScroll);
+            
+            spendAmounts[0] = usdcAmountInUsd;
+            spendAmounts[1] = weETHAmountInUsd;
+
+            tokenAmounts[0] = usdcAmount;
+            tokenAmounts[1] = weETHAmount;
+        }
+
+        {
+            // Track initial balances
+            uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+            uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
+            
+            // Execute spend
+            vm.prank(etherFiWallet);
+            vm.expectEmit(true, true, true, true);
+            emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, spendAmounts[0] + spendAmounts[1], Mode.Debit);
+            cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+            
+            // Verify tokens were transferred to settlement dispatcher
+            assertEq(usdcScroll.balanceOf(address(safe)), tokenAmounts[0]);
+            assertEq(weETHScroll.balanceOf(address(safe)), tokenAmounts[1]);
+            assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0]);
+            assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1]);
+
+            // Execute another spend with different transaction ID
+            bytes32 txId2 = keccak256("txId2");
+            vm.prank(etherFiWallet);
+            cashModule.spend(address(safe), address(0), address(0), txId2, BinSponsor.Reap, spendTokens, spendAmounts, true);
+            
+            // Verify tokens were transferred again
+            assertEq(usdcScroll.balanceOf(address(safe)), 0);
+            assertEq(weETHScroll.balanceOf(address(safe)), 0);
+            assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0] * 2);
+            assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1] * 2);
+        }
         
-        // Verify tokens were transferred again
-        assertEq(usdcScroll.balanceOf(address(safe)), 0);
-        assertEq(weETHScroll.balanceOf(address(safe)), 0);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherUsdcBalBefore + usdcAmount * 2);
-        assertEq(weETHScroll.balanceOf(address(settlementDispatcher)), settlementDispatcherWeETHBalBefore + weETHAmount * 2);
     }
 
     function test_spend_failsWithInsufficientBalance_oneToken() public {
@@ -144,7 +152,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Should revert due to insufficient weETH balance
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
     }
 
     function test_spend_failsWithInsufficientBalance_partialAmount() public {
@@ -170,7 +178,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Should revert due to insufficient weETH balance
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
     }
 
     function test_spend_withCashback_multipleTokens() public {
@@ -198,7 +206,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         
         // Execute spend with cashback
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
         
         // Verify cashback was received
         assertGt(scrToken.balanceOf(spender), spenderTokenBalBefore);
@@ -229,7 +237,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         
         // Execute spend with referrer
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), referrer, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), referrer, txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
         
         // Verify referrer received cashback
         assertGt(scrToken.balanceOf(referrer), referrerTokenBalBefore);
@@ -257,7 +265,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Should revert as total spending exceeds daily limit
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
     }
 
     function test_spend_withPendingWithdrawal_multipleTokens() public {
@@ -265,12 +273,12 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         WithdrawalTestData memory data = _setupWithdrawalTest();
         
         // Setup initial balances tracking
-        uint256 usdcBalanceBefore = usdcScroll.balanceOf(address(settlementDispatcher));
-        uint256 weETHBalanceBefore = weETHScroll.balanceOf(address(settlementDispatcher));
+        uint256 usdcBalanceBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 weETHBalanceBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
         
         // Execute spend
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, data.spendTokens, data.spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, data.spendTokens, data.spendAmounts, true);
         
         // Verify correct token balances after spend
         _verifyWithdrawalTestResults(data, usdcBalanceBefore, weETHBalanceBefore);
@@ -347,8 +355,8 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         assertEq(weETHScroll.balanceOf(address(safe)), 0);
         
         // Verify settlement dispatcher balances
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), usdcBalanceBefore + expectedUsdcAmount);
-        assertEq(weETHScroll.balanceOf(address(settlementDispatcher)), weETHBalanceBefore + expectedWeETHAmount);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), usdcBalanceBefore + expectedUsdcAmount);
+        assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), weETHBalanceBefore + expectedWeETHAmount);
         
         // Verify pending withdrawal still exists
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), data.withdrawalAmount);
@@ -381,7 +389,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Should revert as multiple tokens are not allowed in credit mode
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.OnlyOneTokenAllowedInCreditMode.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
     }
 
     function test_spend_whenPaused_multipleTokens() public {
@@ -410,14 +418,14 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Attempt to spend while paused
         vm.prank(etherFiWallet);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
         
         // Unpause and verify it works again
         vm.prank(unpauser);
         UpgradeableProxy(address(cashModule)).unpause();
         
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
     }
 
     function test_spend_withThreeTokens_inDebitMode() public {
@@ -449,8 +457,8 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Execute spend
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Spend(address(safe), txId, spendTokens, tokenAmounts, spendAmounts, totalSpendInUsd, Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), txId, spendTokens, spendAmounts, false);
+        emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, totalSpendInUsd, Mode.Debit);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
         
         // Verify safe balances are zero
         assertEq(usdcScroll.balanceOf(address(safe)), 0);
@@ -475,9 +483,9 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
     // Helper function to get settlement dispatcher balances for the three tokens
     function _getSettlementDispatcherBalances() internal view returns (uint256[] memory) {
         uint256[] memory balances = new uint256[](3);
-        balances[0] = usdcScroll.balanceOf(address(settlementDispatcher));
-        balances[1] = weETHScroll.balanceOf(address(settlementDispatcher));
-        balances[2] = scrToken.balanceOf(address(settlementDispatcher));
+        balances[0] = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        balances[1] = weETHScroll.balanceOf(address(settlementDispatcherReap));
+        balances[2] = scrToken.balanceOf(address(settlementDispatcherReap));
         return balances;
     }
     
@@ -487,15 +495,15 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256[] memory expectedIncreases
     ) internal view {
         assertEq(
-            usdcScroll.balanceOf(address(settlementDispatcher)), 
+            usdcScroll.balanceOf(address(settlementDispatcherReap)), 
             initialBalances[0] + expectedIncreases[0]
         );
         assertEq(
-            weETHScroll.balanceOf(address(settlementDispatcher)), 
+            weETHScroll.balanceOf(address(settlementDispatcherReap)), 
             initialBalances[1] + expectedIncreases[1]
         );
         assertEq(
-            scrToken.balanceOf(address(settlementDispatcher)), 
+            scrToken.balanceOf(address(settlementDispatcherReap)), 
             initialBalances[2] + expectedIncreases[2]
         );
     }

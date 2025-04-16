@@ -9,6 +9,7 @@ import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
 import { CashModuleTestSetup, DebtManagerCore, DebtManagerAdmin, CashVerificationLib, ICashModule, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
 
 contract CashModuleReferrerCashbackTest is CashModuleTestSetup {
     using Math for uint256;
@@ -42,7 +43,7 @@ contract CashModuleReferrerCashbackTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.ReferrerCashback(address(safe), referrer, amount, address(scrToken), referrerCashbackAmount, referrerCashbackInUsd, true);
-        cashModule.spend(address(safe), spender, referrer, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, referrer, txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         uint256 cashbackBalReferrerAfter = cashbackToken.balanceOf(address(referrer));
 
@@ -61,7 +62,7 @@ contract CashModuleReferrerCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, address(0), txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         uint256 cashbackBalReferrerAfter = cashbackToken.balanceOf(address(referrer));
 
@@ -80,7 +81,7 @@ contract CashModuleReferrerCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, referrer, txId, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), spender, referrer, txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
 
         uint256 cashbackBalReferrerAfter = cashbackToken.balanceOf(address(referrer));
 
@@ -119,7 +120,7 @@ contract CashModuleReferrerCashbackTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.ReferrerCashback(address(safe), referrer, amount, address(scrToken), referrerCashbackAmount, referrerCashbackInUsd, false);
-        cashModule.spend(address(safe), spender, referrer, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, referrer, txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         uint256 cashbackBalReferrerAfter = cashbackToken.balanceOf(address(referrer));
 
@@ -139,7 +140,7 @@ contract CashModuleReferrerCashbackTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
 
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, referrer, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, referrer, txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         // Verify pending cashback is stored
         uint256 referrerPendingCashback = cashModule.getPendingCashback(address(referrer));
@@ -216,7 +217,7 @@ contract CashModuleReferrerCashbackTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.ReferrerCashback(address(safe), referrer, amount, address(scrToken), referrerCashbackAmount, referrerCashbackInUsd, true);
-        cashModule.spend(address(safe), spender, referrer, txId, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), spender, referrer, txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
 
         uint256 cashbackBalReferrerAfter = cashbackToken.balanceOf(address(referrer));
 

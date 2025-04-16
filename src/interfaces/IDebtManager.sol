@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IEtherFiDataProvider } from "./IEtherFiDataProvider.sol";
+import { BinSponsor } from "./ICashModule.sol";
 
 interface IDebtManager {
     struct BorrowTokenConfigData {
@@ -239,10 +240,11 @@ interface IDebtManager {
     /**
      * @notice Function for users to borrow funds for payment using the deposited collateral.
      * @notice Borrowed tokens are transferred to the `etherFiCashSafe`
+     * @param  binSponsor Bin sponsor used to spend.
      * @param  token Address of the token to borrow.
      * @param  amount Amount of the token to borrow.
      */
-    function borrow(address token, uint256 amount) external;
+    function borrow(BinSponsor binSponsor, address token, uint256 amount) external;
 
     /**
      * @notice Function for users to repay the borrowed funds back to the debt manager.

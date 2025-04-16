@@ -39,8 +39,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         mapping(address safe => SafeCashConfig cashConfig) safeCashConfig;
         /// @notice Instance of the DebtManager for borrowing and repayment operations
         IDebtManager debtManager;
-        /// @notice Address of the SettlementDispatcher that processes debit mode transactions
-        address settlementDispatcher;
+        /// @notice Address of the SettlementDispatcher for Reap 
+        address settlementDispatcherReap;
         /// @notice Delay in seconds before a withdrawal request can be finalized
         uint64 withdrawalDelay;
         /// @notice Delay in seconds before spending limit changes take effect
@@ -59,6 +59,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address cashModuleSetters;
         /// @notice Cashback percentage for referrer in bps
         uint64 referrerCashbackPercentageInBps;
+        /// @notice Address of the SettlementDispatcher for Rain 
+        address settlementDispatcherRain;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -124,6 +126,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when trying to use multiple tokens in credit mode
     error OnlyOneTokenAllowedInCreditMode();
+
+    /// @notice Error thrown when Settlement Dispatcher address is not set for the bin sponsor
+    error SettlementDispatcherNotSetForBinSponsor();
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { 
         _disableInitializers();
