@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { Mode, BinSponsor, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
@@ -30,6 +30,29 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { 
         _disableInitializers();
+    }
+
+    /**
+     * @notice Sets the settlement dispatcher address for a bin sponsor
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
+     * @custom:throws InvalidInput if caller doesn't have the controller role
+     */
+    function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (dispatcher == address(0)) revert InvalidInput();
+
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        if (binSponsor == BinSponsor.Rain) { 
+            $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherRain, dispatcher);
+            $.settlementDispatcherRain = dispatcher;
+        } 
+        else {
+            $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherReap, dispatcher);
+            $.settlementDispatcherReap = dispatcher;
+        }
     }
 
     /**
@@ -84,6 +107,21 @@ contract CashModuleSetters is CashModuleStorageContract {
         }
 
         $.cashEventEmitter.emitSetTierCashbackPercentage(tiers, cashbackPercentages);
+    }
+
+    /**
+     * @notice Sets the referrer cashback percentage in bps
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param cashbackPercentage New cashback percentage in bps
+     */
+    function setReferrerCashbackPercentageInBps(uint64 cashbackPercentage) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+
+        if (cashbackPercentage > HUNDRED_PERCENT_IN_BPS) revert InvalidInput();
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        $.cashEventEmitter.emitReferrerCashbackPercentageSet($.referrerCashbackPercentageInBps, cashbackPercentage);
+        $.referrerCashbackPercentageInBps = cashbackPercentage;
     }
 
     /**

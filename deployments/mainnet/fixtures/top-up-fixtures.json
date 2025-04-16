@@ -1,47 +1,96 @@
 {
-    "534352": {
-      "owner": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4"
-    },
-    "1": {
-        "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-        "owner": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
-        "recoveryWallet": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
-        "tokenConfigs":[
-          {
-            "token": "usdc",
-            "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-            "bridge": "stargate",
-            "maxSlippageInBps": "50",
-            "stargatePool": "0xc026395860Db2d07ee33e05fE50ed7bD583189C7"
-          },
-          {
-              "token": "weETH",
-              "address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-              "bridge": "oftBridgeAdapter",
-              "maxSlippageInBps": "50",
-              "oftAdapter": "0xcd2eb13D6831d4602D80E5db9230A57596CDCA63"
-          }
-        ]
-    },
-    "8453": {
-        "weth": "0x4200000000000000000000000000000000000006",
-        "owner": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
-        "recoveryWallet": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
-        "tokenConfigs":[
-          {
-            "token": "usdc",
-            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "bridge": "stargate",
-            "maxSlippageInBps": "50",
-            "stargatePool": "0x27a16dc786820B16E5c9028b75B99F6f604b5d26"
-          },
-          {
-              "token": "weETH",
-              "address": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
-              "bridge": "oftBridgeAdapter",
-              "maxSlippageInBps": "50",
-              "oftAdapter": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A"
-            }
-          ]
+  "534352": {
+    "owner": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4"
+  },
+  "1": {
+    "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "owner": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
+    "recoveryWallet": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
+    "tokenConfigs": [
+      {
+        "token": "usdc",
+        "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "bridge": "stargate",
+        "maxSlippageInBps": "50",
+        "stargatePool": "0xc026395860Db2d07ee33e05fE50ed7bD583189C7"
+      },
+      {
+        "token": "weETH",
+        "address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+        "bridge": "oftBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "oftAdapter": "0xcd2eb13D6831d4602D80E5db9230A57596CDCA63"
+      },
+      {
+        "token": "weth",
+        "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "bridge": "stargate",
+        "maxSlippageInBps": "50",
+        "stargatePool": "0x77b2043768d28E9C9aB44E1aBfC95944bcE57931"
+      },
+      {
+        "token": "liquidEth",
+        "address": "0xf0bb20865277aBd641a307eCe5Ee04E79073416C",
+        "bridge": "liquidBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "teller": "0x9AA79C84b79816ab920bBcE20f8f74557B514734"
+      },
+      {
+        "token": "liquidUsd",
+        "address": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+        "bridge": "liquidBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "teller": "0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387"
+      },
+      {
+        "token": "liquidBtc",
+        "address": "0x5f46d540b6eD704C3c8789105F30E075AA900726",
+        "bridge": "liquidBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "teller": "0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353"
+      },
+      {
+        "token": "eUsd",
+        "address": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+        "bridge": "liquidBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "teller": "0xCc9A7620D0358a521A068B444846E3D5DebEa8fA"
+      },
+      {
+        "token": "eBTC",
+        "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
+        "bridge": "liquidBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268"
       }
+    ]
+  },
+  "8453": {
+    "weth": "0x4200000000000000000000000000000000000006",
+    "owner": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
+    "recoveryWallet": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
+    "tokenConfigs": [
+      {
+        "token": "usdc",
+        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "bridge": "stargate",
+        "maxSlippageInBps": "50",
+        "stargatePool": "0x27a16dc786820B16E5c9028b75B99F6f604b5d26"
+      },
+      {
+        "token": "weETH",
+        "address": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
+        "bridge": "oftBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "oftAdapter": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A"
+      },
+      {
+        "token": "weth",
+        "address": "0x4200000000000000000000000000000000000006",
+        "bridge": "stargate",
+        "maxSlippageInBps": "50",
+        "stargatePool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7"
+      }
+    ]
   }
+}

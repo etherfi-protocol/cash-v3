@@ -2,7 +2,8 @@
     "addresses": {
       "RoleRegistry": "0xa322a04d1e2Cb44672473740F9F35B057FA29CFB",
       "TopUpSourceFactory": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
-      "StargateAdapter": "0x55297F3eEB0Bd00f377a1825133285e518223e73",
-      "EtherFiOFTBridgeAdapter": "0x61fB314ccd2b3cada953Eb4Ab78ee7876c0BE9E2"
+      "StargateAdapter": "0x04238598eFFE31AB66F1fdeCbfBd59aa4117D69A",
+      "EtherFiOFTBridgeAdapter": "0x61fB314ccd2b3cada953Eb4Ab78ee7876c0BE9E2",
+      "EtherFiLiquidBridgeAdapter": "0xf4f5a6c29807bfdfc8d5c572962b8781be951072"
     }
-  }
+}

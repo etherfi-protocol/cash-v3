@@ -9,6 +9,8 @@ import { EtherFiLiquidModule } from "../../../../src/modules/etherfi/EtherFiLiqu
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { ILayerZeroTeller } from "../../../../src/interfaces/ILayerZeroTeller.sol";
+import { IEtherFiSafe } from "../../../../src/interfaces/IEtherFiSafe.sol";
+import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
 
 contract EtherFiLiquidModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -35,7 +37,10 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     address public liquidBtcTeller = 0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353 ;
 
     IERC20 public eUsd = IERC20(0x939778D83b46B456224A33Fb59630B11DEC56663);
-    address public eUsdTeller = 0xCc9A7620D0358a521A068B444846E3D5DebEa8fA ;
+    address public eUsdTeller = 0xCc9A7620D0358a521A068B444846E3D5DebEa8fA;
+
+    IERC20 public ebtc = IERC20(0x657e8C867D8B37dCC18fA4Caead9C45EB088C642);
+    address public ebtcTeller = address(0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268);
 
     address public ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     
@@ -44,17 +49,19 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         
         vm.startPrank(owner);
         
-        address[] memory assets = new address[](4);
+        address[] memory assets = new address[](5);
         assets[0] = address(liquidEth);
         assets[1] = address(liquidBtc);
         assets[2] = address(liquidUsd);
         assets[3] = address(eUsd);
+        assets[4] = address(ebtc);
         
-        address[] memory tellers = new address[](4);
+        address[] memory tellers = new address[](5);
         tellers[0] = liquidEthTeller;
         tellers[1] = liquidBtcTeller;
         tellers[2] = liquidUsdTeller;
         tellers[3] = eUsdTeller;
+        tellers[4] = ebtcTeller;
         
         liquidModule = new EtherFiLiquidModule(assets, tellers, address(dataProvider), address(weth));
         
@@ -100,6 +107,33 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         uint256 liquidAssetBalBefore = liquidEth.balanceOf(address(safe));
         _bridgeLiquid(address(liquidEth), mainnetEid, amountToBridge, signature1, signature2, fee);
         uint256 liquidAssetBalAfter = liquidEth.balanceOf(address(safe));
+        assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
+    }
+
+    function test_bridge_worksforEBtc() public {
+        uint256 amountToBridge = 1e6;
+        deal(address(ebtc), address(safe), amountToBridge);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.BRIDGE_SIG(),
+            block.chainid,
+            address(liquidModule),
+            safe.nonce(),
+            address(safe),
+            abi.encode(address(ebtc), mainnetEid, owner, amountToBridge)
+        )).toEthSignedMessageHash();
+
+        uint256 fee = liquidModule.getBridgeFee(address(ebtc), mainnetEid, owner, amountToBridge);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature1 = abi.encodePacked(r, s, v); 
+        
+        (v, r, s) = vm.sign(owner2Pk, digestHash);
+        bytes memory signature2 = abi.encodePacked(r, s, v); 
+
+        uint256 liquidAssetBalBefore = ebtc.balanceOf(address(safe));
+        _bridgeLiquid(address(ebtc), mainnetEid, amountToBridge, signature1, signature2, fee);
+        uint256 liquidAssetBalAfter = ebtc.balanceOf(address(safe));
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
     }
 
@@ -403,6 +437,36 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         
         assertEq(wbtcBalAfter, wbtcBalBefore - amountToDeposit);
         assertGt(liquidBtcBalAfter, liquidBtcBalBefore);
+    }
+
+    // Test for eBTC with WBTC
+    function test_deposit_worksWithEbtc_forLiquidBtc() public {
+        uint256 amountToDeposit = 1 * 10**8; // 1 WBTC (8 decimals)
+        uint256 minReturn = 0.95 * 10**8; // 0.95 LiquidBTC (18 decimals)
+        deal(address(wbtc), address(safe), amountToDeposit);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.DEPOSIT_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(wbtc), address(ebtc), amountToDeposit, minReturn)
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v); 
+        
+        uint256 wbtcBalBefore = wbtc.balanceOf(address(safe));
+        uint256 eBtcBalBefore = ebtc.balanceOf(address(safe));
+        
+        liquidModule.deposit(address(safe), address(wbtc), address(ebtc), amountToDeposit, minReturn, owner1, signature);
+        
+        uint256 wbtcBalAfter = wbtc.balanceOf(address(safe));
+        uint256 eBtcBalAfter = ebtc.balanceOf(address(safe));
+        
+        assertEq(wbtcBalAfter, wbtcBalBefore - amountToDeposit);
+        assertGt(eBtcBalAfter, eBtcBalBefore);
     }
 
     // Test for eUSD with USDe
@@ -859,5 +923,123 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         // Verify the state remains unchanged
         address tellerAfter = address(liquidModule.liquidAssetToTeller(nonExistentAsset));
         assertEq(tellerAfter, address(0));
+    }
+
+    function test_bridge_revertsWhenInsufficientNativeFee() public {
+        uint256 amountToBridge = 1 ether;
+        deal(address(liquidEth), address(safe), amountToBridge);
+        address[] memory owners = new address[](2);
+        owners[0] = owner1;
+        owners[1] = owner2;
+        
+        bytes[] memory signatures = new bytes[](2);
+        uint256 insufficientFee;
+
+        {
+            bytes32 digestHash = keccak256(abi.encodePacked(
+                liquidModule.BRIDGE_SIG(),
+                block.chainid,
+                address(liquidModule),
+                safe.nonce(),
+                address(safe),
+                abi.encode(address(liquidEth), mainnetEid, owner, amountToBridge)
+            )).toEthSignedMessageHash();
+
+            uint256 requiredFee = liquidModule.getBridgeFee(address(liquidEth), mainnetEid, owner, amountToBridge);
+            insufficientFee = requiredFee - 1; // 1 wei less than required
+
+            (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+            signatures[0] = abi.encodePacked(r, s, v); 
+            
+            (v, r, s) = vm.sign(owner2Pk, digestHash);
+            signatures[1] = abi.encodePacked(r, s, v); 
+        }
+
+        vm.expectRevert(EtherFiLiquidModule.InsufficientNativeFee.selector);
+        liquidModule.bridge{value: insufficientFee}(address(safe), address(liquidEth), mainnetEid, owner, amountToBridge, owners, signatures);
+    }
+
+    function test_bridge_revertsWithInvalidSignatures() public {
+        uint256 amountToBridge = 1 ether;
+        deal(address(liquidEth), address(safe), amountToBridge);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.BRIDGE_SIG(),
+            block.chainid,
+            address(liquidModule),
+            safe.nonce(),
+            address(safe),
+            abi.encode(address(liquidEth), mainnetEid, owner, amountToBridge)
+        )).toEthSignedMessageHash();
+
+        uint256 fee = liquidModule.getBridgeFee(address(liquidEth), mainnetEid, owner, amountToBridge);
+
+        
+        address[] memory owners = new address[](1);
+        owners[0] = owner1; // Using valid owner address
+        
+        bytes[] memory signatures = new bytes[](1);
+        // Sign with incorrect private key
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner2Pk, digestHash);
+        signatures[0] = abi.encodePacked(r, s, v);
+        
+        // Mock the checkSignatures call to return false (invalid signatures)
+        vm.mockCall(
+            address(safe),
+            abi.encodeWithSelector(IEtherFiSafe.checkSignatures.selector),
+            abi.encode(false)
+        );
+
+        vm.expectRevert(EtherFiLiquidModule.InvalidSignatures.selector);
+        liquidModule.bridge{value: fee}(address(safe), address(liquidEth), mainnetEid, owner, amountToBridge, owners, signatures);
+    }
+
+    function test_deposit_revertsWhenInvalidSignature() public {
+        uint256 amountToDeposit = 1 ether;
+        uint256 minReturn = 0.5 ether;
+        deal(address(weth), address(safe), amountToDeposit);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.DEPOSIT_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(weth), address(liquidEth), amountToDeposit, minReturn)
+        )).toEthSignedMessageHash();
+
+        // Sign with a different private key
+        uint256 wrongPrivateKey = 0x54321;
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(wrongPrivateKey, digestHash);
+        bytes memory invalidSignature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(); // Should revert due to ECDSA recovery failure
+        liquidModule.deposit(address(safe), address(weth), address(liquidEth), amountToDeposit, minReturn, owner1, invalidSignature);
+    }
+
+    function test_deposit_revertsForNonAdminSigner() public {
+        uint256 amountToDeposit = 1 ether;
+        uint256 minReturn = 0.5 ether;
+        deal(address(weth), address(safe), amountToDeposit);
+        
+        // Create a non-admin address
+        address nonAdmin = makeAddr("nonAdmin");
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.DEPOSIT_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(weth), address(liquidEth), amountToDeposit, minReturn)
+        )).toEthSignedMessageHash();
+
+        // Sign with owner1's private key
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory validSignature = abi.encodePacked(r, s, v);
+
+        // Try to use a non-admin signer
+        vm.expectRevert();
+        liquidModule.deposit(address(safe), address(weth), address(liquidEth), amountToDeposit, minReturn, nonAdmin, validSignature);
     }
 }

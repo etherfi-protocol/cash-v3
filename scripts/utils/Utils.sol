@@ -32,6 +32,7 @@ contract Utils is Script {
     string internal ROLE_REGISTRY_PROXY = "RoleRegistryProxy";
     string internal ROLE_REGISTRY_IMPL = "RoleRegistryImpl";
     string internal ETHER_FI_OFT_BRIDGE_ADAPTER = "EtherFiOFTBridgeAdapter";
+    string internal ETHER_FI_LIQUID_BRIDGE_ADAPTER = "EtherFiLiquidBridgeAdapter";
     string internal STARGATE_ADAPTER = "StargateAdapter";
 
     string internal ETHER_FI_SAFE_IMPL = "EtherFiSafeImpl";
@@ -59,6 +60,8 @@ contract Utils is Script {
     string internal CASHBACK_DISPATCHER_PROXY = "CashbackDispatcherProxy";
     string internal SETTLEMENT_DISPATCHER_IMPL = "SettlementDispatcherImpl";
     string internal SETTLEMENT_DISPATCHER_PROXY = "SettlementDispatcherProxy";
+    string internal SETTLEMENT_DISPATCHER_RAIN_IMPL = "ProdSettlementDispatcherRainImpl";
+    string internal SETTLEMENT_DISPATCHER_RAIN_PROXY = "ProdSettlementDispatcherRainProxy";
     string internal DEBT_MANAGER_ADMIN_IMPL = "DebtManagerAdminImpl";
     string internal DEBT_MANAGER_CORE_IMPL = "DebtManagerCoreImpl";
     string internal DEBT_MANAGER_INITIALIZER_IMPL = "DebtManagerInitializerImpl";

@@ -23,9 +23,9 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit SettlementDispatcher.DestinationDataSet(tokens, destDatas);
-        settlementDispatcher.setDestinationData(tokens, destDatas);
+        settlementDispatcherReap.setDestinationData(tokens, destDatas);
 
-        SettlementDispatcher.DestinationData memory destData = settlementDispatcher.destinationData(address(usdcScroll));
+        SettlementDispatcher.DestinationData memory destData = settlementDispatcherReap.destinationData(address(usdcScroll));
 
         assertEq(destData.destEid, optimismDestEid);
         assertEq(destData.destRecipient, alice);
@@ -37,7 +37,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
 
         vm.prank(alice);
         vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
-        settlementDispatcher.setDestinationData(tokens, destDatas);
+        settlementDispatcherReap.setDestinationData(tokens, destDatas);
     }
 
     function test_setDestinationData_reverts_whenArrayLengthMismatch() public {
@@ -45,7 +45,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.ArrayLengthMismatch.selector);
-        settlementDispatcher.setDestinationData(tokens, destDatas);
+        settlementDispatcherReap.setDestinationData(tokens, destDatas);
     }
 
     function test_setDestinationData_reverts_whenInvalidValueProvided() public {
@@ -55,19 +55,19 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         tokens[0] = address(0);
 
         vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcher.setDestinationData(tokens, destDatas);
+        settlementDispatcherReap.setDestinationData(tokens, destDatas);
 
         tokens[0] = address(usdcScroll);
         destDatas[0].destRecipient = address(0);
 
         vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcher.setDestinationData(tokens, destDatas);
+        settlementDispatcherReap.setDestinationData(tokens, destDatas);
 
         destDatas[0].destRecipient = alice;
         destDatas[0].stargate = address(0);
 
         vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcher.setDestinationData(tokens, destDatas);
+        settlementDispatcherReap.setDestinationData(tokens, destDatas);
         vm.stopPrank();
     }
 
@@ -77,137 +77,137 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         vm.startPrank(owner);
         destDatas[0].stargate = stargateEthPool;
         vm.expectRevert(SettlementDispatcher.StargateValueInvalid.selector);
-        settlementDispatcher.setDestinationData(tokens, destDatas);
+        settlementDispatcherReap.setDestinationData(tokens, destDatas);
         vm.stopPrank();
     }
 
     function test_bridge_succeeds_whenCalledByBridger() public {
         uint256 balBefore = 100e6;
-        deal(address(usdcScroll), address(settlementDispatcher), balBefore);
+        deal(address(usdcScroll), address(settlementDispatcherReap), balBefore);
         
         uint256 amount = 10e6;
-        ( , uint256 valueToSend, , , ) = settlementDispatcher.prepareRideBus(address(usdcScroll), amount);
+        ( , uint256 valueToSend, , , ) = settlementDispatcherReap.prepareRideBus(address(usdcScroll), amount);
 
-        deal(address(settlementDispatcher), valueToSend);
+        deal(address(settlementDispatcherReap), valueToSend);
         
         uint256 stargateBalBefore = usdcScroll.balanceOf(address(stargateUsdcPool));
 
         vm.prank(owner);
-        settlementDispatcher.bridge(address(usdcScroll), amount, 1);
+        settlementDispatcherReap.bridge(address(usdcScroll), amount, 1);
 
         uint256 stargateBalAfter = usdcScroll.balanceOf(address(stargateUsdcPool));
 
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), balBefore - amount);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), balBefore - amount);
         assertEq(stargateBalAfter - stargateBalBefore, amount);
     }
 
     function test_bridge_reverts_whenCallerNotBridger() public {
         vm.prank(alice);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
-        settlementDispatcher.bridge(address(usdcScroll), 1, 1);
+        settlementDispatcherReap.bridge(address(usdcScroll), 1, 1);
     }
 
     function test_bridge_reverts_whenInvalidParametersProvided() public {
         vm.startPrank(owner);
         vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcher.bridge(address(0), 1, 1);
+        settlementDispatcherReap.bridge(address(0), 1, 1);
         
         vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcher.bridge(address(usdcScroll), 0, 1);
+        settlementDispatcherReap.bridge(address(usdcScroll), 0, 1);
         vm.stopPrank();
     }
 
     function test_bridge_reverts_whenDestinationDataNotSet() public {
         IERC20 weth = IERC20(chainConfig.weth);
-        deal(address(weth), address(settlementDispatcher), 1 ether);
+        deal(address(weth), address(settlementDispatcherReap), 1 ether);
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.DestinationDataNotSet.selector);
-        settlementDispatcher.bridge(address(weth), 1, 1);
+        settlementDispatcherReap.bridge(address(weth), 1, 1);
     }
 
     function test_bridge_reverts_whenInsufficientBalance() public {
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcher)), 0);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), 0);
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.InsufficientBalance.selector);
-        settlementDispatcher.bridge(address(usdcScroll), 1, 1);
+        settlementDispatcherReap.bridge(address(usdcScroll), 1, 1);
     }
 
     function test_bridge_reverts_whenInsufficientFee() public {
         uint256 balBefore = 100e6;
-        deal(address(usdcScroll), address(settlementDispatcher), balBefore);
+        deal(address(usdcScroll), address(settlementDispatcherReap), balBefore);
         
         uint256 amount = 10e6;
-        ( , uint256 valueToSend, , , ) = settlementDispatcher.prepareRideBus(address(usdcScroll), amount);
+        ( , uint256 valueToSend, , , ) = settlementDispatcherReap.prepareRideBus(address(usdcScroll), amount);
 
-        deal(address(settlementDispatcher), valueToSend - 1);
+        deal(address(settlementDispatcherReap), valueToSend - 1);
         
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.InsufficientFeeToCoverCost.selector);
-        settlementDispatcher.bridge(address(usdcScroll), amount, 1);
+        settlementDispatcherReap.bridge(address(usdcScroll), amount, 1);
     }
 
     function test_bridge_reverts_whenMinReturnTooHigh() public {
         uint256 balBefore = 100e6;
-        deal(address(usdcScroll), address(settlementDispatcher), balBefore);
+        deal(address(usdcScroll), address(settlementDispatcherReap), balBefore);
         uint256 amount = 10e6;
-        ( , uint256 valueToSend, uint256 minReturnFromStargate, , ) = settlementDispatcher.prepareRideBus(address(usdcScroll), amount);
-        deal(address(settlementDispatcher), valueToSend);
+        ( , uint256 valueToSend, uint256 minReturnFromStargate, , ) = settlementDispatcherReap.prepareRideBus(address(usdcScroll), amount);
+        deal(address(settlementDispatcherReap), valueToSend);
         
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.InsufficientMinReturn.selector);
-        settlementDispatcher.bridge(address(usdcScroll), amount, minReturnFromStargate + 1);
+        settlementDispatcherReap.bridge(address(usdcScroll), amount, minReturnFromStargate + 1);
     }
 
     function test_withdrawFunds_succeeds_withErc20Token() public {
-        deal(address(usdcScroll), address(settlementDispatcher), 1 ether);
+        deal(address(usdcScroll), address(settlementDispatcherReap), 1 ether);
         uint256 amount = 100e6;
 
         uint256 aliceBalBefore = usdcScroll.balanceOf(alice);
-        uint256 safeBalBefore = usdcScroll.balanceOf(address(settlementDispatcher));
+        uint256 safeBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
         
         vm.prank(owner);
-        settlementDispatcher.withdrawFunds(address(usdcScroll), alice, amount);
+        settlementDispatcherReap.withdrawFunds(address(usdcScroll), alice, amount);
 
         uint256 aliceBalAfter = usdcScroll.balanceOf(alice);
-        uint256 safeBalAfter = usdcScroll.balanceOf(address(settlementDispatcher));
+        uint256 safeBalAfter = usdcScroll.balanceOf(address(settlementDispatcherReap));
 
         assertEq(aliceBalAfter - aliceBalBefore, amount);
         assertEq(safeBalBefore - safeBalAfter, amount);
 
         // withdraw all
         vm.prank(owner);
-        settlementDispatcher.withdrawFunds(address(usdcScroll), alice, 0);
+        settlementDispatcherReap.withdrawFunds(address(usdcScroll), alice, 0);
 
         aliceBalAfter = usdcScroll.balanceOf(alice);
-        safeBalAfter = usdcScroll.balanceOf(address(settlementDispatcher));
+        safeBalAfter = usdcScroll.balanceOf(address(settlementDispatcherReap));
 
         assertEq(aliceBalAfter - aliceBalBefore, safeBalBefore);
         assertEq(safeBalAfter, 0);
     }
 
     function test_withdrawFunds_succeeds_withNativeToken() public {
-        deal(address(settlementDispatcher), 1 ether);
+        deal(address(settlementDispatcherReap), 1 ether);
         uint256 amount = 100e6;
 
         uint256 aliceBalBefore = alice.balance;
-        uint256 safeBalBefore = address(settlementDispatcher).balance;
+        uint256 safeBalBefore = address(settlementDispatcherReap).balance;
         
         vm.prank(owner);
-        settlementDispatcher.withdrawFunds(address(0), alice, amount);
+        settlementDispatcherReap.withdrawFunds(address(0), alice, amount);
 
         uint256 aliceBalAfter = alice.balance;
-        uint256 safeBalAfter = address(settlementDispatcher).balance;
+        uint256 safeBalAfter = address(settlementDispatcherReap).balance;
 
         assertEq(aliceBalAfter - aliceBalBefore, amount);
         assertEq(safeBalBefore - safeBalAfter, amount);
 
         // withdraw all
         vm.prank(owner);
-        settlementDispatcher.withdrawFunds(address(0), alice, 0);
+        settlementDispatcherReap.withdrawFunds(address(0), alice, 0);
 
         aliceBalAfter = alice.balance;
-        safeBalAfter = address(settlementDispatcher).balance;
+        safeBalAfter = address(settlementDispatcherReap).balance;
 
         assertEq(aliceBalAfter - aliceBalBefore, safeBalBefore);
         assertEq(safeBalAfter, 0);
@@ -216,27 +216,27 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
     function test_withdrawFunds_reverts_whenRecipientAddressZero() public {
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcher.withdrawFunds(address(usdcScroll), address(0), 1);
+        settlementDispatcherReap.withdrawFunds(address(usdcScroll), address(0), 1);
     }
 
     function test_withdrawFunds_reverts_whenNoBalance() public {
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.CannotWithdrawZeroAmount.selector);
-        settlementDispatcher.withdrawFunds(address(usdcScroll), alice, 0);
+        settlementDispatcherReap.withdrawFunds(address(usdcScroll), alice, 0);
         
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.CannotWithdrawZeroAmount.selector);
-        settlementDispatcher.withdrawFunds(address(0), alice, 0);
+        settlementDispatcherReap.withdrawFunds(address(0), alice, 0);
     }
 
     function test_withdrawFunds_reverts_whenInsufficientBalance() public {
         vm.prank(owner);
         vm.expectRevert();
-        settlementDispatcher.withdrawFunds(address(usdcScroll), alice, 1);
+        settlementDispatcherReap.withdrawFunds(address(usdcScroll), alice, 1);
         
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.WithdrawFundsFailed.selector);
-        settlementDispatcher.withdrawFunds(address(0), alice, 1);
+        settlementDispatcherReap.withdrawFunds(address(0), alice, 1);
     }
 
     function getDestData() internal view returns (address[] memory tokens, SettlementDispatcher.DestinationData[] memory destDatas) {

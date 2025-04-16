@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
+import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashEventEmitter, CashModuleTestSetup, Mode } from "../CashModuleTestSetup.t.sol";
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
@@ -29,8 +30,13 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         deal(address(weETHScroll), address(safe), collateralAmount);
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
 
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), borrowAmt, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
     }
 
     function test_setCollateralTokenConfig_updatesLiquidationThreshold_whenCalledByAdmin() public {     
@@ -158,9 +164,15 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         dataProvider.setPriceProvider(address(priceProvider));
 
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
         // safe should borrow at new price for our calculations to be correct
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), borrowAmt, false);
+        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
 
         vm.startPrank(owner);
         uint256 newPrice = 1000e6; // 1000 USD per weETH
@@ -199,9 +211,15 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         dataProvider.setPriceProvider(address(priceProvider));
 
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
         // safe should borrow at new price for our calculations to be correct
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), borrowAmt, false);
+        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
 
         vm.startPrank(owner);
         uint256 newPrice = 1000e6; // 1000 USD per weETH
@@ -275,8 +293,14 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
 
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
         // Alice should borrow at new price for our calculations to be correct
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), borrowAmt, false);
+        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
         
         address newCollateralToken = address(new MockERC20("collateral", "CTK", 18));
         IDebtManager.CollateralTokenConfig memory collateralTokenConfigNewCollateralToken;
@@ -437,8 +461,14 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         dataProvider.setPriceProvider(address(priceProvider));
         
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), borrowAmt, false);
+        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
         
         vm.startPrank(owner);
         uint256 newPrice = 1000e6; // 1000 USD per weETH
@@ -493,9 +523,14 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         
         // Borrow a smaller amount relative to collateral
         uint256 smallerBorrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 4; // Only borrow 25% of capacity
-        
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = smallerBorrowAmt;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), smallerBorrowAmt, false);
+        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
         
         vm.startPrank(owner);
         
@@ -563,8 +598,14 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         dataProvider.setPriceProvider(address(priceProvider));
         
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), keccak256("newTxId"), address(usdcScroll), borrowAmt, false);
+        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
         
         vm.startPrank(owner);
         // Drop price to make position liquidatable

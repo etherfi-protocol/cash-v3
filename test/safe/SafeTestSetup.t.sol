@@ -13,7 +13,7 @@ import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
 import { IModule } from "../../src/interfaces/IModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { ICashEventEmitter } from "../../src/interfaces/ICashEventEmitter.sol";
-import { ICashModule } from "../../src/interfaces/ICashModule.sol";
+import { ICashModule, BinSponsor } from "../../src/interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../src/interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
@@ -43,7 +43,8 @@ contract SafeTestSetup is Utils {
     EtherFiHook public hook;
 
     PriceProvider priceProvider;
-    SettlementDispatcher settlementDispatcher;
+    SettlementDispatcher settlementDispatcherRain;
+    SettlementDispatcher settlementDispatcherReap;
     IDebtManager debtManager;
     CashbackDispatcher cashbackDispatcher;
     ICashEventEmitter cashEventEmitter;
@@ -116,9 +117,9 @@ contract SafeTestSetup is Utils {
 
     function setUp() public virtual {
         string memory scrollRpc = vm.envString("SCROLL_RPC");
-        if (bytes(scrollRpc).length != 0) vm.createSelectFork(scrollRpc);
-        else vm.createSelectFork("https://rpc.scroll.io");
-
+        if (bytes(scrollRpc).length != 0) scrollRpc = "https://rpc.scroll.io"; 
+        vm.createSelectFork(scrollRpc);
+        
         pauser = makeAddr("pauser");
         unpauser = makeAddr("unpauser");
         owner = makeAddr("owner");
@@ -179,13 +180,13 @@ contract SafeTestSetup is Utils {
         _setupDebtManager();
         _setupSettlementDispatcher();
 
-        address cashEventEmitterImpl = address(new CashEventEmitter(address(cashModule)));
-        cashEventEmitter = ICashEventEmitter(address(new UUPSProxy(cashEventEmitterImpl, abi.encodeWithSelector(CashEventEmitter.initialize.selector, address(roleRegistry)))));
+        _setupCashEventEmitter();
 
         CashModuleCore(address(cashModule)).initialize(
             address(roleRegistry), 
             address(debtManager), 
-            address(settlementDispatcher), 
+            address(settlementDispatcherReap), 
+            address(settlementDispatcherRain), 
             address(cashbackDispatcher), 
             address(cashEventEmitter), 
             cashModuleSettersImpl
@@ -209,6 +210,11 @@ contract SafeTestSetup is Utils {
         safe = EtherFiSafe(payable(safeFactory.getDeterministicAddress(keccak256("safe"))));
 
         vm.stopPrank();
+    }
+
+    function _setupCashEventEmitter() internal {
+        address cashEventEmitterImpl = address(new CashEventEmitter(address(cashModule)));
+        cashEventEmitter = ICashEventEmitter(address(new UUPSProxy(cashEventEmitterImpl, abi.encodeWithSelector(CashEventEmitter.initialize.selector, address(roleRegistry)))));
     }
 
     function _setupPriceProvider() internal {
@@ -317,15 +323,25 @@ contract SafeTestSetup is Utils {
             stargate: stargateUsdcPool
         });
 
-        address settlementDispatcherImpl = address(new SettlementDispatcher());
-        settlementDispatcher = SettlementDispatcher(
+        address settlementDispatcherRainImpl = address(new SettlementDispatcher(BinSponsor.Rain));
+        settlementDispatcherRain = SettlementDispatcher(
             payable(address(new UUPSProxy(
-                settlementDispatcherImpl, 
+                settlementDispatcherRainImpl, 
                 abi.encodeWithSelector(SettlementDispatcher.initialize.selector, address(roleRegistry), tokens, destDatas)
             )))
         );
 
-        roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
+        roleRegistry.grantRole(settlementDispatcherRain.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
+
+        address settlementDispatcherReapImpl = address(new SettlementDispatcher(BinSponsor.Reap));
+        settlementDispatcherReap = SettlementDispatcher(
+            payable(address(new UUPSProxy(
+                settlementDispatcherReapImpl, 
+                abi.encodeWithSelector(SettlementDispatcher.initialize.selector, address(roleRegistry), tokens, destDatas)
+            )))
+        );
+
+        roleRegistry.grantRole(settlementDispatcherReap.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
     }
 
     function _setupDebtManager() internal {

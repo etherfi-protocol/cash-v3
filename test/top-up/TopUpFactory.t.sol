@@ -66,7 +66,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.startPrank(owner);
 
-        stargateAdapter = new StargateAdapter();
+        stargateAdapter = new StargateAdapter(address(weth));
         oftBridgeAdapter = new EtherFiOFTBridgeAdapter();
         liquidBridgeAdapter = new EtherFiLiquidBridgeAdapter();
 
@@ -80,9 +80,7 @@ contract TopUpFactoryTest is Test, Constants {
         factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
         roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), admin);
 
-        vm.stopPrank();
-
-        address[] memory tokens = new address[](7);
+        address[] memory tokens = new address[](8);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
         tokens[2] = address(ETH);
@@ -90,8 +88,9 @@ contract TopUpFactoryTest is Test, Constants {
         tokens[4] = address(liquidBtc);
         tokens[5] = address(liquidUsd);
         tokens[6] = address(eUsd);
+        tokens[7] = address(weth);
 
-        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](7);
+        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](8);
         tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(usdcStargatePool) });
         tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
         tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
@@ -99,9 +98,11 @@ contract TopUpFactoryTest is Test, Constants {
         tokenConfigs[4] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidBtcTeller) });
         tokenConfigs[5] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidUsdTeller) });
         tokenConfigs[6] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(eUsdTeller) });
+        tokenConfigs[7] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
 
-        vm.prank(admin);
         factory.setTokenConfig(tokens, tokenConfigs);
+
+        vm.stopPrank();
     }
 
     /// @dev Test deployment of TopUp contract
@@ -118,8 +119,8 @@ contract TopUpFactoryTest is Test, Constants {
 
     /// @dev Test bridge initialization
     function test_deployTopUpContract_setsFactoryAsOwner() public {
-        vm.prank(admin);
         bytes32 salt = bytes32(uint256(1));
+        vm.prank(admin);
         factory.deployTopUpContract(salt);
 
         address topUpAddr = factory.getDeterministicAddress(salt);
@@ -152,7 +153,7 @@ contract TopUpFactoryTest is Test, Constants {
     function test_setRecoveryWallet_succeeds() public {
         address newWallet = makeAddr("recovery");
 
-        vm.startPrank(admin);
+        vm.startPrank(owner);
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.RecoveryWalletSet(address(0), newWallet);
         factory.setRecoveryWallet(newWallet);
@@ -160,14 +161,14 @@ contract TopUpFactoryTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_setRecoveryWallet_reverts_whenCalledByNonAdmin() public {
+    function test_setRecoveryWallet_reverts_whenCalledByNonOwner() public {
         vm.prank(user);
-        vm.expectRevert(TopUpFactory.OnlyAdmin.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         factory.setRecoveryWallet(makeAddr("recovery"));
     }
 
     function test_setRecoveryWallet_reverts_whenZeroAddress() public {
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(TopUpFactory.RecoveryWalletCannotBeZeroAddress.selector);
         factory.setRecoveryWallet(address(0));
     }
@@ -177,7 +178,7 @@ contract TopUpFactoryTest is Test, Constants {
         address recoveryWallet = makeAddr("recovery");
         MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
-        vm.startPrank(admin);
+        vm.startPrank(owner);
         factory.setRecoveryWallet(recoveryWallet);
 
         // Send tokens to factory
@@ -195,7 +196,7 @@ contract TopUpFactoryTest is Test, Constants {
         address recoveryWallet = makeAddr("recovery");
         MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
-        vm.startPrank(admin);
+        vm.startPrank(owner);
         factory.setRecoveryWallet(recoveryWallet);
 
         unsupportedToken.mint(address(factory), 100);
@@ -206,7 +207,7 @@ contract TopUpFactoryTest is Test, Constants {
     function test_recoverFunds_reverts_whenNoRecoveryWallet() public {
         MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(TopUpFactory.RecoveryWalletNotSet.selector);
         factory.recoverFunds(address(unsupportedToken), 100);
     }
@@ -214,7 +215,7 @@ contract TopUpFactoryTest is Test, Constants {
     function test_recoverFunds_reverts_whenSupportedToken() public {
         address recoveryWallet = makeAddr("recovery");
 
-        vm.startPrank(admin);
+        vm.startPrank(owner);
         factory.setRecoveryWallet(recoveryWallet);
 
         vm.expectRevert(TopUpFactory.OnlyUnsupportedTokens.selector);
@@ -243,8 +244,8 @@ contract TopUpFactoryTest is Test, Constants {
     /// @dev Test processTopUp
     function test_processTopUp_transfersFundsToFactory() public {
         // Deploy TopUp through factory
-        vm.prank(admin);
         bytes32 salt = bytes32(uint256(1));
+        vm.prank(admin);
         factory.deployTopUpContract(salt);
 
         // Get deployed topUp contract address
@@ -346,7 +347,7 @@ contract TopUpFactoryTest is Test, Constants {
         TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
         configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
 
-        vm.prank(admin);
+        vm.prank(owner);
         factory.setTokenConfig(tokens, configs);
 
         assertTrue(factory.isTokenSupported(address(weth)), "Token should be supported after config");
@@ -356,7 +357,7 @@ contract TopUpFactoryTest is Test, Constants {
         assertEq(config.maxSlippageInBps, maxSlippage, "Slippage not set correctly");
     }
 
-    function test_setTokenConfig_reverts_whenCalledByNonAdmin() public {
+    function test_setTokenConfig_reverts_whenCalledByNonOwner() public {
         address[] memory tokens = new address[](1);
         tokens[0] = address(weETH);
 
@@ -364,7 +365,7 @@ contract TopUpFactoryTest is Test, Constants {
         configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
 
         vm.prank(user);
-        vm.expectRevert(TopUpFactory.OnlyAdmin.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         factory.setTokenConfig(tokens, configs);
     }
 
@@ -380,7 +381,7 @@ contract TopUpFactoryTest is Test, Constants {
             additionalData: abi.encode(weETHOftAddress)
         });
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(TopUpFactory.InvalidConfig.selector);
         factory.setTokenConfig(tokens, configs);
     }
@@ -392,7 +393,7 @@ contract TopUpFactoryTest is Test, Constants {
         TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
         configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(0), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(TopUpFactory.InvalidConfig.selector);
         factory.setTokenConfig(tokens, configs);
     }
@@ -404,7 +405,7 @@ contract TopUpFactoryTest is Test, Constants {
         TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
         configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: address(0), maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(TopUpFactory.InvalidConfig.selector);
         factory.setTokenConfig(tokens, configs);
     }
@@ -454,6 +455,17 @@ contract TopUpFactoryTest is Test, Constants {
     function test_bridge_succeeds_withUsdc() public {
         address token = address(usdc);
         uint256 amount = 100e6;
+        deal(token, address(factory), amount);
+        (, uint256 fee) = factory.getBridgeFee(token);
+
+        vm.expectEmit(true, true, true, true);
+        emit TopUpFactory.Bridge(token, amount);
+        factory.bridge{ value: fee }(token);
+    }
+
+    function test_bridge_succeeds_withWeth() public {
+        address token = address(weth);
+        uint256 amount = 1 ether;
         deal(token, address(factory), amount);
         (, uint256 fee) = factory.getBridgeFee(token);
 

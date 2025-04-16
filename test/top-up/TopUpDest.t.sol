@@ -12,9 +12,11 @@ import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { UpgradeableProxy, PausableUpgradeable } from "../../src/utils/UpgradeableProxy.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
+import { TopUpDestNativeGateway } from "../../src/top-up/TopUpDestNativeGateway.sol";
 
 contract TopUpDestTest is Test {
     TopUpDest public topUpDest;
+    TopUpDestNativeGateway public topUpDestNativeGateway;
     RoleRegistry public roleRegistry;
     address public dataProvider;
     MockERC20 public token1;
@@ -37,6 +39,10 @@ contract TopUpDestTest is Test {
     uint256 public constant TOP_UP_AMOUNT = 100 ether;
 
     function setUp() public {
+        string memory scrollRpc = vm.envString("SCROLL_RPC");
+        if (bytes(scrollRpc).length != 0) scrollRpc = "https://rpc.scroll.io"; 
+        vm.createSelectFork(scrollRpc);
+
         owner = makeAddr("owner");
         depositor = makeAddr("depositor");
         topUpRole = makeAddr("topUpRole");
@@ -75,13 +81,32 @@ contract TopUpDestTest is Test {
         // Deploy TopUpDest
         address topUpDestImpl = address(new TopUpDest(address(dataProvider)));
         topUpDest = TopUpDest(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry)))));
+        
+        topUpDestNativeGateway = new TopUpDestNativeGateway(address(topUpDest));
+        
         vm.stopPrank();
+
 
         // Approve tokens for depositing
         vm.startPrank(depositor);
         token1.approve(address(topUpDest), INITIAL_AMOUNT);
         token2.approve(address(topUpDest), INITIAL_AMOUNT);
         vm.stopPrank();
+    }
+
+    function test_sendingEthToTopUpDestNativeGateway_sendsWethToTopUpDest() public {        
+        address weth = address(topUpDestNativeGateway.weth());
+        uint256 amount = 1 ether;
+        deal(address(owner), amount);
+
+        uint256 balanceBefore = IERC20(weth).balanceOf(address(topUpDest));
+
+        vm.prank(owner);
+        (bool success, ) = address(topUpDestNativeGateway).call{value: amount}("");
+        assertTrue(success);
+
+        uint256 balanceAfter = IERC20(weth).balanceOf(address(topUpDest));
+        assertEq(balanceAfter - balanceBefore, amount);
     }
 
     function test_deposit_succeeds() public {

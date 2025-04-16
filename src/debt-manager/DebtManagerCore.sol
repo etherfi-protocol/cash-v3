@@ -6,7 +6,7 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashLens } from "../interfaces/ICashLens.sol";
-import { ICashModule } from "../interfaces/ICashModule.sol";
+import { ICashModule, BinSponsor } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
@@ -454,10 +454,11 @@ contract DebtManagerCore is DebtManagerStorageContract {
     /**
      * @notice Borrows tokens from the protocol
      * @dev Can only be called by an EtherFi Safe
+     * @param  binSponsor Bin sponsor used to spend.
      * @param token Address of the token to borrow
      * @param amount Amount of tokens to borrow
      */
-    function borrow(address token, uint256 amount) external whenNotPaused onlyEtherFiSafe {
+    function borrow(BinSponsor binSponsor, address token, uint256 amount) external whenNotPaused onlyEtherFiSafe {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         if (!isBorrowToken(token)) revert UnsupportedBorrowToken();
@@ -474,7 +475,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         ensureHealth(msg.sender);
 
         if (IERC20(token).balanceOf(address(this)) < amount) revert InsufficientLiquidity();
-        address settlementDispatcher = ICashModule(etherFiDataProvider.getCashModule()).getSettlementDispatcher();
+        address settlementDispatcher = ICashModule(etherFiDataProvider.getCashModule()).getSettlementDispatcher(binSponsor);
         IERC20(token).safeTransfer(settlementDispatcher, amount);
 
         emit Borrowed(msg.sender, token, amount);

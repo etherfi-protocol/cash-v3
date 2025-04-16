@@ -5,6 +5,7 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import { IStargate, Ticket } from "../interfaces/IStargate.sol";
+import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
@@ -33,6 +34,11 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Role identifier for accounts permitted to bridge tokens
      */
     bytes32 public constant SETTLEMENT_DISPATCHER_BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
+
+    /**
+     * @notice Bin Sponsor for the settlement dispatcher
+     */
+    BinSponsor public immutable binSponsor;
 
     /// @custom:storage-location erc7201:etherfi.storage.SettlementDispatcher
     /**
@@ -122,8 +128,9 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @dev Cannot be called again after deployment (UUPS pattern)
      */
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {
+    constructor(BinSponsor _binSponsor) {
         _disableInitializers();
+        binSponsor = _binSponsor;
     }
 
     /**

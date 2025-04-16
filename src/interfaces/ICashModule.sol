@@ -9,6 +9,15 @@ import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
 /**
+ * @title BinSponsor
+ * @notice Defines the bin sponsors or card issuers
+ */
+enum BinSponsor {
+    Reap,
+    Rain
+}
+
+/**
  * @title Mode
  * @notice Defines the operating mode for cash spending operations
  * @dev Credit mode borrows tokens, Debit mode uses balance from the safe
@@ -182,6 +191,9 @@ interface ICashModule {
     /// @notice Thrown when the caller is not an EtherFi Safe
     error OnlyEtherFiSafe();
 
+    /// @notice Error thrown when trying to use multiple tokens in credit mode
+    error OnlyOneTokenAllowedInCreditMode();
+
     /**
      * @notice Role identifier for EtherFi wallet access control
      * @return The role identifier as bytes32
@@ -231,10 +243,11 @@ interface ICashModule {
 
     /**
      * @notice Gets the settlement dispatcher address
-     * @dev The settlement dispatcher processes transactions in debit mode
-     * @return The address of the settlement dispatcher
+     * @dev The settlement dispatcher receives the funds that are spent
+     * @param binSponsor Bin sponsor for which the settlement dispatcher needs to be returned
+     * @return settlementDispatcher The address of the settlement dispatcher
      */
-    function getSettlementDispatcher() external view returns (address);
+    function getSettlementDispatcher(BinSponsor binSponsor) external view returns (address settlementDispatcher);
 
     /**
      * @notice Gets the cashback percentage and split percentage for a safe
@@ -278,6 +291,12 @@ interface ICashModule {
     function getMode(address safe) external view returns (Mode);
 
     /**
+     * @notice Gets the referrer cashback percentage in bps
+     * @return uint64 referrer cashback percentage in bps
+     */
+    function getReferrerCashbackPercentage() external view returns (uint64);
+
+    /**
      * @notice Gets the timestamp when a pending credit mode change will take effect
      * @dev Returns 0 if no pending change or if the safe uses debit mode
      * @param safe Address of the EtherFi Safe
@@ -308,13 +327,23 @@ interface ICashModule {
      * @dev Sets up the role registry, debt manager, settlement dispatcher, and data providers
      * @param _roleRegistry Address of the role registry contract
      * @param _debtManager Address of the debt manager contract
-     * @param _settlementDispatcher Address of the settlement dispatcher
+     * @param _settlementDispatcherReap Address of the settlement dispatcher for Reap
+     * @param _settlementDispatcherRain Address of the settlement dispatcher for Rain
      * @param _cashbackDispatcher Address of the cashback dispatcher
      * @param _cashEventEmitter Address of the cash event emitter
      * @param _cashModuleSetters Address of the cash module setters contract
      * @custom:throws InvalidInput if any essential address is zero
      */
-    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcher, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
+    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcherReap, address _settlementDispatcherRain, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
+
+    /**
+     * @notice Sets the settlement dispatcher address for a bin sponsor
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
+     * @custom:throws InvalidInput if caller doesn't have the controller role
+     */
+    function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external;
 
     /**
      * @notice Sets the tier for one or more safes
@@ -338,6 +367,13 @@ interface ICashModule {
      * @custom:throws CashbackPercentageGreaterThanMaxAllowed if any percentage exceeds the maximum allowed
      */
     function setTierCashbackPercentage(SafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external;
+
+    /**
+     * @notice Sets the referrer cashback percentage in bps
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param cashbackPercentage New cashback percentage in bps
+     */
+    function setReferrerCashbackPercentageInBps(uint64 cashbackPercentage) external;
 
     /**
      * @notice Sets the percentage of cashback that goes to the safe (versus the spender)
@@ -393,23 +429,30 @@ interface ICashModule {
     function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external;
 
     /**
-     * @notice Processes a spending transaction
+     * @notice Processes a spending transaction with multiple tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
-     * @param spender Address of the spender initiating the transaction
+     * @param spender Address of the spendeer
+     * @param referrer Address of the referrer 
      * @param txId Transaction identifier
-     * @param token Address of the token to spend
-     * @param amountInUsd Amount to spend in USD
+     * @param binSponsor Bin sponsor used for spending
+     * @param tokens Array of addresses of the tokens to spend
+     * @param amountsInUsd Array of amounts to spend in USD (must match tokens array length)
      * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
-     * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
-     * @custom:throws OnlyEtherFiSafe if the safe is not a valid EtherFi Safe
-     * @custom:throws InvalidInput if spender is the safe
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
-     * @custom:throws UnsupportedToken if the token is not supported
-     * @custom:throws AmountZero if the converted amount is zero
-     * @custom:throws BorrowingsExceedMaxBorrowAfterSpending if spending would exceed borrowing limits
+     * @custom:throws UnsupportedToken if any token is not supported
+     * @custom:throws AmountZero if any converted amount is zero
+     * @custom:throws ArrayLengthMismatch if token and amount arrays have different lengths
+     * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
+     * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, address spender, bytes32 txId, address token, uint256 amountInUsd, bool shouldReceiveCashback) external;
+    function spend(address safe,  address spender, address referrer,  bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external;
+
+    /**
+     * @notice Clears pending cashback for users
+     * @param users Addresses of users to clear the pending cashback for
+     */
+    function clearPendingCashback(address[] calldata users) external;
 
     /**
      * @notice Repays borrowed tokens
