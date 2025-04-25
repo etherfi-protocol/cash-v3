@@ -35,7 +35,6 @@ contract NTTAdapter is BridgeAdapterBase {
      * @param token The address of the token to bridge
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
-     * @param maxSlippage Unused in NTT implementation
      * @param additionalData ABI-encoded NTT manager address
      * @custom:throws InsufficientNativeFee if msg.value is less than required fee
      */
@@ -60,17 +59,13 @@ contract NTTAdapter is BridgeAdapterBase {
     /**
      * @notice Calculates the fee required for bridging through NTT
      * @dev Returns the native token fee required for the bridge operation
-     * @param token Unused in this implementation
-     * @param amount Unused in this implementation
-     * @param destRecipient Unused in this implementation
-     * @param maxSlippage Unused in this implementation
      * @param additionalData ABI-encoded NTT manager address
      * @return ETH address and the required native token fee amount
      */
     function getBridgeFee(
-        address,
-        uint256 amount,
-        address destRecipient,
+        address /*token*/,
+        uint256 /*amount*/,
+        address /*destRecipient*/,
         uint256 /*maxSlippage*/,
         bytes calldata additionalData
     ) external view override returns (address, uint256) {
