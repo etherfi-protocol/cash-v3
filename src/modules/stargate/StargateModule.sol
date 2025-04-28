@@ -221,17 +221,19 @@ contract StargateModule is ModuleBase {
         if (asset != ETH) {
             if (poolToken != asset) revert InvalidStargatePool();
 
-            to = new address[](2);
-            value = new uint256[](2);
-            data = new bytes[](2);
+            to = new address[](3);
+            value = new uint256[](3);
+            data = new bytes[](3);
             
             to[0] = asset;
-            value[0] = 0;
             data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(stargate), amount);
 
             to[1] = address(stargate);
             value[1] = valueToSend;
             data[1] = abi.encodeWithSelector(IStargate.sendToken.selector, sendParam, messagingFee, payable(address(this)));
+        
+            to[2] = asset;
+            data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(stargate), 0);
         } else {
             if (poolToken != address(0)) revert InvalidStargatePool();
 
@@ -277,9 +279,9 @@ contract StargateModule is ModuleBase {
         uint256[] memory value;
         bytes[] memory data;
         if (oft.approvalRequired()) {
-            to = new address[](2);
-            value = new uint256[](2);
-            data = new bytes[](2);
+            to = new address[](3);
+            value = new uint256[](3);
+            data = new bytes[](3);
 
             to[0] = asset;
             data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(oft), amount);
@@ -287,6 +289,9 @@ contract StargateModule is ModuleBase {
             to[1] = address(oft);
             value[1] = messagingFee.nativeFee;
             data[1] = abi.encodeWithSelector(IOFT.send.selector, sendParam, messagingFee, payable(address(this)));
+
+            to[2] = asset;
+            data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(oft), 0);
         } else {
             to = new address[](1);
             value = new uint256[](1);
