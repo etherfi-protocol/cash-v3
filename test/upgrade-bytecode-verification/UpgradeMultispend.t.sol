@@ -27,7 +27,7 @@ contract UpgradeMultispendVerifyBytecode is ContractCodeChecker, Test {
 
     function setUp() public {
         string memory scrollRpc = vm.envString("SCROLL_RPC");
-        if (bytes(scrollRpc).length != 0) scrollRpc = "https://rpc.scroll.io"; 
+        if (bytes(scrollRpc).length == 0) scrollRpc = "https://rpc.scroll.io"; 
         vm.createSelectFork(scrollRpc);
     }
 

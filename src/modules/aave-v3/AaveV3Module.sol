@@ -146,7 +146,7 @@ contract AaveV3Module is ModuleBase {
     function repay(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         bytes32 digestHash = keccak256(abi.encodePacked(REPAY_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
-        _repay(safe, asset, amount);
+        amount = _repay(safe, asset, amount);
 
         emit RepayOnAave(safe, asset, amount);
     }
@@ -279,7 +279,8 @@ contract AaveV3Module is ModuleBase {
      * @custom:throws InvalidInput If amount is zero
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
-    function _repay(address safe, address asset, uint256 amount) internal {
+    function _repay(address safe, address asset, uint256 amount) internal returns (uint256) {
+        if (amount == type(uint256).max) amount = getTokenTotalBorrowAmount(safe, asset);
         if (amount == 0) revert InvalidInput();
         
         uint256 bal;
@@ -302,17 +303,33 @@ contract AaveV3Module is ModuleBase {
             data[0] = abi.encodeWithSelector(IAaveWrappedTokenGateway.repayETH.selector, address(aaveV3Pool), amount, safe);
             values[0] = amount;
         } else {
-            to = new address[](2);
-            data = new bytes[](2);
-            values = new uint256[](2);
+            to = new address[](3);
+            data = new bytes[](3);
+            values = new uint256[](3);
             
             to[0] = asset;
             data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(aaveV3Pool), amount);
             
             to[1] = address(aaveV3Pool);
             data[1] = abi.encodeWithSelector(IAavePoolV3.repay.selector, asset, amount, INTEREST_RATE_MODE, safe);
+            
+            to[2] = asset;
+            data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(aaveV3Pool), 0);
         }
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        return amount;
+    }
+
+    /**
+     * @notice Get the total borrow amount for a specific token for a user
+     * @param user The address of the user
+     * @param tokenAddress The address of the token 
+     * @return totalBorrow The total variable debt for the token
+     */
+    function getTokenTotalBorrowAmount(address user, address tokenAddress) public view returns (uint256 totalBorrow) {                    
+        IAavePoolV3.ReserveDataLegacy memory reserveData = aaveV3Pool.getReserveData(tokenAddress);
+        return IERC20(reserveData.variableDebtTokenAddress).balanceOf(user);
     }
 }
