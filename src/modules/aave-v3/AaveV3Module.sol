@@ -125,7 +125,7 @@ contract AaveV3Module is ModuleBase {
     function withdraw(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         bytes32 digestHash = keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
-        _withdraw(safe, asset, amount);
+        amount = _withdraw(safe, asset, amount);
 
         emit WithdrawFromAave(safe, asset, amount);
     }
@@ -240,7 +240,8 @@ contract AaveV3Module is ModuleBase {
      * @param amount The amount of tokens to be withdrawn
      * @custom:throws InvalidInput If amount is zero
      */
-    function _withdraw(address safe, address asset, uint256 amount) internal {
+    function _withdraw(address safe, address asset, uint256 amount) internal returns (uint256) {
+        if (amount == type(uint256).max) amount = getTotalSupplyAmount(safe, asset);
         if (amount == 0) revert InvalidInput();
 
         address[] memory to;
@@ -269,6 +270,8 @@ contract AaveV3Module is ModuleBase {
         }
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        return amount;
     }
 
     /**
@@ -331,5 +334,16 @@ contract AaveV3Module is ModuleBase {
     function getTokenTotalBorrowAmount(address user, address tokenAddress) public view returns (uint256 totalBorrow) {                    
         IAavePoolV3.ReserveDataLegacy memory reserveData = aaveV3Pool.getReserveData(tokenAddress);
         return IERC20(reserveData.variableDebtTokenAddress).balanceOf(user);
+    }
+
+    /**
+     * @notice Get the total supply amount for a specific token for a user
+     * @param user The address of the user
+     * @param tokenAddress The address of the token 
+     * @return totalSupply The total supply for the token
+     */
+    function getTotalSupplyAmount(address user, address tokenAddress) public view returns (uint256 totalSupply) {                    
+        IAavePoolV3.ReserveDataLegacy memory reserveData = aaveV3Pool.getReserveData(tokenAddress);
+        return IERC20(reserveData.aTokenAddress).balanceOf(user);
     }
 }
