@@ -78,28 +78,28 @@ contract SetCollateralConfig is GnosisHelpers, Utils, Test {
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
         string memory setWethConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, weth, wethConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setWethConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setWethConfig, "0", false)));
         
         string memory setWeEthConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, weEth, weEthConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setWeEthConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setWeEthConfig, "0", false)));
         
         string memory setScrConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, scr, scrConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setScrConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setScrConfig, "0", false)));
         
         string memory setLiquidEthConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, liquidEth, liquidEthConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidEthConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidEthConfig, "0", false)));
         
         string memory setLiquidUsdConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, liquidUsd, liquidUsdConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidUsdConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidUsdConfig, "0", false)));
         
         string memory setLiquidBtcConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, liquidBtc, liquidBtcConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidBtcConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidBtcConfig, "0", false)));
         
         string memory setEUsdConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, eUsd, eUsdConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEUsdConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEUsdConfig, "0", false)));
         
         string memory setEBtcConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, eBtc, eBtcConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEBtcConfig, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEBtcConfig, "0", true)));
         
         vm.createDir("./output", true);
         string memory path = "./output/SetCollateralConfig.json";

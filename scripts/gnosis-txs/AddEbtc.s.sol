@@ -71,7 +71,7 @@ contract AddEbtc is GnosisHelpers, Utils, Test {
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
         string memory addEBtcToPriceProvider = iToHex(abi.encodeWithSelector(PriceProvider.setTokenConfig.selector, tokens, tokensConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(priceProvider)), addEBtcToPriceProvider, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(priceProvider)), addEBtcToPriceProvider, "0", false)));
 
         IDebtManager.CollateralTokenConfig memory eBtcConfig = IDebtManager.CollateralTokenConfig({
             ltv: 50e18,
@@ -80,10 +80,10 @@ contract AddEbtc is GnosisHelpers, Utils, Test {
         });
 
         string memory setEBtcConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, address(ebtc), eBtcConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(debtManager)), setEBtcConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(debtManager)), setEBtcConfig, "0", false)));
 
         string memory addEBtcToLiquidModule = iToHex(abi.encodeWithSelector(EtherFiLiquidModule.addLiquidAssets.selector, tokens, tellers));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(liquidModule)), addEBtcToLiquidModule, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(liquidModule)), addEBtcToLiquidModule, "0", true)));
 
         vm.createDir("./output", true);
         string memory path = "./output/AddEbtc.json";

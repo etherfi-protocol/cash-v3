@@ -120,13 +120,13 @@ contract UpgradeMultispend is GnosisHelpers, Utils, Test {
         txs = upgrades(txs);
 
         string memory setReferrerCashbackPercentage = iToHex(abi.encodeWithSelector(CashModuleSetters.setReferrerCashbackPercentageInBps.selector, 1_00));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setReferrerCashbackPercentage, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setReferrerCashbackPercentage, "0", false)));
         
         string memory setSettlementDispatcherRain = iToHex(abi.encodeWithSelector(CashModuleSetters.setSettlementDispatcher.selector, BinSponsor.Rain, settlementDispatcherRain));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setSettlementDispatcherRain, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setSettlementDispatcherRain, "0", false)));
         
         string memory setWETHConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, address(weth), collateralConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(debtManager)), setWETHConfig, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(debtManager)), setWETHConfig, "0", true)));
         
         vm.createDir("./output", true);
         string memory path = "./output/UpgradeMultispendAndSettlementDispatcher.json";
@@ -144,22 +144,22 @@ contract UpgradeMultispend is GnosisHelpers, Utils, Test {
 
     function upgrades(string memory txs) public view returns (string memory) {
         string memory settlementDispatcherReapUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, settlementDispatcherReapImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(settlementDispatcherReap), settlementDispatcherReapUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(settlementDispatcherReap), settlementDispatcherReapUpgrade, "0", false)));
         
         string memory debtManagerCoreUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, debtManagerCoreImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), debtManagerCoreUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), debtManagerCoreUpgrade, "0", false)));
 
         string memory cashModuleCoreUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cashModuleCoreImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleCoreUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleCoreUpgrade, "0", false)));
 
         string memory cashModuleSettersUpgrade = iToHex(abi.encodeWithSelector(CashModuleCore.setCashModuleSettersAddress.selector, cashModuleSettersImpl));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleSettersUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleSettersUpgrade, "0", false)));
         
         string memory cashEventEmitterUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cashEventEmitterImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(eventEmitter), cashEventEmitterUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(eventEmitter), cashEventEmitterUpgrade, "0", false)));
 
         string memory cashLensUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cashLensImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashLens), cashLensUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashLens), cashLensUpgrade, "0", false)));
 
         return txs;
     }

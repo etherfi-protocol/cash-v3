@@ -65,7 +65,7 @@ contract TopUpSourceSetConfig is Utils, GnosisHelpers {
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
         string memory setTokenConfig = iToHex(abi.encodeWithSelector(TopUpFactory.setTokenConfig.selector, tokens, tokenConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, "0", true)));
         
         vm.createDir("./output", true);
         string memory path = string.concat("./output/TopUpSetConfig-", chainId, ".json");

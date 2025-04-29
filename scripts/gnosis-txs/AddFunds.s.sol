@@ -32,22 +32,22 @@ contract AddFunds is GnosisHelpers, Utils {
         string memory txs = _getGnosisHeader(chainId, addressToHex(safe));
 
         string memory approveSupplyUsdcToDebtManager = iToHex(abi.encodeWithSelector(IERC20.approve.selector, debtManager, 500e6));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(usdc), approveSupplyUsdcToDebtManager, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(usdc), approveSupplyUsdcToDebtManager, "0", false)));
 
         string memory supplyUsdcToDebtManager = iToHex(abi.encodeWithSelector(IDebtManager.supply.selector, safe, usdc, 500e6));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), supplyUsdcToDebtManager, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), supplyUsdcToDebtManager, "0", false)));
         
         string memory approveSupplyUsdcToTopUpDest = iToHex(abi.encodeWithSelector(IERC20.approve.selector, topUpDest, 500e6));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(usdc), approveSupplyUsdcToTopUpDest, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(usdc), approveSupplyUsdcToTopUpDest, "0", false)));
         
         string memory supplyUsdcToTopUpDest = iToHex(abi.encodeWithSelector(TopUpDest.deposit.selector, usdc, 500e6));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(topUpDest), supplyUsdcToTopUpDest, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(topUpDest), supplyUsdcToTopUpDest, "0", false)));
         
         string memory approveSupplyWeEthToTopUpDest = iToHex(abi.encodeWithSelector(IERC20.approve.selector, topUpDest, 1 ether));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(weEth), approveSupplyWeEthToTopUpDest, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(weEth), approveSupplyWeEthToTopUpDest, "0", false)));
 
         string memory supplyWeEthToTopUpDest = iToHex(abi.encodeWithSelector(TopUpDest.deposit.selector, weEth, 1 ether));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(topUpDest), supplyWeEthToTopUpDest, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(topUpDest), supplyWeEthToTopUpDest, "0", true)));
 
         vm.createDir("./output", true);
         string memory path = "./output/AddFunds.json";
