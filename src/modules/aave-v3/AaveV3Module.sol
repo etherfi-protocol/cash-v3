@@ -5,6 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IAavePoolV3 } from "../../interfaces/IAavePoolV3.sol";
+import { IAaveV3IncentivesManager } from "../../interfaces/IAaveV3IncentivesManager.sol";
 import { IAaveWrappedTokenGateway } from "../../interfaces/IAaveWrappedTokenGatewayV3.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
@@ -24,6 +25,9 @@ contract AaveV3Module is ModuleBase {
     
     /// @notice Aave V3 Wrapped Token Gateway contract interface for ETH operations
     IAaveWrappedTokenGateway public immutable aaveWrappedTokenGateway;
+
+    /// @notice Aave V3 Incentives Manager (Rewards Controller)
+    IAaveV3IncentivesManager public immutable aaveIncentivesManager;
     
     /// @notice Variable interest rate mode (2) used for Aave borrowing operations
     /// @dev Aave uses 1 for stable rate and 2 for variable rate
@@ -53,20 +57,28 @@ contract AaveV3Module is ModuleBase {
     /// @notice Emitted when a safe repays assets on Aave
     event RepayOnAave(address indexed safe, address indexed asset, uint256 amount);
 
+    /// @notice Emitted when a safe claims specific rewards from Aave
+    event ClaimRewardsOnAave(address indexed safe, address[] assets, uint256 amount, address reward);
+
+    /// @notice Emitted when a safe claims all available rewards from Aave
+    event ClaimAllRewardsOnAave(address indexed safe, address[] assets);
+
     /// @notice Thrown when the Safe doesn't have sufficient token balance for an operation
     error InsufficientBalanceOnSafe();
 
     /**
      * @notice Contract constructor
      * @param _aavePool Address of the Aave V3 Pool contract
+     * @param _aaveIncentivesManager Address of the Aave V3 Incentives Manager
      * @param _wrappedTokenGateway Address of the Aave V3 Wrapped Token Gateway
      * @param _etherFiDataProvider Address of the EtherFiDataProvider contract
      * @dev Initializes the contract with necessary Aave V3 protocol contracts
      * @custom:throws InvalidInput If any provided address is zero
      */
-    constructor(address _aavePool, address _wrappedTokenGateway, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
-        if (_aavePool == address(0) || _wrappedTokenGateway == address(0)) revert InvalidInput();
+    constructor(address _aavePool, address _aaveIncentivesManager, address _wrappedTokenGateway, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
+        if (_aavePool == address(0) || _aaveIncentivesManager == address(0) || _wrappedTokenGateway == address(0)) revert InvalidInput();
         aaveV3Pool = IAavePoolV3(_aavePool);
+        aaveIncentivesManager = IAaveV3IncentivesManager(_aaveIncentivesManager);
         aaveWrappedTokenGateway = IAaveWrappedTokenGateway(_wrappedTokenGateway);
     }
 
@@ -149,6 +161,46 @@ contract AaveV3Module is ModuleBase {
         amount = _repay(safe, asset, amount);
 
         emit RepayOnAave(safe, asset, amount);
+    }
+
+    /**
+     * @notice Claim specific rewards from Aave V3 for supplied assets
+     * @param safe The Safe address which will receive the rewards
+     * @param assets Array of asset addresses for which to claim rewards
+     * @param amount The amount of rewards to claim
+     * @param reward The reward token address to claim
+     * @custom:throws OnlyEtherFiSafe If caller is not a registered EtherFi Safe
+     * @custom:throws InvalidInput If amount = 0 or reward = address(0)
+     */
+    function claimRewards(address safe, address[] calldata assets, uint256 amount, address reward) external onlyEtherFiSafe(safe) {
+        if (amount == 0 || reward == address(0)) revert InvalidInput();
+        address[] memory to = new address[](1);
+        bytes[] memory data = new bytes[](1);
+        uint256[] memory values = new uint256[](1);
+
+        to[0] = address(aaveIncentivesManager);
+        data[0] = abi.encodeWithSelector(IAaveV3IncentivesManager.claimRewardsToSelf.selector, assets, amount, reward);
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        emit ClaimRewardsOnAave(safe, assets, amount, reward);
+    }
+
+    /**
+     * @notice Claim all available rewards from Aave V3 for supplied assets
+     * @param safe The Safe address which will receive the rewards
+     * @param assets Array of asset addresses for which to claim all rewards
+     * @custom:throws OnlyEtherFiSafe If caller is not a registered EtherFi Safe
+     */
+    function claimAllRewards(address safe, address[] calldata assets) external onlyEtherFiSafe(safe) {
+        address[] memory to = new address[](1);
+        bytes[] memory data = new bytes[](1);
+        uint256[] memory values = new uint256[](1);
+
+        to[0] = address(aaveIncentivesManager);
+        data[0] = abi.encodeWithSelector(IAaveV3IncentivesManager.claimAllRewardsToSelf.selector, assets);
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        emit ClaimAllRewardsOnAave(safe, assets);
     }
 
     /**
