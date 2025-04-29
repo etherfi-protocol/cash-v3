@@ -118,10 +118,10 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
         string memory dataProviderUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, dataProviderImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), dataProviderUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), dataProviderUpgrade, "0", false)));
 
         string memory safeImplUpgrade = iToHex(abi.encodeWithSelector(BeaconFactory.upgradeBeaconImplementation.selector, safeImpl));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(factory), safeImplUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(factory), safeImplUpgrade, "0", false)));
 
         address[] memory defaultModules = new address[](4);
         defaultModules[0] = cashModule;
@@ -136,7 +136,7 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
         shouldWhitelist[3] = true;
 
         string memory addDefaultModules = iToHex(abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, defaultModules, shouldWhitelist));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), addDefaultModules, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), addDefaultModules, "0", false)));
 
         address[] memory dewhitelistModules = new address[](1);
         dewhitelistModules[0] = stdJson.readAddress(
@@ -148,10 +148,10 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
         dewhitelistModuleShouldWhitelist[0] = false;        
 
         string memory removeOldOpenOceanModule = iToHex(abi.encodeWithSelector(EtherFiDataProvider.configureModules.selector, dewhitelistModules, dewhitelistModuleShouldWhitelist));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), removeOldOpenOceanModule, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), removeOldOpenOceanModule, "0", false)));
 
         string memory roleForLiquid = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, liquidModule.ETHERFI_LIQUID_MODULE_ADMIN(), cashControllerSafe));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(roleRegistry)), roleForLiquid, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(roleRegistry)), roleForLiquid, "0", true)));
 
         return txs;
     }

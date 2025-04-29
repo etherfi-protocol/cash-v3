@@ -34,7 +34,7 @@ contract UpgradeTopUpSourceFactory is GnosisHelpers, Utils, Test {
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
         string memory upgradeTopUpSourceFactory = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, address(topUpFactoryImpl), ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), upgradeTopUpSourceFactory, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), upgradeTopUpSourceFactory, "0", true)));
 
         vm.createDir("./output", true);
         string memory path = string.concat("./output/UpgradeTopUpSourceFactory-", chainId, ".json");
