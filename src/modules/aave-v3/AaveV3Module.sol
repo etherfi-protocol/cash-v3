@@ -293,7 +293,11 @@ contract AaveV3Module is ModuleBase {
      * @custom:throws InvalidInput If amount is zero
      */
     function _withdraw(address safe, address asset, uint256 amount) internal returns (uint256) {
-        if (amount == type(uint256).max) amount = getTotalSupplyAmount(safe, asset);
+        address weth = aaveWrappedTokenGateway.getWETHAddress();
+        if (amount == type(uint256).max) {
+            if (asset == ETH) amount = getTotalSupplyAmount(safe, weth);
+            else amount = getTotalSupplyAmount(safe, asset);
+        } 
         if (amount == 0) revert InvalidInput();
 
         address[] memory to;
@@ -304,8 +308,6 @@ contract AaveV3Module is ModuleBase {
             to = new address[](2);
             data = new bytes[](2);
             values = new uint256[](2);
-
-            address weth = aaveWrappedTokenGateway.getWETHAddress();
 
             to[0] = address(aaveV3Pool);
             data[0] = abi.encodeWithSelector(IAavePoolV3.withdraw.selector, weth, amount, safe);
@@ -335,7 +337,11 @@ contract AaveV3Module is ModuleBase {
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
     function _repay(address safe, address asset, uint256 amount) internal returns (uint256) {
-        if (amount == type(uint256).max) amount = getTokenTotalBorrowAmount(safe, asset);
+        address weth = aaveWrappedTokenGateway.getWETHAddress();
+        if (amount == type(uint256).max) {
+            if (asset == ETH) getTokenTotalBorrowAmount(safe, weth);
+            else amount = getTokenTotalBorrowAmount(safe, asset);
+        }
         if (amount == 0) revert InvalidInput();
         
         uint256 bal;
