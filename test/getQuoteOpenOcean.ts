@@ -103,32 +103,32 @@ export const getData = async () => {
     fromAmount,
     fromAssetDecimals
   });
-  
-  console.log(recodeSwapData(data));
+  console.log(data)
+  // console.log(recodeSwapData(data));
 };
 
-const recodeSwapData = (apiEncodedData: string): string => {
-  try {
-    const cOpenOceanRouter = new ethers.Contract(
-      OPEN_OCEAN_ROUTER,
-      new ethers.utils.Interface(ABI)
-    );
+// const recodeSwapData = (apiEncodedData: string): string => {
+//   try {
+//     const cOpenOceanRouter = new ethers.Contract(
+//       OPEN_OCEAN_ROUTER,
+//       new ethers.utils.Interface(ABI)
+//     );
 
-    // decode the 1Inch tx.data that is RLP encoded
-    const swapTx = cOpenOceanRouter.interface.parseTransaction({
-      data: apiEncodedData,
-    });
+//     // decode the 1Inch tx.data that is RLP encoded
+//     const swapTx = cOpenOceanRouter.interface.parseTransaction({
+//       data: apiEncodedData,
+//     });
     
-    const encodedData = ethers.utils.defaultAbiCoder.encode(
-      ["bytes4","address","tuple(uint256,uint256,uint256,bytes)[]"], 
-      [SELECTOR, swapTx.args[0], swapTx.args[2]]
-    );
+//     const encodedData = ethers.utils.defaultAbiCoder.encode(
+//       ["bytes4","address","tuple(uint256,uint256,uint256,bytes)[]"], 
+//       [SELECTOR, swapTx.args[0], swapTx.args[2]]
+//     );
 
-    return encodedData;
-  } catch (err: any) {
-    throw Error(`Failed to recode OpenOcean swap data: ${err.message}`);
-  }
-}
+//     return encodedData;
+//   } catch (err: any) {
+//     throw Error(`Failed to recode OpenOcean swap data: ${err.message}`);
+//   }
+// }
 
 const getOpenOceanSwapData = async ({
   chainId,
