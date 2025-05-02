@@ -9,8 +9,9 @@ contract DeployNTTAdapter is Utils {
     NTTAdapter nttAdapter;
 
     function run() public {
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        vm.startBroadcast();
+        vm.startBroadcast(deployerPrivateKey);
 
         nttAdapter = NTTAdapter(deployWithCreate3(abi.encodePacked(type(NTTAdapter).creationCode), getSalt(NTT_ADAPTER)));
 

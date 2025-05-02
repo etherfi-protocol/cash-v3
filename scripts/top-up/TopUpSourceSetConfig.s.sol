@@ -22,6 +22,7 @@ contract TopUpSourceSetConfig is Utils {
     RoleRegistry roleRegistry;
     address stargateAdapter;
     address etherFiOFTBridgeAdapter;
+    address nttAdapter;
     address etherFiLiquidBridgeAdapter;
     
     function run() public {
@@ -48,6 +49,10 @@ contract TopUpSourceSetConfig is Utils {
         etherFiOFTBridgeAdapter = stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "EtherFiOFTBridgeAdapter")
+        );
+        nttAdapter = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "NTTAdapter")
         );
 
         if (block.chainid == 1) {
@@ -91,6 +96,9 @@ contract TopUpSourceSetConfig is Utils {
             } else if (keccak256(bytes(bridge)) == keccak256(bytes("oftBridgeAdapter"))) {
                 tokenConfig[i].bridgeAdapter = etherFiOFTBridgeAdapter;
                 tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".oftAdapter")));
+            } else if (keccak256(bytes(bridge)) == keccak256(bytes("nttAdapter"))) {
+                tokenConfig[i].bridgeAdapter = nttAdapter;
+                tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".nttManager")), stdJson.readUint(jsonString, string.concat(base, ".dustDecimals")));
             } else if (block.chainid == 1 && keccak256(bytes(bridge)) == keccak256(bytes("liquidBridgeAdapter"))) {
                 tokenConfig[i].bridgeAdapter = etherFiLiquidBridgeAdapter;
                 tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".teller")));

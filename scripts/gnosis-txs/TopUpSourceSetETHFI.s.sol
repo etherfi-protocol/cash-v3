@@ -53,12 +53,12 @@ contract TopUpSourceSetETHFI is Utils, GnosisHelpers, Test {
         );
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
-
+        
         string memory fixturesFile = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv() ,"/fixtures/top-up-fixtures.json"));
         string memory fixtures = vm.readFile(fixturesFile);
         (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, chainId);
         string memory setTokenConfig = iToHex(abi.encodeWithSelector(TopUpFactory.setTokenConfig.selector, tokens, tokenConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, "0", true)));
 
         vm.createDir("./output", true);
         string memory path = string.concat("./output/TopUpETHFISetConfig-", chainId, ".json");
@@ -103,9 +103,8 @@ contract TopUpSourceSetETHFI is Utils, GnosisHelpers, Test {
         tokenConfig[0].recipientOnDestChain = topUpDest;
         tokenConfig[0].maxSlippageInBps = uint96(stdJson.readUint(jsonString, string.concat(base, ".maxSlippageInBps")));
         tokenConfig[0].bridgeAdapter = address(nttAdapter);
-        tokenConfig[0].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".nttManager")));
+        tokenConfig[0].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".nttManager")), stdJson.readUint(jsonString, string.concat(base, ".dustDecimals")));
 
-        
         return (tokens, tokenConfig);
     }
     

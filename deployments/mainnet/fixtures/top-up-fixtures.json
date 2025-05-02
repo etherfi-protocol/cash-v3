@@ -68,7 +68,8 @@
         "address": "0xFe0c30065B384F05761f15d0CC899D4F9F9Cc0eB",
         "bridge": "nttAdapter",
         "maxSlippageInBps": "0",
-        "nttManager": "0x344169Cc4abE9459e77bD99D13AA8589b55b6174"
+        "nttManager": "0x344169Cc4abE9459e77bD99D13AA8589b55b6174",
+        "dustDecimals": "10"
       }
     ]
   },
@@ -103,7 +104,8 @@
         "address": "0x6C240DDA6b5c336DF09A4D011139beAAa1eA2Aa2",
         "bridge": "nttAdapter",
         "maxSlippageInBps": "0",
-        "nttManager": "0xE87797A1aFb329216811dfA22C87380128CA17d8"
+        "nttManager": "0xE87797A1aFb329216811dfA22C87380128CA17d8",
+        "dustDecimals": "10"
       }
     ]
   }
