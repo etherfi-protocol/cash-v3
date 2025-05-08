@@ -255,7 +255,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param safe Address of the EtherFi Safe
      * @custom:throws CannotWithdrawYet if the withdrawal delay period hasn't passed
      */
-    function processWithdrawal(address safe) public onlyEtherFiSafe(safe) {
+    function processWithdrawal(address safe) public onlyEtherFiSafe(safe) nonReentrant {
         _processWithdrawal(safe);
     }
 
@@ -307,7 +307,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe,  address spender, address referrer,  bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external whenNotPaused onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe,  address spender, address referrer,  bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], safe, spender, txId, tokens, amountsInUsd);        
@@ -445,7 +445,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @notice Clears pending cashback for users
      * @param users Addresses of users to clear the pending cashback for
      */
-    function clearPendingCashback(address[] calldata users) external whenNotPaused {
+    function clearPendingCashback(address[] calldata users) external nonReentrant whenNotPaused {
         uint256 len = users.length;
         if (len == 0) revert InvalidInput();
         
@@ -523,7 +523,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param amountInUsd Amount to repay in USD
      * @custom:throws OnlyBorrowToken if token is not a valid borrow token
      */
-    function repay(address safe, address token, uint256 amountInUsd) public whenNotPaused onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function repay(address safe, address token, uint256 amountInUsd) public whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
         IDebtManager debtManager = getDebtManager();
         if (!_isBorrowToken(debtManager, token)) revert OnlyBorrowToken();
         _repay(safe, debtManager, token, amountInUsd);

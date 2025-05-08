@@ -257,9 +257,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
             }
         }
 
-        _getCashModuleStorage().cashEventEmitter.emitWithdrawalProcessed(safe, $.pendingWithdrawalRequest.tokens, $.pendingWithdrawalRequest.amounts, recipient);
-        delete $.pendingWithdrawalRequest;
-
         IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](len), data);
+        _getCashModuleStorage().cashEventEmitter.emitWithdrawalProcessed(safe, $.pendingWithdrawalRequest.tokens, $.pendingWithdrawalRequest.amounts, recipient);
+
+        delete $.pendingWithdrawalRequest;
     }
 }
