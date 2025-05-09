@@ -5,9 +5,96 @@ import { Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter, CashModuleTestSetup, CashVerificationLib, ICashModule, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { EnumerableAddressWhitelistLib } from "../../../../src/libraries/EnumerableAddressWhitelistLib.sol";
+import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
+
+    function test_configureWithdrawAssets_configuresWithdrawAssets() public {
+        address[] memory asset = new address[](2);
+        asset[0] = address(1);
+        asset[1] = address(usdcScroll);
+
+        bool[] memory whitelist = new bool[](2);
+        whitelist[0] = true;
+        whitelist[1] = false;
+
+        assertEq(cashModule.isWhitelistedWithdrawAsset(asset[0]), false);
+        assertEq(cashModule.isWhitelistedWithdrawAsset(asset[1]), true);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.WithdrawTokensConfigured(asset, whitelist);
+        cashModule.configureWithdrawAssets(asset, whitelist);
+
+        assertEq(cashModule.isWhitelistedWithdrawAsset(asset[0]), true);
+        assertEq(cashModule.isWhitelistedWithdrawAsset(asset[1]), false);
+    }
+
+    function test_configureWithdrawAssets_fails_whenCallerIsNotCashController() public {
+        address[] memory asset = new address[](2);
+        asset[0] = address(1);
+        asset[1] = address(usdcScroll);
+
+        bool[] memory whitelist = new bool[](2);
+        whitelist[0] = true;
+        whitelist[1] = false;
+
+        address alice = makeAddr("alice");
+
+        vm.prank(alice);
+        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        cashModule.configureWithdrawAssets(asset, whitelist);
+    }
+
+    function test_configureWithdrawAssets_fails_whenArrayLengthMismatch() public {
+        address[] memory asset = new address[](2);
+        asset[0] = address(1);
+        asset[1] = address(usdcScroll);
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+
+        vm.prank(owner);
+        vm.expectRevert(EnumerableAddressWhitelistLib.ArrayLengthMismatch.selector);
+        cashModule.configureWithdrawAssets(asset, whitelist);
+    }
+
+    function test_configureWithdrawAssets_fails_whenAssetArrayIsEmpty() public {
+        address[] memory asset = new address[](0);
+        bool[] memory whitelist = new bool[](0);
+
+        vm.prank(owner);
+        vm.expectRevert(EnumerableAddressWhitelistLib.InvalidInput.selector);
+        cashModule.configureWithdrawAssets(asset, whitelist);
+    }
+
+    function test_configureWithdrawAssets_fails_whenAssetIsAddressZero() public {
+        address[] memory asset = new address[](1);
+        asset[0] = address(0);
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(EnumerableAddressWhitelistLib.InvalidAddress.selector, 0));
+        cashModule.configureWithdrawAssets(asset, whitelist);
+    }
+    
+    function test_configureWithdrawAssets_fails_whenAssetIsDuplicate() public {
+        address[] memory asset = new address[](2);
+        asset[0] = address(usdcScroll);
+        asset[1] = address(usdcScroll);
+
+        bool[] memory whitelist = new bool[](2);
+        whitelist[0] = true;
+        whitelist[1] = true;
+
+        vm.prank(owner);
+        vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
+        cashModule.configureWithdrawAssets(asset, whitelist);
+    }
 
     function test_requestWithdrawal_works() public {
         uint256 withdrawalAmount = 50e6;
@@ -23,6 +110,32 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         // Verify pending withdrawal was set up correctly
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+    }
+
+    function test_requestWithdrawal_fails_forUnsupportedAsset() public {
+        uint256 withdrawalAmount = 50e6;
+
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(1);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        vm.expectRevert(abi.encodeWithSelector(ICashModule.InvalidWithdrawAsset.selector, tokens[0]));
+        cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, signers, signatures);
     }
 
     function test_processWithdrawals_works() external {
@@ -61,6 +174,77 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         // Verify pending withdrawal is 0
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), 0);
     }
+
+    function test_processWithdrawals_fails_whenAssetIsNotWhitelistedWithdrawAsset() external {
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // Verify pending withdrawal was set up correctly
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay); // withdraw delay is 60 secs
+
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = false;
+
+        vm.prank(owner);
+        cashModule.configureWithdrawAssets(tokens, whitelist);
+
+        vm.expectRevert(abi.encodeWithSelector(ICashModule.InvalidWithdrawAsset.selector, tokens[0]));
+        cashModule.processWithdrawal(address(safe));
+    }
+
+    function test_processWithdrawals_fails_ifPositionUnhealthyAfterWithdrawal() external {
+        uint256 totalSafeBalance = 100e6;
+        deal(address(usdcScroll), address(safe), totalSafeBalance);
+        deal(address(weETHScroll), address(safe), 0);
+
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+
+        uint256 amount = 10e6;
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+
+        vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Credit);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+
+        uint256 withdrawalAmount = 50e6;
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // Verify pending withdrawal was set up correctly
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay); // withdraw delay is 60 secs
+
+        // change the safe balance to withdraw amount so the position become unhealthy for withdrawal
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        cashModule.processWithdrawal(address(safe));
+    }
+
 
     function test_processWithdrawals_fails_whenTheDelayIsNotOver() external {
         uint256 withdrawalAmount = 50e6;

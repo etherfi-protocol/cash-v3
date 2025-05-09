@@ -194,6 +194,10 @@ interface ICashModule {
     /// @notice Error thrown when trying to use multiple tokens in credit mode
     error OnlyOneTokenAllowedInCreditMode();
 
+    /// @notice Error thrown when trying to withdraw an non whitelisted asset
+    /// @param asset The address of the invalid asset
+    error InvalidWithdrawAsset(address asset);
+
     /**
      * @notice Role identifier for EtherFi wallet access control
      * @return The role identifier as bytes32
@@ -217,6 +221,19 @@ interface ICashModule {
      * @return 100% value in basis points
      */
     function HUNDRED_PERCENT_IN_BPS() external pure returns (uint256);
+
+    /**
+     * @notice Returns if an asset is a whitelisted withdraw asset
+     * @param asset Address of the asset
+     * @return True if asset is whitelisted for withdrawals, false otherwise
+     */
+    function isWhitelistedWithdrawAsset(address asset) external view returns (bool);
+
+    /**
+     * @notice Returns all the assets whitelisted for withdrawals
+     * @return Array of whitelisted withdraw assets
+     */    
+    function getWhitelistedWithdrawAssets() external view returns (address[] memory);
 
     /**
      * @notice Retrieves cash configuration data for a Safe
@@ -335,6 +352,19 @@ interface ICashModule {
      * @custom:throws InvalidInput if any essential address is zero
      */
     function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcherReap, address _settlementDispatcherRain, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
+
+    /**
+     * @notice Configures the withdraw assets whitelist
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param assets Array of asset addresses to configure 
+     * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
+     * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
+     * @custom:throws InvalidInput If the arrays are empty
+     * @custom:throws ArrayLengthMismatch If the arrays have different lengths
+     * @custom:throws InvalidAddress If any address is the zero address
+     * @custom:throws DuplicateElementFound If any address appears more than once in the addrs array
+     */
+    function configureWithdrawAssets(address[] calldata assets, bool[] calldata shouldWhitelist) external;
 
     /**
      * @notice Sets the settlement dispatcher address for a bin sponsor

@@ -100,8 +100,29 @@ contract CashModuleCore is CashModuleStorageContract {
         _getCashModuleStorage().cashModuleSetters = newCashModuleSetters;
     }
 
+    /**
+     * @notice Returns the address of CashEventEmitter contract
+     * @return CashEventEmitter contract address
+     */
     function getCashEventEmitter() external view returns (address) {
         return address(_getCashModuleStorage().cashEventEmitter);
+    }
+
+    /**
+     * @notice Returns if an asset is a whitelisted withdraw asset
+     * @param asset Address of the asset
+     * @return True if asset is whitelisted for withdrawals, false otherwise
+     */    
+    function isWhitelistedWithdrawAsset(address asset) external view returns (bool) {
+        return _isWhitelistedWithdrawAsset(asset);
+    }
+
+    /**
+     * @notice Returns all the assets whitelisted for withdrawals
+     * @return Array of whitelisted withdraw assets
+     */    
+    function getWhitelistedWithdrawAssets() external view returns (address[] memory) {
+        return _getCashModuleStorage().whitelistedWithdrawAssets.values();
     }
 
     /**

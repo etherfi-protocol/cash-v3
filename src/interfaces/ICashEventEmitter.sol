@@ -176,4 +176,11 @@ interface ICashEventEmitter {
      * @param modeDelay Delay period for mode changes
      */
     function emitSetDelays(uint64 withdrawalDelay, uint64 spendingLimitDelay, uint64 modeDelay) external;
+
+    /**
+     * @notice Emits the WithdrawTokensConfigured event
+     * @param tokens Address of the tokens
+     * @param shouldWhitelist Boolean value suggesting if the token should be whitelisted for withdrawal
+     */
+    function emitWithdrawTokensConfigured(address[] calldata tokens, bool[] calldata shouldWhitelist) external;
 }
