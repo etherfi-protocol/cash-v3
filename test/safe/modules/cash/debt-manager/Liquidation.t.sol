@@ -86,8 +86,8 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         address[] memory collateralTokenPreference = debtManager.getCollateralTokens();
 
         uint256 currentBorrowAmt = debtManager.borrowingOf(address(safe), address(usdcScroll));
-        deal(address(usdcScroll), owner, currentBorrowAmt);
-        IERC20(address(usdcScroll)).approve(address(debtManager), currentBorrowAmt);
+        deal(address(usdcScroll), owner, currentBorrowAmt + 1);
+        IERC20(address(usdcScroll)).approve(address(debtManager), currentBorrowAmt + 1);
         debtManager.liquidate(address(safe), address(usdcScroll), collateralTokenPreference);
 
         vm.stopPrank();
@@ -251,12 +251,13 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         // next 50% liquidation (since user is still liquidatable)
         // collateral left -> 0.002125 weETH
         // total value in USD -> 0.002125 * 1000 -> 2.125 USD
-        // total bonus -> 0.002125 * 5% = 0.00010625 weETH -> 0.10625 USD
-        // total collateral liquidated -> 2.125 - 0.10625 USD -> 2.01875 USD
+        // total net repay value on this amount -> 0.002125 * 100% / (100 + 5)% = 0.002023809524 weETH = 0.002023809524 * 1000 = 2.023809524 USD
+        // total bonus -> 0.002125 (total collateral) - 0.002023809524 (total net repay) = 0.000101190476 weETH -> 0.101190476 USD
+        // total collateral liquidated -> 2.125 - 0.101190476 USD -> 2.023809524 USD
 
-        // total liquidated amount -> 7.5 + 2.01875 USD = 9.51875 USD
+        // total liquidated amount -> 7.5 + 2.023809524 USD = 9.523809524 USD
 
-        uint256 liquidationAmt = 9.51875 * 1e6;
+        uint256 liquidationAmt = 9.523809 * 1e6;
 
         address[] memory collateralTokenPreference = new address[](1);
         collateralTokenPreference[0] = address(weETHScroll);
@@ -358,20 +359,21 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
 
         // new token is first in preference 
         // total collateral in new token -> 0.00225 * 3000 = 6.75 USDC
-        // liquidation bonus -> 0.00225 * 10% bonus -> 0.000225 in collateral tokens -> 0.675 USDC 
-        // so new token wipes off 6.75 - 0.675 = 6.075 USDC of debt
+        // total net repay value on this amount -> 0.00225 * 100% / (100 + 10)% = 0.002045454545 new token = 0.002045454545 * 3000 = 6.136363635 USD
+        // liquidation bonus -> 0.00225 (total collateral) - 0.002045454545 (total net repay) = 0.000204545455 new token = 0.000204545455 * 3000 = 0.613636365 USD
+        // so new token wipes off 6.136363635 USDC of debt
         
         // weETH is second in preference 
         // total collateral in weETH -> 0.01 * 3000 = 30 USDC
-        // total debt left = 7.5 USDC - 6.075 USDC = 1.425 USDC
-        // total collateral worth 1.425 USDC in weETH -> 1.425 / 3000 -> 0.000475
-        // total bonus on 0.000475 weETH => 0.000475 * 5% = 0.00002375
+        // total debt left = 7.5 USDC - 6.136363635 USDC = 1.363636365 USDC
+        // total collateral worth 1.363636365 USDC in weETH -> 1.363636365 / 3000 -> 0.000454545455
+        // total bonus on 0.000454545455 weETH => 0.000454545455 * 5% = 0.00002272727275
 
         // In total
-        // borrow wiped by new token -> 7.5 + 6.075 = 13.575 USDC
-        // borrow wiped by weETH -> 1.425 USDC
-        // total liquidation bonus new token -> 0.00025 + 0.000225 = 0.000475
-        // total liquidation bonus weETH -> 0.00002375
+        // borrow wiped by new token -> 7.5 + 6.136363635 = 13.636363635 USDC
+        // borrow wiped by weETH -> 1.363636365 USDC
+        // total liquidation bonus new token -> 0.00025 + 0.000204545455 = 0.000454545455
+        // total liquidation bonus weETH -> 0.00002272727275
 
         uint256 ownerWeETHBalBefore = weETHScroll.balanceOf(owner);
         uint256 ownerNewTokenBalBefore = IERC20(newCollateralToken).balanceOf(owner);
@@ -395,10 +397,10 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256 ownerNewTokenBalAfter = IERC20(newCollateralToken).balanceOf(owner);
         uint256 aliceDebtAfter = debtManager.borrowingOf(address(safe), address(usdcScroll));
 
-        uint256 borrowWipedByNewToken =  13.575 * 1e6;
-        uint256 borrowWipedByWeETH = 1.425 * 1e6;
-        uint256 liquidationBonusNewToken =  0.000475 ether;
-        uint256 liquidationBonusWeETH = 0.00002375 ether;
+        uint256 borrowWipedByNewToken =  13.636363 * 1e6;
+        uint256 borrowWipedByWeETH = 1.363636 * 1e6;
+        uint256 liquidationBonusNewToken =  0.000454545455 ether;
+        uint256 liquidationBonusWeETH = 0.00002272727275 ether;
 
         assertApproxEqAbs(
             debtManager.convertCollateralTokenToUsd(

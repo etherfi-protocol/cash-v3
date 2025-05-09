@@ -621,7 +621,9 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
             uint256 collateralAmountForDebt = convertUsdToCollateralToken(collateralToken, repayDebtUsdAmt);
             uint256 totalCollateral = IERC20(collateralToken).balanceOf(user);
-            uint256 maxBonus = (totalCollateral * $.collateralTokenConfig[collateralToken].liquidationBonus) / HUNDRED_PERCENT;
+
+            uint256 netCollateralRepayValue = (totalCollateral * HUNDRED_PERCENT) / (HUNDRED_PERCENT + $.collateralTokenConfig[collateralToken].liquidationBonus);
+            uint256 maxBonus = totalCollateral - netCollateralRepayValue;
 
             if (totalCollateral - maxBonus < collateralAmountForDebt) {
                 uint256 liquidationBonus = maxBonus;
