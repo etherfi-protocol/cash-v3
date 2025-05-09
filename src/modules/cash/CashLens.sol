@@ -394,8 +394,8 @@ contract CashLens is UpgradeableProxy {
             return (0, false);
         }
 
-        // Calculate credit mode amount and round to 4 decimals in one operation
-        return (((totalMaxBorrow - totalBorrowings) * 10 ** 4) / 10 ** 4, true);
+        // Calculate credit mode amount  
+        return (totalMaxBorrow - totalBorrowings, true);
     }
 
     /**
@@ -443,8 +443,7 @@ contract CashLens is UpgradeableProxy {
             debitModeAmount = debtManager.convertCollateralTokenToUsd(token, effectiveBal);
         }
 
-        // Round to 4 decimals
-        return (debitModeAmount * 10 ** 4) / 10 ** 4;
+        return debitModeAmount;
     }
 
     /**

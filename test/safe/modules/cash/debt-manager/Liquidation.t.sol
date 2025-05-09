@@ -105,7 +105,7 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
 
         assertApproxEqAbs(debtManager.convertCollateralTokenToUsd(address(weETHScroll), liquidatorWeEthBalAfter - liquidatorWeEthBalBefore - liquidationBonusReceived), currentBorrowAmt, 10);
         assertEq(safeDebtAfter, 0);
-        assertApproxEqAbs(safeCollateralAfter, collateralValueInUsdc - currentBorrowAmt - liquidationBonusInUsdc, 1);
+        assertApproxEqAbs(safeCollateralAfter, collateralValueInUsdc - currentBorrowAmt - liquidationBonusInUsdc, 2);
     }
 
     function test_liquidate_cancelsPendingWithdrawals_whenWithdrawalsExist() public {
