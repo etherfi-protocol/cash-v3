@@ -359,6 +359,44 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
         cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
     }
+    
+    function test_spend_inDebitMode_cancelsWithdrawal_whenBorrowExceedsMaxBorrowAfterSpending() public {
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+
+        uint256 safeBalUsdc = 1000e6;
+        uint256 safeBalWeETH = 1 ether;
+        deal(address(usdcScroll), address(safe), safeBalUsdc);
+        deal(address(weETHScroll), address(safe), safeBalWeETH);
+        deal(address(usdcScroll), address(debtManager), 1000e6);
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 10e6;
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+
+        _setMode(Mode.Debit);
+
+        address[] memory withdrawTokens = new address[](1);
+        withdrawTokens[0] = address(weETHScroll);
+        uint256[] memory withdrawAmounts = new uint256[](1);
+        withdrawAmounts[0] = safeBalWeETH;
+        address recipient = makeAddr("alice");
+        _requestWithdrawal(withdrawTokens, withdrawAmounts, recipient);    
+
+        spendAmounts[0] = safeBalUsdc;
+
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETHScroll)), safeBalWeETH);
+
+        vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.WithdrawalCancelled(address(safe), withdrawTokens, withdrawAmounts, recipient);
+        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETHScroll)), 0);
+    }
 
     function test_spend_reverts_whenArrayLengthMismatch() public {
         // Create mismatched arrays
@@ -604,8 +642,6 @@ contract CashModuleSpendTest is CashModuleTestSetup {
     function test_spend_fails_whenDuplicateTokensArePassed() public {
         uint256 amount = 100e6;
         deal(address(usdcScroll), address(safe), amount);
-
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
 
         address[] memory spendTokens = new address[](2);
         spendTokens[0] = address(usdcScroll);

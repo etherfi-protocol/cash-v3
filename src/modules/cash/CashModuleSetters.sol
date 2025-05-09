@@ -302,7 +302,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param recipient Address to receive the withdrawn tokens
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
      */
-    function _requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient) internal {
+function _requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 

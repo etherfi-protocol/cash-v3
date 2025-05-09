@@ -437,7 +437,15 @@ contract CashModuleCore is CashModuleStorageContract {
         _spendDebit(safe, binSponsor, tokens, amounts);
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
-        $.debtManager.ensureHealth(safe);
+
+        // Ensuring the account is healthy
+        // If account is unhealthy after spend, cancel withdrawal and try again
+        try $.debtManager.ensureHealth(safe) {}
+        catch {
+            _cancelOldWithdrawal(safe);
+            $.debtManager.ensureHealth(safe);
+        }
+
         if (shouldReceiveCashback) {
             _cashback($, safe, spender, totalSpendingInUsd);
             if (referrer != address(0)) _referrerCashback($, safe, referrer, totalSpendingInUsd);
@@ -457,11 +465,7 @@ contract CashModuleCore is CashModuleStorageContract {
             data[i] = abi.encodeWithSelector(IERC20.transfer.selector, settlementDispatcher, amounts[i]);
             values[i] = 0;
         }
-        try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) {}
-        catch {
-            _cancelOldWithdrawal(safe);
-            IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-        }
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
     
     /**
