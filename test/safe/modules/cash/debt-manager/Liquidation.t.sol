@@ -70,6 +70,9 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
     function test_liquidate_succeeds_whenPositionLiquidatable() public {
         vm.startPrank(owner);
 
+        // fast forward 10 days so the interest index also updates
+        vm.warp(block.timestamp + 10 days);
+
         uint256 liquidatorWeEthBalBefore = weETHScroll.balanceOf(owner);
 
         IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
@@ -82,8 +85,9 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
 
         address[] memory collateralTokenPreference = debtManager.getCollateralTokens();
 
-        deal(address(usdcScroll), owner, borrowAmt);
-        IERC20(address(usdcScroll)).approve(address(debtManager), borrowAmt);
+        uint256 currentBorrowAmt = debtManager.borrowingOf(address(safe), address(usdcScroll));
+        deal(address(usdcScroll), owner, currentBorrowAmt);
+        IERC20(address(usdcScroll)).approve(address(debtManager), currentBorrowAmt);
         debtManager.liquidate(address(safe), address(usdcScroll), collateralTokenPreference);
 
         vm.stopPrank();
@@ -95,13 +99,13 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256 safeDebtAfter = debtManager.borrowingOf(address(safe), address(usdcScroll));
         uint256 liquidatorWeEthBalAfter = weETHScroll.balanceOf(owner);
 
-        uint256 liquidatedUsdcCollateralAmt = debtManager.convertUsdToCollateralToken(address(weETHScroll), borrowAmt);
+        uint256 liquidatedUsdcCollateralAmt = debtManager.convertUsdToCollateralToken(address(weETHScroll), currentBorrowAmt);
         uint256 liquidationBonusReceived = (liquidatedUsdcCollateralAmt * collateralTokenConfig.liquidationBonus) / HUNDRED_PERCENT;
         uint256 liquidationBonusInUsdc = debtManager.convertCollateralTokenToUsd(address(weETHScroll), liquidationBonusReceived);
 
-        assertApproxEqAbs(debtManager.convertCollateralTokenToUsd(address(weETHScroll), liquidatorWeEthBalAfter - liquidatorWeEthBalBefore - liquidationBonusReceived), borrowAmt, 10);
+        assertApproxEqAbs(debtManager.convertCollateralTokenToUsd(address(weETHScroll), liquidatorWeEthBalAfter - liquidatorWeEthBalBefore - liquidationBonusReceived), currentBorrowAmt, 10);
         assertEq(safeDebtAfter, 0);
-        assertApproxEqAbs(safeCollateralAfter, collateralValueInUsdc - borrowAmt - liquidationBonusInUsdc, 1);
+        assertApproxEqAbs(safeCollateralAfter, collateralValueInUsdc - currentBorrowAmt - liquidationBonusInUsdc, 1);
     }
 
     function test_liquidate_cancelsPendingWithdrawals_whenWithdrawalsExist() public {

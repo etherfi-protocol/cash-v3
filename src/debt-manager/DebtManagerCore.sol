@@ -540,7 +540,18 @@ contract DebtManagerCore is DebtManagerStorageContract {
         uint256 debtAmountToLiquidateInUsd = _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken].ceilDiv(2), interestIndex);
         _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
 
-        if (liquidatable(user)) _liquidate(user, borrowToken, collateralTokensPreference, $.userNormalizedBorrowings[user][borrowToken], interestIndex);
+        uint256 remainingNormalizedBorrowAmt = $.userNormalizedBorrowings[user][borrowToken];
+        if (remainingNormalizedBorrowAmt > 0 && liquidatable(user)) {
+            debtAmountToLiquidateInUsd = _getActualBorrowAmount(remainingNormalizedBorrowAmt, interestIndex);
+            _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
+
+            // If there's still 1 wei left due to rounding, force it to zero
+            remainingNormalizedBorrowAmt = $.userNormalizedBorrowings[user][borrowToken];
+            if (remainingNormalizedBorrowAmt == 1) {
+                $.userNormalizedBorrowings[user][borrowToken] = 0;
+                $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= 1;
+            }
+        }
     }
 
     /**
