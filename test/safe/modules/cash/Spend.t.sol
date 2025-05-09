@@ -600,4 +600,22 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(usdcScroll.balanceOf(address(safe)), initialBalance);
         assertEq(usdcScroll.balanceOf(address(settlementDispatcherRain)), settlementDispatcherRainBalBefore + amount);
     }
+
+    function test_spend_fails_whenDuplicateTokensArePassed() public {
+        uint256 amount = 100e6;
+        deal(address(usdcScroll), address(safe), amount);
+
+        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+
+        address[] memory spendTokens = new address[](2);
+        spendTokens[0] = address(usdcScroll);
+        spendTokens[1] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](2);
+        spendAmounts[0] = amount;
+        spendAmounts[1] = amount;
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+    }
 }

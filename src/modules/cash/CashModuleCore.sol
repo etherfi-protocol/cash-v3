@@ -344,6 +344,8 @@ contract CashModuleCore is CashModuleStorageContract {
         if (tokens.length != amountsInUsd.length) revert ArrayLengthMismatch();
         if (spender == safe) revert InvalidInput();
 
+        if (tokens.length > 1) tokens.checkDuplicates();
+
         // Set current mode and check transaction status
         _setCurrentMode($$);
         if ($$.transactionCleared[txId]) revert TransactionAlreadyCleared();

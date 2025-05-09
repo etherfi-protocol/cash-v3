@@ -11,8 +11,8 @@ import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol"
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
-
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
+import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 
 /**
  * @title CashLens
@@ -24,6 +24,7 @@ contract CashLens is UpgradeableProxy {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using SpendingLimitLib for SpendingLimit;
     using Math for uint256;
+    using ArrayDeDupLib for address[];
 
     /// @notice Reference to the deployed CashModule contract
     ICashModule public immutable cashModule;
@@ -83,6 +84,8 @@ contract CashLens is UpgradeableProxy {
         if (tokens.length == 0) return (false, "No tokens provided");
         if (tokens.length != amountsInUsd.length) return (false, "Tokens and amounts arrays length mismatch");
         if (cashModule.transactionCleared(safe, txId)) return (false, "Transaction already cleared");
+
+        if (tokens.length > 1) tokens.checkDuplicates();
         
         // Check total spending amount
         uint256 totalSpendingInUsd = 0;

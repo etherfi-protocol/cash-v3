@@ -5,6 +5,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
+import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 
 contract CashLensCanSpendTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -569,5 +570,18 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         assertFalse(canSpend, "Should not allow spending with already cleared txId");
         assertEq(message, "Transaction already cleared", "Error message should match");
+    }
+
+    function test_canSpend_fails_whenDuplicateTokensArePassed() public {
+        uint256 bal = usdcScroll.balanceOf(address(safe));
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdcScroll);
+        tokens[1] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = bal + 1;
+        amounts[1] = bal + 1;
+        vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
+        cashLens.canSpend(address(safe), txId, tokens, amounts);
     }
 }
