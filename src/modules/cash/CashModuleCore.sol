@@ -407,7 +407,7 @@ contract CashModuleCore is CashModuleStorageContract {
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
         if (shouldReceiveCashback) {
-            _cashback($, safe, spender, amountsInUsd[0]);
+            _cashback($, safe, spender, totalSpendingInUsd);
             if (referrer != address(0)) _referrerCashback($, safe, referrer, totalSpendingInUsd);
         }
     }
