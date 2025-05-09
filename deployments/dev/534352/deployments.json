@@ -16,6 +16,7 @@
     "CashEventEmitter": "0x357b440CfcD9677A99f2f85D5297c141B8837A9b",
     "CashLens": "0xdFa3089466fD8Ce1c55E998cA3FdffC3371bc106",
     "EtherFiLiquidModule": "0xb7AF0F32f0af40305a449711AD9c0001941DD9C5",
-    "EtherFiStakeModule": "0x5ac17A065B0e7070737daAc216B3D97c0c400Eec"
+    "EtherFiStakeModule": "0x5ac17A065B0e7070737daAc216B3D97c0c400Eec",
+    "CashLiquidationHelper": "0x68a977A594906B1262206bF0Aa06607Afa43cC4C"
   }
 }
