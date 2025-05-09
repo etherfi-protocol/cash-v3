@@ -414,12 +414,11 @@ contract CashLens is UpgradeableProxy {
         address[] memory tokens = new address[](1);
         tokens[0] = token;
         uint256[] memory amounts = new uint256[](1);
-        amounts[0] = IERC20(token).balanceOf(safe);
+        uint256 effectiveBal = IERC20(token).balanceOf(safe) - getPendingWithdrawalAmount(safe, token);
+        amounts[0] = effectiveBal;
 
         // Get collateral balance with token subtracted
         (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, tokens, amounts);
-
-        uint256 effectiveBal = amounts[0] - getPendingWithdrawalAmount(safe, token);
 
         // Check for errors - return early if invalid
         if (bytes(error).length != 0 || collateralTokenAmounts.length == 0) {
@@ -495,9 +494,11 @@ contract CashLens is UpgradeableProxy {
                     }
                 }
                 
-                tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
-                unchecked {
-                    ++m;
+                if (balance != 0) {
+                    tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
+                    unchecked {
+                        ++m;
+                    }
                 }
             }
             unchecked {

@@ -71,7 +71,7 @@ contract CashLensTest is CashModuleTestSetup {
         uint256 availableBalanceInUsd = debtManager.convertCollateralTokenToUsd(address(usdcScroll), availableBalance);
         
         // The debit max spend should now be limited by the available balance
-        assertLe(debitMaxSpend, availableBalanceInUsd, "Debit max spend should be limited by available balance");
+        assertEq(debitMaxSpend, availableBalanceInUsd, "Debit max spend should be limited by available balance");
     }
 
     function test_getUserCollateralForToken() public {
