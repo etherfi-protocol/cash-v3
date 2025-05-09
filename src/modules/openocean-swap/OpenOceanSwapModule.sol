@@ -42,6 +42,8 @@ contract OpenOceanSwapModule is ModuleBase {
     error OutputLessThanMinAmount();
     /// @notice Error for Invalid Owner quorum signatures
     error InvalidSignatures();
+    /// @notice Thrown when slippage from OpenOcean is too high
+    error SlippageTooHigh();
 
     /**
      * @notice Initializes the OpenOceanSwapModule
@@ -59,7 +61,6 @@ contract OpenOceanSwapModule is ModuleBase {
      * @param toAsset Address of the token being purchased (or ETH address for native swaps)
      * @param fromAssetAmount Amount of the source token to swap
      * @param minToAssetAmount Minimum amount of the destination token to receive
-     * @param guaranteedAmount Guaranteed amount as per OpenOcean's protocol
      * @param data Additional data needed for the swap, encoded as (bytes4, address, CallDescription[])
      * @param signers Addresses of the safe owners authorizing this swap
      * @param signatures Signatures from the signers authorizing this transaction
@@ -74,13 +75,12 @@ contract OpenOceanSwapModule is ModuleBase {
         address toAsset, 
         uint256 fromAssetAmount, 
         uint256 minToAssetAmount, 
-        uint256 guaranteedAmount, 
         bytes calldata data, 
         address[] calldata signers, 
         bytes[] calldata signatures
     ) external onlyEtherFiSafe(safe) {
-        _checkSignatures(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data, signers, signatures);
-        _swap(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
+        _checkSignatures(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data, signers, signatures);
+        _swap(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data);
     }
 
     /**
@@ -90,7 +90,6 @@ contract OpenOceanSwapModule is ModuleBase {
      * @param toAsset Address of the token being purchased (or ETH address for native swaps)
      * @param fromAssetAmount Amount of the source token to swap
      * @param minToAssetAmount Minimum amount of the destination token to receive
-     * @param guaranteedAmount Guaranteed amount as per OpenOcean's protocol
      * @param data Additional data needed for the swap, encoded as (bytes4, address, CallDescription[])
      * @param signers Addresses of the safe owners authorizing this swap
      * @param signatures Signatures from the signers authorizing this transaction
@@ -102,12 +101,11 @@ contract OpenOceanSwapModule is ModuleBase {
         address toAsset, 
         uint256 fromAssetAmount, 
         uint256 minToAssetAmount, 
-        uint256 guaranteedAmount, 
         bytes calldata data, 
         address[] calldata signers, 
         bytes[] calldata signatures
     ) internal {
-        bytes32 digestHash = _createDigest(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
+        bytes32 digestHash = _createDigest(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data);
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 
@@ -118,7 +116,6 @@ contract OpenOceanSwapModule is ModuleBase {
      * @param toAsset Address of the destination token
      * @param fromAssetAmount Amount of the source token
      * @param minToAssetAmount Minimum expected amount of destination token
-     * @param guaranteedAmount Guaranteed amount as per OpenOcean
      * @param data Additional swap data
      * @return Digest hash for signature verification
      */
@@ -128,7 +125,6 @@ contract OpenOceanSwapModule is ModuleBase {
         address toAsset,
         uint256 fromAssetAmount,
         uint256 minToAssetAmount,
-        uint256 guaranteedAmount,
         bytes calldata data
     ) internal returns(bytes32) {
         return keccak256(abi.encodePacked(
@@ -137,7 +133,7 @@ contract OpenOceanSwapModule is ModuleBase {
             address(this), 
             IEtherFiSafe(safe).useNonce(), 
             safe, 
-            abi.encode(fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data)
+            abi.encode(fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data)
         )).toEthSignedMessageHash();
     }
 
@@ -148,7 +144,6 @@ contract OpenOceanSwapModule is ModuleBase {
      * @param toAsset Address of the destination token
      * @param fromAssetAmount Amount of the source token
      * @param minToAssetAmount Minimum expected amount of destination token
-     * @param guaranteedAmount Guaranteed amount as per OpenOcean
      * @param data Additional swap data
      * @dev Handles the core swap logic and verification of received amounts
      * @custom:throws SwappingToSameAsset If trying to swap a token for itself
@@ -161,7 +156,6 @@ contract OpenOceanSwapModule is ModuleBase {
         address toAsset,
         uint256 fromAssetAmount,
         uint256 minToAssetAmount,
-        uint256 guaranteedAmount,
         bytes calldata data
     ) internal {
         if (fromAsset == toAsset) revert SwappingToSameAsset();
@@ -171,11 +165,13 @@ contract OpenOceanSwapModule is ModuleBase {
         if (toAsset == ETH) balBefore = address(safe).balance;
         else balBefore = IERC20(toAsset).balanceOf(safe);
 
+        _validateSwapData(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data);
+
         address[] memory to; 
         uint256[] memory value; 
         bytes[] memory callData;
-        if (fromAsset == ETH) (to, value, callData) = _swapNative(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
-        else (to, value, callData) = _swapERC20(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
+        if (fromAsset == ETH) (to, value, callData) = _swapNative(safe, fromAssetAmount, data);
+        else (to, value, callData) = _swapERC20(safe, fromAsset, fromAssetAmount, data);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, value, callData);
 
@@ -193,10 +189,7 @@ contract OpenOceanSwapModule is ModuleBase {
      * @notice Prepares an ERC20 token swap transaction
      * @param safe Address of the EtherFi safe
      * @param fromAsset Address of the source ERC20 token
-     * @param toAsset Address of the destination token
      * @param fromAssetAmount Amount of the source token
-     * @param minToAssetAmount Minimum expected amount of destination token
-     * @param guaranteedAmount Guaranteed amount as per OpenOcean
      * @param data Additional swap data
      * @return to Array of target addresses for transactions
      * @return value Array of ETH values for transactions
@@ -207,33 +200,29 @@ contract OpenOceanSwapModule is ModuleBase {
     function _swapERC20(
         address safe,
         address fromAsset,
-        address toAsset,
         uint256 fromAssetAmount,
-        uint256 minToAssetAmount,
-        uint256 guaranteedAmount,
         bytes calldata data
     ) internal view returns (address[] memory to, uint256[] memory value, bytes[] memory callData) { 
         if (IERC20(fromAsset).balanceOf(safe) < fromAssetAmount) revert InsufficientBalanceOnSafe();
 
-        to = new address[](2);
-        value = new uint256[](2);
-        callData = new bytes[](2);
+        to = new address[](3);
+        value = new uint256[](3);
+        callData = new bytes[](3);
 
         to[0] = fromAsset;
         callData[0] = abi.encodeWithSelector(IERC20.approve.selector, swapRouter, fromAssetAmount);
 
         to[1] = swapRouter;
-        callData[1] = _getSwapData(false, safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
+        callData[1] = data;
+
+        to[2] = fromAsset;
+        callData[2] = abi.encodeWithSelector(IERC20.approve.selector, swapRouter, 0);
     }
 
     /**
      * @notice Prepares a native ETH swap transaction
      * @param safe Address of the EtherFi safe
-     * @param fromAsset Address representing ETH (should be ETH address constant)
-     * @param toAsset Address of the destination token
      * @param fromAssetAmount Amount of ETH to swap
-     * @param minToAssetAmount Minimum expected amount of destination token
-     * @param guaranteedAmount Guaranteed amount as per OpenOcean
      * @param data Additional swap data
      * @return to Array of target addresses for transactions
      * @return value Array of ETH values for transactions
@@ -243,11 +232,7 @@ contract OpenOceanSwapModule is ModuleBase {
      */
     function _swapNative(
         address safe,
-        address fromAsset,
-        address toAsset,
         uint256 fromAssetAmount,
-        uint256 minToAssetAmount,
-        uint256 guaranteedAmount,
         bytes calldata data
     ) internal view returns (address[] memory to, uint256[] memory value, bytes[] memory callData) {
         if (address(safe).balance < fromAssetAmount) revert InsufficientBalanceOnSafe();
@@ -258,47 +243,37 @@ contract OpenOceanSwapModule is ModuleBase {
 
         to[0] = swapRouter;
         value[0] = fromAssetAmount;
-        callData[0] = _getSwapData(true, safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, guaranteedAmount, data);
+        callData[0] = data;
     }
 
     /**
-     * @notice Generates the OpenOcean swap function call data
-     * @param isNative Whether the swap involves native ETH
+     * @notice Validates the OpenOcean swap function call data
      * @param safe Address of the EtherFi safe
      * @param fromAsset Address of the source token
      * @param toAsset Address of the destination token
      * @param fromAssetAmount Amount of the source token
      * @param minToAssetAmount Minimum expected amount of destination token
-     * @param guaranteedAmount Guaranteed amount as per OpenOcean
      * @param data Additional swap data
-     * @return Encoded calldata for the OpenOcean swap function
      * @dev Decodes the provided data and constructs the OpenOcean swap description
      */
-    function _getSwapData(
-        bool isNative,
+    function _validateSwapData(
         address safe,
         address fromAsset,
         address toAsset,
         uint256 fromAssetAmount,
         uint256 minToAssetAmount,
-        uint256 guaranteedAmount,
         bytes calldata data
-    ) internal pure returns (bytes memory) {
-        ( , address executor, IOpenOceanCaller.CallDescription[] memory calls) = abi.decode(data, (bytes4, address, IOpenOceanCaller.CallDescription[]));
+    ) internal pure {
+        (address executor, OpenOceanSwapDescription memory swapDesc) = abi.decode(data[4:], (address, OpenOceanSwapDescription));
 
-        OpenOceanSwapDescription memory swapDesc = OpenOceanSwapDescription({
-            srcToken: IERC20(fromAsset),
-            dstToken: IERC20(toAsset),
-            srcReceiver: payable(executor),
-            dstReceiver: payable(safe),
-            amount: fromAssetAmount,
-            minReturnAmount: minToAssetAmount,
-            guaranteedAmount: guaranteedAmount,
-            flags: isNative ? 0 : 2,
-            referrer: safe,
-            permit: hex""
-        });
+        if (
+            swapDesc.srcToken != IERC20(fromAsset) ||
+            swapDesc.dstToken != IERC20(toAsset) || 
+            swapDesc.srcReceiver != payable(executor) || 
+            swapDesc.dstReceiver != payable(safe) || 
+            swapDesc.amount != fromAssetAmount 
+        ) revert InvalidInput();
 
-        return abi.encodeWithSelector(IOpenOceanRouter.swap.selector, IOpenOceanCaller(executor), swapDesc, calls);
+        if (swapDesc.minReturnAmount < minToAssetAmount) revert SlippageTooHigh();
     }
 }
