@@ -44,7 +44,9 @@ contract UpgradeWithdrawalFix is GnosisHelpers, Utils, Test {
 
         string memory chainId = vm.toString(block.chainid);
 
-        vm.startBroadcast();
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+
+        vm.startBroadcast(deployerPrivateKey);
 
         cashModule = stdJson.readAddress(
             deployments,
