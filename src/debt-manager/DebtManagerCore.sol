@@ -429,7 +429,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param borrowToken Address of the token to withdraw
      * @param amount Amount of tokens to withdraw
      */
-    function withdrawBorrowToken(address borrowToken, uint256 amount) external whenNotPaused {
+    function withdrawBorrowToken(address borrowToken, uint256 amount) external whenNotPaused nonReentrant {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         uint256 totalBorrowTokenAmt = _getTotalBorrowTokenAmount(borrowToken);
@@ -441,11 +441,11 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
         if ($.sharesOfBorrowTokens[msg.sender][borrowToken] < shares) revert InsufficientBorrowShares();
 
-        uint256 sharesLeft = $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens - shares;
-        if (sharesLeft != 0 && sharesLeft < $.borrowTokenConfig[borrowToken].minShares) revert SharesCannotBeLessThanMinShares();
+        uint256 userSharesLeft = $.sharesOfBorrowTokens[msg.sender][borrowToken] - shares;
+        if (userSharesLeft != 0 && userSharesLeft < $.borrowTokenConfig[borrowToken].minShares) revert SharesCannotBeLessThanMinShares();
 
-        $.sharesOfBorrowTokens[msg.sender][borrowToken] -= shares;
-        $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens = sharesLeft;
+        $.sharesOfBorrowTokens[msg.sender][borrowToken] = userSharesLeft;
+        $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens = $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens - shares;
 
         IERC20(borrowToken).safeTransfer(msg.sender, amount);
         emit WithdrawBorrowToken(msg.sender, borrowToken, amount);
