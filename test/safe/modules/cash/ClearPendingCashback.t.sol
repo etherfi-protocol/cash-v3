@@ -9,6 +9,7 @@ import { Test } from "forge-std/Test.sol";
 import { ICashModule, BinSponsor, Mode } from "../../../../src/interfaces/ICashModule.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { UpgradeableProxy } from "../../../../src/utils/UpgradeableProxy.sol";
+import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 
 contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -30,6 +31,17 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         address[] memory users = new address[](0);
         
         vm.expectRevert(ICashModule.InvalidInput.selector);
+        cashModule.clearPendingCashback(users);
+    }
+    
+    
+    function test_clearPendingCashback_reverts_whenArrayContainsDuplicates() public {
+        // Test with an empty array, should execute without reverting
+        address[] memory users = new address[](2);
+        users[0] = user1;
+        users[1] = user1;
+        
+        vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
         cashModule.clearPendingCashback(users);
     }
     
@@ -102,35 +114,6 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         cashModule.clearPendingCashback(users);
         
         for (uint256 i = 0; i < users.length; i++) assertGt(scrToken.balanceOf(users[i]), balancesBefore[i]);
-    }
-    
-    function test_clearPendingCashback_DuplicateUsers() public {
-        // Create array with duplicate users
-        address[] memory users = new address[](3);
-        users[0] = user1;
-        users[1] = user1; // Duplicate
-        users[2] = user1; // Duplicate
-        
-        // Setup pending cashback for user1
-        uint256 spendAmount = 100e6;
-        deal(address(usdcScroll), address(safe), spendAmount);
-        deal(address(scrToken), address(cashbackDispatcher), 0);
-        
-        // Create pending cashback
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmount;
-        
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), user1, address(0), keccak256("spend"), BinSponsor.Reap, spendTokens, spendAmounts, true);
-        
-        // Verify pending cashback exists
-        assertGt(cashModule.getPendingCashback(user1), 0);
-        
-        deal(address(scrToken), address(cashbackDispatcher), 1000 ether);
-                
-        cashModule.clearPendingCashback(users);
     }
     
     function test_clearPendingCashback_NoPendingCashback() public {

@@ -475,6 +475,7 @@ contract CashModuleCore is CashModuleStorageContract {
     function clearPendingCashback(address[] calldata users) external nonReentrant whenNotPaused {
         uint256 len = users.length;
         if (len == 0) revert InvalidInput();
+        if (len > 1) users.checkDuplicates();
         
         for (uint256 i = 0; i < len; ) {
             if (users[i] == address(0)) revert InvalidInput();
