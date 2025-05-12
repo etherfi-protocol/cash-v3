@@ -22,6 +22,7 @@ contract SetCollateralConfig is GnosisHelpers, Utils, Test {
     address public eUsd = 0x939778D83b46B456224A33Fb59630B11DEC56663;
     address public eBtc = 0x657e8C867D8B37dCC18fA4Caead9C45EB088C642;
     address public scr = 0xd29687c813D741E2F938F4aC377128810E217b1b;
+    address public ethfi = 0x056A5FA5da84ceb7f93d36e545C5905607D8bD81;
 
     address debtManager;
     
@@ -45,6 +46,11 @@ contract SetCollateralConfig is GnosisHelpers, Utils, Test {
             liquidationBonus: 3.5e18
         }); 
         IDebtManager.CollateralTokenConfig memory scrConfig = IDebtManager.CollateralTokenConfig({
+            ltv: 20e18,
+            liquidationThreshold: 50e18,
+            liquidationBonus: 5e18
+        }); 
+        IDebtManager.CollateralTokenConfig memory ethfiConfig = IDebtManager.CollateralTokenConfig({
             ltv: 20e18,
             liquidationThreshold: 50e18,
             liquidationBonus: 5e18
@@ -85,6 +91,9 @@ contract SetCollateralConfig is GnosisHelpers, Utils, Test {
         
         string memory setScrConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, scr, scrConfig));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setScrConfig, "0", false)));
+        
+        string memory setEthfiConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, ethfi, ethfiConfig));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEthfiConfig, "0", false)));
         
         string memory setLiquidEthConfig = iToHex(abi.encodeWithSelector(IDebtManager.setCollateralTokenConfig.selector, liquidEth, liquidEthConfig));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidEthConfig, "0", false)));

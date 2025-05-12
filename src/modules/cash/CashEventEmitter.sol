@@ -195,6 +195,22 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param newDispatcher Address of the new dispatcher for the bin sponsor
      */
     event SettlementDispatcheUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher);
+    
+    /**
+     * @notice Emitted when the withdrawal tokens are updated
+     * @param tokens Address of the tokens
+     * @param shouldWhitelist Boolean value suggesting if the token should be whitelisted for withdrawal
+     */
+    event WithdrawTokensConfigured(address[] tokens, bool[] shouldWhitelist);
+
+    /**
+     * @notice Emits the WithdrawTokensConfigured event
+     * @param tokens Address of the tokens
+     * @param shouldWhitelist Boolean value suggesting if the token should be whitelisted for withdrawal
+     */
+    function emitWithdrawTokensConfigured(address[] calldata tokens, bool[] calldata shouldWhitelist) external onlyCashModule {
+        emit WithdrawTokensConfigured(tokens, shouldWhitelist);
+    }
 
     /**
      * @notice Emits the SettlementDispatcheUpdated event

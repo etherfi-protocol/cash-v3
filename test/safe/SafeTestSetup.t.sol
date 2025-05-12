@@ -195,6 +195,8 @@ contract SafeTestSetup is Utils {
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
 
+        _setupWithdrawTokenWhitelist();
+
         address[] memory owners = new address[](3);
         owners[0] = owner1;
         owners[1] = owner2;
@@ -210,6 +212,20 @@ contract SafeTestSetup is Utils {
         safe = EtherFiSafe(payable(safeFactory.getDeterministicAddress(keccak256("safe"))));
 
         vm.stopPrank();
+    }
+
+    function _setupWithdrawTokenWhitelist() internal {
+        address[] memory tokens = new address[](3);
+        tokens[0] = address(usdcScroll);
+        tokens[1] = address(weETHScroll);
+        tokens[2] = address(scrToken);
+
+        bool[] memory whitelist = new bool[](3);
+        whitelist[0] = true;
+        whitelist[1] = true;
+        whitelist[2] = true;
+    
+        cashModule.configureWithdrawAssets(tokens, whitelist);
     }
 
     function _setupCashEventEmitter() internal {

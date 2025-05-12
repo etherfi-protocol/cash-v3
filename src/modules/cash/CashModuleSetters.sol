@@ -17,6 +17,8 @@ import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLi
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
+import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
+
 
 /**
  * @title CashModule
@@ -53,6 +55,26 @@ contract CashModuleSetters is CashModuleStorageContract {
             $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherReap, dispatcher);
             $.settlementDispatcherReap = dispatcher;
         }
+    }   
+
+    /**
+     * @notice Configures the withdraw assets whitelist
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param assets Array of asset addresses to configure 
+     * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
+     * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
+     * @custom:throws InvalidInput If the arrays are empty
+     * @custom:throws ArrayLengthMismatch If the arrays have different lengths
+     * @custom:throws InvalidAddress If any address is the zero address
+     * @custom:throws DuplicateElementFound If any address appears more than once in the addrs array
+     */
+    function configureWithdrawAssets(address[] calldata assets, bool[] calldata shouldWhitelist) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        EnumerableAddressWhitelistLib.configure($.whitelistedWithdrawAssets, assets, shouldWhitelist);
+        $.cashEventEmitter.emitWithdrawTokensConfigured(assets, shouldWhitelist);
     }
 
     /**
@@ -217,7 +239,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws InsufficientBalance if any token has insufficient balance
      */
-    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
@@ -286,7 +308,8 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
         if (tokens.length > 1) tokens.checkDuplicates();
-
+        
+        _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 
         uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;

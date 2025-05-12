@@ -458,7 +458,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param token Address of the token to borrow
      * @param amount Amount of tokens to borrow
      */
-    function borrow(BinSponsor binSponsor, address token, uint256 amount) external whenNotPaused onlyEtherFiSafe {
+    function borrow(BinSponsor binSponsor, address token, uint256 amount) external whenNotPaused nonReentrant onlyEtherFiSafe {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         if (!isBorrowToken(token)) revert UnsupportedBorrowToken();

@@ -157,6 +157,8 @@ contract Setup is Utils {
         topUpDest = TopUpDest(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(topUpDestImpl, "")), getSalt(TOP_UP_DEST_PROXY)));
         topUpDest.initialize(address(roleRegistry));
 
+        _configureWithdrawTokens();
+
         _grantRoles();
         _configureDebtManager();
 
@@ -190,6 +192,23 @@ contract Setup is Utils {
         writeDeploymentFile(finalJson);
 
         vm.stopBroadcast();
+    }
+
+    function _configureWithdrawTokens() internal {
+        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
+        address[] memory tokens = new address[](3);
+        tokens[0] = address(usdcScroll);
+        tokens[1] = address(weETHScroll);
+        tokens[2] = address(scrToken);
+
+        bool[] memory shouldWhitelist = new bool[](3);
+        shouldWhitelist[0] = true;
+        shouldWhitelist[1] = true;
+        shouldWhitelist[2] = true;
+
+        cashModule.configureWithdrawAssets(tokens, shouldWhitelist);
+
+        roleRegistry.revokeRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
     }
 
     function _grantRoles() internal {
