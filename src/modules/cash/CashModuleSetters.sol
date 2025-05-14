@@ -139,7 +139,7 @@ contract CashModuleSetters is CashModuleStorageContract {
     function setReferrerCashbackPercentageInBps(uint64 cashbackPercentage) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
 
-        if (cashbackPercentage > HUNDRED_PERCENT_IN_BPS) revert InvalidInput();
+        if (cashbackPercentage > MAX_CASHBACK_PERCENTAGE) revert InvalidInput();
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         $.cashEventEmitter.emitReferrerCashbackPercentageSet($.referrerCashbackPercentageInBps, cashbackPercentage);
