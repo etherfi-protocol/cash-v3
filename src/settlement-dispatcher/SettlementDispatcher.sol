@@ -5,6 +5,7 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import { IStargate, Ticket } from "../interfaces/IStargate.sol";
+import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
@@ -31,6 +32,21 @@ contract SettlementDispatcher is UpgradeableProxy {
     }
 
     /**
+     * @notice Struct containing liquid withdrawal configuration
+     * @dev Stores all data needed to withdraw liquid tokens
+     */
+    struct LiquidWithdrawConfig {
+        /// @notice assetOut The asset to withdraw
+        address assetOut;
+        /// @notice boringQueue Address of the boring queue
+        address boringQueue;
+        /// @notice discount The discount to apply to the withdraw in bps
+        uint16 discount;
+        /// @notice secondsToDeadline The time in seconds the request is valid for
+        uint24 secondsToDeadline;
+    }
+
+    /**
      * @notice Role identifier for accounts permitted to bridge tokens
      */
     bytes32 public constant SETTLEMENT_DISPATCHER_BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
@@ -47,6 +63,10 @@ contract SettlementDispatcher is UpgradeableProxy {
     struct SettlementDispatcherStorage {
         /// @notice Mapping of token addresses to their destination chain information
         mapping(address token => DestinationData) destinationData;
+        /// @notice Mapping of liquid token address to its withdraw config
+        mapping (address liquidToken => LiquidWithdrawConfig) liquidWithdrawConfig;
+        /// @notice Refund wallet used for refunding users for reversals/returns
+        address refundWallet;
     }
 
     /**
@@ -77,6 +97,39 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @param recipient Address that received the withdrawn funds
      */
     event FundsWithdrawn(address indexed token, uint256 amount, address indexed recipient);
+
+    /**
+     * @notice Emitted when liquid asset withdraw config is set
+     * @param token Address of the liquid asset
+     * @param assetOut Address of the asset out
+     * @param boringQueue Address of the boring queue
+     * @param discount Discount percentage with 5 decimals precision
+     * @param secondsToDeadline The time in seconds the request is valid for
+     */
+    event LiquidWithdrawConfigSet(address indexed token, address indexed assetOut, address boringQueue, uint16 discount, uint24 secondsToDeadline);
+    
+    /**
+     * @notice Emitted when liquid asset withdrawal is requested
+     * @param liquidToken Address of the liquid asset
+     * @param assetOut Address of the asset out
+     * @param amount Amount of liquid assets withdrawn
+     */
+    event LiquidWithdrawalRequested(address indexed liquidToken,address indexed assetOut, uint128 amount);
+
+    /**
+     * @notice Emitted when a new refund wallet is set
+     * @param oldRefundWallet Address of the old refund wallet
+     * @param newRefundWallet Address of the new refund wallet
+     */
+    event RefundWalletSet(address oldRefundWallet, address newRefundWallet);
+
+    /**
+     * @notice Emitted when funds are transferred to the refund wallet
+     * @param asset Address of the asset transferred
+     * @param refundWallet Address of the refund wallet
+     * @param amount Amount of the asset transferred
+     */
+    event TransferToRefundWallet(address asset, address refundWallet, uint256 amount);
 
     /**
      * @notice Thrown when input arrays have different lengths
@@ -122,6 +175,36 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Thrown when the minimum return amount is not satisfied
      */
     error InsufficientMinReturn();
+
+    /**
+     * @notice Thrown when Boring Queue does not allow the asset out
+     */
+    error BoringQueueDoesNotAllowAssetOut();
+
+    /**
+     * @notice Thrown when the Liquid Asset withdraw discount is out of the queue bounds
+     */
+    error InvalidDiscount();
+    
+    /**
+     * @notice Thrown when the Liquid Asset withdraw seconds to deadline is less than min set on the queue
+     */
+    error SecondsToDeadlingLowerThanMin();
+
+    /**
+     * @notice Thrown when liquid withdraw config is not set for the liquid token
+     */
+    error LiquidWithdrawConfigNotSet();
+
+    /**
+     * @notice Thrown when the boring queue has a different boring vault than expected
+     */
+    error InvalidBoringQueue();
+
+    /**
+     * @notice Thrown when refund wallet is not set and trying to transfer to refund wallet
+     */
+    error RefundWalletNotSet();
 
     /**
      * @notice Constructor that disables initializers
@@ -178,6 +261,106 @@ contract SettlementDispatcher is UpgradeableProxy {
      */
     function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external onlyRoleRegistryOwner {
         _setDestinationData(tokens, destDatas);
+    }
+
+    /**
+     * @notice Function to set the liquid asset withdraw config 
+     * @dev Only callable by the role registry owner
+     * @param asset Address of the liquid asset
+     * @param assetOut Address of the asset out
+     * @param boringQueue Address of the boring queue
+     * @param discount Discount with 5 decimals (1% = 100000)
+     * @param secondsToDeadline Seconds to deadline after which the withdraw request would expire
+     * @custom:throws InvalidValue If any address parameter is zero
+     * @custom:throws BoringQueueDoesNotAllowAssetOut If the boring queue does not allow the asset out 
+     * @custom:throws InvalidDiscount If the discount is out of min and max bounds
+     * @custom:throws SecondsToDeadlingLowerThanMin If the seconds to deadline is lesser than the min seconds to deadline 
+     */
+    function setLiquidAssetWithdrawConfig(address asset, address assetOut, address boringQueue, uint16 discount, uint24 secondsToDeadline) external onlyRoleRegistryOwner {
+        if (asset == address(0) || assetOut == address(0) || boringQueue == address(0)) revert InvalidValue();
+        
+        IBoringOnChainQueue.WithdrawAsset memory withdrawAsset = IBoringOnChainQueue(boringQueue).withdrawAssets(assetOut);
+        if (!withdrawAsset.allowWithdraws) revert BoringQueueDoesNotAllowAssetOut();
+        if (discount < withdrawAsset.minDiscount || discount > withdrawAsset.maxDiscount) revert InvalidDiscount();
+        if (secondsToDeadline < withdrawAsset.minimumSecondsToDeadline) revert SecondsToDeadlingLowerThanMin();
+        if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();
+
+        SettlementDispatcherStorage storage $ = _getSettlementDispatcherStorage();
+
+        $.liquidWithdrawConfig[asset] = LiquidWithdrawConfig({
+            assetOut: assetOut,
+            boringQueue: boringQueue,
+            discount: discount,
+            secondsToDeadline: secondsToDeadline
+        });
+
+        emit LiquidWithdrawConfigSet(asset, assetOut, boringQueue, discount, secondsToDeadline);
+    }
+
+    /**
+     * @notice Returns the liquid asset withdraw config
+     * @param asset Address of the liquid asset
+     * @return LiquidWithdrawConfig struct (assetOut, boringQueue, discount, secondsToDeadline)
+     */
+    function getLiquidAssetWithdrawConfig(address asset) external view returns (LiquidWithdrawConfig memory) {
+        return _getSettlementDispatcherStorage().liquidWithdrawConfig[asset];
+    } 
+
+    /**
+     * @notice Function to withdraw liquid tokens inside the Settlement Dispatcher
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
+     * @param liquidToken Address of the liquid token
+     * @param amount Amount of liquid tokens to withdraw
+     */
+    function withdrawLiquidAsset(address liquidToken, uint128 amount) external onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        LiquidWithdrawConfig storage $ = _getSettlementDispatcherStorage().liquidWithdrawConfig[liquidToken];
+
+        if ($.boringQueue == address(0)) revert LiquidWithdrawConfigNotSet();
+
+        IERC20(liquidToken).forceApprove($.boringQueue, amount);
+        IBoringOnChainQueue($.boringQueue).requestOnChainWithdraw($.assetOut, amount, $.discount, $.secondsToDeadline);
+
+        emit LiquidWithdrawalRequested(liquidToken, $.assetOut, amount);
+    }
+
+    /**
+     * @notice Sets the address of the refund wallet
+     * @dev Only callable by the role registry owner
+     * @param refundWallet The address to set as the refund wallet
+     * @custom:throws InvalidValue If refundWallet is address(0)
+     */
+    function setRefundWallet(address refundWallet) external onlyRoleRegistryOwner() {
+        if (refundWallet == address(0)) revert InvalidValue();
+
+        SettlementDispatcherStorage storage $ = _getSettlementDispatcherStorage();
+        emit RefundWalletSet($.refundWallet, refundWallet);
+        $.refundWallet = refundWallet;
+    }
+
+    /**
+     * @notice Returns the address of the currently set refund wallet
+     * @return Address of the refund wallet
+     */
+    function getRefundWallet() external view returns (address) {
+        return _getSettlementDispatcherStorage().refundWallet;
+    }
+
+    /**
+     * @notice Transfers funds to the refund wallet
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
+     * @param asset Address of the token to transfer 
+     * @param amount Amount of tokens to transfer
+     * @custom:throws RefundWalletNotSet If the refund wallet address is not set
+     * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
+     * @custom:throws WithdrawFundsFailed If ETH transfer fails
+     */
+    function transferFundsToRefundWallet(address asset, uint256 amount) external nonReentrant onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        SettlementDispatcherStorage storage $ = _getSettlementDispatcherStorage();
+
+        if ($.refundWallet == address(0)) revert RefundWalletNotSet();
+        amount = _withdrawFunds(asset, $.refundWallet, amount);
+
+        emit TransferToRefundWallet(asset, $.refundWallet, amount);
     }
 
     /**
@@ -261,9 +444,22 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
      * @custom:throws WithdrawFundsFailed If ETH transfer fails
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRoleRegistryOwner() {
+    function withdrawFunds(address token, address recipient, uint256 amount) external nonReentrant onlyRoleRegistryOwner() {
         if (recipient == address(0)) revert InvalidValue();
+        amount = _withdrawFunds(token, recipient, amount);
+        emit FundsWithdrawn(token, amount, recipient);
+    }
 
+    /**
+     * @notice Internal function to handle withdrawal of tokens or ETH
+     * @dev Used by both withdrawFunds and transferFundsToRefundWallet
+     * @param token Address of the token to withdraw (address(0) for ETH)
+     * @param recipient Address to receive the withdrawn funds
+     * @param amount Amount to withdraw (0 to withdraw all available balance)
+     * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
+     * @custom:throws WithdrawFundsFailed If ETH transfer fails
+     */    
+    function _withdrawFunds(address token, address recipient, uint256 amount) internal returns (uint256) {
         if (token == address(0)) {
             if (amount == 0) amount = address(this).balance;
             if (amount == 0) revert CannotWithdrawZeroAmount();
@@ -275,7 +471,7 @@ contract SettlementDispatcher is UpgradeableProxy {
             IERC20(token).safeTransfer(recipient, amount);
         }
 
-        emit FundsWithdrawn(token, amount, recipient);
+        return amount;
     }
 
     /**
