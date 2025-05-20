@@ -268,6 +268,14 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         settlementDispatcherReap.setLiquidAssetWithdrawConfig(address(boringQueueLiquidUsd), address(usdcScroll), address(boringQueueLiquidUsd), discount, 1);
     }
 
+    function test_getLiquidAssetWithdrawalConfig_returns_correctConfig() public view {
+        SettlementDispatcher.LiquidWithdrawConfig memory config = settlementDispatcherReap.getLiquidAssetWithdrawConfig(address(liquidUsd));
+        assertEq(config.assetOut, address(usdcScroll));
+        assertEq(config.boringQueue, address(boringQueueLiquidUsd));
+        assertEq(config.discount, discount);
+        assertEq(config.secondsToDeadline, secondsToDeadline);
+    }
+
     function test_withdrawLiquidAsset_succeeds() public {
         uint128 amount = 100e6;
 

@@ -7,6 +7,7 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { SafeTestSetup, MessageHashUtils } from "../../SafeTestSetup.t.sol";
 import { EtherFiLiquidModule } from "../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
+import { IBoringOnChainQueue } from "../../../../src/interfaces/IBoringOnChainQueue.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { ILayerZeroTeller } from "../../../../src/interfaces/ILayerZeroTeller.sol";
 import { IEtherFiSafe } from "../../../../src/interfaces/IEtherFiSafe.sol";
@@ -42,7 +43,19 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     IERC20 public ebtc = IERC20(0x657e8C867D8B37dCC18fA4Caead9C45EB088C642);
     address public ebtcTeller = address(0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268);
 
+    IBoringOnChainQueue public liquidUsdBoringQueue = IBoringOnChainQueue(0x38FC1BA73b7ED289955a07d9F11A85b6E388064A);
+    IBoringOnChainQueue public liquidEthBoringQueue = IBoringOnChainQueue(0x0D2dF071207E18Ca8638b4f04E98c53155eC2cE0);
+    IBoringOnChainQueue public liquidBtcBoringQueue = IBoringOnChainQueue(0x77A2fd42F8769d8063F2E75061FC200014E41Edf);
+
+    address liquidUsdAssetOut = address(usdc);
+    address liquidEthAssetOut = address(weEth);
+    address liquidBtcAssetOut = address(wbtc);
+
+    uint16 discount = 1; 
+    uint24 secondsToDeadline = 3 days;
+
     address public ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+    
     
     function setUp() public override {
         super.setUp();
@@ -78,9 +91,12 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         _configureModules(modules, shouldWhitelist, moduleSetupData);
 
         roleRegistry.grantRole(liquidModule.ETHERFI_LIQUID_MODULE_ADMIN(), owner);
+
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidEth), liquidEthAssetOut, address(liquidEthBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidBtc), liquidBtcAssetOut, address(liquidBtcBoringQueue), discount, secondsToDeadline);
         
         vm.stopPrank();
-    
     }
 
     function test_bridge_worksforLiquidEth() public {
@@ -1041,5 +1057,285 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         // Try to use a non-admin signer
         vm.expectRevert();
         liquidModule.deposit(address(safe), address(weth), address(liquidEth), amountToDeposit, minReturn, nonAdmin, validSignature);
+    }
+
+    function test_setLiquidAssetWithdrawConfig_succeeds() public {
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidWithdrawConfigSet(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+    }
+
+    function test_setLiquidAssetWithdrawConfig_fails_ifSetterNotRoleRegistryOwner() public {
+        vm.prank(makeAddr("alice"));
+        vm.expectRevert(EtherFiLiquidModule.Unauthorized.selector);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+    }
+
+    function test_setLiquidAssetWithdrawConfig_fails_ifBoringQueueIsNotCorrect() public {
+        // putting liquidEth boring queue for liquid USD should fails
+        vm.prank(owner);
+        vm.expectRevert(EtherFiLiquidModule.InvalidBoringQueue.selector);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidEth), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+    }
+    
+    function test_setLiquidAssetWithdrawConfig_fails_ForZeroAddresses() public {
+        vm.startPrank(owner);
+        
+        vm.expectRevert(EtherFiLiquidModule.InvalidValue.selector);
+        liquidModule.setLiquidAssetWithdrawConfig(address(0), address(usdcScroll), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        
+        vm.expectRevert(EtherFiLiquidModule.InvalidValue.selector);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(0), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        
+        vm.expectRevert(EtherFiLiquidModule.InvalidValue.selector);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(usdcScroll), address(0), discount, secondsToDeadline);
+
+        vm.stopPrank();
+    }
+    
+    function test_setLiquidAssetWithdrawConfig_fails_ifAssetOutNotSupported() public {
+        // Putting liquidEthAssetOut in liquid usd boring queue token out should fail
+        vm.prank(owner);
+        vm.expectRevert(EtherFiLiquidModule.BoringQueueDoesNotAllowAssetOut.selector);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidEthAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+    }
+    
+    function test_setLiquidAssetWithdrawConfig_fails_ifDiscountOutOfBounds() public {
+        vm.prank(owner);
+        vm.expectRevert(EtherFiLiquidModule.InvalidDiscount.selector);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), 1e4, secondsToDeadline);
+    }
+
+    function test_setLiquidAssetWithdrawConfig_fails_ifSecondsToDeadlineIsLessThanMin() public {
+        vm.prank(owner);
+        vm.expectRevert(EtherFiLiquidModule.SecondsToDeadlingLowerThanMin.selector);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, 1);
+    }
+
+    function test_withdraw_succeeds_forLiquidUsd() public {    
+        vm.prank(owner);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        
+        uint256 amountToWithdraw = 1000 * 10**6; 
+        deal(address(liquidUsd), address(safe), amountToWithdraw);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.WITHDRAW_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(liquidUsd), amountToWithdraw)
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        uint256 liquidUsdBalBefore = liquidUsd.balanceOf(address(safe));
+        
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidWithdrawal(address(safe), address(liquidUsd), amountToWithdraw);
+        
+        liquidModule.withdraw(address(safe), address(liquidUsd), amountToWithdraw, owner1, signature);
+        
+        uint256 liquidUsdBalAfter = liquidUsd.balanceOf(address(safe));
+        assertEq(liquidUsdBalAfter, liquidUsdBalBefore - amountToWithdraw);
+    }
+    
+    function test_withdraw_succeeds_forLiquidEth() public {    
+        vm.prank(owner);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidEth), liquidEthAssetOut, address(liquidEthBoringQueue), discount, secondsToDeadline);
+        
+        uint256 amountToWithdraw = 1 ether; 
+        deal(address(liquidEth), address(safe), amountToWithdraw);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.WITHDRAW_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(liquidEth), amountToWithdraw)
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        uint256 liquidEthBalBefore = liquidEth.balanceOf(address(safe));
+        
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidWithdrawal(address(safe), address(liquidEth), amountToWithdraw);
+        
+        liquidModule.withdraw(address(safe), address(liquidEth), amountToWithdraw, owner1, signature);
+        
+        uint256 liquidEthBalAfter = liquidEth.balanceOf(address(safe));
+        assertEq(liquidEthBalAfter, liquidEthBalBefore - amountToWithdraw);
+    }
+    
+    function test_withdraw_succeeds_forLiquidBtc() public {    
+        vm.prank(owner);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidBtc), liquidBtcAssetOut, address(liquidBtcBoringQueue), discount, secondsToDeadline);
+        
+        uint256 amountToWithdraw = 1 ether; 
+        deal(address(liquidBtc), address(safe), amountToWithdraw);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.WITHDRAW_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(liquidBtc), amountToWithdraw)
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        uint256 liquidBtcBalBefore = liquidBtc.balanceOf(address(safe));
+        
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidWithdrawal(address(safe), address(liquidBtc), amountToWithdraw);
+        
+        liquidModule.withdraw(address(safe), address(liquidBtc), amountToWithdraw, owner1, signature);
+        
+        uint256 liquidBtcBalAfter = liquidBtc.balanceOf(address(safe));
+        assertEq(liquidBtcBalAfter, liquidBtcBalBefore - amountToWithdraw);
+    }
+
+    function test_withdraw_revertsWhenConfigNotSet() public {
+        // Use an asset without config
+        uint256 amountToWithdraw = 1000 * 10**18;
+        deal(address(eUsd), address(safe), amountToWithdraw);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.WITHDRAW_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(eUsd), amountToWithdraw)
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        vm.expectRevert(EtherFiLiquidModule.LiquidWithdrawConfigNotSet.selector);
+        liquidModule.withdraw(address(safe), address(eUsd), amountToWithdraw, owner1, signature);
+    }
+
+    function test_withdraw_revertsWithZeroAmount() public {        
+        vm.prank(owner);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        
+        uint256 amountToWithdraw = 0;
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.WITHDRAW_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(liquidUsd), amountToWithdraw)
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        liquidModule.withdraw(address(safe), address(liquidUsd), amountToWithdraw, owner1, signature);
+    }
+
+    function test_withdraw_revertsWithInsufficientBalance() public {
+        vm.prank(owner);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        
+        // Ensure the safe has some balance, but less than we'll try to withdraw
+        uint256 safeBalance = 500 * 10**6;
+        uint256 amountToWithdraw = 1000 * 10**6; // More than balance
+        deal(address(liquidUsd), address(safe), safeBalance);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.WITHDRAW_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(liquidUsd), amountToWithdraw)
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        vm.expectRevert(EtherFiLiquidModule.InsufficientBalanceOnSafe.selector);
+        liquidModule.withdraw(address(safe), address(liquidUsd), amountToWithdraw, owner1, signature);
+    }
+
+    function test_withdraw_revertsWithInvalidSignature() public {
+        vm.prank(owner);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        
+        uint256 amountToWithdraw = 1000 * 10**6;
+        deal(address(liquidUsd), address(safe), amountToWithdraw);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.WITHDRAW_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(liquidUsd), amountToWithdraw + 1) // Wrong amount
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory invalidSignature = abi.encodePacked(r, s, v);
+        
+        vm.expectRevert(ModuleBase.InvalidSignature.selector);
+        liquidModule.withdraw(address(safe), address(liquidUsd), amountToWithdraw, owner1, invalidSignature);
+    }
+
+    function test_withdraw_revertsWhenCalledFromNonSafe() public {
+        vm.prank(owner);
+        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), liquidUsdAssetOut, address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        
+        address fakeSafe = makeAddr("fakeSafe");
+        uint256 amountToWithdraw = 1000 * 10**6;
+        deal(address(liquidUsd), address(fakeSafe), amountToWithdraw);
+        
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.WITHDRAW_SIG(),
+            block.chainid,
+            address(liquidModule),
+            uint256(0), // nonce
+            fakeSafe,
+            abi.encode(address(liquidUsd), amountToWithdraw + 1) // Wrong amount
+        )).toEthSignedMessageHash();
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory invalidSignature = abi.encodePacked(r, s, v);
+        
+        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
+        liquidModule.withdraw(address(fakeSafe), address(liquidUsd), amountToWithdraw, owner1, invalidSignature);
+    }
+
+    function test_getLiquidAssetWithdrawConfig_returnsCorrectConfig() public view {
+        EtherFiLiquidModule.LiquidWithdrawConfig memory liquidUsdConfig = liquidModule.getLiquidAssetWithdrawConfig(address(liquidUsd));
+        assertEq(liquidUsdConfig.assetOut, liquidUsdAssetOut);
+        assertEq(liquidUsdConfig.boringQueue, address(liquidUsdBoringQueue));
+        assertEq(liquidUsdConfig.discount, discount);
+        assertEq(liquidUsdConfig.secondsToDeadline, secondsToDeadline);
+        
+        EtherFiLiquidModule.LiquidWithdrawConfig memory liquidEthConfig = liquidModule.getLiquidAssetWithdrawConfig(address(liquidEth));
+        assertEq(liquidEthConfig.assetOut, liquidEthAssetOut);
+        assertEq(liquidEthConfig.boringQueue, address(liquidEthBoringQueue));
+        assertEq(liquidEthConfig.discount, discount);
+        assertEq(liquidEthConfig.secondsToDeadline, secondsToDeadline);
+        
+        EtherFiLiquidModule.LiquidWithdrawConfig memory liquidBtcConfig = liquidModule.getLiquidAssetWithdrawConfig(address(liquidBtc));
+        assertEq(liquidBtcConfig.assetOut, liquidBtcAssetOut);
+        assertEq(liquidBtcConfig.boringQueue, address(liquidBtcBoringQueue));
+        assertEq(liquidBtcConfig.discount, discount);
+        assertEq(liquidBtcConfig.secondsToDeadline, secondsToDeadline);
+        
     }
 }
