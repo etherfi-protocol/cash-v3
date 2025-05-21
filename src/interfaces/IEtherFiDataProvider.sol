@@ -69,6 +69,12 @@ interface IEtherFiDataProvider {
      */
     function getThirdPartyRecoverySigner() external view returns (address);
 
+        /**
+     * @notice Returns the address of the Refund wallet
+     * @return Address of the Refund wallet
+     */
+    function getRefundWallet() external view returns (address);
+
     /**
      * @notice Returns the Recovery delay period in seconds
      * @return Recovery delay period in seconds

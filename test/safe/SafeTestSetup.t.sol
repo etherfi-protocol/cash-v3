@@ -103,6 +103,7 @@ contract SafeTestSetup is Utils {
 
     bytes32 public DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
 
+    address refundWallet;
     // User recovery signers
     address userRecoverySigner1;
     address userRecoverySigner2;
@@ -119,7 +120,8 @@ contract SafeTestSetup is Utils {
         string memory scrollRpc = vm.envString("SCROLL_RPC");
         if (bytes(scrollRpc).length == 0) scrollRpc = "https://rpc.scroll.io"; 
         vm.createSelectFork(scrollRpc);
-        
+
+        refundWallet = makeAddr("refundWallet");
         pauser = makeAddr("pauser");
         unpauser = makeAddr("unpauser");
         owner = makeAddr("owner");
@@ -175,7 +177,7 @@ contract SafeTestSetup is Utils {
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
-        dataProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), address(cashLens), modules, defaultModules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner));
+        dataProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), address(cashLens), modules, defaultModules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
 
         _setupDebtManager();
         _setupSettlementDispatcher();
@@ -339,7 +341,7 @@ contract SafeTestSetup is Utils {
             stargate: stargateUsdcPool
         });
 
-        address settlementDispatcherRainImpl = address(new SettlementDispatcher(BinSponsor.Rain));
+        address settlementDispatcherRainImpl = address(new SettlementDispatcher(BinSponsor.Rain, address(dataProvider)));
         settlementDispatcherRain = SettlementDispatcher(
             payable(address(new UUPSProxy(
                 settlementDispatcherRainImpl, 
@@ -349,7 +351,7 @@ contract SafeTestSetup is Utils {
 
         roleRegistry.grantRole(settlementDispatcherRain.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
 
-        address settlementDispatcherReapImpl = address(new SettlementDispatcher(BinSponsor.Reap));
+        address settlementDispatcherReapImpl = address(new SettlementDispatcher(BinSponsor.Reap, address(dataProvider)));
         settlementDispatcherReap = SettlementDispatcher(
             payable(address(new UUPSProxy(
                 settlementDispatcherReapImpl, 

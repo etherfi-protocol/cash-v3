@@ -11,6 +11,7 @@ import { CashVerificationLib } from "../../../../../src/libraries/CashVerificati
 import { MockPriceProvider } from "../../../../../src/mocks/MockPriceProvider.sol";
 import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PriceProvider.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
+import { IEtherFiDataProvider } from "../../../../../src/interfaces/IEtherFiDataProvider.sol";
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { SettlementDispatcher } from "../../../../../src/settlement-dispatcher/SettlementDispatcher.sol";
@@ -23,9 +24,6 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
     uint16 discount = 1;
     uint24 secondsToDeadline = 3 days;
 
-    address refundWallet = makeAddr("refundWallet");
-    address newRefundWallet = makeAddr("newRefundWallet");
-
     function setUp() public override {
         super.setUp();
         vm.prank(owner);
@@ -34,58 +32,21 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
     }
 
-    function test_setRefundWallet_succeeds_whenCalledByOwner() public {
-        vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcher.RefundWalletSet(address(0), refundWallet);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-        
-        assertEq(settlementDispatcherReap.getRefundWallet(), refundWallet);
-    }
-
-    function test_setRefundWallet_succeeds_whenChangingExistingWallet() public {
-        // First set initial wallet
-        vm.prank(owner);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-        
-        // Then change it
-        vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcher.RefundWalletSet(refundWallet, newRefundWallet);
-        settlementDispatcherReap.setRefundWallet(newRefundWallet);
-        
-        assertEq(settlementDispatcherReap.getRefundWallet(), newRefundWallet);
-    }
-
-    function test_setRefundWallet_reverts_whenCallerNotOwner() public {
-        vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-    }
-
-    function test_setRefundWallet_reverts_whenAddressZero() public {
-        vm.prank(owner);
-        vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcherReap.setRefundWallet(address(0));
-    }
 
     function test_getRefundWallet_returnsCorrectAddress() public {
         // Initially should be address(0)
-        assertEq(settlementDispatcherReap.getRefundWallet(), address(0));
+        assertEq(settlementDispatcherReap.getRefundWallet(), refundWallet);
         
+        address newWallet = makeAddr("newWallet");
         // Set refund wallet
         vm.prank(owner);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
+        dataProvider.setRefundWallet(newWallet);
         
         // Should return the set address
-        assertEq(settlementDispatcherReap.getRefundWallet(), refundWallet);
+        assertEq(settlementDispatcherReap.getRefundWallet(), newWallet);
     }
 
-    function test_transferFundsToRefundWallet_succeeds_withErc20Token() public {
-        // Set refund wallet
-        vm.prank(owner);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-        
+    function test_transferFundsToRefundWallet_succeeds_withErc20Token() public {        
         // Fund the contract with USDC
         uint256 amount = 100e6;
         deal(address(usdcScroll), address(settlementDispatcherReap), amount);
@@ -108,11 +69,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         assertEq(dispatcherBalBefore - dispatcherBalAfter, amount);
     }
 
-    function test_transferFundsToRefundWallet_succeeds_withNativeToken() public {
-        // Set refund wallet
-        vm.prank(owner);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-        
+    function test_transferFundsToRefundWallet_succeeds_withNativeToken() public {        
         // Fund the contract with ETH
         uint256 amount = 1 ether;
         deal(address(settlementDispatcherReap), amount);
@@ -135,11 +92,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         assertEq(dispatcherBalBefore - dispatcherBalAfter, amount);
     }
 
-    function test_transferFundsToRefundWallet_transferAllTokens_withAmountZero() public {
-        // Set refund wallet
-        vm.prank(owner);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-        
+    function test_transferFundsToRefundWallet_transferAllTokens_withAmountZero() public {        
         // Fund the contract with USDC
         uint256 totalAmount = 100e6;
         deal(address(usdcScroll), address(settlementDispatcherReap), totalAmount);
@@ -163,11 +116,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         assertEq(dispatcherBalAfter, 0);
     }
 
-    function test_transferFundsToRefundWallet_reverts_whenNoBalanceAndAmountIsZero() public {
-        // Set refund wallet
-        vm.prank(owner);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-        
+    function test_transferFundsToRefundWallet_reverts_whenNoBalanceAndAmountIsZero() public {        
         // Attempt to transfer with zero balance
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.CannotWithdrawZeroAmount.selector);
@@ -176,7 +125,12 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
 
 
     function test_transferFundsToRefundWallet_reverts_whenRefundWalletNotSet() public {
-        // Don't set refund wallet
+        // Unset refund wallet
+        vm.mockCall(
+            address(dataProvider),
+            abi.encodeWithSelector(IEtherFiDataProvider.getRefundWallet.selector),
+            abi.encode(address(0))
+        );
         
         // Fund the contract
         deal(address(usdcScroll), address(settlementDispatcherReap), 100e6);
@@ -187,11 +141,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         settlementDispatcherReap.transferFundsToRefundWallet(address(usdcScroll), 100e6);
     }
 
-    function test_transferFundsToRefundWallet_reverts_whenCallerNotBridger() public {
-        // Set refund wallet
-        vm.prank(owner);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-        
+    function test_transferFundsToRefundWallet_reverts_whenCallerNotBridger() public {        
         // Fund the contract
         deal(address(usdcScroll), address(settlementDispatcherReap), 100e6);
         
@@ -201,11 +151,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         settlementDispatcherReap.transferFundsToRefundWallet(address(usdcScroll), 100e6);
     }
 
-    function test_transferFundsToRefundWallet_reverts_whenInsufficientBalance() public {
-        // Set refund wallet
-        vm.prank(owner);
-        settlementDispatcherReap.setRefundWallet(refundWallet);
-        
+    function test_transferFundsToRefundWallet_reverts_whenInsufficientBalance() public {        
         // Fund the contract with less than we'll try to transfer
         uint256 amount = 50e6;
         deal(address(usdcScroll), address(settlementDispatcherReap), amount);
