@@ -5,6 +5,7 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import { IStargate, Ticket } from "../interfaces/IStargate.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
@@ -56,6 +57,11 @@ contract SettlementDispatcher is UpgradeableProxy {
      */
     BinSponsor public immutable binSponsor;
 
+    /**
+     * @notice Instance of the EtherFiDataProvider 
+     */
+    IEtherFiDataProvider public immutable dataProvider;
+
     /// @custom:storage-location erc7201:etherfi.storage.SettlementDispatcher
     /**
      * @dev Storage struct for SettlementDispatcher (follows ERC-7201 naming convention)
@@ -65,8 +71,6 @@ contract SettlementDispatcher is UpgradeableProxy {
         mapping(address token => DestinationData) destinationData;
         /// @notice Mapping of liquid token address to its withdraw config
         mapping (address liquidToken => LiquidWithdrawConfig) liquidWithdrawConfig;
-        /// @notice Refund wallet used for refunding users for reversals/returns
-        address refundWallet;
     }
 
     /**
@@ -115,13 +119,6 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @param amount Amount of liquid assets withdrawn
      */
     event LiquidWithdrawalRequested(address indexed liquidToken,address indexed assetOut, uint128 amount);
-
-    /**
-     * @notice Emitted when a new refund wallet is set
-     * @param oldRefundWallet Address of the old refund wallet
-     * @param newRefundWallet Address of the new refund wallet
-     */
-    event RefundWalletSet(address oldRefundWallet, address newRefundWallet);
 
     /**
      * @notice Emitted when funds are transferred to the refund wallet
@@ -211,9 +208,10 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @dev Cannot be called again after deployment (UUPS pattern)
      */
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(BinSponsor _binSponsor) {
+    constructor(BinSponsor _binSponsor, address _dataProvider) {
         _disableInitializers();
         binSponsor = _binSponsor;
+        dataProvider = IEtherFiDataProvider(_dataProvider);
     }
 
     /**
@@ -307,6 +305,14 @@ contract SettlementDispatcher is UpgradeableProxy {
     } 
 
     /**
+     * @notice Returns the refund wallet address set in the data provider contract
+     * @return Refund wallet address
+     */
+    function getRefundWallet() public view returns (address) {
+        return dataProvider.getRefundWallet();
+    }
+
+    /**
      * @notice Function to withdraw liquid tokens inside the Settlement Dispatcher
      * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
      * @param liquidToken Address of the liquid token
@@ -324,28 +330,6 @@ contract SettlementDispatcher is UpgradeableProxy {
     }
 
     /**
-     * @notice Sets the address of the refund wallet
-     * @dev Only callable by the role registry owner
-     * @param refundWallet The address to set as the refund wallet
-     * @custom:throws InvalidValue If refundWallet is address(0)
-     */
-    function setRefundWallet(address refundWallet) external onlyRoleRegistryOwner() {
-        if (refundWallet == address(0)) revert InvalidValue();
-
-        SettlementDispatcherStorage storage $ = _getSettlementDispatcherStorage();
-        emit RefundWalletSet($.refundWallet, refundWallet);
-        $.refundWallet = refundWallet;
-    }
-
-    /**
-     * @notice Returns the address of the currently set refund wallet
-     * @return Address of the refund wallet
-     */
-    function getRefundWallet() external view returns (address) {
-        return _getSettlementDispatcherStorage().refundWallet;
-    }
-
-    /**
      * @notice Transfers funds to the refund wallet
      * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
      * @param asset Address of the token to transfer 
@@ -355,12 +339,11 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @custom:throws WithdrawFundsFailed If ETH transfer fails
      */
     function transferFundsToRefundWallet(address asset, uint256 amount) external nonReentrant onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
-        SettlementDispatcherStorage storage $ = _getSettlementDispatcherStorage();
+        address refundWallet = getRefundWallet();
+        if (refundWallet == address(0)) revert RefundWalletNotSet();
+        amount = _withdrawFunds(asset, refundWallet, amount);
 
-        if ($.refundWallet == address(0)) revert RefundWalletNotSet();
-        amount = _withdrawFunds(asset, $.refundWallet, amount);
-
-        emit TransferToRefundWallet(asset, $.refundWallet, amount);
+        emit TransferToRefundWallet(asset, refundWallet, amount);
     }
 
     /**
