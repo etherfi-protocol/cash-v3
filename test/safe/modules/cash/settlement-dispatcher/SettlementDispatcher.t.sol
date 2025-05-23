@@ -28,8 +28,8 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         super.setUp();
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcher.LiquidWithdrawConfigSet(liquidUsd, address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
+        emit SettlementDispatcher.LiquidWithdrawConfigSet(liquidUsd, address(boringQueueLiquidUsd), discount, secondsToDeadline);
+        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(boringQueueLiquidUsd), discount, secondsToDeadline);
     }
 
 
@@ -165,58 +165,36 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
     function test_setLiquidAssetWithdrawConfig_setsTheConfig() public {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcher.LiquidWithdrawConfigSet(liquidUsd, address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
+        emit SettlementDispatcher.LiquidWithdrawConfigSet(liquidUsd, address(boringQueueLiquidUsd), discount, secondsToDeadline);
+        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(boringQueueLiquidUsd), discount, secondsToDeadline);
     }
     
     function test_setLiquidAssetWithdrawConfig_fails_ifSetterNotRoleRegistryOwner() public {
         vm.prank(alice);
         vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
+        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(boringQueueLiquidUsd), discount, secondsToDeadline);
     }
 
     function test_setLiquidAssetWithdrawConfig_fails_ifBoringQueueIsNotCorrect() public {
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.InvalidBoringQueue.selector);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(address(usdcScroll), address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
+        settlementDispatcherReap.setLiquidAssetWithdrawConfig(address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
     }
     
     function test_setLiquidAssetWithdrawConfig_fails_ForZeroAddresses() public {
         vm.startPrank(owner);
         
         vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(address(0), address(usdcScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
-        
+        settlementDispatcherReap.setLiquidAssetWithdrawConfig(address(0), address(boringQueueLiquidUsd), discount, secondsToDeadline);
+                
         vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(0), address(boringQueueLiquidUsd), discount, secondsToDeadline);
-        
-        vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(usdcScroll), address(0), discount, secondsToDeadline);
+        settlementDispatcherReap.setLiquidAssetWithdrawConfig(liquidUsd, address(0), discount, secondsToDeadline);
 
         vm.stopPrank();
-    }
-    
-    function test_setLiquidAssetWithdrawConfig_fails_ifAssetOutNotSupported() public {
-        vm.prank(owner);
-        vm.expectRevert(SettlementDispatcher.BoringQueueDoesNotAllowAssetOut.selector);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(address(boringQueueLiquidUsd), address(weETHScroll), address(boringQueueLiquidUsd), discount, secondsToDeadline);
-    }
-    
-    function test_setLiquidAssetWithdrawConfig_fails_ifDiscountOutOfBounds() public {
-        vm.prank(owner);
-        vm.expectRevert(SettlementDispatcher.InvalidDiscount.selector);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(address(boringQueueLiquidUsd), address(usdcScroll), address(boringQueueLiquidUsd), 1e4, secondsToDeadline);
-    }
-
-    function test_setLiquidAssetWithdrawConfig_fails_ifSecondsToDeadlineIsLessThanMin() public {
-        vm.prank(owner);
-        vm.expectRevert(SettlementDispatcher.SecondsToDeadlingLowerThanMin.selector);
-        settlementDispatcherReap.setLiquidAssetWithdrawConfig(address(boringQueueLiquidUsd), address(usdcScroll), address(boringQueueLiquidUsd), discount, 1);
     }
 
     function test_getLiquidAssetWithdrawalConfig_returns_correctConfig() public view {
         SettlementDispatcher.LiquidWithdrawConfig memory config = settlementDispatcherReap.getLiquidAssetWithdrawConfig(address(liquidUsd));
-        assertEq(config.assetOut, address(usdcScroll));
         assertEq(config.boringQueue, address(boringQueueLiquidUsd));
         assertEq(config.discount, discount);
         assertEq(config.secondsToDeadline, secondsToDeadline);
@@ -230,7 +208,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit SettlementDispatcher.LiquidWithdrawalRequested(liquidUsd, address(usdcScroll), amount);
-        settlementDispatcherReap.withdrawLiquidAsset(liquidUsd, amount);
+        settlementDispatcherReap.withdrawLiquidAsset(liquidUsd, address(usdcScroll), amount);
 
         assertEq(IERC20(liquidUsd).balanceOf(address(settlementDispatcherReap)), 0);
     }
@@ -240,7 +218,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.LiquidWithdrawConfigNotSet.selector);
-        settlementDispatcherReap.withdrawLiquidAsset(address(usdcScroll), amount);
+        settlementDispatcherReap.withdrawLiquidAsset(address(usdcScroll), address(usdcScroll), amount);
     }
 
     function test_setDestinationData_succeeds_whenCalledByAdmin() public {

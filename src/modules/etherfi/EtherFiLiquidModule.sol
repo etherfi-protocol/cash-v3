@@ -27,8 +27,6 @@ contract EtherFiLiquidModule is ModuleBase {
      * @dev Stores all data needed to withdraw liquid tokens
      */
     struct LiquidWithdrawConfig {
-        /// @notice assetOut The asset to withdraw
-        address assetOut;
         /// @notice boringQueue Address of the boring queue
         address boringQueue;
         /// @notice discount The discount to apply to the withdraw in bps
@@ -76,12 +74,11 @@ contract EtherFiLiquidModule is ModuleBase {
     /**
      * @notice Emitted when liquid asset withdraw config is set
      * @param token Address of the liquid asset
-     * @param assetOut Address of the asset out
      * @param boringQueue Address of the boring queue
      * @param discount Discount percentage with 5 decimals precision
      * @param secondsToDeadline The time in seconds the request is valid for
      */
-    event LiquidWithdrawConfigSet(address indexed token, address indexed assetOut, address boringQueue, uint16 discount, uint24 secondsToDeadline);
+    event LiquidWithdrawConfigSet(address indexed token,  address boringQueue, uint16 discount, uint24 secondsToDeadline);
     
     /// @notice Thrown when the Safe doesn't have sufficient token balance for an operation
     error InsufficientBalanceOnSafe();
@@ -109,15 +106,6 @@ contract EtherFiLiquidModule is ModuleBase {
 
     /// @notice Error when the return amount is less than min return
     error InsufficientReturnAmount();
-
-    /// @notice Thrown when Boring Queue does not allow the asset out
-    error BoringQueueDoesNotAllowAssetOut();
-
-    /// @notice Thrown when the Liquid Asset withdraw discount is out of the queue bounds
-    error InvalidDiscount();
-    
-    /// @notice Thrown when the Liquid Asset withdraw seconds to deadline is less than min set on the queue
-    error SecondsToDeadlingLowerThanMin();
 
     /// @notice Thrown when liquid withdraw config is not set for the liquid token
     error LiquidWithdrawConfigNotSet();
@@ -263,7 +251,8 @@ contract EtherFiLiquidModule is ModuleBase {
     /**
      * @notice Withdraws from Liquid tokens from the safe
      * @param safe The Safe address which holds the tokens 
-     * @param liquidAsset The address of the liquid token to receive 
+     * @param liquidAsset The address of the liquid token to withdraw 
+     * @param assetOut The address of the underlying token to receive 
      * @param amountToWithdraw The amount of tokens to withdraw
      * @param signer The address that signed the transaction 
      * @param signature The signature authorizing the transaction 
@@ -274,10 +263,10 @@ contract EtherFiLiquidModule is ModuleBase {
      * @custom:throws OnlySafeAdmin If signer is not an admin of the Safe
      * @custom:throws InvalidSignature If the signature is invalid
      */
-    function withdraw(address safe, address liquidAsset, uint256 amountToWithdraw, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+    function withdraw(address safe, address liquidAsset, address assetOut, uint256 amountToWithdraw, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         bytes32 digestHash = _getWithdrawDigestHash(safe, liquidAsset, amountToWithdraw);
         _verifyAdminSig(digestHash, signer, signature);
-        _withdraw(safe, liquidAsset, amountToWithdraw);
+        _withdraw(safe, liquidAsset, assetOut, amountToWithdraw);
     }
 
     /**
@@ -294,14 +283,15 @@ contract EtherFiLiquidModule is ModuleBase {
     /**
      * @notice Internal function which facilitates liquid withdrawals from the safe
      * @param safe The Safe address which holds the tokens 
-     * @param liquidAsset The address of the liquid token to receive 
+     * @param liquidAsset The address of the liquid token to withdraw
+     * @param assetOut The address of the underlying token to receive 
      * @param amountToWithdraw The amount of tokens to withdraw
      * @custom:throws LiquidWithdrawConfigNotSet If the liquid withdraw config is not set for the liquid token
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidInput If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidSignature If the signature is invalid
      */
-    function _withdraw(address safe, address liquidAsset, uint256 amountToWithdraw) internal {
+    function _withdraw(address safe, address liquidAsset, address assetOut, uint256 amountToWithdraw) internal {
         if (liquidWithdrawConfig[liquidAsset].boringQueue == address(0)) revert LiquidWithdrawConfigNotSet();
         if (amountToWithdraw == 0) revert InvalidInput();
                 
@@ -315,7 +305,7 @@ contract EtherFiLiquidModule is ModuleBase {
         data[0] = abi.encodeWithSelector(ERC20.approve.selector, liquidWithdrawConfig[liquidAsset].boringQueue, amountToWithdraw);
         
         to[1] = address(liquidWithdrawConfig[liquidAsset].boringQueue);
-        data[1] = abi.encodeWithSelector(IBoringOnChainQueue.requestOnChainWithdraw.selector, liquidWithdrawConfig[liquidAsset].assetOut, amountToWithdraw, liquidWithdrawConfig[liquidAsset].discount, liquidWithdrawConfig[liquidAsset].secondsToDeadline);
+        data[1] = abi.encodeWithSelector(IBoringOnChainQueue.requestOnChainWithdraw.selector, assetOut, amountToWithdraw, liquidWithdrawConfig[liquidAsset].discount, liquidWithdrawConfig[liquidAsset].secondsToDeadline);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
         
@@ -466,7 +456,6 @@ contract EtherFiLiquidModule is ModuleBase {
      * @notice Function to set the liquid asset withdraw config 
      * @dev Only callable by the role registry owner
      * @param asset Address of the liquid asset
-     * @param assetOut Address of the asset out
      * @param boringQueue Address of the boring queue
      * @param discount Discount with 5 decimals (1% = 100000)
      * @param secondsToDeadline Seconds to deadline after which the withdraw request would expire
@@ -475,25 +464,19 @@ contract EtherFiLiquidModule is ModuleBase {
      * @custom:throws InvalidDiscount If the discount is out of min and max bounds
      * @custom:throws SecondsToDeadlingLowerThanMin If the seconds to deadline is lesser than the min seconds to deadline 
      */
-    function setLiquidAssetWithdrawConfig(address asset, address assetOut, address boringQueue, uint16 discount, uint24 secondsToDeadline) external {
+    function setLiquidAssetWithdrawConfig(address asset, address boringQueue, uint16 discount, uint24 secondsToDeadline) external {
         if (!etherFiDataProvider.roleRegistry().hasRole(ETHERFI_LIQUID_MODULE_ADMIN, msg.sender)) revert Unauthorized();
         
-        if (asset == address(0) || assetOut == address(0) || boringQueue == address(0)) revert InvalidValue();
-        
-        IBoringOnChainQueue.WithdrawAsset memory withdrawAsset = IBoringOnChainQueue(boringQueue).withdrawAssets(assetOut);
-        if (!withdrawAsset.allowWithdraws) revert BoringQueueDoesNotAllowAssetOut();
-        if (discount < withdrawAsset.minDiscount || discount > withdrawAsset.maxDiscount) revert InvalidDiscount();
-        if (secondsToDeadline < withdrawAsset.minimumSecondsToDeadline) revert SecondsToDeadlingLowerThanMin();
+        if (asset == address(0) ||  boringQueue == address(0)) revert InvalidValue();
         if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();
 
         liquidWithdrawConfig[asset] = LiquidWithdrawConfig({
-            assetOut: assetOut,
             boringQueue: boringQueue,
             discount: discount,
             secondsToDeadline: secondsToDeadline
         });
 
-        emit LiquidWithdrawConfigSet(asset, assetOut, boringQueue, discount, secondsToDeadline);
+        emit LiquidWithdrawConfigSet(asset, boringQueue, discount, secondsToDeadline);
     }
 
     /**

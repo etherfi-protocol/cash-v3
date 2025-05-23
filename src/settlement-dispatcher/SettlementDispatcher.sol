@@ -37,8 +37,6 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @dev Stores all data needed to withdraw liquid tokens
      */
     struct LiquidWithdrawConfig {
-        /// @notice assetOut The asset to withdraw
-        address assetOut;
         /// @notice boringQueue Address of the boring queue
         address boringQueue;
         /// @notice discount The discount to apply to the withdraw in bps
@@ -105,12 +103,11 @@ contract SettlementDispatcher is UpgradeableProxy {
     /**
      * @notice Emitted when liquid asset withdraw config is set
      * @param token Address of the liquid asset
-     * @param assetOut Address of the asset out
      * @param boringQueue Address of the boring queue
      * @param discount Discount percentage with 5 decimals precision
      * @param secondsToDeadline The time in seconds the request is valid for
      */
-    event LiquidWithdrawConfigSet(address indexed token, address indexed assetOut, address boringQueue, uint16 discount, uint24 secondsToDeadline);
+    event LiquidWithdrawConfigSet(address indexed token, address boringQueue, uint16 discount, uint24 secondsToDeadline);
     
     /**
      * @notice Emitted when liquid asset withdrawal is requested
@@ -118,7 +115,7 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @param assetOut Address of the asset out
      * @param amount Amount of liquid assets withdrawn
      */
-    event LiquidWithdrawalRequested(address indexed liquidToken,address indexed assetOut, uint128 amount);
+    event LiquidWithdrawalRequested(address indexed liquidToken, address indexed assetOut, uint128 amount);
 
     /**
      * @notice Emitted when funds are transferred to the refund wallet
@@ -172,21 +169,6 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Thrown when the minimum return amount is not satisfied
      */
     error InsufficientMinReturn();
-
-    /**
-     * @notice Thrown when Boring Queue does not allow the asset out
-     */
-    error BoringQueueDoesNotAllowAssetOut();
-
-    /**
-     * @notice Thrown when the Liquid Asset withdraw discount is out of the queue bounds
-     */
-    error InvalidDiscount();
-    
-    /**
-     * @notice Thrown when the Liquid Asset withdraw seconds to deadline is less than min set on the queue
-     */
-    error SecondsToDeadlingLowerThanMin();
 
     /**
      * @notice Thrown when liquid withdraw config is not set for the liquid token
@@ -265,7 +247,6 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Function to set the liquid asset withdraw config 
      * @dev Only callable by the role registry owner
      * @param asset Address of the liquid asset
-     * @param assetOut Address of the asset out
      * @param boringQueue Address of the boring queue
      * @param discount Discount with 5 decimals (1% = 100000)
      * @param secondsToDeadline Seconds to deadline after which the withdraw request would expire
@@ -274,25 +255,19 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @custom:throws InvalidDiscount If the discount is out of min and max bounds
      * @custom:throws SecondsToDeadlingLowerThanMin If the seconds to deadline is lesser than the min seconds to deadline 
      */
-    function setLiquidAssetWithdrawConfig(address asset, address assetOut, address boringQueue, uint16 discount, uint24 secondsToDeadline) external onlyRoleRegistryOwner {
-        if (asset == address(0) || assetOut == address(0) || boringQueue == address(0)) revert InvalidValue();
-        
-        IBoringOnChainQueue.WithdrawAsset memory withdrawAsset = IBoringOnChainQueue(boringQueue).withdrawAssets(assetOut);
-        if (!withdrawAsset.allowWithdraws) revert BoringQueueDoesNotAllowAssetOut();
-        if (discount < withdrawAsset.minDiscount || discount > withdrawAsset.maxDiscount) revert InvalidDiscount();
-        if (secondsToDeadline < withdrawAsset.minimumSecondsToDeadline) revert SecondsToDeadlingLowerThanMin();
+    function setLiquidAssetWithdrawConfig(address asset, address boringQueue, uint16 discount, uint24 secondsToDeadline) external onlyRoleRegistryOwner {
+        if (asset == address(0) || boringQueue == address(0)) revert InvalidValue();
         if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();
 
         SettlementDispatcherStorage storage $ = _getSettlementDispatcherStorage();
 
         $.liquidWithdrawConfig[asset] = LiquidWithdrawConfig({
-            assetOut: assetOut,
             boringQueue: boringQueue,
             discount: discount,
             secondsToDeadline: secondsToDeadline
         });
 
-        emit LiquidWithdrawConfigSet(asset, assetOut, boringQueue, discount, secondsToDeadline);
+        emit LiquidWithdrawConfigSet(asset, boringQueue, discount, secondsToDeadline);
     }
 
     /**
@@ -316,17 +291,18 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Function to withdraw liquid tokens inside the Settlement Dispatcher
      * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
      * @param liquidToken Address of the liquid token
+     * @param assetOut Address of the underlying token to receive
      * @param amount Amount of liquid tokens to withdraw
      */
-    function withdrawLiquidAsset(address liquidToken, uint128 amount) external onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+    function withdrawLiquidAsset(address liquidToken, address assetOut, uint128 amount) external onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
         LiquidWithdrawConfig storage $ = _getSettlementDispatcherStorage().liquidWithdrawConfig[liquidToken];
 
         if ($.boringQueue == address(0)) revert LiquidWithdrawConfigNotSet();
 
         IERC20(liquidToken).forceApprove($.boringQueue, amount);
-        IBoringOnChainQueue($.boringQueue).requestOnChainWithdraw($.assetOut, amount, $.discount, $.secondsToDeadline);
+        IBoringOnChainQueue($.boringQueue).requestOnChainWithdraw(assetOut, amount, $.discount, $.secondsToDeadline);
 
-        emit LiquidWithdrawalRequested(liquidToken, $.assetOut, amount);
+        emit LiquidWithdrawalRequested(liquidToken, assetOut, amount);
     }
 
     /**
