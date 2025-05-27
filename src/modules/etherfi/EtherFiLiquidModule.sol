@@ -66,7 +66,7 @@ contract EtherFiLiquidModule is ModuleBase {
     event LiquidDeposit(address indexed safe, address indexed inputToken, address indexed outputToken, uint256 inputAmount, uint256 outputAmount);
 
     /// @notice Emitted when safe withdraws from Liquid
-    event LiquidWithdrawal(address indexed safe, address indexed liquidAsset, uint256 amountToWithdraw);
+    event LiquidWithdrawal(address indexed safe, address indexed liquidAsset, uint256 amountToWithdraw, uint256 amountOut);
     
     /// @notice Emitted when safe bridge Liquid assets to other chains
     event LiquidBridged(address indexed safe, address indexed liquidAsset, address indexed destRecipient, uint32 destEid, uint256 amount, uint256 bridgeFee);
@@ -254,6 +254,7 @@ contract EtherFiLiquidModule is ModuleBase {
      * @param liquidAsset The address of the liquid token to withdraw 
      * @param assetOut The address of the underlying token to receive 
      * @param amountToWithdraw The amount of tokens to withdraw
+     * @param minReturn Acceptable min return amount of asset out
      * @param signer The address that signed the transaction 
      * @param signature The signature authorizing the transaction 
      * @dev Verifies signature then executes token approval and deposit through the Safe's module execution
@@ -263,10 +264,10 @@ contract EtherFiLiquidModule is ModuleBase {
      * @custom:throws OnlySafeAdmin If signer is not an admin of the Safe
      * @custom:throws InvalidSignature If the signature is invalid
      */
-    function withdraw(address safe, address liquidAsset, address assetOut, uint256 amountToWithdraw, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = _getWithdrawDigestHash(safe, liquidAsset, amountToWithdraw);
+    function withdraw(address safe, address liquidAsset, address assetOut, uint128 amountToWithdraw, uint128 minReturn, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        bytes32 digestHash = _getWithdrawDigestHash(safe, liquidAsset, amountToWithdraw, minReturn);
         _verifyAdminSig(digestHash, signer, signature);
-        _withdraw(safe, liquidAsset, assetOut, amountToWithdraw);
+        _withdraw(safe, liquidAsset, assetOut, amountToWithdraw, minReturn);
     }
 
     /**
@@ -274,10 +275,11 @@ contract EtherFiLiquidModule is ModuleBase {
      * @param safe The Safe address which holds the tokens
      * @param liquidAsset The address of the liquid token
      * @param amountToWithdraw The amount to withdraw
+     * @param minReturn Acceptable min return amount of asset out
      * @return The digest hash for signature verification
      */
-    function _getWithdrawDigestHash(address safe, address liquidAsset, uint256 amountToWithdraw) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(liquidAsset, amountToWithdraw))).toEthSignedMessageHash();
+    function _getWithdrawDigestHash(address safe, address liquidAsset, uint128 amountToWithdraw, uint128 minReturn) internal returns (bytes32) {
+        return keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(liquidAsset, amountToWithdraw, minReturn))).toEthSignedMessageHash();
     }
 
     /**
@@ -286,30 +288,35 @@ contract EtherFiLiquidModule is ModuleBase {
      * @param liquidAsset The address of the liquid token to withdraw
      * @param assetOut The address of the underlying token to receive 
      * @param amountToWithdraw The amount of tokens to withdraw
+     * @param minReturn Acceptable min return amount of asset out
      * @custom:throws LiquidWithdrawConfigNotSet If the liquid withdraw config is not set for the liquid token
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidInput If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidSignature If the signature is invalid
      */
-    function _withdraw(address safe, address liquidAsset, address assetOut, uint256 amountToWithdraw) internal {
-        if (liquidWithdrawConfig[liquidAsset].boringQueue == address(0)) revert LiquidWithdrawConfigNotSet();
+    function _withdraw(address safe, address liquidAsset, address assetOut, uint128 amountToWithdraw, uint128 minReturn) internal {
+        IBoringOnChainQueue boringQueue = IBoringOnChainQueue(liquidWithdrawConfig[liquidAsset].boringQueue);
+        uint16 discount = liquidWithdrawConfig[liquidAsset].discount;
+        if (address(boringQueue) == address(0)) revert LiquidWithdrawConfigNotSet();
         if (amountToWithdraw == 0) revert InvalidInput();
-                
         if (ERC20(liquidAsset).balanceOf(safe) < amountToWithdraw) revert InsufficientBalanceOnSafe();
+
+        uint128 amountOutFromQueue = boringQueue.previewAssetsOut(assetOut, amountToWithdraw, discount);
+        if (amountOutFromQueue < minReturn) revert InsufficientReturnAmount();
 
         address[] memory to = new address[](2);
         bytes[] memory data = new bytes[](2);
         uint256[] memory values = new uint256[](2);
 
         to[0] = liquidAsset;
-        data[0] = abi.encodeWithSelector(ERC20.approve.selector, liquidWithdrawConfig[liquidAsset].boringQueue, amountToWithdraw);
+        data[0] = abi.encodeWithSelector(ERC20.approve.selector, boringQueue, amountToWithdraw);
         
-        to[1] = address(liquidWithdrawConfig[liquidAsset].boringQueue);
-        data[1] = abi.encodeWithSelector(IBoringOnChainQueue.requestOnChainWithdraw.selector, assetOut, amountToWithdraw, liquidWithdrawConfig[liquidAsset].discount, liquidWithdrawConfig[liquidAsset].secondsToDeadline);
+        to[1] = address(boringQueue);
+        data[1] = abi.encodeWithSelector(IBoringOnChainQueue.requestOnChainWithdraw.selector, assetOut, amountToWithdraw, discount, liquidWithdrawConfig[liquidAsset].secondsToDeadline);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
         
-        emit LiquidWithdrawal(safe, liquidAsset, amountToWithdraw);
+        emit LiquidWithdrawal(safe, liquidAsset, amountToWithdraw, amountOutFromQueue);
     }
 
     /**
