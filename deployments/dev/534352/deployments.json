@@ -11,11 +11,11 @@
     "SettlementDispatcherRain": "0x26d90676C6aeF2a09Cf383af499cc67E9D6ad7CA",
     "TopUpDest": "0x06fe42Cf3C63412f1955758ce2798709476a38fd",
     "TopUpDestNativeGateway": "0x023aA54c7bcC6257733Db28bc5b9C11b886a4578",
-    "OpenOceanSwapModule": "0x765eEfC0Cccd6eD7599C9CDf09Bc724e3410423d",
+    "OpenOceanSwapModule": "0x976e56Bb016A39480dD9c5044F52f3766212A376",
     "CashModule": "0xBc5e1a8cdC14b286A8f5F523059cf02A7fFE9A6d",
     "CashEventEmitter": "0x357b440CfcD9677A99f2f85D5297c141B8837A9b",
     "CashLens": "0xdFa3089466fD8Ce1c55E998cA3FdffC3371bc106",
-    "EtherFiLiquidModule": "0xb7AF0F32f0af40305a449711AD9c0001941DD9C5",
+    "EtherFiLiquidModule": "0x585d49f856aD14F37234B42Fc78A8506f7f8e446",
     "EtherFiStakeModule": "0x5ac17A065B0e7070737daAc216B3D97c0c400Eec",
     "CashLiquidationHelper": "0x68a977A594906B1262206bF0Aa06607Afa43cC4C"
   }
