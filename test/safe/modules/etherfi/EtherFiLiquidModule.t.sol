@@ -92,9 +92,9 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
 
         roleRegistry.grantRole(liquidModule.ETHERFI_LIQUID_MODULE_ADMIN(), owner);
 
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidEth), address(liquidEthBoringQueue), discount, secondsToDeadline);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidBtc), address(liquidBtcBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(liquidUsdBoringQueue));
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidEth), address(liquidEthBoringQueue));
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidBtc), address(liquidBtcBoringQueue));
         
         vm.stopPrank();
     }
@@ -1059,42 +1059,42 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         liquidModule.deposit(address(safe), address(weth), address(liquidEth), amountToDeposit, minReturn, nonAdmin, validSignature);
     }
 
-    function test_setLiquidAssetWithdrawConfig_succeeds() public {
+    function test_setLiquidAssetWithdrawQueue_succeeds() public {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit EtherFiLiquidModule.LiquidWithdrawConfigSet(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        emit EtherFiLiquidModule.LiquidWithdrawQueueSet(address(liquidUsd), address(liquidUsdBoringQueue));
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(liquidUsdBoringQueue));
     }
 
-    function test_setLiquidAssetWithdrawConfig_fails_ifSetterNotRoleRegistryOwner() public {
+    function test_setLiquidAssetWithdrawQueue_fails_ifSetterNotRoleRegistryOwner() public {
         vm.prank(makeAddr("alice"));
         vm.expectRevert(EtherFiLiquidModule.Unauthorized.selector);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(liquidUsdBoringQueue));
     }
 
-    function test_setLiquidAssetWithdrawConfig_fails_ifBoringQueueIsNotCorrect() public {
+    function test_setLiquidAssetWithdrawQueue_fails_ifBoringQueueIsNotCorrect() public {
         // putting liquidEth boring queue for liquid USD should fails
         vm.prank(owner);
         vm.expectRevert(EtherFiLiquidModule.InvalidBoringQueue.selector);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidEth), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidEth), address(liquidUsdBoringQueue));
     }
     
-    function test_setLiquidAssetWithdrawConfig_fails_ForZeroAddresses() public {
+    function test_setLiquidAssetWithdrawQueue_fails_ForZeroAddresses() public {
         vm.startPrank(owner);
         
         vm.expectRevert(EtherFiLiquidModule.InvalidValue.selector);
-        liquidModule.setLiquidAssetWithdrawConfig(address(0), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(0), address(liquidUsdBoringQueue));
         
         
         vm.expectRevert(EtherFiLiquidModule.InvalidValue.selector);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(0), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(0));
 
         vm.stopPrank();
     }
     
     function test_withdraw_succeeds_forLiquidUsd() public {    
         vm.prank(owner);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(liquidUsdBoringQueue));
         
         uint128 amountToWithdraw = 1000 * 10**6; 
         uint128 amountOut = liquidUsdBoringQueue.previewAssetsOut(address(liquidUsdAssetOut), amountToWithdraw, discount);
@@ -1106,7 +1106,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             liquidModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(address(liquidUsd), amountToWithdraw, amountToWithdraw)
+            abi.encode(address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -1117,7 +1117,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit EtherFiLiquidModule.LiquidWithdrawal(address(safe), address(liquidUsd), amountToWithdraw, amountOut);
         
-        liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, owner1, signature);
+        liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, signature);
         
         uint256 liquidUsdBalAfter = liquidUsd.balanceOf(address(safe));
         assertEq(liquidUsdBalAfter, liquidUsdBalBefore - amountToWithdraw);
@@ -1125,7 +1125,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     
     function test_withdraw_succeeds_forLiquidEth() public {    
         vm.prank(owner);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidEth), address(liquidEthBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidEth), address(liquidEthBoringQueue));
         
         uint128 amountToWithdraw = 1 ether; 
         uint128 assetOut = liquidEthBoringQueue.previewAssetsOut(address(liquidEthAssetOut), amountToWithdraw, discount);
@@ -1137,7 +1137,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             liquidModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(address(liquidEth), amountToWithdraw, assetOut)
+            abi.encode(address(liquidEth), liquidEthAssetOut, amountToWithdraw, assetOut, discount, secondsToDeadline)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -1148,7 +1148,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit EtherFiLiquidModule.LiquidWithdrawal(address(safe), address(liquidEth), amountToWithdraw, assetOut);
         
-        liquidModule.withdraw(address(safe), address(liquidEth), liquidEthAssetOut, amountToWithdraw, assetOut, owner1, signature);
+        liquidModule.withdraw(address(safe), address(liquidEth), liquidEthAssetOut, amountToWithdraw, assetOut, discount, secondsToDeadline, owner1, signature);
         
         uint256 liquidEthBalAfter = liquidEth.balanceOf(address(safe));
         assertEq(liquidEthBalAfter, liquidEthBalBefore - amountToWithdraw);
@@ -1156,7 +1156,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     
     function test_withdraw_succeeds_forLiquidBtc() public {    
         vm.prank(owner);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidBtc), address(liquidBtcBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidBtc), address(liquidBtcBoringQueue));
         
         uint128 amountToWithdraw = 1 ether; 
         uint128 assetOut = liquidBtcBoringQueue.previewAssetsOut(address(liquidBtcAssetOut), amountToWithdraw, discount);
@@ -1168,7 +1168,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             liquidModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(address(liquidBtc), amountToWithdraw, amountToWithdraw)
+            abi.encode(address(liquidBtc), liquidBtcAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -1179,7 +1179,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit EtherFiLiquidModule.LiquidWithdrawal(address(safe), address(liquidBtc), amountToWithdraw, assetOut);
         
-        liquidModule.withdraw(address(safe), address(liquidBtc), liquidBtcAssetOut, amountToWithdraw, amountToWithdraw, owner1, signature);
+        liquidModule.withdraw(address(safe), address(liquidBtc), liquidBtcAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, signature);
         
         uint256 liquidBtcBalAfter = liquidBtc.balanceOf(address(safe));
         assertEq(liquidBtcBalAfter, liquidBtcBalBefore - amountToWithdraw);
@@ -1187,7 +1187,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     
     function test_withdraw_fails_ifReturnAmountIsInsufficient() public {    
         vm.prank(owner);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidBtc), address(liquidBtcBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidBtc), address(liquidBtcBoringQueue));
         
         uint128 amountToWithdraw = 1 ether; 
         uint128 assetOut = liquidBtcBoringQueue.previewAssetsOut(address(liquidBtcAssetOut), amountToWithdraw, discount);
@@ -1200,14 +1200,14 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             liquidModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(address(liquidBtc), amountToWithdraw, minReturn)
+            abi.encode(address(liquidBtc), address(liquidBtcAssetOut), amountToWithdraw, minReturn, discount, secondsToDeadline)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(EtherFiLiquidModule.InsufficientReturnAmount.selector);
-        liquidModule.withdraw(address(safe), address(liquidBtc), liquidBtcAssetOut, amountToWithdraw, minReturn, owner1, signature);
+        liquidModule.withdraw(address(safe), address(liquidBtc), liquidBtcAssetOut, amountToWithdraw, minReturn, discount, secondsToDeadline, owner1, signature);
     }
 
     function test_withdraw_revertsWhenConfigNotSet() public {
@@ -1221,19 +1221,19 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             liquidModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(address(eUsd), amountToWithdraw, amountToWithdraw)
+            abi.encode(address(eUsd), address(liquidUsdAssetOut), amountToWithdraw, amountToWithdraw, discount, secondsToDeadline)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(EtherFiLiquidModule.LiquidWithdrawConfigNotSet.selector);
-        liquidModule.withdraw(address(safe), address(eUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, owner1, signature);
+        liquidModule.withdraw(address(safe), address(eUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, signature);
     }
 
     function test_withdraw_revertsWithZeroAmount() public {        
         vm.prank(owner);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(liquidUsdBoringQueue));
         
         uint128 amountToWithdraw = 0;
         
@@ -1243,19 +1243,19 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             liquidModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(address(liquidUsd), amountToWithdraw, amountToWithdraw)
+            abi.encode(address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, owner1, signature);
+        liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, signature);
     }
 
     function test_withdraw_revertsWithInsufficientBalance() public {
         vm.prank(owner);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(liquidUsdBoringQueue));
         
         // Ensure the safe has some balance, but less than we'll try to withdraw
         uint256 safeBalance = 500 * 10**6;
@@ -1268,19 +1268,19 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             liquidModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(address(liquidUsd), amountToWithdraw, amountToWithdraw)
+            abi.encode(address(liquidUsd), address(liquidUsdAssetOut), amountToWithdraw, amountToWithdraw, discount, secondsToDeadline)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(EtherFiLiquidModule.InsufficientBalanceOnSafe.selector);
-        liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, owner1, signature);
+        liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, signature);
     }
 
     function test_withdraw_revertsWithInvalidSignature() public {
         vm.prank(owner);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(liquidUsdBoringQueue));
         
         uint128 amountToWithdraw = 1000 * 10**6;
         deal(address(liquidUsd), address(safe), amountToWithdraw);
@@ -1291,19 +1291,19 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             liquidModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(address(liquidUsd), amountToWithdraw + 1, amountToWithdraw) // Wrong amount
+            abi.encode(address(liquidUsd), address(liquidUsdAssetOut), amountToWithdraw + 1, amountToWithdraw, discount, secondsToDeadline) // Wrong amount
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory invalidSignature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, owner1, invalidSignature);
+        liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, invalidSignature);
     }
 
     function test_withdraw_revertsWhenCalledFromNonSafe() public {
         vm.prank(owner);
-        liquidModule.setLiquidAssetWithdrawConfig(address(liquidUsd), address(liquidUsdBoringQueue), discount, secondsToDeadline);
+        liquidModule.setLiquidAssetWithdrawQueue(address(liquidUsd), address(liquidUsdBoringQueue));
         
         address fakeSafe = makeAddr("fakeSafe");
         uint128 amountToWithdraw = 1000 * 10**6;
@@ -1315,31 +1315,19 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
             address(liquidModule),
             uint256(0), // nonce
             fakeSafe,
-            abi.encode(address(liquidUsd), amountToWithdraw, amountToWithdraw) 
+            abi.encode(address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline) 
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory invalidSignature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
-        liquidModule.withdraw(address(fakeSafe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, owner1, invalidSignature);
+        liquidModule.withdraw(address(fakeSafe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, invalidSignature);
     }
 
     function test_getLiquidAssetWithdrawConfig_returnsCorrectConfig() public view {
-        EtherFiLiquidModule.LiquidWithdrawConfig memory liquidUsdConfig = liquidModule.getLiquidAssetWithdrawConfig(address(liquidUsd));
-        assertEq(liquidUsdConfig.boringQueue, address(liquidUsdBoringQueue));
-        assertEq(liquidUsdConfig.discount, discount);
-        assertEq(liquidUsdConfig.secondsToDeadline, secondsToDeadline);
-        
-        EtherFiLiquidModule.LiquidWithdrawConfig memory liquidEthConfig = liquidModule.getLiquidAssetWithdrawConfig(address(liquidEth));
-        assertEq(liquidEthConfig.boringQueue, address(liquidEthBoringQueue));
-        assertEq(liquidEthConfig.discount, discount);
-        assertEq(liquidEthConfig.secondsToDeadline, secondsToDeadline);
-        
-        EtherFiLiquidModule.LiquidWithdrawConfig memory liquidBtcConfig = liquidModule.getLiquidAssetWithdrawConfig(address(liquidBtc));
-        assertEq(liquidBtcConfig.boringQueue, address(liquidBtcBoringQueue));
-        assertEq(liquidBtcConfig.discount, discount);
-        assertEq(liquidBtcConfig.secondsToDeadline, secondsToDeadline);
-        
+        assertEq(liquidModule.getLiquidAssetWithdrawQueue(address(liquidUsd)), address(liquidUsdBoringQueue));
+        assertEq(liquidModule.getLiquidAssetWithdrawQueue(address(liquidEth)), address(liquidEthBoringQueue));
+        assertEq(liquidModule.getLiquidAssetWithdrawQueue(address(liquidBtc)), address(liquidBtcBoringQueue));
     }
 }
