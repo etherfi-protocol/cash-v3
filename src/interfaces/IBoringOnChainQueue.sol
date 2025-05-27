@@ -40,6 +40,15 @@ interface IBoringOnChainQueue {
      * @return requestId The request Id.
      */
     function requestOnChainWithdraw(address assetOut, uint128 amountOfShares, uint16 discount, uint24 secondsToDeadline) external returns (bytes32 requestId);
+
+    /**
+     * @notice Preview assets out from a withdraw request.
+     * @param assetOut The asset to withdraw.
+     * @param amountOfShares The amount of shares to withdraw.
+     * @param discount The discount to apply to the withdraw in bps.
+     * @return amountOfAssets128 Amount of assets out.
+     */
+    function previewAssetsOut(address assetOut, uint128 amountOfShares, uint16 discount) external view returns (uint128 amountOfAssets128);
 }
 
 contract BoringVault {}

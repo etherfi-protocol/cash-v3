@@ -12,6 +12,7 @@ import { MockPriceProvider } from "../../../../../src/mocks/MockPriceProvider.so
 import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PriceProvider.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { IEtherFiDataProvider } from "../../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { IBoringOnChainQueue } from "../../../../../src/interfaces/IBoringOnChainQueue.sol";
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { SettlementDispatcher } from "../../../../../src/settlement-dispatcher/SettlementDispatcher.sol";
@@ -202,23 +203,36 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
 
     function test_withdrawLiquidAsset_succeeds() public {
         uint128 amount = 100e6;
+        uint128 minReturn = 100e6;
 
         deal(liquidUsd, address(settlementDispatcherReap), amount);
-    
+
+        uint128 amountOut = IBoringOnChainQueue(boringQueueLiquidUsd).previewAssetsOut(address(usdcScroll), amount, discount);
+
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcher.LiquidWithdrawalRequested(liquidUsd, address(usdcScroll), amount);
-        settlementDispatcherReap.withdrawLiquidAsset(liquidUsd, address(usdcScroll), amount);
+        emit SettlementDispatcher.LiquidWithdrawalRequested(liquidUsd, address(usdcScroll), amount, amountOut);
+        settlementDispatcherReap.withdrawLiquidAsset(liquidUsd, address(usdcScroll), amount, minReturn);
 
         assertEq(IERC20(liquidUsd).balanceOf(address(settlementDispatcherReap)), 0);
     }
 
     function test_withdrawLiquidAsset_fails_ifConfigNotSet() public {
         uint128 amount = 100e6;
+        uint128 minReturn = 100e6;
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.LiquidWithdrawConfigNotSet.selector);
-        settlementDispatcherReap.withdrawLiquidAsset(address(usdcScroll), address(usdcScroll), amount);
+        settlementDispatcherReap.withdrawLiquidAsset(address(usdcScroll), address(usdcScroll), amount, minReturn);
+    }
+
+    function test_withdrawLiquidAsset_fails_ifInsufficientReturnAmount() public {
+        uint128 amount = 100e6;
+        uint128 minReturn = 150e6;
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcher.InsufficientReturnAmount.selector);
+        settlementDispatcherReap.withdrawLiquidAsset(address(liquidUsd), address(usdcScroll), amount, minReturn);
     }
 
     function test_setDestinationData_succeeds_whenCalledByAdmin() public {

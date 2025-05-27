@@ -113,9 +113,10 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Emitted when liquid asset withdrawal is requested
      * @param liquidToken Address of the liquid asset
      * @param assetOut Address of the asset out
-     * @param amount Amount of liquid assets withdrawn
+     * @param amountToWithdraw Amount of liquid assets withdrawn
+     * @param amountOut Amount of underlying tokens to receive
      */
-    event LiquidWithdrawalRequested(address indexed liquidToken, address indexed assetOut, uint128 amount);
+    event LiquidWithdrawalRequested(address indexed liquidToken, address indexed assetOut, uint128 amountToWithdraw, uint128 amountOut);
 
     /**
      * @notice Emitted when funds are transferred to the refund wallet
@@ -184,6 +185,11 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Thrown when refund wallet is not set and trying to transfer to refund wallet
      */
     error RefundWalletNotSet();
+
+    /**
+     * @notice Thrown when the return amount is less than min return
+     */
+    error InsufficientReturnAmount();
 
     /**
      * @notice Constructor that disables initializers
@@ -293,16 +299,21 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @param liquidToken Address of the liquid token
      * @param assetOut Address of the underlying token to receive
      * @param amount Amount of liquid tokens to withdraw
+     * @param minReturn Acceptable min return amount of asset out
      */
-    function withdrawLiquidAsset(address liquidToken, address assetOut, uint128 amount) external onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+    function withdrawLiquidAsset(address liquidToken, address assetOut, uint128 amount, uint128 minReturn) external onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
         LiquidWithdrawConfig storage $ = _getSettlementDispatcherStorage().liquidWithdrawConfig[liquidToken];
 
         if ($.boringQueue == address(0)) revert LiquidWithdrawConfigNotSet();
+        IBoringOnChainQueue boringQueue = IBoringOnChainQueue($.boringQueue);
+
+        uint128 amountOutFromQueue = boringQueue.previewAssetsOut(assetOut, amount, $.discount);
+        if (amountOutFromQueue < minReturn) revert InsufficientReturnAmount();
 
         IERC20(liquidToken).forceApprove($.boringQueue, amount);
-        IBoringOnChainQueue($.boringQueue).requestOnChainWithdraw(assetOut, amount, $.discount, $.secondsToDeadline);
+        boringQueue.requestOnChainWithdraw(assetOut, amount, $.discount, $.secondsToDeadline);
 
-        emit LiquidWithdrawalRequested(liquidToken, assetOut, amount);
+        emit LiquidWithdrawalRequested(liquidToken, assetOut, amount, amountOutFromQueue);
     }
 
     /**
