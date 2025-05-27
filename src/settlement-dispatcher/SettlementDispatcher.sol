@@ -104,7 +104,7 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @notice Emitted when liquid asset withdraw config is set
      * @param token Address of the liquid asset
      * @param boringQueue Address of the boring queue
-     * @param discount Discount percentage with 5 decimals precision
+     * @param discount Discount in bps
      * @param secondsToDeadline The time in seconds the request is valid for
      */
     event LiquidWithdrawConfigSet(address indexed token, address boringQueue, uint16 discount, uint24 secondsToDeadline);

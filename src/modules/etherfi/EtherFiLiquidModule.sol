@@ -464,7 +464,7 @@ contract EtherFiLiquidModule is ModuleBase {
      * @dev Only callable by the role registry owner
      * @param asset Address of the liquid asset
      * @param boringQueue Address of the boring queue
-     * @param discount Discount with 5 decimals (1% = 100000)
+     * @param discount Discount in bps
      * @param secondsToDeadline Seconds to deadline after which the withdraw request would expire
      * @custom:throws InvalidValue If any address parameter is zero
      * @custom:throws BoringQueueDoesNotAllowAssetOut If the boring queue does not allow the asset out 
