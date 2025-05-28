@@ -33,8 +33,8 @@ pragma solidity ^0.8.28;
 
 //     function test_upgradeMultispend_verifyBytecode() public {
 //         DebtManagerCore debtManagerCore = new DebtManagerCore(dataProvider);
-//         SettlementDispatcher settlementDispatcherRain = new SettlementDispatcher(BinSponsor.Rain);
-//         SettlementDispatcher settlementDispatcherReap = new SettlementDispatcher(BinSponsor.Reap);
+//         SettlementDispatcher settlementDispatcherRain = new SettlementDispatcher(BinSponsor.Rain, dataProvider);
+//         SettlementDispatcher settlementDispatcherReap = new SettlementDispatcher(BinSponsor.Reap, dataProvider);
 //         CashLens cashLens = new CashLens(cashModule, dataProvider);
 //         CashEventEmitter cashEventEmitter = new CashEventEmitter(cashModule);
 //         CashModuleCore cashModuleCore = new CashModuleCore(dataProvider);
