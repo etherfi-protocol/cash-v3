@@ -60,10 +60,53 @@ contract AaveV3WithdrawTest is AaveV3TestSetup {
         (uint8 wv, bytes32 wr, bytes32 ws) = vm.sign(owner1Pk, withdrawDigestHash);
         bytes memory withdrawSignature = abi.encodePacked(wr, ws, wv);
 
+        vm.expectEmit(true, true, true, true);
+        emit AaveV3Module.WithdrawFromAave(address(safe), address(usdcScroll), amountToWithdraw);
         aaveV3Module.withdraw(address(safe), address(usdcScroll), amountToWithdraw, owner1, withdrawSignature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
         assertEq(balanceAfter - balanceBefore, amountToWithdraw);
+    }
+
+    function test_withdraw_withdrawsAllTokensFromPoolIfAmountIsMax() public {        
+        uint256 collateralAmount = 1000e6;
+        deal(address(usdcScroll), address(safe), collateralAmount);
+
+        bytes32 supplyDigestHash = keccak256(abi.encodePacked(
+            aaveV3Module.SUPPLY_SIG(), 
+            block.chainid, 
+            address(aaveV3Module), 
+            aaveV3Module.getNonce(address(safe)), 
+            address(safe), 
+            abi.encode(address(usdcScroll), collateralAmount)
+        )).toEthSignedMessageHash();
+
+        (uint8 sv, bytes32 sr, bytes32 ss) = vm.sign(owner1Pk, supplyDigestHash);
+        bytes memory supplySignature = abi.encodePacked(sr, ss, sv);
+
+        aaveV3Module.supply(address(safe), address(usdcScroll), collateralAmount, owner1, supplySignature);
+
+        uint256 amountToWithdraw = type(uint256).max;
+        uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
+
+        bytes32 withdrawDigestHash = keccak256(abi.encodePacked(
+            aaveV3Module.WITHDRAW_SIG(), 
+            block.chainid, 
+            address(aaveV3Module), 
+            aaveV3Module.getNonce(address(safe)), 
+            address(safe), 
+            abi.encode(address(usdcScroll), amountToWithdraw)
+        )).toEthSignedMessageHash();
+
+        (uint8 wv, bytes32 wr, bytes32 ws) = vm.sign(owner1Pk, withdrawDigestHash);
+        bytes memory withdrawSignature = abi.encodePacked(wr, ws, wv);
+
+        vm.expectEmit(true, true, true, true);
+        emit AaveV3Module.WithdrawFromAave(address(safe), address(usdcScroll), collateralAmount);
+        aaveV3Module.withdraw(address(safe), address(usdcScroll), amountToWithdraw, owner1, withdrawSignature);
+
+        uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
+        assertEq(balanceAfter - balanceBefore, collateralAmount);
     }
 
     function test_withdraw_withdrawsETHFromPool() public {

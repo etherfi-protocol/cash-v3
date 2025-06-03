@@ -33,9 +33,9 @@ contract GnosisHelpers is Script {
 
     // Create a gnosis transaction
     // ether sent value is always 0 for our usecase
-    function _getGnosisTransaction(string memory to, string memory data, bool isLast) internal pure returns (string memory) {
+    function _getGnosisTransaction(string memory to, string memory data, string memory value, bool isLast) internal pure returns (string memory) {
         string memory suffix = isLast ? ']}' : ',';
-        return string.concat('{"to":"', to, '","value":"0","data":"', data, '"}', suffix);
+        return string.concat('{"to":"', to, '","value":"', value, '","data":"', data, '"}', suffix);
     }
 
     // Helper function to convert bytes to hex strings 
@@ -70,7 +70,7 @@ contract GnosisHelpers is Script {
         string memory timelockAddressHex = iToHex(abi.encodePacked(address(timelock)));
         string memory scheduleTransactionData = iToHex(abi.encodeWithSignature("schedule(address,uint256,bytes,bytes32,bytes32,uint256)", to, 0, data, predecessor, salt, delay));
 
-        return _getGnosisTransaction(timelockAddressHex, scheduleTransactionData, isLasts);
+        return _getGnosisTransaction(timelockAddressHex, scheduleTransactionData, "0", isLasts);
     }
 
     function _getTimelockExecuteTransaction(address to, bytes memory data, bool isLasts) internal pure returns (string memory) {
@@ -78,7 +78,7 @@ contract GnosisHelpers is Script {
         string memory timelockAddressHex = iToHex(abi.encodePacked(address(timelock)));
         string memory executeTransactionData = iToHex(abi.encodeWithSignature("execute(address,uint256,bytes,bytes32,bytes32)", to, 0, data, predecessor, salt));
 
-        return _getGnosisTransaction(timelockAddressHex, executeTransactionData, isLasts);
+        return _getGnosisTransaction(timelockAddressHex, executeTransactionData, "0", isLasts);
     }
 
 }

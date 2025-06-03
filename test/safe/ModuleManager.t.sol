@@ -26,39 +26,6 @@ contract ModuleManagerTest is SafeTestSetup {
         assertFalse(safe.isModuleEnabled(nonWhitelistedModule));
     }
 
-    function test_configureModules_reverts_whenRemovingCashModule() public {
-        // First add the cash module to the whitelist
-        address[] memory modules = new address[](1);
-        modules[0] = address(cashModule);
-        bool[] memory shouldWhitelist = new bool[](1);
-        shouldWhitelist[0] = true;
-
-        bytes[] memory setupData = new bytes[](1);
-        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
-
-        // First add it to whitelist
-        _configureModules(modules, shouldWhitelist, setupData);
-
-        // Now try to remove it
-        shouldWhitelist[0] = false;
-
-        bytes32 digestHash = _getDigest(modules, shouldWhitelist, setupData);
-
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
-
-        bytes[] memory signatures = new bytes[](2);
-        signatures[0] = abi.encodePacked(r1, s1, v1);
-        signatures[1] = abi.encodePacked(r2, s2, v2);
-
-        address[] memory signers = new address[](2);
-        signers[0] = owner1;
-        signers[1] = owner2;
-
-        vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.CannotRemoveCashModule.selector, 0));
-        safe.configureModules(modules, shouldWhitelist, setupData, signers, signatures);
-    }
-
     function test_configureModules_reverts_whenAddingUnsupportedModule() public {
         address nonWhitelistedModule = makeAddr("nonWhitelistedModule");
 

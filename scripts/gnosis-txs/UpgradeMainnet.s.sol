@@ -138,10 +138,10 @@ contract UpgradeMainnet is GnosisHelpers, Utils {
         shouldWhitelist[1] = true;   
 
         string memory updateModulesOnDataProvider = iToHex(abi.encodeWithSelector(EtherFiDataProvider.configureModules.selector, modules, shouldWhitelist));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), updateModulesOnDataProvider, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), updateModulesOnDataProvider, "0", false)));
 
         string memory setTokenConfig = setupPriceProviderConfig();
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), setTokenConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), setTokenConfig, "0", false)));
 
         txs = configureCollateralAssets(txs);
 
@@ -159,35 +159,35 @@ contract UpgradeMainnet is GnosisHelpers, Utils {
 
     function getUpgrades(string memory txs) internal view returns (string memory) {
         string memory safeFactoryUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, factoryImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(factory), safeFactoryUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(factory), safeFactoryUpgrade, "0", false)));
 
         string memory safeImplUpgrade = iToHex(abi.encodeWithSelector(BeaconFactory.upgradeBeaconImplementation.selector, safeImpl));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(factory), safeImplUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(factory), safeImplUpgrade, "0", false)));
 
         string memory priceProviderUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, priceProviderImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), priceProviderUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), priceProviderUpgrade, "0", false)));
 
         string memory cashModuleCoreUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cashModuleCoreImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleCoreUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleCoreUpgrade, "0", false)));
 
         string memory cashModuleAdminUpgrade = iToHex(abi.encodeWithSelector(CashModuleCore.setCashModuleSettersAddress.selector, cashModuleSettersImpl));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleAdminUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleAdminUpgrade, "0", false)));
         
         string memory cashEventEmitterUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cashEventEmitterImpl, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashEventEmitter), cashEventEmitterUpgrade, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashEventEmitter), cashEventEmitterUpgrade, "0", false)));
 
         return txs;
     }
 
     function grantRoles(string memory txs) internal  returns (string memory) {
         string memory grantEtherFiWalletRole = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, ETHER_FI_WALLET_ROLE, etherFiWallet));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantEtherFiWalletRole, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantEtherFiWalletRole, "0", false)));
         
         string memory grantEtherFiSafeFactoryAdminRole = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, ETHERFI_SAFE_FACTORY_ADMIN_ROLE, etherFiWallet));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantEtherFiSafeFactoryAdminRole, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantEtherFiSafeFactoryAdminRole, "0", false)));
         
         string memory grantTopUpDepositorRole = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, TOP_UP_DEPOSITOR_ROLE, topUpDepositorWallet));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantTopUpDepositorRole, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantTopUpDepositorRole, "0", false)));
 
         topUpWallets.push(0xf96f8E03615f7b71e0401238D28bb08CceECBae7);
         topUpWallets.push(0xB82C61E4A4b4E5524376BC54013a154b2e55C5c8);
@@ -203,7 +203,7 @@ contract UpgradeMainnet is GnosisHelpers, Utils {
         for (uint256 i = 0; i < topUpWallets.length; ++i) {
             bool isLast = i == topUpWallets.length - 1;
             string memory grantTopUpRole = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, TOP_UP_ROLE, topUpWallets[i]));
-            txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantTopUpRole, isLast)));
+            txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantTopUpRole, "0", isLast)));
         }
         
         return txs;
@@ -318,16 +318,16 @@ contract UpgradeMainnet is GnosisHelpers, Utils {
         }); 
 
         string memory setLiquidEthConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, liquidEth, liquidEthConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidEthConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidEthConfig, "0", false)));
         
         string memory setLiquidBtcConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, liquidBtc, liquidBtcConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidBtcConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidBtcConfig, "0", false)));
         
         string memory setLiquidUsdConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, liquidUsd, liquidUsdConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidUsdConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setLiquidUsdConfig, "0", false)));
         
         string memory setEUsdConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, eUsd, eUsdConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEUsdConfig, false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEUsdConfig, "0", false)));
 
         return txs;
     }

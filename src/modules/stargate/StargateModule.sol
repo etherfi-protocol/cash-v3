@@ -48,11 +48,14 @@ contract StargateModule is ModuleBase {
     /// @notice The ADMIN role for the Stargate module
     bytes32 public constant STARGATE_MODULE_ADMIN_ROLE = keccak256("STARGATE_MODULE_ADMIN_ROLE");
 
-    /// @notice TypeHash for bridge function signature used in EIP-712 signatures
+    /// @notice TypeHash for bridge function signature 
     bytes32 public constant BRIDGE_SIG = keccak256("bridge");
 
     /// @notice 100% in basis points (10,000)
     uint256 public constant HUNDRES_PERCENT_IN_BPS = 10_000;
+
+    /// @notice Emitted when a safe bridges funds with stargate
+    event BridgeWithStargate(address indexed safe, uint32 indexed destEid, address indexed asset, uint256 amount, address destRecipient);
     
     /// @notice Error for Invalid Owner quorum signatures
     error InvalidSignatures();
@@ -150,6 +153,8 @@ contract StargateModule is ModuleBase {
     function bridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
         _checkSignature(safe, destEid, asset, amount, destRecipient, maxSlippageInBps, signers, signatures);
         _bridge(safe, destEid, asset, amount, destRecipient, maxSlippageInBps);
+        
+        emit BridgeWithStargate(safe, destEid, asset, amount, destRecipient);
     }
 
     /**
@@ -216,17 +221,19 @@ contract StargateModule is ModuleBase {
         if (asset != ETH) {
             if (poolToken != asset) revert InvalidStargatePool();
 
-            to = new address[](2);
-            value = new uint256[](2);
-            data = new bytes[](2);
+            to = new address[](3);
+            value = new uint256[](3);
+            data = new bytes[](3);
             
             to[0] = asset;
-            value[0] = 0;
             data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(stargate), amount);
 
             to[1] = address(stargate);
             value[1] = valueToSend;
             data[1] = abi.encodeWithSelector(IStargate.sendToken.selector, sendParam, messagingFee, payable(address(this)));
+        
+            to[2] = asset;
+            data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(stargate), 0);
         } else {
             if (poolToken != address(0)) revert InvalidStargatePool();
 
@@ -272,9 +279,9 @@ contract StargateModule is ModuleBase {
         uint256[] memory value;
         bytes[] memory data;
         if (oft.approvalRequired()) {
-            to = new address[](2);
-            value = new uint256[](2);
-            data = new bytes[](2);
+            to = new address[](3);
+            value = new uint256[](3);
+            data = new bytes[](3);
 
             to[0] = asset;
             data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(oft), amount);
@@ -282,6 +289,9 @@ contract StargateModule is ModuleBase {
             to[1] = address(oft);
             value[1] = messagingFee.nativeFee;
             data[1] = abi.encodeWithSelector(IOFT.send.selector, sendParam, messagingFee, payable(address(this)));
+
+            to[2] = asset;
+            data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(oft), 0);
         } else {
             to = new address[](1);
             value = new uint256[](1);

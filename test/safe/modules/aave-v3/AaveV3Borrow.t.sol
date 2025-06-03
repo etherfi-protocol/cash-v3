@@ -44,6 +44,8 @@ contract AaveV3BorrowTest is AaveV3TestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
+        vm.expectEmit(true, true, true, true);
+        emit AaveV3Module.BorrowFromAave(address(safe), address(usdcScroll), amountToBorrow);
         aaveV3Module.borrow(address(safe), address(usdcScroll), amountToBorrow, owner1, signature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));

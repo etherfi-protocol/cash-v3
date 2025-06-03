@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { Mode, BinSponsor, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
@@ -17,6 +17,8 @@ import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLi
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
+import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
+
 
 /**
  * @title CashModule
@@ -30,6 +32,49 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { 
         _disableInitializers();
+    }
+
+    /**
+     * @notice Sets the settlement dispatcher address for a bin sponsor
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
+     * @custom:throws InvalidInput if caller doesn't have the controller role
+     */
+    function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (dispatcher == address(0)) revert InvalidInput();
+
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        if (binSponsor == BinSponsor.Rain) { 
+            $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherRain, dispatcher);
+            $.settlementDispatcherRain = dispatcher;
+        } 
+        else {
+            $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherReap, dispatcher);
+            $.settlementDispatcherReap = dispatcher;
+        }
+    }   
+
+    /**
+     * @notice Configures the withdraw assets whitelist
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param assets Array of asset addresses to configure 
+     * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
+     * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
+     * @custom:throws InvalidInput If the arrays are empty
+     * @custom:throws ArrayLengthMismatch If the arrays have different lengths
+     * @custom:throws InvalidAddress If any address is the zero address
+     * @custom:throws DuplicateElementFound If any address appears more than once in the addrs array
+     */
+    function configureWithdrawAssets(address[] calldata assets, bool[] calldata shouldWhitelist) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        EnumerableAddressWhitelistLib.configure($.whitelistedWithdrawAssets, assets, shouldWhitelist);
+        $.cashEventEmitter.emitWithdrawTokensConfigured(assets, shouldWhitelist);
     }
 
     /**
@@ -84,6 +129,21 @@ contract CashModuleSetters is CashModuleStorageContract {
         }
 
         $.cashEventEmitter.emitSetTierCashbackPercentage(tiers, cashbackPercentages);
+    }
+
+    /**
+     * @notice Sets the referrer cashback percentage in bps
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param cashbackPercentage New cashback percentage in bps
+     */
+    function setReferrerCashbackPercentageInBps(uint64 cashbackPercentage) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+
+        if (cashbackPercentage > HUNDRED_PERCENT_IN_BPS) revert InvalidInput();
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        $.cashEventEmitter.emitReferrerCashbackPercentageSet($.referrerCashbackPercentageInBps, cashbackPercentage);
+        $.referrerCashbackPercentageInBps = cashbackPercentage;
     }
 
     /**
@@ -179,7 +239,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws InsufficientBalance if any token has insufficient balance
      */
-    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
@@ -248,7 +308,8 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
         if (tokens.length > 1) tokens.checkDuplicates();
-
+        
+        _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 
         uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;

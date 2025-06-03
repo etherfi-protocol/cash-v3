@@ -13,13 +13,14 @@ contract AaveV3TestSetup is SafeTestSetup {
 
     AaveV3Module public aaveV3Module;
     address public aaveV3PoolScroll = 0x11fCfe756c05AD438e312a7fd934381537D3cFfe;
+    address public aaveV3IncentivesManagerScroll = 0xa3f3100C4f1D0624DB9DB97b40C13885Ce297799;
     address public aaveWrappedTokenGateway = 0xE79Ca44408Dae5a57eA2a9594532f1E84d2edAa4;
     address ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     function setUp() public virtual override {
         super.setUp();
 
-        aaveV3Module = new AaveV3Module(aaveV3PoolScroll, address(aaveWrappedTokenGateway), address(dataProvider));
+        aaveV3Module = new AaveV3Module(aaveV3PoolScroll, aaveV3IncentivesManagerScroll, address(aaveWrappedTokenGateway), address(dataProvider));
 
         address[] memory modules = new address[](1);
         modules[0] = address(aaveV3Module);

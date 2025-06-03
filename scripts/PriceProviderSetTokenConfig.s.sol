@@ -6,7 +6,6 @@ import {stdJson} from "forge-std/StdJson.sol";
 
 import { PriceProvider, IAggregatorV3 } from "../src/oracle/PriceProvider.sol";
 import { ILayerZeroTeller, AccountantWithRateProviders } from "../src/interfaces/ILayerZeroTeller.sol";
-import { Utils } from "./utils/Utils.sol";
 
 contract PriceProviderSetTokenConfig is Utils {
     IERC20 public weth = IERC20(0x5300000000000000000000000000000000000004);

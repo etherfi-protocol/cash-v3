@@ -10,8 +10,13 @@
     "EtherFiSafeFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
     "PriceProvider": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
     "RoleRegistry": "0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B",
-    "SettlementDispatcher": "0x9623e86Df854FF3b48F7B4079a516a4F64861Db2",
+    "SettlementDispatcherReap": "0x9623e86Df854FF3b48F7B4079a516a4F64861Db2",
+    "SettlementDispatcherRain": "0x50A233C4a0Bb1d7124b0224880037d35767a501C",
     "TopUpDest": "0x3a6A724595184dda4be69dB1Ce726F2Ac3D66B87",
-    "OpenOceanSwapModule": "0x7fbe444ff0f3F83Ad8776f9A1ac01fBBA8D07E27"
+    "TopUpDestNativeGateway": "0x83393192c7e8B3b9250312387f7C6B26495736aA",
+    "OpenOceanSwapModule": "0x57d23DEa576c88AA5a3F919b1a38f44E1D4b0512",
+    "EtherFiLiquidModule": "0x62f623161fdB6564925c3F9B783cbDfeF4CE8AEc",
+    "EtherFiStakeModule": "0x93DB6fb518193F67dd9e2EA867A287C7029D59e0",
+    "CashLiquidationHelper": "0x56103F3DC21f182611601110F794686fdD8082ad"
   }
 }

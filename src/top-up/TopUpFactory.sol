@@ -184,9 +184,7 @@ contract TopUpFactory is BeaconFactory, Constants {
      *   - maxSlippageInBps exceeds MAX_ALLOWED_SLIPPAGE
      * @custom:emits TokenConfigSet when configs are updated
      */
-    function setTokenConfig(address[] calldata tokens, TokenConfig[] calldata configs) external {
-        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
-
+    function setTokenConfig(address[] calldata tokens, TokenConfig[] calldata configs) external onlyRoleRegistryOwner {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
         if (len != configs.length) revert ArrayLengthMismatch();
@@ -237,10 +235,9 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @custom:throws OnlyUnsupportedTokens if token is a supported bridge asset
      * @custom:throws RecoveryWalletNotSet if recovery wallet is not configured
      */
-    function recoverFunds(address token, uint256 amount) external {
+    function recoverFunds(address token, uint256 amount) external onlyRoleRegistryOwner {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
-        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter != address(0)) revert OnlyUnsupportedTokens();
         if ($.recoveryWallet == address(0)) revert RecoveryWalletNotSet();
@@ -257,10 +254,9 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @custom:throws OnlyAdmin if caller doesn't have admin role
      * @custom:throws RecoveryWalletCannotBeZeroAddress if provided address is zero
      */
-    function setRecoveryWallet(address _recoveryWallet) external {
+    function setRecoveryWallet(address _recoveryWallet) external onlyRoleRegistryOwner {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
-        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         if (_recoveryWallet == address(0)) revert RecoveryWalletCannotBeZeroAddress();
         emit RecoveryWalletSet($.recoveryWallet, _recoveryWallet);
         $.recoveryWallet = _recoveryWallet;

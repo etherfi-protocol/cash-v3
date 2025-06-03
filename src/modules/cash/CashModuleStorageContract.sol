@@ -39,8 +39,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         mapping(address safe => SafeCashConfig cashConfig) safeCashConfig;
         /// @notice Instance of the DebtManager for borrowing and repayment operations
         IDebtManager debtManager;
-        /// @notice Address of the SettlementDispatcher that processes debit mode transactions
-        address settlementDispatcher;
+        /// @notice Address of the SettlementDispatcher for Reap 
+        address settlementDispatcherReap;
         /// @notice Delay in seconds before a withdrawal request can be finalized
         uint64 withdrawalDelay;
         /// @notice Delay in seconds before spending limit changes take effect
@@ -57,6 +57,12 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         ICashEventEmitter cashEventEmitter;
         /// @notice Address of cash module setters contract
         address cashModuleSetters;
+        /// @notice Cashback percentage for referrer in bps
+        uint64 referrerCashbackPercentageInBps;
+        /// @notice Address of the SettlementDispatcher for Rain 
+        address settlementDispatcherRain;
+        /// @notice Address of tokens that can be withdrawn from the safe
+        EnumerableSetLib.AddressSet whitelistedWithdrawAssets;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -119,6 +125,16 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when attempting to set a split ratio that is identical to the current split
     error SplitAlreadyTheSame();
+
+    /// @notice Error thrown when trying to use multiple tokens in credit mode
+    error OnlyOneTokenAllowedInCreditMode();
+
+    /// @notice Error thrown when Settlement Dispatcher address is not set for the bin sponsor
+    error SettlementDispatcherNotSetForBinSponsor();
+
+    /// @notice Error thrown when trying to withdraw an non whitelisted asset
+    /// @param asset The address of the invalid asset
+    error InvalidWithdrawAsset(address asset);
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { 
         _disableInitializers();
@@ -202,6 +218,14 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
+     * @dev Checks if an asset is a whitelisted withdraw asset
+     * @param asset Address of the asset
+     */
+    function _isWhitelistedWithdrawAsset(address asset) internal view returns (bool) {
+        return _getCashModuleStorage().whitelistedWithdrawAssets.contains(asset);
+    }
+
+    /**
      * @dev Modifier to ensure caller has the EtherFi wallet role
      * @custom:throws OnlyEtherFiWallet if caller does not have the role
      */
@@ -223,33 +247,55 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
+     * @dev Checks if assets are whitelisted withdraw assets
+     * @param $ Storage reference to the SafeCashConfig for the safe
+     * @param tokens Array of token addresses to check 
+     * @custom:throws InvalidWithdrawAsset if an asset is not whitelisted for withdrawals
+     */
+    function _areAssetsWithdrawable(CashModuleStorage storage $, address[] memory tokens) internal view {
+        uint256 len = tokens.length;
+
+        for (uint256 i = 0; i < len; ) {
+            if (!$.whitelistedWithdrawAssets.contains(tokens[i])) revert InvalidWithdrawAsset(tokens[i]);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
      * @notice Processes a pending withdrawal request for a Safe after delay period
      * @dev Transfers tokens to the designated recipient if the finalize time has passed
      * @param safe Address of the EtherFi Safe processing the withdrawal
      * @custom:throws CannotWithdrawYet if the withdrawal delay period has not elapsed
      */
     function _processWithdrawal(address safe) internal {
-        SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        SafeCashConfig storage $$ = _getCashModuleStorage().safeCashConfig[safe];
 
-        if ($.pendingWithdrawalRequest.finalizeTime > block.timestamp) revert CannotWithdrawYet();
-        address recipient = $.pendingWithdrawalRequest.recipient;
-        uint256 len = $.pendingWithdrawalRequest.tokens.length;
+        if ($$.pendingWithdrawalRequest.finalizeTime > block.timestamp) revert CannotWithdrawYet();
+        _areAssetsWithdrawable($, $$.pendingWithdrawalRequest.tokens);
+
+        address recipient = $$.pendingWithdrawalRequest.recipient;
+        uint256 len = $$.pendingWithdrawalRequest.tokens.length;
 
         address[] memory to = new address[](len);
         bytes[] memory data = new bytes[](len);
 
         for (uint256 i = 0; i < len;) {
-            to[i] = $.pendingWithdrawalRequest.tokens[i];
-            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, recipient, $.pendingWithdrawalRequest.amounts[i]);
+            to[i] = $$.pendingWithdrawalRequest.tokens[i];
+            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, recipient, $$.pendingWithdrawalRequest.amounts[i]);
 
             unchecked {
                 ++i;
             }
         }
 
-        _getCashModuleStorage().cashEventEmitter.emitWithdrawalProcessed(safe, $.pendingWithdrawalRequest.tokens, $.pendingWithdrawalRequest.amounts, recipient);
-        delete $.pendingWithdrawalRequest;
-
         IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](len), data);
+        _getCashModuleStorage().cashEventEmitter.emitWithdrawalProcessed(safe, $$.pendingWithdrawalRequest.tokens, $$.pendingWithdrawalRequest.amounts, recipient);
+
+        delete $$.pendingWithdrawalRequest;
+
+        $.debtManager.ensureHealth(safe);
     }
 }

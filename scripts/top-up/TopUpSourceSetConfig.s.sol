@@ -22,6 +22,8 @@ contract TopUpSourceSetConfig is Utils {
     RoleRegistry roleRegistry;
     address stargateAdapter;
     address etherFiOFTBridgeAdapter;
+    address nttAdapter;
+    address etherFiLiquidBridgeAdapter;
     
     function run() public {
         // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -48,11 +50,22 @@ contract TopUpSourceSetConfig is Utils {
             deployments,
             string.concat(".", "addresses", ".", "EtherFiOFTBridgeAdapter")
         );
+        nttAdapter = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "NTTAdapter")
+        );
+
+        if (block.chainid == 1) {
+            etherFiLiquidBridgeAdapter = stdJson.readAddress(
+                deployments,
+                string.concat(".", "addresses", ".", "EtherFiLiquidBridgeAdapter")
+            );
+        }  
         
-        string memory fixturesFile = string.concat(vm.projectRoot(), "/deployments/fixtures/top-up-fixtures.json");
+        string memory fixturesFile = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv() ,"/fixtures/top-up-fixtures.json"));
         string memory fixtures = vm.readFile(fixturesFile);
 
-        (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, chainId);
+        (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, vm.toString(block.chainid));
 
         topUpFactory.setTokenConfig(tokens, tokenConfig);
     
@@ -64,12 +77,16 @@ contract TopUpSourceSetConfig is Utils {
         uint256 count = getTokenConfigsLength(jsonString, chainId);
         tokens = new address[](count);
         tokenConfig = new TopUpFactory.TokenConfig[](count);
+
+        (address topUpDest, address topUpDestNativeGateway) = getTopUpDestAndNativeGateway();
+        address weth = stdJson.readAddress(jsonString, string.concat(".", chainId, ".weth"));
         
         for (uint256 i = 0; i < count; i++) {
             string memory base = string.concat(".", chainId, ".tokenConfigs[", vm.toString(i), "]");
             
             tokens[i] = stdJson.readAddress(jsonString, string.concat(base, ".address"));
-            tokenConfig[i].recipientOnDestChain = getDestRecipientAddress();
+            tokenConfig[i].recipientOnDestChain = (tokens[i] == weth) ? topUpDestNativeGateway : topUpDest;
+
             tokenConfig[i].maxSlippageInBps = uint96(stdJson.readUint(jsonString, string.concat(base, ".maxSlippageInBps")));
             string memory bridge = stdJson.readString(jsonString, string.concat(base, ".bridge"));
 
@@ -79,6 +96,12 @@ contract TopUpSourceSetConfig is Utils {
             } else if (keccak256(bytes(bridge)) == keccak256(bytes("oftBridgeAdapter"))) {
                 tokenConfig[i].bridgeAdapter = etherFiOFTBridgeAdapter;
                 tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".oftAdapter")));
+            } else if (keccak256(bytes(bridge)) == keccak256(bytes("nttAdapter"))) {
+                tokenConfig[i].bridgeAdapter = nttAdapter;
+                tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".nttManager")), stdJson.readUint(jsonString, string.concat(base, ".dustDecimals")));
+            } else if (block.chainid == 1 && keccak256(bytes(bridge)) == keccak256(bytes("liquidBridgeAdapter"))) {
+                tokenConfig[i].bridgeAdapter = etherFiLiquidBridgeAdapter;
+                tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".teller")));
             } else revert ("Unknown bridge");
 
             if (tokenConfig[i].recipientOnDestChain == address(0)) revert (string.concat("Invalid recipientOnDestChain for token ", stdJson.readString(jsonString, string.concat(base, ".token"))));
@@ -116,17 +139,23 @@ contract TopUpSourceSetConfig is Utils {
         return stdJson.readAddress(jsonString, path);
     }
 
-    function getDestRecipientAddress() internal view returns (address) {
-        string memory dir = string.concat(vm.projectRoot(), "/deployments/");
+    function getTopUpDestAndNativeGateway() internal view returns (address, address) {
+        string memory dir = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv(), "/"));
         string memory chainDir = string.concat(scrollChainId, "/");
         string memory file = string.concat(dir, chainDir, "deployments", ".json");
 
         if (!vm.exists(file)) revert ("Scroll deployment file not found");
         string memory deployments = vm.readFile(file);
 
-        return stdJson.readAddress(
+        address topUpDest = stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "TopUpDest")
         );
+        address topUpDestNativeGateway = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "TopUpDestNativeGateway")
+        );
+
+        return (topUpDest, topUpDestNativeGateway);
     }
 }

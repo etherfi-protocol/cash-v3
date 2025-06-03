@@ -64,10 +64,40 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
+        vm.expectEmit(true, true, true, true);
+        emit AaveV3Module.RepayOnAave(address(safe), address(usdcScroll), amountToRepay);
         aaveV3Module.repay(address(safe), address(usdcScroll), amountToRepay, owner1, signature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
         assertEq(balanceBefore - balanceAfter, amountToRepay);
+    }
+    
+    function test_repay_repaysFullDebtIfAmountIsMax() public {        
+        uint256 amountToRepay = type(uint256).max;
+
+        uint256 totalDebt = aaveV3Module.getTokenTotalBorrowAmount(address(safe), address(usdcScroll));
+        deal(address(usdcScroll), address(safe), 1 ether);
+
+        uint256 balanceBefore = usdcScroll.balanceOf(address(safe));
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            aaveV3Module.REPAY_SIG(), 
+            block.chainid, 
+            address(aaveV3Module), 
+            aaveV3Module.getNonce(address(safe)), 
+            address(safe), 
+            abi.encode(address(usdcScroll), amountToRepay)
+        )).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        vm.expectEmit(true, true, true, true);
+        emit AaveV3Module.RepayOnAave(address(safe), address(usdcScroll), totalDebt);
+        aaveV3Module.repay(address(safe), address(usdcScroll), amountToRepay, owner1, signature);
+
+        uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
+        assertEq(balanceBefore - balanceAfter, totalDebt);
     }
 
     function test_repay_revertsForAmountZero() public {        

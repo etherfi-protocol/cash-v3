@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { CashEventEmitter, CashModuleTestSetup, IERC20, IDebtManager, ICashModule, Mode } from "../CashModuleTestSetup.t.sol";
+import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
 
 contract DebtManagerRepayTest is CashModuleTestSetup {
     uint256 collateralAmount = 0.01 ether;
@@ -22,8 +23,13 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
 
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 2;
 
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), txId, address(usdcScroll), borrowAmt, true);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
     }
 
     function test_repay_works() public {

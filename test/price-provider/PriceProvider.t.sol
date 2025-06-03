@@ -108,7 +108,7 @@ contract PriceProviderTest is Test {
             isChainlinkType: false,
             oraclePriceDecimals: liquidBtcAccountant.decimals(),
             maxStaleness: 2 days,
-            dataType: PriceProvider.ReturnType.Int256,
+            dataType: PriceProvider.ReturnType.Uint256,
             isBaseTokenEth: false,
             isStableToken: false,
             isBaseTokenBtc: true

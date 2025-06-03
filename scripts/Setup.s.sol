@@ -12,7 +12,7 @@ import {EtherFiDataProvider} from "../src/data-provider/EtherFiDataProvider.sol"
 import {EtherFiSafe} from "../src/safe/EtherFiSafe.sol";
 import {EtherFiSafeFactory} from "../src/safe/EtherFiSafeFactory.sol";
 import {EtherFiHook} from "../src/hook/EtherFiHook.sol";
-import {ICashModule} from "../src/interfaces/ICashModule.sol";
+import {ICashModule, BinSponsor} from "../src/interfaces/ICashModule.sol";
 import {AaveV3Module} from "../src/modules/aave-v3/AaveV3Module.sol";
 import {CashLens} from "../src/modules/cash/CashLens.sol";
 import {Utils, ChainConfig} from "./utils/Utils.sol";
@@ -44,7 +44,8 @@ contract Setup is Utils {
     CashLens cashLens;
 
     PriceProvider priceProvider;
-    SettlementDispatcher settlementDispatcher;
+    SettlementDispatcher settlementDispatcherReap;
+    SettlementDispatcher settlementDispatcherRain;
     IDebtManager debtManager;
     CashbackDispatcher cashbackDispatcher;
     CashEventEmitter cashEventEmitter;
@@ -144,7 +145,8 @@ contract Setup is Utils {
         cashModule.initialize(
             address(roleRegistry),
             address(debtManager),
-            address(settlementDispatcher),
+            address(settlementDispatcherReap),
+            address(settlementDispatcherRain),
             address(cashbackDispatcher),
             address(cashEventEmitter),
             cashModuleSettersImpl
@@ -154,6 +156,8 @@ contract Setup is Utils {
 
         topUpDest = TopUpDest(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(topUpDestImpl, "")), getSalt(TOP_UP_DEST_PROXY)));
         topUpDest.initialize(address(roleRegistry));
+
+        _configureWithdrawTokens();
 
         _grantRoles();
         _configureDebtManager();
@@ -174,7 +178,8 @@ contract Setup is Utils {
         vm.serializeAddress(deployedAddresses, "CashModule", address(cashModule));
         vm.serializeAddress(deployedAddresses, "CashEventEmitter", address(cashEventEmitter));
         vm.serializeAddress(deployedAddresses, "CashLens", address(cashLens));
-        string memory addressOutput = vm.serializeAddress(deployedAddresses, "SettlementDispatcher", address(settlementDispatcher));
+        vm.serializeAddress(deployedAddresses, "SettlementDispatcherReap", address(settlementDispatcherReap));
+        string memory addressOutput = vm.serializeAddress(deployedAddresses, "SettlementDispatcherRain", address(settlementDispatcherRain));
         string memory finalJson = vm.serializeString(
             parentObject,
             deployedAddresses,
@@ -187,6 +192,23 @@ contract Setup is Utils {
         writeDeploymentFile(finalJson);
 
         vm.stopBroadcast();
+    }
+
+    function _configureWithdrawTokens() internal {
+        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
+        address[] memory tokens = new address[](3);
+        tokens[0] = address(usdcScroll);
+        tokens[1] = address(weETHScroll);
+        tokens[2] = address(scrToken);
+
+        bool[] memory shouldWhitelist = new bool[](3);
+        shouldWhitelist[0] = true;
+        shouldWhitelist[1] = true;
+        shouldWhitelist[2] = true;
+
+        cashModule.configureWithdrawAssets(tokens, shouldWhitelist);
+
+        roleRegistry.revokeRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
     }
 
     function _grantRoles() internal {
@@ -285,9 +307,13 @@ contract Setup is Utils {
             stargate: stargateUsdcPool
         });
 
-        address settlementDispatcherImpl = deployWithCreate3(abi.encodePacked(type(SettlementDispatcher).creationCode), getSalt(SETTLEMENT_DISPATCHER_IMPL));
-        settlementDispatcher = SettlementDispatcher(payable(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(settlementDispatcherImpl, "")), getSalt(SETTLEMENT_DISPATCHER_PROXY))));
-        settlementDispatcher.initialize(address(roleRegistry), tokens, destDatas);
+        address settlementDispatcherReapImpl = deployWithCreate3(abi.encodePacked(type(SettlementDispatcher).creationCode, abi.encode(BinSponsor.Reap)), getSalt(SETTLEMENT_DISPATCHER_IMPL));
+        settlementDispatcherReap = SettlementDispatcher(payable(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(settlementDispatcherReapImpl, "")), getSalt(SETTLEMENT_DISPATCHER_PROXY))));
+        settlementDispatcherReap.initialize(address(roleRegistry), tokens, destDatas);
+        
+        address settlementDispatcherRainImpl = deployWithCreate3(abi.encodePacked(type(SettlementDispatcher).creationCode, abi.encode(BinSponsor.Rain)), getSalt(SETTLEMENT_DISPATCHER_RAIN_IMPL));
+        settlementDispatcherRain = SettlementDispatcher(payable(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(settlementDispatcherRainImpl, "")), getSalt(SETTLEMENT_DISPATCHER_RAIN_PROXY))));
+        settlementDispatcherRain.initialize(address(roleRegistry), tokens, destDatas);
     }
 
     function _setupDebtManager() internal {

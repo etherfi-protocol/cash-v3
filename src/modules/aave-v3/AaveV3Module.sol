@@ -5,6 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IAavePoolV3 } from "../../interfaces/IAavePoolV3.sol";
+import { IAaveV3IncentivesManager } from "../../interfaces/IAaveV3IncentivesManager.sol";
 import { IAaveWrappedTokenGateway } from "../../interfaces/IAaveWrappedTokenGatewayV3.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
@@ -24,6 +25,9 @@ contract AaveV3Module is ModuleBase {
     
     /// @notice Aave V3 Wrapped Token Gateway contract interface for ETH operations
     IAaveWrappedTokenGateway public immutable aaveWrappedTokenGateway;
+
+    /// @notice Aave V3 Incentives Manager (Rewards Controller)
+    IAaveV3IncentivesManager public immutable aaveIncentivesManager;
     
     /// @notice Variable interest rate mode (2) used for Aave borrowing operations
     /// @dev Aave uses 1 for stable rate and 2 for variable rate
@@ -41,20 +45,40 @@ contract AaveV3Module is ModuleBase {
     /// @notice TypeHash for repay function signature used in EIP-712 signatures
     bytes32 public constant REPAY_SIG = keccak256("repay");
 
+    /// @notice Emitted when a safe supplies assets on Aave
+    event SupplyOnAave(address indexed safe, address indexed asset, uint256 amount);
+    
+    /// @notice Emitted when a safe borrows assets from Aave
+    event BorrowFromAave(address indexed safe, address indexed asset, uint256 amount);
+    
+    /// @notice Emitted when a safe withdraws assets from Aave
+    event WithdrawFromAave(address indexed safe, address indexed asset, uint256 amount);
+    
+    /// @notice Emitted when a safe repays assets on Aave
+    event RepayOnAave(address indexed safe, address indexed asset, uint256 amount);
+
+    /// @notice Emitted when a safe claims specific rewards from Aave
+    event ClaimRewardsOnAave(address indexed safe, address[] assets, uint256 amount, address reward);
+
+    /// @notice Emitted when a safe claims all available rewards from Aave
+    event ClaimAllRewardsOnAave(address indexed safe, address[] assets);
+
     /// @notice Thrown when the Safe doesn't have sufficient token balance for an operation
     error InsufficientBalanceOnSafe();
 
     /**
      * @notice Contract constructor
      * @param _aavePool Address of the Aave V3 Pool contract
+     * @param _aaveIncentivesManager Address of the Aave V3 Incentives Manager
      * @param _wrappedTokenGateway Address of the Aave V3 Wrapped Token Gateway
      * @param _etherFiDataProvider Address of the EtherFiDataProvider contract
      * @dev Initializes the contract with necessary Aave V3 protocol contracts
      * @custom:throws InvalidInput If any provided address is zero
      */
-    constructor(address _aavePool, address _wrappedTokenGateway, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
-        if (_aavePool == address(0) || _wrappedTokenGateway == address(0)) revert InvalidInput();
+    constructor(address _aavePool, address _aaveIncentivesManager, address _wrappedTokenGateway, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
+        if (_aavePool == address(0) || _aaveIncentivesManager == address(0) || _wrappedTokenGateway == address(0)) revert InvalidInput();
         aaveV3Pool = IAavePoolV3(_aavePool);
+        aaveIncentivesManager = IAaveV3IncentivesManager(_aaveIncentivesManager);
         aaveWrappedTokenGateway = IAaveWrappedTokenGateway(_wrappedTokenGateway);
     }
 
@@ -75,6 +99,8 @@ contract AaveV3Module is ModuleBase {
         bytes32 digestHash = keccak256(abi.encodePacked(SUPPLY_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _supply(safe, asset, amount);
+
+        emit SupplyOnAave(safe, asset, amount);
     }
 
     /**
@@ -93,6 +119,7 @@ contract AaveV3Module is ModuleBase {
         bytes32 digestHash = keccak256(abi.encodePacked(BORROW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
         _borrow(safe, asset, amount);
+        emit BorrowFromAave(safe, asset, amount);
     }
 
     /**
@@ -110,7 +137,9 @@ contract AaveV3Module is ModuleBase {
     function withdraw(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         bytes32 digestHash = keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
-        _withdraw(safe, asset, amount);
+        amount = _withdraw(safe, asset, amount);
+
+        emit WithdrawFromAave(safe, asset, amount);
     }
 
     /**
@@ -129,7 +158,49 @@ contract AaveV3Module is ModuleBase {
     function repay(address safe, address asset, uint256 amount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         bytes32 digestHash = keccak256(abi.encodePacked(REPAY_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(asset, amount))).toEthSignedMessageHash();
         _verifyAdminSig(digestHash, signer, signature);
-        _repay(safe, asset, amount);
+        amount = _repay(safe, asset, amount);
+
+        emit RepayOnAave(safe, asset, amount);
+    }
+
+    /**
+     * @notice Claim specific rewards from Aave V3 for supplied assets
+     * @param safe The Safe address which will receive the rewards
+     * @param assets Array of asset addresses for which to claim rewards
+     * @param amount The amount of rewards to claim
+     * @param reward The reward token address to claim
+     * @custom:throws OnlyEtherFiSafe If caller is not a registered EtherFi Safe
+     * @custom:throws InvalidInput If amount = 0 or reward = address(0)
+     */
+    function claimRewards(address safe, address[] calldata assets, uint256 amount, address reward) external onlyEtherFiSafe(safe) {
+        if (amount == 0 || reward == address(0)) revert InvalidInput();
+        address[] memory to = new address[](1);
+        bytes[] memory data = new bytes[](1);
+        uint256[] memory values = new uint256[](1);
+
+        to[0] = address(aaveIncentivesManager);
+        data[0] = abi.encodeWithSelector(IAaveV3IncentivesManager.claimRewardsToSelf.selector, assets, amount, reward);
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        emit ClaimRewardsOnAave(safe, assets, amount, reward);
+    }
+
+    /**
+     * @notice Claim all available rewards from Aave V3 for supplied assets
+     * @param safe The Safe address which will receive the rewards
+     * @param assets Array of asset addresses for which to claim all rewards
+     * @custom:throws OnlyEtherFiSafe If caller is not a registered EtherFi Safe
+     */
+    function claimAllRewards(address safe, address[] calldata assets) external onlyEtherFiSafe(safe) {
+        address[] memory to = new address[](1);
+        bytes[] memory data = new bytes[](1);
+        uint256[] memory values = new uint256[](1);
+
+        to[0] = address(aaveIncentivesManager);
+        data[0] = abi.encodeWithSelector(IAaveV3IncentivesManager.claimAllRewardsToSelf.selector, assets);
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        emit ClaimAllRewardsOnAave(safe, assets);
     }
 
     /**
@@ -221,7 +292,12 @@ contract AaveV3Module is ModuleBase {
      * @param amount The amount of tokens to be withdrawn
      * @custom:throws InvalidInput If amount is zero
      */
-    function _withdraw(address safe, address asset, uint256 amount) internal {
+    function _withdraw(address safe, address asset, uint256 amount) internal returns (uint256) {
+        address weth = aaveWrappedTokenGateway.getWETHAddress();
+        if (amount == type(uint256).max) {
+            if (asset == ETH) amount = getTotalSupplyAmount(safe, weth);
+            else amount = getTotalSupplyAmount(safe, asset);
+        } 
         if (amount == 0) revert InvalidInput();
 
         address[] memory to;
@@ -232,8 +308,6 @@ contract AaveV3Module is ModuleBase {
             to = new address[](2);
             data = new bytes[](2);
             values = new uint256[](2);
-
-            address weth = aaveWrappedTokenGateway.getWETHAddress();
 
             to[0] = address(aaveV3Pool);
             data[0] = abi.encodeWithSelector(IAavePoolV3.withdraw.selector, weth, amount, safe);
@@ -250,6 +324,8 @@ contract AaveV3Module is ModuleBase {
         }
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        return amount;
     }
 
     /**
@@ -260,7 +336,12 @@ contract AaveV3Module is ModuleBase {
      * @custom:throws InvalidInput If amount is zero
      * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
-    function _repay(address safe, address asset, uint256 amount) internal {
+    function _repay(address safe, address asset, uint256 amount) internal returns (uint256) {
+        address weth = aaveWrappedTokenGateway.getWETHAddress();
+        if (amount == type(uint256).max) {
+            if (asset == ETH) getTokenTotalBorrowAmount(safe, weth);
+            else amount = getTokenTotalBorrowAmount(safe, asset);
+        }
         if (amount == 0) revert InvalidInput();
         
         uint256 bal;
@@ -283,17 +364,44 @@ contract AaveV3Module is ModuleBase {
             data[0] = abi.encodeWithSelector(IAaveWrappedTokenGateway.repayETH.selector, address(aaveV3Pool), amount, safe);
             values[0] = amount;
         } else {
-            to = new address[](2);
-            data = new bytes[](2);
-            values = new uint256[](2);
+            to = new address[](3);
+            data = new bytes[](3);
+            values = new uint256[](3);
             
             to[0] = asset;
             data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(aaveV3Pool), amount);
             
             to[1] = address(aaveV3Pool);
             data[1] = abi.encodeWithSelector(IAavePoolV3.repay.selector, asset, amount, INTEREST_RATE_MODE, safe);
+            
+            to[2] = asset;
+            data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(aaveV3Pool), 0);
         }
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        return amount;
+    }
+
+    /**
+     * @notice Get the total borrow amount for a specific token for a user
+     * @param user The address of the user
+     * @param tokenAddress The address of the token 
+     * @return totalBorrow The total variable debt for the token
+     */
+    function getTokenTotalBorrowAmount(address user, address tokenAddress) public view returns (uint256 totalBorrow) {                    
+        IAavePoolV3.ReserveDataLegacy memory reserveData = aaveV3Pool.getReserveData(tokenAddress);
+        return IERC20(reserveData.variableDebtTokenAddress).balanceOf(user);
+    }
+
+    /**
+     * @notice Get the total supply amount for a specific token for a user
+     * @param user The address of the user
+     * @param tokenAddress The address of the token 
+     * @return totalSupply The total supply for the token
+     */
+    function getTotalSupplyAmount(address user, address tokenAddress) public view returns (uint256 totalSupply) {                    
+        IAavePoolV3.ReserveDataLegacy memory reserveData = aaveV3Pool.getReserveData(tokenAddress);
+        return IERC20(reserveData.aTokenAddress).balanceOf(user);
     }
 }

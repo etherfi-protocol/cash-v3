@@ -39,7 +39,8 @@ contract SanityTest is Utils {
     CashEventEmitter eventEmitter;
     PriceProvider priceProvider;
     RoleRegistry roleRegistry;
-    SettlementDispatcher settlementDispatcher;
+    SettlementDispatcher settlementDispatcherReap;
+    SettlementDispatcher settlementDispatcherRain;
     TopUpDest topUpDest;
     ICashModule cashModule;
     CashLens cashLens;
@@ -93,9 +94,14 @@ contract SanityTest is Utils {
             string.concat(".", "addresses", ".", "RoleRegistry")
         ));
         
-        settlementDispatcher = SettlementDispatcher(payable(stdJson.readAddress(
+        settlementDispatcherReap = SettlementDispatcher(payable(stdJson.readAddress(
             deployments,
-            string.concat(".", "addresses", ".", "SettlementDispatcher")
+            string.concat(".", "addresses", ".", "SettlementDispatcherReap")
+        )));
+
+        settlementDispatcherRain = SettlementDispatcher(payable(stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "SettlementDispatcherRain")
         )));
         
         topUpDest = TopUpDest(stdJson.readAddress(
@@ -148,7 +154,8 @@ contract SanityTest is Utils {
         assertTrue(roleRegistry.hasRole(safeFactory.ETHERFI_SAFE_FACTORY_ADMIN_ROLE(), etherFiWallet2));
         
         assertTrue(roleRegistry.hasRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), cashControllerSafe));
-        assertTrue(roleRegistry.hasRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), settlementDispatcherBridger));
+        assertTrue(roleRegistry.hasRole(settlementDispatcherReap.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), settlementDispatcherBridger));
+        assertTrue(roleRegistry.hasRole(settlementDispatcherRain.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), settlementDispatcherBridger));
 
         assertTrue(roleRegistry.hasRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), cashControllerSafe));
         assertTrue(roleRegistry.hasRole(debtManager.DEBT_MANAGER_ADMIN_ROLE(), cashControllerSafe));

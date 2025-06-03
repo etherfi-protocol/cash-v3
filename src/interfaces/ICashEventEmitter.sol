@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { SpendingLimit } from "../libraries/SpendingLimitLib.sol";
-import { Mode, SafeTiers } from "./ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor } from "./ICashModule.sol";
 
 /**
  * @title ICashEventEmitter
@@ -10,12 +10,40 @@ import { Mode, SafeTiers } from "./ICashModule.sol";
  */
 interface ICashEventEmitter {
     /**
+     * @notice Emits the SettlementDispatcheUpdated event
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param oldDispatcher Address of the old dispatcher for the bin sponsor
+     * @param newDispatcher Address of the new dispatcher for the bin sponsor
+     */
+    function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external;
+
+    /**
+     * @notice Emits the ReferrerCashback event
+     * @param safe Address of the safe
+     * @param referrer Address of the referrer
+     * @param spendingInUsd USD value of the spending
+     * @param cashbackToken Address of the cashback token
+     * @param referrerCashbackAmt Cashback amount to referrer
+     * @param referrerCashbackInUsd USD value to the referrer
+     * @param paid Whether the cashback was paid
+     */
+    function emitReferrerCashbackEvent(address safe, address referrer, uint256 spendingInUsd, address cashbackToken, uint256 referrerCashbackAmt, uint256 referrerCashbackInUsd, bool paid) external;
+
+    /**
+     * @notice Emits the ReferrerCashbackPercentageSet event
+     * @param oldPercentage Old cashback percentage
+     * @param newPercentage New cashback percentage
+     */
+    function emitReferrerCashbackPercentageSet(uint64 oldPercentage, uint64 newPercentage) external;
+
+    /**
      * @notice Emits an event when pending cashback is cleared
+     * @param recipient Address receiving the cashback
      * @param cashbackToken Address of the cashback token
      * @param cashbackAmount Amount of cashback token cleared
      * @param cashbackInUsd USD value of the cashback
      */
-    function emitPendingCashbackClearedEvent(address safe, address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external;
+    function emitPendingCashbackClearedEvent(address recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd) external;
 
     /**
      * @notice Emits the Cashback event
@@ -33,16 +61,19 @@ interface ICashEventEmitter {
     function emitCashbackEvent(address safe, address spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) external;
 
     /**
-     * @notice Emits an event for a spending transaction
+     * @notice Emits the Spend event
+     * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
      * @param txId Transaction identifier
-     * @param token Address of the token spent
-     * @param amount Amount of token spent
-     * @param amountInUsd USD value of the amount spent
-     * @param mode Mode used for the spending (Debit or Credit)
+     * @param binSponsor Bin sponsor for the transaction
+     * @param tokens Addresses of the tokens
+     * @param amounts Amounts of tokens
+     * @param amountsInUsd Amounts in USD value
+     * @param totalUsdAmt Total amount in USD
+     * @param mode Operational mode
      */
-    function emitSpend(address safe, bytes32 txId, address token, uint256 amount, uint256 amountInUsd, Mode mode) external;
-
+    function emitSpend(address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external;
+    
     /**
      * @notice Emits an event when the mode is changed
      * @param prevMode Previous mode
@@ -145,4 +176,11 @@ interface ICashEventEmitter {
      * @param modeDelay Delay period for mode changes
      */
     function emitSetDelays(uint64 withdrawalDelay, uint64 spendingLimitDelay, uint64 modeDelay) external;
+
+    /**
+     * @notice Emits the WithdrawTokensConfigured event
+     * @param tokens Address of the tokens
+     * @param shouldWhitelist Boolean value suggesting if the token should be whitelisted for withdrawal
+     */
+    function emitWithdrawTokensConfigured(address[] calldata tokens, bool[] calldata shouldWhitelist) external;
 }
