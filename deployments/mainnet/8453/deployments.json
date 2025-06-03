@@ -4,6 +4,7 @@
     "TopUpSourceFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
     "StargateAdapter": "0x54F5666F5872cc695eE1D21Ec79283c3487A3298",
     "EtherFiOFTBridgeAdapter": "0x3E0ccbce6c3beC4826397005c877BE66C39D9912",
+    "EtherFiLiquidBridgeAdapter": "0x38c541a32BFE45e266D0CdF2409ca0B73cC943d0",
     "NTTAdapter": "0x16B4AE4D4c96793524084A22E6f4c160cad08975"
   }
 }

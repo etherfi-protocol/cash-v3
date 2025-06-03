@@ -41,6 +41,8 @@ contract EtherFiDataProvider is UpgradeableProxy {
         uint256 recoveryDelayPeriod;
         /// @notice Default modules
         EnumerableSetLib.AddressSet defaultModules;
+        /// @notice Address of the refund wallet 
+        address refundWallet;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
@@ -59,6 +61,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param _hook Address of the initial hook contract
      * @param _etherFiRecoverySigner Address of the EtherFi Recovery Signer
      * @param _thirdPartyRecoverySigner Address of the Third Party Recovery Signer
+     * @param _refundWallet Address of the Refund wallet
      */
     struct InitParams {
         address _roleRegistry;
@@ -71,6 +74,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
         address _priceProvider;
         address _etherFiRecoverySigner;
         address _thirdPartyRecoverySigner;
+        address _refundWallet;
     }
 
     /// @notice Thrown when input parameters are invalid or zero address is provided
@@ -131,6 +135,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param oldSigner Address of old signer
     /// @param newSigner Address of new signer
     event ThirdPartyRecoverySignerConfigured(address oldSigner, address newSigner);
+    
+    /// @notice Emitted when Refund Wallet address is updated
+    /// @param oldWallet Address of old wallet
+    /// @param newWallet Address of new wallet
+    event RefundWalletAddressUpdated(address oldWallet, address newWallet);
 
     /// @notice Emitted when the hook address is updated
     /// @param oldHookAddress Previous hook address
@@ -175,6 +184,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
         _setPriceProvider(initParams._priceProvider);
         _setEtherFiRecoverySigner(initParams._etherFiRecoverySigner);
         _setThirdPartyRecoverySigner(initParams._thirdPartyRecoverySigner);
+        _setRefundWallet(initParams._refundWallet);
 
         _getEtherFiDataProviderStorage().recoveryDelayPeriod = 3 days;
 
@@ -269,6 +279,16 @@ contract EtherFiDataProvider is UpgradeableProxy {
     }
 
     /**
+     * @notice Updates the EtherFi Refund Wallet address
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
+     * @param wallet Address of the new wallet
+     */
+    function setRefundWallet(address wallet) external {
+        _onlyDataProviderAdmin();
+        _setRefundWallet(wallet);
+    }
+
+    /**
      * @notice Updates the Recovery delay period
      * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
      * @param period Recovery timelock period in seconds
@@ -350,6 +370,14 @@ contract EtherFiDataProvider is UpgradeableProxy {
      */
     function getThirdPartyRecoverySigner() public view returns (address) {
         return _getEtherFiDataProviderStorage().thirdPartyRecoverySigner;
+    }
+
+    /**
+     * @notice Returns the address of the Refund wallet
+     * @return Address of the Refund wallet
+     */
+    function getRefundWallet() public view returns (address) {
+        return _getEtherFiDataProviderStorage().refundWallet;
     }
 
     /**
@@ -577,6 +605,18 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
         emit ThirdPartyRecoverySignerConfigured(address($.thirdPartyRecoverySigner), thirdPartyRecoverySigner);
         $.thirdPartyRecoverySigner = thirdPartyRecoverySigner;
+    }
+
+    /**
+     * @dev Internal function to set EtherFi Refund wallet address
+     * @param wallet Refund wallet address
+     */
+    function _setRefundWallet(address wallet) private {
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+        if (wallet == address(0)) revert InvalidInput();
+
+        emit RefundWalletAddressUpdated(address($.refundWallet), wallet);
+        $.refundWallet = wallet;
     }
 
     /**

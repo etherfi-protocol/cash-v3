@@ -29,6 +29,8 @@ contract EtherFiDataProviderTest is Test {
     address public thirdPartyRecoverySigner = address(0x1100);
     address public newEtherFiRecoverySigner = address(0x1200);
     address public newThirdPartyRecoverySigner = address(0x1300);
+    address public refundWallet = address(0x1400);
+    address public newRefundWallet = address(0x1500);
 
     uint256 public defaultRecoveryPeriod = 3 days;
     uint256 public newRecoveryPeriod = 7 days;
@@ -54,7 +56,7 @@ contract EtherFiDataProviderTest is Test {
         address roleRegistryImpl = address(new RoleRegistry(address(provider)));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
 
-        provider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), cashLens, initialModules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        provider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), cashLens, initialModules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
 
         roleRegistry.grantRole(provider.DATA_PROVIDER_ADMIN_ROLE(), admin);
         vm.stopPrank();
@@ -79,7 +81,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(Initializable.InvalidInitialization.selector);
-        provider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashModule, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        provider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashModule, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
 
     function test_initialize_withoutHook() public {
@@ -93,7 +95,7 @@ contract EtherFiDataProviderTest is Test {
         defaultModules[0] = module1;
 
         vm.prank(admin);
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, initialModules, defaultModules, address(0), safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, initialModules, defaultModules, address(0), safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
 
         // Hook should be zero address since we didn't set it
         assertEq(newProvider.getHookAddress(), address(0));
@@ -114,7 +116,7 @@ contract EtherFiDataProviderTest is Test {
         defaultModules[0] = module1;
 
         vm.prank(admin);
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, initialModules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, initialModules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
 
         // Cash module should be zero address since we didn't set it
         assertEq(newProvider.getCashModule(), address(0));
@@ -132,7 +134,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
     function test_initialize_reverts_whenEmptyDefaultModuleArray() public {
         address newImpl = address(new EtherFiDataProvider());
@@ -144,7 +146,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
 
     function test_initialize_reverts_whenZeroAddressModule() public {
@@ -156,7 +158,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(EtherFiDataProvider.InvalidModule.selector, 0));
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
 
     function test_initialize_reverts_whenZeroAddressDefaultModule() public {
@@ -170,7 +172,7 @@ contract EtherFiDataProviderTest is Test {
 
         vm.prank(admin);
         vm.expectRevert(abi.encodeWithSelector(EtherFiDataProvider.InvalidModule.selector, 0));
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(0), cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
 
     function test_initialize_emits_hookAddressUpdatedEvent() public {
@@ -183,7 +185,7 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.HookAddressUpdated(address(0), hookAddress);
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
 
     function test_initialize_emits_modulesSetupEvent() public {
@@ -196,7 +198,7 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.ModulesSetup(modules);
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
 
     function test_initialize_emits_defaultModulesSetupEvent() public {
@@ -213,7 +215,7 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.DefaultModulesSetup(defaultModules);
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
 
     function test_initialize_emits_cashModuleConfiguredEvent() public {
@@ -227,7 +229,21 @@ contract EtherFiDataProviderTest is Test {
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.CashModuleConfigured(address(0), cashModule);
 
-        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner));
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
+    }
+   
+    function test_initialize_emits_refundWalletAddressUpdatedEvent() public {
+        address newImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider newProvider = EtherFiDataProvider(address(new UUPSProxy(newImpl, "")));
+
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
+
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.RefundWalletAddressUpdated(address(0), refundWallet);
+
+        newProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), cashModule, cashLens, modules, modules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
     }
 
     // Configure Modules Tests
@@ -564,7 +580,7 @@ contract EtherFiDataProviderTest is Test {
 
         assertEq(provider.getThirdPartyRecoverySigner(), newThirdPartyRecoverySigner);
     }
-
+    
     function test_setThirdPartyRecoverySigner_reverts_whenCalledByNonAdmin() public {
         vm.prank(nonAdmin);
         vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
@@ -575,6 +591,28 @@ contract EtherFiDataProviderTest is Test {
         vm.prank(admin);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
         provider.setThirdPartyRecoverySigner(address(0));
+    }
+
+     // Set Refund wallet
+    function test_setRefundWallet_updatesAddress() public {
+        vm.prank(admin);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.RefundWalletAddressUpdated(refundWallet, newRefundWallet);
+        provider.setRefundWallet(newRefundWallet);
+
+        assertEq(provider.getRefundWallet(), newRefundWallet);
+    }
+    
+    function test_setRefundWallet_reverts_whenCalledByNonAdmin() public {
+        vm.prank(nonAdmin);
+        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        provider.setRefundWallet(newRefundWallet);
+    }
+
+    function test_setRefundWallet_reverts_whenZeroAddress() public {
+        vm.prank(admin);
+        vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
+        provider.setRefundWallet(address(0));
     }
 
     // Recovery Delay Period Tests

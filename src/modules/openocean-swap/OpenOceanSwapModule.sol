@@ -264,12 +264,11 @@ contract OpenOceanSwapModule is ModuleBase {
         uint256 minToAssetAmount,
         bytes calldata data
     ) internal pure {
-        (address executor, OpenOceanSwapDescription memory swapDesc) = abi.decode(data[4:], (address, OpenOceanSwapDescription));
+        (, OpenOceanSwapDescription memory swapDesc) = abi.decode(data[4:], (address, OpenOceanSwapDescription));
 
         if (
             swapDesc.srcToken != IERC20(fromAsset) ||
             swapDesc.dstToken != IERC20(toAsset) || 
-            swapDesc.srcReceiver != payable(executor) || 
             swapDesc.dstReceiver != payable(safe) || 
             swapDesc.amount != fromAssetAmount 
         ) revert InvalidInput();

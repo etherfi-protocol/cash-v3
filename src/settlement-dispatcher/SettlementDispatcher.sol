@@ -5,6 +5,8 @@ import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import { IStargate, Ticket } from "../interfaces/IStargate.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
@@ -40,6 +42,11 @@ contract SettlementDispatcher is UpgradeableProxy {
      */
     BinSponsor public immutable binSponsor;
 
+    /**
+     * @notice Instance of the EtherFiDataProvider 
+     */
+    IEtherFiDataProvider public immutable dataProvider;
+
     /// @custom:storage-location erc7201:etherfi.storage.SettlementDispatcher
     /**
      * @dev Storage struct for SettlementDispatcher (follows ERC-7201 naming convention)
@@ -47,6 +54,8 @@ contract SettlementDispatcher is UpgradeableProxy {
     struct SettlementDispatcherStorage {
         /// @notice Mapping of token addresses to their destination chain information
         mapping(address token => DestinationData) destinationData;
+        /// @notice Mapping of liquid token address to its withdraw queue
+        mapping (address liquidToken => address boringQueue) liquidWithdrawQueue;
     }
 
     /**
@@ -77,6 +86,30 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @param recipient Address that received the withdrawn funds
      */
     event FundsWithdrawn(address indexed token, uint256 amount, address indexed recipient);
+
+    /**
+     * @notice Emitted when liquid asset withdraw config is set
+     * @param token Address of the liquid asset
+     * @param boringQueue Address of the boring queue
+     */
+    event LiquidWithdrawQueueSet(address indexed token, address indexed boringQueue);
+    
+    /**
+     * @notice Emitted when liquid asset withdrawal is requested
+     * @param liquidToken Address of the liquid asset
+     * @param assetOut Address of the asset out
+     * @param amountToWithdraw Amount of liquid assets withdrawn
+     * @param amountOut Amount of underlying tokens to receive
+     */
+    event LiquidWithdrawalRequested(address indexed liquidToken, address indexed assetOut, uint128 amountToWithdraw, uint128 amountOut);
+
+    /**
+     * @notice Emitted when funds are transferred to the refund wallet
+     * @param asset Address of the asset transferred
+     * @param refundWallet Address of the refund wallet
+     * @param amount Amount of the asset transferred
+     */
+    event TransferToRefundWallet(address asset, address refundWallet, uint256 amount);
 
     /**
      * @notice Thrown when input arrays have different lengths
@@ -124,13 +157,34 @@ contract SettlementDispatcher is UpgradeableProxy {
     error InsufficientMinReturn();
 
     /**
+     * @notice Thrown when liquid withdraw config is not set for the liquid token
+     */
+    error LiquidWithdrawConfigNotSet();
+
+    /**
+     * @notice Thrown when the boring queue has a different boring vault than expected
+     */
+    error InvalidBoringQueue();
+
+    /**
+     * @notice Thrown when refund wallet is not set and trying to transfer to refund wallet
+     */
+    error RefundWalletNotSet();
+
+    /**
+     * @notice Thrown when the return amount is less than min return
+     */
+    error InsufficientReturnAmount();
+
+    /**
      * @notice Constructor that disables initializers
      * @dev Cannot be called again after deployment (UUPS pattern)
      */
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(BinSponsor _binSponsor) {
+    constructor(BinSponsor _binSponsor, address _dataProvider) {
         _disableInitializers();
         binSponsor = _binSponsor;
+        dataProvider = IEtherFiDataProvider(_dataProvider);
     }
 
     /**
@@ -178,6 +232,80 @@ contract SettlementDispatcher is UpgradeableProxy {
      */
     function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external onlyRoleRegistryOwner {
         _setDestinationData(tokens, destDatas);
+    }
+
+    /**
+     * @notice Function to set the liquid asset withdraw queue 
+     * @dev Only callable by the role registry owner
+     * @param asset Address of the liquid asset
+     * @param boringQueue Address of the boring queue
+     * @custom:throws InvalidValue If any address parameter is zero
+     * @custom:throws InvalidBoringQueue If the queue does not belong to the liquid asset
+     */
+    function setLiquidAssetWithdrawQueue(address asset, address boringQueue) external onlyRoleRegistryOwner {
+        if (asset == address(0) || boringQueue == address(0)) revert InvalidValue();
+        if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();
+
+        _getSettlementDispatcherStorage().liquidWithdrawQueue[asset] = boringQueue;
+
+        emit LiquidWithdrawQueueSet(asset, boringQueue);
+    }
+
+    /**
+     * @notice Returns the liquid asset withdraw queue
+     * @param asset Address of the liquid asset
+     * @return Boring Queue for liquid asset
+     */
+    function getLiquidAssetWithdrawQueue(address asset) external view returns (address) {
+        return _getSettlementDispatcherStorage().liquidWithdrawQueue[asset];
+    } 
+
+    /**
+     * @notice Returns the refund wallet address set in the data provider contract
+     * @return Refund wallet address
+     */
+    function getRefundWallet() public view returns (address) {
+        return dataProvider.getRefundWallet();
+    }
+
+    /**
+     * @notice Function to withdraw liquid tokens inside the Settlement Dispatcher
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
+     * @param liquidToken Address of the liquid token
+     * @param assetOut Address of the underlying token to receive
+     * @param amount Amount of liquid tokens to withdraw
+     * @param minReturn Acceptable min return amount of asset out
+     * @param discount Acceptable discount in bps
+     * @param secondsToDeadline Expiry deadline in seconds from now
+     */
+    function withdrawLiquidAsset(address liquidToken, address assetOut, uint128 amount, uint128 minReturn, uint16 discount, uint24 secondsToDeadline) external onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        IBoringOnChainQueue boringQueue = IBoringOnChainQueue(_getSettlementDispatcherStorage().liquidWithdrawQueue[liquidToken]);
+        if (address(boringQueue) == address(0)) revert LiquidWithdrawConfigNotSet();
+
+        uint128 amountOutFromQueue = boringQueue.previewAssetsOut(assetOut, amount, discount);
+        if (amountOutFromQueue < minReturn) revert InsufficientReturnAmount();
+
+        IERC20(liquidToken).forceApprove(address(boringQueue), amount);
+        boringQueue.requestOnChainWithdraw(assetOut, amount, discount, secondsToDeadline);
+
+        emit LiquidWithdrawalRequested(liquidToken, assetOut, amount, amountOutFromQueue);
+    }
+
+    /**
+     * @notice Transfers funds to the refund wallet
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
+     * @param asset Address of the token to transfer 
+     * @param amount Amount of tokens to transfer
+     * @custom:throws RefundWalletNotSet If the refund wallet address is not set
+     * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
+     * @custom:throws WithdrawFundsFailed If ETH transfer fails
+     */
+    function transferFundsToRefundWallet(address asset, uint256 amount) external nonReentrant onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        address refundWallet = getRefundWallet();
+        if (refundWallet == address(0)) revert RefundWalletNotSet();
+        amount = _withdrawFunds(asset, refundWallet, amount);
+
+        emit TransferToRefundWallet(asset, refundWallet, amount);
     }
 
     /**
@@ -261,9 +389,22 @@ contract SettlementDispatcher is UpgradeableProxy {
      * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
      * @custom:throws WithdrawFundsFailed If ETH transfer fails
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRoleRegistryOwner() {
+    function withdrawFunds(address token, address recipient, uint256 amount) external nonReentrant onlyRoleRegistryOwner() {
         if (recipient == address(0)) revert InvalidValue();
+        amount = _withdrawFunds(token, recipient, amount);
+        emit FundsWithdrawn(token, amount, recipient);
+    }
 
+    /**
+     * @notice Internal function to handle withdrawal of tokens or ETH
+     * @dev Used by both withdrawFunds and transferFundsToRefundWallet
+     * @param token Address of the token to withdraw (address(0) for ETH)
+     * @param recipient Address to receive the withdrawn funds
+     * @param amount Amount to withdraw (0 to withdraw all available balance)
+     * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
+     * @custom:throws WithdrawFundsFailed If ETH transfer fails
+     */    
+    function _withdrawFunds(address token, address recipient, uint256 amount) internal returns (uint256) {
         if (token == address(0)) {
             if (amount == 0) amount = address(this).balance;
             if (amount == 0) revert CannotWithdrawZeroAmount();
@@ -275,7 +416,7 @@ contract SettlementDispatcher is UpgradeableProxy {
             IERC20(token).safeTransfer(recipient, amount);
         }
 
-        emit FundsWithdrawn(token, amount, recipient);
+        return amount;
     }
 
     /**

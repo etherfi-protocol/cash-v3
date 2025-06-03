@@ -11,12 +11,226 @@ import { CashVerificationLib } from "../../../../../src/libraries/CashVerificati
 import { MockPriceProvider } from "../../../../../src/mocks/MockPriceProvider.sol";
 import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PriceProvider.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
+import { IEtherFiDataProvider } from "../../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { IBoringOnChainQueue } from "../../../../../src/interfaces/IBoringOnChainQueue.sol";
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { SettlementDispatcher } from "../../../../../src/settlement-dispatcher/SettlementDispatcher.sol";
 
 contract SettlementDispatcherTest is CashModuleTestSetup {
     address alice = makeAddr("alice");
+
+    address liquidUsd = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
+    address boringQueueLiquidUsd = 0x38FC1BA73b7ED289955a07d9F11A85b6E388064A;
+    uint16 discount = 1;
+    uint24 secondsToDeadline = 3 days;
+
+    function setUp() public override {
+        super.setUp();
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcher.LiquidWithdrawQueueSet(liquidUsd, address(boringQueueLiquidUsd));
+        settlementDispatcherReap.setLiquidAssetWithdrawQueue(liquidUsd, address(boringQueueLiquidUsd));
+    }
+
+
+    function test_getRefundWallet_returnsCorrectAddress() public {
+        // Initially should be address(0)
+        assertEq(settlementDispatcherReap.getRefundWallet(), refundWallet);
+        
+        address newWallet = makeAddr("newWallet");
+        // Set refund wallet
+        vm.prank(owner);
+        dataProvider.setRefundWallet(newWallet);
+        
+        // Should return the set address
+        assertEq(settlementDispatcherReap.getRefundWallet(), newWallet);
+    }
+
+    function test_transferFundsToRefundWallet_succeeds_withErc20Token() public {        
+        // Fund the contract with USDC
+        uint256 amount = 100e6;
+        deal(address(usdcScroll), address(settlementDispatcherReap), amount);
+        
+        // Track balances before transfer
+        uint256 walletBalBefore = usdcScroll.balanceOf(refundWallet);
+        uint256 dispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        
+        // Transfer funds
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcher.TransferToRefundWallet(address(usdcScroll), refundWallet, amount);
+        settlementDispatcherReap.transferFundsToRefundWallet(address(usdcScroll), amount);
+        
+        // Check balances after transfer
+        uint256 walletBalAfter = usdcScroll.balanceOf(refundWallet);
+        uint256 dispatcherBalAfter = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        
+        assertEq(walletBalAfter - walletBalBefore, amount);
+        assertEq(dispatcherBalBefore - dispatcherBalAfter, amount);
+    }
+
+    function test_transferFundsToRefundWallet_succeeds_withNativeToken() public {        
+        // Fund the contract with ETH
+        uint256 amount = 1 ether;
+        deal(address(settlementDispatcherReap), amount);
+        
+        // Track balances before transfer
+        uint256 walletBalBefore = refundWallet.balance;
+        uint256 dispatcherBalBefore = address(settlementDispatcherReap).balance;
+        
+        // Transfer funds
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcher.TransferToRefundWallet(address(0), refundWallet, amount);
+        settlementDispatcherReap.transferFundsToRefundWallet(address(0), amount);
+        
+        // Check balances after transfer
+        uint256 walletBalAfter = refundWallet.balance;
+        uint256 dispatcherBalAfter = address(settlementDispatcherReap).balance;
+        
+        assertEq(walletBalAfter - walletBalBefore, amount);
+        assertEq(dispatcherBalBefore - dispatcherBalAfter, amount);
+    }
+
+    function test_transferFundsToRefundWallet_transferAllTokens_withAmountZero() public {        
+        // Fund the contract with USDC
+        uint256 totalAmount = 100e6;
+        deal(address(usdcScroll), address(settlementDispatcherReap), totalAmount);
+        
+        // Track balances before transfer
+        uint256 walletBalBefore = usdcScroll.balanceOf(refundWallet);
+        uint256 dispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        
+        // Transfer funds with amount 0 (should transfer all tokens)
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcher.TransferToRefundWallet(address(usdcScroll), refundWallet, totalAmount);
+        settlementDispatcherReap.transferFundsToRefundWallet(address(usdcScroll), 0);
+        
+        // Check balances after transfer
+        uint256 walletBalAfter = usdcScroll.balanceOf(refundWallet);
+        uint256 dispatcherBalAfter = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        
+        assertEq(walletBalAfter - walletBalBefore, totalAmount);
+        assertEq(dispatcherBalBefore - dispatcherBalAfter, totalAmount);
+        assertEq(dispatcherBalAfter, 0);
+    }
+
+    function test_transferFundsToRefundWallet_reverts_whenNoBalanceAndAmountIsZero() public {        
+        // Attempt to transfer with zero balance
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcher.CannotWithdrawZeroAmount.selector);
+        settlementDispatcherReap.transferFundsToRefundWallet(address(usdcScroll), 0);
+    }
+
+
+    function test_transferFundsToRefundWallet_reverts_whenRefundWalletNotSet() public {
+        // Unset refund wallet
+        vm.mockCall(
+            address(dataProvider),
+            abi.encodeWithSelector(IEtherFiDataProvider.getRefundWallet.selector),
+            abi.encode(address(0))
+        );
+        
+        // Fund the contract
+        deal(address(usdcScroll), address(settlementDispatcherReap), 100e6);
+        
+        // Attempt to transfer
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcher.RefundWalletNotSet.selector);
+        settlementDispatcherReap.transferFundsToRefundWallet(address(usdcScroll), 100e6);
+    }
+
+    function test_transferFundsToRefundWallet_reverts_whenCallerNotBridger() public {        
+        // Fund the contract
+        deal(address(usdcScroll), address(settlementDispatcherReap), 100e6);
+        
+        // Attempt to transfer as non-bridger
+        vm.prank(alice);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        settlementDispatcherReap.transferFundsToRefundWallet(address(usdcScroll), 100e6);
+    }
+
+    function test_transferFundsToRefundWallet_reverts_whenInsufficientBalance() public {        
+        // Fund the contract with less than we'll try to transfer
+        uint256 amount = 50e6;
+        deal(address(usdcScroll), address(settlementDispatcherReap), amount);
+        
+        // Attempt to transfer more than available
+        vm.prank(owner);
+        vm.expectRevert();
+        settlementDispatcherReap.transferFundsToRefundWallet(address(usdcScroll), amount * 2);
+    }
+
+    function test_setLiquidAssetWithdrawQueue_setsTheConfig() public {
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcher.LiquidWithdrawQueueSet(liquidUsd, address(boringQueueLiquidUsd));
+        settlementDispatcherReap.setLiquidAssetWithdrawQueue(liquidUsd, address(boringQueueLiquidUsd));
+    }
+    
+    function test_setLiquidAssetWithdrawQueue_fails_ifSetterNotRoleRegistryOwner() public {
+        vm.prank(alice);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        settlementDispatcherReap.setLiquidAssetWithdrawQueue(liquidUsd, address(boringQueueLiquidUsd));
+    }
+
+    function test_setLiquidAssetWithdrawQueue_fails_ifBoringQueueIsNotCorrect() public {
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcher.InvalidBoringQueue.selector);
+        settlementDispatcherReap.setLiquidAssetWithdrawQueue(address(usdcScroll), address(boringQueueLiquidUsd));
+    }
+    
+    function test_setLiquidAssetWithdrawQueue_fails_ForZeroAddresses() public {
+        vm.startPrank(owner);
+        
+        vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
+        settlementDispatcherReap.setLiquidAssetWithdrawQueue(address(0), address(boringQueueLiquidUsd));
+                
+        vm.expectRevert(SettlementDispatcher.InvalidValue.selector);
+        settlementDispatcherReap.setLiquidAssetWithdrawQueue(liquidUsd, address(0));
+
+        vm.stopPrank();
+    }
+
+    function test_getLiquidAssetWithdrawQueue_returns_correctQueueAddress() public view {
+        assertEq(settlementDispatcherReap.getLiquidAssetWithdrawQueue(address(liquidUsd)), address(boringQueueLiquidUsd));
+    }
+
+    function test_withdrawLiquidAsset_succeeds() public {
+        uint128 amount = 100e6;
+        uint128 minReturn = 100e6;
+
+        deal(liquidUsd, address(settlementDispatcherReap), amount);
+
+        uint128 amountOut = IBoringOnChainQueue(boringQueueLiquidUsd).previewAssetsOut(address(usdcScroll), amount, discount);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcher.LiquidWithdrawalRequested(liquidUsd, address(usdcScroll), amount, amountOut);
+        settlementDispatcherReap.withdrawLiquidAsset(liquidUsd, address(usdcScroll), amount, minReturn, discount, secondsToDeadline);
+
+        assertEq(IERC20(liquidUsd).balanceOf(address(settlementDispatcherReap)), 0);
+    }
+
+    function test_withdrawLiquidAsset_fails_ifConfigNotSet() public {
+        uint128 amount = 100e6;
+        uint128 minReturn = 100e6;
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcher.LiquidWithdrawConfigNotSet.selector);
+        settlementDispatcherReap.withdrawLiquidAsset(address(usdcScroll), address(usdcScroll), amount, minReturn, discount, secondsToDeadline);
+    }
+
+    function test_withdrawLiquidAsset_fails_ifInsufficientReturnAmount() public {
+        uint128 amount = 100e6;
+        uint128 minReturn = 150e6;
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcher.InsufficientReturnAmount.selector);
+        settlementDispatcherReap.withdrawLiquidAsset(address(liquidUsd), address(usdcScroll), amount, minReturn, discount, secondsToDeadline);
+    }
 
     function test_setDestinationData_succeeds_whenCalledByAdmin() public {
         (address[] memory tokens, SettlementDispatcher.DestinationData[] memory destDatas) = getDestData();
