@@ -13,7 +13,7 @@ contract DeployEtherFiLiquidBridgeAdapter is Utils {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        liquidBridgeAdapter = EtherFiLiquidBridgeAdapter(deployWithCreate3(abi.encodePacked(type(EtherFiLiquidBridgeAdapter).creationCode), getSalt(ETHER_FI_LIQUID_BRIDGE_ADAPTER)));
+        liquidBridgeAdapter = new EtherFiLiquidBridgeAdapter();
 
         vm.stopBroadcast();
     }
