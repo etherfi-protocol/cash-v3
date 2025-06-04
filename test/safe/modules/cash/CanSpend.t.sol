@@ -2,13 +2,57 @@
 pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 
+import { PriceProvider, IAggregatorV3 } from "../../../../src/oracle/PriceProvider.sol"; 
 import { Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
+import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 
 contract CashLensCanSpendTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
+
+    IERC20 public liquidUsdScroll = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
+
+    function setUp() public override {
+        super.setUp();
+
+        vm.startPrank(owner);
+
+        PriceProvider.Config memory liquidUsdConfig = PriceProvider.Config({
+            oracle: usdcUsdOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: IAggregatorV3(usdcUsdOracle).decimals(),
+            maxStaleness: type(uint24).max,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: true,
+            isBaseTokenBtc: false
+        });
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(liquidUsdScroll);
+
+        PriceProvider.Config[] memory tokensConfig = new PriceProvider.Config[](1);
+        tokensConfig[0] = liquidUsdConfig;
+
+        priceProvider.setTokenConfig(tokens, tokensConfig);
+
+        IDebtManager.CollateralTokenConfig[] memory collateralTokenConfig = new IDebtManager.CollateralTokenConfig[](1);
+
+        collateralTokenConfig[0].ltv = ltv;
+        collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
+        collateralTokenConfig[0].liquidationBonus = liquidationBonus;
+
+        debtManager.supportCollateralToken(address(liquidUsdScroll), collateralTokenConfig[0]);        
+
+        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsdScroll)).decimals());
+        debtManager.supportBorrowToken(address(liquidUsdScroll), borrowApyPerSecond, minShares);
+        vm.stopPrank();
+    }
 
     function test_canSpend_succeeds_inDebitMode_whenBalanceAvailable() public {
         address[] memory tokens = new address[](1);
@@ -583,5 +627,253 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         amounts[1] = bal + 1;
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
         cashLens.canSpend(address(safe), txId, tokens, amounts);
+    }
+    
+    function test_canSpendSingleToken_debitMode_firstTokenWorks() public {
+        deal(address(usdcScroll), address(safe), 1000e6);
+        deal(address(liquidUsdScroll), address(safe), 1000e18);
+        
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](2);
+        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[1] = address(liquidUsdScroll);
+        
+        uint256 amountInUsd = 500e6; // 500 USD
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
+        assertEq(token, address(usdcScroll), "Should return first preference token");
+        assertTrue(canSpend, "Should be able to spend");
+        assertEq(message, "", "Should have no error message");
+    }
+
+    function test_canSpendSingleToken_debitMode_fallbackToSecondToken() public {
+        // Setup: safe only has LiquidUSD
+        deal(address(liquidUsdScroll), address(safe), 1000e18);
+        
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](2);
+        debitPrefs[0] = address(usdcScroll); // No balance
+        debitPrefs[1] = address(liquidUsdScroll); // Has balance
+        
+        uint256 amountInUsd = 500e6; // 500 USD
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
+        assertEq(token, address(liquidUsdScroll), "Should return second preference token");
+        assertTrue(canSpend, "Should be able to spend with second token");
+        assertEq(message, "", "Should have no error message");
+    }
+
+    function test_canSpendSingleToken_creditMode_works() public {
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        
+        deal(address(weETHScroll), address(safe), 1 ether);
+        deal(address(usdcScroll), address(debtManager), 10000e6);
+        
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](1);
+        debitPrefs[0] = address(usdcScroll);
+        
+        uint256 amountInUsd = 500e6; // 500 USD
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Credit), "Should return credit mode");
+        assertEq(token, address(usdcScroll), "Should return USDC");
+        assertTrue(canSpend, "Should be able to spend in credit mode");
+        assertEq(message, "", "Should have no error message");
+    }
+
+    function test_canSpendSingleToken_noTokensWork() public {
+        deal(address(usdcScroll), address(safe), 100e6);
+        
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](2);
+        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[1] = address(liquidUsdScroll);
+        
+        uint256 amountInUsd = 500e6; 
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
+        assertEq(token, address(usdcScroll), "Should return first preference token");
+        assertFalse(canSpend, "Should not be able to spend");
+        assertEq(message, "Insufficient token balance for debit mode spending", "Should return first token's error");
+    }
+
+    function test_canSpendSingleToken_emptyPreferences() public view {
+        address[] memory creditPrefs = new address[](0);
+        address[] memory debitPrefs = new address[](0);
+        
+        uint256 amountInUsd = 500e6;
+        
+        (Mode mode, address token, bool canSpend, string memory message) = 
+            cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return current mode");
+        assertEq(token, address(0), "Should return zero address");
+        assertFalse(canSpend, "Should not be able to spend");
+        assertEq(message, "No token preferences provided", "Should indicate no preferences");
+    }
+
+    function test_canSpendSingleToken_zeroAmount() public view {
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](1);
+        debitPrefs[0] = address(usdcScroll);
+        
+        uint256 amountInUsd = 0; // Zero amount
+        
+        (Mode mode, address token, bool canSpend, string memory message) = 
+            cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return current mode");
+        assertEq(token, address(usdcScroll), "Should return first preference");
+        assertFalse(canSpend, "Should not be able to spend");
+        assertEq(message, "Amount cannot be zero", "Should indicate zero amount");
+    }
+
+    function test_canSpendSingleToken_transactionAlreadyCleared() public {
+        deal(address(usdcScroll), address(safe), 10000e6);
+        
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1000e6;
+        
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, tokens, amounts, false);
+        
+        // Try canSpendSingleToken with cleared txId
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](1);
+        debitPrefs[0] = address(usdcScroll);
+        
+        uint256 amountInUsd = 500e6;
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return current mode");
+        assertEq(token, address(usdcScroll), "Should return first preference");
+        assertFalse(canSpend, "Should not be able to spend");
+        assertEq(message, "Transaction already cleared", "Should indicate cleared transaction");
+    }
+
+    function test_canSpendSingleToken_withPendingWithdrawals() public {
+        // Setup balances
+        deal(address(usdcScroll), address(safe), 1000e6);
+        deal(address(liquidUsdScroll), address(safe), 1000e18);
+        
+        // Request withdrawal that affects USDC
+        address[] memory withdrawTokens = new address[](1);
+        withdrawTokens[0] = address(usdcScroll);
+        uint256[] memory withdrawAmounts = new uint256[](1);
+        withdrawAmounts[0] = 800e6; // Leave only 200 USDC
+        _requestWithdrawal(withdrawTokens, withdrawAmounts, withdrawRecipient);
+        
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](2);
+        debitPrefs[0] = address(usdcScroll); // Will fail due to withdrawal
+        debitPrefs[1] = address(liquidUsdScroll); // Should work
+        
+        uint256 amountInUsd = 500e6; // More than remaining USDC
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
+        assertEq(token, address(liquidUsdScroll), "Should fallback to LiquidUSD");
+        assertTrue(canSpend, "Should be able to spend with second token");
+        assertEq(message, "", "Should have no error message");
+    }
+
+    function test_canSpendSingleToken_creditModeWithInsufficientCollateral() public {
+        // Switch to credit mode
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        
+        // No collateral, but debt manager has liquidity
+        deal(address(usdcScroll), address(debtManager), 10000e6);
+        
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](1);
+        debitPrefs[0] = address(usdcScroll);
+        
+        uint256 amountInUsd = 500e6;
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Credit), "Should return credit mode");
+        assertEq(token, address(usdcScroll), "Should return USDC");
+        assertFalse(canSpend, "Should not be able to spend without collateral");
+        assertEq(message, "Insufficient borrowing power", "Should indicate borrowing power issue");
+    }
+
+    function test_canSpendSingleToken_spendingLimitExceeded() public {
+        // Setup balance
+        deal(address(usdcScroll), address(safe), 10000e6);
+        
+        // Update spending limit to be lower
+        _updateSpendingLimit(100e6, 10000e6); // Daily limit of 100 USD
+        
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](1);
+        debitPrefs[0] = address(usdcScroll);
+        
+        uint256 amountInUsd = 200e6; // Exceeds daily limit
+        
+        (, uint64 spendingLimitDelay,) = cashModule.getDelays();
+        vm.warp(block.timestamp + spendingLimitDelay + 1);
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
+        assertEq(token, address(usdcScroll), "Should return first preference");
+        assertFalse(canSpend, "Should not be able to spend over limit");
+        assertEq(message, "Daily available spending limit less than amount requested", "Should indicate limit exceeded");
+    }
+
+    function test_canSpendSingleToken_unsupportedTokenInPreferences() public {
+        // Setup balance
+        deal(address(usdcScroll), address(safe), 1000e6);
+        
+        address unsupportedToken = makeAddr("unsupportedToken");
+        
+        address[] memory creditPrefs = new address[](1);
+        creditPrefs[0] = address(usdcScroll);
+        
+        address[] memory debitPrefs = new address[](2);
+        debitPrefs[0] = unsupportedToken; // Not a borrow token
+        debitPrefs[1] = address(usdcScroll);
+        
+        uint256 amountInUsd = 500e6;
+        
+        (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
+        
+        assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
+        assertEq(token, address(usdcScroll), "Should skip unsupported and use USDC");
+        assertTrue(canSpend, "Should be able to spend with valid token");
+        assertEq(message, "", "Should have no error message");
     }
 }
