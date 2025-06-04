@@ -78,7 +78,7 @@ contract CashLens is UpgradeableProxy {
      * @return canSpend Boolean indicating if the spending is allowed
      * @return message Error message if spending is not allowed
      */
-    function canSpend(address safe, bytes32 txId, address[] calldata tokens,uint256[] calldata amountsInUsd) public view returns (bool, string memory) {
+    function canSpend(address safe, bytes32 txId, address[] memory tokens,uint256[] memory amountsInUsd) public view returns (bool, string memory) {
         // Basic validation
         if (tokens.length == 0) return (false, "No tokens provided");
         if (tokens.length != amountsInUsd.length) return (false, "Tokens and amounts arrays length mismatch");
@@ -95,10 +95,58 @@ contract CashLens is UpgradeableProxy {
         return _validateSpending(safe, tokens, amountsInUsd, totalSpendingInUsd);
     }
 
+    function canSpendSingleToken(
+        address safe, 
+        bytes32 txId, 
+        address[] calldata creditModeTokenPreferences, 
+        address[] calldata debitModeTokenPreferences, 
+        uint256 amountInUsd
+    ) public view returns (Mode mode, address token, bool canSpendResult, string memory declineReason) {
+        mode = cashModule.getMode(safe);
+        
+        address[] memory tokenPreferences = mode == Mode.Debit ? debitModeTokenPreferences : creditModeTokenPreferences;
+        
+        if (tokenPreferences.length == 0) return (mode, address(0), false, "No token preferences provided");
+        if (amountInUsd == 0) return (mode, tokenPreferences[0], false, "Amount cannot be zero");
+        if (cashModule.transactionCleared(safe, txId)) return (mode, tokenPreferences[0], false, "Transaction already cleared");
+        
+        (token, canSpendResult, declineReason) = _checkTokenPreferences(safe, txId, tokenPreferences, amountInUsd);
+        
+        return (mode, token, canSpendResult, declineReason);
+    }
+
+    function _checkTokenPreferences(
+        address safe,
+        bytes32 txId,
+        address[] memory tokenPreferences,
+        uint256 amountInUsd
+    ) internal view returns (address token, bool canSpendResult, string memory declineReason) {
+        uint256[] memory amountsInUsd = new uint256[](1);
+        amountsInUsd[0] = amountInUsd;
+        address[] memory singleToken = new address[](1);
+        
+        string memory firstError;
+        
+        for (uint256 i = 0; i < tokenPreferences.length; ) {
+            singleToken[0] = tokenPreferences[i];
+            
+            (bool success, string memory error) = canSpend(safe, txId, singleToken, amountsInUsd);
+            if (i == 0) firstError = error;
+            
+            if (success) return (tokenPreferences[i], true, "");
+            
+            unchecked {
+                ++i;
+            }
+        }
+        
+        return (tokenPreferences[0], false, firstError);
+    }
+
     /**
      * @notice Validates mode, limits and completes spending checks
      */
-    function _validateSpending(address safe, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
+    function _validateSpending(address safe, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
         IDebtManager debtManager = cashModule.getDebtManager();
         SafeData memory safeData = cashModule.getData(safe);
         
@@ -119,7 +167,7 @@ contract CashLens is UpgradeableProxy {
     /**
      * @notice Process tokens and check mode-specific rules
      */
-    function _processTokensAndMode(address safe, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
+    function _processTokensAndMode(address safe, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
         // Convert USD to token amounts and validate each token
         uint256[] memory amounts = new uint256[](tokens.length);
         
@@ -165,7 +213,7 @@ contract CashLens is UpgradeableProxy {
     /**
      * @notice Debit mode specific checks
      */
-    function _debitModeCheck(address safe, address[] calldata tokens, uint256[] memory amounts, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
+    function _debitModeCheck(address safe, address[] memory tokens, uint256[] memory amounts, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
         // Simulate the spending of multiple tokens
         (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) =  _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, tokens, amounts);
         
