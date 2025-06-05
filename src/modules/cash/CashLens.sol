@@ -106,7 +106,7 @@ contract CashLens is UpgradeableProxy {
         uint256 amountInUsd
     ) public view returns (Mode mode, address token, bool canSpendResult, string memory declineReason) {
         SafeData memory safeData = cashModule.getData(safe);
-        if (safeData.incomingCreditModeStartTime != 0) mode = Mode.Credit;
+        if (safeData.incomingCreditModeStartTime != 0) safeData.mode = Mode.Credit;
         mode = safeData.mode;
         
         address[] memory tokenPreferences = mode == Mode.Debit ? debitModeTokenPreferences : creditModeTokenPreferences;
