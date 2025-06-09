@@ -117,14 +117,30 @@ struct SafeCashData {
     uint256 maxBorrow;
     /// @notice Maximum spendable amount in Credit mode (USD)
     uint256 creditMaxSpend;
-    /// @notice Maximum spendable amount in Debit mode (USD)
-    uint256 debitMaxSpend;
     /// @notice Remaining spending limit allowance
     uint256 spendingLimitAllowance;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
     /// @notice Timestamp when a pending change to Credit mode will take effect (0 if no pending change)
     uint256 incomingCreditModeStartTime;
+    /// @notice Maximum spendable amount in Debit mode 
+    DebitModeMaxSpend debitMaxSpend;
+}
+
+/**
+ * @title DebitModeMaxSpend
+ * @notice Data structure to return Debit mode max spend result
+ */
+struct DebitModeMaxSpend {
+    /// @notice Tokens that can be spent. Order of token matter, Order determines 
+    /// priority for deficit coverage - earlier tokens are used first
+    address[] spendableTokens;
+    /// @notice Amounts of respective tokens that can be spent
+    uint256[] spendableAmounts;
+    /// @notice Amounts in USD of respective tokens that can be spent
+    uint256[] amountsInUsd;
+    /// @notice Total amount in USD that can be spent
+    uint256 totalSpendableInUsd;
 }
 
 interface ICashModule {
