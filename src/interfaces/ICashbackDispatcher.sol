@@ -20,35 +20,23 @@ interface ICashbackDispatcher {
     function convertUsdToCashbackToken(uint256 cashbackInUsd) external view returns (uint256);
 
     /**
-     * @notice Calculate the cashback amount based on the spent amount and cashback percentage
-     * @param cashbackPercentageInBps The cashback percentage in basis points
-     * @param spentAmountInUsd The amount spent in USD
-     * @return The cashback amount in cashback token and USD
-     */
-    function getCashbackAmount(uint256 cashbackPercentageInBps, uint256 spentAmountInUsd) external view returns (uint256, uint256);
-
-    /**
-     * @notice Process cashback to a safe and a spender
-     * @param safe The address of the safe
-     * @param spender The address of the spender
-     * @param spentAmountInUsd The amount spent in USD
-     * @param cashbackPercentageInBps The cashback percentage in basis points
-     * @param cashbackSplitToSafePercentage The percentage of cashback to send to the safe
-     * @return token The address of the cashback token
-     * @return cashbackAmountToSafe The amount of cashback token sent to the safe
-     * @return cashbackInUsdToSafe The USD value of cashback sent to the safe
-     * @return cashbackAmountToSpender The amount of cashback token sent to the spender
-     * @return cashbackInUsdToSpender The USD value of cashback sent to the spender
+     * @notice Process cashback to a recipient
+     * @param recipient The address of the recipient
+     * @param token The address of the cashback token
+     * @param amountInUsd The amount of cashback tokens in USD to be paid out
+     * @return cashbackAmountInToken The amount of cashback token sent to the recipient
      * @return paid Whether the cashback was paid successfully
      */
-    function cashback(address safe, address spender, uint256 spentAmountInUsd, uint256 cashbackPercentageInBps, uint256 cashbackSplitToSafePercentage) external returns (address token, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid);
+    function cashback(address recipient, address token, uint256 amountInUsd) external returns (uint256 cashbackAmountInToken, bool paid);
 
     /**
      * @notice Clear pending cashback for an account
      * @param account The address of the account
-     * @return The cashback token address, the amount of cashback, and whether it was paid
+     * @param token The address of the cashback token
+     * @return the amount of cashback 
+     * @return whether it was paid
      */
-    function clearPendingCashback(address account) external returns (address, uint256, bool);
+    function clearPendingCashback(address account, address token) external returns (uint256, bool);
 
     /**
      * @notice Set the Cash Module address
