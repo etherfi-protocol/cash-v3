@@ -33,10 +33,11 @@ interface ICashbackDispatcher {
      * @notice Clear pending cashback for an account
      * @param account The address of the account
      * @param token The address of the cashback token
-     * @return the amount of cashback 
+     * @param amountInUsd The amount of cashback in USD for the token
+     * @return the amount of cashback in token
      * @return whether it was paid
      */
-    function clearPendingCashback(address account, address token) external returns (uint256, bool);
+    function clearPendingCashback(address account, address token, uint256 amountInUsd) external returns (uint256, bool);
 
     /**
      * @notice Set the Cash Module address

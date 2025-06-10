@@ -11,7 +11,6 @@ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
-
 /**
  * @title CashbackDispatcher
  * @author ether.fi
@@ -183,7 +182,7 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @notice Returns the addresses of the whitelisted cashback tokens
      * @return Addresses of the cashback tokens
      */
-    function getCashbackTokens() external view returns (address[] memory) {
+    function getCashbackTokens() public view returns (address[] memory) {
         return _getCashbackDispatcherStorage().whitelistedCashbackTokens.values();
     }
 
@@ -239,34 +238,26 @@ contract CashbackDispatcher is UpgradeableProxy {
     /**
      * @notice Clear pending cashback for an account
      * @param account The address of the account
-     * @param tokens The addresses of the cashback tokens
-     * @return the amount of cashback 
+     * @param token The address of the cashback token
+     * @param amountInUsd The amount of cashback in USD for the token
+     * @return the amount of cashback in token
      * @return whether it was paid
      */
-    function clearPendingCashback(address account, address[] memory tokens) external returns (uint256, bool) {
+    function clearPendingCashback(address account, address token, uint256 amountInUsd) external returns (uint256, bool) {
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
         
         if (account == address(0)) revert InvalidInput();
         if (msg.sender != address($.cashModule)) revert OnlyCashModule();
-        (TokenDataInUsd[] memory data, ) = $.cashModule.getPendingCashback(account);
 
-        uint256 len = data.length;
+        if (!isCashbackToken(token)) revert InvalidInput();
+        uint256 cashbackAmount = convertUsdToCashbackToken(token, amountInUsd);
+        if (cashbackAmount == 0) return (0, true);
 
-        for (uint256 i = 0; i < len; ) {
-            if (!isCashbackToken(data[i].token)) revert InvalidInput();
-            uint256 cashbackAmount = convertUsdToCashbackToken(data[i].token, data[i].amountInUsd);
-            if (cashbackAmount == 0) continue;
-
-            if (IERC20(data[i].token).balanceOf(address(this)) < cashbackAmount) {
-                return (cashbackAmount, false);
-            } else {
-                IERC20(data[i].token).safeTransfer(account, cashbackAmount);
-                return (cashbackAmount, true);
-            }
-
-            unchecked {
-                ++i;
-            }
+        if (IERC20(token).balanceOf(address(this)) < cashbackAmount) {
+            return (cashbackAmount, false);
+        } else {
+            IERC20(token).safeTransfer(account, cashbackAmount);
+            return (cashbackAmount, true);
         }
     }
 
@@ -295,12 +286,20 @@ contract CashbackDispatcher is UpgradeableProxy {
     function setPriceProvider(address _priceProvider) external onlyRole(CASHBACK_DISPATCHER_ADMIN_ROLE) {
         if (_priceProvider == address(0)) revert InvalidValue();
 
+        address[] memory cashbackTokens = getCashbackTokens();
+        uint256 len = cashbackTokens.length;
+        
+        for (uint256 i = 0; i < len; ) {
+            if (IPriceProvider(_priceProvider).price(cashbackTokens[i]) == 0) revert CashbackTokenPriceNotConfigured();
+            unchecked {
+                ++i;
+            }
+        }
+
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
 
         emit PriceProviderSet(address($.priceProvider), _priceProvider);
         $.priceProvider = IPriceProvider(_priceProvider);
-
-        if ($.priceProvider.price($.cashbackToken) == 0) revert CashbackTokenPriceNotConfigured();
     }
 
     /**

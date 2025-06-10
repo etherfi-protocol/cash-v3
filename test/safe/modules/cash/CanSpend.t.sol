@@ -6,7 +6,7 @@ import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 
 import { PriceProvider, IAggregatorV3 } from "../../../../src/oracle/PriceProvider.sol"; 
-import { Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 
@@ -50,6 +50,24 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsdScroll)).decimals());
         debtManager.supportBorrowToken(address(liquidUsdScroll), borrowApyPerSecond, minShares);
+        
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        cashbacks[0] = scrCashback;
+
         vm.stopPrank();
     }
 
@@ -242,8 +260,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountToSpend;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, tokens, amounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, tokens, amounts, cashbacks);
 
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
@@ -277,8 +297,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = dailyLimitInUsd - amountToSpend + 1;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -299,8 +321,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = dailyLimitInUsd - amountToSpend + 1;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -338,10 +362,12 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 1;
 
+        Cashback[] memory cashbacks;
+
         (, uint64 spendingLimitDelay,) = cashModule.getDelays();
         vm.warp(block.timestamp + spendingLimitDelay + 1);
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -368,10 +394,12 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 1;
 
+        Cashback[] memory cashbacks;
+
         (, uint64 spendingLimitDelay,) = cashModule.getDelays();
         vm.warp(block.timestamp + spendingLimitDelay + 1);
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
 
@@ -413,8 +441,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         _updateSpendingLimit(amount - 1, 1 ether);
 
@@ -601,9 +631,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         deal(address(usdcScroll), address(safe), 10000e6);
 
+        Cashback[] memory cashbacks;
+
         // Spend to clear the transaction
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, tokens, amounts, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, tokens, amounts, cashbacks);
         
         // Try to spend with the same txId
         uint256[] memory amountsInUsd = new uint256[](1);
@@ -740,9 +772,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         tokens[0] = address(usdcScroll);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1000e6;
+
+        Cashback[] memory cashbacks;
         
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, tokens, amounts, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, tokens, amounts, cashbacks);
         
         // Try canSpendSingleToken with cleared txId
         address[] memory creditPrefs = new address[](1);

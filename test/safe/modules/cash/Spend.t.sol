@@ -7,7 +7,7 @@ import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-import { ICashModule, Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
+import { ICashModule, Mode, BinSponsor, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
@@ -30,10 +30,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), txId));
@@ -48,12 +50,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         debtManager.supportBorrowToken(address(weETHScroll), borrowApyPerSecond, minShares);
 
         uint256 amountInUsd = 100e6;
+        uint256 totalAmountInUsd = amountInUsd * 2; // Pre-calculate total
         uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), amountInUsd);
         uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), amountInUsd);
 
         deal(address(usdcScroll), address(safe), usdcAmount);
         deal(address(weETHScroll), address(safe), weETHAmount);
-
 
         uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
         uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
@@ -69,10 +71,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         tokenAmounts[0] = usdcAmount;
         tokenAmounts[1] = weETHAmount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, amountInUsd + amountInUsd, Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, totalAmountInUsd, Mode.Debit);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), txId));
@@ -83,7 +87,6 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + usdcAmount);
         assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + weETHAmount);
     }
-
 
     function test_spend_works_inCreditMode() public {
         uint256 initialBalance = 100e6;
@@ -102,10 +105,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Credit);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), txId));
@@ -131,10 +136,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = amount;
         spendAmounts[1] = amount;
+        
+        Cashback[] memory cashbacks;
 
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.OnlyOneTokenAllowedInCreditMode.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_reverts_whenTransactionAlreadyCleared() public {
@@ -146,14 +153,16 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
+        Cashback[] memory cashbacks;
+
         // Mark transaction as cleared
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Try to spend again with the same txId
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.TransactionAlreadyCleared.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_reverts_whenUnsupportedToken() public {
@@ -165,9 +174,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 100e6;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.UnsupportedToken.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_reverts_whenAmountIsZero() public {
@@ -176,9 +187,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 0;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.AmountZero.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_reverts_whenNotEtherFiWallet() public {
@@ -189,9 +202,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 100e6;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(notEtherFiWallet);
         vm.expectRevert(abi.encodeWithSelector(ICashModule.OnlyEtherFiWallet.selector));
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_worksWithPendingWithdrawalInDebitMode() public {
@@ -218,9 +233,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
 
+        Cashback[] memory cashbacks;
+
         // Spend should work and account for the pending withdrawal
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify tokens were transferred
         assertEq(usdcScroll.balanceOf(address(safe)), initialAmount - spendAmount);
@@ -251,8 +268,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 maxCanWithdraw = 10e6;
         tokens[0] = address(usdcScroll);
@@ -266,7 +285,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.WithdrawalCancelled(address(safe), tokens, amounts, withdrawRecipient);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 settlementDispatcherUsdcBalAfter = usdcScroll.balanceOf(address(settlementDispatcherReap));
 
@@ -297,11 +316,13 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
 
+        Cashback[] memory cashbacks;
+
         // Spend should work and cancel the withdrawal
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.WithdrawalAmountUpdated(address(safe), address(usdcScroll), initialAmount - spendAmount);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify tokens were transferred
         assertEq(usdcScroll.balanceOf(address(safe)), initialAmount - spendAmount);
@@ -319,16 +340,18 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = dailyLimitInUsd + 1;
 
+        Cashback[] memory cashbacks;
+
         // Try to spend more than daily limit
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         spendAmounts[0] = dailyLimitInUsd / 2;
 
         // Spend within limit should work
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("txId2"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), keccak256("txId2"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
@@ -348,8 +371,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 10e6;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         _setMode(Mode.Debit);
 
@@ -357,7 +382,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_reverts_whenArrayLengthMismatch() public {
@@ -368,20 +393,24 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 100e6;
+
+        Cashback[] memory cashbacks;
         
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.ArrayLengthMismatch.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
     
     function test_spend_reverts_whenEmptyTokensArray() public {
         // Create empty tokens array
         address[] memory spendTokens = new address[](0);
         uint256[] memory spendAmounts = new uint256[](0);
-        
+
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InvalidInput.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
     
     function test_spend_withNoCashback() public {
@@ -395,33 +424,15 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         spendTokens[0] = address(usdcScroll);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
+
+        Cashback[] memory cashbacks;
         
         vm.prank(etherFiWallet);
         // Spend with shouldReceiveCashback set to false
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify no cashback was received
         assertEq(scrToken.balanceOf(address(safe)), safeTokenBalBefore);
-    }
-    
-    function test_spend_withSpecificSpender() public {
-        uint256 amount = 100e6;
-        deal(address(usdcScroll), address(safe), amount);
-        
-        address spender = makeAddr("spender");
-        uint256 spenderTokenBalBefore = scrToken.balanceOf(spender);
-        
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = amount;
-        
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-        
-        // Check if the spender received some cashback
-        // The exact amount depends on configuration but should be greater than initial
-        assertGt(scrToken.balanceOf(spender), spenderTokenBalBefore);
     }
     
     function test_spend_whenPaused() public {
@@ -436,18 +447,20 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         // Pause the contract
         vm.prank(pauser);
         UpgradeableProxy(address(cashModule)).pause();
+
+        Cashback[] memory cashbacks;
         
         // Attempt to spend while paused
         vm.prank(etherFiWallet);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Unpause and verify it works again
         vm.prank(unpauser);
         UpgradeableProxy(address(cashModule)).unpause();
         
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
     
     function test_spend_multiplesWithinLimits() public {
@@ -457,6 +470,8 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdcScroll);
         uint256[] memory spendAmounts = new uint256[](1);
+
+        Cashback[] memory cashbacks;
         
         // Perform multiple spends
         for (uint i = 0; i < 4; i++) {
@@ -464,7 +479,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
             bytes32 currentTxId = keccak256(abi.encodePacked("txId", i));
             
             vm.prank(etherFiWallet);
-            cashModule.spend(address(safe), address(0), address(0), currentTxId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+            cashModule.spend(address(safe), currentTxId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         }
         
         // This spend should exceed the daily limit
@@ -473,7 +488,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), address(0), address(0), finalTxId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), finalTxId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Advance time to next day (considering timezone offset)
         uint256 timeToAdd = 24 hours;
@@ -481,23 +496,9 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         
         // Now the spend should work as daily limit resets
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), finalTxId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), finalTxId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
         
-    function test_spend_revertWhenSafeIsSpender() public {
-        uint256 amount = 100e6;
-        deal(address(usdcScroll), address(safe), amount);
-        
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = amount;
-        
-        vm.prank(etherFiWallet);
-        vm.expectRevert(ICashModule.InvalidInput.selector);
-        cashModule.spend(address(safe), address(safe), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-    }
-    
     function test_spend_inDebitModeWithInsufficientBalance() public {
         uint256 amount = 100e6;
         uint256 availableAmount = 50e6;
@@ -507,10 +508,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         spendTokens[0] = address(usdcScroll);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
+
+        Cashback[] memory cashbacks;
         
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_settlementDispatcherView() public view {
@@ -529,10 +532,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), txId));
@@ -546,7 +551,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), keccak256("txId2"), BinSponsor.Rain, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("txId2"), BinSponsor.Rain, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), keccak256("txId2"), BinSponsor.Rain, spendTokens, spendAmounts, cashbacks);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
@@ -573,10 +578,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Credit);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), txId));
@@ -591,7 +598,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), keccak256("txId2"), BinSponsor.Rain, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Credit);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("txId2"), BinSponsor.Rain, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), keccak256("txId2"), BinSponsor.Rain, spendTokens, spendAmounts, cashbacks);
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));

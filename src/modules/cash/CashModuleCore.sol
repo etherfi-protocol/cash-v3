@@ -176,6 +176,17 @@ contract CashModuleCore is CashModuleStorageContract {
             mstore(data, m)
         }
     }
+ 
+    /**
+     * @notice Gets the pending cashback amount for an account in USD for a specific token
+     * @dev Returns the amount of cashback waiting to be claimed
+     * @param account Address of the account (safe or spender)
+     * @param token Address of tokens for cashback
+     * @return Pending cashback amount in USD for the token
+     */
+    function getPendingCashbackForToken(address account, address token) public view returns (uint256) {
+        return _getCashModuleStorage().pendingCashbackForTokenInUsd[account][token];
+    }
 
     /**
      * @notice Gets the settlement dispatcher address
@@ -452,7 +463,15 @@ contract CashModuleCore is CashModuleStorageContract {
         for (uint256 i = 0; i < len; ) {
             if (users[i] == address(0)) revert InvalidInput();
             
-            _retrievePendingCashback(users[i], tokens[i]);
+            for(uint256 j = 0; j < tokens.length; ) {
+                if (tokens[j] == address(0)) revert InvalidInput();
+                
+                _retrievePendingCashback(users[i], tokens[j]);
+                unchecked {
+                    ++j;
+                }
+            }
+
             unchecked {
                 ++i;
             }
@@ -468,10 +487,12 @@ contract CashModuleCore is CashModuleStorageContract {
     function _retrievePendingCashback(address user, address token) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        if ($.pendingCashbackForTokenInUsd[user][token] != 0) {
-            (uint256 cashbackAmount, bool paid) = $.cashbackDispatcher.clearPendingCashback(user, token);
+        uint256 amountInUsd = getPendingCashbackForToken(user, token);
+
+        if (amountInUsd > 0) {
+            (uint256 cashbackAmountInToken, bool paid) = $.cashbackDispatcher.clearPendingCashback(user, token, amountInUsd);
             if (paid) {
-                $.cashEventEmitter.emitPendingCashbackClearedEvent(user, token, cashbackAmount, $.pendingCashbackForTokenInUsd[user][token]);
+                $.cashEventEmitter.emitPendingCashbackClearedEvent(user, token, cashbackAmountInToken, amountInUsd);
                 delete $.pendingCashbackForTokenInUsd[user][token];
             }
         }

@@ -6,7 +6,7 @@ import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
-import { Mode, BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor, Cashback } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PriceProvider.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
@@ -227,8 +227,10 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.startPrank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 borrowInUsdc = debtManager.borrowingOf(address(safe), address(usdcScroll));
         assertApproxEqAbs(borrowInUsdc, borrowAmt, 1);
@@ -253,8 +255,10 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.startPrank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         vm.stopPrank();
 
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdcScroll)), borrowAmt, 1);
@@ -319,8 +323,10 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = remainingBorrowCapacityInUsdc;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0),  txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe),  txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         (, totalBorrowingsOfAliceSafe) = debtManager.borrowingOf(address(safe));
         assertEq(totalBorrowingsOfAliceSafe, remainingBorrowCapacityInUsdc);
@@ -339,8 +345,10 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.startPrank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdcScroll)), borrowAmt, 1);
 
@@ -359,7 +367,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
             2
         );
 
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertApproxEqAbs(
             debtManager.borrowingOf(address(safe), address(usdcScroll)),

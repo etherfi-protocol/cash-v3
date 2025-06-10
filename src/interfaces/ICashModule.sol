@@ -339,6 +339,15 @@ interface ICashModule {
     function getPendingCashback(address account, address[] memory tokens) external view returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd);
 
     /**
+     * @notice Gets the pending cashback amount for an account in USD for a specific token
+     * @dev Returns the amount of cashback waiting to be claimed
+     * @param account Address of the account (safe or spender)
+     * @param token Address of tokens for cashback
+     * @return Pending cashback amount in USD for the token
+     */
+    function getPendingCashbackForToken(address account, address token) external view returns (uint256);
+
+    /**
      * @notice Gets the current delay settings for the module
      * @return withdrawalDelay Delay in seconds before a withdrawal can be finalized
      * @return spendLimitDelay Delay in seconds before spending limit changes take effect

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
-
+import { Mode, BinSponsor, Cashback } from "../../../../src/interfaces/ICashModule.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { CashModuleTestSetup, CashVerificationLib, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
@@ -27,8 +26,10 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = transferAmount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         spendingLimitBefore = cashLens.applicableSpendingLimit(address(safe));
         assertEq(spendingLimitBefore.spentToday, transferAmount);
@@ -105,8 +106,10 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         assertEq(cashLens.applicableSpendingLimit(address(safe)).spentToday, amount);
         assertEq(cashLens.applicableSpendingLimit(address(safe)).spentThisMonth, amount);
@@ -115,13 +118,13 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         spendAmounts[0] = dailyLimit - amount + 1;
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp);
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
         // Since the time for renewal is in the past, spentToday should be 0

@@ -105,69 +105,6 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
-     * @notice Sets the cashback percentage for different tiers
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param tiers Array of tiers to configure
-     * @param cashbackPercentages Array of cashback percentages in basis points (100 = 1%)
-     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
-     * @custom:throws ArrayLengthMismatch if arrays have different lengths
-     * @custom:throws CashbackPercentageGreaterThanMaxAllowed if any percentage exceeds the maximum allowed
-     */
-    function setTierCashbackPercentage(SafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external {
-        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
-
-        CashModuleStorage storage $ = _getCashModuleStorage();
-
-        uint256 len = tiers.length;
-        if (len != cashbackPercentages.length) revert ArrayLengthMismatch();
-        for (uint256 i = 0; i < len;) {
-            if (cashbackPercentages[i] > MAX_CASHBACK_PERCENTAGE) revert CashbackPercentageGreaterThanMaxAllowed();
-            $.tierCashbackPercentage[tiers[i]] = cashbackPercentages[i];
-            unchecked {
-                ++i;
-            }
-        }
-
-        $.cashEventEmitter.emitSetTierCashbackPercentage(tiers, cashbackPercentages);
-    }
-
-    /**
-     * @notice Sets the referrer cashback percentage in bps
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param cashbackPercentage New cashback percentage in bps
-     */
-    function setReferrerCashbackPercentageInBps(uint64 cashbackPercentage) external {
-        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
-
-        if (cashbackPercentage > HUNDRED_PERCENT_IN_BPS) revert InvalidInput();
-        CashModuleStorage storage $ = _getCashModuleStorage();
-
-        $.cashEventEmitter.emitReferrerCashbackPercentageSet($.referrerCashbackPercentageInBps, cashbackPercentage);
-        $.referrerCashbackPercentageInBps = cashbackPercentage;
-    }
-
-    /**
-     * @notice Sets the percentage of cashback that goes to the safe (versus the spender)
-     * @dev Can only be called by the safe itself with a valid admin signature
-     * @param safe Address of the safe to configure
-     * @param splitInBps Percentage in basis points to allocate to the safe (10000 = 100%)
-     * @param signer Address of the safe admin signing the transaction
-     * @param signature Signature from the signer authorizing this change
-     * @custom:throws SplitAlreadyTheSame if the new split is the same as the current one
-     * @custom:throws InvalidInput if the split percentage exceeds 100%
-     */
-    function setCashbackSplitToSafeBps(address safe, uint256 splitInBps, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-
-        if (splitInBps == $.safeCashConfig[safe].cashbackSplitToSafePercentage) revert SplitAlreadyTheSame();
-        if (splitInBps > HUNDRED_PERCENT_IN_BPS) revert InvalidInput();
-
-        CashVerificationLib.verifySetCashbackSplitToSafePercentage(safe, signer, _useNonce(safe), splitInBps, signature);
-
-        $.cashEventEmitter.emitSetCashbackSplitToSafeBps(safe, $.safeCashConfig[safe].cashbackSplitToSafePercentage, splitInBps);
-        $.safeCashConfig[safe].cashbackSplitToSafePercentage = splitInBps;
-    }
-    /**
      * @notice Sets the time delays for withdrawals, spending limit changes, and mode changes
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
      * @param withdrawalDelay Delay in seconds before a withdrawal can be finalized
