@@ -6,7 +6,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
-import { Mode, BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor, Cashback } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { MockPriceProvider } from "../../../../../src/mocks/MockPriceProvider.sol";
 import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PriceProvider.sol";
@@ -70,9 +70,11 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         // Borrow some tokens first to have both collateral and borrows
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Get user state
         (

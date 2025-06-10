@@ -309,6 +309,9 @@ contract SafeTestSetup is Utils {
     }
     
     function _setupCashbackDispatcher() internal {
+        address[] memory cashbackTokens = new address[](1);
+        cashbackTokens[0] = address(scrToken);
+
         address cashbackDispatcherImpl = address(new CashbackDispatcher(address(dataProvider)));
         cashbackDispatcher = CashbackDispatcher(
             address(
@@ -319,7 +322,7 @@ contract SafeTestSetup is Utils {
                         address(roleRegistry),
                         address(cashModule),
                         address(priceProvider),
-                        address(scrToken)
+                        cashbackTokens
                     )
                 )
             )
