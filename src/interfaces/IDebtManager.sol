@@ -107,6 +107,12 @@ interface IDebtManager {
     function MAX_BORROW_APY() external view returns (uint64);
 
     /**
+     * @notice Returns the address of DebtManagerAdmin implementation
+     * @return address DebtManagerAdmin implmentaion
+     */
+    function getDebtManagerAdmin() external view returns (address);
+
+    /**
      * @notice Returns an instance of the EtherFiDataProvider 
      * @return EtherFiDataProvider instance
      */

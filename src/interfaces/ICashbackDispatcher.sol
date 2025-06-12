@@ -7,10 +7,57 @@ pragma solidity ^0.8.24;
  */
 interface ICashbackDispatcher {
     /**
+     * @notice Thrown when the price of the cashback token is not configured in the price provider
+     */
+    error CashbackTokenPriceNotConfigured();
+    
+    /**
+     * @notice Thrown when a zero or invalid address is provided
+     */
+    error InvalidValue();
+    
+    /**
+     * @notice Thrown when an operation requires an ether.fi safe but account is not one
+     */
+    error OnlyEtherFiSafe();
+    
+    /**
+     * @notice Thrown when attempting to withdraw zero tokens or ETH
+     */
+    error CannotWithdrawZeroAmount();
+    
+    /**
+     * @notice Thrown when a withdrawal of funds fails
+     */
+    error WithdrawFundsFailed();
+    
+    /**
+     * @notice Thrown when a function is called by an account other than the Cash Module
+     */
+    error OnlyCashModule();
+    
+    /**
+     * @notice Thrown when invalid input parameters are provided
+     */
+    error InvalidInput();
+    
+    /**
+     * @notice Thrown when the cashback token is not supported
+     */
+    error InvalidCashbackToken();
+
+    /**
      * @notice Function to fetch the admin role
      * @return CASHBACK_DISPATCHER_ADMIN_ROLE
      */
     function CASHBACK_DISPATCHER_ADMIN_ROLE() external view returns (bytes32);
+
+    /**
+     * @notice Returns true if the token is a whitelisted cashback token, false otherwise
+     * @param token Address of the token
+     * @return Returns true if the token is a whitelisted cashback token, false otherwise
+     */
+    function isCashbackToken(address token) external view returns (bool);
 
     /**
      * @notice Convert a USD amount to the equivalent amount in cashback token
