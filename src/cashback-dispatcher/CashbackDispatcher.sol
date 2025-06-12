@@ -105,6 +105,11 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @notice Thrown when invalid input parameters are provided
      */
     error InvalidInput();
+    
+    /**
+     * @notice Thrown when the cashback token is not supported
+     */
+    error InvalidCashbackToken();
 
     /**
      * @notice Constructor that sets the data provider and disables initializers
@@ -203,7 +208,7 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @return The equivalent amount in cashback tokens
      */
     function convertUsdToCashbackToken(address cashbackToken, uint256 cashbackInUsd) public view returns (uint256) {
-        if (!isCashbackToken(cashbackToken)) revert InvalidValue();
+        if (!isCashbackToken(cashbackToken)) revert InvalidCashbackToken();
 
         if (cashbackInUsd == 0) return 0;
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
@@ -249,7 +254,6 @@ contract CashbackDispatcher is UpgradeableProxy {
         if (account == address(0)) revert InvalidInput();
         if (msg.sender != address($.cashModule)) revert OnlyCashModule();
 
-        if (!isCashbackToken(token)) revert InvalidInput();
         uint256 cashbackAmount = convertUsdToCashbackToken(token, amountInUsd);
         if (cashbackAmount == 0) return (0, true);
 

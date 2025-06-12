@@ -490,11 +490,12 @@ contract CashModuleCore is CashModuleStorageContract {
         uint256 amountInUsd = getPendingCashbackForToken(user, token);
 
         if (amountInUsd > 0) {
-            (uint256 cashbackAmountInToken, bool paid) = $.cashbackDispatcher.clearPendingCashback(user, token, amountInUsd);
-            if (paid) {
-                $.cashEventEmitter.emitPendingCashbackClearedEvent(user, token, cashbackAmountInToken, amountInUsd);
-                delete $.pendingCashbackForTokenInUsd[user][token];
-            }
+            try $.cashbackDispatcher.clearPendingCashback(user, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
+                if (paid) {
+                    $.cashEventEmitter.emitPendingCashbackClearedEvent(user, token, cashbackAmountInToken, amountInUsd);
+                    delete $.pendingCashbackForTokenInUsd[user][token];
+                }
+            } catch {}
         }
     }
 
@@ -518,11 +519,14 @@ contract CashModuleCore is CashModuleStorageContract {
                 uint256 amountInUsd = cashbackTokens[j].amountInUsd;
                 
                 if (amountInUsd != 0) {
-                    (uint256 cashbackAmountInToken, bool paid) = $.cashbackDispatcher.cashback(to, token, amountInUsd);
-                    if (!paid) $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
-            
-                    $.safeCashConfig[to].totalCashbackEarnedInUsd += cashbackTokens[j].amountInUsd;
-                    $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, cashbackAmountInToken, amountInUsd, cashbackTokens[j].cashbackType, paid);
+                    try $.cashbackDispatcher.cashback(to, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
+                        if (!paid) $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
+                        $.safeCashConfig[to].totalCashbackEarnedInUsd += cashbackTokens[j].amountInUsd;
+                        $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, cashbackAmountInToken, amountInUsd, cashbackTokens[j].cashbackType, paid);
+                    } catch {
+                        $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
+                        $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, 0, amountInUsd, cashbackTokens[j].cashbackType, false);
+                    }
                 }
 
                 unchecked {

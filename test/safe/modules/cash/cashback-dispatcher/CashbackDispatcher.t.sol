@@ -443,6 +443,12 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertEq(amount, 0, "Amount should be zero");
         assertTrue(success, "Should return success even with zero amount");
     }
+            
+    function test_clearPendingCashback_reverts_whenInvalidCashbackToken() public {
+        vm.prank(address(cashModule));
+        vm.expectRevert(CashbackDispatcher.InvalidCashbackToken.selector);
+        cashbackDispatcher.clearPendingCashback(address(safe), address(weETHScroll), 1 ether);
+    }
 
     function test_clearPendingCashback_insufficientTokens() public {
         deal(address(scrToken), address(cashbackDispatcher), 0);

@@ -7,6 +7,7 @@ import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { ICashModule, BinSponsor, Mode, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
+import { ICashbackDispatcher } from "../../../../src/interfaces/ICashbackDispatcher.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { UpgradeableProxy } from "../../../../src/utils/UpgradeableProxy.sol";
 

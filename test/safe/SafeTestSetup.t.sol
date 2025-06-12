@@ -46,6 +46,7 @@ contract SafeTestSetup is Utils {
     SettlementDispatcher settlementDispatcherRain;
     SettlementDispatcher settlementDispatcherReap;
     IDebtManager debtManager;
+    address debtManagerAdminImpl;
     CashbackDispatcher cashbackDispatcher;
     ICashEventEmitter cashEventEmitter;
 
@@ -383,7 +384,7 @@ contract SafeTestSetup is Utils {
         collateralTokenConfig[1].liquidationBonus = liquidationBonus;
 
         address debtManagerCoreImpl = address(new DebtManagerCore(address(dataProvider)));
-        address debtManagerAdminImpl = address(new DebtManagerAdmin(address(dataProvider)));
+        debtManagerAdminImpl = address(new DebtManagerAdmin(address(dataProvider)));
         address debtManagerInitializer = address(new DebtManagerInitializer(address(dataProvider)));
         address debtManagerProxy = address(new UUPSProxy(debtManagerInitializer, abi.encodeWithSelector(DebtManagerInitializer.initialize.selector, address(roleRegistry))));
 

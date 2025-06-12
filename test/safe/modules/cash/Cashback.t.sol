@@ -3,13 +3,12 @@ pragma solidity ^0.8.28;
 
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
-import { SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
-
+import { CashModuleTestSetup, DebtManagerCore, DebtManagerAdmin, CashVerificationLib, ICashModule, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
+import { BinSponsor, SafeTiers, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
 import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
-import { CashModuleTestSetup, DebtManagerCore, DebtManagerAdmin, CashVerificationLib, ICashModule, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
-import { BinSponsor, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
+import { ICashbackDispatcher } from "../../../../src/interfaces/ICashbackDispatcher.sol";
 
 contract CashModuleCashbackTest is CashModuleTestSetup {
     using Math for uint256;
@@ -17,6 +16,173 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
     address spender = makeAddr("spender");
     IERC20 cashbackToken = scrToken;
+
+    function test_spend_multipleCashbacksToMultiplePeople() public {
+        uint256 amount = 100e6;
+        deal(address(usdcScroll), address(safe), amount);
+
+        address referrer = makeAddr("referrer");
+
+        uint256 cashbackBalSafeBefore = cashbackToken.balanceOf(address(safe));
+
+        Cashback[] memory cashbacks = new Cashback[](3);
+        
+        CashbackTokens[] memory safeTokens = new CashbackTokens[](1);
+        safeTokens[0] = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+        cashbacks[0] = Cashback({
+            to: address(safe),
+            cashbackTokens: safeTokens
+        });
+
+        CashbackTokens[] memory spenderTokens = new CashbackTokens[](1);
+        spenderTokens[0] = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 2e6,
+            cashbackType: CashbackTypes.Spender
+        });
+        cashbacks[1] = Cashback({
+            to: address(spender),
+            cashbackTokens: spenderTokens
+        });
+
+        CashbackTokens[] memory referrerTokens = new CashbackTokens[](1);
+        referrerTokens[0] = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 2e6,
+            cashbackType: CashbackTypes.Referral
+        });
+        cashbacks[2] = Cashback({
+            to: address(referrer),
+            cashbackTokens: referrerTokens
+        });
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+
+        uint256 expectedCashbackToSafe = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), safeTokens[0].amountInUsd);
+        uint256 expectedCashbackToSpender = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), spenderTokens[0].amountInUsd);
+        uint256 expectedCashbackToReferrer = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), referrerTokens[0].amountInUsd);
+
+        vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedCashbackToSafe, safeTokens[0].amountInUsd, CashbackTypes.Regular, true);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, spenderTokens[0].amountInUsd, CashbackTypes.Spender, true);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(referrer), address(scrToken), expectedCashbackToReferrer, referrerTokens[0].amountInUsd, CashbackTypes.Referral, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        assertEq(cashbackToken.balanceOf(address(safe)) - cashbackBalSafeBefore, expectedCashbackToSafe);
+        assertEq(cashbackToken.balanceOf(address(spender)), expectedCashbackToSpender);
+        assertEq(cashbackToken.balanceOf(address(referrer)), expectedCashbackToReferrer);
+    }
+
+    function test_spend_receivesMultipleCashbackTokens() public {
+        // whitelist weETH as a cashback token
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(weETHScroll);
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashbackDispatcher.configureCashbackToken(tokens, shouldWhitelist);
+
+        deal(address(weETHScroll), address(cashbackDispatcher), 100 ether);
+
+        uint256 amount = 100e6;
+        deal(address(usdcScroll), address(safe), amount);
+
+        uint256 scrBalSafeBefore = scrToken.balanceOf(address(safe));
+        uint256 weETHBalSafeBefore = weETHScroll.balanceOf(address(safe));
+
+        Cashback[] memory cashbacks = new Cashback[](2);
+        
+        CashbackTokens[] memory safeTokens = new CashbackTokens[](2);
+        safeTokens[0] = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+        safeTokens[1] = CashbackTokens({
+            token: address(weETHScroll),
+            amountInUsd: 10e6,
+            cashbackType: CashbackTypes.Promotion
+        });
+        cashbacks[0] = Cashback({
+            to: address(safe),
+            cashbackTokens: safeTokens
+        });
+
+        CashbackTokens[] memory spenderTokens = new CashbackTokens[](1);
+        spenderTokens[0] = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 2e6,
+            cashbackType: CashbackTypes.Spender
+        });
+        cashbacks[1] = Cashback({
+            to: address(spender),
+            cashbackTokens: spenderTokens
+        });
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+
+        uint256 expectedScrCashbackToSafe = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), safeTokens[0].amountInUsd);
+        uint256 expectedWeETHCashbackToSafe = cashbackDispatcher.convertUsdToCashbackToken(address(weETHScroll), safeTokens[1].amountInUsd);
+        uint256 expectedCashbackToSpender = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), spenderTokens[0].amountInUsd);
+
+        vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedScrCashbackToSafe, safeTokens[0].amountInUsd, CashbackTypes.Regular, true);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(weETHScroll), expectedWeETHCashbackToSafe, safeTokens[1].amountInUsd, CashbackTypes.Promotion, true);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, spenderTokens[0].amountInUsd, CashbackTypes.Spender, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        assertEq(scrToken.balanceOf(address(safe)) - scrBalSafeBefore, expectedScrCashbackToSafe);
+        assertEq(weETHScroll.balanceOf(address(safe)) - weETHBalSafeBefore, expectedWeETHCashbackToSafe);
+        assertEq(scrToken.balanceOf(address(spender)), expectedCashbackToSpender);
+    }
+
+    function test_spend_emitsEventWhenCashbackTokenIsInvalid() public {
+        Cashback[] memory cashbacks = new Cashback[](1);
+        
+        // WeETH is not a supported cashback token
+        CashbackTokens[] memory safeTokens = new CashbackTokens[](2);
+        safeTokens[0] = CashbackTokens({
+            token: address(weETHScroll),
+            amountInUsd: 10e6,
+            cashbackType: CashbackTypes.Promotion
+        });
+        cashbacks[0] = Cashback({
+            to: address(safe),
+            cashbackTokens: safeTokens
+        });
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 1e6;
+
+        deal(address(usdcScroll), address(safe), spendAmounts[0]);
+
+        vm.prank(etherFiWallet);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmounts[0], address(safe), safeTokens[0].token, 0, safeTokens[0].amountInUsd, CashbackTypes.Promotion, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(safeTokens[0].token)), safeTokens[0].amountInUsd);
+    }
+
 
     function test_spend_receivesCashback_forSafeAndSpender() public {
         uint256 amount = 100e6;
@@ -60,7 +226,8 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedCashbackToSafe, 1e6, CashbackTypes.Regular, true);
-        emit CashEventEmitter.Cashback(address(spender), amount, address(spender), address(scrToken), expectedCashbackToSpender, 2e6, CashbackTypes.Spender, true);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, 2e6, CashbackTypes.Spender, true);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertEq(cashbackToken.balanceOf(address(safe)) - cashbackBalSafeBefore, expectedCashbackToSafe);
