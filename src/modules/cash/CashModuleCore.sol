@@ -615,47 +615,6 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @dev Calculates collateral balance with a token amount subtracted
-     * @param debtManager Reference to the debt manager contract
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to subtract
-     * @param amount Amount to subtract
-     * @param __mode Operating mode (Credit or Debit)
-     * @return tokenAmounts Array of token data with updated balances
-     * @return error Error message if calculation fails
-     */
-    function _getCollateralBalanceWithTokenSubtracted(IDebtManager debtManager, address safe, address token, uint256 amount, Mode __mode) internal view returns (IDebtManager.TokenData[] memory, string memory error) {
-        address[] memory collateralTokens = debtManager.getCollateralTokens();
-        uint256 len = collateralTokens.length;
-        IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
-        uint256 m = 0;
-        for (uint256 i = 0; i < len;) {
-            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
-            uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
-            if (balance != 0) {
-                balance = balance - pendingWithdrawalAmount;
-                if (__mode == Mode.Debit && token == collateralTokens[i]) {
-                    if (balance == 0 || balance < amount) return (new IDebtManager.TokenData[](0), "Insufficient effective balance after withdrawal to spend with debit mode");
-                    balance = balance - amount;
-                }
-                tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
-                unchecked {
-                    ++m;
-                }
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        assembly ("memory-safe") {
-            mstore(tokenAmounts, m)
-        }
-
-        return (tokenAmounts, "");
-    }
-
-    /**
      * @notice Fetches the address Cash Module Setters contract
      * @return address Cash Module Setters
      */
