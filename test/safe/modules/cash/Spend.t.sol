@@ -400,8 +400,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 10e6;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         _setMode(Mode.Debit);
 
@@ -419,7 +421,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.WithdrawalCancelled(address(safe), withdrawTokens, withdrawAmounts, recipient);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETHScroll)), 0);
     }
 
@@ -657,8 +659,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         spendAmounts[0] = amount;
         spendAmounts[1] = amount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 }

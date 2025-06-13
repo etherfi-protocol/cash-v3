@@ -466,7 +466,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
         // Convert amount to 6 decimals before adding to borrowings
         uint256 borrowAmt = convertCollateralTokenToUsd(token, amount);
-        uint256 normalizedAmount = _getNormalizedAmount(borrowAmt, newInterestIndex);
+        uint256 normalizedAmount = _getNormalizedAmount(borrowAmt, newInterestIndex, Math.Rounding.Ceil);
         if (normalizedAmount == 0) revert BorrowAmountZero();
 
         $.userNormalizedBorrowings[msg.sender][token] += normalizedAmount;
@@ -504,7 +504,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
             amount = convertUsdToCollateralToken(token, repayDebtUsdAmt);
         }
 
-        uint256 normalizedAmount = _getNormalizedAmount(repayDebtUsdAmt, interestIndex);        
+        uint256 normalizedAmount = _getNormalizedAmount(repayDebtUsdAmt, interestIndex, Math.Rounding.Floor);        
         if (normalizedAmount == 0) revert RepaymentAmountIsZero();
 
         // if (!isBorrowToken(token)) revert UnsupportedRepayToken();
@@ -575,7 +575,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         cashModule.postLiquidate(user, msg.sender, collateralTokensToSend);
 
         uint256 liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt;
-        uint256 normalizedLiquidatedAmount = _getNormalizedAmount(liquidatedAmt, interestIndex);
+        uint256 normalizedLiquidatedAmount = _getNormalizedAmount(liquidatedAmt, interestIndex, Math.Rounding.Floor);
         $.userNormalizedBorrowings[user][borrowToken] -= normalizedLiquidatedAmount;
         $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= normalizedLiquidatedAmount;
 

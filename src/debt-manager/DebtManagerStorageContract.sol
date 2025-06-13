@@ -527,8 +527,8 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @param interestIndex The current interest index to normalize against
      * @return The normalized amount without accrued interest
      */
-    function _getNormalizedAmount(uint256 actualAmount, uint256 interestIndex) internal pure returns (uint256) {
-        return actualAmount.mulDiv(PRECISION, interestIndex, Math.Rounding.Ceil);
+    function _getNormalizedAmount(uint256 actualAmount, uint256 interestIndex, Math.Rounding rounding) internal pure returns (uint256) {
+        return actualAmount.mulDiv(PRECISION, interestIndex, rounding);
     }
 
     /**

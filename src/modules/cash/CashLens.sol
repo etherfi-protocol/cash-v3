@@ -581,7 +581,7 @@ contract CashLens is UpgradeableProxy {
 
     /**
      * @notice Calculate the amount that can be spent in credit mode
-     * @dev Internal helper for maxCanSpend that handles credit mode calculations
+     * @dev Internal helper that handles credit mode calculations
      * @param debtManager The debt manager instance
      * @param safe The address of the safe
      * @param safeData The safe data

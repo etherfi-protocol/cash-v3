@@ -430,7 +430,14 @@ contract CashModuleCore is CashModuleStorageContract {
         _spendDebit(safe, binSponsor, tokens, amounts);
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
-        $.debtManager.ensureHealth(safe);
+        
+        // Ensuring the account is healthy
+        // If account is unhealthy after spend, cancel withdrawal and try again
+        try $.debtManager.ensureHealth(safe) {}
+        catch {
+            _cancelOldWithdrawal(safe);
+            $.debtManager.ensureHealth(safe);
+        }
     }
 
     function _spendDebit(address safe, BinSponsor binSponsor,  address[] calldata tokens, uint256[] memory amounts) internal {

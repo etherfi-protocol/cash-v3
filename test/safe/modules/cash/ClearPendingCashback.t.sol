@@ -39,17 +39,6 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         cashModule.clearPendingCashback(users, tokens);
     }
     
-    
-    function test_clearPendingCashback_reverts_whenArrayContainsDuplicates() public {
-        // Test with an empty array, should execute without reverting
-        address[] memory users = new address[](2);
-        users[0] = user1;
-        users[1] = user1;
-        
-        vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
-        cashModule.clearPendingCashback(users);
-    }
-    
     function test_clearPendingCashback_ZeroAddress() public {
         // Create array with zero address
         address[] memory users = new address[](1);
@@ -179,6 +168,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         
         deal(address(scrToken), address(cashbackDispatcher), 1000 ether);
         
+        vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
         cashModule.clearPendingCashback(users, tokens);
     }
     
