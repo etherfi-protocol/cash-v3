@@ -417,19 +417,14 @@ contract TopUpFactoryTest is Test, Constants {
 
     /// @dev Test bridging functionality
     function test_bridge_reverts_whenZeroBalance() public {
-        vm.expectRevert(TopUpFactory.ZeroBalance.selector);
-        factory.bridge(address(weETH));
+        vm.expectRevert(TopUpFactory.AmountCannotBeZero.selector);
+        factory.bridge(address(weETH), 0);
     }
 
     function test_bridge_reverts_whenUnsupportedToken() public {
         MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
-        factory.bridge(address(unsupportedToken));
-    }
-
-    function test_getBridgeFee_reverts_whenZeroBalance() public {
-        vm.expectRevert(TopUpFactory.ZeroBalance.selector);
-        factory.getBridgeFee(address(weETH));
+        factory.bridge(address(unsupportedToken), 1);
     }
 
     function test_getBridgeFee_reverts_whenUnsupportedToken() public {
@@ -465,7 +460,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     function test_bridge_succeeds_withWeth() public {
@@ -476,7 +471,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     function test_bridge_succeeds_withLiquidEth() public {
@@ -487,7 +482,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     function test_bridge_succeeds_withLiquidBtc() public {
@@ -498,7 +493,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     function test_bridge_succeeds_withLiquidUsd() public {
@@ -509,7 +504,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     function test_bridge_succeeds_withEUsd() public {
@@ -520,7 +515,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     function test_bridge_succeeds_withEth() public {
@@ -529,7 +524,7 @@ contract TopUpFactoryTest is Test, Constants {
         deal(address(factory), amount);
         (, uint256 fee) = factory.getBridgeFee(token);
         
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     function test_bridge_succeeds_withWeEth() public {
@@ -540,7 +535,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     function test_bridge_succeeds_withEthfi() public {
@@ -551,7 +546,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{value: fee}(token);
+        factory.bridge{value: fee}(token, amount);
     }
 
     function test_bridge_succeeds_withEthfi_dust() public {
@@ -562,17 +557,17 @@ contract TopUpFactoryTest is Test, Constants {
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{value: fee}(token);
+        factory.bridge{value: fee}(token, amount);
     }
 
-    function test_bridge_fails_withInsufficientNativeFee() public {
+    function test_bridge_reverts_whenInsufficientFeeIsPassed() public {
         address token = address(usdc);
         uint256 amount = 100e6;
         deal(token, address(factory), amount);
         (, uint256 fee) = factory.getBridgeFee(token);
 
-        vm.expectRevert();
-        factory.bridge{ value: fee - 1 }(token);
+        vm.expectRevert(TopUpFactory.InsufficientFeePassed.selector);
+        factory.bridge{ value: fee - 1 }(token, amount);
     }
 
     /// @dev Test bridging when paused
@@ -586,7 +581,7 @@ contract TopUpFactoryTest is Test, Constants {
         factory.pause();
 
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        factory.bridge{ value: fee }(token);
+        factory.bridge{ value: fee }(token, amount);
     }
 
     /// @dev Test pausing functionality
@@ -596,7 +591,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         // Try to bridge tokens while paused
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        factory.bridge(address(usdc));
+        factory.bridge(address(usdc), 1);
     }
 
     function test_unpause_succeeds() public {
