@@ -562,9 +562,11 @@ contract CashLens is UpgradeableProxy {
             uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
             if (balance != 0) {
                 balance = balance - pendingWithdrawalAmount;
-                tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
-                unchecked {
-                    ++m;
+                if (balance != 0) {
+                    tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
+                    unchecked {
+                        ++m;
+                    }
                 }
             }
             unchecked {
