@@ -315,8 +315,7 @@ contract CashLens is UpgradeableProxy {
      * @dev Analyzes the safe's collateral health to determine spendable amounts for each token while
      *      maintaining solvency. When underwater (borrowings > max borrow), tokens are consumed in 
      *      preference order to restore health before allowing spending. The function strictly respects 
-     *      token preference order - if a token has zero value, subsequent tokens won't be available 
-     *      for spending even if the deficit is covered.
+     *      token preference order.
      * 
      * @param safe Address of the EtherFi Safe to calculate spending limits for
      * @param debtServiceTokenPreference Ordered array of borrow token addresses. Order determines 
@@ -329,7 +328,7 @@ contract CashLens is UpgradeableProxy {
      *                          Accounts for pending withdrawals. Zero for tokens needed as collateral.
      *  - amountsInUsd Array of spendable amounts converted to USD values. Corresponds 1:1 with
      *                      spendableAmounts. Zero for tokens reserved for collateral.
-     *  - totalSpendableInUsd Aggregate USD value spendable across all tokens, rounded to 4 decimals
+     *  - totalSpendableInUsd Aggregate USD value spendable across all tokens
      * 
      * @custom:reverts NotABorrowToken if any token in debtServiceTokenPreference is not whitelisted
      * @custom:reverts DuplicateElementFound if debtServiceTokenPreference contains duplicate addresses
@@ -339,7 +338,8 @@ contract CashLens is UpgradeableProxy {
      * // Returns: spendableAmounts=[1000e6, 500e6], amountsInUsd=[1000e18, 500e18], total=$1500
      * 
      * @custom:example Underwater Position  
-     * // Safe: $1000 USDC (80% LTV), $500 USDT (80% LTV), $800 borrowings, $600 max borrow
+     * // Safe: 1 weETH ($3000, 50% LTV), $1000 USDC (80% LTV), $500 USDT (80% LTV), $1700 borrowings
+     * // $1500 borrowing covered by weETH
      * // Deficit: $200, needs $250 collateral at 80% LTV from USDC (first preference)
      * // Returns: spendableAmounts=[750e6, 500e6], amountsInUsd=[750e18, 500e18], total=$1250
      * 
@@ -376,7 +376,7 @@ contract CashLens is UpgradeableProxy {
         (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
         
         // Healthy position - can spend all effective balances
-        if (totalBorrowings == 0 || totalMaxBorrow >= totalBorrowings) return DebitModeMaxSpend(debtServiceTokenPreference, effectiveBalances, tokenValuesInUsd, (totalValueInUsd * 10**4) / 10**4);
+        if (totalBorrowings == 0 || totalMaxBorrow >= totalBorrowings) return DebitModeMaxSpend(debtServiceTokenPreference, effectiveBalances, tokenValuesInUsd, totalValueInUsd);
         
         // Underwater position - need to calculate deficit coverage
         return _processUnderwaterPosition(debtServiceTokenPreference, tokenValuesInUsd, effectiveBalances, debtManager, totalBorrowings - totalMaxBorrow);
@@ -413,7 +413,7 @@ contract CashLens is UpgradeableProxy {
         // Add remaining tokens and calculate total
         uint256 totalSpendableUsd = _addRemainingTokens(spendableAmounts,spendableUsdValues,effectiveBalances,tokenValuesInUsd,lastProcessedIndex,len);
         
-        return DebitModeMaxSpend(tokens, spendableAmounts, spendableUsdValues, (totalSpendableUsd * 10**4) / 10**4);
+        return DebitModeMaxSpend(tokens, spendableAmounts, spendableUsdValues, totalSpendableUsd);
     }
 
     function _coverDeficitAndCalculateSpendable(address[] memory tokens,uint256[] memory tokenValuesInUsd,IDebtManager debtManager,uint256 deficit) internal view returns (uint256[] memory spendableAmounts,uint256[] memory spendableUsdValues,uint256 remainingDeficit,uint256 lastProcessedIndex) {
@@ -604,7 +604,7 @@ contract CashLens is UpgradeableProxy {
             return (0, false);
         }
 
-        // Calculate credit mode amount  
+        // Calculate credit mode amount 
         return (totalMaxBorrow - totalBorrowings, true);
     }
 
