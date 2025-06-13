@@ -14,10 +14,12 @@ import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { IEtherFiDataProvider } from "../../../../../src/interfaces/IEtherFiDataProvider.sol";
 import { IBoringOnChainQueue } from "../../../../../src/interfaces/IBoringOnChainQueue.sol";
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
+import { MessagingFee } from "../../../../../src/interfaces/IStargate.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { SettlementDispatcher } from "../../../../../src/settlement-dispatcher/SettlementDispatcher.sol";
+import { Constants } from "../../../../../src/utils/Constants.sol";
 
-contract SettlementDispatcherTest is CashModuleTestSetup {
+contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
     address alice = makeAddr("alice");
 
     address liquidUsd = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
@@ -313,6 +315,39 @@ contract SettlementDispatcherTest is CashModuleTestSetup {
 
         assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), balBefore - amount);
         assertEq(stargateBalAfter - stargateBalBefore, amount);
+    }
+
+    function test_bridge_worksWithEth() public {
+        address[] memory tokens = new address[](1); 
+        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
+
+        tokens[0] = ETH;
+        destDatas[0] = SettlementDispatcher.DestinationData({
+            destEid: optimismDestEid,
+            destRecipient: address(1),
+            stargate: address(stargateEthPool)
+        });
+
+        vm.prank(owner);
+        settlementDispatcherReap.setDestinationData(tokens, destDatas);
+
+        uint256 balBefore = 1 ether;
+        deal(address(settlementDispatcherReap), balBefore);
+        
+        uint256 amount = 0.1 ether;
+        ( , , , , MessagingFee memory messagingFee) = settlementDispatcherReap.prepareRideBus(ETH, amount);
+
+        deal(address(settlementDispatcherReap), balBefore + messagingFee.nativeFee);
+        
+        uint256 stargateBalBefore = address(stargateEthPool).balance;
+        
+        vm.prank(owner);
+        settlementDispatcherReap.bridge(ETH, amount, 1);
+
+        uint256 stargateBalAfter = address(stargateEthPool).balance;
+
+        assertEq(address(settlementDispatcherReap).balance, balBefore - amount);
+        assertGt(stargateBalAfter, stargateBalBefore);
     }
 
     function test_bridge_reverts_whenCallerNotBridger() public {
