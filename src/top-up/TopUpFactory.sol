@@ -99,6 +99,8 @@ contract TopUpFactory is BeaconFactory, Constants {
     error InvalidConfig();
     /// @notice Error thrown when insufficient fee is passed for bridging
     error InsufficientFeePassed();
+    /// @notice Error thrown when ETH transfer fails
+    error NativeTransferFailed();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -243,14 +245,17 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @custom:throws OnlyUnsupportedTokens if token is a supported bridge asset
      * @custom:throws RecoveryWalletNotSet if recovery wallet is not configured
      */
-    function recoverFunds(address token, uint256 amount) external onlyRoleRegistryOwner {
+    function recoverFunds(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter != address(0)) revert OnlyUnsupportedTokens();
         if ($.recoveryWallet == address(0)) revert RecoveryWalletNotSet();
 
-        IERC20(token).safeTransfer($.recoveryWallet, amount);
+        if (token == ETH) {
+            (bool success, ) = payable($.recoveryWallet).call{value: amount}("");
+            if (!success) revert NativeTransferFailed();
+        } else IERC20(token).safeTransfer($.recoveryWallet, amount);
 
         emit Recovery($.recoveryWallet, token, amount);
     }

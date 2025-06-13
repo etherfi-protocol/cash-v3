@@ -197,6 +197,29 @@ contract TopUpFactoryTest is Test, Constants {
         vm.stopPrank();
     }
 
+    function test_recoverFunds_reverts_when_NativeTransferFails() public {
+        // Deploy a new factory instance without ETH configured as supported token
+        vm.startPrank(owner);
+        
+        // Deploy new factory without ETH in supported tokens
+        address newFactoryImpl = address(new TopUpFactory());
+        TopUpFactory newFactory = TopUpFactory(payable(address(new UUPSProxy(newFactoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
+        
+        // Set recovery wallet that will reject ETH transfers
+        // Using a contract address that doesn't have a receive/fallback function
+        address recoveryWallet = address(roleRegistry); // roleRegistry doesn't accept ETH
+        newFactory.setRecoveryWallet(recoveryWallet);
+        
+        // Send ETH to the new factory
+        deal(address(newFactory), 1 ether);
+        
+        // Now try to recover ETH - it should fail because roleRegistry can't receive ETH
+        vm.expectRevert(TopUpFactory.NativeTransferFailed.selector);
+        newFactory.recoverFunds(ETH, 1 ether);
+        
+        vm.stopPrank();
+    }
+
     function test_recoverFunds_reverts_whenZeroAmount() public {
         address recoveryWallet = makeAddr("recovery");
         MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
