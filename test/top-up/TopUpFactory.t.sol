@@ -14,6 +14,7 @@ import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUp } from "../../src/top-up/TopUp.sol";
 import { BeaconFactory, TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { EtherFiOFTBridgeAdapter } from "../../src/top-up/bridge/EtherFiOFTBridgeAdapter.sol";
+import { ScrollERC20BridgeAdapter } from "../../src/top-up/bridge/ScrollERC20BridgeAdapter.sol";
 import { StargateAdapter } from "../../src/top-up/bridge/StargateAdapter.sol";
 import { EtherFiLiquidBridgeAdapter } from "../../src/top-up/bridge/EtherFiLiquidBridgeAdapter.sol";
 import {NTTAdapter} from "../../src/top-up/bridge/NTTAdapter.sol";
@@ -32,6 +33,7 @@ contract TopUpFactoryTest is Test, Constants {
     EtherFiOFTBridgeAdapter oftBridgeAdapter;
     EtherFiLiquidBridgeAdapter liquidBridgeAdapter;
     StargateAdapter stargateAdapter;
+    ScrollERC20BridgeAdapter scrollErc20Adapter;
     NTTAdapter nttAdapter;
     address public dataProvider = makeAddr("dataProvider");
     uint96 maxSlippage = 100;
@@ -45,6 +47,8 @@ contract TopUpFactoryTest is Test, Constants {
     address usdcStargatePool = 0xc026395860Db2d07ee33e05fE50ed7bD583189C7;
     address ethStargatePool = 0x77b2043768d28E9C9aB44E1aBfC95944bcE57931;
     address nttManager = 0x344169Cc4abE9459e77bD99D13AA8589b55b6174;
+    address scrollGatewayRouter = 0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6;
+    uint256 gasLimitForScrollGateway = 200_000;
 
     IERC20 public liquidEth = IERC20(0xf0bb20865277aBd641a307eCe5Ee04E79073416C);
     address public liquidEthTeller = address(0x9AA79C84b79816ab920bBcE20f8f74557B514734);
@@ -71,6 +75,7 @@ contract TopUpFactoryTest is Test, Constants {
         vm.startPrank(owner);
 
         stargateAdapter = new StargateAdapter(address(weth));
+        scrollErc20Adapter = new ScrollERC20BridgeAdapter();
         oftBridgeAdapter = new EtherFiOFTBridgeAdapter();
         liquidBridgeAdapter = new EtherFiLiquidBridgeAdapter();
         nttAdapter = new NTTAdapter();
@@ -96,7 +101,7 @@ contract TopUpFactoryTest is Test, Constants {
         tokens[8] = address(ethfi);
 
         TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](9);
-        tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(usdcStargatePool) });
+        tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(scrollErc20Adapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(scrollGatewayRouter, gasLimitForScrollGateway) });
         tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
         tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
         tokenConfigs[3] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidEthTeller) });
