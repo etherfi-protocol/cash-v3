@@ -453,7 +453,12 @@ contract TopUpFactoryTest is Test, Constants {
     function test_getBridgeFee_reverts_whenUnsupportedToken() public {
         MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
-        factory.getBridgeFee(address(unsupportedToken));
+        factory.getBridgeFee(address(unsupportedToken), 1);
+    }
+    
+    function test_getBridgeFee_reverts_whenAmountIsZero() public {
+        vm.expectRevert(TopUpFactory.AmountCannotBeZero.selector);
+        factory.getBridgeFee(address(usdc), 0);
     }
 
     /// @dev Test token support checks
@@ -479,7 +484,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(usdc);
         uint256 amount = 100e6;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -490,7 +495,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(weth);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -501,7 +506,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(liquidEth);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -512,7 +517,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(liquidBtc);
         uint256 amount = 1e5;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -523,7 +528,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(liquidUsd);
         uint256 amount = 1e6;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -534,7 +539,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(eUsd);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -545,7 +550,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = ETH;
         uint256 amount = 1e18;
         deal(address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
         
         factory.bridge{ value: fee }(token, amount);
     }
@@ -554,7 +559,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(weETH);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -565,7 +570,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(ethfi);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -576,7 +581,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(ethfi);
         uint256 amount = 1111111111111111111;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount);
@@ -587,7 +592,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(usdc);
         uint256 amount = 100e6;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.expectRevert(TopUpFactory.InsufficientFeePassed.selector);
         factory.bridge{ value: fee - 1 }(token, amount);
@@ -598,7 +603,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(usdc);
         uint256 amount = 100e6;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token);
+        (, uint256 fee) = factory.getBridgeFee(token, amount);
 
         vm.prank(pauser);
         factory.pause();

@@ -227,7 +227,7 @@ contract TopUpFactory is BeaconFactory, Constants {
         uint256 balance = token == ETH ? address(this).balance : IERC20(token).balanceOf(address(this));
         if (balance < amount) revert InsufficientBalance();
 
-        (, uint256 bridgeFee) = getBridgeFee(token);
+        (, uint256 bridgeFee) = getBridgeFee(token, amount);
         if (bridgeFee > msg.value) revert InsufficientFeePassed();
 
         DelegateCallLib.delegateCall($.tokenConfig[token].bridgeAdapter, abi.encodeWithSelector(BridgeAdapterBase.bridge.selector, token, amount, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData));
@@ -281,22 +281,21 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @notice Gets the bridge fee for a token transfer
      * @dev Queries the bridge adapter for the fee estimation
      * @param token The address of the token to bridge
+     * @param amount The amount of the token to bridge
      * @return _token The fee token address
      * @return _amount The fee amount in the _token's decimals
      * @custom:throws TokenCannotBeZeroAddress if token address is zero
      * @custom:throws TokenConfigNotSet if bridge configuration is not set for the token
      * @custom:throws AmountCannotBeZero if contract has no balance of the specified token
      */
-    function getBridgeFee(address token) public view returns (address _token, uint256 _amount) {
+    function getBridgeFee(address token, uint256 amount) public view returns (address _token, uint256 _amount) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
+        if (amount == 0) revert AmountCannotBeZero();
 
-        uint256 balance = token == ETH ? address(this).balance : IERC20(token).balanceOf(address(this));
-        if (balance == 0) revert AmountCannotBeZero();
-
-        return BridgeAdapterBase($.tokenConfig[token].bridgeAdapter).getBridgeFee(token, balance, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData);
+        return BridgeAdapterBase($.tokenConfig[token].bridgeAdapter).getBridgeFee(token, amount, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData);
     }
 
     /**
