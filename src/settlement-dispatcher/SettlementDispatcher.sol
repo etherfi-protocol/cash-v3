@@ -404,14 +404,14 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
     /**
      * @notice Internal function to handle withdrawal of tokens or ETH
      * @dev Used by both withdrawFunds and transferFundsToRefundWallet
-     * @param token Address of the token to withdraw (address(0) for ETH)
+     * @param token Address of the token to withdraw 
      * @param recipient Address to receive the withdrawn funds
      * @param amount Amount to withdraw (0 to withdraw all available balance)
      * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
      * @custom:throws WithdrawFundsFailed If ETH transfer fails
      */    
     function _withdrawFunds(address token, address recipient, uint256 amount) internal returns (uint256) {
-        if (token == address(0)) {
+        if (token == ETH) {
             if (amount == 0) amount = address(this).balance;
             if (amount == 0) revert CannotWithdrawZeroAmount();
             (bool success, ) = payable(recipient).call{value: amount}("");

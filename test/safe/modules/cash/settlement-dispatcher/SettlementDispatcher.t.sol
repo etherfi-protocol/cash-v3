@@ -84,8 +84,8 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         // Transfer funds
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcher.TransferToRefundWallet(address(0), refundWallet, amount);
-        settlementDispatcherReap.transferFundsToRefundWallet(address(0), amount);
+        emit SettlementDispatcher.TransferToRefundWallet(ETH, refundWallet, amount);
+        settlementDispatcherReap.transferFundsToRefundWallet(ETH, amount);
         
         // Check balances after transfer
         uint256 walletBalAfter = refundWallet.balance;
@@ -443,7 +443,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         uint256 safeBalBefore = address(settlementDispatcherReap).balance;
         
         vm.prank(owner);
-        settlementDispatcherReap.withdrawFunds(address(0), alice, amount);
+        settlementDispatcherReap.withdrawFunds(ETH, alice, amount);
 
         uint256 aliceBalAfter = alice.balance;
         uint256 safeBalAfter = address(settlementDispatcherReap).balance;
@@ -453,7 +453,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
 
         // withdraw all
         vm.prank(owner);
-        settlementDispatcherReap.withdrawFunds(address(0), alice, 0);
+        settlementDispatcherReap.withdrawFunds(ETH, alice, 0);
 
         aliceBalAfter = alice.balance;
         safeBalAfter = address(settlementDispatcherReap).balance;
@@ -475,7 +475,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.CannotWithdrawZeroAmount.selector);
-        settlementDispatcherReap.withdrawFunds(address(0), alice, 0);
+        settlementDispatcherReap.withdrawFunds(ETH, alice, 0);
     }
 
     function test_withdrawFunds_reverts_whenInsufficientBalance() public {
@@ -485,7 +485,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcher.WithdrawFundsFailed.selector);
-        settlementDispatcherReap.withdrawFunds(address(0), alice, 1);
+        settlementDispatcherReap.withdrawFunds(ETH, alice, 1);
     }
 
     function getDestData() internal view returns (address[] memory tokens, SettlementDispatcher.DestinationData[] memory destDatas) {
