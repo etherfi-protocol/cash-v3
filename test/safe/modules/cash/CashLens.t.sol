@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 
 import { Mode, SafeCashData, BinSponsor, SafeData } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
@@ -9,69 +11,62 @@ import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { SpendingLimit } from "../../../../src/libraries/SpendingLimitLib.sol";
+import { PriceProvider, IAggregatorV3 } from "../../../../src/oracle/PriceProvider.sol"; 
+import { ILayerZeroTeller, AccountantWithRateProviders } from "../../../../src/interfaces/ILayerZeroTeller.sol";
+
 
 contract CashLensTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
+    IERC20 public liquidUsdScroll = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
+    ILayerZeroTeller public liquidUsdTeller = ILayerZeroTeller(0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387);
+
     function setUp() public override {
         super.setUp();
-        
+
+        vm.startPrank(owner);
+
+        AccountantWithRateProviders liquidUsdAccountant = liquidUsdTeller.accountant();
+
+        PriceProvider.Config memory liquidUsdConfig = PriceProvider.Config({
+            oracle: address(liquidUsdAccountant),
+            priceFunctionCalldata: abi.encodeWithSelector(AccountantWithRateProviders.getRate.selector),
+            isChainlinkType: false,
+            oraclePriceDecimals: liquidUsdAccountant.decimals(),
+            maxStaleness: 2 days,
+            dataType: PriceProvider.ReturnType.Uint256,
+            isBaseTokenEth: false,
+            isStableToken: true,
+            isBaseTokenBtc: false
+        });
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(liquidUsdScroll);
+
+        PriceProvider.Config[] memory tokensConfig = new PriceProvider.Config[](1);
+        tokensConfig[0] = liquidUsdConfig;
+
+        priceProvider.setTokenConfig(tokens, tokensConfig);
+
+        IDebtManager.CollateralTokenConfig[] memory collateralTokenConfig = new IDebtManager.CollateralTokenConfig[](1);
+
+        collateralTokenConfig[0].ltv = ltv;
+        collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
+        collateralTokenConfig[0].liquidationBonus = liquidationBonus;
+
+        debtManager.supportCollateralToken(address(liquidUsdScroll), collateralTokenConfig[0]);        
+
+        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsdScroll)).decimals());
+        debtManager.supportBorrowToken(address(liquidUsdScroll), borrowApyPerSecond, minShares);
+
         // Add some collateral to safe for tests
         deal(address(weETHScroll), address(safe), 10 ether);
         deal(address(usdcScroll), address(safe), 50000e6);
         
         // Ensure debt manager has sufficient liquidity
         deal(address(usdcScroll), address(debtManager), 100000e6);
-    }
 
-    function test_maxCanSpend_inDebitMode() public view {
-        (uint256 creditMaxSpend, uint256 debitMaxSpend, uint256 spendingLimitAllowance) = cashLens.maxCanSpend(address(safe), address(usdcScroll));
-        
-        assertGt(creditMaxSpend, 0, "Credit max spend should be greater than 0");
-        assertGt(debitMaxSpend, 0, "Debit max spend should be greater than 0");
-        assertEq(spendingLimitAllowance, dailyLimitInUsd, "Spending limit allowance should match daily limit");
-        
-        uint256 usdcBalance = usdcScroll.balanceOf(address(safe));
-        
-        assertEq(debitMaxSpend, usdcBalance);
-    }
-
-    function test_maxCanSpend_inCreditMode() public {
-        // Set to credit mode
-        _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
-        
-        (uint256 creditMaxSpend, uint256 debitMaxSpend, uint256 spendingLimitAllowance) = cashLens.maxCanSpend(address(safe), address(usdcScroll));
-        
-        // Calculate expected max borrowing power
-        uint256 totalMaxBorrow = debtManager.getMaxBorrowAmount(address(safe), true);
-        
-        // In credit mode, creditMaxSpend should match the max borrowing power
-        assertGt(creditMaxSpend, 0, "Credit max spend should be greater than 0");
-        assertGt(debitMaxSpend, 0, "Debit max spend should be greater than 0");
-        assertEq(spendingLimitAllowance, dailyLimitInUsd, "Spending limit allowance should match daily limit");
-        
-        assertEq(creditMaxSpend, totalMaxBorrow, "Credit max spend should match the expected value");
-    }
-
-    function test_maxCanSpend_withWithdrawalRequests() public {
-        // Create a withdrawal request
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = 30000e6; // Withdraw 30,000 USDC
-        _requestWithdrawal(tokens, amounts, withdrawRecipient);
-        
-        ( , uint256 debitMaxSpend, ) = cashLens.maxCanSpend(address(safe), address(usdcScroll));
-        
-        // Calculate the available balance after the withdrawal
-        uint256 usdcBalance = usdcScroll.balanceOf(address(safe));
-        uint256 pendingWithdrawal = cashLens.getPendingWithdrawalAmount(address(safe), address(usdcScroll));
-        uint256 availableBalance = usdcBalance - pendingWithdrawal;
-        uint256 availableBalanceInUsd = debtManager.convertCollateralTokenToUsd(address(usdcScroll), availableBalance);
-        
-        // The debit max spend should now be limited by the available balance
-        assertLe(debitMaxSpend, availableBalanceInUsd, "Debit max spend should be limited by available balance");
+        vm.stopPrank();
     }
 
     function test_getUserCollateralForToken() public {
@@ -150,7 +145,7 @@ contract CashLensTest is CashModuleTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         // Get safe cash data
-        SafeCashData memory data = cashLens.getSafeCashData(address(safe));
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
         
         // Verify basic data
         assertEq(uint8(data.mode), uint8(Mode.Debit), "Initial mode should be Debit");
@@ -171,14 +166,6 @@ contract CashLensTest is CashModuleTestSetup {
         assertGt(data.totalCollateral, 0, "Total collateral should be positive");
         assertEq(data.totalBorrow, 0, "Total borrow should be zero initially");
         assertGt(data.maxBorrow, 0, "Max borrow should be positive");
-        
-        // Verify spending limits
-        (uint256 expectedCreditMaxSpend, uint256 expectedDebitMaxSpend, uint256 expectedSpendingLimitAllowance) = 
-            cashLens.maxCanSpend(address(safe), address(usdcScroll));
-        
-        assertEq(data.creditMaxSpend, expectedCreditMaxSpend, "Credit max spend should match maxCanSpend result");
-        assertEq(data.debitMaxSpend, expectedDebitMaxSpend, "Debit max spend should match maxCanSpend result");
-        assertEq(data.spendingLimitAllowance, expectedSpendingLimitAllowance, "Spending limit allowance should match maxCanSpend result");
     }
 
     function test_getSafeCashData_inCreditMode() public {
@@ -190,7 +177,7 @@ contract CashLensTest is CashModuleTestSetup {
         _setMode(Mode.Credit);
         
         // Get safe cash data before credit mode is active
-        SafeCashData memory data = cashLens.getSafeCashData(address(safe));
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
         
         // Verify mode is still Debit but incoming change is recorded
         assertEq(uint8(data.mode), uint8(Mode.Debit), "Mode should still be Debit");
@@ -200,7 +187,7 @@ contract CashLensTest is CashModuleTestSetup {
         vm.warp(data.incomingCreditModeStartTime + 1);
         
         // Get updated safe cash data
-        data = cashLens.getSafeCashData(address(safe));
+        data = cashLens.getSafeCashData(address(safe), new address[](0));
         
         // Verify mode is now Credit
         assertEq(uint8(data.mode), uint8(Mode.Credit), "Mode should now be Credit");
@@ -226,7 +213,7 @@ contract CashLensTest is CashModuleTestSetup {
         cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
         
         // Get safe cash data
-        SafeCashData memory data = cashLens.getSafeCashData(address(safe));
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
         
         // Verify borrows
         assertEq(data.borrows.length, 1, "Should have one borrow entry");
@@ -313,11 +300,8 @@ contract CashLensTest is CashModuleTestSetup {
         // Get the safe data structure
         SafeData memory safeData = cashModule.getData(address(safe));
         safeData.mode = Mode.Credit;
-        
-        address token = address(usdcScroll);
-        
-        // Call through maxCanSpend to test the internal _calculateCreditModeAmount
-        (uint256 creditMaxSpend, , ) = cashLens.maxCanSpend(safeDummy, token);
+                
+        uint256 creditMaxSpend = cashLens.getMaxSpendCredit(safeDummy);
         
         assertEq(creditMaxSpend, 0, "Credit max spend should be zero with no collateral");
     }
@@ -346,7 +330,7 @@ contract CashLensTest is CashModuleTestSetup {
         
         
         // Calculate max debit spend - should be zero due to 0 collateral
-        (, uint256 debitMaxSpend, ) = cashLens.maxCanSpend(insufficientSafe, address(usdcScroll));
+        uint256 debitMaxSpend = cashLens.getMaxSpendDebit(insufficientSafe, debtManager.getBorrowTokens()).totalSpendableInUsd;
         
         assertEq(debitMaxSpend, 0, "Debit max spend should be zero with insufficient collateral");
     }
