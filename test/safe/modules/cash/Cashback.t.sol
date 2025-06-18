@@ -9,6 +9,8 @@ import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
 import { ICashbackDispatcher } from "../../../../src/interfaces/ICashbackDispatcher.sol";
+import { EnumerableAddressWhitelistLib } from "../../../../src/libraries/EnumerableAddressWhitelistLib.sol";
+
 
 contract CashModuleCashbackTest is CashModuleTestSetup {
     using Math for uint256;
@@ -182,7 +184,6 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         assertEq(cashModule.getPendingCashbackForToken(address(safe), address(safeTokens[0].token)), safeTokens[0].amountInUsd);
     }
-
 
     function test_spend_receivesCashback_forSafeAndSpender() public {
         uint256 amount = 100e6;

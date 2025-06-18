@@ -292,7 +292,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         shouldWhitelist[0] = false;
 
         vm.prank(owner);
-        vm.expectRevert(PriceProvider.TokenOracleNotSet.selector);
+        vm.expectRevert(abi.encodeWithSelector(EnumerableAddressWhitelistLib.InvalidAddress.selector, tokens[0]));
         cashbackDispatcher.configureCashbackToken(tokens, shouldWhitelist);
     }
 
