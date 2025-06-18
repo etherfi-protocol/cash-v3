@@ -21,14 +21,15 @@ contract TopUpSourceSetConfig is Utils {
     TopUpFactory topUpFactory;
     RoleRegistry roleRegistry;
     address stargateAdapter;
+    address scrollERC20BridgeAdapter;
     address etherFiOFTBridgeAdapter;
     address nttAdapter;
     address etherFiLiquidBridgeAdapter;
     
     function run() public {
-        // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        vm.startBroadcast();
+        vm.startBroadcast(deployerPrivateKey);
         
         string memory deployments = readTopUpSourceDeployment();
 
@@ -60,6 +61,11 @@ contract TopUpSourceSetConfig is Utils {
                 deployments,
                 string.concat(".", "addresses", ".", "EtherFiLiquidBridgeAdapter")
             );
+
+            scrollERC20BridgeAdapter = stdJson.readAddress(
+                deployments,
+                string.concat(".", "addresses", ".", "ScrollERC20BridgeAdapter")
+            );
         }  
         
         string memory fixturesFile = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv() ,"/fixtures/top-up-fixtures.json"));
@@ -77,7 +83,7 @@ contract TopUpSourceSetConfig is Utils {
         uint256 count = getTokenConfigsLength(jsonString, chainId);
         tokens = new address[](count);
         tokenConfig = new TopUpFactory.TokenConfig[](count);
-
+        
         (address topUpDest, address topUpDestNativeGateway) = getTopUpDestAndNativeGateway();
         address weth = stdJson.readAddress(jsonString, string.concat(".", chainId, ".weth"));
         
@@ -102,6 +108,11 @@ contract TopUpSourceSetConfig is Utils {
             } else if (block.chainid == 1 && keccak256(bytes(bridge)) == keccak256(bytes("liquidBridgeAdapter"))) {
                 tokenConfig[i].bridgeAdapter = etherFiLiquidBridgeAdapter;
                 tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".teller")));
+            } else if (block.chainid == 1 && keccak256(bytes(bridge)) == keccak256(bytes("scrollERC20BridgeAdapter"))) {
+                tokenConfig[i].bridgeAdapter = scrollERC20BridgeAdapter;
+                address scrollGateway = stdJson.readAddress(jsonString, string.concat(base, ".scrollGatewayRouter"));
+                uint256 gasLimit = stdJson.readUint(jsonString, string.concat(base, ".gasLimitForScrollGateway"));
+                tokenConfig[i].additionalData = abi.encode(scrollGateway, gasLimit);
             } else revert ("Unknown bridge");
 
             if (tokenConfig[i].recipientOnDestChain == address(0)) revert (string.concat("Invalid recipientOnDestChain for token ", stdJson.readString(jsonString, string.concat(base, ".token"))));
@@ -112,32 +123,23 @@ contract TopUpSourceSetConfig is Utils {
         return (tokens, tokenConfig);
     }
 
-    // First, let's create a helper to find the array length
-    function getTokenConfigsLength(string memory jsonString, string memory chainId) internal view returns (uint256) {
-        uint256 i = 0;
-        // Keep checking indices until we get an invalid entry
-        while (true) {
-            string memory path = string.concat(
-                ".", 
-                chainId, 
-                ".tokenConfigs[",
-                vm.toString(i),
-                "].address"
-            );
-            
-            // This will revert if the index doesn't exist
-            try this.getValue(jsonString, path) returns (address) {
-                i++;
-            } catch {
-                break;
-            }
+    function getTokenConfigsLength(string memory jsonString, string memory chainId) internal pure returns (uint256) {
+        // First, let's try to parse the entire tokenConfigs array as raw bytes
+        bytes memory arrayData = stdJson.parseRaw(jsonString, string.concat(".", chainId, ".tokenConfigs"));
+        
+        // Now we need to decode this. The array is ABI-encoded.
+        // For an array of structs, it starts with the array length
+        
+        // Direct decode of the length
+        // ABI encoding for dynamic types: first 32 bytes = offset, then at offset: 32 bytes = length
+        uint256 arrayLength;
+        assembly {
+            // Skip the first 32 bytes (offset) and read the length
+            arrayLength := mload(add(arrayData, 0x40))
         }
-        return i;
-    }
-
-    function getValue(string memory jsonString, string memory path) external pure returns (address) {
-        return stdJson.readAddress(jsonString, path);
-    }
+        
+        return arrayLength;
+}
 
     function getTopUpDestAndNativeGateway() internal view returns (address, address) {
         string memory dir = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv(), "/"));
