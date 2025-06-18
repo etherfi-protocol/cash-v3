@@ -11,14 +11,14 @@ import { ScrollERC20BridgeAdapter } from "../../src/top-up/bridge/ScrollERC20Bri
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
-contract UpgradeTopUpSourceFactory is GnosisHelpers, Utils, Test {
+contract AddScrollERC20Bridge is GnosisHelpers, Utils, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     address usdcEthereum = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address topUpFactory;
     string chainId;
     string deployments;
-    address scrollERC20BridgeAdapter = 0x46A2A0eDf74eD97A72518349B5ccBD53AABf8265;
+    address scrollERC20BridgeAdapter;
     address topUpDestOnScroll = 0x3a6A724595184dda4be69dB1Ce726F2Ac3D66B87;
     address scrollGateway = 0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6;
     uint256 gasLimit = 200_000;
@@ -57,7 +57,7 @@ contract UpgradeTopUpSourceFactory is GnosisHelpers, Utils, Test {
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setConfig, "0", true)));
 
         vm.createDir("./output", true);
-        string memory path = string.concat("./output/AddScrollERC20Bridge-", chainId, ".json");
+        string memory path = string.concat("./output/AddScrollERC20Bridge", ".json");
         vm.writeFile(path, txs);
 
         vm.stopBroadcast();

@@ -10,9 +10,10 @@
       {
         "token": "usdc",
         "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-        "bridge": "stargate",
+        "bridge": "scrollERC20BridgeAdapter",
         "maxSlippageInBps": "50",
-        "stargatePool": "0xc026395860Db2d07ee33e05fE50ed7bD583189C7"
+        "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
+        "gasLimitForScrollGateway": "200000"
       },
       {
         "token": "weETH",
