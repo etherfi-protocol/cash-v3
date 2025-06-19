@@ -150,6 +150,7 @@ contract CashModuleCore is CashModuleStorageContract {
         CashModuleStorage storage $ = _getCashModuleStorage();
         
         uint256 len = tokens.length;
+        if (len > 1) tokens.checkDuplicates();
         data = new TokenDataInUsd[](len);
         uint256 m = 0;
 
@@ -459,6 +460,7 @@ contract CashModuleCore is CashModuleStorageContract {
     function clearPendingCashback(address[] calldata users, address[] calldata tokens) external nonReentrant whenNotPaused {
         uint256 len = users.length;
         if (len == 0) revert InvalidInput();
+        if (tokens.length > 1) tokens.checkDuplicates();
         
         for (uint256 i = 0; i < len; ) {
             if (users[i] == address(0)) revert InvalidInput();
