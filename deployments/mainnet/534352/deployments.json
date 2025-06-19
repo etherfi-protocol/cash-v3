@@ -17,6 +17,7 @@
     "OpenOceanSwapModule": "0x57d23DEa576c88AA5a3F919b1a38f44E1D4b0512",
     "EtherFiLiquidModule": "0x62f623161fdB6564925c3F9B783cbDfeF4CE8AEc",
     "EtherFiStakeModule": "0x93DB6fb518193F67dd9e2EA867A287C7029D59e0",
-    "CashLiquidationHelper": "0x56103F3DC21f182611601110F794686fdD8082ad"
+    "CashLiquidationHelper": "0x56103F3DC21f182611601110F794686fdD8082ad",
+    "StargateModule": "0x7e33b74ACdEc31dc80250F5af528038413288aDD"
   }
 }

@@ -17,6 +17,7 @@
     "CashLens": "0xdFa3089466fD8Ce1c55E998cA3FdffC3371bc106",
     "EtherFiLiquidModule": "0x585d49f856aD14F37234B42Fc78A8506f7f8e446",
     "EtherFiStakeModule": "0x5ac17A065B0e7070737daAc216B3D97c0c400Eec",
-    "CashLiquidationHelper": "0x68a977A594906B1262206bF0Aa06607Afa43cC4C"
+    "CashLiquidationHelper": "0x68a977A594906B1262206bF0Aa06607Afa43cC4C",
+    "StargateModule": "0x6c906af3300294317C454A18AC552bAce9a72Fca"
   }
 }
