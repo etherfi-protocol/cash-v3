@@ -227,8 +227,11 @@ contract CashbackDispatcher is UpgradeableProxy {
      */
     function cashback(address recipient, address token, uint256 amountInUsd) external whenNotPaused returns (uint256 cashbackAmountInToken, bool paid) {
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
-        
+
+        if (recipient == address(0)) revert InvalidInput();        
+        if (!isCashbackToken(token)) revert InvalidCashbackToken();
         if (msg.sender != address($.cashModule)) revert OnlyCashModule();
+        
         cashbackAmountInToken = convertUsdToCashbackToken(token, amountInUsd);
         if (cashbackAmountInToken == 0) return (0, true);
 
@@ -249,6 +252,7 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @return whether it was paid
      */
     function clearPendingCashback(address account, address token, uint256 amountInUsd) external returns (uint256, bool) {
+        if (!isCashbackToken(token)) revert InvalidCashbackToken();
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
         
         if (account == address(0)) revert InvalidInput();
@@ -318,7 +322,7 @@ contract CashbackDispatcher is UpgradeableProxy {
         
         uint256 len = tokens.length;
         for (uint256 i = 0; i < len; ) {
-            if ($.priceProvider.price(tokens[i]) == 0) revert CashbackTokenPriceNotConfigured();
+            if (shouldWhitelist[i] && $.priceProvider.price(tokens[i]) == 0) revert CashbackTokenPriceNotConfigured();
             unchecked {
                 ++i;
             }

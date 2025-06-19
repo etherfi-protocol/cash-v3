@@ -150,6 +150,7 @@ contract CashModuleCore is CashModuleStorageContract {
         CashModuleStorage storage $ = _getCashModuleStorage();
         
         uint256 len = tokens.length;
+        if (len > 1) tokens.checkDuplicates();
         data = new TokenDataInUsd[](len);
         uint256 m = 0;
 
@@ -464,6 +465,7 @@ contract CashModuleCore is CashModuleStorageContract {
     function clearPendingCashback(address[] calldata users, address[] calldata tokens) external nonReentrant whenNotPaused {
         uint256 len = users.length;
         if (len == 0) revert InvalidInput();
+        if (tokens.length > 1) tokens.checkDuplicates();
         if (len > 1) users.checkDuplicates();
         
         for (uint256 i = 0; i < len; ) {
@@ -516,6 +518,7 @@ contract CashModuleCore is CashModuleStorageContract {
         
         for (uint256 i = 0; i < len; ) {
             address to = cashbacks[i].to;
+            if (to == address(0)) continue;
             CashbackTokens[] memory cashbackTokens = cashbacks[i].cashbackTokens;
 
             for(uint256 j = 0; j < cashbackTokens.length; ) {
@@ -523,11 +526,11 @@ contract CashModuleCore is CashModuleStorageContract {
                 _retrievePendingCashback(to, token);
                 
                 uint256 amountInUsd = cashbackTokens[j].amountInUsd;
+                $.safeCashConfig[to].totalCashbackEarnedInUsd += amountInUsd;
                 
                 if (amountInUsd != 0) {
                     try $.cashbackDispatcher.cashback(to, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
                         if (!paid) $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
-                        $.safeCashConfig[to].totalCashbackEarnedInUsd += cashbackTokens[j].amountInUsd;
                         $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, cashbackAmountInToken, amountInUsd, cashbackTokens[j].cashbackType, paid);
                     } catch {
                         $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;

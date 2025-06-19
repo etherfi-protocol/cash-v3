@@ -9,6 +9,8 @@ import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
 import { ICashbackDispatcher } from "../../../../src/interfaces/ICashbackDispatcher.sol";
+import { EnumerableAddressWhitelistLib } from "../../../../src/libraries/EnumerableAddressWhitelistLib.sol";
+
 
 contract CashModuleCashbackTest is CashModuleTestSetup {
     using Math for uint256;
