@@ -12,8 +12,8 @@ import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol"
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
-
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
+import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 
 /**
  * @title CashLens
@@ -26,6 +26,7 @@ contract CashLens is UpgradeableProxy {
     using SpendingLimitLib for SpendingLimit;
     using ArrayDeDupLib for address[];
     using Math for uint256;
+    using ArrayDeDupLib for address[];
 
     /// @notice Reference to the deployed CashModule contract
     ICashModule public immutable cashModule;
@@ -87,6 +88,8 @@ contract CashLens is UpgradeableProxy {
         if (tokens.length == 0) return (false, "No tokens provided");
         if (tokens.length != amountsInUsd.length) return (false, "Tokens and amounts arrays length mismatch");
         if (cashModule.transactionCleared(safe, txId)) return (false, "Transaction already cleared");
+
+        if (tokens.length > 1) tokens.checkDuplicates();
         
         // Check total spending amount
         uint256 totalSpendingInUsd = 0;
@@ -559,9 +562,11 @@ contract CashLens is UpgradeableProxy {
             uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
             if (balance != 0) {
                 balance = balance - pendingWithdrawalAmount;
-                tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
-                unchecked {
-                    ++m;
+                if (balance != 0) {
+                    tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
+                    unchecked {
+                        ++m;
+                    }
                 }
             }
             unchecked {
@@ -578,7 +583,7 @@ contract CashLens is UpgradeableProxy {
 
     /**
      * @notice Calculate the amount that can be spent in credit mode
-     * @dev Internal helper for maxCanSpend that handles credit mode calculations
+     * @dev Internal helper that handles credit mode calculations
      * @param debtManager The debt manager instance
      * @param safe The address of the safe
      * @param safeData The safe data

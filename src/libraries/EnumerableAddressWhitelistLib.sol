@@ -63,4 +63,27 @@ library EnumerableAddressWhitelistLib {
             }
         }
     }
+
+    /**
+     * @notice Whitelists a set of addresses
+     * @dev Checks for duplicate addresses and validates inputs before modifying the set
+     * @param set The EnumerableSetLib.AddressSet to modify
+     * @param addrs Array of addresses to add or remove
+     * @custom:throws InvalidInput If the arrays are empty
+     * @custom:throws InvalidAddress If any address is the zero address
+     * @custom:throws DuplicateElementFound If any address appears more than once in the addrs array
+     */
+    function addToWhitelist(EnumerableSetLib.AddressSet storage set, address[] calldata addrs) internal {
+        uint256 len = addrs.length;
+        if (len == 0) revert InvalidInput();
+        if (len > 1) addrs.checkDuplicates();
+
+        unchecked {
+            for (uint256 i; i < len; ++i) {
+                if (addrs[i] == address(0)) revert InvalidAddress(i);
+                bool contains = set.contains(addrs[i]);
+                if (!contains) set.add(addrs[i]);
+            }
+        }
+    }
 }

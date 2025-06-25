@@ -339,7 +339,7 @@ contract AaveV3Module is ModuleBase {
     function _repay(address safe, address asset, uint256 amount) internal returns (uint256) {
         address weth = aaveWrappedTokenGateway.getWETHAddress();
         if (amount == type(uint256).max) {
-            if (asset == ETH) getTokenTotalBorrowAmount(safe, weth);
+            if (asset == ETH) amount = getTokenTotalBorrowAmount(safe, weth);
             else amount = getTokenTotalBorrowAmount(safe, asset);
         }
         if (amount == 0) revert InvalidInput();

@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
-import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
+import { BinSponsor, Cashback } from "../../../../../src/interfaces/ICashModule.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashEventEmitter, CashModuleTestSetup, Mode } from "../CashModuleTestSetup.t.sol";
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
@@ -35,8 +35,10 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_setCollateralTokenConfig_updatesLiquidationThreshold_whenCalledByAdmin() public {     
@@ -70,6 +72,9 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
     function test_liquidate_succeeds_whenPositionLiquidatable() public {
         vm.startPrank(owner);
 
+        // fast forward 10 days so the interest index also updates
+        vm.warp(block.timestamp + 10 days);
+
         uint256 liquidatorWeEthBalBefore = weETHScroll.balanceOf(owner);
 
         IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
@@ -82,8 +87,9 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
 
         address[] memory collateralTokenPreference = debtManager.getCollateralTokens();
 
-        deal(address(usdcScroll), owner, borrowAmt);
-        IERC20(address(usdcScroll)).approve(address(debtManager), borrowAmt);
+        uint256 currentBorrowAmt = debtManager.borrowingOf(address(safe), address(usdcScroll));
+        deal(address(usdcScroll), owner, currentBorrowAmt + 1);
+        IERC20(address(usdcScroll)).approve(address(debtManager), currentBorrowAmt + 1);
         debtManager.liquidate(address(safe), address(usdcScroll), collateralTokenPreference);
 
         vm.stopPrank();
@@ -95,13 +101,13 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256 safeDebtAfter = debtManager.borrowingOf(address(safe), address(usdcScroll));
         uint256 liquidatorWeEthBalAfter = weETHScroll.balanceOf(owner);
 
-        uint256 liquidatedUsdcCollateralAmt = debtManager.convertUsdToCollateralToken(address(weETHScroll), borrowAmt);
+        uint256 liquidatedUsdcCollateralAmt = debtManager.convertUsdToCollateralToken(address(weETHScroll), currentBorrowAmt);
         uint256 liquidationBonusReceived = (liquidatedUsdcCollateralAmt * collateralTokenConfig.liquidationBonus) / HUNDRED_PERCENT;
         uint256 liquidationBonusInUsdc = debtManager.convertCollateralTokenToUsd(address(weETHScroll), liquidationBonusReceived);
 
-        assertApproxEqAbs(debtManager.convertCollateralTokenToUsd(address(weETHScroll), liquidatorWeEthBalAfter - liquidatorWeEthBalBefore - liquidationBonusReceived), borrowAmt, 10);
+        assertApproxEqAbs(debtManager.convertCollateralTokenToUsd(address(weETHScroll), liquidatorWeEthBalAfter - liquidatorWeEthBalBefore - liquidationBonusReceived), currentBorrowAmt, 10);
         assertEq(safeDebtAfter, 0);
-        assertApproxEqAbs(safeCollateralAfter, collateralValueInUsdc - borrowAmt - liquidationBonusInUsdc, 1);
+        assertApproxEqAbs(safeCollateralAfter, collateralValueInUsdc - currentBorrowAmt - liquidationBonusInUsdc, 2);
     }
 
     function test_liquidate_cancelsPendingWithdrawals_whenWithdrawalsExist() public {
@@ -170,9 +176,11 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         // safe should borrow at new price for our calculations to be correct
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         vm.startPrank(owner);
         uint256 newPrice = 1000e6; // 1000 USD per weETH
@@ -217,9 +225,11 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         // safe should borrow at new price for our calculations to be correct
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         vm.startPrank(owner);
         uint256 newPrice = 1000e6; // 1000 USD per weETH
@@ -247,12 +257,13 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         // next 50% liquidation (since user is still liquidatable)
         // collateral left -> 0.002125 weETH
         // total value in USD -> 0.002125 * 1000 -> 2.125 USD
-        // total bonus -> 0.002125 * 5% = 0.00010625 weETH -> 0.10625 USD
-        // total collateral liquidated -> 2.125 - 0.10625 USD -> 2.01875 USD
+        // total net repay value on this amount -> 0.002125 * 100% / (100 + 5)% = 0.002023809524 weETH = 0.002023809524 * 1000 = 2.023809524 USD
+        // total bonus -> 0.002125 (total collateral) - 0.002023809524 (total net repay) = 0.000101190476 weETH -> 0.101190476 USD
+        // total collateral liquidated -> 2.125 - 0.101190476 USD -> 2.023809524 USD
 
-        // total liquidated amount -> 7.5 + 2.01875 USD = 9.51875 USD
+        // total liquidated amount -> 7.5 + 2.023809524 USD = 9.523809524 USD
 
-        uint256 liquidationAmt = 9.51875 * 1e6;
+        uint256 liquidationAmt = 9.523809 * 1e6;
 
         address[] memory collateralTokenPreference = new address[](1);
         collateralTokenPreference[0] = address(weETHScroll);
@@ -299,8 +310,10 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         address newCollateralToken = address(new MockERC20("collateral", "CTK", 18));
         IDebtManager.CollateralTokenConfig memory collateralTokenConfigNewCollateralToken;
@@ -354,20 +367,21 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
 
         // new token is first in preference 
         // total collateral in new token -> 0.00225 * 3000 = 6.75 USDC
-        // liquidation bonus -> 0.00225 * 10% bonus -> 0.000225 in collateral tokens -> 0.675 USDC 
-        // so new token wipes off 6.75 - 0.675 = 6.075 USDC of debt
+        // total net repay value on this amount -> 0.00225 * 100% / (100 + 10)% = 0.002045454545 new token = 0.002045454545 * 3000 = 6.136363635 USD
+        // liquidation bonus -> 0.00225 (total collateral) - 0.002045454545 (total net repay) = 0.000204545455 new token = 0.000204545455 * 3000 = 0.613636365 USD
+        // so new token wipes off 6.136363635 USDC of debt
         
         // weETH is second in preference 
         // total collateral in weETH -> 0.01 * 3000 = 30 USDC
-        // total debt left = 7.5 USDC - 6.075 USDC = 1.425 USDC
-        // total collateral worth 1.425 USDC in weETH -> 1.425 / 3000 -> 0.000475
-        // total bonus on 0.000475 weETH => 0.000475 * 5% = 0.00002375
+        // total debt left = 7.5 USDC - 6.136363635 USDC = 1.363636365 USDC
+        // total collateral worth 1.363636365 USDC in weETH -> 1.363636365 / 3000 -> 0.000454545455
+        // total bonus on 0.000454545455 weETH => 0.000454545455 * 5% = 0.00002272727275
 
         // In total
-        // borrow wiped by new token -> 7.5 + 6.075 = 13.575 USDC
-        // borrow wiped by weETH -> 1.425 USDC
-        // total liquidation bonus new token -> 0.00025 + 0.000225 = 0.000475
-        // total liquidation bonus weETH -> 0.00002375
+        // borrow wiped by new token -> 7.5 + 6.136363635 = 13.636363635 USDC
+        // borrow wiped by weETH -> 1.363636365 USDC
+        // total liquidation bonus new token -> 0.00025 + 0.000204545455 = 0.000454545455
+        // total liquidation bonus weETH -> 0.00002272727275
 
         uint256 ownerWeETHBalBefore = weETHScroll.balanceOf(owner);
         uint256 ownerNewTokenBalBefore = IERC20(newCollateralToken).balanceOf(owner);
@@ -391,10 +405,10 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256 ownerNewTokenBalAfter = IERC20(newCollateralToken).balanceOf(owner);
         uint256 aliceDebtAfter = debtManager.borrowingOf(address(safe), address(usdcScroll));
 
-        uint256 borrowWipedByNewToken =  13.575 * 1e6;
-        uint256 borrowWipedByWeETH = 1.425 * 1e6;
-        uint256 liquidationBonusNewToken =  0.000475 ether;
-        uint256 liquidationBonusWeETH = 0.00002375 ether;
+        uint256 borrowWipedByNewToken =  13.636363 * 1e6;
+        uint256 borrowWipedByWeETH = 1.363636 * 1e6;
+        uint256 liquidationBonusNewToken =  0.000454545455 ether;
+        uint256 liquidationBonusWeETH = 0.00002272727275 ether;
 
         assertApproxEqAbs(
             debtManager.convertCollateralTokenToUsd(
@@ -467,8 +481,10 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         vm.startPrank(owner);
         uint256 newPrice = 1000e6; // 1000 USD per weETH
@@ -529,8 +545,10 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = smallerBorrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         vm.startPrank(owner);
         
@@ -604,8 +622,10 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         vm.startPrank(owner);
         // Drop price to make position liquidatable

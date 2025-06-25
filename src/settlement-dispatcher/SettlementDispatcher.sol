@@ -10,13 +10,14 @@ import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
+import { Constants } from "../utils/Constants.sol";
 
 /**
  * @title SettlementDispatcher
  * @author shivam@ether.fi
  * @notice This contract receives payments from user safes and bridges it to another chain to pay the fiat provider
  */
-contract SettlementDispatcher is UpgradeableProxy {
+contract SettlementDispatcher is UpgradeableProxy, Constants {
     using SafeERC20 for IERC20;
 
     /**
@@ -327,7 +328,7 @@ contract SettlementDispatcher is UpgradeableProxy {
         if (minReturnLD > minReturnFromStargate) revert InsufficientMinReturn();
         if (address(this).balance < valueToSend) revert InsufficientFeeToCoverCost();
 
-        IERC20(token).forceApprove(stargate, amount);
+        if (token != ETH) IERC20(token).forceApprove(stargate, amount);
         (, , Ticket memory ticket) = IStargate(stargate).sendToken{ value: valueToSend }(sendParam, messagingFee, payable(address(this)));
         emit FundsBridgedWithStargate(token, amount, ticket);
     }
@@ -351,7 +352,12 @@ contract SettlementDispatcher is UpgradeableProxy {
         uint256 amount
     ) public view returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
         if (token == address(0) || amount == 0) revert InvalidValue();
-        if (IERC20(token).balanceOf(address(this)) < amount) revert InsufficientBalance();
+        
+        uint256 balance = 0;
+        if (token == ETH) balance = address(this).balance;
+        else balance = IERC20(token).balanceOf(address(this));
+        
+        if (balance < amount) revert InsufficientBalance();
 
         DestinationData memory destData = _getSettlementDispatcherStorage().destinationData[token];
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
@@ -398,14 +404,14 @@ contract SettlementDispatcher is UpgradeableProxy {
     /**
      * @notice Internal function to handle withdrawal of tokens or ETH
      * @dev Used by both withdrawFunds and transferFundsToRefundWallet
-     * @param token Address of the token to withdraw (address(0) for ETH)
+     * @param token Address of the token to withdraw 
      * @param recipient Address to receive the withdrawn funds
      * @param amount Amount to withdraw (0 to withdraw all available balance)
      * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
      * @custom:throws WithdrawFundsFailed If ETH transfer fails
      */    
     function _withdrawFunds(address token, address recipient, uint256 amount) internal returns (uint256) {
-        if (token == address(0)) {
+        if (token == ETH) {
             if (amount == 0) amount = address(this).balance;
             if (amount == 0) revert CannotWithdrawZeroAmount();
             (bool success, ) = payable(recipient).call{value: amount}("");
@@ -436,7 +442,11 @@ contract SettlementDispatcher is UpgradeableProxy {
 
         for (uint256 i = 0; i < len; ) {
             if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate == address(0)) revert InvalidValue(); 
-            if (IStargate(destDatas[i].stargate).token() != tokens[i]) revert StargateValueInvalid();
+            
+            if (tokens[i] == ETH) {
+                if (IStargate(destDatas[i].stargate).token() != address(0)) revert StargateValueInvalid(); 
+            }
+            else if (IStargate(destDatas[i].stargate).token() != tokens[i]) revert StargateValueInvalid();
 
             $.destinationData[tokens[i]] = destDatas[i];
             unchecked {

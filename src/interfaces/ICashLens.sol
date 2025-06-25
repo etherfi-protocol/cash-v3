@@ -18,17 +18,6 @@ interface ICashLens {
     function canSpend(address safe, bytes32 txId, address token, uint256 amountInUsd) external view returns (bool, string memory);
 
     /**
-     * @notice Calculates the maximum amount that can be spent in both credit and debit modes
-     * @dev Performs separate calculations for credit and debit modes
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to spend
-     * @return returnAmtInCreditModeUsd Maximum amount that can be spent in credit mode (USD)
-     * @return returnAmtInDebitModeUsd Maximum amount that can be spent in debit mode (USD)
-     * @return spendingLimitAllowance Remaining spending limit allowance
-     */
-    function maxCanSpend(address safe, address token) external view returns (uint256 returnAmtInCreditModeUsd, uint256 returnAmtInDebitModeUsd, uint256 spendingLimitAllowance);
-
-    /**
      * @notice Gets comprehensive cash data for a Safe
      * @dev Aggregates data from multiple sources including DebtManager and CashModule
      * @param safe Address of the EtherFi Safe

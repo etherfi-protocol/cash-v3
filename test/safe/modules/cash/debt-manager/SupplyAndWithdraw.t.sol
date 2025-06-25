@@ -7,7 +7,7 @@ import { IERC20Errors } from "@openzeppelin/contracts/interfaces/draft-IERC6093.
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
-import { Mode, BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor, Cashback } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { MockPriceProvider } from "../../../../../src/mocks/MockPriceProvider.sol";
 import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PriceProvider.sol";
@@ -53,6 +53,80 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         vm.startPrank(owner);
         debtManager.withdrawBorrowToken(address(usdcScroll), debtManager.supplierBalance(owner, address(usdcScroll)));
         vm.stopPrank();
+    }
+
+    function test_view_functions() public {
+        uint128 minSharesWeETH = 0.000001 ether;
+        // support weETH as borrow token 
+        vm.prank(owner);
+        debtManager.supportBorrowToken(address(weETHScroll), borrowApyPerSecond, minSharesWeETH);
+        
+        deal(address(usdcScroll), notOwner, 1 ether);
+        deal(address(weETHScroll), notOwner, 1 ether);
+
+        uint256 principle = 0.01 ether;
+
+        vm.startPrank(notOwner);
+        usdcScroll.approve(address(debtManager), 1 ether);
+        weETHScroll.approve(address(debtManager), 1 ether);
+        debtManager.supply(notOwner, address(usdcScroll), principle);
+        debtManager.supply(notOwner, address(weETHScroll), principle);
+        vm.stopPrank();
+
+        assertApproxEqAbs(debtManager.supplierBalance(notOwner, address(usdcScroll)), principle, 1);
+        assertApproxEqAbs(debtManager.supplierBalance(notOwner, address(weETHScroll)), principle, 1);
+
+        assertApproxEqAbs(debtManager.totalSupplies(address(usdcScroll)), principle, 1);
+        assertApproxEqAbs(debtManager.totalSupplies(address(weETHScroll)), principle, 1);
+
+        assertEq(debtManager.borrowTokenMinShares(address(usdcScroll)), minShares);
+        assertEq(debtManager.borrowTokenMinShares(address(weETHScroll)), minSharesWeETH);
+
+        (IDebtManager.TokenData[] memory tokenData, uint256 totalSuppliesInUsd) = debtManager.supplierBalance(notOwner);
+
+        assertEq(tokenData.length, 2);
+        assertEq(tokenData[0].token, address(usdcScroll));
+        assertApproxEqAbs(tokenData[0].amount, principle, 1);
+        assertEq(tokenData[1].token, address(weETHScroll));
+        assertApproxEqAbs(tokenData[1].amount, principle, 1);
+
+        uint256 totalSupplied = debtManager.convertCollateralTokenToUsd(address(usdcScroll), principle) + debtManager.convertCollateralTokenToUsd(address(weETHScroll), principle);
+
+        assertApproxEqAbs(totalSuppliesInUsd, totalSupplied, 1);
+
+        assertEq(debtManager.getDebtManagerAdmin(), debtManagerAdminImpl);   
+        
+        (IDebtManager.TokenData[] memory borrowings, uint256 totalBorrowingsInUsd, IDebtManager.TokenData[] memory totalLiquidStableAmounts) = debtManager.getCurrentState();
+        assertEq(borrowings.length, 0);
+        assertEq(totalBorrowingsInUsd, 0);
+        assertEq(totalLiquidStableAmounts.length, 2);
+        assertEq(totalLiquidStableAmounts[0].token, address(usdcScroll));
+        assertApproxEqAbs(totalLiquidStableAmounts[0].amount, principle, 1);
+        assertEq(totalLiquidStableAmounts[1].token, address(weETHScroll));
+        assertApproxEqAbs(totalLiquidStableAmounts[1].amount, principle, 1);
+
+        Cashback[] memory cashbacks;
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdcScroll);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 1e6;
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+
+        (borrowings, totalBorrowingsInUsd, totalLiquidStableAmounts) = debtManager.getCurrentState();
+        assertEq(borrowings.length, 1);
+        assertEq(borrowings[0].token, spendTokens[0]);
+        assertApproxEqAbs(borrowings[0].amount, spendAmounts[0], 1);
+        assertApproxEqAbs(totalBorrowingsInUsd, spendAmounts[0], 1);
+
+        assertEq(totalLiquidStableAmounts.length, 2);
+        assertEq(totalLiquidStableAmounts[0].token, address(usdcScroll));
+        assertApproxEqAbs(totalLiquidStableAmounts[0].amount, principle - spendAmounts[0], 1);
+        assertEq(totalLiquidStableAmounts[1].token, address(weETHScroll));
+        assertApproxEqAbs(totalLiquidStableAmounts[1].amount, principle, 1);
     }
 
     function test_supply_andWithdraw_succeeds() public {
@@ -299,7 +373,9 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
+        Cashback[] memory cashbacks;
+
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // 1 day after, there should be some interest accumulated
         vm.warp(block.timestamp + 24 * 60 * 60);

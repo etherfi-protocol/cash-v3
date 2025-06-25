@@ -429,7 +429,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param borrowToken Address of the token to withdraw
      * @param amount Amount of tokens to withdraw
      */
-    function withdrawBorrowToken(address borrowToken, uint256 amount) external whenNotPaused {
+    function withdrawBorrowToken(address borrowToken, uint256 amount) external whenNotPaused nonReentrant {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         uint256 totalBorrowTokenAmt = _getTotalBorrowTokenAmount(borrowToken);
@@ -441,11 +441,11 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
         if ($.sharesOfBorrowTokens[msg.sender][borrowToken] < shares) revert InsufficientBorrowShares();
 
-        uint256 sharesLeft = $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens - shares;
-        if (sharesLeft != 0 && sharesLeft < $.borrowTokenConfig[borrowToken].minShares) revert SharesCannotBeLessThanMinShares();
+        uint256 userSharesLeft = $.sharesOfBorrowTokens[msg.sender][borrowToken] - shares;
+        if (userSharesLeft != 0 && userSharesLeft < $.borrowTokenConfig[borrowToken].minShares) revert SharesCannotBeLessThanMinShares();
 
-        $.sharesOfBorrowTokens[msg.sender][borrowToken] -= shares;
-        $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens = sharesLeft;
+        $.sharesOfBorrowTokens[msg.sender][borrowToken] = userSharesLeft;
+        $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens = $.borrowTokenConfig[borrowToken].totalSharesOfBorrowTokens - shares;
 
         IERC20(borrowToken).safeTransfer(msg.sender, amount);
         emit WithdrawBorrowToken(msg.sender, borrowToken, amount);
@@ -466,7 +466,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
         // Convert amount to 6 decimals before adding to borrowings
         uint256 borrowAmt = convertCollateralTokenToUsd(token, amount);
-        uint256 normalizedAmount = _getNormalizedAmount(borrowAmt, newInterestIndex);
+        uint256 normalizedAmount = _getNormalizedAmount(borrowAmt, newInterestIndex, Math.Rounding.Ceil);
         if (normalizedAmount == 0) revert BorrowAmountZero();
 
         $.userNormalizedBorrowings[msg.sender][token] += normalizedAmount;
@@ -504,7 +504,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
             amount = convertUsdToCollateralToken(token, repayDebtUsdAmt);
         }
 
-        uint256 normalizedAmount = _getNormalizedAmount(repayDebtUsdAmt, interestIndex);        
+        uint256 normalizedAmount = _getNormalizedAmount(repayDebtUsdAmt, interestIndex, Math.Rounding.Floor);        
         if (normalizedAmount == 0) revert RepaymentAmountIsZero();
 
         // if (!isBorrowToken(token)) revert UnsupportedRepayToken();
@@ -540,7 +540,18 @@ contract DebtManagerCore is DebtManagerStorageContract {
         uint256 debtAmountToLiquidateInUsd = _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken].ceilDiv(2), interestIndex);
         _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
 
-        if (liquidatable(user)) _liquidate(user, borrowToken, collateralTokensPreference, $.userNormalizedBorrowings[user][borrowToken], interestIndex);
+        uint256 remainingNormalizedBorrowAmt = $.userNormalizedBorrowings[user][borrowToken];
+        if (remainingNormalizedBorrowAmt > 0 && liquidatable(user)) {
+            debtAmountToLiquidateInUsd = _getActualBorrowAmount(remainingNormalizedBorrowAmt, interestIndex);
+            _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
+
+            // If there's still 1 wei left due to rounding, force it to zero
+            remainingNormalizedBorrowAmt = $.userNormalizedBorrowings[user][borrowToken];
+            if (remainingNormalizedBorrowAmt == 1) {
+                $.userNormalizedBorrowings[user][borrowToken] = 0;
+                $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= 1;
+            }
+        }
     }
 
     /**
@@ -564,7 +575,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         cashModule.postLiquidate(user, msg.sender, collateralTokensToSend);
 
         uint256 liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt;
-        uint256 normalizedLiquidatedAmount = _getNormalizedAmount(liquidatedAmt, interestIndex);
+        uint256 normalizedLiquidatedAmount = _getNormalizedAmount(liquidatedAmt, interestIndex, Math.Rounding.Floor);
         $.userNormalizedBorrowings[user][borrowToken] -= normalizedLiquidatedAmount;
         $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= normalizedLiquidatedAmount;
 
@@ -610,7 +621,9 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
             uint256 collateralAmountForDebt = convertUsdToCollateralToken(collateralToken, repayDebtUsdAmt);
             uint256 totalCollateral = IERC20(collateralToken).balanceOf(user);
-            uint256 maxBonus = (totalCollateral * $.collateralTokenConfig[collateralToken].liquidationBonus) / HUNDRED_PERCENT;
+
+            uint256 netCollateralRepayValue = (totalCollateral * HUNDRED_PERCENT) / (HUNDRED_PERCENT + $.collateralTokenConfig[collateralToken].liquidationBonus);
+            uint256 maxBonus = totalCollateral - netCollateralRepayValue;
 
             if (totalCollateral - maxBonus < collateralAmountForDebt) {
                 uint256 liquidationBonus = maxBonus;

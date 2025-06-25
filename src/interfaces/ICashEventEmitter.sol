@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { SpendingLimit } from "../libraries/SpendingLimitLib.sol";
-import { Mode, SafeTiers, BinSponsor } from "./ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor, CashbackTypes } from "./ICashModule.sol";
 
 /**
  * @title ICashEventEmitter
@@ -18,25 +18,6 @@ interface ICashEventEmitter {
     function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external;
 
     /**
-     * @notice Emits the ReferrerCashback event
-     * @param safe Address of the safe
-     * @param referrer Address of the referrer
-     * @param spendingInUsd USD value of the spending
-     * @param cashbackToken Address of the cashback token
-     * @param referrerCashbackAmt Cashback amount to referrer
-     * @param referrerCashbackInUsd USD value to the referrer
-     * @param paid Whether the cashback was paid
-     */
-    function emitReferrerCashbackEvent(address safe, address referrer, uint256 spendingInUsd, address cashbackToken, uint256 referrerCashbackAmt, uint256 referrerCashbackInUsd, bool paid) external;
-
-    /**
-     * @notice Emits the ReferrerCashbackPercentageSet event
-     * @param oldPercentage Old cashback percentage
-     * @param newPercentage New cashback percentage
-     */
-    function emitReferrerCashbackPercentageSet(uint64 oldPercentage, uint64 newPercentage) external;
-
-    /**
      * @notice Emits an event when pending cashback is cleared
      * @param recipient Address receiving the cashback
      * @param cashbackToken Address of the cashback token
@@ -49,16 +30,15 @@ interface ICashEventEmitter {
      * @notice Emits the Cashback event
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
-     * @param spender Address of the spender
      * @param spendingInUsd USD value of the spending
+     * @param recipient Address of the recipient of cashback
      * @param cashbackToken Address of the cashback token
-     * @param cashbackAmountToSafe Amount to the safe
-     * @param cashbackInUsdToSafe USD value to the safe
-     * @param cashbackAmountToSpender Amount to the spender
-     * @param cashbackInUsdToSpender USD value to the spender
+     * @param cashbackAmountInToken Cashback token amount to the recipient 
+     * @param cashbackInUsd Cashback token amount in USD value to the recipient 
+     * @param cashbackType Type of cashback
      * @param paid Whether the cashback was paid
      */
-    function emitCashbackEvent(address safe, address spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) external;
+    function emitCashbackEvent(address safe, uint256 spendingInUsd, address recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, CashbackTypes cashbackType, bool paid) external;
 
     /**
      * @notice Emits the Spend event

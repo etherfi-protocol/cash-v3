@@ -7,13 +7,11 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-
 import { CashbackDispatcher } from "../../../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { DebtManagerAdmin } from "../../../../src/debt-manager/DebtManagerAdmin.sol";
 import { DebtManagerCore, DebtManagerStorageContract } from "../../../../src/debt-manager/DebtManagerCore.sol";
 import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
-import { Mode, SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
-
+import { Mode, SafeTiers, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
@@ -47,21 +45,7 @@ contract CashModuleTestSetup is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        _configureModules(modules, shouldWhitelist, setupData);
-
-        SafeTiers[] memory tiers = new SafeTiers[](4);
-        tiers[0] = SafeTiers.Pepe;
-        tiers[1] = SafeTiers.Wojak;
-        tiers[2] = SafeTiers.Chad;
-        tiers[3] = SafeTiers.Whale;
-
-        uint256[] memory cashbackPercentages = new uint256[](4);
-        cashbackPercentages[0] = 200;
-        cashbackPercentages[1] = 300;
-        cashbackPercentages[2] = 400;
-        cashbackPercentages[3] = 400;
-
-        cashModule.setTierCashbackPercentage(tiers, cashbackPercentages);
+        _configureModules(modules, shouldWhitelist, setupData);        
 
         vm.stopPrank();
     }
