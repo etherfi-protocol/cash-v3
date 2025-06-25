@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Mode, SafeTiers, BinSponsor } from "../../interfaces/ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor, CashbackTypes } from "../../interfaces/ICashModule.sol";
 import { SpendingLimit } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
@@ -118,30 +118,17 @@ contract CashEventEmitter is UpgradeableProxy {
     
     /**
      * @notice Emitted when cashback is calculated and potentially distributed
-     * @param safe Address of the safe receiving cashback
-     * @param spender Address of the spender who initiated the transaction
+     * @param safe Address of the safe 
      * @param spendingInUsd USD value of the spending that generated the cashback
+     * @param recipient Address of the recipient who will receive cashback
      * @param cashbackToken Address of the token used for cashback
-     * @param cashbackAmountToSafe Amount of cashback tokens sent to the safe
-     * @param cashbackInUsdToSafe USD value of cashback sent to the safe
-     * @param cashbackAmountToSpender Amount of cashback tokens sent to the spender
-     * @param cashbackInUsdToSpender USD value of cashback sent to the spender
+     * @param cashbackAmountInToken Amount of cashback tokens sent to the recipient
+     * @param cashbackInUsd USD value of cashback sent to the recipient
+     * @param cashbackType Type of cashback
      * @param paid Whether the cashback was successfully paid
      */
-    event Cashback(address indexed safe, address indexed spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool indexed paid);
-    
-    /**
-     * @notice Emitted when referral cashback is calculated and potentially distributed
-     * @param safe Address of the safe receiving cashback
-     * @param referrer Address of the referrer
-     * @param spendingInUsd USD value of the spending that generated the cashback
-     * @param cashbackToken Address of the token used for cashback
-     * @param referrerCashbackAmt Amount of cashback tokens sent to the referrer
-     * @param referrerCashbackInUsd USD value of cashback sent to the referrer
-     * @param paid Whether the cashback was successfully paid
-     */
-    event ReferrerCashback(address indexed safe, address indexed referrer, uint256 spendingInUsd, address cashbackToken, uint256 referrerCashbackAmt, uint256 referrerCashbackInUsd, bool indexed paid);
-    
+    event Cashback(address indexed safe, uint256 spendingInUsd, address indexed recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, CashbackTypes cashbackType, bool indexed paid);
+        
     /**
      * @notice Emitted when pending cashback is cleared
      * @param recipient Address receiving the cashback
@@ -180,13 +167,6 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param modeDelay Delay period for mode changes
      */
     event DelaysSet(uint64 withdrawalDelay, uint64 spendingLimitDelay, uint64 modeDelay);
-
-    /**
-     * @notice Emitted when the referrer cashback percentage is set
-     * @param oldCashbackPercentage Old cashback percentage for referrer
-     * @param newCashbackPercentage New cashback percentage for referrer
-     */
-    event ReferrerCashbackPercentageSet(uint64 oldCashbackPercentage, uint64 newCashbackPercentage);
 
     /**
      * @notice Emitted when settlement dispatcher is updated
@@ -230,15 +210,6 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitSetSafeTiers(address[] memory safes, SafeTiers[] memory safeTiers) external onlyCashModule {
         emit SafeTiersSet(safes, safeTiers);
-    }
-
-    /**
-     * @notice Emits the ReferrerCashbackPercentageSet event
-     * @param oldPercentage Old cashback percentage
-     * @param newPercentage New cashback percentage
-     */
-    function emitReferrerCashbackPercentageSet(uint64 oldPercentage, uint64 newPercentage) external onlyCashModule {
-        emit ReferrerCashbackPercentageSet(oldPercentage, newPercentage);
     }
 
     /**
@@ -289,31 +260,16 @@ contract CashEventEmitter is UpgradeableProxy {
      * @notice Emits the Cashback event
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
-     * @param spender Address of the spender
      * @param spendingInUsd USD value of the spending
+     * @param recipient Address of the recipient of cashback
      * @param cashbackToken Address of the cashback token
-     * @param cashbackAmountToSafe Amount to the safe
-     * @param cashbackInUsdToSafe USD value to the safe
-     * @param cashbackAmountToSpender Amount to the spender
-     * @param cashbackInUsdToSpender USD value to the spender
+     * @param cashbackAmountInToken Cashback token amount to the recipient 
+     * @param cashbackInUsd Cashback token amount in USD value to the recipient 
+     * @param cashbackType Type of cashback
      * @param paid Whether the cashback was paid
      */
-    function emitCashbackEvent(address safe, address spender, uint256 spendingInUsd, address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) external onlyCashModule {
-        emit Cashback(safe, spender, spendingInUsd, cashbackToken, cashbackAmountToSafe, cashbackInUsdToSafe, cashbackAmountToSpender, cashbackInUsdToSpender, paid);
-    }
-
-    /**
-     * @notice Emits the ReferrerCashback event
-     * @param safe Address of the safe
-     * @param referrer Address of the referrer
-     * @param spendingInUsd USD value of the spending
-     * @param cashbackToken Address of the cashback token
-     * @param referrerCashbackAmt Cashback amount to referrer
-     * @param referrerCashbackInUsd USD value to the referrer
-     * @param paid Whether the cashback was paid
-     */
-    function emitReferrerCashbackEvent(address safe, address referrer, uint256 spendingInUsd, address cashbackToken, uint256 referrerCashbackAmt, uint256 referrerCashbackInUsd, bool paid) external onlyCashModule {
-        emit ReferrerCashback(safe, referrer, spendingInUsd, cashbackToken, referrerCashbackAmt, referrerCashbackInUsd, paid);
+    function emitCashbackEvent(address safe, uint256 spendingInUsd, address recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, CashbackTypes cashbackType, bool paid) external onlyCashModule {
+        emit Cashback(safe, spendingInUsd, recipient, cashbackToken, cashbackAmountInToken, cashbackInUsd, cashbackType, paid);
     }
 
     /**

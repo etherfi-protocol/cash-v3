@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 
-import { ICashModule, Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
+import { ICashModule, Mode, BinSponsor, Cashback } from "../../../../src/interfaces/ICashModule.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
@@ -112,10 +112,12 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         
         // Track initial balance of the new dispatcher
         uint256 dispatcherBalanceBefore = usdcScroll.balanceOf(newDispatcher);
+
+        Cashback[] memory cashbacks;
         
         // Execute spend to verify tokens go to the new dispatcher
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify tokens were transferred to the new settlement dispatcher
         assertEq(usdcScroll.balanceOf(address(safe)), 0);
@@ -156,10 +158,12 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         // Track initial balances
         uint256 rainDispatcherBalanceBefore = usdcScroll.balanceOf(rainDispatcher);
         uint256 reapDispatcherBalanceBefore = usdcScroll.balanceOf(reapDispatcher);
+
+        Cashback[] memory cashbacks;
         
         // Execute spend with Rain bin sponsor
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Rain, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Rain, spendTokens, spendAmounts, cashbacks);
         
         // Verify tokens went to Rain dispatcher
         assertEq(usdcScroll.balanceOf(rainDispatcher), rainDispatcherBalanceBefore + tokenAmount);
@@ -168,7 +172,7 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         // Execute another spend with Reap bin sponsor
         bytes32 txId2 = keccak256("txId2");
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId2, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId2, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify tokens went to Reap dispatcher
         assertEq(usdcScroll.balanceOf(rainDispatcher), rainDispatcherBalanceBefore + tokenAmount); // No change

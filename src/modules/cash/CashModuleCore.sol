@@ -7,7 +7,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { Mode, BinSponsor, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { Mode, BinSponsor, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest, TokenDataInUsd, Cashback, CashbackTokens } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
@@ -64,13 +64,6 @@ contract CashModuleCore is CashModuleStorageContract {
         $.modeDelay = 1; // 1 sec
 
         $.cashModuleSetters = _cashModuleSetters;
-
-        $.tierCashbackPercentage[SafeTiers.Pepe] = 2_00; // 2%
-        $.tierCashbackPercentage[SafeTiers.Wojak] = 3_00; // 3%
-        $.tierCashbackPercentage[SafeTiers.Chad] = 4_00; // 4%
-        $.tierCashbackPercentage[SafeTiers.Whale] = 4_00; // 4%
-        $.tierCashbackPercentage[SafeTiers.Business] = 2_00; // 2%
-        $.referrerCashbackPercentageInBps = 1_00; // 1%
     }
 
     /**
@@ -84,7 +77,6 @@ contract CashModuleCore is CashModuleStorageContract {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         $.mode = Mode.Debit;
-        $.cashbackSplitToSafePercentage = 0; // 0% goes to safe, 100% goes to spender by default
     }
 
     /**
@@ -126,32 +118,12 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Gets the cashback percentage and split percentage for a safe
-     * @dev Returns the tier-based cashback percentage and safe's split configuration
-     * @param safe Address of the EtherFi Safe
-     * @return Cashback percentage in basis points (100 = 1%)
-     * @return Split percentage to safe in basis points (5000 = 50%)
-     */
-    function getSafeCashbackPercentageAndSplit(address safe) public view onlyEtherFiSafe(safe) returns (uint256, uint256) {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-        return ($.tierCashbackPercentage[$.safeCashConfig[safe].safeTier], $.safeCashConfig[safe].cashbackSplitToSafePercentage);
-    }
-
-    /**
      * @notice Fetches the safe tier
      * @param safe Address of the safe
      * @return SafeTiers Tier of the safe
      */
     function getSafeTier(address safe) external view onlyEtherFiSafe(safe) returns (SafeTiers) {
         return _getCashModuleStorage().safeCashConfig[safe].safeTier;
-    }
-
-    /**
-     * @notice Fetches Cashback Percentage for a safe tier
-     * @return uint256 Cashback Percentage in bps
-     */
-    function getTierCashbackPercentage(SafeTiers tier) external view returns (uint256) {
-        return _getCashModuleStorage().tierCashbackPercentage[tier];
     }
 
     /**
@@ -170,10 +142,51 @@ contract CashModuleCore is CashModuleStorageContract {
      * @notice Gets the pending cashback amount for an account in USD
      * @dev Returns the amount of cashback waiting to be claimed
      * @param account Address of the account (safe or spender)
-     * @return Pending cashback amount in USD
+     * @param tokens Addresses of tokens for cashback
+     * @return data Pending cashback data for tokens in USD
+     * @return totalCashbackInUsd Total pending cashback amount in USD
      */
-    function getPendingCashback(address account) external view returns (uint256) {
-        return _getCashModuleStorage().pendingCashbackInUsd[account];
+    function getPendingCashback(address account, address[] memory tokens) external view returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        
+        uint256 len = tokens.length;
+        if (len > 1) tokens.checkDuplicates();
+        data = new TokenDataInUsd[](len);
+        uint256 m = 0;
+
+        for (uint256 i = 0; i < len; ) {
+            uint256 pendingCashbackInUsd = $.pendingCashbackForTokenInUsd[account][tokens[i]];
+            if (pendingCashbackInUsd > 0) {
+                data[m] = TokenDataInUsd({
+                    token: tokens[i],
+                    amountInUsd: pendingCashbackInUsd
+                });
+
+                totalCashbackInUsd += pendingCashbackInUsd;
+
+                unchecked {
+                    ++m;
+                }
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        assembly ("memory-safe") {
+            mstore(data, m)
+        }
+    }
+ 
+    /**
+     * @notice Gets the pending cashback amount for an account in USD for a specific token
+     * @dev Returns the amount of cashback waiting to be claimed
+     * @param account Address of the account (safe or spender)
+     * @param token Address of tokens for cashback
+     * @return Pending cashback amount in USD for the token
+     */
+    function getPendingCashbackForToken(address account, address token) public view returns (uint256) {
+        return _getCashModuleStorage().pendingCashbackForTokenInUsd[account][token];
     }
 
     /**
@@ -188,14 +201,6 @@ contract CashModuleCore is CashModuleStorageContract {
         else settlementDispatcher = _getCashModuleStorage().settlementDispatcherReap;
 
         if (settlementDispatcher == address(0)) revert SettlementDispatcherNotSetForBinSponsor();
-    }
-
-    /**
-     * @notice Gets the referrer cashback percentage in bps
-     * @return uint64 referrer cashback percentage in bps
-     */
-    function getReferrerCashbackPercentage() external view returns (uint64) {
-        return _getCashModuleStorage().referrerCashbackPercentageInBps;
     }
 
     /**
@@ -306,6 +311,10 @@ contract CashModuleCore is CashModuleStorageContract {
         return _getCashModuleStorage().safeCashConfig[safe].transactionCleared[txId];
     }
 
+    /**
+     * @notice Returns an instance of the Debt Manager contract
+     * @return Debt Manager instance
+     */
     function getDebtManager() public view returns (IDebtManager) {
         return _getDebtManager();
     }
@@ -314,13 +323,11 @@ contract CashModuleCore is CashModuleStorageContract {
      * @notice Processes a spending transaction with multiple tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
-     * @param spender Address of the spendeer
-     * @param referrer Address of the referrer 
      * @param txId Transaction identifier
      * @param binSponsor Bin sponsor used for spending
      * @param tokens Array of addresses of the tokens to spend
      * @param amountsInUsd Array of amounts to spend in USD (must match tokens array length)
-     * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
+     * @param cashbacks Struct of Cashback to be given
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
      * @custom:throws UnsupportedToken if any token is not supported
      * @custom:throws AmountZero if any converted amount is zero
@@ -328,21 +335,22 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe,  address spender, address referrer,  bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe, bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  Cashback[] calldata cashbacks) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], safe, spender, txId, tokens, amountsInUsd);        
+        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);        
                 
-        // Process all token transfers based on mode
-        if ($.safeCashConfig[safe].mode == Mode.Credit)  _spendCredit($, safe, txId, spender, referrer, binSponsor, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
-        else _spendDebit($, safe, txId, spender, referrer, binSponsor, tokens, amountsInUsd, totalSpendingInUsd, shouldReceiveCashback);
+        if ($.safeCashConfig[safe].mode == Mode.Credit)  _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        else _spendDebit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        _cashback($, safe, totalSpendingInUsd, cashbacks);
     }
 
-    function _validateSpend(SafeCashConfig storage $$, address safe,  address spender,  bytes32 txId, address[] calldata tokens,  uint256[] calldata amountsInUsd) internal returns(uint256) {
+    function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens,  uint256[] calldata amountsInUsd) internal returns(uint256) {
         // Input validation
         if (tokens.length == 0) revert InvalidInput();
         if (tokens.length != amountsInUsd.length) revert ArrayLengthMismatch();
-        if (spender == safe) revert InvalidInput();
+
+        if (tokens.length > 1) tokens.checkDuplicates();
 
         // Set current mode and check transaction status
         _setCurrentMode($$);
@@ -363,10 +371,6 @@ contract CashModuleCore is CashModuleStorageContract {
         $$.transactionCleared[txId] = true;
         $$.spendingLimit.spend(totalSpendingInUsd);
 
-        // Retrieve any pending cashback for safe and spender
-        _retrievePendingCashback(spender);
-        _retrievePendingCashback(safe);
-
         return totalSpendingInUsd;
     }
 
@@ -375,12 +379,10 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
-     * @param spender Address of the spender
      * @param tokens Addresses of the tokens to spend
      * @param amountsInUsd Amounts to spend in USD
-     * @param shouldReceiveCashback Flag indicating if cashback should be processed
      */
-    function _spendCredit(CashModuleStorage storage $, address safe, bytes32 txId, address spender, address referrer, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd, bool shouldReceiveCashback) internal {
+    function _spendCredit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd) internal {
         // Credit mode validation
         if (!_isBorrowToken($.debtManager, tokens[0])) revert UnsupportedToken();
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
@@ -404,10 +406,6 @@ contract CashModuleCore is CashModuleStorageContract {
         amounts[0] = amount;
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
-        if (shouldReceiveCashback) {
-            _cashback($, safe, spender, amountsInUsd[0]);
-            if (referrer != address(0)) _referrerCashback($, safe, referrer, totalSpendingInUsd);
-        }
     }
 
     /**
@@ -415,12 +413,10 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
-     * @param spender Address of the spender
      * @param tokens Array of addresses of the tokens to spend
      * @param amountsInUsd Array of amounts to spend in USD
-     * @param shouldReceiveCashback Flag indicating if cashback should be processed
      */
-    function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, address spender, address referrer, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd, bool shouldReceiveCashback) internal {
+    function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
         uint256[] memory amounts = new uint256[](tokens.length);
         
         // Convert USD amounts to token amounts and validate
@@ -435,11 +431,14 @@ contract CashModuleCore is CashModuleStorageContract {
         _spendDebit(safe, binSponsor, tokens, amounts);
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
-        $.debtManager.ensureHealth(safe);
-        if (shouldReceiveCashback) {
-            _cashback($, safe, spender, totalSpendingInUsd);
-            if (referrer != address(0)) _referrerCashback($, safe, referrer, totalSpendingInUsd);
-        } 
+        
+        // Ensuring the account is healthy
+        // If account is unhealthy after spend, cancel withdrawal and try again
+        try $.debtManager.ensureHealth(safe) {}
+        catch {
+            _cancelOldWithdrawal(safe);
+            $.debtManager.ensureHealth(safe);
+        }
     }
 
     function _spendDebit(address safe, BinSponsor binSponsor,  address[] calldata tokens, uint256[] memory amounts) internal {
@@ -455,25 +454,32 @@ contract CashModuleCore is CashModuleStorageContract {
             data[i] = abi.encodeWithSelector(IERC20.transfer.selector, settlementDispatcher, amounts[i]);
             values[i] = 0;
         }
-        try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) {}
-        catch {
-            _cancelOldWithdrawal(safe);
-            IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-        }
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
     
     /**
      * @notice Clears pending cashback for users
      * @param users Addresses of users to clear the pending cashback for
+     * @param tokens Addresses of cashback tokens
      */
-    function clearPendingCashback(address[] calldata users) external nonReentrant whenNotPaused {
+    function clearPendingCashback(address[] calldata users, address[] calldata tokens) external nonReentrant whenNotPaused {
         uint256 len = users.length;
         if (len == 0) revert InvalidInput();
+        if (tokens.length > 1) tokens.checkDuplicates();
+        if (len > 1) users.checkDuplicates();
         
         for (uint256 i = 0; i < len; ) {
             if (users[i] == address(0)) revert InvalidInput();
             
-            _retrievePendingCashback(users[i]);
+            for(uint256 j = 0; j < tokens.length; ) {
+                if (tokens[j] == address(0)) revert InvalidInput();
+                
+                _retrievePendingCashback(users[i], tokens[j]);
+                unchecked {
+                    ++j;
+                }
+            }
+
             unchecked {
                 ++i;
             }
@@ -484,55 +490,62 @@ contract CashModuleCore is CashModuleStorageContract {
      * @notice Attempts to retrieve pending cashback for a user
      * @dev Calls the cashback dispatcher to clear pending cashback and updates storage if successful
      * @param user Address of the user who may have pending cashback
+     * @param token Address of the cashback token
      */
-    function _retrievePendingCashback(address user) internal {
+    function _retrievePendingCashback(address user, address token) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        if ($.pendingCashbackInUsd[user] != 0) {
-            (address cashbackToken, uint256 cashbackAmount, bool paid) = $.cashbackDispatcher.clearPendingCashback(user);
-            if (paid) {
-                $.cashEventEmitter.emitPendingCashbackClearedEvent(user, cashbackToken, cashbackAmount, $.pendingCashbackInUsd[user]);
-                delete $.pendingCashbackInUsd[user];
-            }
+        uint256 amountInUsd = getPendingCashbackForToken(user, token);
+
+        if (amountInUsd > 0) {
+            try $.cashbackDispatcher.clearPendingCashback(user, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
+                if (paid) {
+                    $.cashEventEmitter.emitPendingCashbackClearedEvent(user, token, cashbackAmountInToken, amountInUsd);
+                    delete $.pendingCashbackForTokenInUsd[user][token];
+                }
+            } catch {}
         }
     }
 
     /**
      * @notice Processes cashback for a spending transaction
-     * @dev Calculates and distributes cashback between safe and spender based on settings
+     * @dev Calculates and distributes cashback 
      * @param $ Storage reference to the CashModuleStorage
-     * @param safe Address of the EtherFi Safe
-     * @param spender Address of the spender who triggered the cashback
-     * @param amountInUsd Amount spent in USD that is eligible for cashback
+     * @param cashbacks Array of Cashback struct 
      */
-    function _cashback(CashModuleStorage storage $, address safe, address spender, uint256 amountInUsd) internal {
-        (uint256 cashbackPercentage, uint256 cashbackSplitToSafePercentage) = getSafeCashbackPercentageAndSplit(safe);
+    function _cashback(CashModuleStorage storage $, address safe, uint256 spendAmount, Cashback[] calldata cashbacks) internal {
+        uint256 len = cashbacks.length;
+        
+        for (uint256 i = 0; i < len; ) {
+            address to = cashbacks[i].to;
+            if (to == address(0)) continue;
+            CashbackTokens[] memory cashbackTokens = cashbacks[i].cashbackTokens;
 
-        (address cashbackToken, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) = $.cashbackDispatcher.cashback(safe, spender, amountInUsd, cashbackPercentage, cashbackSplitToSafePercentage);
+            for(uint256 j = 0; j < cashbackTokens.length; ) {
+                address token = cashbackTokens[j].token;
+                _retrievePendingCashback(to, token);
+                
+                uint256 amountInUsd = cashbackTokens[j].amountInUsd;
+                $.safeCashConfig[to].totalCashbackEarnedInUsd += amountInUsd;
+                
+                if (amountInUsd != 0) {
+                    try $.cashbackDispatcher.cashback(to, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
+                        if (!paid) $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
+                        $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, cashbackAmountInToken, amountInUsd, cashbackTokens[j].cashbackType, paid);
+                    } catch {
+                        $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
+                        $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, 0, amountInUsd, cashbackTokens[j].cashbackType, false);
+                    }
+                }
 
-        if (!paid) {
-            $.pendingCashbackInUsd[safe] += cashbackInUsdToSafe;
-            $.pendingCashbackInUsd[spender] += cashbackInUsdToSpender;
-        }
+                unchecked {
+                    ++j;
+                }
+            }
 
-        $.safeCashConfig[safe].totalCashbackEarnedInUsd += cashbackInUsdToSafe + cashbackInUsdToSpender;
-
-        $.cashEventEmitter.emitCashbackEvent(safe, spender, amountInUsd, cashbackToken, cashbackAmountToSafe, cashbackInUsdToSafe, cashbackAmountToSpender, cashbackInUsdToSpender, paid);
-    }
-
-    /**
-     * @notice Processes referrer cashback for a spending transaction
-     * @dev Calculates and distributes cashback to the referrer
-     * @param $ Storage reference to the CashModuleStorage
-     * @param safe Address of the EtherFi Safe
-     * @param referrer Address of the referrer 
-     * @param amountInUsd Amount spent in USD that is eligible for cashback
-     */
-    function _referrerCashback(CashModuleStorage storage $, address safe, address referrer, uint256 amountInUsd) internal {
-        if ($.referrerCashbackPercentageInBps > 0) {
-            (address cashbackToken, , , uint256 cashbackAmountToReferrer, uint256 cashbackInUsdToReferrer, bool paid) = $.cashbackDispatcher.cashback(safe, referrer, amountInUsd, $.referrerCashbackPercentageInBps, 0);
-            if (!paid) $.pendingCashbackInUsd[referrer] += cashbackInUsdToReferrer;
-            $.cashEventEmitter.emitReferrerCashbackEvent(safe, referrer, amountInUsd, cashbackToken, cashbackAmountToReferrer, cashbackInUsdToReferrer, paid);
+            unchecked {
+                ++i;
+            }
         }
     }
 
@@ -602,47 +615,6 @@ contract CashModuleCore is CashModuleStorageContract {
         }
 
         return tokenIndex != len ? withdrawalRequest.amounts[tokenIndex] : 0;
-    }
-
-    /**
-     * @dev Calculates collateral balance with a token amount subtracted
-     * @param debtManager Reference to the debt manager contract
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to subtract
-     * @param amount Amount to subtract
-     * @param __mode Operating mode (Credit or Debit)
-     * @return tokenAmounts Array of token data with updated balances
-     * @return error Error message if calculation fails
-     */
-    function _getCollateralBalanceWithTokenSubtracted(IDebtManager debtManager, address safe, address token, uint256 amount, Mode __mode) internal view returns (IDebtManager.TokenData[] memory, string memory error) {
-        address[] memory collateralTokens = debtManager.getCollateralTokens();
-        uint256 len = collateralTokens.length;
-        IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
-        uint256 m = 0;
-        for (uint256 i = 0; i < len;) {
-            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
-            uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
-            if (balance != 0) {
-                balance = balance - pendingWithdrawalAmount;
-                if (__mode == Mode.Debit && token == collateralTokens[i]) {
-                    if (balance == 0 || balance < amount) return (new IDebtManager.TokenData[](0), "Insufficient effective balance after withdrawal to spend with debit mode");
-                    balance = balance - amount;
-                }
-                tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
-                unchecked {
-                    ++m;
-                }
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        assembly ("memory-safe") {
-            mstore(tokenAmounts, m)
-        }
-
-        return (tokenAmounts, "");
     }
 
     /**

@@ -4,8 +4,8 @@ pragma solidity ^0.8.28;
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
-
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
@@ -527,8 +527,8 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @param interestIndex The current interest index to normalize against
      * @return The normalized amount without accrued interest
      */
-    function _getNormalizedAmount(uint256 actualAmount, uint256 interestIndex) internal pure returns (uint256) {
-        return actualAmount.mulDiv(PRECISION, interestIndex, Math.Rounding.Floor);
+    function _getNormalizedAmount(uint256 actualAmount, uint256 interestIndex, Math.Rounding rounding) internal pure returns (uint256) {
+        return actualAmount.mulDiv(PRECISION, interestIndex, rounding);
     }
 
     /**

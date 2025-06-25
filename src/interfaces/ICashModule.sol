@@ -9,6 +9,45 @@ import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
 /**
+ * @title CashbackTypes
+ * @notice Defines the different cashback types
+ */
+enum CashbackTypes {
+    Regular,
+    Spender, 
+    Promotion,
+    Referral
+}
+
+/**
+ * @title Cashback
+ * @notice Defines the structure of Cashback
+ */
+struct Cashback {
+    address to;
+    CashbackTokens[] cashbackTokens;
+}
+
+/**
+ * @title CashbackTokens
+ * @notice Defines the structure of Cashback tokens 
+ */
+struct CashbackTokens {
+    address token;
+    uint256 amountInUsd;
+    CashbackTypes cashbackType;
+}
+
+/**
+ * @title TokenDataInUsd
+ * @notice Defines the token data with amount in USD
+ */
+struct TokenDataInUsd {
+    address token;
+    uint256 amountInUsd;
+}
+
+/**
  * @title BinSponsor
  * @notice Defines the bin sponsors or card issuers
  */
@@ -88,7 +127,7 @@ struct SafeCashConfig {
     /// @notice Mapping of transaction IDs to cleared status to prevent replay attacks
     mapping(bytes32 txId => bool cleared) transactionCleared;
     /// @notice Percentage of cashback allocated to the safe vs. the spender (in basis points, 5000 = 50%)
-    uint256 cashbackSplitToSafePercentage;
+    uint256 DEPRECATED_cashbackSplitToSafePercentage;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
 }
@@ -283,16 +322,6 @@ interface ICashModule {
     function getSettlementDispatcher(BinSponsor binSponsor) external view returns (address settlementDispatcher);
 
     /**
-     * @notice Gets the cashback percentage and split percentage for a safe
-     * @dev Returns the tier-based cashback percentage and safe's split configuration
-     * @param safe Address of the EtherFi Safe
-     * @return Cashback percentage in basis points (100 = 1%)
-     * @return Split percentage to safe in basis points (5000 = 50%)
-     * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
-     */
-    function getSafeCashbackPercentageAndSplit(address safe) external view returns (uint256, uint256);
-
-    /**
      * @notice Returns the EtherFiDataProvider contract reference
      * @dev Used to access global system configuration and services
      * @return The EtherFiDataProvider contract instance
@@ -303,9 +332,20 @@ interface ICashModule {
      * @notice Gets the pending cashback amount for an account in USD
      * @dev Returns the amount of cashback waiting to be claimed
      * @param account Address of the account (safe or spender)
-     * @return Pending cashback amount in USD
+     * @param tokens Addresses of tokens for cashback
+     * @return data Pending cashback data for tokens in USD
+     * @return totalCashbackInUsd Total pending cashback amount in USD
      */
-    function getPendingCashback(address account) external view returns (uint256);
+    function getPendingCashback(address account, address[] memory tokens) external view returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd);
+
+    /**
+     * @notice Gets the pending cashback amount for an account in USD for a specific token
+     * @dev Returns the amount of cashback waiting to be claimed
+     * @param account Address of the account (safe or spender)
+     * @param token Address of tokens for cashback
+     * @return Pending cashback amount in USD for the token
+     */
+    function getPendingCashbackForToken(address account, address token) external view returns (uint256);
 
     /**
      * @notice Gets the current delay settings for the module
@@ -322,12 +362,6 @@ interface ICashModule {
      * @return The current operating mode (Debit or Credit)
      */
     function getMode(address safe) external view returns (Mode);
-
-    /**
-     * @notice Gets the referrer cashback percentage in bps
-     * @return uint64 referrer cashback percentage in bps
-     */
-    function getReferrerCashbackPercentage() external view returns (uint64);
 
     /**
      * @notice Gets the timestamp when a pending credit mode change will take effect
@@ -404,39 +438,6 @@ interface ICashModule {
     function setSafeTier(address[] memory safes, SafeTiers[] memory tiers) external;
 
     /**
-     * @notice Sets the cashback percentage for different tiers
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param tiers Array of tiers to configure
-     * @param cashbackPercentages Array of cashback percentages in basis points (100 = 1%)
-     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
-     * @custom:throws ArrayLengthMismatch if arrays have different lengths
-     * @custom:throws CashbackPercentageGreaterThanMaxAllowed if any percentage exceeds the maximum allowed
-     */
-    function setTierCashbackPercentage(SafeTiers[] memory tiers, uint256[] memory cashbackPercentages) external;
-
-    /**
-     * @notice Sets the referrer cashback percentage in bps
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param cashbackPercentage New cashback percentage in bps
-     */
-    function setReferrerCashbackPercentageInBps(uint64 cashbackPercentage) external;
-
-    /**
-     * @notice Sets the percentage of cashback that goes to the safe (versus the spender)
-     * @dev Can only be called by the safe itself with a valid admin signature
-     * @param safe Address of the safe to configure
-     * @param splitInBps Percentage in basis points to allocate to the safe (10000 = 100%)
-     * @param signer Address of the safe admin signing the transaction
-     * @param signature Signature from the signer authorizing this change
-     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
-     * @custom:throws OnlySafeAdmin if signer is not a safe admin
-     * @custom:throws SplitAlreadyTheSame if the new split is the same as the current one
-     * @custom:throws InvalidInput if the split percentage exceeds 100%
-     * @custom:throws InvalidSignatures if signature verification fails
-     */
-    function setCashbackSplitToSafeBps(address safe, uint256 splitInBps, address signer, bytes calldata signature) external;
-
-    /**
      * @notice Sets the time delays for withdrawals, spending limit changes, and mode changes
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
      * @param withdrawalDelay Delay in seconds before a withdrawal can be finalized
@@ -478,13 +479,11 @@ interface ICashModule {
      * @notice Processes a spending transaction with multiple tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
-     * @param spender Address of the spendeer
-     * @param referrer Address of the referrer 
      * @param txId Transaction identifier
      * @param binSponsor Bin sponsor used for spending
      * @param tokens Array of addresses of the tokens to spend
      * @param amountsInUsd Array of amounts to spend in USD (must match tokens array length)
-     * @param shouldReceiveCashback Yes if tx should receive cashback, to block cashbacks for some types of txs like ATM withdrawals
+     * @param cashbacks Struct of Cashback to be given
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
      * @custom:throws UnsupportedToken if any token is not supported
      * @custom:throws AmountZero if any converted amount is zero
@@ -492,13 +491,14 @@ interface ICashModule {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe,  address spender, address referrer,  bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  bool shouldReceiveCashback) external;
+    function spend(address safe, bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  Cashback[] calldata cashbacks) external;
 
     /**
      * @notice Clears pending cashback for users
      * @param users Addresses of users to clear the pending cashback for
+     * @param tokens Addresses of cashback tokens
      */
-    function clearPendingCashback(address[] calldata users) external;
+    function clearPendingCashback(address[] calldata users, address[] calldata tokens) external;
 
     /**
      * @notice Repays borrowed tokens
@@ -582,10 +582,4 @@ interface ICashModule {
      * @return SafeTiers Tier of the safe
      */
     function getSafeTier(address safe) external view returns (SafeTiers);
-    
-    /**
-     * @notice Fetches Cashback Percentage for a safe tier
-     * @return uint256 Cashback Percentage in bps
-     */
-    function getTierCashbackPercentage(SafeTiers tier) external view returns (uint256);
 }

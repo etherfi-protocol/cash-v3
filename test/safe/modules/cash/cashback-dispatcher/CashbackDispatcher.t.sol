@@ -7,7 +7,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
-import { Mode, SafeTiers, BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor, Cashback, CashbackTokens, CashbackTypes } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
 import { CashbackDispatcher } from "../../../../../src/cashback-dispatcher/CashbackDispatcher.sol";
@@ -16,37 +16,54 @@ import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PricePro
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
+import { EnumerableAddressWhitelistLib } from "../../../../../src/libraries/EnumerableAddressWhitelistLib.sol";
 
 contract CashbackDispatcherTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
-
-    uint256 pepeCashbackPercentage = 200;
-    uint256 wojakCashbackPercentage = 300;
-    uint256 chadCashbackPercentage = 400;
-    uint256 whaleCashbackPercentage = 500;
 
     address newCashModuleAddress = makeAddr("newCashModuleAddress");
 
     ETHRejecter ethRejecter;
 
+    // Helper function to create single cashback
+    function _createSingleCashback(
+        address to,
+        address token,
+        uint256 amountInUsd,
+        CashbackTypes cashbackType
+    ) private pure returns (Cashback[] memory) {
+        CashbackTokens[] memory tokens = new CashbackTokens[](1);
+        tokens[0] = CashbackTokens({
+            token: token,
+            amountInUsd: amountInUsd,
+            cashbackType: cashbackType
+        });
+        
+        Cashback[] memory cashbacks = new Cashback[](1);
+        cashbacks[0] = Cashback({
+            to: to,
+            cashbackTokens: tokens
+        });
+        
+        return cashbacks;
+    }
+
+    // Helper function to create spend arrays
+    function _createSpendArrays(address token, uint256 amount) 
+        private 
+        pure 
+        returns (address[] memory tokens, uint256[] memory amounts) 
+    {
+        tokens = new address[](1);
+        tokens[0] = token;
+        amounts = new uint256[](1);
+        amounts[0] = amount;
+    }
+
     function setUp() public override {
         super.setUp();
 
         vm.startPrank(owner);
-
-        SafeTiers[] memory userSafeTiers = new SafeTiers[](4);
-        userSafeTiers[0] = SafeTiers.Pepe;
-        userSafeTiers[1] = SafeTiers.Wojak;
-        userSafeTiers[2] = SafeTiers.Chad;
-        userSafeTiers[3] = SafeTiers.Whale;
-
-        uint256[] memory cashbackPercentages = new uint256[](4);
-        cashbackPercentages[0] = pepeCashbackPercentage;
-        cashbackPercentages[1] = wojakCashbackPercentage;
-        cashbackPercentages[2] = chadCashbackPercentage;
-        cashbackPercentages[3] = whaleCashbackPercentage;
-
-        cashModule.setTierCashbackPercentage(userSafeTiers, cashbackPercentages);
 
         ethRejecter = new ETHRejecter();
 
@@ -54,44 +71,46 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
     }
 
     function test_deploy_initializesCorrectValues() public view {
+        address[] memory cashbackTokensInDispatcher = cashbackDispatcher.getCashbackTokens();
         assertEq(address(cashbackDispatcher.etherFiDataProvider()), address(dataProvider));
         assertEq(address(cashbackDispatcher.priceProvider()), address(priceProvider));
-        assertEq(cashbackDispatcher.cashbackToken(), address(scrToken));
+        assertEq(cashbackTokensInDispatcher.length, 1);
+        assertEq(cashbackTokensInDispatcher[0], address(scrToken));
         assertEq(cashbackDispatcher.cashModule(), address(cashModule));
 
         assertEq(uint8(cashModule.getSafeTier(address(safe))), uint8(SafeTiers.Pepe));
-        assertEq(cashModule.getTierCashbackPercentage(SafeTiers.Pepe), pepeCashbackPercentage);
-        assertEq(cashModule.getTierCashbackPercentage(SafeTiers.Wojak), wojakCashbackPercentage);
-        assertEq(cashModule.getTierCashbackPercentage(SafeTiers.Chad), chadCashbackPercentage);
-        assertEq(cashModule.getTierCashbackPercentage(SafeTiers.Whale), whaleCashbackPercentage);
     }
 
-    function test_processCashback_providesCashback_inDebitFlowWithPepeTier() public {
+    function test_processCashback_providesCashback_inDebitFlow() public {
         uint256 spendAmt = 100e6;
         deal(address(usdcScroll), address(safe), 100e6);
         deal(address(scrToken), address(cashbackDispatcher), 100 ether);
+
+        // Use helper to create cashback
+        Cashback[] memory cashbacks = _createSingleCashback(
+            address(safe),
+            address(scrToken),
+            1e6,
+            CashbackTypes.Regular
+        );
         
-        // owner is pepe, so cashback is 2% -> 2 USDC in scroll tokens
-        uint256 cashbackInUsdc = (spendAmt * pepeCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
+        uint256 cashbackInUsdc = 1e6;
+        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), cashbackInUsdc);
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
         
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
+        (address[] memory spendTokens, uint256[] memory spendAmounts) = _createSpendArrays(address(usdcScroll), spendAmt);
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc, CashbackTypes.Regular, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
     }
 
-    function test_processCashback_providesCashback_inCreditFlowWithPepeTier() public {
+    function test_processCashback_providesCashback_inCreditFlow() public {
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
 
@@ -100,365 +119,136 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(debtManager), 10000e6);
         deal(address(scrToken), address(cashbackDispatcher), 100 ether);
         
-        // owner is pepe, so cashback is 2% -> 2 USDC in scroll tokens
-        uint256 cashbackInUsdc = (spendAmt * pepeCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
+        // Use helper to create cashback
+        Cashback[] memory cashbacks = _createSingleCashback(
+            address(safe),
+            address(scrToken),
+            1e6,
+            CashbackTypes.Regular
+        );
+        
+        uint256 cashbackInUsdc = 1e6;
+        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), cashbackInUsdc);
 
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
 
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
+        (address[] memory spendTokens, uint256[] memory spendAmounts) = _createSpendArrays(address(usdcScroll), spendAmt);
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc, CashbackTypes.Regular, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
         assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
-    }
-
-    function test_processCashback_providesCashback_inDebitFlowWithWojakTier() public {
-        setTier(SafeTiers.Wojak);
-
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), 100e6);
-        deal(address(scrToken), address(cashbackDispatcher), 100 ether);
-        
-        uint256 cashbackInUsdc = (spendAmt * wojakCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
-
-        uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
-    }
-
-    function test_processCashback_providesCashback_inCreditFlowWithWojakTier() public {
-        setTier(SafeTiers.Wojak);
-
-        _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
-
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), 10000e6);
-        deal(address(usdcScroll), address(debtManager), 10000e6);
-        deal(address(scrToken), address(cashbackDispatcher), 100 ether);
-        
-        uint256 cashbackInUsdc = (spendAmt * wojakCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
-
-        uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
-    }
-
-    function test_processCashback_providesCashback_inDebitFlowWithChadTier() public {
-        setTier(SafeTiers.Chad);
-
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), 100e6);
-        deal(address(scrToken), address(cashbackDispatcher), 100 ether);
-        
-        uint256 cashbackInUsdc = (spendAmt * chadCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
-
-        uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
-    }
-
-    function test_processCashback_providesCashback_inCreditFlowWithChadTier() public {
-        setTier(SafeTiers.Chad);
-
-        _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
-
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), 10000e6);
-        deal(address(usdcScroll), address(debtManager), 10000e6);
-        deal(address(scrToken), address(cashbackDispatcher), 100 ether);
-        
-        uint256 cashbackInUsdc = (spendAmt * chadCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
-
-        uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
-        
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
-    }
-
-    function test_processCashback_providesCashback_inDebitFlowWithWhaleTier() public {
-        setTier(SafeTiers.Whale);
-
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), 100e6);
-        deal(address(scrToken), address(cashbackDispatcher), 100 ether);
-        
-        uint256 cashbackInUsdc = (spendAmt * whaleCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
-
-        uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-        
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
-    }
-
-    function test_processCashback_providesCashback_inCreditFlowWithWhaleTier() public {
-        setTier(SafeTiers.Whale);
-
-        _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
-
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), 10000e6);
-        deal(address(usdcScroll), address(debtManager), 10000e6);
-        deal(address(scrToken), address(cashbackDispatcher), 100 ether);
-        
-        uint256 cashbackInUsdc = (spendAmt * whaleCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
-
-        uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
-    }
-
-    function test_processCashback_storesPendingCashback_whenInsufficientFunds() public {
-        deal(address(scrToken), address(cashbackDispatcher), 0);
-        
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), 100e6);
-        
-        // owner is pepe, so cashback is 2% -> 2 USDC in scroll tokens
-        uint256 cashbackInUsdc = (spendAmt * pepeCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
-
-        uint256 safePendingCashbackBefore = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackBefore, 0);
-
-        uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertEq(safeScrBalAfter, safeScrBalBefore);
-
-        uint256 safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackAfter, cashbackInUsdc);
-    }
-
-    function test_processCashback_accumulatesPendingCashback_whenFundsRemainUnavailable() public {
-        deal(address(scrToken), address(cashbackDispatcher), 0);
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), spendAmt);
-        
-        // owner is pepe, so cashback is 2% -> 2 USDC in scroll tokens
-        uint256 cashbackInUsdc = (spendAmt * pepeCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
-
-        uint256 safePendingCashbackBefore = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackBefore, 0);
-
-        uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertEq(safeScrBalAfter, safeScrBalBefore);
-
-        uint256 safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackAfter, cashbackInUsdc);
-
-        deal(address(usdcScroll), address(safe), spendAmt);
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
-
-        safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackAfter, cashbackInUsdc * 2);
     }
 
     function test_processCashback_paysPending_whenFundsBecomesAvailable() public {
         deal(address(scrToken), address(cashbackDispatcher), 0);
         uint256 spendAmt = 100e6;
+        uint256 cashbackAmountUsd = 1e6;
         deal(address(usdcScroll), address(safe), spendAmt);
         
-        // owner is pepe, so cashback is 2% -> 2 USDC in scroll tokens
-        uint256 cashbackInUsdc = (spendAmt * pepeCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
+        // Use helper to create cashback
+        Cashback[] memory cashbacks = _createSingleCashback(
+            address(safe),
+            address(scrToken),
+            cashbackAmountUsd,
+            CashbackTypes.Regular
+        );
+        
+        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), cashbackAmountUsd);
 
-        uint256 safePendingCashbackBefore = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackBefore, 0);
-
+        // Check initial state
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(scrToken)), 0);
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
 
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
+        (address[] memory spendTokens, uint256[] memory spendAmounts) = _createSpendArrays(address(usdcScroll), spendAmt);
 
+        // First spend - creates pending cashback
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(scrToken), cashbackInScroll, cashbackAmountUsd, CashbackTypes.Regular, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertEq(safeScrBalAfter, safeScrBalBefore);
+        // Verify pending cashback
+        assertEq(scrToken.balanceOf(address(safe)), safeScrBalBefore);
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(scrToken)), cashbackAmountUsd);
 
-        uint256 safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackAfter, cashbackInUsdc);
-
+        // Add funds for second spend
         deal(address(usdcScroll), address(safe), spendAmt);
         deal(address(scrToken), address(cashbackDispatcher), 1000 ether);
 
         safeScrBalBefore = scrToken.balanceOf(address(safe));
 
+        // Second spend - should clear pending and give new cashback
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(scrToken), cashbackInScroll, cashbackAmountUsd);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, true);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(scrToken), cashbackInScroll, cashbackAmountUsd, CashbackTypes.Regular, true);
+        
+        // Create new arrays to avoid stack issues
+        (address[] memory spendTokens2, uint256[] memory spendAmounts2) = _createSpendArrays(address(usdcScroll), spendAmt);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens2, spendAmounts2, cashbacks);
 
-        safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackAfter, 0);
-
-        safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, 2 * cashbackInScroll, 1000);
+        // Verify results
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(scrToken)), 0);
+        assertApproxEqAbs(scrToken.balanceOf(address(safe)) - safeScrBalBefore, 2 * cashbackInScroll, 1000);
     }
 
     function test_processCashback_clearsPendingButDoesNotGiveCurrentCashback_whenInsufficientFundsForTotal() public {
         deal(address(scrToken), address(cashbackDispatcher), 0);
         
         uint256 spendAmt = 100e6;
+        uint256 cashbackAmountUsd = 1e6;
         deal(address(usdcScroll), address(safe), spendAmt);
         
-        // owner is pepe, so cashback is 2% -> 2 USDC in scroll tokens
-        uint256 cashbackInUsdc = (spendAmt * pepeCashbackPercentage) / HUNDRED_PERCENT_IN_BPS;
-        uint256 cashbackInScroll = (cashbackInUsdc * 10 ** IERC20Metadata(address(scrToken)).decimals()) / priceProvider.price(address(scrToken));
+        // Use helper to create cashback
+        Cashback[] memory cashbacks = _createSingleCashback(
+            address(safe),
+            address(scrToken),
+            cashbackAmountUsd,
+            CashbackTypes.Regular
+        );
+        
+        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), cashbackAmountUsd);
 
-        uint256 safePendingCashbackBefore = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackBefore, 0);
-
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(scrToken)), 0);
         uint256 safeScrBalBefore = scrToken.balanceOf(address(safe));
 
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
+        (address[] memory spendTokens, uint256[] memory spendAmounts) = _createSpendArrays(address(usdcScroll), spendAmt);
 
+        // First spend - creates pending
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(scrToken), cashbackInScroll, cashbackAmountUsd, CashbackTypes.Regular, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        uint256 safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertEq(safeScrBalAfter, safeScrBalBefore);
+        assertEq(scrToken.balanceOf(address(safe)), safeScrBalBefore);
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(scrToken)), cashbackAmountUsd);
 
-        uint256 safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackAfter, cashbackInUsdc);
-
+        // Add funds for only one cashback
         deal(address(usdcScroll), address(safe), spendAmt);
         deal(address(scrToken), address(cashbackDispatcher), cashbackInScroll);
 
         safeScrBalBefore = scrToken.balanceOf(address(safe));
 
+        // Second spend - should clear pending but not give new cashback
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(scrToken), cashbackInScroll, cashbackInUsdc);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(scrToken), cashbackInScroll, cashbackAmountUsd);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), address(0), spendAmt, address(scrToken), cashbackInScroll, cashbackInUsdc, 0, 0, false);
-        cashModule.spend(address(safe), address(0), address(0), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(scrToken), cashbackInScroll, cashbackAmountUsd, CashbackTypes.Regular, false);
+        
+        (address[] memory spendTokens2, uint256[] memory spendAmounts2) = _createSpendArrays(address(usdcScroll), spendAmt);
+        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens2, spendAmounts2, cashbacks);
 
-        safePendingCashbackAfter = cashModule.getPendingCashback(address(safe));
-        assertEq(safePendingCashbackAfter, cashbackInUsdc);
-
-        safeScrBalAfter = scrToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(scrToken)), cashbackAmountUsd);
+        assertApproxEqAbs(scrToken.balanceOf(address(safe)) - safeScrBalBefore, cashbackInScroll, 1000);
     }
 
+    // Rest of the test functions remain the same...
     function test_setPriceProvider_succeeds_whenCalledByOwner() public {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
@@ -479,23 +269,43 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
-    function test_setCashbackToken_succeeds_whenCalledByOwner() public {
+    function test_configureCashbackTokens_succeeds_whenCalledByOwner() public {
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdcScroll);
+        tokens[1] = address(scrToken);
+
+        bool[] memory shouldWhitelist = new bool[](2);
+        shouldWhitelist[0] = false;
+        shouldWhitelist[1] = true;
+
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit CashbackDispatcher.CashbackTokenSet(address(scrToken), address(usdcScroll));
-        cashbackDispatcher.setCashbackToken(address(usdcScroll));
+        emit CashbackDispatcher.CashbackTokensConfigured(tokens, shouldWhitelist);
+        cashbackDispatcher.configureCashbackToken(tokens, shouldWhitelist);
     }
 
-    function test_setCashbackToken_reverts_whenAddressZero() public {
+    function test__configureCashbackTokens_reverts_whenAddressZero() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(0);
+
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = false;
+
         vm.prank(owner);
-        vm.expectRevert(CashbackDispatcher.InvalidValue.selector);
-        cashbackDispatcher.setCashbackToken(address(0));
+        vm.expectRevert(abi.encodeWithSelector(EnumerableAddressWhitelistLib.InvalidAddress.selector, tokens[0]));
+        cashbackDispatcher.configureCashbackToken(tokens, shouldWhitelist);
     }
 
-    function test_setCashbackToken_reverts_whenCallerNotOwner() public {
+    function test_configureCashbackTokens_reverts_whenCallerNotOwner() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(scrToken);
+
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = false;
+
         vm.startPrank(notOwner);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
-        cashbackDispatcher.setCashbackToken(address(usdcScroll));
+        cashbackDispatcher.configureCashbackToken(tokens, shouldWhitelist);
         vm.stopPrank();
     }
 
@@ -579,54 +389,44 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         cashbackDispatcher.withdrawFunds(address(0), owner, 1);
     }
 
-    // Test direct cashback function with invalid parameters
     function test_cashback_reverts_whenNotCalledByCashModule() public {
         vm.expectRevert(CashbackDispatcher.OnlyCashModule.selector);
-        cashbackDispatcher.cashback(address(safe), address(0), 100e6, 200, 10000);
+        cashbackDispatcher.cashback(address(safe), address(scrToken), 100e6);
     }
 
-    // Test direct cashback function with non-EtherFiSafe address
-    function test_cashback_reverts_whenSafeIsNotEtherFiSafe() public {
-        address randomAddress = makeAddr("randomAddress");
-        
-        // Mock the call as if coming from CashModule
-        vm.prank(address(cashModule));
-        vm.expectRevert(CashbackDispatcher.OnlyEtherFiSafe.selector);
-        cashbackDispatcher.cashback(randomAddress, address(0), 100e6, 200, 10000);
-    }
-
-    // Test the clearPendingCashback function
     function test_clearPendingCashback_success() public {
-        // First create pending cashback by doing a spend with no tokens in the dispatcher
+        // Setup
         deal(address(scrToken), address(cashbackDispatcher), 0);
         uint256 spendAmt = 100e6;
+        uint256 cashbackAmountUsd = 1e6;
         deal(address(usdcScroll), address(safe), spendAmt);
-        
-        uint256 cashbackPercentage = cashModule.getTierCashbackPercentage(SafeTiers.Pepe);
-        uint256 cashbackInUsdc = (spendAmt * cashbackPercentage) / 10000;
 
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
+        // Create cashback using helper
+        Cashback[] memory cashbacks = _createSingleCashback(
+            address(safe),
+            address(scrToken),
+            cashbackAmountUsd,
+            CashbackTypes.Regular
+        );
+        
+        (address[] memory spendTokens, uint256[] memory spendAmounts) = _createSpendArrays(address(usdcScroll), spendAmt);
         
         // Spend to create pending cashback
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify pending cashback exists
-        assertEq(cashModule.getPendingCashback(address(safe)), cashbackInUsdc);
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(scrToken)), cashbackAmountUsd);
         
         // Now add tokens to the dispatcher
-        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(cashbackInUsdc);
+        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), cashbackAmountUsd);
         deal(address(scrToken), address(cashbackDispatcher), cashbackInScroll);
         
         // Test clearing the pending cashback directly
         vm.prank(address(cashModule));
-        (address token, uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe));
+        (uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe), address(scrToken), cashbackAmountUsd);
         
         // Check results
-        assertEq(token, address(scrToken), "Token should be SCR token");
         assertGt(amount, 0, "Amount should be positive");
         assertTrue(success, "Should successfully clear cashback");
         
@@ -634,142 +434,82 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertApproxEqAbs(scrToken.balanceOf(address(safe)), cashbackInScroll, 1000, "Safe should receive tokens");
     }
 
-    // Test clearPendingCashback when there's no pending cashback
     function test_clearPendingCashback_noPendingCashback() public {
-        // Ensure safe has no pending cashback
-        assertEq(cashModule.getPendingCashback(address(safe)), 0);
+        assertEq(cashModule.getPendingCashbackForToken(address(safe), address(scrToken)), 0);
         
         vm.prank(address(cashModule));
-        (address token, uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe));
+        (uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe), address(scrToken), 0);
         
-        assertEq(token, address(scrToken), "Token should be SCR token");
         assertEq(amount, 0, "Amount should be zero");
         assertTrue(success, "Should return success even with zero amount");
     }
-
-    // Test clearPendingCashback with insufficient tokens
-    function test_clearPendingCashback_insufficientTokens() public {
-        // First create pending cashback by doing a spend with no tokens in the dispatcher
-        deal(address(scrToken), address(cashbackDispatcher), 0);
-        uint256 spendAmt = 100e6;
-        deal(address(usdcScroll), address(safe), spendAmt);
-        
-        uint256 cashbackPercentage = cashModule.getTierCashbackPercentage(SafeTiers.Pepe);
-        uint256 cashbackInUsdc = (spendAmt * cashbackPercentage) / 10000;
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmt;
-        
-        // Spend to create pending cashback
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-        
-        // Verify pending cashback exists
-        assertEq(cashModule.getPendingCashback(address(safe)), cashbackInUsdc);
-        
-        // Try to clear pending cashback with no tokens in dispatcher
+            
+    function test_clearPendingCashback_reverts_whenInvalidCashbackToken() public {
         vm.prank(address(cashModule));
-        (address token, uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe));
+        vm.expectRevert(CashbackDispatcher.InvalidCashbackToken.selector);
+        cashbackDispatcher.clearPendingCashback(address(safe), address(weETHScroll), 1 ether);
+    }
+
+    function test_clearPendingCashback_insufficientTokens() public {
+        deal(address(scrToken), address(cashbackDispatcher), 0);
+
+        vm.prank(address(cashModule));
+        (uint256 amount, bool success) = cashbackDispatcher.clearPendingCashback(address(safe), address(scrToken), 100e6);
         
-        // Check results
-        assertEq(token, address(scrToken), "Token should be SCR token");
         assertGt(amount, 0, "Amount should be positive");
         assertFalse(success, "Should fail due to insufficient tokens");
         
-        // Verify no tokens were transferred
         assertEq(scrToken.balanceOf(address(safe)), 0, "Safe should not receive tokens");
     }
 
-    // Test clearPendingCashback when called by non-CashModule
     function test_clearPendingCashback_reverts_whenNotCalledByCashModule() public {
         vm.expectRevert(CashbackDispatcher.OnlyCashModule.selector);
-        cashbackDispatcher.clearPendingCashback(address(safe));
+        cashbackDispatcher.clearPendingCashback(address(safe), address(scrToken), 100e6);
     }
 
-    // Test clearPendingCashback with address(0)
     function test_clearPendingCashback_reverts_withInvalidInput() public {
         vm.prank(address(cashModule));
         vm.expectRevert(CashbackDispatcher.InvalidInput.selector);
-        cashbackDispatcher.clearPendingCashback(address(0));
+        cashbackDispatcher.clearPendingCashback(address(0), address(scrToken), 100e6);
     }
 
-    // Test setCashModule function
     function test_setCashModule_success() public {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit CashbackDispatcher.CashModuleSet(address(cashModule), newCashModuleAddress);
         cashbackDispatcher.setCashModule(newCashModuleAddress);
         
-        // Verify the cashModule address was updated
         assertEq(cashbackDispatcher.cashModule(), newCashModuleAddress);
     }
 
-    // Test setCashModule with zero address
     function test_setCashModule_reverts_withZeroAddress() public {
         vm.prank(owner);
         vm.expectRevert(CashbackDispatcher.InvalidValue.selector);
         cashbackDispatcher.setCashModule(address(0));
     }
 
-    // Test setCashModule with unauthorized caller
     function test_setCashModule_reverts_whenCallerNotOwner() public {
         vm.prank(notOwner);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         cashbackDispatcher.setCashModule(newCashModuleAddress);
     }
 
-    // Test withdrawFunds with a contract that rejects ETH transfers
     function test_withdrawFunds_reverts_whenETHTransferIsRejected() public {
-        // Fund the cashback dispatcher with ETH
         deal(address(cashbackDispatcher), 1 ether);
         
-        // Try to withdraw ETH to a contract that rejects transfers
         vm.prank(owner);
         vm.expectRevert(CashbackDispatcher.WithdrawFundsFailed.selector);
         cashbackDispatcher.withdrawFunds(address(0), address(ethRejecter), 0.5 ether);
     }
 
-    // Test convertUsdToCashbackToken function
     function test_convertUsdToCashbackToken_withZeroAmount() public view {
-        uint256 result = cashbackDispatcher.convertUsdToCashbackToken(0);
+        uint256 result = cashbackDispatcher.convertUsdToCashbackToken(address(scrToken), 0);
         assertEq(result, 0, "Should return 0 for 0 input");
     }
-
-    // Test getCashbackAmount function
-    function test_getCashbackAmount_calculatesCorrectly() public view {
-        uint256 spentAmountInUsd = 1000e6; // 1000 USD
-        uint256 cashbackPercentageInBps = 250; // 2.5%
-        
-        (uint256 tokenAmount, uint256 usdAmount) = cashbackDispatcher.getCashbackAmount(
-            cashbackPercentageInBps, 
-            spentAmountInUsd
-        );
-        
-        // Expected USD amount is 2.5% of 1000 USD = 25 USD
-        assertEq(usdAmount, 25e6, "USD amount should be 25 USD");
-        
-        // Token amount should match the converted value
-        uint256 expectedTokenAmount = cashbackDispatcher.convertUsdToCashbackToken(25e6);
-        assertEq(tokenAmount, expectedTokenAmount, "Token amount should match converted value");
-    }
-
-    function setTier(SafeTiers tier) internal {
-        address[] memory safes = new address[](1);
-        safes[0] = address(safe);
-        SafeTiers[] memory tiers = new SafeTiers[](1);
-        tiers[0] = tier;
-
-        vm.prank(etherFiWallet);
-        cashModule.setSafeTier(safes, tiers);
-    }
-
 }
 
 // Helper contract to test ETH transfer rejection
 contract ETHRejecter {
-    // This fallback function will revert when receiving ETH
     receive() external payable {
         revert("ETH transfer rejected");
     }

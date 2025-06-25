@@ -4,12 +4,13 @@ pragma solidity ^0.8.24;
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
-import { ICashModule } from "../interfaces/ICashModule.sol";
+import { ICashModule, TokenDataInUsd } from "../interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
-
+import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
 /**
  * @title CashbackDispatcher
  * @author ether.fi
@@ -19,6 +20,8 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 contract CashbackDispatcher is UpgradeableProxy {
     using SafeERC20 for IERC20;
     using Math for uint256;
+    using EnumerableSetLib for EnumerableSetLib.AddressSet;
+    using EnumerableAddressWhitelistLib for EnumerableSetLib.AddressSet;
 
     /// @notice Constant representing 100% in basis points (10,000)
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
@@ -36,7 +39,9 @@ contract CashbackDispatcher is UpgradeableProxy {
         /// @notice Reference to the Price Provider contract
         IPriceProvider priceProvider;
         /// @notice Address of the token used for cashback payments
-        address cashbackToken;
+        address DEPRECATED_cashbackToken;
+        /// @notice Addresses of the whitelisted cashback tokens
+        EnumerableSetLib.AddressSet whitelistedCashbackTokens;
     }
 
     /**
@@ -60,11 +65,11 @@ contract CashbackDispatcher is UpgradeableProxy {
     event PriceProviderSet(address oldPriceProvider, address newPriceProvider);
     
     /**
-     * @notice Emitted when the cashback token address is updated
-     * @param oldToken Previous cashback token address
-     * @param newToken New cashback token address
+     * @notice Emitted when the cashback tokens are configured
+     * @param tokens Addresses of the tokens
+     * @param isWhitelisted Whether tokens are whitelisted or removed from whitelist
      */
-    event CashbackTokenSet(address oldToken, address newToken);
+    event CashbackTokensConfigured(address[] tokens, bool[] isWhitelisted);
 
     /**
      * @notice Thrown when the price of the cashback token is not configured in the price provider
@@ -100,6 +105,11 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @notice Thrown when invalid input parameters are provided
      */
     error InvalidInput();
+    
+    /**
+     * @notice Thrown when the cashback token is not supported
+     */
+    error InvalidCashbackToken();
 
     /**
      * @notice Constructor that sets the data provider and disables initializers
@@ -118,12 +128,12 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @param _roleRegistry Address of the role registry contract
      * @param _cashModule Address of the Cash Module contract
      * @param _priceProvider Address of the Price Provider contract
-     * @param _cashbackToken Address of the token to be used for cashback
+     * @param _cashbackTokens Addresses of the cashback tokens
      * @custom:throws InvalidValue When any address parameter is zero
      * @custom:throws CashbackTokenPriceNotConfigured When the cashback token has no price configured
      */
-    function initialize(address _roleRegistry, address _cashModule, address _priceProvider, address _cashbackToken) external initializer {
-        if (_cashModule == address(0) || _priceProvider == address(0) || _cashbackToken == address(0)) revert InvalidValue();
+    function initialize(address _roleRegistry, address _cashModule, address _priceProvider, address[] calldata _cashbackTokens) external initializer {
+        if (_cashModule == address(0) || _priceProvider == address(0)) revert InvalidValue();
 
         __UpgradeableProxy_init(_roleRegistry);
 
@@ -131,13 +141,20 @@ contract CashbackDispatcher is UpgradeableProxy {
 
         $.cashModule = ICashModule(_cashModule);
         $.priceProvider = IPriceProvider(_priceProvider);
+        
+        uint256 len = _cashbackTokens.length;
 
-        if ($.priceProvider.price(_cashbackToken) == 0) revert CashbackTokenPriceNotConfigured();
-        $.cashbackToken = _cashbackToken;
+        for (uint256 i = 0; i < len; ) {
+            if ($.priceProvider.price(_cashbackTokens[i]) == 0) revert CashbackTokenPriceNotConfigured();
+            unchecked {
+                ++i;
+            }
+        }
+        
+        $.whitelistedCashbackTokens.addToWhitelist(_cashbackTokens);
 
         emit CashModuleSet(address(0), _cashModule);
         emit PriceProviderSet(address(0), _priceProvider);
-        emit CashbackTokenSet(address(0), _cashbackToken);
     }
 
     /**
@@ -167,98 +184,88 @@ contract CashbackDispatcher is UpgradeableProxy {
     }
 
     /**
-     * @notice Returns the address of the token used for cashback
-     * @return Address of the cashback token
+     * @notice Returns the addresses of the whitelisted cashback tokens
+     * @return Addresses of the cashback tokens
      */
-    function cashbackToken() external view returns (address) {
-        return address(_getCashbackDispatcherStorage().cashbackToken);
+    function getCashbackTokens() public view returns (address[] memory) {
+        return _getCashbackDispatcherStorage().whitelistedCashbackTokens.values();
+    }
+
+    /**
+     * @notice Returns true if the token is a whitelisted cashback token, false otherwise
+     * @param token Address of the token
+     * @return Returns true if the token is a whitelisted cashback token, false otherwise
+     */
+    function isCashbackToken(address token) public view returns (bool) {
+        return _getCashbackDispatcherStorage().whitelistedCashbackTokens.contains(token);
     }
     
     /**
      * @notice Converts a USD amount to the equivalent value in cashback tokens
      * @dev Uses the price provider to get the current exchange rate
+     * @param cashbackToken The address of the cashback token
      * @param cashbackInUsd The amount of cashback in USD (with decimals)
      * @return The equivalent amount in cashback tokens
      */
-    function convertUsdToCashbackToken(uint256 cashbackInUsd) public view returns (uint256) {
+    function convertUsdToCashbackToken(address cashbackToken, uint256 cashbackInUsd) public view returns (uint256) {
+        if (!isCashbackToken(cashbackToken)) revert InvalidCashbackToken();
+
         if (cashbackInUsd == 0) return 0;
-
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
 
-        uint256 cashbackTokenPrice = $.priceProvider.price($.cashbackToken);
-        return cashbackInUsd.mulDiv(10 ** IERC20Metadata($.cashbackToken).decimals(), cashbackTokenPrice);
+        uint256 cashbackTokenPrice = $.priceProvider.price(cashbackToken);
+        return cashbackInUsd.mulDiv(10 ** IERC20Metadata(cashbackToken).decimals(), cashbackTokenPrice);
     }
 
     /**
-     * @notice Calculates the cashback amount based on the spent amount and cashback percentage
-     * @param cashbackPercentageInBps The cashback percentage in basis points (100% = 10,000)
-     * @param spentAmountInUsd The amount spent in USD (with decimals)
-     * @return The cashback amount in token units and the cashback amount in USD
+     * @notice Process cashback to a recipient
+     * @param recipient The address of the recipient
+     * @param token The address of the cashback token
+     * @param amountInUsd The amount of cashback tokens in USD to be paid out
+     * @return cashbackAmountInToken The amount of cashback token sent to the recipient
+     * @return paid Whether the cashback was paid successfully
      */
-    function getCashbackAmount(uint256 cashbackPercentageInBps, uint256 spentAmountInUsd) public view returns (uint256, uint256) {
-        uint256 cashbackInUsd = spentAmountInUsd.mulDiv(cashbackPercentageInBps, HUNDRED_PERCENT_IN_BPS);
-        return (convertUsdToCashbackToken(cashbackInUsd), cashbackInUsd);
-    }
-
-    /**
-     * @notice Processes cashback for a transaction, splitting between safe and spender if applicable
-     * @dev Can only be called by the Cash Module contract
-     * @param safe The address of the ether.fi safe receiving the cashback
-     * @param spender The address of the spender who initiated the transaction
-     * @param spentAmountInUsd The amount spent in USD (with decimals)
-     * @param cashbackPercentageInBps The cashback percentage in basis points (100% = 10,000)
-     * @param cashbackSplitToSafePercentage The percentage of cashback going to the safe (100% = 10,000)
-     * @return token The address of the cashback token
-     * @return cashbackAmountToSafe The amount of tokens sent to the safe
-     * @return cashbackInUsdToSafe The USD value of tokens sent to the safe
-     * @return cashbackAmountToSpender The amount of tokens sent to the spender
-     * @return cashbackInUsdToSpender The USD value of tokens sent to the spender
-     * @return paid Whether the cashback was successfully paid
-     * @custom:throws OnlyCashModule When called by an account other than the Cash Module
-     * @custom:throws OnlyEtherFiSafe When the safe address is not a valid ether.fi safe
-     */
-    function cashback(address safe, address spender, uint256 spentAmountInUsd, uint256 cashbackPercentageInBps, uint256 cashbackSplitToSafePercentage) external whenNotPaused returns (address token, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid) {
+    function cashback(address recipient, address token, uint256 amountInUsd) external whenNotPaused returns (uint256 cashbackAmountInToken, bool paid) {
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
-        
+
+        if (recipient == address(0)) revert InvalidInput();        
+        if (!isCashbackToken(token)) revert InvalidCashbackToken();
         if (msg.sender != address($.cashModule)) revert OnlyCashModule();
-        if (!etherFiDataProvider.isEtherFiSafe(safe)) revert OnlyEtherFiSafe();
-        if (spender == address(0)) cashbackSplitToSafePercentage = 10_000; // 100%
+        
+        cashbackAmountInToken = convertUsdToCashbackToken(token, amountInUsd);
+        if (cashbackAmountInToken == 0) return (0, true);
 
-        token = $.cashbackToken;
-
-        (uint256 cashbackAmountTotal, uint256 cashbackInUsdTotal) = getCashbackAmount(cashbackPercentageInBps, spentAmountInUsd);
-        if (cashbackAmountTotal == 0) return ($.cashbackToken, 0, 0, 0, 0, true);
-
-        cashbackAmountToSafe = cashbackAmountTotal.mulDiv(cashbackSplitToSafePercentage, HUNDRED_PERCENT_IN_BPS);
-        cashbackInUsdToSafe = cashbackInUsdTotal.mulDiv(cashbackSplitToSafePercentage, HUNDRED_PERCENT_IN_BPS);
-        cashbackAmountToSpender = cashbackAmountTotal - cashbackAmountToSafe;
-        cashbackInUsdToSpender = cashbackInUsdTotal - cashbackInUsdToSafe;
-
-        if (IERC20(token).balanceOf(address(this)) < cashbackAmountTotal) {
+        if (IERC20(token).balanceOf(address(this)) < cashbackAmountInToken) {
             paid = false;
         } else {
             paid = true;
-            if (cashbackAmountToSafe > 0) IERC20(token).safeTransfer(safe, cashbackAmountToSafe);
-            if (cashbackAmountToSpender > 0) IERC20(token).safeTransfer(spender, cashbackAmountToSpender);
+            IERC20(token).safeTransfer(recipient, cashbackAmountInToken);
         }
-    }
+    } 
 
-    function clearPendingCashback(address account) external returns (address, uint256, bool) {
+    /**
+     * @notice Clear pending cashback for an account
+     * @param account The address of the account
+     * @param token The address of the cashback token
+     * @param amountInUsd The amount of cashback in USD for the token
+     * @return the amount of cashback in token
+     * @return whether it was paid
+     */
+    function clearPendingCashback(address account, address token, uint256 amountInUsd) external returns (uint256, bool) {
+        if (!isCashbackToken(token)) revert InvalidCashbackToken();
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
         
-        if (msg.sender != address($.cashModule)) revert OnlyCashModule();
         if (account == address(0)) revert InvalidInput();
+        if (msg.sender != address($.cashModule)) revert OnlyCashModule();
 
-        uint256 pendingCashbackInUsd = $.cashModule.getPendingCashback(account);
+        uint256 cashbackAmount = convertUsdToCashbackToken(token, amountInUsd);
+        if (cashbackAmount == 0) return (0, true);
 
-        uint256 cashbackAmount = convertUsdToCashbackToken(pendingCashbackInUsd);
-        if (cashbackAmount == 0) return ($.cashbackToken, 0, true);
-
-        if (IERC20($.cashbackToken).balanceOf(address(this)) < cashbackAmount) {
-            return ($.cashbackToken, cashbackAmount, false);
+        if (IERC20(token).balanceOf(address(this)) < cashbackAmount) {
+            return (cashbackAmount, false);
         } else {
-            IERC20($.cashbackToken).safeTransfer(account, cashbackAmount);
-            return ($.cashbackToken, cashbackAmount, true);
+            IERC20(token).safeTransfer(account, cashbackAmount);
+            return (cashbackAmount, true);
         }
     }
 
@@ -287,29 +294,41 @@ contract CashbackDispatcher is UpgradeableProxy {
     function setPriceProvider(address _priceProvider) external onlyRole(CASHBACK_DISPATCHER_ADMIN_ROLE) {
         if (_priceProvider == address(0)) revert InvalidValue();
 
+        address[] memory cashbackTokens = getCashbackTokens();
+        uint256 len = cashbackTokens.length;
+        
+        for (uint256 i = 0; i < len; ) {
+            if (IPriceProvider(_priceProvider).price(cashbackTokens[i]) == 0) revert CashbackTokenPriceNotConfigured();
+            unchecked {
+                ++i;
+            }
+        }
+
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
 
         emit PriceProviderSet(address($.priceProvider), _priceProvider);
         $.priceProvider = IPriceProvider(_priceProvider);
-
-        if ($.priceProvider.price($.cashbackToken) == 0) revert CashbackTokenPriceNotConfigured();
     }
 
     /**
      * @notice Updates the cashback token address
      * @dev Only callable by addresses with CASHBACK_DISPATCHER_ADMIN_ROLE
-     * @param _token New cashback token address
-     * @custom:throws InvalidValue When the provided address is zero
+     * @param tokens Addresses of the cashback tokens
+     * @param shouldWhitelist Whether to whitelist the respective token
      * @custom:throws CashbackTokenPriceNotConfigured When the price provider has no price for the new token
      */
-    function setCashbackToken(address _token) external onlyRole(CASHBACK_DISPATCHER_ADMIN_ROLE) {
-        if (_token == address(0)) revert InvalidValue();
-
+    function configureCashbackToken(address[] calldata tokens, bool[] calldata shouldWhitelist) external onlyRole(CASHBACK_DISPATCHER_ADMIN_ROLE) {
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
-
-        if ($.priceProvider.price(_token) == 0) revert CashbackTokenPriceNotConfigured();
-        emit CashbackTokenSet($.cashbackToken, _token);
-        $.cashbackToken = _token;
+        
+        uint256 len = tokens.length;
+        for (uint256 i = 0; i < len; ) {
+            if (shouldWhitelist[i] && $.priceProvider.price(tokens[i]) == 0) revert CashbackTokenPriceNotConfigured();
+            unchecked {
+                ++i;
+            }
+        }
+        $.whitelistedCashbackTokens.configure(tokens, shouldWhitelist);
+        emit CashbackTokensConfigured(tokens, shouldWhitelist);
     }
 
     /**

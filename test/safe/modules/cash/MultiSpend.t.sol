@@ -7,7 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-import { ICashModule, Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
+import { ICashModule, Mode, BinSponsor, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -56,12 +56,30 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Track initial balances
         uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
         uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Execute spend
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, spendAmounts[0] + spendAmounts[1], Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify tokens were transferred to settlement dispatcher
         assertEq(usdcScroll.balanceOf(address(safe)), 0);
@@ -103,12 +121,30 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
             // Track initial balances
             uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
             uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
+
+            Cashback[] memory cashbacks = new Cashback[](1);
+            CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+            CashbackTokens memory scr = CashbackTokens({
+                token: address(scrToken),
+                amountInUsd: 1e6,
+                cashbackType: CashbackTypes.Regular
+            });
+
+            cashbackTokens[0] = scr;
+
+            Cashback memory scrCashback = Cashback({
+                to: address(safe),
+                cashbackTokens: cashbackTokens
+            });
+
+            cashbacks[0] = scrCashback;
             
             // Execute spend
             vm.prank(etherFiWallet);
             vm.expectEmit(true, true, true, true);
             emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, spendAmounts[0] + spendAmounts[1], Mode.Debit);
-            cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+            cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
             
             // Verify tokens were transferred to settlement dispatcher
             assertEq(usdcScroll.balanceOf(address(safe)), tokenAmounts[0]);
@@ -119,7 +155,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
             // Execute another spend with different transaction ID
             bytes32 txId2 = keccak256("txId2");
             vm.prank(etherFiWallet);
-            cashModule.spend(address(safe), address(0), address(0), txId2, BinSponsor.Reap, spendTokens, spendAmounts, true);
+            cashModule.spend(address(safe), txId2, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
             
             // Verify tokens were transferred again
             assertEq(usdcScroll.balanceOf(address(safe)), 0);
@@ -148,11 +184,29 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
         spendAmounts[1] = weETHAmountInUsd;
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Should revert due to insufficient weETH balance
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_failsWithInsufficientBalance_partialAmount() public {
@@ -174,15 +228,32 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
         spendAmounts[1] = weETHAmountInUsd;
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Should revert due to insufficient weETH balance
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_withCashback_multipleTokens() public {
-        // Setup: Fund the safe with both tokens
         uint256 usdcAmountInUsd = 50e6;
         uint256 weETHAmountInUsd = 50e6;
         
@@ -192,9 +263,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(safe), usdcAmount);
         deal(address(weETHScroll), address(safe), weETHAmount);
         
-        // Custom spender to receive cashback
-        address spender = makeAddr("spender");
-        uint256 spenderTokenBalBefore = scrToken.balanceOf(spender);
+        uint256 safeTokenBalBefore = scrToken.balanceOf(address(safe));
         
         address[] memory spendTokens = new address[](2);
         spendTokens[0] = address(usdcScroll);
@@ -203,44 +272,31 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
         spendAmounts[1] = weETHAmountInUsd;
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Execute spend with cashback
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), spender, address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify cashback was received
-        assertGt(scrToken.balanceOf(spender), spenderTokenBalBefore);
-    }
-
-    function test_spend_withReferrer_multipleTokens() public {
-        // Setup: Fund the safe with both tokens
-        uint256 usdcAmountInUsd = 50e6;
-        uint256 weETHAmountInUsd = 50e6;
-        
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
-        
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount);
-        
-        // Custom referrer to receive cashback
-        address referrer = makeAddr("referrer");
-        uint256 referrerTokenBalBefore = scrToken.balanceOf(referrer);
-        
-        address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
-        
-        uint256[] memory spendAmounts = new uint256[](2);
-        spendAmounts[0] = usdcAmountInUsd;
-        spendAmounts[1] = weETHAmountInUsd;
-        
-        // Execute spend with referrer
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), referrer, txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
-        
-        // Verify referrer received cashback
-        assertGt(scrToken.balanceOf(referrer), referrerTokenBalBefore);
+        assertGt(scrToken.balanceOf(address(safe)), safeTokenBalBefore);
     }
 
     function test_spend_exceedsDailyLimit_multipleTokens() public {
@@ -261,11 +317,29 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
         spendAmounts[1] = weETHAmountInUsd;
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Should revert as total spending exceeds daily limit
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_withPendingWithdrawal_multipleTokens() public {
@@ -275,10 +349,28 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Setup initial balances tracking
         uint256 usdcBalanceBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
         uint256 weETHBalanceBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Execute spend
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, data.spendTokens, data.spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, data.spendTokens, data.spendAmounts, cashbacks);
         
         // Verify correct token balances after spend
         _verifyWithdrawalTestResults(data, usdcBalanceBefore, weETHBalanceBefore);
@@ -385,11 +477,29 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
         spendAmounts[1] = weETHAmountInUsd;
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Should revert as multiple tokens are not allowed in credit mode
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.OnlyOneTokenAllowedInCreditMode.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_whenPaused_multipleTokens() public {
@@ -414,18 +524,36 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Pause the contract
         vm.prank(pauser);
         UpgradeableProxy(address(cashModule)).pause();
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Attempt to spend while paused
         vm.prank(etherFiWallet);
         vm.expectRevert(Pausable.EnforcedPause.selector);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Unpause and verify it works again
         vm.prank(unpauser);
         UpgradeableProxy(address(cashModule)).unpause();
         
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_withThreeTokens_inDebitMode() public {
@@ -453,17 +581,34 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // Prepare and execute multi-token spend
         (address[] memory spendTokens, uint256[] memory spendAmounts, uint256[] memory tokenAmounts) = 
             _prepareThreeTokenSpend(usdcAmountInUsd, weETHAmountInUsd, scrAmountInUsd);
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Execute spend
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, totalSpendInUsd, Mode.Debit);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, false);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
-        // Verify safe balances are zero
+        // Verify safe balances are zero, not for scroll since there was cashback
         assertEq(usdcScroll.balanceOf(address(safe)), 0);
         assertEq(weETHScroll.balanceOf(address(safe)), 0);
-        assertEq(scrToken.balanceOf(address(safe)), 0);
         
         // Verify settlement dispatcher received the tokens
         uint256[] memory expectedIncreases = new uint256[](3);

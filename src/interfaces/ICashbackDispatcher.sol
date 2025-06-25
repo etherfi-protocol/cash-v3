@@ -7,10 +7,57 @@ pragma solidity ^0.8.24;
  */
 interface ICashbackDispatcher {
     /**
+     * @notice Thrown when the price of the cashback token is not configured in the price provider
+     */
+    error CashbackTokenPriceNotConfigured();
+    
+    /**
+     * @notice Thrown when a zero or invalid address is provided
+     */
+    error InvalidValue();
+    
+    /**
+     * @notice Thrown when an operation requires an ether.fi safe but account is not one
+     */
+    error OnlyEtherFiSafe();
+    
+    /**
+     * @notice Thrown when attempting to withdraw zero tokens or ETH
+     */
+    error CannotWithdrawZeroAmount();
+    
+    /**
+     * @notice Thrown when a withdrawal of funds fails
+     */
+    error WithdrawFundsFailed();
+    
+    /**
+     * @notice Thrown when a function is called by an account other than the Cash Module
+     */
+    error OnlyCashModule();
+    
+    /**
+     * @notice Thrown when invalid input parameters are provided
+     */
+    error InvalidInput();
+    
+    /**
+     * @notice Thrown when the cashback token is not supported
+     */
+    error InvalidCashbackToken();
+
+    /**
      * @notice Function to fetch the admin role
      * @return CASHBACK_DISPATCHER_ADMIN_ROLE
      */
     function CASHBACK_DISPATCHER_ADMIN_ROLE() external view returns (bytes32);
+
+    /**
+     * @notice Returns true if the token is a whitelisted cashback token, false otherwise
+     * @param token Address of the token
+     * @return Returns true if the token is a whitelisted cashback token, false otherwise
+     */
+    function isCashbackToken(address token) external view returns (bool);
 
     /**
      * @notice Convert a USD amount to the equivalent amount in cashback token
@@ -20,35 +67,24 @@ interface ICashbackDispatcher {
     function convertUsdToCashbackToken(uint256 cashbackInUsd) external view returns (uint256);
 
     /**
-     * @notice Calculate the cashback amount based on the spent amount and cashback percentage
-     * @param cashbackPercentageInBps The cashback percentage in basis points
-     * @param spentAmountInUsd The amount spent in USD
-     * @return The cashback amount in cashback token and USD
-     */
-    function getCashbackAmount(uint256 cashbackPercentageInBps, uint256 spentAmountInUsd) external view returns (uint256, uint256);
-
-    /**
-     * @notice Process cashback to a safe and a spender
-     * @param safe The address of the safe
-     * @param spender The address of the spender
-     * @param spentAmountInUsd The amount spent in USD
-     * @param cashbackPercentageInBps The cashback percentage in basis points
-     * @param cashbackSplitToSafePercentage The percentage of cashback to send to the safe
-     * @return token The address of the cashback token
-     * @return cashbackAmountToSafe The amount of cashback token sent to the safe
-     * @return cashbackInUsdToSafe The USD value of cashback sent to the safe
-     * @return cashbackAmountToSpender The amount of cashback token sent to the spender
-     * @return cashbackInUsdToSpender The USD value of cashback sent to the spender
+     * @notice Process cashback to a recipient
+     * @param recipient The address of the recipient
+     * @param token The address of the cashback token
+     * @param amountInUsd The amount of cashback tokens in USD to be paid out
+     * @return cashbackAmountInToken The amount of cashback token sent to the recipient
      * @return paid Whether the cashback was paid successfully
      */
-    function cashback(address safe, address spender, uint256 spentAmountInUsd, uint256 cashbackPercentageInBps, uint256 cashbackSplitToSafePercentage) external returns (address token, uint256 cashbackAmountToSafe, uint256 cashbackInUsdToSafe, uint256 cashbackAmountToSpender, uint256 cashbackInUsdToSpender, bool paid);
+    function cashback(address recipient, address token, uint256 amountInUsd) external returns (uint256 cashbackAmountInToken, bool paid);
 
     /**
      * @notice Clear pending cashback for an account
      * @param account The address of the account
-     * @return The cashback token address, the amount of cashback, and whether it was paid
+     * @param token The address of the cashback token
+     * @param amountInUsd The amount of cashback in USD for the token
+     * @return the amount of cashback in token
+     * @return whether it was paid
      */
-    function clearPendingCashback(address account) external returns (address, uint256, bool);
+    function clearPendingCashback(address account, address token, uint256 amountInUsd) external returns (uint256, bool);
 
     /**
      * @notice Set the Cash Module address

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Mode, BinSponsor } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor, Cashback } from "../../../../src/interfaces/ICashModule.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter, CashModuleTestSetup, CashVerificationLib, ICashModule, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
@@ -218,10 +218,12 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
+        Cashback[] memory cashbacks;
+
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Credit);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 withdrawalAmount = 50e6;
         // Setup a pending withdrawal
@@ -287,8 +289,10 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
             uint256[] memory spendAmounts = new uint256[](1);
             spendAmounts[0] = 10e6;
 
+            Cashback[] memory cashbacks;
+
             vm.prank(etherFiWallet);
-            cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+            cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         }
 
         {

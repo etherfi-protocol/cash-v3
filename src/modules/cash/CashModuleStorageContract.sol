@@ -48,9 +48,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         /// @notice Delay in seconds before a mode change (particularly to Credit mode) takes effect
         uint64 modeDelay;
         /// @notice Mapping of safe tiers to cashback percentages in basis points (100 = 1%)
-        mapping(SafeTiers tier => uint256 cashbackPercentage) tierCashbackPercentage;
+        mapping(SafeTiers tier => uint256 cashbackPercentage) DEPRECATED_tierCashbackPercentage;
         /// @notice Tracks pending cashback amounts in USD for each account (safe or spender)
-        mapping(address account => uint256 pendingCashback) pendingCashbackInUsd;
+        mapping(address account => uint256 pendingCashback) DEPRECATED_pendingCashbackInUsd;
         /// @notice Reference to the cashback dispatcher contract that processes cashback rewards
         ICashbackDispatcher cashbackDispatcher;
         /// @notice Reference to the event emitter contract that standardizes event emissions
@@ -58,11 +58,13 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         /// @notice Address of cash module setters contract
         address cashModuleSetters;
         /// @notice Cashback percentage for referrer in bps
-        uint64 referrerCashbackPercentageInBps;
+        uint64 DEPRECATED_referrerCashbackPercentageInBps;
         /// @notice Address of the SettlementDispatcher for Rain 
         address settlementDispatcherRain;
         /// @notice Address of tokens that can be withdrawn from the safe
         EnumerableSetLib.AddressSet whitelistedWithdrawAssets;
+        /// @notice Tracks pending cashback amounts for a token in USD for each account (safe or spender)
+        mapping(address account => mapping(address token => uint256 pendingCashback)) pendingCashbackForTokenInUsd;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))

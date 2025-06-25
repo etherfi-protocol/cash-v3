@@ -5,7 +5,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 
-import { Mode, SafeCashData, BinSponsor, SafeData } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, SafeCashData, BinSponsor, SafeData, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
@@ -207,10 +207,28 @@ contract CashLensTest is CashModuleTestSetup {
         spendTokens[0] = address(usdcScroll);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
+
+        Cashback[] memory cashbacks = new Cashback[](1);
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+
+        CashbackTokens memory scr = CashbackTokens({
+            token: address(scrToken),
+            amountInUsd: 1e6,
+            cashbackType: CashbackTypes.Regular
+        });
+
+        cashbackTokens[0] = scr;
+
+        Cashback memory scrCashback = Cashback({
+            to: address(safe),
+            cashbackTokens: cashbackTokens
+        });
+
+        cashbacks[0] = scrCashback;
         
         // Spend in credit mode to create a borrow
         vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), address(0), address(0), txId, BinSponsor.Reap, spendTokens, spendAmounts, true);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Get safe cash data
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
