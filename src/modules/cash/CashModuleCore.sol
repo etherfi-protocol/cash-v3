@@ -212,18 +212,18 @@ contract CashModuleCore is CashModuleStorageContract {
     function getMode(address safe) external view returns (Mode) {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
 
-        if ($.incomingCreditModeStartTime != 0 && block.timestamp > $.incomingCreditModeStartTime) return Mode.Credit;
+        if ($.incomingModeStartTime != 0 && block.timestamp > $.incomingModeStartTime) return $.incomingMode;
         return $.mode;
     }
 
     /**
-     * @notice Gets the timestamp when a pending credit mode change will take effect
+     * @notice Gets the timestamp when a pending mode change will take effect
      * @dev Returns 0 if no pending change or if the safe uses debit mode
      * @param safe Address of the EtherFi Safe
-     * @return Timestamp when credit mode will take effect, or 0 if not applicable
+     * @return Timestamp when incoming mode will take effect, or 0 if not applicable
      */
-    function incomingCreditModeStartTime(address safe) external view returns (uint256) {
-        return _getCashModuleStorage().safeCashConfig[safe].incomingCreditModeStartTime;
+    function incomingModeStartTime(address safe) external view returns (uint256) {
+        return _getCashModuleStorage().safeCashConfig[safe].incomingModeStartTime;
     }
 
     /**
@@ -294,7 +294,7 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function getData(address safe) external view onlyEtherFiSafe(safe) returns (SafeData memory) {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
-        SafeData memory data = SafeData({ spendingLimit: $.spendingLimit, pendingWithdrawalRequest: $.pendingWithdrawalRequest, mode: $.mode, incomingCreditModeStartTime: $.incomingCreditModeStartTime, totalCashbackEarnedInUsd: $.totalCashbackEarnedInUsd });
+        SafeData memory data = SafeData({ spendingLimit: $.spendingLimit, pendingWithdrawalRequest: $.pendingWithdrawalRequest, mode: $.mode, incomingModeStartTime: $.incomingModeStartTime, totalCashbackEarnedInUsd: $.totalCashbackEarnedInUsd, incomingMode: $.incomingMode });
 
         return data;
     }

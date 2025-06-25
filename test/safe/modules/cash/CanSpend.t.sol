@@ -86,7 +86,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_succeeds_inCreditMode_whenCollateralAvailable() public {
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -114,7 +114,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_fails_inCreditMode_whenLiquidityUnavailableInDebtManager() public {
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdcScroll);
@@ -153,7 +153,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_succeeds_inCreditMode_whenAfterWithdrawalAmountIsStillBorrowable() public {
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         deal(address(usdcScroll), address(debtManager), 1 ether);
         uint256 totalBal = 1000e6;
@@ -497,7 +497,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     function test_canSpend_creditModeValidation() public {
         // Set to credit mode
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         // Try to spend multiple tokens in credit mode
         address[] memory tokens = new address[](2);
@@ -705,7 +705,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpendSingleToken_creditMode_works() public {
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         deal(address(weETHScroll), address(safe), 1 ether);
         deal(address(usdcScroll), address(debtManager), 10000e6);
@@ -841,7 +841,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     function test_canSpendSingleToken_creditModeWithInsufficientCollateral() public {
         // Switch to credit mode
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         // No collateral, but debt manager has liquidity
         deal(address(usdcScroll), address(debtManager), 10000e6);

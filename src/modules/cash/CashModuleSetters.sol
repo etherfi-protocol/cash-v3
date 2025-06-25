@@ -126,7 +126,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Sets the operating mode for a safe
-     * @dev Switches between Debit and Credit modes, with possible delay for Credit mode
+     * @dev Switches between Debit and Credit modes with delay 
      * @param safe Address of the EtherFi Safe
      * @param mode The target mode (Debit or Credit)
      * @param signer Address of the safe admin signing the transaction
@@ -147,16 +147,9 @@ contract CashModuleSetters is CashModuleStorageContract {
             // If delay = 0, just set the value
             $.safeCashConfig[safe].mode = mode;
         } else {
-            // If delay != 0, debit to credit mode should incur delay
-            if (mode == Mode.Credit) {
-                $.safeCashConfig[safe].incomingCreditModeStartTime = block.timestamp + $.modeDelay;
-                $.cashEventEmitter.emitSetMode(safe, Mode.Debit, Mode.Credit, $.safeCashConfig[safe].incomingCreditModeStartTime);
-            } else {
-                // If mode is debit, no problem, just set the mode
-                $.safeCashConfig[safe].incomingCreditModeStartTime = 0;
-                $.safeCashConfig[safe].mode = mode;
-                $.cashEventEmitter.emitSetMode(safe, Mode.Credit, Mode.Debit, block.timestamp);
-            }
+            $.safeCashConfig[safe].incomingModeStartTime = block.timestamp + $.modeDelay;
+            $.safeCashConfig[safe].incomingMode = mode;
+            $.cashEventEmitter.emitSetMode(safe, $.safeCashConfig[safe].mode, mode, $.safeCashConfig[safe].incomingModeStartTime);
         }
     }
 

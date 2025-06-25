@@ -242,9 +242,10 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
      * @param $ Storage reference to the SafeCashConfig for the safe
      */
     function _setCurrentMode(SafeCashConfig storage $) internal {
-        if ($.incomingCreditModeStartTime != 0 && block.timestamp > $.incomingCreditModeStartTime) {
-            $.mode = Mode.Credit;
-            delete $.incomingCreditModeStartTime;
+        if ($.incomingModeStartTime != 0 && block.timestamp > $.incomingModeStartTime) {
+            $.mode = $.incomingMode;
+            delete $.incomingModeStartTime;
+            delete $.incomingMode;
         }
     }
 

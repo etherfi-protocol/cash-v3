@@ -90,10 +90,12 @@ struct SafeData {
     WithdrawalRequest pendingWithdrawalRequest;
     /// @notice User's chosen mode
     Mode mode;
-    /// @notice Start time for credit mode
-    uint256 incomingCreditModeStartTime;
+    /// @notice Start time for incoming mode
+    uint256 incomingModeStartTime;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
+    /// @notice Incoming mode that will be applied after the delay
+    Mode incomingMode;
 }
 
 /**
@@ -120,8 +122,8 @@ struct SafeCashConfig {
     WithdrawalRequest pendingWithdrawalRequest;
     /// @notice Current operating mode (Credit or Debit) for spending transactions
     Mode mode;
-    /// @notice Timestamp when a pending change to Credit mode will take effect (0 if no pending change)
-    uint256 incomingCreditModeStartTime;
+    /// @notice Timestamp when a pending change to incoming mode will take effect (0 if no pending change)
+    uint256 incomingModeStartTime;
     /// @notice Tier level of the safe that determines cashback percentages
     SafeTiers safeTier;
     /// @notice Mapping of transaction IDs to cleared status to prevent replay attacks
@@ -130,6 +132,8 @@ struct SafeCashConfig {
     uint256 DEPRECATED_cashbackSplitToSafePercentage;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
+    /// @notice Incoming mode that will be applied after the delay
+    Mode incomingMode; 
 }
 
 /**
@@ -160,8 +164,8 @@ struct SafeCashData {
     uint256 spendingLimitAllowance;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
-    /// @notice Timestamp when a pending change to Credit mode will take effect (0 if no pending change)
-    uint256 incomingCreditModeStartTime;
+    /// @notice Timestamp when a pending change to incoming mode mode will take effect (0 if no pending change)
+    uint256 incomingModeStartTime;
     /// @notice Maximum spendable amount in Debit mode 
     DebitModeMaxSpend debitMaxSpend;
 }
@@ -364,12 +368,12 @@ interface ICashModule {
     function getMode(address safe) external view returns (Mode);
 
     /**
-     * @notice Gets the timestamp when a pending credit mode change will take effect
+     * @notice Gets the timestamp when a pending mode change will take effect
      * @dev Returns 0 if no pending change or if the safe uses debit mode
      * @param safe Address of the EtherFi Safe
-     * @return Timestamp when credit mode will take effect, or 0 if not applicable
+     * @return Timestamp when incoming mode will take effect, or 0 if not applicable
      */
-    function incomingCreditModeStartTime(address safe) external view returns (uint256);
+    function incomingModeStartTime(address safe) external view returns (uint256);
 
     /**
      * @notice Gets the pending withdrawal amount for a token
@@ -449,7 +453,7 @@ interface ICashModule {
 
     /**
      * @notice Sets the operating mode for a safe
-     * @dev Switches between Debit and Credit modes, with possible delay for Credit mode
+     * @dev Switches between Debit and Credit modes with delay
      * @param safe Address of the EtherFi Safe
      * @param mode The target mode (Debit or Credit)
      * @param signer Address of the safe admin signing the transaction

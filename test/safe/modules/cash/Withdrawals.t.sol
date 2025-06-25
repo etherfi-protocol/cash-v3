@@ -209,7 +209,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         deal(address(weETHScroll), address(safe), 0);
 
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 amount = 10e6;
 
@@ -281,7 +281,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(debtManager), 1 ether);
 
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         {
             address[] memory spendTokens = new address[](1);

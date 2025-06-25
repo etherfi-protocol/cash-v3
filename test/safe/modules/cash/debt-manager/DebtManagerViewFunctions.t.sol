@@ -30,7 +30,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
 
         // Setup for credit mode
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         // Add collateral and supply tokens
         deal(address(weETHScroll), address(safe), collateralAmount);

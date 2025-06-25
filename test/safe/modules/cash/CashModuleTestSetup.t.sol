@@ -82,7 +82,7 @@ contract CashModuleTestSetup is SafeTestSetup {
 
         Mode prevMode = mode == Mode.Debit ? Mode.Credit : Mode.Debit;
         (,, uint64 modeDelay) = cashModule.getDelays();
-        uint256 modeStartTime = mode == Mode.Credit ? block.timestamp + modeDelay : block.timestamp;
+        uint256 modeStartTime = block.timestamp + modeDelay;
 
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.ModeSet(address(safe), prevMode, mode, modeStartTime);
