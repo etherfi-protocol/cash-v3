@@ -71,6 +71,25 @@ contract CashModuleTestSetup is SafeTestSetup {
         cashModule.requestWithdrawal(address(safe), tokens, amounts, recipient, signers, signatures);
     }
 
+    function _cancelWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal {
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CANCEL_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce())).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.WithdrawalCancelled(address(safe), tokens, amounts, recipient);
+        cashModule.cancelWithdrawal(address(safe), signers, signatures);
+    }
+
     function _setMode(Mode mode) internal {
         uint256 nonce = cashModule.getNonce(address(safe));
 

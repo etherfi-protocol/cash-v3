@@ -171,7 +171,96 @@ contract CashModuleSetters is CashModuleStorageContract {
      */
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
+
+        if (_getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(msg.sender) || _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(recipient))  revert InvalidWithdrawRequest();
         _requestWithdrawal(safe, tokens, amounts, recipient);
+    }
+
+    /**
+     * @notice Requests a withdrawal of a token by a module on behalf of a safe
+     * @dev Can only be called by whitelisted modules
+     * @param safe Address of the EtherFi Safe
+     * @param token Token address to withdraw
+     * @param amount Token amount to withdraw
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws OnlyWhitelistedModuleCanRequestWithdraw if the caller is not a whitelisted module
+     */
+    function requestWithdrawalByModule(address safe, address token, uint256 amount) external nonReentrant onlyEtherFiSafe(safe) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        if (!etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
+        if (!$.whitelistedModulesCanRequestWithdraw.contains(msg.sender)) revert OnlyWhitelistedModuleCanRequestWithdraw();
+
+        address[] memory tokens = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = token;
+        amounts[0] = amount;
+
+        address recipient = msg.sender; // The module itself is the recipient
+        
+        _requestWithdrawal(safe, tokens, amounts, recipient);
+    }
+
+    /**
+     * @notice Configures which modules can request withdrawals
+     * @dev Can only be called by the CASH_MODULE_CONTROLLER_ROLE
+     * @param modules Array of module addresses to configure
+     * @param shouldWhitelist Array of boolean values indicating whether to whitelist each module
+     */
+    function configureModulesCanRequestWithdraw(address[] calldata modules, bool[] calldata shouldWhitelist) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        uint256 len = modules.length;
+        if (len == 0 || len != shouldWhitelist.length) revert ArrayLengthMismatch();
+
+        for (uint256 i = 0; i < len; ) {
+            if (shouldWhitelist[i] && !etherFiDataProvider.isWhitelistedModule(modules[i])) revert ModuleNotWhitelistedOnDataProvider();
+            unchecked {
+                ++i;
+            }
+        }
+
+        EnumerableAddressWhitelistLib.configure($.whitelistedModulesCanRequestWithdraw, modules, shouldWhitelist);
+        $.cashEventEmitter.emitModulesCanRequestWithdrawConfigured(modules, shouldWhitelist);
+    }
+
+    /**
+     * @notice Cancel a pending withdrawal request
+     * @dev Only callable by the module that requested the withdrawal if requested by a whitelisted module
+     * @param safe Address of the EtherFi Safe
+     * @param signers Array of signers for the cancellation
+     * @param signatures Array of signatures from the signers
+     */
+    function cancelWithdrawal(address safe, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
+
+        if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
+
+        // Ensure that the module that requested the withdrawal is the one cancelling it
+        if ($.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) revert InvalidWithdrawRequest();
+
+        CashVerificationLib.verifyCancelWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), signers, signatures);
+        _cancelOldWithdrawal(safe);
+    }
+
+    /**
+     * @notice Cancels a pending withdrawal request by the module
+     * @dev Only callable by whitelisted modules that requested the withdrawal
+     * @param safe Address of the EtherFi Safe
+     */
+    function cancelWithdrawalByModule(address safe) external onlyEtherFiSafe(safe) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
+
+        if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
+        if (!$.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) revert InvalidWithdrawRequest(); 
+        if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanCancel();
+        if (!etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
+        
+        _cancelOldWithdrawal(safe);
     }
 
     /**
@@ -211,7 +300,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws InsufficientBalance if any token has insufficient balance
      */
-    function _checkBalance(address safe, address[] calldata tokens, uint256[] calldata amounts) internal view {
+    function _checkBalance(address safe, address[] memory tokens, uint256[] memory amounts) internal view {
         uint256 len = tokens.length;
         if (len != amounts.length) revert ArrayLengthMismatch();
         for (uint256 i = 0; i < len;) {
@@ -232,7 +321,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param recipient Address to receive the withdrawn tokens
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
      */
-function _requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient) internal {
+function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 

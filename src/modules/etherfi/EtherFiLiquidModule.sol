@@ -4,13 +4,17 @@ pragma solidity ^0.8.28;
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import { IBoringOnChainQueue } from "../../interfaces/IBoringOnChainQueue.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { ICashModule, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { ILayerZeroTeller } from "../../interfaces/ILayerZeroTeller.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
+
 
 /**
  * @title EtherFiLiquidModule
@@ -18,9 +22,23 @@ import { ModuleBase } from "../ModuleBase.sol";
  * @notice Module for interacting with ether.fi Liquid vaults
  * @dev Extends ModuleBase to provide ether.fi Liquid integration for Safes
  */
-contract EtherFiLiquidModule is ModuleBase {
+contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
+
+    /**
+     * @notice Stores cross-chain withdrawal request details
+     * @param destEid Destination endpoint ID for LayerZero
+     * @param asset Address of the liquid asset being bridged
+     * @param amount Amount of tokens to bridge
+     * @param destRecipient Recipient address on destination chain
+     */
+    struct LiquidCrossChainWithdrawal {
+        uint32 destEid;
+        address asset;
+        uint256 amount;
+        address destRecipient;
+    }
 
     /// @notice Address of the wrapped ETH contract
     address public immutable weth;
@@ -29,7 +47,10 @@ contract EtherFiLiquidModule is ModuleBase {
     mapping(address asset => ILayerZeroTeller teller) public liquidAssetToTeller;
 
     /// @notice Mapping of liquid token address to its withdraw config
-    mapping (address liquidToken => address boringQueue) liquidWithdrawQueue;
+    mapping (address liquidToken => address boringQueue) public liquidWithdrawQueue;
+
+    /// @notice Cross-chain withdrawal requests for each Safe
+    mapping(address safe => LiquidCrossChainWithdrawal withdrawal) private withdrawals;
 
     /// @notice TypeHash for deposit function signature 
     bytes32 public constant DEPOSIT_SIG = keccak256("deposit");
@@ -38,7 +59,10 @@ contract EtherFiLiquidModule is ModuleBase {
     bytes32 public constant WITHDRAW_SIG = keccak256("withdraw");
 
     /// @notice TypeHash for bridge function signature 
-    bytes32 public constant BRIDGE_SIG = keccak256("bridge");
+    bytes32 public constant REQUEST_BRIDGE_SIG = keccak256("requestBridge");
+
+    /// @notice TypeHash for cancel bridge function signature
+    bytes32 public constant CANCEL_BRIDGE_SIG = keccak256("cancelBridge");
 
     /// @notice Role identifier for admins of the Liquid Module
     bytes32 public constant ETHERFI_LIQUID_MODULE_ADMIN = keccak256("ETHERFI_LIQUID_MODULE_ADMIN");
@@ -56,7 +80,13 @@ contract EtherFiLiquidModule is ModuleBase {
     event LiquidWithdrawal(address indexed safe, address indexed liquidAsset, uint256 amountToWithdraw, uint256 amountOut);
     
     /// @notice Emitted when safe bridge Liquid assets to other chains
-    event LiquidBridged(address indexed safe, address indexed liquidAsset, address indexed destRecipient, uint32 destEid, uint256 amount, uint256 bridgeFee);
+    event LiquidBridgeExecuted(address indexed safe, address indexed liquidAsset, address indexed destRecipient, uint32 destEid, uint256 amount, uint256 bridgeFee);
+
+    /// @notice Emitted when a request for bridging liquid assets is made
+    event LiquidBridgeRequested(address indexed safe, address indexed liquidAsset, uint32 destEid, address indexed destRecipient, uint256 amount);
+
+    /// @notice Emitted when a bridge request is cancelled
+    event LiquidBridgeCancelled(address indexed safe, address indexed liquidAsset, uint32 destEid, address indexed destRecipient, uint256 amount);
 
     /**
      * @notice Emitted when liquid asset withdraw config is set
@@ -100,6 +130,12 @@ contract EtherFiLiquidModule is ModuleBase {
 
     /// @notice Thrown when an address value is address(0)
     error InvalidValue();
+
+    /// @notice Error thrown when no withdrawal is queued for Liquid
+    error NoWithdrawalQueuedForLiquid();
+
+    /// @notice Error thrown when no matching withdrawal is found for the safe
+    error CannotFindMatchingWithdrawalForSafe();
 
     /**
      * @notice Contract constructor
@@ -311,23 +347,91 @@ contract EtherFiLiquidModule is ModuleBase {
     }
 
     /**
-     * @notice Bridges liquid assets from one chain to another
+     * @notice Gets the pending bridge request for a safe
+     * @param safe Address of the EtherFiSafe
+     * @return LiquidCrossChainWithdrawal containing the pending bridge request details
+     */        
+    function getPendingBridge(address safe) external view returns (LiquidCrossChainWithdrawal memory) {
+        return withdrawals[safe];
+    }
+
+    /**
+     * @notice Requests bridging of liquid assets from one chain to another
      * @param safe The Safe address which holds the tokens
-     * @param liquidAsset The address of the liquid asset to bridge
      * @param destEid The destination chain ID in LayerZero format
+     * @param asset The address of the liquid asset to bridge
+     * @param amount The amount of liquid assets to bridge
      * @param destRecipient The recipient address on the destination chain
-     * @param amount The amount of liquid asset to bridge
      * @param signers Array of addresses that signed the transaction
      * @param signatures Array of signatures from the signers
-     * @dev Verifies signatures then executes the bridge operation through the Safe's module execution
      * @custom:throws InvalidSignatures If the signatures are invalid
      * @custom:throws UnsupportedLiquidAsset If the liquid asset is not supported
-     * @custom:throws InsufficientNativeFee If the provided native fee is insufficient
-     * @custom:throws NativeTransferFailed If the native token transfer to the safe fails
+     * @custom:throws InvalidInput If the destRecipient is address(0)
      */
-    function bridge(address safe, address liquidAsset, uint32 destEid, address destRecipient, uint256 amount, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
-        _checkBridgeSignature(safe, liquidAsset, destEid, destRecipient, amount, signers, signatures);
-        _bridge(safe, liquidAsset, destEid, destRecipient, amount);
+    function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+        _checkBridgeSignature(safe, asset, destEid, destRecipient, amount, signers, signatures);
+        _requestBridge(safe, asset, destEid, destRecipient, amount);
+    }
+
+    /**
+     * @notice Executes a previously requested bridge transaction
+     * @param safe The Safe address that requested the bridge
+     * @dev Verifies the withdrawal request matches the stored bridge details before execution
+     * @custom:throws NoWithdrawalQueuedForLiquid If no bridge request exists for the safe
+     * @custom:throws CannotFindMatchingWithdrawalForSafe If the withdrawal details don't match
+     */
+    function executeBridge(address safe) external payable onlyEtherFiSafe(safe) {
+        LiquidCrossChainWithdrawal memory withdrawal = withdrawals[safe];
+        if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForLiquid();
+
+        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+        WithdrawalRequest memory withdrawalRequest = cashModule.getData(safe).pendingWithdrawalRequest;
+
+        if (withdrawalRequest.recipient != address(this) || withdrawalRequest.tokens.length != 1 || withdrawalRequest.tokens[0] != withdrawal.asset || withdrawalRequest.amounts[0] != withdrawal.amount) revert CannotFindMatchingWithdrawalForSafe();
+        cashModule.processWithdrawal(safe);
+
+        _bridge(safe, withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
+        delete withdrawals[safe]; 
+    }
+
+    /**
+     * @notice Cancels a bridge request for a safe
+     * @param safe Address of the EtherFiSafe
+     * @param signers Array of addresses of safe owners that signed the transaction
+     * @param signatures Array of signatures from the signers
+     */
+    function cancelBridge(address safe, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+        _checkCancelBridgeSignature(safe, signers, signatures);
+        
+        LiquidCrossChainWithdrawal memory withdrawal = withdrawals[safe];
+        if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForLiquid();
+
+        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+        
+        try cashModule.cancelWithdrawalByModule(safe) {}
+        catch {
+            // If the cancellation fails, we still want to emit the event and delete the withdrawal
+            // This allows to cancel a bridge tx even if the withdrawal was overridden on cash module
+        }
+
+        emit LiquidBridgeCancelled(safe, withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
+        delete withdrawals[safe];
+    }
+
+    /**
+     * @notice Cancels a bridge request by the cash module
+     * @dev This function is intended to be called by the cash module to cancel a bridge
+     * @param safe Address of the EtherFiSafe
+     */
+    function cancelBridgeByCashModule(address safe) external {
+        if (msg.sender != etherFiDataProvider.getCashModule()) revert Unauthorized();
+
+        LiquidCrossChainWithdrawal memory withdrawal = withdrawals[safe];
+        // Return if no withdrawal found for Liquid
+        if (withdrawal.destRecipient == address(0)) return; 
+
+        emit LiquidBridgeCancelled(safe, withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
+        delete withdrawals[safe];
     }
 
     /**
@@ -336,13 +440,28 @@ contract EtherFiLiquidModule is ModuleBase {
      * @param destEid The destination chain ID in LayerZero format
      * @param destRecipient The recipient address on the destination chain
      * @param amount The amount of liquid assets to bridge
+     * @return The bridge fee for the liquid asset withdrawal queued for the safe
      */
-    function getBridgeFee(address liquidAsset, uint32 destEid, address destRecipient, uint256 amount) external view returns(uint256) {
+    function getBridgeFee(address liquidAsset, uint32 destEid, address destRecipient, uint256 amount) public view returns(uint256) {
         ILayerZeroTeller teller = liquidAssetToTeller[liquidAsset];
         if (address(teller) == address(0)) revert UnsupportedLiquidAsset();
 
         bytes memory bridgeWildCard = abi.encode(destEid);
         return teller.previewFee(amount.toUint96(), destRecipient, bridgeWildCard, ERC20(ETH));
+    }
+
+    /**
+     * @notice Returns the bridge fee for the liquid asset withdrawal queued for the safe
+     * @param safe Address of the EtherFiSafe
+     * @return The bridge fee for the liquid asset withdrawal queued for the safe
+     * @custom:throws NoWithdrawalQueuedForLiquid If no withdrawal is queued for the safe
+     * @custom:throws UnsupportedLiquidAsset If the liquid asset is not supported
+     */
+    function getBridgeFeeForSafe(address safe) external view returns(uint256) {
+        LiquidCrossChainWithdrawal memory withdrawal = withdrawals[safe];
+        if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForLiquid();
+        
+        return getBridgeFee(withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
     }
 
     /**
@@ -357,20 +476,38 @@ contract EtherFiLiquidModule is ModuleBase {
      * @custom:throws InvalidSignatures if the signatures are invalid
      */
     function _checkBridgeSignature(address safe, address liquidAsset, uint32 destEid, address destRecipient, uint256 amount, address[] calldata signers, bytes[] calldata signatures) internal {
-        bytes32 digestHash = keccak256(abi.encodePacked(BRIDGE_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe, abi.encode(liquidAsset, destEid, destRecipient, amount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(REQUEST_BRIDGE_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe, abi.encode(liquidAsset, destEid, destRecipient, amount))).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+    }
+    
+    function _checkCancelBridgeSignature(address safe, address[] calldata signers, bytes[] calldata signatures) internal {
+        bytes32 digestHash = keccak256(abi.encodePacked(CANCEL_BRIDGE_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 
+    function _requestBridge(address safe, address liquidAsset, uint32 destEid, address destRecipient, uint256 amount) internal {
+        if (liquidAsset == address(0) || amount == 0 || destRecipient == address(0)) revert InvalidInput();
+        ILayerZeroTeller teller = liquidAssetToTeller[liquidAsset];
+        if (address(teller) == address(0)) revert UnsupportedLiquidAsset();
+        
+
+        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+        cashModule.requestWithdrawalByModule(safe, liquidAsset, amount);
+
+        withdrawals[safe] = LiquidCrossChainWithdrawal(destEid, liquidAsset, amount, destRecipient);
+
+        emit LiquidBridgeRequested(safe, liquidAsset, destEid, destRecipient, amount);
+    }
+
     /**
-     * @dev Internal function to execute the bridge operation
+     * @dev Internal function to execute a bridge transaction
      * @param safe The Safe address which holds the tokens
      * @param liquidAsset The address of the liquid asset to bridge
      * @param destEid The destination chain ID in LayerZero format
      * @param destRecipient The recipient address on the destination chain
-     * @param amount The amount of liquid asset to bridge
+     * @param amount The amount of liquid asset to bridge (will be cast to uint96)
      * @custom:throws UnsupportedLiquidAsset If the liquid asset is not supported
      * @custom:throws InsufficientNativeFee If the provided native fee is insufficient
-     * @custom:throws NativeTransferFailed If the native token transfer to the safe fails
      */
     function _bridge(address safe, address liquidAsset, uint32 destEid, address destRecipient, uint256 amount) internal {
         ILayerZeroTeller teller = liquidAssetToTeller[liquidAsset];
@@ -380,20 +517,10 @@ contract EtherFiLiquidModule is ModuleBase {
         uint256 fee = teller.previewFee(amount.toUint96(), destRecipient, bridgeWildCard, ERC20(ETH));
 
         if (address(this).balance < fee) revert InsufficientNativeFee();
-        (bool success, ) = safe.call{value: fee}("");
-        if (!success) revert NativeTransferFailed();
 
-        address[] memory to = new address[](1);
-        uint256[] memory values = new uint256[](1);
-        bytes[] memory data = new bytes[](1);
+        teller.bridge{value: fee}(amount.toUint96(), destRecipient, bridgeWildCard, ERC20(ETH), fee);
 
-        to[0] = address(teller); 
-        values[0] = fee;
-        data[0] = abi.encodeWithSelector(ILayerZeroTeller.bridge.selector, amount, destRecipient, bridgeWildCard, ERC20(ETH), fee);
-
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-
-        emit LiquidBridged(safe, liquidAsset, destRecipient, destEid, amount, fee);
+        emit LiquidBridgeExecuted(safe, liquidAsset, destRecipient, destEid, amount, fee);
     }
 
     /**

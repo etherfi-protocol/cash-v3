@@ -295,7 +295,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(withdrawalAmt, 0);
     }
 
-    function test_spend_updatesWithdrawalRequestIfNecessary() public {
+    function test_spend_cancelsWithdrawalRequestIfNecessary() public {
         uint256 initialAmount = 200e6;
         uint256 spendAmount = 150e6;
         uint256 withdrawalAmount = 100e6;
@@ -320,8 +320,6 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Spend should work and cancel the withdrawal
         vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.WithdrawalAmountUpdated(address(safe), address(usdcScroll), initialAmount - spendAmount);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify tokens were transferred
@@ -329,7 +327,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + spendAmount);
 
         // Verify pending withdrawal was cancelled
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), initialAmount - spendAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), 0);
     }
 
     function test_spend_respectsSpendingLimits() public {

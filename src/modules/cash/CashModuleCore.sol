@@ -101,15 +101,6 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Returns if an asset is a whitelisted withdraw asset
-     * @param asset Address of the asset
-     * @return True if asset is whitelisted for withdrawals, false otherwise
-     */    
-    function isWhitelistedWithdrawAsset(address asset) external view returns (bool) {
-        return _isWhitelistedWithdrawAsset(asset);
-    }
-
-    /**
      * @notice Returns all the assets whitelisted for withdrawals
      * @return Array of whitelisted withdraw assets
      */    
@@ -300,6 +291,14 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Returns the list of modules that can request withdrawals
+     * @return Array of module addresses that can request withdrawals
+     */
+    function getWhitelistedModulesCanRequestWithdraw() external view returns (address[] memory) {
+        return _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.values();
+    }
+
+    /**
      * @notice Checks if a transaction has been cleared
      * @dev Only callable for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
@@ -425,7 +424,7 @@ contract CashModuleCore is CashModuleStorageContract {
             amounts[i] = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
             if (IERC20(tokens[i]).balanceOf(safe) < amounts[i]) revert InsufficientBalance();
             
-            _updateWithdrawalRequestIfNecessary(safe, tokens[i], amounts[i]);
+            _cancelWithdrawalRequestIfNecessary(safe, tokens[i], amounts[i]);
         }
 
         _spendDebit(safe, binSponsor, tokens, amounts);
@@ -574,7 +573,7 @@ contract CashModuleCore is CashModuleStorageContract {
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
         uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();
-        _updateWithdrawalRequestIfNecessary(safe, token, amount);
+        _cancelWithdrawalRequestIfNecessary(safe, token, amount);
 
         address[] memory to = new address[](3);
         bytes[] memory data = new bytes[](3);
