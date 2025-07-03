@@ -348,7 +348,6 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
         DestinationData memory destData = _getSettlementDispatcherStorage().destinationData[token];
         if (destData.useCanonicalBridge) {
             _withdrawCanonicalBridge(token, destData.destRecipient, amount, destData.minGasLimit);
-            return;
         }
         else {
             (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) = 

@@ -773,9 +773,13 @@ contract TopUpFactoryTest is Test, Constants {
         
         factory.setTokenConfig(tokens, tokenConfigs);
 
-        deal(address(baseUsdt), address(factory), 100e6);
+        uint256 balBefore = 100e6;
 
-        factory.bridge(address(baseUsdt), 100e6);
+        deal(address(baseUsdt), address(factory), balBefore);
+
+        factory.bridge(address(baseUsdt), balBefore);
+
+        assertEq(baseUsdt.balanceOf(address(factory)), 0);
 
         vm.stopPrank();
     }

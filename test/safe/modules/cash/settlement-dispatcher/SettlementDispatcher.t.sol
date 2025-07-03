@@ -357,6 +357,8 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         deal(address(usdtScroll), address(settlementDispatcherRain), balBefore);
         deal(address(usdcScroll), address(settlementDispatcherRain), balBefore);
 
+        alice = makeAddr("alice");
+
         vm.startPrank(owner);
         settlementDispatcherRain.bridge(address(usdtScroll), balBefore, 1);
         assertEq(usdtScroll.balanceOf(address(settlementDispatcherRain)), 0);
@@ -367,7 +369,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         tokens[0] = address(usdcScroll);
         destDatas[0] = SettlementDispatcher.DestinationData({
             destEid: optimismDestEid,
-            destRecipient: owner,
+            destRecipient: alice,
             stargate: stargateUsdcPool,
             useCanonicalBridge: true,
             minGasLimit: 200_000
@@ -382,13 +384,15 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         uint256 balBefore = 1e6;
         deal(address(settlementDispatcherRain), balBefore);
 
+        alice = makeAddr("alice");
+
         address[] memory tokens = new address[](1);
         SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
 
         tokens[0] = address(ETH);
         destDatas[0] = SettlementDispatcher.DestinationData({
             destEid: optimismDestEid,
-            destRecipient: owner,
+            destRecipient: alice,
             stargate: stargateEthPool,
             useCanonicalBridge: true,
             minGasLimit: 200_000
