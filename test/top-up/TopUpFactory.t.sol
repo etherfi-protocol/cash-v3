@@ -18,6 +18,7 @@ import { ScrollERC20BridgeAdapter } from "../../src/top-up/bridge/ScrollERC20Bri
 import { StargateAdapter } from "../../src/top-up/bridge/StargateAdapter.sol";
 import { EtherFiLiquidBridgeAdapter } from "../../src/top-up/bridge/EtherFiLiquidBridgeAdapter.sol";
 import {NTTAdapter} from "../../src/top-up/bridge/NTTAdapter.sol";
+import { BaseWithdrawERC20BridgeAdapter } from "../../src/top-up/bridge/BaseWithdrawERC20BridgeAdapter.sol";
 import { Constants } from "../../src/utils/Constants.sol";
 
 contract TopUpFactoryTest is Test, Constants {
@@ -42,7 +43,8 @@ contract TopUpFactoryTest is Test, Constants {
     IERC20 weETH = IERC20(0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee);
     IERC20 usdc = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
     IERC20 ethfi = IERC20(0xFe0c30065B384F05761f15d0CC899D4F9F9Cc0eB);
-    
+    IERC20 baseUsdt = IERC20(0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2);
+
     address weETHOftAddress = 0xcd2eb13D6831d4602D80E5db9230A57596CDCA63;
     address usdcStargatePool = 0xc026395860Db2d07ee33e05fE50ed7bD583189C7;
     address ethStargatePool = 0x77b2043768d28E9C9aB44E1aBfC95944bcE57931;
@@ -743,5 +745,38 @@ contract TopUpFactoryTest is Test, Constants {
         // Compare owner
         assertEq(originalOwner, postUpgradeOwner, "Owner should remain the same after upgrade");
         assertEq(postUpgradeOwner, address(factory), "Owner should still be the factory");
+    }
+    
+    function test_baseBaseWithdrawAdapter() public {
+        vm.createSelectFork("https://mainnet.base.org");
+
+        owner = makeAddr("owner");
+        admin = makeAddr("admin");
+        alice = makeAddr("alice");
+
+        vm.startPrank(owner);
+
+        address baseAdapter = address(new BaseWithdrawERC20BridgeAdapter());
+        address roleRegistryImpl = address(new RoleRegistry(dataProvider));
+        roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
+
+        implementation = new TopUp();
+        address factoryImpl = address(new TopUpFactory());
+        factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
+        roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), admin);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(baseUsdt);
+
+        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](1);
+        tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(baseAdapter), recipientOnDestChain: alice, maxSlippageInBps: 0, additionalData: abi.encode(200_000, "") });
+        
+        factory.setTokenConfig(tokens, tokenConfigs);
+
+        deal(address(baseUsdt), address(factory), 100e6);
+
+        factory.bridge(address(baseUsdt), 100e6);
+
+        vm.stopPrank();
     }
 }
