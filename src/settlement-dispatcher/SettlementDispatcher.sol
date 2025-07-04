@@ -35,7 +35,7 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
         /// @notice Whether to use canonical bridge for the token
         bool useCanonicalBridge;
         /// @notice Minimum gas limit for the canonical bridge
-        uint256 minGasLimit;
+        uint64 minGasLimit;
     }
 
     /**
@@ -495,7 +495,7 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
 
         for (uint256 i = 0; i < len; ) {
             if (destDatas[i].useCanonicalBridge) {
-                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].minGasLimit == 0) revert InvalidValue();
+                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate != address(0) ||  destDatas[i].destEid != 0) revert InvalidValue();
             }
             else {
                 if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate == address(0)) revert InvalidValue(); 

@@ -368,9 +368,9 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
 
         tokens[0] = address(usdcScroll);
         destDatas[0] = SettlementDispatcher.DestinationData({
-            destEid: optimismDestEid,
+            destEid: 0,
             destRecipient: alice,
-            stargate: stargateUsdcPool,
+            stargate: address(0),
             useCanonicalBridge: true,
             minGasLimit: 200_000
         });
@@ -391,9 +391,9 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
 
         tokens[0] = address(ETH);
         destDatas[0] = SettlementDispatcher.DestinationData({
-            destEid: optimismDestEid,
+            destEid: 0,
             destRecipient: alice,
-            stargate: stargateEthPool,
+            stargate: address(0),
             useCanonicalBridge: true,
             minGasLimit: 200_000
         });

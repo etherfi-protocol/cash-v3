@@ -350,9 +350,9 @@ contract SafeTestSetup is Utils {
         });
 
         destDatas[1] = SettlementDispatcher.DestinationData({
-            destEid: optimismDestEid,
+            destEid: 0,
             destRecipient: owner,
-            stargate: stargateUsdcPool,
+            stargate: address(0),
             useCanonicalBridge: true,
             minGasLimit: 200_000
         });
