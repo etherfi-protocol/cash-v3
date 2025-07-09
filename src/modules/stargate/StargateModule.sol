@@ -211,25 +211,30 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
         
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
         cashModule.requestWithdrawalByModule(safe, asset, amount);
-        
-        StargateModuleStorage storage $ = _getStargateModuleStorage();
-        $.withdrawals[safe] = CrossChainWithdrawal({
-            destEid: destEid,
-            asset: asset,
-            amount: amount,
-            destRecipient: destRecipient,
-            maxSlippageInBps: maxSlippageInBps
-        });
 
         emit RequestBridgeWithStargate(safe, destEid, asset, amount, destRecipient, maxSlippageInBps);
+
+        (uint64 withdrawalDelay, , ) = cashModule.getDelays();
+        if (withdrawalDelay == 0) {
+            _bridge(destEid, asset, amount, destRecipient, maxSlippageInBps);
+            emit BridgeWithStargate(safe, destEid, asset, amount, destRecipient, maxSlippageInBps);
+        } else {
+            _getStargateModuleStorage().withdrawals[safe] = CrossChainWithdrawal({
+                destEid: destEid,
+                asset: asset,
+                amount: amount,
+                destRecipient: destRecipient,
+                maxSlippageInBps: maxSlippageInBps
+            });
+        }
     }
 
     /**
      * @notice Executes the bridge operation for a safe
      * @param safe Address of the EtherFiSafe
      */
-    function executeBridge(address safe) external payable nonReentrant onlyEtherFiSafe(safe) {
-        CrossChainWithdrawal storage withdrawal = _getStargateModuleStorage().withdrawals[safe];
+    function executeBridge(address safe) public payable nonReentrant onlyEtherFiSafe(safe) {
+        CrossChainWithdrawal memory withdrawal = _getStargateModuleStorage().withdrawals[safe];
 
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForStargate();
         
@@ -240,7 +245,7 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
 
         cashModule.processWithdrawal(safe);
 
-        _bridge(withdrawal);
+        _bridge(withdrawal.destEid, withdrawal.asset, withdrawal.amount, withdrawal.destRecipient, withdrawal.maxSlippageInBps);
         emit BridgeWithStargate(safe, withdrawal.destEid, withdrawal.asset, withdrawal.amount, withdrawal.destRecipient, withdrawal.maxSlippageInBps);
 
         delete _getStargateModuleStorage().withdrawals[safe];
@@ -307,13 +312,13 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
      * @custom:throws InvalidInput if destination, asset, or amount is invalid
      * @custom:throws InsufficientAmount if the safe doesn't have enough assets
      */
-    function _bridge(CrossChainWithdrawal memory withdrawal) internal {
-        _checkBalance(withdrawal.asset, withdrawal.amount);
+    function _bridge(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps) internal {
+        _checkBalance(asset, amount);
 
-        uint256 minAmount = _deductSlippage(withdrawal.amount, withdrawal.maxSlippageInBps);
+        uint256 minAmount = _deductSlippage(amount, maxSlippageInBps);
 
-        if (_getStargateModuleStorage().assetConfig[withdrawal.asset].isOFT) _bridgeOft(withdrawal.destEid, withdrawal.asset, withdrawal.amount, withdrawal.destRecipient, minAmount);
-        else _bridgeNonOft(withdrawal.destEid, withdrawal.asset, withdrawal.amount, withdrawal.destRecipient, minAmount);
+        if (_getStargateModuleStorage().assetConfig[asset].isOFT) _bridgeOft(destEid, asset, amount, destRecipient, minAmount);
+        else _bridgeNonOft(destEid, asset, amount, destRecipient, minAmount);
     }
 
     /**

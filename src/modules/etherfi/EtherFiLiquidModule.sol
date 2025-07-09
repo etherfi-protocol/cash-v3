@@ -368,7 +368,7 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @custom:throws UnsupportedLiquidAsset If the liquid asset is not supported
      * @custom:throws InvalidInput If the destRecipient is address(0)
      */
-    function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+    function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
         _checkBridgeSignature(safe, asset, destEid, destRecipient, amount, signers, signatures);
         _requestBridge(safe, asset, destEid, destRecipient, amount);
     }
@@ -380,7 +380,7 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @custom:throws NoWithdrawalQueuedForLiquid If no bridge request exists for the safe
      * @custom:throws CannotFindMatchingWithdrawalForSafe If the withdrawal details don't match
      */
-    function executeBridge(address safe) external payable onlyEtherFiSafe(safe) {
+    function executeBridge(address safe) public payable onlyEtherFiSafe(safe) {
         LiquidCrossChainWithdrawal memory withdrawal = withdrawals[safe];
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForLiquid();
 
@@ -489,14 +489,23 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
         if (liquidAsset == address(0) || amount == 0 || destRecipient == address(0)) revert InvalidInput();
         ILayerZeroTeller teller = liquidAssetToTeller[liquidAsset];
         if (address(teller) == address(0)) revert UnsupportedLiquidAsset();
-        
 
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
         cashModule.requestWithdrawalByModule(safe, liquidAsset, amount);
 
-        withdrawals[safe] = LiquidCrossChainWithdrawal(destEid, liquidAsset, amount, destRecipient);
-
         emit LiquidBridgeRequested(safe, liquidAsset, destEid, destRecipient, amount);
+
+        (uint64 withdrawalDelay, , ) = cashModule.getDelays();
+        if (withdrawalDelay == 0) {
+            _bridge(safe, liquidAsset, destEid, destRecipient, amount);
+        } else {
+            withdrawals[safe] = LiquidCrossChainWithdrawal({
+                destEid: destEid, 
+                asset: liquidAsset, 
+                amount: amount, 
+                destRecipient: destRecipient
+            });
+        }
     }
 
     /**

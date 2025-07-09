@@ -130,6 +130,31 @@ contract StargateModuleTest is SafeTestSetup {
         assertEq(withdrawal.maxSlippageInBps, maxSlippage);
     }
 
+    function test_requestBridge_executesBridge_whenTheWithdrawDelayIsZero() public {
+        // make withdraw delay 0
+        vm.prank(owner);
+        cashModule.setDelays(0, 0, 0);
+
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount); 
+
+        (, uint256 fee) = stargateModule.getBridgeFee(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+
+        uint256 usdcBalBefore = usdc.balanceOf(address(safe));
+
+        (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+
+        vm.expectEmit(true, true, true, true);
+        emit StargateModule.RequestBridgeWithStargate(address(safe), mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+        vm.expectEmit(true, true, true, true);
+        emit StargateModule.BridgeWithStargate(address(safe), mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+        stargateModule.requestBridge{value: fee}(address(safe), mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage, signers, signatures);
+
+        uint256 usdcBalAfter = usdc.balanceOf(address(safe));
+        assertEq(usdcBalAfter, usdcBalBefore - amount);
+
+    }
+
     function test_executeBridge_worksWithUsdc() public {
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), amount); 

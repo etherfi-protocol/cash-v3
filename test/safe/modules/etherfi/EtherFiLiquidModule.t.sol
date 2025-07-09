@@ -328,6 +328,60 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertEq(withdrawal.destRecipient, owner);
     }
 
+    function test_requestBridge_executesBridge_whenTheWithdrawDelayIsZero() public {
+        // make withdraw delay 0
+        vm.prank(owner);
+        cashModule.setDelays(0, 0, 0);
+
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amountToBridge = 1 ether;
+        deal(address(liquidEth), address(safe), amountToBridge);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.REQUEST_BRIDGE_SIG(),
+            block.chainid,
+            address(liquidModule),
+            safe.nonce(),
+            address(safe),
+            abi.encode(address(liquidEth), mainnetEid, owner, amountToBridge)
+        )).toEthSignedMessageHash();
+
+        uint256 fee = liquidModule.getBridgeFee(address(liquidEth), mainnetEid, owner, amountToBridge);
+
+
+        address[] memory owners = new address[](2);
+        owners[0] = owner1;
+        owners[1] = owner2;
+        
+        bytes[] memory signatures = new bytes[](2);
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        signatures[0] = abi.encodePacked(r, s, v); 
+
+        (v, r, s) = vm.sign(owner2Pk, digestHash);
+        signatures[1] = abi.encodePacked(r, s, v);
+
+        uint256 liquidAssetBalBefore = liquidEth.balanceOf(address(safe));
+
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidBridgeRequested(address(safe), address(address(liquidEth)), mainnetEid, owner, amountToBridge);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidBridgeExecuted(address(safe), address(liquidEth), owner, mainnetEid, amountToBridge, fee);
+        liquidModule.requestBridge{value: fee}(address(safe), mainnetEid, address(liquidEth), amountToBridge, owner, owners, signatures);
+
+
+        uint256 liquidAssetBalAfter = liquidEth.balanceOf(address(safe));
+        assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
+    }
+
     function test_executeBridge_reverts_ifWithdrawalDelayIsNotOver() public {
         address[] memory modules = new address[](1);
         modules[0] = address(liquidModule);
