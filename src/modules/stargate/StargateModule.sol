@@ -11,7 +11,7 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { IOFT, MessagingFee, MessagingReceipt, OFTFeeDetail, OFTLimit, OFTReceipt, SendParam, SendParam } from "../../interfaces/IOFT.sol";
 import { IStargate, Ticket } from "../../interfaces/IStargate.sol";
-import { ICashModule, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { ICashModule, WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 
 /**
@@ -265,11 +265,9 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForStargate();
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
 
-        try cashModule.cancelWithdrawalByModule(safe) {}
-        catch {
-            // If the cancellation fails, we still want to emit the event and delete the withdrawal
-            // This allows to cancel a bridge tx even if the withdrawal was overridden on cash module
-        }
+        SafeData memory data = cashModule.getData(safe);
+
+        if (data.pendingWithdrawalRequest.recipient == address(this)) cashModule.cancelWithdrawalByModule(safe);
 
         if (withdrawal.asset != address(0)) {
             emit BridgeCancelled(safe, withdrawal.destEid, withdrawal.asset, withdrawal.amount, withdrawal.destRecipient);

@@ -8,7 +8,7 @@ import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/Reentran
 
 import { IBoringOnChainQueue } from "../../interfaces/IBoringOnChainQueue.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { ICashModule, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { ICashModule, WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { ILayerZeroTeller } from "../../interfaces/ILayerZeroTeller.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
@@ -407,12 +407,10 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForLiquid();
 
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
-        
-        try cashModule.cancelWithdrawalByModule(safe) {}
-        catch {
-            // If the cancellation fails, we still want to emit the event and delete the withdrawal
-            // This allows to cancel a bridge tx even if the withdrawal was overridden on cash module
-        }
+
+        SafeData memory data = cashModule.getData(safe);
+        // If there is a withdrawal pending from this module on Cash Module, cancel it
+        if (data.pendingWithdrawalRequest.recipient == address(this)) cashModule.cancelWithdrawalByModule(safe);
 
         if (withdrawals[safe].asset != address(0)) {
             emit LiquidBridgeCancelled(safe, withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
