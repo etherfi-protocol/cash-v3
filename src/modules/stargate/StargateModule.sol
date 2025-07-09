@@ -204,7 +204,7 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
      * @custom:throws InvalidSignatures if the signatures are invalid
      * @custom:throws InvalidInput if destination, asset, amount or slippage is invalid
      */
-    function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
+    function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps, address[] calldata signers, bytes[] calldata signatures) external payable nonReentrant onlyEtherFiSafe(safe) {
         if (destRecipient == address(0) || asset == address(0) || amount == 0 || maxSlippageInBps > 10_000) revert InvalidInput();
 
         _checkSignature(safe, destEid, asset, amount, destRecipient, maxSlippageInBps, signers, signatures);
@@ -257,7 +257,7 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
      * @param signers Array of addresses of safe owners that signed the transaction
      * @param signatures Array of signatures from the signers
      */
-    function cancelBridge(address safe, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+    function cancelBridge(address safe, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         bytes32 digestHash = keccak256(abi.encodePacked(CANCEL_BRIDGE_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         
