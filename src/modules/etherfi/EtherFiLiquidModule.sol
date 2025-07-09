@@ -414,8 +414,10 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
             // This allows to cancel a bridge tx even if the withdrawal was overridden on cash module
         }
 
-        emit LiquidBridgeCancelled(safe, withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
-        delete withdrawals[safe];
+        if (withdrawals[safe].asset != address(0)) {
+            emit LiquidBridgeCancelled(safe, withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
+            delete withdrawals[safe];
+        }
     }
 
     /**

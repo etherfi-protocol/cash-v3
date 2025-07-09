@@ -264,14 +264,17 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
         CrossChainWithdrawal storage withdrawal = _getStargateModuleStorage().withdrawals[safe];
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForStargate();
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+
         try cashModule.cancelWithdrawalByModule(safe) {}
         catch {
             // If the cancellation fails, we still want to emit the event and delete the withdrawal
             // This allows to cancel a bridge tx even if the withdrawal was overridden on cash module
         }
 
-        emit BridgeCancelled(safe, withdrawal.destEid, withdrawal.asset, withdrawal.amount, withdrawal.destRecipient);
-        delete _getStargateModuleStorage().withdrawals[safe];
+        if (withdrawal.asset != address(0)) {
+            emit BridgeCancelled(safe, withdrawal.destEid, withdrawal.asset, withdrawal.amount, withdrawal.destRecipient);
+            delete _getStargateModuleStorage().withdrawals[safe];
+        }
     }
 
     /**
