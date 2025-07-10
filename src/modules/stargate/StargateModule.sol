@@ -69,7 +69,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
     bytes32 public constant CANCEL_BRIDGE_SIG = keccak256("cancelBridge");
 
     /// @notice 100% in basis points (10,000)
-    uint256 public constant HUNDRES_PERCENT_IN_BPS = 10_000;
+    uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
     
     /// @notice Error for Invalid Owner quorum signatures
     error InvalidSignatures();
@@ -475,7 +475,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @return The minimum amount after slippage deduction
      */
     function _deductSlippage(uint256 amount, uint256 slippage) internal pure returns (uint256) {
-        return amount.mulDiv(HUNDRES_PERCENT_IN_BPS - slippage, HUNDRES_PERCENT_IN_BPS);
+        return amount.mulDiv(HUNDRED_PERCENT_IN_BPS - slippage, HUNDRED_PERCENT_IN_BPS);
     }
 
     /**
