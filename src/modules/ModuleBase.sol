@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
@@ -28,6 +30,8 @@ contract ModuleBase is Constants {
     error ArrayLengthMismatch();
     /// @notice Thrown when the caller is not an EtherFi Safe
     error OnlyEtherFiSafe();
+    /// @notice Thrown when insufficient amount is available for use from the safe
+    error AmountNotAvailable();
 
     /// @custom:storage-location erc7201:etherfi.storage.ModuleBaseStorage
     struct ModuleBaseStorage {

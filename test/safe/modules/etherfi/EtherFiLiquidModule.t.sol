@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import { SafeTestSetup, MessageHashUtils } from "../../SafeTestSetup.t.sol";
-import { EtherFiLiquidModule } from "../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
+import { EtherFiLiquidModule, ModuleCheckBalance } from "../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { IBoringOnChainQueue } from "../../../../src/interfaces/IBoringOnChainQueue.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
@@ -642,6 +642,33 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         return (signers, signatures);
     }
 
+    function test_deposit_reverts_ifPendingWithdrawalBlocksIt() public {
+        uint256 amountToDeposit = 10e6;
+        uint256 minReturn = 0.50e6; 
+        deal(address(usdc), address(safe), amountToDeposit);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amountToDeposit - 1;
+        _requestWithdrawal(tokens, amounts, address(1));
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.DEPOSIT_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(usdc), address(liquidUsd), amountToDeposit, minReturn)
+        )).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v); 
+
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
+        liquidModule.deposit(address(safe), address(usdc), address(liquidUsd), amountToDeposit, minReturn, owner1, signature);
+    }
+
     function test_deposit_worksWithWeth_forLiquidEth() public {
         uint256 amountToDeposit = 1 ether;
         uint256 minReturn = 0.5 ether; 
@@ -968,7 +995,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(EtherFiLiquidModule.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         liquidModule.deposit(address(safe), address(wbtc), address(liquidBtc), amountToDeposit, minReturn, owner1, signature);
     }
 
@@ -1661,7 +1688,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(EtherFiLiquidModule.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, signature);
     }
 

@@ -7,11 +7,12 @@ import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/Reentran
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { ModuleBase } from "../ModuleBase.sol";
+import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { IOFT, MessagingFee, MessagingReceipt, OFTFeeDetail, OFTLimit, OFTReceipt, SendParam, SendParam } from "../../interfaces/IOFT.sol";
 import { IStargate, Ticket } from "../../interfaces/IStargate.sol";
-import { ICashModule, WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
+import { WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 
 /**
@@ -21,7 +22,7 @@ import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
  * @dev Extends ModuleBase to inherit common functionality
  * @custom:security-contact security@etherfi.io
  */
-contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
+contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
     using MessageHashUtils for bytes32;
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -142,7 +143,7 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
      * @param _assetConfigs Array of corresponding asset configurations
      * @param _etherFiDataProvider Address of the EtherFi data provider
      */
-    constructor(address[] memory _assets, AssetConfig[] memory _assetConfigs, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
+    constructor(address[] memory _assets, AssetConfig[] memory _assetConfigs, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         _setAssetConfigs(_assets, _assetConfigs);
     }
 
@@ -209,7 +210,6 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
 
         _checkSignature(safe, destEid, asset, amount, destRecipient, maxSlippageInBps, signers, signatures);
         
-        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
         cashModule.requestWithdrawalByModule(safe, asset, amount);
 
         emit RequestBridgeWithStargate(safe, destEid, asset, amount, destRecipient, maxSlippageInBps);
@@ -238,7 +238,6 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
 
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForStargate();
         
-        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
         WithdrawalRequest memory withdrawalRequest = cashModule.getData(safe).pendingWithdrawalRequest;
         
         if (withdrawalRequest.recipient != address(this) || withdrawalRequest.tokens.length != 1 || withdrawalRequest.tokens[0] != withdrawal.asset || withdrawalRequest.amounts[0] != withdrawal.amount) revert CannotFindMatchingWithdrawalForSafe();
@@ -263,7 +262,6 @@ contract StargateModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
         
         CrossChainWithdrawal storage withdrawal = _getStargateModuleStorage().withdrawals[safe];
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForStargate();
-        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
 
         SafeData memory data = cashModule.getData(safe);
 
