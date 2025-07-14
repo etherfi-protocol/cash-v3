@@ -8,11 +8,12 @@ import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/Reentran
 
 import { IBoringOnChainQueue } from "../../interfaces/IBoringOnChainQueue.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { ICashModule, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { ILayerZeroTeller } from "../../interfaces/ILayerZeroTeller.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 
 
@@ -22,7 +23,7 @@ import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
  * @notice Module for interacting with ether.fi Liquid vaults
  * @dev Extends ModuleBase to provide ether.fi Liquid integration for Safes
  */
-contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeModule {
+contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
 
@@ -94,10 +95,7 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @param boringQueue Address of the boring queue
      */
     event LiquidWithdrawQueueSet(address indexed token,  address indexed boringQueue);
-    
-    /// @notice Thrown when the Safe doesn't have sufficient token balance for an operation
-    error InsufficientBalanceOnSafe();
-    
+        
     /// @notice Thrown when attempting to deposit to a liquid asset not supported by the module
     error UnsupportedLiquidAsset();
     
@@ -147,7 +145,7 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero
      */
-    constructor(address[] memory _assets, address[] memory _tellers, address _etherFiDataProvider, address _weth) ModuleBase(_etherFiDataProvider) {
+    constructor(address[] memory _assets, address[] memory _tellers, address _etherFiDataProvider, address _weth) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         uint256 len = _assets.length;
         if (len != _tellers.length) revert ArrayLengthMismatch();
         if (_etherFiDataProvider == address(0) || _weth == address(0)) revert InvalidInput();
@@ -173,7 +171,6 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @param signer The address that signed the transaction
      * @param signature The signature authorizing the transaction
      * @dev Verifies signature then executes token approval and deposit through the Safe's module execution
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      * @custom:throws UnsupportedLiquidAsset If the liquid asset is not supported
      * @custom:throws AssetNotSupportedForDeposit If the asset cannot be deposited to the teller
      * @custom:throws InvalidInput If amount is zero
@@ -209,7 +206,6 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @param minReturn The minimum amount of liquid tokens to receive
      * @custom:throws UnsupportedLiquidAsset If the liquid asset is not supported
      * @custom:throws InvalidInput If amount or min return is zero
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      * @custom:throws AssetNotSupportedForDeposit If the asset cannot be deposited to the teller
      * @custom:throws InsufficientReturnAmount If the return amount is less than min return
      */
@@ -219,11 +215,7 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
         
         if (amountToDeposit == 0 || minReturn == 0) revert InvalidInput();
         
-        uint256 bal;
-        if (assetToDeposit == ETH) bal = safe.balance;        
-        else bal = ERC20(assetToDeposit).balanceOf(safe);
-        
-        if (bal < amountToDeposit) revert InsufficientBalanceOnSafe();
+        _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
         bytes[] memory data;
@@ -282,7 +274,6 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @param signature The signature authorizing the transaction 
      * @dev Verifies signature then executes token approval and deposit through the Safe's module execution
      * @custom:throws LiquidWithdrawConfigNotSet If the liquid withdraw config is not set for the liquid token
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidInput If the Safe doesn't have enough liquid asset balance
      * @custom:throws OnlySafeAdmin If signer is not an admin of the Safe
      * @custom:throws InvalidSignature If the signature is invalid
@@ -318,7 +309,6 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @param discount Acceptable discount in bps
      * @param secondsToDeadline Expiry deadline in seconds from now
      * @custom:throws LiquidWithdrawConfigNotSet If the liquid withdraw config is not set for the liquid token
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidInput If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidSignature If the signature is invalid
      */
@@ -326,7 +316,8 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
         IBoringOnChainQueue boringQueue = IBoringOnChainQueue(liquidWithdrawQueue[liquidAsset]);
         if (address(boringQueue) == address(0)) revert LiquidWithdrawConfigNotSet();
         if (amountToWithdraw == 0) revert InvalidInput();
-        if (ERC20(liquidAsset).balanceOf(safe) < amountToWithdraw) revert InsufficientBalanceOnSafe();
+        
+        _checkAmountAvailable(safe, liquidAsset, amountToWithdraw);
 
         uint128 amountOutFromQueue = boringQueue.previewAssetsOut(assetOut, amountToWithdraw, discount);
         if (amountOutFromQueue < minReturn) revert InsufficientReturnAmount();
@@ -368,7 +359,7 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @custom:throws UnsupportedLiquidAsset If the liquid asset is not supported
      * @custom:throws InvalidInput If the destRecipient is address(0)
      */
-    function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+    function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, address[] calldata signers, bytes[] calldata signatures) external payable nonReentrant onlyEtherFiSafe(safe) {
         _checkBridgeSignature(safe, asset, destEid, destRecipient, amount, signers, signatures);
         _requestBridge(safe, asset, destEid, destRecipient, amount);
     }
@@ -380,11 +371,10 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @custom:throws NoWithdrawalQueuedForLiquid If no bridge request exists for the safe
      * @custom:throws CannotFindMatchingWithdrawalForSafe If the withdrawal details don't match
      */
-    function executeBridge(address safe) external payable onlyEtherFiSafe(safe) {
+    function executeBridge(address safe) public payable nonReentrant onlyEtherFiSafe(safe) {
         LiquidCrossChainWithdrawal memory withdrawal = withdrawals[safe];
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForLiquid();
 
-        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
         WithdrawalRequest memory withdrawalRequest = cashModule.getData(safe).pendingWithdrawalRequest;
 
         if (withdrawalRequest.recipient != address(this) || withdrawalRequest.tokens.length != 1 || withdrawalRequest.tokens[0] != withdrawal.asset || withdrawalRequest.amounts[0] != withdrawal.amount) revert CannotFindMatchingWithdrawalForSafe();
@@ -400,22 +390,20 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
      * @param signers Array of addresses of safe owners that signed the transaction
      * @param signatures Array of signatures from the signers
      */
-    function cancelBridge(address safe, address[] calldata signers, bytes[] calldata signatures) external onlyEtherFiSafe(safe) {
+    function cancelBridge(address safe, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         _checkCancelBridgeSignature(safe, signers, signatures);
         
         LiquidCrossChainWithdrawal memory withdrawal = withdrawals[safe];
         if (withdrawal.destRecipient == address(0)) revert NoWithdrawalQueuedForLiquid();
 
-        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
-        
-        try cashModule.cancelWithdrawalByModule(safe) {}
-        catch {
-            // If the cancellation fails, we still want to emit the event and delete the withdrawal
-            // This allows to cancel a bridge tx even if the withdrawal was overridden on cash module
-        }
+        SafeData memory data = cashModule.getData(safe);
+        // If there is a withdrawal pending from this module on Cash Module, cancel it
+        if (data.pendingWithdrawalRequest.recipient == address(this)) cashModule.cancelWithdrawalByModule(safe);
 
-        emit LiquidBridgeCancelled(safe, withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
-        delete withdrawals[safe];
+        if (withdrawals[safe].asset != address(0)) {
+            emit LiquidBridgeCancelled(safe, withdrawal.asset, withdrawal.destEid, withdrawal.destRecipient, withdrawal.amount);
+            delete withdrawals[safe];
+        }
     }
 
     /**
@@ -489,14 +477,22 @@ contract EtherFiLiquidModule is ModuleBase, ReentrancyGuardTransient, IBridgeMod
         if (liquidAsset == address(0) || amount == 0 || destRecipient == address(0)) revert InvalidInput();
         ILayerZeroTeller teller = liquidAssetToTeller[liquidAsset];
         if (address(teller) == address(0)) revert UnsupportedLiquidAsset();
-        
 
-        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
         cashModule.requestWithdrawalByModule(safe, liquidAsset, amount);
 
-        withdrawals[safe] = LiquidCrossChainWithdrawal(destEid, liquidAsset, amount, destRecipient);
-
         emit LiquidBridgeRequested(safe, liquidAsset, destEid, destRecipient, amount);
+
+        (uint64 withdrawalDelay, , ) = cashModule.getDelays();
+        if (withdrawalDelay == 0) {
+            _bridge(safe, liquidAsset, destEid, destRecipient, amount);
+        } else {
+            withdrawals[safe] = LiquidCrossChainWithdrawal({
+                destEid: destEid, 
+                asset: liquidAsset, 
+                amount: amount, 
+                destRecipient: destRecipient
+            });
+        }
     }
 
     /**
