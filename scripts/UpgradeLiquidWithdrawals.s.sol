@@ -34,13 +34,9 @@ contract UpgradeLiquidWithdrawals is Utils {
     address public liquidEthBoringQueue = 0x0D2dF071207E18Ca8638b4f04E98c53155eC2cE0;
     address public liquidBtcBoringQueue = 0x77A2fd42F8769d8063F2E75061FC200014E41Edf;
 
-    uint16 discount = 1; 
-    uint24 secondsToDeadline = 3 days;
-
     address openOceanSwapRouter = 0x6352a56caadC4F1E25CD6c75970Fa768A3304e64;
 
     address refundWallet = 0x2e0BE8D3D9f1833fbACf9A5e9f2d470817Ff0c00;
-
 
     OpenOceanSwapModule openOceanSwapModule;
     EtherFiLiquidModule liquidModule;
