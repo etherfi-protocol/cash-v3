@@ -440,7 +440,6 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
      * @param minGasLimit Minimum gas limit for the withdrawal
      */
     function _withdrawCanonicalBridge(address token, address recipient, uint256 amount, uint256 minGasLimit) internal returns (uint256) {
-        if (amount == 0 || recipient == address(0)) revert InvalidValue();
         if (token == ETH) {
             IL2Messenger(ETH_MESSENGER).sendMessage{value: amount}(recipient, amount, "", minGasLimit);
         }
