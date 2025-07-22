@@ -14,10 +14,10 @@
     "SettlementDispatcherRain": "0x50A233C4a0Bb1d7124b0224880037d35767a501C",
     "TopUpDest": "0x3a6A724595184dda4be69dB1Ce726F2Ac3D66B87",
     "TopUpDestNativeGateway": "0x83393192c7e8B3b9250312387f7C6B26495736aA",
-    "OpenOceanSwapModule": "0x57d23DEa576c88AA5a3F919b1a38f44E1D4b0512",
-    "EtherFiLiquidModule": "0x62f623161fdB6564925c3F9B783cbDfeF4CE8AEc",
-    "EtherFiStakeModule": "0x93DB6fb518193F67dd9e2EA867A287C7029D59e0",
+    "OpenOceanSwapModule": "0x4dEAa5f2e1CD1A792304d1649EdfA35D565F9346",
+    "EtherFiLiquidModule": "0x2A0E60E26a118fF6F181B98666E6FD6BBf3e1826",
+    "EtherFiStakeModule": "0x40c8438e9cc3B7817aeb117cd0d7B829c32bfEd8",
     "CashLiquidationHelper": "0x56103F3DC21f182611601110F794686fdD8082ad",
-    "StargateModule": "0x6ca9aA0Cbf0ECf0d849ecB4F9E757Fd72c1519C3"
+    "StargateModule": "0xC1ab383b81fD81803a54c4d50A7b7d4A31a317b4"
   }
 }

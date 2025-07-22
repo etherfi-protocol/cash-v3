@@ -7,29 +7,39 @@ import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter, CashModuleTestSetup, CashVerificationLib, ICashModule, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 import { EnumerableAddressWhitelistLib } from "../../../../src/libraries/EnumerableAddressWhitelistLib.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
+import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
+import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
+import { IBridgeModule } from "../../../../src/interfaces/IBridgeModule.sol";
+import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
     function test_configureWithdrawAssets_configuresWithdrawAssets() public {
-        address[] memory asset = new address[](2);
-        asset[0] = address(1);
-        asset[1] = address(usdcScroll);
+        address[] memory asset = new address[](3);
+        asset[0] = address(usdcScroll);
+        asset[1] = address(weETHScroll);
+        asset[2] = address(scrToken);
 
-        bool[] memory whitelist = new bool[](2);
+        bool[] memory whitelist = new bool[](3);
         whitelist[0] = true;
         whitelist[1] = false;
+        whitelist[2] = false;
 
-        assertEq(cashModule.isWhitelistedWithdrawAsset(asset[0]), false);
-        assertEq(cashModule.isWhitelistedWithdrawAsset(asset[1]), true);
+        address[] memory whitelistedAssets = cashModule.getWhitelistedWithdrawAssets();
+        assertEq(whitelistedAssets.length, 3);
+        assertEq(whitelistedAssets[0], asset[0]);
+        assertEq(whitelistedAssets[1], asset[1]);
+        assertEq(whitelistedAssets[2], asset[2]);
 
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.WithdrawTokensConfigured(asset, whitelist);
         cashModule.configureWithdrawAssets(asset, whitelist);
 
-        assertEq(cashModule.isWhitelistedWithdrawAsset(asset[0]), true);
-        assertEq(cashModule.isWhitelistedWithdrawAsset(asset[1]), false);
+        whitelistedAssets = cashModule.getWhitelistedWithdrawAssets();
+        assertEq(whitelistedAssets.length, 1);
+        assertEq(whitelistedAssets[0], asset[0]);
     }
 
     function test_configureWithdrawAssets_fails_whenCallerIsNotCashController() public {
@@ -209,7 +219,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         deal(address(weETHScroll), address(safe), 0);
 
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 amount = 10e6;
 
@@ -281,7 +291,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(debtManager), 1 ether);
 
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         {
             address[] memory spendTokens = new address[](1);
@@ -486,5 +496,426 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         vm.expectRevert(CashVerificationLib.InvalidSignatures.selector);
         cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, signers, signatures);
+    }
+
+    function test_requestWithdrawalByModule_worksAndSetsRecipientAsModule() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        vm.prank(module);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+
+        WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 1);
+        assertEq(request.tokens[0], address(usdcScroll));
+        assertEq(request.amounts[0], withdrawalAmount);
+        assertEq(request.recipient, module);
+    }
+
+    function test_cancelWithdrawalByModule_works() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        vm.prank(module);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+
+        WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 1);
+        assertEq(request.tokens[0], address(usdcScroll));
+        assertEq(request.amounts[0], withdrawalAmount);
+        assertEq(request.recipient, module);
+
+        vm.mockCall(module, abi.encodeWithSelector(IBridgeModule.cancelBridgeByCashModule.selector, address(safe)), abi.encode(""));
+
+        vm.prank(module);
+        cashModule.cancelWithdrawalByModule(address(safe));
+
+        request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 0);
+    }
+
+    function test_cancelWithdrawalByModule_reverts_whenPendingWithdrawalDoesNotExist() public {
+        vm.prank(address(1));
+        vm.expectRevert(ICashModule.WithdrawalDoesNotExist.selector);
+        cashModule.cancelWithdrawalByModule(address(safe));
+    }
+
+    function test_cancelWithdrawalByModule_reverts_whenCalledByADifferentModule() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        vm.prank(module);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+
+        WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 1);
+        assertEq(request.tokens[0], address(usdcScroll));
+        assertEq(request.amounts[0], withdrawalAmount);
+        assertEq(request.recipient, module);
+
+        vm.prank(address(1));
+        vm.expectRevert(ICashModule.OnlyModuleThatRequestedCanCancel.selector);
+        cashModule.cancelWithdrawalByModule(address(safe));
+    }
+    
+    function test_cancelWithdrawalByModule_reverts_whenCreatedByNonModule() public {
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // Verify pending withdrawal was set up correctly
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+        
+        vm.prank(module);
+        vm.expectRevert(ICashModule.InvalidWithdrawRequest.selector);
+        cashModule.cancelWithdrawalByModule(address(safe));
+    }
+
+    function test_cancelWithdrawalByModule_reverts_whenCalledByModuleRemovedFromDataProviderWhitelist() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        vm.prank(module);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+
+        WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 1);
+        assertEq(request.tokens[0], address(usdcScroll));
+        assertEq(request.amounts[0], withdrawalAmount);
+        assertEq(request.recipient, module);
+
+        // Remove from data provider whitelist after requesting withdrawal
+        vm.startPrank(owner);
+        shouldWhitelist[0] = false;
+        dataProvider.configureModules(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        vm.prank(address(module));
+        vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
+        cashModule.cancelWithdrawalByModule(address(safe));
+    }
+
+    function test_cancelWithdrawalByModule_reverts_whenModuleIsNotTheCaller() public {
+        
+    }
+
+    function test_requestWithdrawalByModule_revertsIfModuleIsNotWhitelistedOnDataProvider() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        // Remove from data provider whitelist after whitelisting on Cash
+        shouldWhitelist[0] = false;
+        dataProvider.configureModules(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        vm.prank(module);
+        vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+    }
+
+    function test_requestWithdrawalByModule_revertsIfNotCalledByWhitelistedWithdrawModule() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        
+        // only whitelist on data provider, not on cash module
+        vm.prank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+
+        vm.prank(module);
+        vm.expectRevert(ICashModule.OnlyWhitelistedModuleCanRequestWithdraw.selector);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), 1e6);
+    }
+
+    function test_configureModulesCanRequestWithdraw_canOnlyBeCalledByCashController() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        address alice = makeAddr("alice");
+
+        vm.prank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+
+        vm.prank(alice);
+        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.ModulesCanRequestWithdrawConfigured(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        address[] memory whitelistedModules = cashModule.getWhitelistedModulesCanRequestWithdraw();
+        assertEq(whitelistedModules.length, 1);
+        assertEq(whitelistedModules[0], module);
+    }
+
+    function test_configureModulesCanRequestWithdraw_fails_whenArrayLengthMismatch() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](2);
+        modules[0] = module;
+        modules[1] = address(0);
+
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        vm.expectRevert(EnumerableAddressWhitelistLib.ArrayLengthMismatch.selector);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+    }
+
+    function test_configureModulesCanRequestWithdraw_fails_whenModuleNotWhitelistedOnDataProvider() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](2);
+        modules[0] = address(cashModule);
+        modules[1] = module;
+
+        bool[] memory shouldWhitelist = new bool[](2);
+        shouldWhitelist[0] = true;
+        shouldWhitelist[1] = true;
+
+        vm.prank(owner);
+        vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+    }
+
+    function test_configureModulesCanRequestWithdraw_doesNotCheckIfModuleIsWhitelistedOnDataProviderIfRemoving() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.startPrank(owner);    
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        shouldWhitelist[0] = false;
+        
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+
+        // Doesnt care if module is whitelisted on data provider if removing the module from whitelist
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.ModulesCanRequestWithdrawConfigured(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+    }
+
+    function test_configureModulesCanRequestWithdraw_fails_whenModuleIsAddressZero() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(0);
+
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.mockCall(address(dataProvider), abi.encodeWithSelector(IEtherFiDataProvider.isWhitelistedModule.selector, address(0)), abi.encode(true));
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(EnumerableAddressWhitelistLib.InvalidAddress.selector, 0));
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+    }
+
+    function test_cancelWithdrawal_works() public {
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // Verify pending withdrawal was set up correctly
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+
+        _cancelWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // Verify pending withdrawal is 0
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), 0);
+    }
+    
+    function test_cancelWithdrawal_reverts_whenNoWithdrawalQueued() public {
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CANCEL_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce())).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+        
+        vm.expectRevert(ICashModule.WithdrawalDoesNotExist.selector);
+        cashModule.cancelWithdrawal(address(safe), signers, signatures);
+    }
+
+    function test_cancelWithdrawal_reverts_whenQueuedByWhitelistedModule() public {
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // Making withdraw recipient a whitelisted module to simulate the scenario
+        address[] memory modules = new address[](1);
+        modules[0] = address(withdrawRecipient);
+
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        // Verify pending withdrawal was set up correctly
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+
+        vm.expectRevert(ICashModule.InvalidWithdrawRequest.selector);
+        cashModule.cancelWithdrawal(address(safe), new address[](0), new bytes[](0));
+    }
+
+    function test_cancelWithdraw_reverts_whenInvalidSignature() public {
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CANCEL_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce())).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = signatures[0]; // use the signature from owner1 itself for owner2 so its a wrong signature
+
+        vm.expectRevert(CashVerificationLib.InvalidSignatures.selector);
+        cashModule.cancelWithdrawal(address(safe), signers, signatures);
+    }
+
+    function test_cancelWithdraw_reverts_whenNoQuorum() public {
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdcScroll), address(safe), withdrawalAmount);
+
+        // Setup a pending withdrawal
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdcScroll);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CANCEL_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce())).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+
+        address[] memory signers = new address[](1);
+        signers[0] = owner1;
+
+        bytes[] memory signatures = new bytes[](1);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+
+        vm.expectRevert(EtherFiSafeErrors.InsufficientSigners.selector);
+        cashModule.cancelWithdrawal(address(safe), signers, signatures);
     }
 }

@@ -84,7 +84,7 @@ contract TopUpFactoryTest is Test, Constants {
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
-        implementation = new TopUp();
+        implementation = new TopUp(address(weth));
         address factoryImpl = address(new TopUpFactory());
         factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
         roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), admin);
@@ -134,7 +134,7 @@ contract TopUpFactoryTest is Test, Constants {
         factory.deployTopUpContract(salt);
 
         address topUpAddr = factory.getDeterministicAddress(salt);
-        TopUp topUp = TopUp(topUpAddr);
+        TopUp topUp = TopUp(payable(topUpAddr));
 
         assertEq(topUp.owner(), address(factory), "Factory should be bridge owner");
     }
@@ -654,7 +654,7 @@ contract TopUpFactoryTest is Test, Constants {
     function test_upgradeBeaconImplementation_succeeds() public {
         vm.startPrank(owner);
         
-        address newImplementation = address(new TopUp());
+        address newImplementation = address(new TopUp(address(weth)));
         // Get the current implementation before upgrade
         address oldImpl = UpgradeableBeacon(factory.beacon()).implementation();
         
@@ -678,7 +678,7 @@ contract TopUpFactoryTest is Test, Constants {
     function test_upgradeBeaconImplementation_reverts_whenCallerIsNotOwner() public {
         vm.startPrank(makeAddr("notOwner"));
 
-        address newImplementation = address(new TopUp());
+        address newImplementation = address(new TopUp(address(weth)));
         
         // Expect the upgrade to revert because caller is not the owner
         vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
@@ -700,7 +700,7 @@ contract TopUpFactoryTest is Test, Constants {
     function test_upgradeBeaconImplementation_affectsNewDeployments() public {
         // First upgrade the implementation
         vm.startPrank(owner);
-        address newImplementation = address(new TopUp());
+        address newImplementation = address(new TopUp(address(weth)));
         factory.upgradeBeaconImplementation(address(newImplementation));
         vm.stopPrank();
         
@@ -717,7 +717,7 @@ contract TopUpFactoryTest is Test, Constants {
         assertTrue(factory.isTopUpContract(deployedTopUp), "Address should be a valid TopUp contract");
         
         // Check if the topUp is properly initialized (owner should be factory)
-        TopUp topUp = TopUp(deployedTopUp);
+        TopUp topUp = TopUp(payable(deployedTopUp));
         assertEq(topUp.owner(), address(factory), "Factory should be TopUp owner");
     }
     
@@ -730,9 +730,9 @@ contract TopUpFactoryTest is Test, Constants {
         vm.stopPrank();
         
         // Note the original topUp state
-        TopUp topUp = TopUp(deployedTopUp);
+        TopUp topUp = TopUp(payable(deployedTopUp));
         address originalOwner = topUp.owner();
-        address newImplementation = address(new TopUp());
+        address newImplementation = address(new TopUp(address(weth)));
         // Now upgrade the implementation
         vm.prank(owner);
         factory.upgradeBeaconImplementation(address(newImplementation));

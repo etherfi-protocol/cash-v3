@@ -5,6 +5,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ModuleBase } from "../ModuleBase.sol";
+import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { IL2SyncPool } from "../../../src/interfaces/IL2SyncPool.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
@@ -15,7 +16,7 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
  * @notice Module for staking ETH and WETH through the EtherFi protocol
  * @dev Extends ModuleBase to provide staking functionality for Safes
  */
-contract EtherFiStakeModule is ModuleBase {
+contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance {
     using MessageHashUtils for bytes32;
 
     /// @notice Reference to the L2SyncPool contract for staking operations
@@ -37,9 +38,6 @@ contract EtherFiStakeModule is ModuleBase {
     
     /// @notice Thrown when the amount of weETH returned is less than the specified minimum
     error InsufficientReturnAmount();
-    
-    /// @notice Thrown when the Safe doesn't have sufficient balance for staking
-    error InsufficientBalanceOnSafe();
 
     /**
      * @notice Contract constructor
@@ -49,7 +47,7 @@ contract EtherFiStakeModule is ModuleBase {
      * @param _weETH Address of the weETH contract
      * @dev Initializes the contract with required contract references
      */
-    constructor(address _dataProvider, address _syncPool, address _weth, address _weETH) ModuleBase(_dataProvider) {
+    constructor(address _dataProvider, address _syncPool, address _weth, address _weETH) ModuleBase(_dataProvider) ModuleCheckBalance(_dataProvider) {
         if (_syncPool == address(0) || _weth == address(0) || _weETH == address(0)) revert InvalidInput();
         syncPool = IL2SyncPool(_syncPool);
         weth = _weth;
@@ -67,7 +65,6 @@ contract EtherFiStakeModule is ModuleBase {
      * @dev Verifies signature then executes the staking operation through the Safe's module execution
      * @custom:throws UnsupportedAsset If the asset is not ETH or WETH
      * @custom:throws InvalidInput If amountToDeposit or minReturn is zero
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      * @custom:throws InsufficientReturnAmount If the received weETH is less than minReturn
      * @custom:throws OnlyEtherFiSafe If the calling safe is not a valid EtherFiSafe
      * @custom:throws OnlySafeAdmin If signer is not an admin of the Safe
@@ -99,18 +96,12 @@ contract EtherFiStakeModule is ModuleBase {
      * @param minReturn The minimum amount of weETH to receive
      * @custom:throws UnsupportedAsset If the asset is not ETH or WETH
      * @custom:throws InvalidInput If amountToDeposit or minReturn is zero
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      * @custom:throws InsufficientReturnAmount If the received weETH is less than minReturn
      */
     function _deposit(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturn) internal {
         if (assetToDeposit != weth && assetToDeposit != ETH) revert UnsupportedAsset();
         if (amountToDeposit == 0 || minReturn == 0) revert InvalidInput();
-
-        uint256 bal;
-        if (assetToDeposit == ETH) bal = safe.balance;        
-        else bal = IERC20(assetToDeposit).balanceOf(safe);
-
-        if (bal < amountToDeposit) revert InsufficientBalanceOnSafe();
+        _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
         bytes[] memory data;

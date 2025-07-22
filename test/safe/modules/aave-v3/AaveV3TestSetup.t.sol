@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Test } from "forge-std/Test.sol";
 
-import { AaveV3Module, ModuleBase } from "../../../../src/modules/aave-v3/AaveV3Module.sol";
+import { AaveV3Module, ModuleBase, ModuleCheckBalance } from "../../../../src/modules/aave-v3/AaveV3Module.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
 
 contract AaveV3TestSetup is SafeTestSetup {

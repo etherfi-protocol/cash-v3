@@ -148,7 +148,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     function test_getMaxSpendDebit_underwaterPosition_USDCFirst() public {
         // Create debt by borrowing in credit mode
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         _updateSpendingLimit(1000_000e6, 1000_000e6);
         
@@ -200,7 +200,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     function test_getMaxSpendDebit_underwaterPosition_liquidUSDFirst() public {
         // Create debt
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         _updateSpendingLimit(1000_000e6, 1000_000e6);
         
         uint256 borrowAmount = weEthBorrowPower + liquidUsdBorrowPower - 1e6;
@@ -305,7 +305,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     function test_getMaxSpendDebit_cannotCoverDeficit() public {        
         // Create large debt
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         uint256 borrowAmount = 10000e6;
         address[] memory spendTokens = new address[](1);

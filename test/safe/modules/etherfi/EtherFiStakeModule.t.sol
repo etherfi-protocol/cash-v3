@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { SafeTestSetup, MessageHashUtils } from "../../SafeTestSetup.t.sol";
-import { EtherFiStakeModule } from "../../../../src/modules/etherfi/EtherFiStakeModule.sol";
+import { EtherFiStakeModule, ModuleCheckBalance } from "../../../../src/modules/etherfi/EtherFiStakeModule.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { IL2SyncPool } from "../../../../src/interfaces/IL2SyncPool.sol";
 
@@ -187,7 +187,7 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(EtherFiStakeModule.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
     }
     
@@ -208,7 +208,7 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(EtherFiStakeModule.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         stakeModule.deposit(address(safe), address(weth), amount, minReturn, owner1, signature);
     }
     
