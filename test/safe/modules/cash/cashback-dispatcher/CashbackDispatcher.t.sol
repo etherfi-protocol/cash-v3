@@ -112,7 +112,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
     function test_processCashback_providesCashback_inCreditFlow() public {
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 spendAmt = 100e6;
         deal(address(usdcScroll), address(safe), 10000e6);

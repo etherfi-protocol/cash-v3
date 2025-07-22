@@ -10,6 +10,7 @@ import { IAaveWrappedTokenGateway } from "../../interfaces/IAaveWrappedTokenGate
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 
 /**
  * @title AaveV3Module
@@ -17,7 +18,7 @@ import { ModuleBase } from "../ModuleBase.sol";
  * @notice Module for interacting with Aave V3 Protocol from a Safe
  * @dev Extends ModuleBase to provide Aave V3 integration for Safes
  */
-contract AaveV3Module is ModuleBase {
+contract AaveV3Module is ModuleBase, ModuleCheckBalance {
     using MessageHashUtils for bytes32;
 
     /// @notice Aave V3 Pool contract interface for lending/borrowing operations
@@ -63,9 +64,6 @@ contract AaveV3Module is ModuleBase {
     /// @notice Emitted when a safe claims all available rewards from Aave
     event ClaimAllRewardsOnAave(address indexed safe, address[] assets);
 
-    /// @notice Thrown when the Safe doesn't have sufficient token balance for an operation
-    error InsufficientBalanceOnSafe();
-
     /**
      * @notice Contract constructor
      * @param _aavePool Address of the Aave V3 Pool contract
@@ -75,7 +73,7 @@ contract AaveV3Module is ModuleBase {
      * @dev Initializes the contract with necessary Aave V3 protocol contracts
      * @custom:throws InvalidInput If any provided address is zero
      */
-    constructor(address _aavePool, address _aaveIncentivesManager, address _wrappedTokenGateway, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
+    constructor(address _aavePool, address _aaveIncentivesManager, address _wrappedTokenGateway, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         if (_aavePool == address(0) || _aaveIncentivesManager == address(0) || _wrappedTokenGateway == address(0)) revert InvalidInput();
         aaveV3Pool = IAavePoolV3(_aavePool);
         aaveIncentivesManager = IAaveV3IncentivesManager(_aaveIncentivesManager);
@@ -90,7 +88,6 @@ contract AaveV3Module is ModuleBase {
      * @param signer The address that signed the transaction
      * @param signature The signature authorizing the transaction
      * @dev Verifies signature then executes token approval and supply through the Safe's module execution
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      * @custom:throws InvalidInput If amount is zero
      * @custom:throws OnlySafeAdmin If signer is not an admin of the Safe
      * @custom:throws InvalidSignature If the signature is invalid
@@ -150,7 +147,6 @@ contract AaveV3Module is ModuleBase {
      * @param signer The address that signed the transaction
      * @param signature The signature authorizing the transaction
      * @dev Verifies signature then executes repayment through the Safe's module execution
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      * @custom:throws InvalidInput If amount is zero
      * @custom:throws OnlySafeAdmin If signer is not an admin of the Safe
      * @custom:throws InvalidSignature If the signature is invalid
@@ -209,17 +205,10 @@ contract AaveV3Module is ModuleBase {
      * @param asset The address of the token to be supplied (or ETH address for ETH)
      * @param amount The amount of tokens to be supplied
      * @custom:throws InvalidInput If amount is zero
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
     function _supply(address safe, address asset, uint256 amount) internal {
-        uint256 bal;
-
-        if (amount == 0) revert InvalidInput();
-        
-        if (asset == ETH) bal = safe.balance;        
-        else bal = IERC20(asset).balanceOf(safe);
-        
-        if (bal < amount) revert InsufficientBalanceOnSafe();
+        if (amount == 0) revert InvalidInput();        
+        _checkAmountAvailable(safe, asset, amount);
 
         address[] memory to;
         bytes[] memory data;
@@ -334,7 +323,6 @@ contract AaveV3Module is ModuleBase {
      * @param asset The address of the asset to be repaid (or ETH address for ETH)
      * @param amount The amount of tokens to be repaid
      * @custom:throws InvalidInput If amount is zero
-     * @custom:throws InsufficientBalanceOnSafe If the Safe doesn't have enough tokens
      */
     function _repay(address safe, address asset, uint256 amount) internal returns (uint256) {
         address weth = aaveWrappedTokenGateway.getWETHAddress();
@@ -343,13 +331,8 @@ contract AaveV3Module is ModuleBase {
             else amount = getTokenTotalBorrowAmount(safe, asset);
         }
         if (amount == 0) revert InvalidInput();
-        
-        uint256 bal;
-        
-        if (asset == ETH) bal = safe.balance;        
-        else bal = IERC20(asset).balanceOf(safe);
-        
-        if (bal < amount) revert InsufficientBalanceOnSafe();
+
+        _checkAmountAvailable(safe, asset, amount);
 
         address[] memory to;
         bytes[] memory data;

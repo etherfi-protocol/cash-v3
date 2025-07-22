@@ -259,7 +259,7 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
      */
     function getLiquidAssetWithdrawQueue(address asset) external view returns (address) {
         return _getSettlementDispatcherStorage().liquidWithdrawQueue[asset];
-    } 
+    }
 
     /**
      * @notice Returns the refund wallet address set in the data provider contract

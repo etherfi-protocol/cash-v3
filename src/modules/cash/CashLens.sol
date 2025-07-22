@@ -110,8 +110,8 @@ contract CashLens is UpgradeableProxy {
         uint256 amountInUsd
     ) public view returns (Mode mode, address token, bool canSpendResult, string memory declineReason) {
         SafeData memory safeData = cashModule.getData(safe);
-        if (safeData.incomingCreditModeStartTime != 0) safeData.mode = Mode.Credit;
-        mode = safeData.mode;
+        if (safeData.incomingModeStartTime != 0) mode = safeData.incomingMode;
+        else mode = safeData.mode;
         
         address[] memory tokenPreferences = mode == Mode.Debit ? debitModeTokenPreferences : creditModeTokenPreferences;
         
@@ -158,25 +158,26 @@ contract CashLens is UpgradeableProxy {
     function _validateSpending(address safe, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
         IDebtManager debtManager = cashModule.getDebtManager();
         SafeData memory safeData = cashModule.getData(safe);
-        
+
+        Mode mode = safeData.mode; 
         // Update mode if necessary
-        if (safeData.incomingCreditModeStartTime != 0) safeData.mode = Mode.Credit;
-        
+        if (safeData.incomingModeStartTime != 0) mode = safeData.incomingMode;
+
         // In Credit mode, only one token is allowed
-        if (safeData.mode == Mode.Credit && tokens.length > 1) return (false, "Only one token allowed in Credit mode");
+        if (mode == Mode.Credit && tokens.length > 1) return (false, "Only one token allowed in Credit mode");
         
         // Check spending limit
         (bool withinLimit, string memory limitMessage) = safeData.spendingLimit.canSpend(totalSpendingInUsd);
         if (!withinLimit) return (false, limitMessage);
         
         // Validate tokens
-        return _processTokensAndMode(safe, tokens, amountsInUsd, totalSpendingInUsd, debtManager, safeData);
+        return _processTokensAndMode(safe, tokens, amountsInUsd, totalSpendingInUsd, debtManager, safeData, mode);
     }
 
     /**
      * @notice Process tokens and check mode-specific rules
      */
-    function _processTokensAndMode(address safe, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
+    function _processTokensAndMode(address safe, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData, Mode mode) internal view returns (bool, string memory) {
         // Convert USD to token amounts and validate each token
         uint256[] memory amounts = new uint256[](tokens.length);
         
@@ -190,13 +191,13 @@ contract CashLens is UpgradeableProxy {
             amounts[i] = debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
             
             // In Debit mode, check each token's balance
-            if (safeData.mode == Mode.Debit && IERC20(tokens[i]).balanceOf(safe) < amounts[i]) {
+            if (mode == Mode.Debit && IERC20(tokens[i]).balanceOf(safe) < amounts[i]) {
                 return (false, "Insufficient token balance for debit mode spending");
             }
         }
         
         // Check mode-specific conditions
-        if (safeData.mode == Mode.Credit) {
+        if (mode == Mode.Credit) {
             return _creditModeCheck(safe, tokens, amounts, totalSpendingInUsd, debtManager, safeData);
         } else {
             return _debitModeCheck(safe, tokens, amounts, debtManager, safeData);
@@ -272,7 +273,7 @@ contract CashLens is UpgradeableProxy {
      *   - debitMaxSpend: Detailed breakdown of debit mode spending limits per token
      *   - spendingLimitAllowance: Remaining spending limit allowance
      *   - totalCashbackEarnedInUsd: Running total of all cashback earned
-     *   - incomingCreditModeStartTime: Timestamp when Credit mode takes effect
+     *   - incomingModeStartTime: Timestamp when Credit mode takes effect
      */
     function getSafeCashData(address safe, address[] memory debtServiceTokenPreference) external view returns (SafeCashData memory safeCashData) {
         IDebtManager debtManager = cashModule.getDebtManager();
@@ -304,10 +305,10 @@ contract CashLens is UpgradeableProxy {
         else safeCashData.debitMaxSpend = getMaxSpendDebit(safe, debtServiceTokenPreference);
 
         safeCashData.totalCashbackEarnedInUsd = safeData.totalCashbackEarnedInUsd;
-        safeCashData.incomingCreditModeStartTime = safeData.incomingCreditModeStartTime;
+        safeCashData.incomingModeStartTime = safeData.incomingModeStartTime;
         safeCashData.mode = safeData.mode;
-        
-        if (safeCashData.incomingCreditModeStartTime > 0 && block.timestamp > safeCashData.incomingCreditModeStartTime) safeCashData.mode = Mode.Credit;
+
+        if (safeCashData.incomingModeStartTime > 0 && block.timestamp > safeCashData.incomingModeStartTime) safeCashData.mode = safeData.incomingMode;
     }
 
     /**

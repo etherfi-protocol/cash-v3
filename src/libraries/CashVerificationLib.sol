@@ -21,6 +21,9 @@ library CashVerificationLib {
     /// @notice Method identifier for withdrawal requests
     bytes32 public constant REQUEST_WITHDRAWAL_METHOD = keccak256("requestWithdrawal");
 
+    /// @notice Method identifier for withdrawal cancellation
+    bytes32 public constant CANCEL_WITHDRAWAL_METHOD = keccak256("cancelWithdrawal");
+
     /// @notice Method identifier for spending limit updates
     bytes32 public constant UPDATE_SPENDING_LIMIT_METHOD = keccak256("updateSpendingLimit");
 
@@ -91,6 +94,20 @@ library CashVerificationLib {
      */
     function verifyRequestWithdrawalSig(address safe, uint256 nonce, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) internal view {
         bytes32 digestHash = keccak256(abi.encodePacked(REQUEST_WITHDRAWAL_METHOD, block.chainid, safe, nonce, abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+    }
+
+    /**
+     * @notice Verifies a signature for cancelling a withdrawal
+     * @dev Creates and validates an EIP-191 signed message hash
+     * @param safe Address of the safe
+     * @param nonce Transaction nonce for replay protection
+     * @param signers Address of the signers
+     * @param signatures ECDSA signatures by signers
+     * @custom:throws InvalidSignatures if the signature is invalid
+     */
+    function verifyCancelWithdrawalSig(address safe, uint256 nonce, address[] calldata signers, bytes[] calldata signatures) internal view {
+        bytes32 digestHash = keccak256(abi.encodePacked(CANCEL_WITHDRAWAL_METHOD, block.chainid, safe, nonce)).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 

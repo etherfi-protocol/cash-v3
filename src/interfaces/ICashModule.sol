@@ -90,10 +90,12 @@ struct SafeData {
     WithdrawalRequest pendingWithdrawalRequest;
     /// @notice User's chosen mode
     Mode mode;
-    /// @notice Start time for credit mode
-    uint256 incomingCreditModeStartTime;
+    /// @notice Start time for incoming mode
+    uint256 incomingModeStartTime;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
+    /// @notice Incoming mode that will be applied after the delay
+    Mode incomingMode;
 }
 
 /**
@@ -120,8 +122,8 @@ struct SafeCashConfig {
     WithdrawalRequest pendingWithdrawalRequest;
     /// @notice Current operating mode (Credit or Debit) for spending transactions
     Mode mode;
-    /// @notice Timestamp when a pending change to Credit mode will take effect (0 if no pending change)
-    uint256 incomingCreditModeStartTime;
+    /// @notice Timestamp when a pending change to incoming mode will take effect (0 if no pending change)
+    uint256 incomingModeStartTime;
     /// @notice Tier level of the safe that determines cashback percentages
     SafeTiers safeTier;
     /// @notice Mapping of transaction IDs to cleared status to prevent replay attacks
@@ -130,6 +132,8 @@ struct SafeCashConfig {
     uint256 DEPRECATED_cashbackSplitToSafePercentage;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
+    /// @notice Incoming mode that will be applied after the delay
+    Mode incomingMode; 
 }
 
 /**
@@ -160,8 +164,8 @@ struct SafeCashData {
     uint256 spendingLimitAllowance;
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
-    /// @notice Timestamp when a pending change to Credit mode will take effect (0 if no pending change)
-    uint256 incomingCreditModeStartTime;
+    /// @notice Timestamp when a pending change to incoming mode mode will take effect (0 if no pending change)
+    uint256 incomingModeStartTime;
     /// @notice Maximum spendable amount in Debit mode 
     DebitModeMaxSpend debitMaxSpend;
 }
@@ -253,6 +257,24 @@ interface ICashModule {
     /// @param asset The address of the invalid asset
     error InvalidWithdrawAsset(address asset);
 
+    /// @notice Error thrown when a withdrawal request is made by a module that is not whitelisted
+    error OnlyWhitelistedModuleCanRequestWithdraw();
+
+    /// @notice Error thrown when a module tries to process a withdrawal that was not requested by it
+    error OnlyModuleThatRequestedCanWithdraw();
+
+    /// @notice Error thrown when a module tries to cancel a withdrawal that was not requested by it
+    error OnlyModuleThatRequestedCanCancel();
+
+    /// @notice Error thrown when a withdrawal request does not exist for a safe
+    error WithdrawalDoesNotExist();
+
+    /// @notice Error thrown when a module is not whitelisted on the data provider
+    error ModuleNotWhitelistedOnDataProvider();
+
+    /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
+    error InvalidWithdrawRequest();
+
     /**
      * @notice Role identifier for EtherFi wallet access control
      * @return The role identifier as bytes32
@@ -276,13 +298,6 @@ interface ICashModule {
      * @return 100% value in basis points
      */
     function HUNDRED_PERCENT_IN_BPS() external pure returns (uint256);
-
-    /**
-     * @notice Returns if an asset is a whitelisted withdraw asset
-     * @param asset Address of the asset
-     * @return True if asset is whitelisted for withdrawals, false otherwise
-     */
-    function isWhitelistedWithdrawAsset(address asset) external view returns (bool);
 
     /**
      * @notice Returns all the assets whitelisted for withdrawals
@@ -364,12 +379,12 @@ interface ICashModule {
     function getMode(address safe) external view returns (Mode);
 
     /**
-     * @notice Gets the timestamp when a pending credit mode change will take effect
+     * @notice Gets the timestamp when a pending mode change will take effect
      * @dev Returns 0 if no pending change or if the safe uses debit mode
      * @param safe Address of the EtherFi Safe
-     * @return Timestamp when credit mode will take effect, or 0 if not applicable
+     * @return Timestamp when incoming mode will take effect, or 0 if not applicable
      */
-    function incomingCreditModeStartTime(address safe) external view returns (uint256);
+    function incomingModeStartTime(address safe) external view returns (uint256);
 
     /**
      * @notice Gets the pending withdrawal amount for a token
@@ -380,6 +395,12 @@ interface ICashModule {
      * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
      */
     function getPendingWithdrawalAmount(address safe, address token) external view returns (uint256);
+
+    /**
+     * @notice Returns the list of modules that can request withdrawals
+     * @return Array of module addresses that can request withdrawals
+     */
+    function getWhitelistedModulesCanRequestWithdraw() external view returns (address[] memory);
 
     /**
      * @notice Sets up a new Safe's Cash Module with initial configuration
@@ -402,6 +423,41 @@ interface ICashModule {
      * @custom:throws InvalidInput if any essential address is zero
      */
     function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcherReap, address _settlementDispatcherRain, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
+
+    /**
+     * @notice Cancel a pending withdrawal request
+     * @dev Only callable by the module that requested the withdrawal if requested by a whitelisted module
+     * @param safe Address of the EtherFi Safe
+     * @param signers Array of signers for the cancellation
+     * @param signatures Array of signatures from the signers
+     */
+    function cancelWithdrawal(address safe, address[] calldata signers, bytes[] calldata signatures) external;
+
+    /**
+     * @notice Cancels a pending withdrawal request by the module
+     * @dev Only callable by whitelisted modules that requested the withdrawal
+     * @param safe Address of the EtherFi Safe
+     */
+    function cancelWithdrawalByModule(address safe) external;
+
+    /**
+     * @notice Requests a withdrawal of a token by a module on behalf of a safe
+     * @dev Can only be called by whitelisted modules
+     * @param safe Address of the EtherFi Safe
+     * @param token Token address to withdraw
+     * @param amount Token amount to withdraw
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws OnlyWhitelistedModuleCanRequestWithdraw if the caller is not a whitelisted module
+     */
+    function requestWithdrawalByModule(address safe, address token, uint256 amount) external;
+
+    /**
+     * @notice Configures which modules can request withdrawals
+     * @dev Can only be called by the CASH_MODULE_CONTROLLER_ROLE
+     * @param modules Array of module addresses to configure
+     * @param shouldWhitelist Array of boolean values indicating whether to whitelist each module
+     */
+    function configureModulesCanRequestWithdraw(address[] calldata modules, bool[] calldata shouldWhitelist) external;
 
     /**
      * @notice Configures the withdraw assets whitelist
@@ -449,7 +505,7 @@ interface ICashModule {
 
     /**
      * @notice Sets the operating mode for a safe
-     * @dev Switches between Debit and Credit modes, with possible delay for Credit mode
+     * @dev Switches between Debit and Credit modes with delay
      * @param safe Address of the EtherFi Safe
      * @param mode The target mode (Debit or Credit)
      * @param signer Address of the safe admin signing the transaction
