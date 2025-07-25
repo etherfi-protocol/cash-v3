@@ -345,6 +345,14 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
      * @custom:throws InsufficientFeeToCoverCost If not enough ETH is provided for fees
      */
     function bridge(address token, uint256 amount, uint256 minReturnLD) external payable whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        if (token == address(0) || amount == 0) revert InvalidValue();
+        
+        uint256 balance = 0;
+        if (token == ETH) balance = address(this).balance;
+        else balance = IERC20(token).balanceOf(address(this));
+        
+        if (balance < amount) revert InsufficientBalance();
+
         DestinationData memory destData = _getSettlementDispatcherStorage().destinationData[token];
         if (destData.useCanonicalBridge) {
             _withdrawCanonicalBridge(token, destData.destRecipient, amount, destData.minGasLimit);
@@ -380,14 +388,7 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
         address token,
         uint256 amount
     ) public view returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
-        if (token == address(0) || amount == 0) revert InvalidValue();
         
-        uint256 balance = 0;
-        if (token == ETH) balance = address(this).balance;
-        else balance = IERC20(token).balanceOf(address(this));
-        
-        if (balance < amount) revert InsufficientBalance();
-
         DestinationData memory destData = _getSettlementDispatcherStorage().destinationData[token];
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
 
@@ -439,7 +440,6 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
      * @param minGasLimit Minimum gas limit for the withdrawal
      */
     function _withdrawCanonicalBridge(address token, address recipient, uint256 amount, uint256 minGasLimit) internal returns (uint256) {
-        if (amount == 0 || recipient == address(0)) revert InvalidValue();
         if (token == ETH) {
             IL2Messenger(ETH_MESSENGER).sendMessage{value: amount}(recipient, amount, "", minGasLimit);
         }
