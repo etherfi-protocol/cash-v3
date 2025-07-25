@@ -71,6 +71,14 @@
         "maxSlippageInBps": "0",
         "nttManager": "0x344169Cc4abE9459e77bD99D13AA8589b55b6174",
         "dustDecimals": "10"
+      },
+      {
+        "token": "usdt",
+        "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "bridge": "scrollERC20BridgeAdapter",
+        "maxSlippageInBps": "0",
+        "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
+        "gasLimitForScrollGateway": "200000"
       }
     ]
   },
@@ -114,6 +122,13 @@
         "maxSlippageInBps": "0",
         "nttManager": "0xE87797A1aFb329216811dfA22C87380128CA17d8",
         "dustDecimals": "10"
+      },
+      {
+        "token": "USDT",
+        "address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+        "bridge": "baseWithdrawERC20BridgeAdapter",
+        "maxSlippageInBps": "0",
+        "baseWithdrawERC20BridgeAdapter": "0x83c536a18e295a5dbc8f678aa3e293ed7884044e"
       }
     ]
   }
