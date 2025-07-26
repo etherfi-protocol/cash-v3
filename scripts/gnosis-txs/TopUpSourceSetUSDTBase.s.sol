@@ -5,7 +5,7 @@ import {stdJson} from "forge-std/StdJson.sol";
 import  "forge-std/Vm.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import {TopUpFactory} from "../../src/top-up/TopUpFactory.sol";
+import {OldTopUpFactory} from "../../src/top-up/OldTopUpFactory.sol";
 import {Utils} from "../utils/Utils.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import {Test} from "forge-std/Test.sol";
@@ -22,7 +22,8 @@ struct TokenConfig {
 contract TopUpSourceSetUSDTBase is Utils, GnosisHelpers, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-    TopUpFactory topUpFactory;
+    // Upgrade to new TopUpFactory has not been executed yet
+    OldTopUpFactory OldTopUpFactory;
     address baseWithdrawERC20BridgeAdapter; 
     // TopUpDest is our mainnet TopUpSourceFactory contracts as we can't bridge directly to Base
     address topUpDest;
@@ -30,7 +31,7 @@ contract TopUpSourceSetUSDTBase is Utils, GnosisHelpers, Test {
 
         string memory deployments = readTopUpSourceDeployment();
         string memory chainId = vm.toString(block.chainid);
-        topUpFactory = TopUpFactory(
+        OldTopUpFactory = OldTopUpFactory(
             payable(
                 stdJson.readAddress(
                     deployments,
@@ -71,7 +72,7 @@ contract TopUpSourceSetUSDTBase is Utils, GnosisHelpers, Test {
         executeGnosisTransactionBundle(path);
 
         deal(tokens[0], address(topUpFactory), 1 ether);
-        (, uint256 fee) = topUpFactory.getBridgeFee(tokens[0]);
+        (, uint256 fee) = OldTopUpFactory.getBridgeFee(tokens[0]);
         // deal(address(vm.addr(1)), fee);
         // vm.prank(address(vm.addr(1)));
         // topUpFactory.bridge{value: fee}(tokens[0]);
