@@ -21,6 +21,11 @@ contract TopUp is Constants, Ownable {
     /// @notice Error thrown when ETH transfer fails
     error EthTransferFailed();
 
+    /// @notice Emitted when funds are processed
+    /// @param token Address of the token processed
+    /// @param amount Amount of the token processed
+    event ProcessTopUp(address indexed token, uint256 amount);
+
     address public immutable weth;
 
     constructor(address _weth) {
@@ -67,6 +72,9 @@ contract TopUp is Constants, Ownable {
                 balance = IERC20(tokens[i]).balanceOf(address(this));
                 if (balance > 0) IERC20(tokens[i]).safeTransfer(_owner, balance);
             }
+
+            emit ProcessTopUp(tokens[i], balance);
+
             unchecked {
                 ++i;
             }
