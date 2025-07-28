@@ -96,7 +96,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 debtManagerBalBefore = usdcScroll.balanceOf(address(debtManager));
 
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 amount = 10e6;
 
@@ -126,7 +126,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         deal(address(usdcScroll), address(safe), initialBalance);
 
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 amount = 10e6;
 
@@ -261,7 +261,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 borrowAmt = totalMaxBorrow - futureBorrowAmt;
 
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdcScroll);
@@ -295,7 +295,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(withdrawalAmt, 0);
     }
 
-    function test_spend_updatesWithdrawalRequestIfNecessary() public {
+    function test_spend_cancelsWithdrawalRequestIfNecessary() public {
         uint256 initialAmount = 200e6;
         uint256 spendAmount = 150e6;
         uint256 withdrawalAmount = 100e6;
@@ -320,8 +320,6 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Spend should work and cancel the withdrawal
         vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.WithdrawalAmountUpdated(address(safe), address(usdcScroll), initialAmount - spendAmount);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify tokens were transferred
@@ -329,7 +327,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + spendAmount);
 
         // Verify pending withdrawal was cancelled
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), initialAmount - spendAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), 0);
     }
 
     function test_spend_respectsSpendingLimits() public {
@@ -359,7 +357,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
     function test_spend_inDebitMode_fails_whenBorrowExceedsMaxBorrow() public {
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 safeBalUsdc = 1000e6;
         deal(address(usdcScroll), address(safe), safeBalUsdc);
@@ -377,6 +375,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         _setMode(Mode.Debit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         spendAmounts[0] = safeBalUsdc;
 
@@ -387,7 +386,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
     
     function test_spend_inDebitMode_cancelsWithdrawal_whenBorrowExceedsMaxBorrowAfterSpending() public {
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 safeBalUsdc = 1000e6;
         uint256 safeBalWeETH = 1 ether;
@@ -406,6 +405,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         _setMode(Mode.Debit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory withdrawTokens = new address[](1);
         withdrawTokens[0] = address(weETHScroll);
@@ -609,7 +609,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 debtManagerBalBefore = usdcScroll.balanceOf(address(debtManager));
 
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 amount = 10e6;
 

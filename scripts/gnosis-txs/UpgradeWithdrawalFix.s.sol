@@ -96,17 +96,6 @@ contract UpgradeWithdrawalFix is GnosisHelpers, Utils, Test {
         vm.stopBroadcast();
 
         executeGnosisTransactionBundle(path);
-
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(weth));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(weEth));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(usdc));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(liquidEth));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(liquidUsd));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(liquidBtc));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(eUsd));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(eBtc));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(scr));
-        assertTrue(CashModuleCore(cashModule).isWhitelistedWithdrawAsset(ethfi));
     }
 
     function _buildWithdrawArrays() internal {

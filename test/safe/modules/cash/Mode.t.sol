@@ -24,7 +24,7 @@ contract CashModuleModeTest is CashModuleTestSetup {
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit));
     }
 
-    function test_setMode_doesNotIncursDelay_whenSwitchingFromCreditToDebitMode() public {
+    function test_setMode_doesIncursDelay_whenSwitchingFromCreditToDebitMode() public {
         _setMode(Mode.Credit);
         (,, uint256 modeDelay) = cashModule.getDelays();
 
@@ -32,6 +32,8 @@ contract CashModuleModeTest is CashModuleTestSetup {
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit));
 
         _setMode(Mode.Debit);
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit));
+        vm.warp(block.timestamp + modeDelay + 1);
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit));
     }
 

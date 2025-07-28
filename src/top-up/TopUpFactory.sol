@@ -149,7 +149,7 @@ contract TopUpFactory is BeaconFactory, Constants {
         if (start + n > length) n = length - start;
 
         for (uint256 i = 0; i < n;) {
-            TopUp($.deployedAddresses.at(start + i)).processTopUp(tokens);
+            TopUp(payable($.deployedAddresses.at(start + i))).processTopUp(tokens);
             unchecked {
                 ++i;
             }
@@ -170,7 +170,7 @@ contract TopUpFactory is BeaconFactory, Constants {
 
         for (uint256 i = 0; i < addrLength;) {
             if (!$.deployedAddresses.contains(topUpContracts[i])) revert InvalidTopUpAddress();
-            TopUp(topUpContracts[i]).processTopUp(tokens);
+            TopUp(payable(topUpContracts[i])).processTopUp(tokens);
             unchecked {
                 ++i;
             }

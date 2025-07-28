@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
-
+import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
 import { Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
@@ -65,6 +65,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         EnumerableSetLib.AddressSet whitelistedWithdrawAssets;
         /// @notice Tracks pending cashback amounts for a token in USD for each account (safe or spender)
         mapping(address account => mapping(address token => uint256 pendingCashback)) pendingCashbackForTokenInUsd;
+        /// @notice Addresses of modules that can request withdrawals on behalf of safes
+        EnumerableSetLib.AddressSet whitelistedModulesCanRequestWithdraw;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -138,6 +140,24 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @param asset The address of the invalid asset
     error InvalidWithdrawAsset(address asset);
 
+    /// @notice Error thrown when a withdrawal request is made by a module that is not whitelisted
+    error OnlyWhitelistedModuleCanRequestWithdraw();
+
+    /// @notice Error thrown when a module tries to process a withdrawal that was not requested by it
+    error OnlyModuleThatRequestedCanWithdraw();
+
+    /// @notice Error thrown when a module tries to cancel a withdrawal that was not requested by it
+    error OnlyModuleThatRequestedCanCancel();
+
+    /// @notice Error thrown when a withdrawal request does not exist for a safe
+    error WithdrawalDoesNotExist();
+
+    /// @notice Error thrown when a module is not whitelisted on the data provider
+    error ModuleNotWhitelistedOnDataProvider();
+
+    /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
+    error InvalidWithdrawRequest();
+
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { 
         _disableInitializers();
     }
@@ -165,23 +185,32 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
      * @param safe Address of the EtherFi Safe
      */
     function _cancelOldWithdrawal(address safe) internal {
-        ICashEventEmitter eventEmitter = _getCashModuleStorage().cashEventEmitter;
-        SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        ICashEventEmitter eventEmitter = $.cashEventEmitter;
+        SafeCashConfig storage safeCashConfig = $.safeCashConfig[safe];
+        
+        address recipient = safeCashConfig.pendingWithdrawalRequest.recipient;
+
         if (safeCashConfig.pendingWithdrawalRequest.tokens.length > 0) {
-            eventEmitter.emitWithdrawalCancelled(safe, safeCashConfig.pendingWithdrawalRequest.tokens, safeCashConfig.pendingWithdrawalRequest.amounts, safeCashConfig.pendingWithdrawalRequest.recipient);
+            if ($.whitelistedModulesCanRequestWithdraw.contains(recipient)) {
+                // Only call the function if the module is whitelisted on data provider
+                if (etherFiDataProvider.isWhitelistedModule(recipient)) IBridgeModule(recipient).cancelBridgeByCashModule(safe);
+            }
+
+            eventEmitter.emitWithdrawalCancelled(safe, safeCashConfig.pendingWithdrawalRequest.tokens, safeCashConfig.pendingWithdrawalRequest.amounts, recipient);
             delete safeCashConfig.pendingWithdrawalRequest;
         }
     }
 
     /**
-     * @dev Updates withdrawal request if necessary based on available balance
+     * @dev Cancels withdrawal request if necessary based on available balance
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to update
      * @param amount Amount being processed
      * @custom:throws InsufficientBalance if there is not enough balance for the operation
      */
-    function _updateWithdrawalRequestIfNecessary(address safe, address token, uint256 amount) internal {
-        ICashEventEmitter eventEmitter = _getCashModuleStorage().cashEventEmitter;
+    function _cancelWithdrawalRequestIfNecessary(address safe, address token, uint256 amount) internal {
         SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
         uint256 balance = IERC20(token).balanceOf(safe);
 
@@ -203,9 +232,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         if (tokenIndex == len) return;
 
         if (amount + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
-            safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] = balance - amount;
-
-            eventEmitter.emitWithdrawalAmountUpdated(safe, token, balance - amount);
+            _cancelOldWithdrawal(safe);
         }
     }
 
@@ -217,14 +244,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
      */
     function _isBorrowToken(IDebtManager debtManager, address token) internal view returns (bool) {
         return debtManager.isBorrowToken(token);
-    }
-
-    /**
-     * @dev Checks if an asset is a whitelisted withdraw asset
-     * @param asset Address of the asset
-     */
-    function _isWhitelistedWithdrawAsset(address asset) internal view returns (bool) {
-        return _getCashModuleStorage().whitelistedWithdrawAssets.contains(asset);
     }
 
     /**
@@ -242,9 +261,10 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
      * @param $ Storage reference to the SafeCashConfig for the safe
      */
     function _setCurrentMode(SafeCashConfig storage $) internal {
-        if ($.incomingCreditModeStartTime != 0 && block.timestamp > $.incomingCreditModeStartTime) {
-            $.mode = Mode.Credit;
-            delete $.incomingCreditModeStartTime;
+        if ($.incomingModeStartTime != 0 && block.timestamp > $.incomingModeStartTime) {
+            $.mode = $.incomingMode;
+            delete $.incomingModeStartTime;
+            delete $.incomingMode;
         }
     }
 
@@ -274,8 +294,15 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     function _processWithdrawal(address safe) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = _getCashModuleStorage().safeCashConfig[safe];
+        
+        // Ensure that the withdrawal request exists
+        if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
 
         if ($$.pendingWithdrawalRequest.finalizeTime > block.timestamp) revert CannotWithdrawYet();
+        // Ensure that if the recipient of withdrawal is a whitelisted withdrawal module, only that module can process the withdrawal
+        if ($.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) {
+            if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanWithdraw();
+        }
         _areAssetsWithdrawable($, $$.pendingWithdrawalRequest.tokens);
 
         address recipient = $$.pendingWithdrawalRequest.recipient;

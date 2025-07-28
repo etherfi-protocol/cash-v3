@@ -10,6 +10,14 @@ import { Mode, SafeTiers, BinSponsor, CashbackTypes } from "./ICashModule.sol";
  */
 interface ICashEventEmitter {
     /**
+     * @notice Emits the ModulesCanRequestWithdrawConfigured event
+     * @dev Can only be called by the Cash Module Controller
+     * @param modules Array of module addresses that can request withdrawals
+     * @param shouldWhitelist Array of boolean values indicating if the module should be whitelisted for withdrawal
+     */
+    function emitModulesCanRequestWithdrawConfigured(address[] calldata modules, bool[] calldata shouldWhitelist) external;
+    
+    /**
      * @notice Emits the SettlementDispatcheUpdated event
      * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
      * @param oldDispatcher Address of the old dispatcher for the bin sponsor
