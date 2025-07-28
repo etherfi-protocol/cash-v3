@@ -53,6 +53,10 @@ contract TopUpTest is Test, Constants {
         tokens[1] = ETH; // ETH
 
         vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit TopUp.ProcessTopUp(address(token), 100);
+        vm.expectEmit(true, true, true, true);
+        emit TopUp.ProcessTopUp(address(ETH), 1 ether);
         topUp.processTopUp(tokens);
 
         assertEq(token.balanceOf(address(topUp)), 0, "TopUp contract should have 0 tokens");
