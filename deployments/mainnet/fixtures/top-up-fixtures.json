@@ -73,10 +73,10 @@
         "dustDecimals": "10"
       },
       {
-        "token": "usdt",
+        "token": "USDT",
         "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
         "bridge": "scrollERC20BridgeAdapter",
-        "maxSlippageInBps": "0",
+        "maxSlippageInBps": "50",
         "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
         "gasLimitForScrollGateway": "200000"
       }
