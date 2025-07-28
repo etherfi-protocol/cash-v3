@@ -760,7 +760,7 @@ contract TopUpFactoryTest is Test, Constants {
         address roleRegistryImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
 
-        implementation = new TopUp();
+        implementation = new TopUp(address(weth));
         address factoryImpl = address(new TopUpFactory());
         factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
         roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), admin);

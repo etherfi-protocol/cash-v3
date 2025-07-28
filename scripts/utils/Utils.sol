@@ -37,6 +37,8 @@ contract Utils is Script {
     string internal NTT_ADAPTER = "NTTAdapterSalt";
     string internal SCROLL_ERC20_BRIDGE_ADAPTER_DEV = "ScrollERC20BridgeAdapterDev";
     string internal SCROLL_ERC20_BRIDGE_ADAPTER_PROD = "ScrollERC20BridgeAdapterProd";
+    string internal BASE_WITHDRAW_ERC20_BRIDGE_ADAPTER_DEV = "BaseWithdrawERC20BridgeAdapterDev";
+    string internal BASE_WITHDRAW_ERC20_BRIDGE_ADAPTER_PROD = "BaseWithdrawERC20BridgeAdapterProd";
 
     string internal ETHER_FI_SAFE_IMPL = "EtherFiSafeImpl";
     string internal ETHER_FI_SAFE_FACTORY_IMPL = TOP_UP_SOURCE_FACTORY_IMPL;
