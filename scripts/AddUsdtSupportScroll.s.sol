@@ -10,7 +10,7 @@ import { Utils } from "./utils/Utils.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 import { PriceProvider, IAggregatorV3 } from "../src/oracle/PriceProvider.sol";
 
-contract AddUSDTSupport is Utils {
+contract AddUSDTSupportScroll is Utils {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     address usdt = 0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df;
@@ -24,7 +24,7 @@ contract AddUSDTSupport is Utils {
     PriceProvider priceProvider;
     string deployments;
 
-    address destRecipient = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
+    address destRecipient = 0x6f7F522075AA5483d049dF0Ef81FcdD3b0ace7f4; // Ryki Address
     address usdtUsdOracle = 0xf376A91Ae078927eb3686D6010a6f1482424954E;
 
     function run() public {
