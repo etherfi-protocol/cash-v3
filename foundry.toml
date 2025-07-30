@@ -18,8 +18,14 @@ dynamic_test_linking = true
 runs = 10000
 
 [rpc_endpoints]
+mainnet = "${MAINNET_RPC}"
+scroll = "${SCROLL_RPC}"
+base = "${BASE_RPC}"
 
 [etherscan]
+mainnet = { key = "${MAINNET_ETHERSCAN_KEY}" }
+scroll = { key = "${SCROLLSCAN_KEY}" }
+base = { key = "${BASESCAN_KEY}" }
 
 
 
