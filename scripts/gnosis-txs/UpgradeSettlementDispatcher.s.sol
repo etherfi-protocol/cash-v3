@@ -70,7 +70,6 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
 
         executeGnosisTransactionBundle(path);
 
-
         vm.startPrank(owner);
 
         deal(address(usdtScroll), address(settlementDispatcherRain), 1e6);
