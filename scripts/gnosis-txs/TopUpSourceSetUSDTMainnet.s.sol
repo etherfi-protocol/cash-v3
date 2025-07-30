@@ -3,7 +3,9 @@ pragma solidity ^0.8.28;
 
 import {stdJson} from "forge-std/StdJson.sol";
 import  "forge-std/Vm.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
+import { BeaconFactory } from "../../src/beacon-factory/BeaconFactory.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import {TopUpFactory} from "../../src/top-up/TopUpFactory.sol";
 import {Utils} from "../utils/Utils.sol";
@@ -25,6 +27,10 @@ contract TopUpSourceSetUSDTMainnet is Utils, GnosisHelpers, Test {
     TopUpFactory topUpFactory;
     address scrollERC20BridgeAdapter; 
     address topUpDest;
+
+    address newTopUpFactoryImp = 0xB580df5d8E6ceB72a936727DaE19F32cE4Bb303f;
+    address newTopUpImp = 0x1876eCAE880Ddf1F92E60c90e8916A3977576206;
+    
     function run() public {
 
         string memory deployments = readTopUpSourceDeployment();
@@ -57,7 +63,12 @@ contract TopUpSourceSetUSDTMainnet is Utils, GnosisHelpers, Test {
         string memory fixtures = vm.readFile(fixturesFile);
         (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, chainId);
         string memory setTokenConfig = iToHex(abi.encodeWithSelector(TopUpFactory.setTokenConfig.selector, tokens, tokenConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, "0", true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, "0", false)));
+
+        string memory upgradeTopUpFactory = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, newTopUpFactoryImp, ""));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), upgradeTopUpFactory, "0", false)));
+        string memory upgradeTopUp = iToHex(abi.encodeWithSelector(BeaconFactory.upgradeBeaconImplementation.selector, newTopUpImp, ""));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), upgradeTopUp, "0", true)));
 
         vm.createDir("./output", true);
         string memory path = string.concat("./output/TopUpUSDTSetConfig-", chainId, ".json");
@@ -66,10 +77,10 @@ contract TopUpSourceSetUSDTMainnet is Utils, GnosisHelpers, Test {
         executeGnosisTransactionBundle(path);
 
         deal(tokens[0], address(topUpFactory), 100e6);
-        (, uint256 fee) = topUpFactory.getBridgeFee(tokens[0]);
+        (, uint256 fee) = topUpFactory.getBridgeFee(tokens[0], 100e6);
         deal(address(vm.addr(1)), fee);
         vm.prank(address(vm.addr(1)));
-        topUpFactory.bridge{value: fee}(tokens[0]);
+        topUpFactory.bridge{value: fee}(tokens[0], 100e6);
     }   
 
     // Helper function to parse token configs from JSON
