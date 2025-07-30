@@ -22,6 +22,8 @@ struct TokenConfig {
 contract TopUpSourceSetUSDTBase is Utils, GnosisHelpers, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
+    address newTopUpFactoryImp = 0x4c5644c0bcd100263d28c4eb735f9143ec83847f;
+
     TopUpFactory topUpFactory;
     address baseWithdrawERC20BridgeAdapter; 
     // TopUpDest is our mainnet TopUpSourceFactory contracts as we can't bridge directly to Base
