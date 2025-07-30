@@ -59,14 +59,18 @@ contract SetUsdtConfig is GnosisHelpers, Utils, Test {
             liquidationBonus: 1e18
         }); 
 
+        uint64 borrowApy = 1;
+
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
         string memory setusdtPriceProviderConfig = iToHex(abi.encodeWithSelector(PriceProvider.setTokenConfig.selector, tokens, priceProviderConfigs));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), setusdtPriceProviderConfig, "0", false)));
         
         string memory setUsdtConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, usdt, usdtConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setUsdtConfig, "0", true)));
-        
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setUsdtConfig, "0", false)));
+
+        string memory setUsdtBorrowConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportBorrowToken.selector, usdt, borrowApy, type(uint128).max));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setUsdtBorrowConfig, "0", true)));
         
         vm.createDir("./output", true);
         string memory path = "./output/SetUsdtConfig.json";
@@ -76,5 +80,6 @@ contract SetUsdtConfig is GnosisHelpers, Utils, Test {
         executeGnosisTransactionBundle(path);
 
         assert(IDebtManager(debtManager).isCollateralToken(usdt) == true);
+        assert(IDebtManager(debtManager).isBorrowToken(usdt) == true);
     }
 }

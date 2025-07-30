@@ -24,6 +24,7 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
     address mainnetSettlementAddress = 0x6f7F522075AA5483d049dF0Ef81FcdD3b0ace7f4;
 
     IERC20 public usdtScroll = IERC20(0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df);
+    IERC20 public usdcScroll = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
 
     address public owner = 0x23ddE38BA34e378D28c667bC26b44310c7CA0997;
 
@@ -50,15 +51,23 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(settlementDispatcherRain)), upgradeTransaction, "0", false)));
 
 
-        address[] memory tokens = new address[](1); 
-        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
+        address[] memory tokens = new address[](2); 
+        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](2);
         tokens[0] = address(usdtScroll);
+        tokens[1] = address(usdcScroll);
         destDatas[0] = SettlementDispatcher.DestinationData({
             destEid: 0,
             destRecipient: mainnetSettlementAddress,
             stargate: address(0),
             useCanonicalBridge: true,
-            minGasLimit: 200_000
+            minGasLimit: 0
+        });
+        destDatas[1] = SettlementDispatcher.DestinationData({
+            destEid: 0,
+            destRecipient: mainnetSettlementAddress,
+            stargate: address(0),
+            useCanonicalBridge: true,
+            minGasLimit: 0
         });
 
         string memory setDestinationData = iToHex(abi.encodeWithSelector(SettlementDispatcher.setDestinationData.selector, tokens, destDatas));
@@ -79,6 +88,14 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
         deal(address(usdtScroll), address(settlementDispatcherReap), 1e6);
         SettlementDispatcher(payable(settlementDispatcherReap)).bridge(address(usdtScroll), 1e6, 1);
         assertEq(usdtScroll.balanceOf(address(settlementDispatcherReap)), 0);
+
+        deal(address(usdcScroll), address(settlementDispatcherRain), 1e6);
+        SettlementDispatcher(payable(settlementDispatcherRain)).bridge(address(usdcScroll), 1e6, 1);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcherRain)), 0);
+
+        deal(address(usdcScroll), address(settlementDispatcherReap), 1e6);
+        SettlementDispatcher(payable(settlementDispatcherReap)).bridge(address(usdcScroll), 1e6, 1);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), 0);
     }
 
 }

@@ -43,16 +43,8 @@ contract TopUpSourceSetUSDTBase is Utils, GnosisHelpers, Test {
             string.concat(".", "addresses", ".", "BaseWithdrawERC20BridgeAdapter")
         );
 
-        string memory dir = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv(), "/"));
-        string memory chainDir = string.concat(mainnetChainId, "/");
-        string memory file = string.concat(dir, chainDir, "deployments", ".json");
-        string memory mainnetDeployments = vm.readFile(file);
-
-        // TopUpDest is our mainnet TopUpSourceFactory contracts as we can't bridge directly to Base
-        topUpDest = stdJson.readAddress(
-            mainnetDeployments,
-            string.concat(".", "addresses", ".", "TopUpSourceFactory")
-        );
+        // TopUpDest is our mainnet TopUpSourceFactory contracts as we can't bridge directly to scroll from base canonical
+        topUpDest = address(topUpFactory);
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
@@ -101,7 +93,7 @@ contract TopUpSourceSetUSDTBase is Utils, GnosisHelpers, Test {
         tokenConfig[0].recipientOnDestChain = topUpDest;
         tokenConfig[0].maxSlippageInBps = uint96(stdJson.readUint(jsonString, string.concat(base, ".maxSlippageInBps")));
         tokenConfig[0].bridgeAdapter = address(baseWithdrawERC20BridgeAdapter);
-        tokenConfig[0].additionalData = abi.encode(200_000, "");
+        tokenConfig[0].additionalData = abi.encode(0, "");
 
         return (tokens, tokenConfig);
     }

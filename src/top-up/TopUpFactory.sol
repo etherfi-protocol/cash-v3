@@ -81,8 +81,10 @@ contract TopUpFactory is BeaconFactory, Constants {
     error TokenCannotBeZeroAddress();
     /// @notice Error thrown when attempting to bridge a token without configuration
     error TokenConfigNotSet();
-    /// @notice Error thrown when attempting to bridge with zero balance
-    error ZeroBalance();
+    /// @notice Error thrown when attempting to bridge with zero amount
+    error AmountCannotBeZero();
+    /// @notice Error thrown when attempting to bridge with insufficient balance
+    error InsufficientBalance();
     /// @notice Error thrown when recovery wallet is not set
     error RecoveryWalletNotSet();
     /// @notice Error thrown when attempting to set zero address as recovery wallet
@@ -95,6 +97,10 @@ contract TopUpFactory is BeaconFactory, Constants {
     error InvalidStartIndex();
     /// @notice Error thrown when the token config passed is invalid
     error InvalidConfig();
+    /// @notice Error thrown when insufficient fee is passed for bridging
+    error InsufficientFeePassed();
+    /// @notice Error thrown when ETH transfer fails
+    error NativeTransferFailed();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -143,7 +149,7 @@ contract TopUpFactory is BeaconFactory, Constants {
         if (start + n > length) n = length - start;
 
         for (uint256 i = 0; i < n;) {
-            TopUp($.deployedAddresses.at(start + i)).processTopUp(tokens);
+            TopUp(payable($.deployedAddresses.at(start + i))).processTopUp(tokens);
             unchecked {
                 ++i;
             }
@@ -164,7 +170,7 @@ contract TopUpFactory is BeaconFactory, Constants {
 
         for (uint256 i = 0; i < addrLength;) {
             if (!$.deployedAddresses.contains(topUpContracts[i])) revert InvalidTopUpAddress();
-            TopUp(topUpContracts[i]).processTopUp(tokens);
+            TopUp(payable(topUpContracts[i])).processTopUp(tokens);
             unchecked {
                 ++i;
             }
@@ -208,21 +214,25 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @param token The address of the token to bridge
      * @custom:throws TokenCannotBeZeroAddress if token address is zero
      * @custom:throws TokenConfigNotSet if bridge configuration is not set for the token
-     * @custom:throws ZeroBalance if contract has no balance of the specified token
+     * @custom:throws AmountCannotBeZero if amount passed is zero
+     * @custom:throws InsufficientBalance if contract has insufficient balance of the specified token
      */
-    function bridge(address token) external payable whenNotPaused {
+    function bridge(address token, uint256 amount) external payable whenNotPaused {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
+        if (amount == 0) revert AmountCannotBeZero();
         if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
 
-        // leaving behind 0.01 ether for bridge fee if any
-        uint256 balance = token == ETH ? address(this).balance - 0.01 ether : IERC20(token).balanceOf(address(this));
-        if (balance == 0) revert ZeroBalance();
+        uint256 balance = token == ETH ? address(this).balance : IERC20(token).balanceOf(address(this));
+        if (balance < amount) revert InsufficientBalance();
 
-        DelegateCallLib.delegateCall($.tokenConfig[token].bridgeAdapter, abi.encodeWithSelector(BridgeAdapterBase.bridge.selector, token, balance, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData));
+        (, uint256 bridgeFee) = getBridgeFee(token, amount);
+        if (bridgeFee > msg.value) revert InsufficientFeePassed();
 
-        emit Bridge(token, balance);
+        DelegateCallLib.delegateCall($.tokenConfig[token].bridgeAdapter, abi.encodeWithSelector(BridgeAdapterBase.bridge.selector, token, amount, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData));
+
+        emit Bridge(token, amount);
     }
 
     /**
@@ -235,14 +245,17 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @custom:throws OnlyUnsupportedTokens if token is a supported bridge asset
      * @custom:throws RecoveryWalletNotSet if recovery wallet is not configured
      */
-    function recoverFunds(address token, uint256 amount) external onlyRoleRegistryOwner {
+    function recoverFunds(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter != address(0)) revert OnlyUnsupportedTokens();
         if ($.recoveryWallet == address(0)) revert RecoveryWalletNotSet();
 
-        IERC20(token).safeTransfer($.recoveryWallet, amount);
+        if (token == ETH) {
+            (bool success, ) = payable($.recoveryWallet).call{value: amount}("");
+            if (!success) revert NativeTransferFailed();
+        } else IERC20(token).safeTransfer($.recoveryWallet, amount);
 
         emit Recovery($.recoveryWallet, token, amount);
     }
@@ -268,22 +281,21 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @notice Gets the bridge fee for a token transfer
      * @dev Queries the bridge adapter for the fee estimation
      * @param token The address of the token to bridge
+     * @param amount The amount of the token to bridge
      * @return _token The fee token address
      * @return _amount The fee amount in the _token's decimals
      * @custom:throws TokenCannotBeZeroAddress if token address is zero
      * @custom:throws TokenConfigNotSet if bridge configuration is not set for the token
-     * @custom:throws ZeroBalance if contract has no balance of the specified token
+     * @custom:throws AmountCannotBeZero if contract has no balance of the specified token
      */
-    function getBridgeFee(address token) external view returns (address _token, uint256 _amount) {
+    function getBridgeFee(address token, uint256 amount) public view returns (address _token, uint256 _amount) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
         if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
+        if (amount == 0) revert AmountCannotBeZero();
 
-        uint256 balance = token == ETH ? address(this).balance : IERC20(token).balanceOf(address(this));
-        if (balance == 0) revert ZeroBalance();
-
-        return BridgeAdapterBase($.tokenConfig[token].bridgeAdapter).getBridgeFee(token, balance, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData);
+        return BridgeAdapterBase($.tokenConfig[token].bridgeAdapter).getBridgeFee(token, amount, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData);
     }
 
     /**
