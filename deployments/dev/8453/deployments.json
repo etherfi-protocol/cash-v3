@@ -5,6 +5,7 @@
     "StargateAdapter": "0x7F40ADbcc373d74c74b27f42c522e9CA95976389",
     "EtherFiOFTBridgeAdapter": "0x6C6C72B148f76DD10fE61956b058e5f356907640",
     "EtherFiLiquidBridgeAdapter": "0xf4f5a6c29807bfdfc8d5c572962b8781be951072",
-    "NTTAdapter": "0x1DCCe2dA4Ba31e6f41FD4bF37DC8dc5A37582009"
+    "NTTAdapter": "0x1DCCe2dA4Ba31e6f41FD4bF37DC8dc5A37582009",
+    "BaseWithdrawERC20BridgeAdapter": "0xe552587ae634930898E9eeEEE34a6270fDA6251e"
   }
 }

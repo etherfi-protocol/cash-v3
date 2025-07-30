@@ -61,7 +61,7 @@ contract BaseWithdrawERC20BridgeAdapter is BridgeAdapterBase {
         address, // destRecipient
         uint256, // maxSlippage
         bytes calldata // additionalData
-    ) public view override returns (address, uint256) {
+    ) public pure override returns (address, uint256) {
         return (ETH, 0);
     }
 }
