@@ -184,6 +184,23 @@ contract CashEventEmitter is UpgradeableProxy {
     event WithdrawTokensConfigured(address[] tokens, bool[] shouldWhitelist);
 
     /**
+     * @notice Emitted when modules are configured to request withdrawals
+     * @param modules Array of module addresses that can request withdrawals
+     * @param shouldWhitelist Array of boolean values suggesting whether to whitelist the modules
+     */
+    event ModulesCanRequestWithdrawConfigured(address[] modules, bool[] shouldWhitelist);
+
+    /**
+     * @notice Emits the ModulesCanRequestWithdrawConfigured event
+     * @dev Can only be called by the Cash Module
+     * @param modules Array of module addresses that can request withdrawals
+     * @param shouldWhitelist Array of boolean values suggesting whether to whitelist the modules
+     */
+    function emitModulesCanRequestWithdrawConfigured(address[] calldata modules, bool[] calldata shouldWhitelist) external onlyCashModule {
+        emit ModulesCanRequestWithdrawConfigured(modules, shouldWhitelist);
+    }
+
+    /**
      * @notice Emits the WithdrawTokensConfigured event
      * @param tokens Address of the tokens
      * @param shouldWhitelist Boolean value suggesting if the token should be whitelisted for withdrawal

@@ -48,7 +48,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
 
         bytes memory signature = abi.encodePacked(r, s, v);
         cashModule.setMode(address(safe), Mode.Credit, owner1, signature);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
     }
 
     // Borrow token support related tests

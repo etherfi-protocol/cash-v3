@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, IDebtManager, IERC20 } from "./AaveV3TestSetup.t.sol";
+import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, ModuleCheckBalance, IDebtManager, IERC20 } from "./AaveV3TestSetup.t.sol";
 
 contract AaveV3RepayTest is AaveV3TestSetup {
     using MessageHashUtils for bytes32;
@@ -196,7 +196,7 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        vm.expectRevert(AaveV3Module.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         aaveV3Module.repay(address(safe), address(usdcScroll), amountToRepay, owner1, signature);
     }
 

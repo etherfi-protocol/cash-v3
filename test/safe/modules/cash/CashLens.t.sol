@@ -149,7 +149,7 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Verify basic data
         assertEq(uint8(data.mode), uint8(Mode.Debit), "Initial mode should be Debit");
-        assertEq(data.incomingCreditModeStartTime, 0, "No incoming credit mode change");
+        assertEq(data.incomingModeStartTime, 0, "No incoming mode change");
         assertEq(data.totalCashbackEarnedInUsd, 0, "No cashback earned initially");
         
         // Verify collateral and borrows
@@ -181,10 +181,10 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Verify mode is still Debit but incoming change is recorded
         assertEq(uint8(data.mode), uint8(Mode.Debit), "Mode should still be Debit");
-        assertGt(data.incomingCreditModeStartTime, 0, "Should have incoming credit mode start time");
+        assertGt(data.incomingModeStartTime, 0, "Should have incoming credit mode start time");
         
         // Fast forward to after credit mode start time
-        vm.warp(data.incomingCreditModeStartTime + 1);
+        vm.warp(data.incomingModeStartTime + 1);
         
         // Get updated safe cash data
         data = cashLens.getSafeCashData(address(safe), new address[](0));
@@ -199,7 +199,7 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Set to credit mode and wait for it to activate
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 spendAmount = 1000e6;
 
@@ -344,7 +344,7 @@ contract CashLensTest is CashModuleTestSetup {
                 
         // Set to credit mode and borrow more than collateral value
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         
         // Calculate max debit spend - should be zero due to 0 collateral

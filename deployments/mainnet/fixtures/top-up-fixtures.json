@@ -11,7 +11,7 @@
         "token": "usdc",
         "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
         "bridge": "scrollERC20BridgeAdapter",
-        "maxSlippageInBps": "50",
+        "maxSlippageInBps": "0",
         "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
         "gasLimitForScrollGateway": "200000"
       },
@@ -25,9 +25,10 @@
       {
         "token": "weth",
         "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-        "bridge": "stargate",
-        "maxSlippageInBps": "50",
-        "stargatePool": "0x77b2043768d28E9C9aB44E1aBfC95944bcE57931"
+        "bridge": "scrollERC20BridgeAdapter",
+        "maxSlippageInBps": "0",
+        "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
+        "gasLimitForScrollGateway": "250000"
       },
       {
         "token": "liquidEth",
