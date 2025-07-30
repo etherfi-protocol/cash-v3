@@ -15,7 +15,6 @@ contract UpgradeTopUpFactory is Utils {
 
         TopUpFactory factoryImpl = new TopUpFactory();
 
-
         vm.stopBroadcast();
     }
 }
