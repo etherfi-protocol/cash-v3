@@ -9,80 +9,10 @@ function chainIdToChainName(chainId:string) : string {
   else throw new Error("Chain ID unidentified");
 }
 
-const OPEN_OCEAN_API_ENDPOINT =
-  `https://open-api.openocean.finance/v3`;
-const OPEN_OCEAN_ROUTER = "0x6352a56caadC4F1E25CD6c75970Fa768A3304e64";
-const SELECTOR = "0x90411a32"
+const OPEN_OCEAN_API_ENDPOINT = `https://open-api-pro.openocean.finance/v4`;
+const apikey = process.env.OPENOCEAN_API_KEY;
 
-const ABI = [
-  {
-    "inputs": [
-      {
-        "internalType": "contract IOpenOceanCaller",
-        "name": "caller",
-        "type": "address"
-      },
-      {
-        "components": [
-          {
-            "internalType": "contract IERC20",
-            "name": "srcToken",
-            "type": "address"
-          },
-          {
-            "internalType": "contract IERC20",
-            "name": "dstToken",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "srcReceiver",
-            "type": "address"
-          },
-          {
-            "internalType": "address",
-            "name": "dstReceiver",
-            "type": "address"
-          },
-          { "internalType": "uint256", "name": "amount", "type": "uint256" },
-          {
-            "internalType": "uint256",
-            "name": "minReturnAmount",
-            "type": "uint256"
-          },
-          {
-            "internalType": "uint256",
-            "name": "guaranteedAmount",
-            "type": "uint256"
-          },
-          { "internalType": "uint256", "name": "flags", "type": "uint256" },
-          { "internalType": "address", "name": "referrer", "type": "address" },
-          { "internalType": "bytes", "name": "permit", "type": "bytes" }
-        ],
-        "internalType": "struct OpenOceanExchange.SwapDescription",
-        "name": "desc",
-        "type": "tuple"
-      },
-      {
-        "components": [
-          { "internalType": "uint256", "name": "target", "type": "uint256" },
-          { "internalType": "uint256", "name": "gasLimit", "type": "uint256" },
-          { "internalType": "uint256", "name": "value", "type": "uint256" },
-          { "internalType": "bytes", "name": "data", "type": "bytes" }
-        ],
-        "internalType": "struct IOpenOceanCaller.CallDescription[]",
-        "name": "calls",
-        "type": "tuple[]"
-      }
-    ],
-    "name": "swap",
-    "outputs": [
-      { "internalType": "uint256", "name": "returnAmount", "type": "uint256" }
-    ],
-    "stateMutability": "payable",
-    "type": "function"
-  }
-];  
+if (!apikey) throw new Error("OPENOCEAN_API_KEY not found in the .env");
 
 export const getData = async () => {
   const args = process.argv;
@@ -104,32 +34,7 @@ export const getData = async () => {
     fromAssetDecimals
   });
   console.log(data)
-  // console.log(recodeSwapData(data));
 };
-
-// const recodeSwapData = (apiEncodedData: string): string => {
-//   try {
-//     const cOpenOceanRouter = new ethers.Contract(
-//       OPEN_OCEAN_ROUTER,
-//       new ethers.utils.Interface(ABI)
-//     );
-
-//     // decode the 1Inch tx.data that is RLP encoded
-//     const swapTx = cOpenOceanRouter.interface.parseTransaction({
-//       data: apiEncodedData,
-//     });
-    
-//     const encodedData = ethers.utils.defaultAbiCoder.encode(
-//       ["bytes4","address","tuple(uint256,uint256,uint256,bytes)[]"], 
-//       [SELECTOR, swapTx.args[0], swapTx.args[2]]
-//     );
-
-//     return encodedData;
-//   } catch (err: any) {
-//     throw Error(`Failed to recode OpenOcean swap data: ${err.message}`);
-//   }
-// }
-
 const getOpenOceanSwapData = async ({
   chainId,
   fromAddress,
@@ -159,12 +64,15 @@ const getOpenOceanSwapData = async ({
 
   let retries = 5;
 
-  const API_ENDPOINT = `${OPEN_OCEAN_API_ENDPOINT}/${chainIdToChainName(chainId)}/swap_quote`;
+  const API_ENDPOINT = `${OPEN_OCEAN_API_ENDPOINT}/${chainIdToChainName(chainId)}/swap`;
 
   while (retries > 0) {
     try {
       const response = await axios.get(API_ENDPOINT, {
         params,
+        headers: {
+          apikey,
+        }
       });
 
       if (!response.data.data || !response.data.data.data) {
