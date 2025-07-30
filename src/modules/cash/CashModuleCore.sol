@@ -101,15 +101,6 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Returns if an asset is a whitelisted withdraw asset
-     * @param asset Address of the asset
-     * @return True if asset is whitelisted for withdrawals, false otherwise
-     */    
-    function isWhitelistedWithdrawAsset(address asset) external view returns (bool) {
-        return _isWhitelistedWithdrawAsset(asset);
-    }
-
-    /**
      * @notice Returns all the assets whitelisted for withdrawals
      * @return Array of whitelisted withdraw assets
      */    
@@ -212,18 +203,18 @@ contract CashModuleCore is CashModuleStorageContract {
     function getMode(address safe) external view returns (Mode) {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
 
-        if ($.incomingCreditModeStartTime != 0 && block.timestamp > $.incomingCreditModeStartTime) return Mode.Credit;
+        if ($.incomingModeStartTime != 0 && block.timestamp > $.incomingModeStartTime) return $.incomingMode;
         return $.mode;
     }
 
     /**
-     * @notice Gets the timestamp when a pending credit mode change will take effect
+     * @notice Gets the timestamp when a pending mode change will take effect
      * @dev Returns 0 if no pending change or if the safe uses debit mode
      * @param safe Address of the EtherFi Safe
-     * @return Timestamp when credit mode will take effect, or 0 if not applicable
+     * @return Timestamp when incoming mode will take effect, or 0 if not applicable
      */
-    function incomingCreditModeStartTime(address safe) external view returns (uint256) {
-        return _getCashModuleStorage().safeCashConfig[safe].incomingCreditModeStartTime;
+    function incomingModeStartTime(address safe) external view returns (uint256) {
+        return _getCashModuleStorage().safeCashConfig[safe].incomingModeStartTime;
     }
 
     /**
@@ -294,9 +285,17 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function getData(address safe) external view onlyEtherFiSafe(safe) returns (SafeData memory) {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[safe];
-        SafeData memory data = SafeData({ spendingLimit: $.spendingLimit, pendingWithdrawalRequest: $.pendingWithdrawalRequest, mode: $.mode, incomingCreditModeStartTime: $.incomingCreditModeStartTime, totalCashbackEarnedInUsd: $.totalCashbackEarnedInUsd });
+        SafeData memory data = SafeData({ spendingLimit: $.spendingLimit, pendingWithdrawalRequest: $.pendingWithdrawalRequest, mode: $.mode, incomingModeStartTime: $.incomingModeStartTime, totalCashbackEarnedInUsd: $.totalCashbackEarnedInUsd, incomingMode: $.incomingMode });
 
         return data;
+    }
+
+    /**
+     * @notice Returns the list of modules that can request withdrawals
+     * @return Array of module addresses that can request withdrawals
+     */
+    function getWhitelistedModulesCanRequestWithdraw() external view returns (address[] memory) {
+        return _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.values();
     }
 
     /**
@@ -425,7 +424,7 @@ contract CashModuleCore is CashModuleStorageContract {
             amounts[i] = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
             if (IERC20(tokens[i]).balanceOf(safe) < amounts[i]) revert InsufficientBalance();
             
-            _updateWithdrawalRequestIfNecessary(safe, tokens[i], amounts[i]);
+            _cancelWithdrawalRequestIfNecessary(safe, tokens[i], amounts[i]);
         }
 
         _spendDebit(safe, binSponsor, tokens, amounts);
@@ -574,7 +573,7 @@ contract CashModuleCore is CashModuleStorageContract {
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
         uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();
-        _updateWithdrawalRequestIfNecessary(safe, token, amount);
+        _cancelWithdrawalRequestIfNecessary(safe, token, amount);
 
         address[] memory to = new address[](3);
         bytes[] memory data = new bytes[](3);

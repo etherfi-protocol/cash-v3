@@ -5,13 +5,16 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import { SafeTestSetup, MessageHashUtils } from "../../SafeTestSetup.t.sol";
-import { EtherFiLiquidModule } from "../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
+import { EtherFiLiquidModule, ModuleCheckBalance } from "../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { IBoringOnChainQueue } from "../../../../src/interfaces/IBoringOnChainQueue.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { ILayerZeroTeller } from "../../../../src/interfaces/ILayerZeroTeller.sol";
 import { IEtherFiSafe } from "../../../../src/interfaces/IEtherFiSafe.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { ICashModule, WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
+import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
+import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 
 contract EtherFiLiquidModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -75,9 +78,18 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         tellers[2] = liquidUsdTeller;
         tellers[3] = eUsdTeller;
         tellers[4] = ebtcTeller;
-        
+
+        bool[] memory isWithdrawAsset = new bool[](5);
+        isWithdrawAsset[0] = true;
+        isWithdrawAsset[1] = true;
+        isWithdrawAsset[2] = true;
+        isWithdrawAsset[3] = true;
+        isWithdrawAsset[4] = true;
+
         liquidModule = new EtherFiLiquidModule(assets, tellers, address(dataProvider), address(weth));
         
+        cashModule.configureWithdrawAssets(assets, isWithdrawAsset);
+
         address[] memory modules = new address[](1);
         modules[0] = address(liquidModule);
         
@@ -99,12 +111,21 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         vm.stopPrank();
     }
 
-    function test_bridge_worksforLiquidEth() public {
+    function test_requestBridgeAndExecuteBridge_worksforLiquidEth() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
         uint256 amountToBridge = 1 ether;
         deal(address(liquidEth), address(safe), amountToBridge);
 
         bytes32 digestHash = keccak256(abi.encodePacked(
-            liquidModule.BRIDGE_SIG(),
+            liquidModule.REQUEST_BRIDGE_SIG(),
             block.chainid,
             address(liquidModule),
             safe.nonce(),
@@ -126,12 +147,21 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
     }
 
-    function test_bridge_worksforEBtc() public {
+    function test_requestBridgeAndExecuteBridge_worksforEBtc() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
         uint256 amountToBridge = 1e6;
         deal(address(ebtc), address(safe), amountToBridge);
 
         bytes32 digestHash = keccak256(abi.encodePacked(
-            liquidModule.BRIDGE_SIG(),
+            liquidModule.REQUEST_BRIDGE_SIG(),
             block.chainid,
             address(liquidModule),
             safe.nonce(),
@@ -153,12 +183,21 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
     }
 
-    function test_bridge_worksforLiquidBtc() public {
+    function test_requestBridgeAndExecuteBridge_worksforLiquidBtc() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        
         uint256 amountToBridge = 1e5;
         deal(address(liquidBtc), address(safe), amountToBridge);
 
         bytes32 digestHash = keccak256(abi.encodePacked(
-            liquidModule.BRIDGE_SIG(),
+            liquidModule.REQUEST_BRIDGE_SIG(),
             block.chainid,
             address(liquidModule),
             safe.nonce(),
@@ -183,12 +222,21 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
     }
 
-    function test_bridge_worksforLiquidUsd() public {
+    function test_requestBridgeAndExecuteBridge_worksforLiquidUsd() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        
         uint256 amountToBridge = 1e6;
         deal(address(liquidUsd), address(safe), amountToBridge);
 
         bytes32 digestHash = keccak256(abi.encodePacked(
-            liquidModule.BRIDGE_SIG(),
+            liquidModule.REQUEST_BRIDGE_SIG(),
             block.chainid,
             address(liquidModule),
             safe.nonce(),
@@ -210,12 +258,21 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
     }
 
-    function test_bridge_worksforEUsd() public {
+    function test_requestBridgeAndExecuteBridge_worksforEUsd() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
         uint256 amountToBridge = 1e6;
         deal(address(eUsd), address(safe), amountToBridge);
 
         bytes32 digestHash = keccak256(abi.encodePacked(
-            liquidModule.BRIDGE_SIG(),
+            liquidModule.REQUEST_BRIDGE_SIG(),
             block.chainid,
             address(liquidModule),
             safe.nonce(),
@@ -237,6 +294,282 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
     }
 
+    function test_requestBridge_createsWithdrawal() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amount = 100e6;
+        deal(address(liquidUsd), address(safe), amount); 
+
+        uint256 liquidUsdBalBefore = liquidUsd.balanceOf(address(safe));
+
+        _requestBridge(address(liquidUsd), mainnetEid, amount);
+
+        uint256 liquidUsdBalAfter = liquidUsd.balanceOf(address(safe));
+        assertEq(liquidUsdBalAfter, liquidUsdBalBefore);
+
+        // Check that a withdrawal request was created
+        WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 1);
+        assertEq(request.tokens[0], address(liquidUsd));
+        assertEq(request.amounts[0], amount);
+        assertEq(request.recipient, address(liquidModule));
+        
+        EtherFiLiquidModule.LiquidCrossChainWithdrawal memory withdrawal = liquidModule.getPendingBridge(address(safe));
+        assertEq(withdrawal.destEid, mainnetEid);
+        assertEq(withdrawal.asset, address(liquidUsd));
+        assertEq(withdrawal.amount, amount);   
+        assertEq(withdrawal.destRecipient, owner);
+    }
+
+    function test_requestBridge_executesBridge_whenTheWithdrawDelayIsZero() public {
+        // make withdraw delay 0
+        vm.prank(owner);
+        cashModule.setDelays(0, 0, 0);
+
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amountToBridge = 1 ether;
+        deal(address(liquidEth), address(safe), amountToBridge);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.REQUEST_BRIDGE_SIG(),
+            block.chainid,
+            address(liquidModule),
+            safe.nonce(),
+            address(safe),
+            abi.encode(address(liquidEth), mainnetEid, owner, amountToBridge)
+        )).toEthSignedMessageHash();
+
+        uint256 fee = liquidModule.getBridgeFee(address(liquidEth), mainnetEid, owner, amountToBridge);
+
+
+        address[] memory owners = new address[](2);
+        owners[0] = owner1;
+        owners[1] = owner2;
+        
+        bytes[] memory signatures = new bytes[](2);
+        
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        signatures[0] = abi.encodePacked(r, s, v); 
+
+        (v, r, s) = vm.sign(owner2Pk, digestHash);
+        signatures[1] = abi.encodePacked(r, s, v);
+
+        uint256 liquidAssetBalBefore = liquidEth.balanceOf(address(safe));
+
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidBridgeRequested(address(safe), address(address(liquidEth)), mainnetEid, owner, amountToBridge);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidBridgeExecuted(address(safe), address(liquidEth), owner, mainnetEid, amountToBridge, fee);
+        liquidModule.requestBridge{value: fee}(address(safe), mainnetEid, address(liquidEth), amountToBridge, owner, owners, signatures);
+
+
+        uint256 liquidAssetBalAfter = liquidEth.balanceOf(address(safe));
+        assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amountToBridge);
+    }
+
+    function test_executeBridge_reverts_ifWithdrawalDelayIsNotOver() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amount = 100e6;
+        deal(address(liquidUsd), address(safe), amount); 
+
+        _requestBridge(address(liquidUsd), mainnetEid, amount);
+
+        vm.expectRevert(ICashModule.CannotWithdrawYet.selector);
+        liquidModule.executeBridge{value: 1}(address(safe));
+    }
+
+    function test_executeBridge_reverts_whenNoWithdrawalQueued() public {
+        vm.expectRevert(EtherFiLiquidModule.NoWithdrawalQueuedForLiquid.selector);
+        liquidModule.executeBridge{value: 0}(address(safe));
+    }
+
+    function test_requestWithdrawal_cancelsTheCurrentBridgeTx() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amount = 100e6;
+        deal(address(liquidUsd), address(safe), amount); 
+
+        _requestBridge(address(liquidUsd), mainnetEid, amount);
+
+        // Remove the withdrawal request from CashModule by overriding it
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(liquidUsd);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amount;
+        _requestWithdrawal(tokens, amounts, address(1));
+        
+        EtherFiLiquidModule.LiquidCrossChainWithdrawal memory withdrawal = liquidModule.getPendingBridge(address(safe));
+        assertEq(withdrawal.destEid, 0);
+        assertEq(withdrawal.asset, address(0));
+        assertEq(withdrawal.amount, 0);
+        assertEq(withdrawal.destRecipient, address(0)); 
+    }
+
+    function test_cancelBridge_works() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amount = 100e6;
+        deal(address(liquidUsd), address(safe), amount); 
+
+        _requestBridge(address(liquidUsd), mainnetEid, amount);
+
+        (address[] memory signers, bytes[] memory signatures) = _getCancelSignatures();
+
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidBridgeCancelled(address(safe), address(liquidUsd), mainnetEid, owner, amount);
+        liquidModule.cancelBridge(address(safe), signers, signatures);
+
+        EtherFiLiquidModule.LiquidCrossChainWithdrawal memory withdrawal = liquidModule.getPendingBridge(address(safe));
+        assertEq(withdrawal.destEid, 0);
+        assertEq(withdrawal.asset, address(0));
+        assertEq(withdrawal.amount, 0);
+        assertEq(withdrawal.destRecipient, address(0));
+
+        WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 0);
+    }
+
+    function test_cancelBridge_reverts_whenNoWithdrawalQueued() public {
+        (address[] memory signers, bytes[] memory signatures) = _getCancelSignatures();
+
+        vm.expectRevert(EtherFiLiquidModule.NoWithdrawalQueuedForLiquid.selector);
+        liquidModule.cancelBridge(address(safe), signers, signatures);
+    }
+
+    function test_cancelBridge_reverts_whenInvalidSignatures() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amount = 100e6;
+        deal(address(liquidUsd), address(safe), amount); 
+
+        _requestBridge(address(liquidUsd), mainnetEid, amount);
+
+        (address[] memory signers, bytes[] memory signatures) = _getCancelSignatures();
+        signatures[1] = signatures[0]; // Invalid signature
+
+        vm.expectRevert(EtherFiLiquidModule.InvalidSignatures.selector);
+        liquidModule.cancelBridge(address(safe), signers, signatures);
+    }
+
+    function test_cancelBridge_reverts_ifQuorumIsNotMet() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amount = 100e6;
+        deal(address(liquidUsd), address(safe), amount);
+        _requestBridge(address(liquidUsd), mainnetEid, amount);
+
+        (address[] memory signers, bytes[] memory signatures) = _getCancelSignatures();
+
+        address[] memory newSigners = new address[](1);  
+        bytes[] memory newSignatures = new bytes[](1);
+        newSigners[0] = signers[0];
+        newSignatures[0] = signatures[0];
+
+        vm.expectRevert(EtherFiSafeErrors.InsufficientSigners.selector);
+        liquidModule.cancelBridge(address(safe), newSigners, newSignatures);
+    }
+
+    function test_requestBridge_insufficientAmount() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        uint256 amount = 100e6;
+        // deal less amount than required
+        deal(address(liquidUsd), address(safe), amount - 1);
+
+        (address[] memory signers, bytes[] memory signatures) = _getSignaturesForRequestBridging(address(liquidUsd), mainnetEid, amount, owner);
+
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
+        liquidModule.requestBridge(address(safe), mainnetEid, address(liquidUsd), amount, owner, signers, signatures);
+    }
+
+    function test_requestBridge_invalidInput() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+        
+        // Test with zero address for destRecipient
+        (address[] memory signers1, bytes[] memory signatures1) = _getSignaturesForRequestBridging(address(liquidUsd), mainnetEid, amount, address(0));
+        
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        liquidModule.requestBridge(address(safe), mainnetEid, address(liquidUsd), amount, address(0), signers1, signatures1);
+
+        // Test with zero address for asset
+        (address[] memory signers2, bytes[] memory signatures2) = _getSignaturesForRequestBridging(address(0), mainnetEid, amount, owner);
+        
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        liquidModule.requestBridge(address(safe), mainnetEid, address(0), amount, owner, signers2, signatures2);
+
+        // Test with zero amount
+        (address[] memory signers3, bytes[] memory signatures3) = _getSignaturesForRequestBridging(address(liquidUsd), mainnetEid, 0, owner);
+        
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        liquidModule.requestBridge(address(safe), mainnetEid, address(liquidUsd), 0, owner, signers3, signatures3);
+    }
+
+    function _requestBridge(address liquidAsset, uint32 destEid, uint256 amountToBridge) internal {
+        (address[] memory signers, bytes[] memory signatures) = _getSignaturesForRequestBridging(liquidAsset, destEid, amountToBridge, owner);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidBridgeRequested(address(safe), address(liquidAsset), destEid, owner, amountToBridge);
+        liquidModule.requestBridge(address(safe), destEid, address(liquidAsset), amountToBridge, owner, signers, signatures);
+    }
+
     function _bridgeLiquid(address liquidAsset, uint32 destEid, uint256 amountToBridge, bytes memory signature1, bytes memory signature2, uint256 fee) internal {
         address[] memory owners = new address[](2);
         owners[0] = owner1;
@@ -246,8 +579,94 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         signatures[1] = signature2;
 
         vm.expectEmit(true, true, true, true);
-        emit EtherFiLiquidModule.LiquidBridged(address(safe), address(liquidAsset), owner, destEid, amountToBridge, fee);
-        liquidModule.bridge{value: fee}(address(safe), address(liquidAsset), destEid, owner, amountToBridge, owners, signatures);
+        emit EtherFiLiquidModule.LiquidBridgeRequested(address(safe), address(liquidAsset), destEid, owner, amountToBridge);
+        liquidModule.requestBridge(address(safe), destEid, address(liquidAsset), amountToBridge, owner, owners, signatures);
+
+        (uint64 withdrawalDelay, , ) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiLiquidModule.LiquidBridgeExecuted(address(safe), address(liquidAsset), owner, destEid, amountToBridge, fee);
+        liquidModule.executeBridge{value: fee}(address(safe));
+
+    }
+
+    function _getSignaturesForRequestBridging(address liquidAsset, uint32 destEid, uint256 amountToBridge, address destRecipient) internal view returns (address[] memory owners, bytes[] memory signatures) {
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.REQUEST_BRIDGE_SIG(),
+            block.chainid,
+            address(liquidModule),
+            safe.nonce(),
+            address(safe),
+            abi.encode(address(liquidAsset), destEid, destRecipient, amountToBridge)
+        )).toEthSignedMessageHash();
+
+        owners = new address[](2);
+        owners[0] = owner1;
+        owners[1] = owner2;
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature1 = abi.encodePacked(r, s, v); 
+        
+        (v, r, s) = vm.sign(owner2Pk, digestHash);
+        bytes memory signature2 = abi.encodePacked(r, s, v); 
+
+        signatures = new bytes[](2);
+        signatures[0] = signature1;
+        signatures[1] = signature2;
+
+        return (owners, signatures);
+    }
+
+    function _getCancelSignatures() internal view returns (address[] memory, bytes[] memory) {
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.CANCEL_BRIDGE_SIG(), 
+            block.chainid, 
+            address(liquidModule),
+            safe.nonce(),
+            address(safe) 
+        )).toEthSignedMessageHash();
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        return (signers, signatures);
+    }
+
+    function test_deposit_reverts_ifPendingWithdrawalBlocksIt() public {
+        uint256 amountToDeposit = 10e6;
+        uint256 minReturn = 0.50e6; 
+        deal(address(usdc), address(safe), amountToDeposit);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amountToDeposit - 1;
+        _requestWithdrawal(tokens, amounts, address(1));
+
+        bytes32 digestHash = keccak256(abi.encodePacked(
+            liquidModule.DEPOSIT_SIG(),
+            block.chainid,
+            address(liquidModule),
+            liquidModule.getNonce(address(safe)),
+            address(safe),
+            abi.encode(address(usdc), address(liquidUsd), amountToDeposit, minReturn)
+        )).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v); 
+
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
+        liquidModule.deposit(address(safe), address(usdc), address(liquidUsd), amountToDeposit, minReturn, owner1, signature);
     }
 
     function test_deposit_worksWithWeth_forLiquidEth() public {
@@ -576,7 +995,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(EtherFiLiquidModule.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         liquidModule.deposit(address(safe), address(wbtc), address(liquidBtc), amountToDeposit, minReturn, owner1, signature);
     }
 
@@ -941,55 +1360,50 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertEq(tellerAfter, address(0));
     }
 
-    function test_bridge_revertsWhenInsufficientNativeFee() public {
+    function test_executeBridge_revertsWhenInsufficientNativeFee() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
         uint256 amountToBridge = 1 ether;
         deal(address(liquidEth), address(safe), amountToBridge);
-        address[] memory owners = new address[](2);
-        owners[0] = owner1;
-        owners[1] = owner2;
+        _requestBridge(address(liquidEth),  mainnetEid, amountToBridge);
         
-        bytes[] memory signatures = new bytes[](2);
+        (uint64 withdrawalDelay, , ) = cashModule.getDelays();
+        
+        vm.warp(block.timestamp + withdrawalDelay);
         uint256 insufficientFee;
 
-        {
-            bytes32 digestHash = keccak256(abi.encodePacked(
-                liquidModule.BRIDGE_SIG(),
-                block.chainid,
-                address(liquidModule),
-                safe.nonce(),
-                address(safe),
-                abi.encode(address(liquidEth), mainnetEid, owner, amountToBridge)
-            )).toEthSignedMessageHash();
-
-            uint256 requiredFee = liquidModule.getBridgeFee(address(liquidEth), mainnetEid, owner, amountToBridge);
-            insufficientFee = requiredFee - 1; // 1 wei less than required
-
-            (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-            signatures[0] = abi.encodePacked(r, s, v); 
-            
-            (v, r, s) = vm.sign(owner2Pk, digestHash);
-            signatures[1] = abi.encodePacked(r, s, v); 
-        }
-
         vm.expectRevert(EtherFiLiquidModule.InsufficientNativeFee.selector);
-        liquidModule.bridge{value: insufficientFee}(address(safe), address(liquidEth), mainnetEid, owner, amountToBridge, owners, signatures);
+        liquidModule.executeBridge{value: insufficientFee}(address(safe));
     }
 
-    function test_bridge_revertsWithInvalidSignatures() public {
+    function test_requestBridge_revertsWithInvalidSignatures() public {
+        address[] memory modules = new address[](1);
+        modules[0] = address(liquidModule);
+        
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
         uint256 amountToBridge = 1 ether;
         deal(address(liquidEth), address(safe), amountToBridge);
 
         bytes32 digestHash = keccak256(abi.encodePacked(
-            liquidModule.BRIDGE_SIG(),
+            liquidModule.REQUEST_BRIDGE_SIG(),
             block.chainid,
             address(liquidModule),
             safe.nonce(),
             address(safe),
             abi.encode(address(liquidEth), mainnetEid, owner, amountToBridge)
         )).toEthSignedMessageHash();
-
-        uint256 fee = liquidModule.getBridgeFee(address(liquidEth), mainnetEid, owner, amountToBridge);
-
         
         address[] memory owners = new address[](1);
         owners[0] = owner1; // Using valid owner address
@@ -1007,7 +1421,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         );
 
         vm.expectRevert(EtherFiLiquidModule.InvalidSignatures.selector);
-        liquidModule.bridge{value: fee}(address(safe), address(liquidEth), mainnetEid, owner, amountToBridge, owners, signatures);
+        liquidModule.requestBridge(address(safe), mainnetEid, address(liquidEth), amountToBridge, owner, owners, signatures);
     }
 
     function test_deposit_revertsWhenInvalidSignature() public {
@@ -1274,7 +1688,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(EtherFiLiquidModule.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         liquidModule.withdraw(address(safe), address(liquidUsd), liquidUsdAssetOut, amountToWithdraw, amountToWithdraw, discount, secondsToDeadline, owner1, signature);
     }
 
@@ -1329,5 +1743,22 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertEq(liquidModule.getLiquidAssetWithdrawQueue(address(liquidUsd)), address(liquidUsdBoringQueue));
         assertEq(liquidModule.getLiquidAssetWithdrawQueue(address(liquidEth)), address(liquidEthBoringQueue));
         assertEq(liquidModule.getLiquidAssetWithdrawQueue(address(liquidBtc)), address(liquidBtcBoringQueue));
+    }
+
+    function _requestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal {
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        cashModule.requestWithdrawal(address(safe), tokens, amounts, recipient, signers, signatures);
     }
 }

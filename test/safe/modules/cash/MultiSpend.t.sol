@@ -468,7 +468,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         
         // Switch to credit mode
         _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingCreditModeStartTime(address(safe)) + 1);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         address[] memory spendTokens = new address[](2);
         spendTokens[0] = address(usdcScroll);

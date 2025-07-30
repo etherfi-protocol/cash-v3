@@ -5,9 +5,10 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Test } from "forge-std/Test.sol";
 
-import { OpenOceanSwapModule, ModuleBase } from "../../../../src/modules/openocean-swap/OpenOceanSwapModule.sol";
+import { OpenOceanSwapModule, ModuleBase, ModuleCheckBalance } from "../../../../src/modules/openocean-swap/OpenOceanSwapModule.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
+import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 
 contract OpenOceanSwapModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -165,7 +166,39 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData);
 
-        vm.expectRevert(OpenOceanSwapModule.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
+        openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData, owners, signatures);
+    }
+
+    function test_swap_failsWhenPendingWithdrawalBlocksIt() public {
+        address fromAsset = address(usdcScroll);
+        uint256 fromAssetAmount = 100e6;
+        address toAsset = address(weETHScroll);
+        uint256 minToAssetAmount = 1;
+
+        deal(address(usdcScroll), address(safe), fromAssetAmount);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(fromAsset);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1;
+        _requestWithdrawal(tokens, amounts, address(1));
+
+        bytes memory swapData = getQuoteOpenOcean(
+            vm.toString(block.chainid), 
+            address(safe), 
+            address(safe), 
+            fromAsset, 
+            toAsset, 
+            fromAssetAmount, 
+            IERC20Metadata(fromAsset).decimals()
+        );
+        
+        uint256 nonceBefore = safe.nonce();
+
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData);
+
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData, owners, signatures);
     }
 
@@ -190,7 +223,7 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData);
 
-        vm.expectRevert(OpenOceanSwapModule.InsufficientBalanceOnSafe.selector);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData, owners, signatures);
     }
 
@@ -425,5 +458,22 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
         inputs[9] = vm.toString(srcTokenDecimals);
 
         return vm.ffi(inputs);
+    }
+
+    function _requestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal {
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        cashModule.requestWithdrawal(address(safe), tokens, amounts, recipient, signers, signatures);
     }
 }

@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable } from "solady/auth/Ownable.sol";
 
+import { IWETH } from "../interfaces/IWETH.sol";
 import { Constants } from "../utils/Constants.sol";
 
 /**
@@ -20,9 +21,13 @@ contract TopUp is Constants, Ownable {
     /// @notice Error thrown when ETH transfer fails
     error EthTransferFailed();
 
-    constructor() {
+    address public immutable weth;
+
+    constructor(address _weth) {
         // initialize with dead so the impl ownership cannot be taken over by someone
         _initializeOwner(address(0xdead));
+
+        weth = _weth;
     }
 
     /**
@@ -66,5 +71,12 @@ contract TopUp is Constants, Ownable {
                 ++i;
             }
         }
+    }
+
+    /**
+     * @notice Deposits all ETH into WETH
+     */
+    receive() external payable {
+        IWETH(weth).deposit{value: msg.value}();
     }
 }
