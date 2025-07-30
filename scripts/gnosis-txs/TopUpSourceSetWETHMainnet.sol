@@ -79,6 +79,8 @@ contract TopUpSourceSetWETHConfig is Utils, GnosisHelpers, Test {
         deal(address(vm.addr(1)), fee);
         vm.prank(address(vm.addr(1)));
         IFactory(address(topUpFactory)).bridge{value: fee}(tokens[0]);
+
+        
     }   
 
     // Helper function to parse token configs from JSON

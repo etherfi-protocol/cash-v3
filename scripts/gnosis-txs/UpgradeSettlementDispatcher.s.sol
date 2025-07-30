@@ -12,8 +12,8 @@ import {Test} from "forge-std/Test.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {SettlementDispatcher} from "../../src/settlement-dispatcher/SettlementDispatcher.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-
+import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
+import { PriceProvider, IAggregatorV3 } from "../../src/oracle/PriceProvider.sol";
 
 contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
@@ -28,10 +28,16 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
 
     address public owner = 0x23ddE38BA34e378D28c667bC26b44310c7CA0997;
 
+    // https://docs.chain.link/data-feeds/price-feeds/addresses?page=1&testnetPage=1&network=scroll&testnetSearch=E&search=USDT
+    address usdtUsdOracle = 0xf376A91Ae078927eb3686D6010a6f1482424954E;
+
+    address debtManager;
+    address priceProvider;
+
     function run() public {
 
         string memory deployments = readDeploymentFile();
-         string memory chainId = vm.toString(block.chainid);
+        string memory chainId = vm.toString(block.chainid);
 
         address settlementDispatcherReap = stdJson.readAddress(
             deployments, 
@@ -41,9 +47,52 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
             deployments, 
             string(abi.encodePacked(".", "addresses", ".", "SettlementDispatcherRain"))
         );
-
+        priceProvider = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "PriceProvider")
+        );
+        debtManager = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "DebtManager")
+        );
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe)); 
 
+        PriceProvider.Config memory usdtUsdConfig = PriceProvider.Config({
+            oracle: usdtUsdOracle,
+            priceFunctionCalldata: "",
+            isChainlinkType: true,
+            oraclePriceDecimals: IAggregatorV3(usdtUsdOracle).decimals(),
+            maxStaleness: 10 days,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: true,
+            isBaseTokenBtc: false
+        });
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdtScroll); 
+        uint64 borrowApy = 1;
+
+        PriceProvider.Config[] memory priceProviderConfigs = new PriceProvider.Config[](1);
+        priceProviderConfigs[0] = usdtUsdConfig;
+
+        IDebtManager.CollateralTokenConfig memory usdtConfig = IDebtManager.CollateralTokenConfig({
+            ltv: 90e18,
+            liquidationThreshold: 95e18,
+            liquidationBonus: 1e18
+        }); 
+
+        // set usdt spend+borrow configs
+        string memory setusdtPriceProviderConfig = iToHex(abi.encodeWithSelector(PriceProvider.setTokenConfig.selector, tokens, priceProviderConfigs));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), setusdtPriceProviderConfig, "0", false)));
+        
+        string memory setUsdtConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, address(usdtScroll), usdtConfig));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setUsdtConfig, "0", false)));
+
+        string memory setUsdtBorrowConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportBorrowToken.selector, address(usdtScroll), borrowApy, type(uint128).max));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setUsdtBorrowConfig, "0", false)));
+
+        // upgrade settlement dispatchers
         string memory upgradeTransaction = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, settlementDispatcherReapImpl, ""));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(settlementDispatcherReap)), upgradeTransaction, "0", false)));
 
@@ -51,10 +100,10 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(settlementDispatcherRain)), upgradeTransaction, "0", false)));
 
 
-        address[] memory tokens = new address[](2); 
+        address[] memory SettlementDispatcherTokens = new address[](2); 
         SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](2);
-        tokens[0] = address(usdtScroll);
-        tokens[1] = address(usdcScroll);
+        SettlementDispatcherTokens[0] = address(usdtScroll);
+        SettlementDispatcherTokens[1] = address(usdcScroll);
         destDatas[0] = SettlementDispatcher.DestinationData({
             destEid: 0,
             destRecipient: mainnetSettlementAddress,
@@ -70,11 +119,12 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
             minGasLimit: 0
         });
 
-        string memory setDestinationData = iToHex(abi.encodeWithSelector(SettlementDispatcher.setDestinationData.selector, tokens, destDatas));
+        // set destination data
+        string memory setDestinationData = iToHex(abi.encodeWithSelector(SettlementDispatcher.setDestinationData.selector, SettlementDispatcherTokens, destDatas));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(settlementDispatcherReap)), setDestinationData, "0", false)));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(settlementDispatcherRain)), setDestinationData, "0", true)));
 
-        string memory path = string.concat("./output/UpgradeSettlementDispatchers-", chainId, ".json");
+        string memory path = string.concat("./output/UpgradeSettlementDispatchers-SetUsdtConfig-", chainId, ".json");
         vm.writeFile(path, txs);
 
         executeGnosisTransactionBundle(path);
@@ -96,6 +146,9 @@ contract UpgradeSettlementDispatcher is Utils, GnosisHelpers, Test {
         deal(address(usdcScroll), address(settlementDispatcherReap), 1e6);
         SettlementDispatcher(payable(settlementDispatcherReap)).bridge(address(usdcScroll), 1e6, 1);
         assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), 0);
+
+        assert(IDebtManager(debtManager).isCollateralToken(address(usdtScroll)) == true);
+        assert(IDebtManager(debtManager).isBorrowToken(address(usdtScroll)) == true);
     }
 
 }
