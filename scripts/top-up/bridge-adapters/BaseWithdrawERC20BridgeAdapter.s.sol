@@ -13,7 +13,7 @@ contract DeployBaseWithdrawERC20BridgeAdapter is Utils {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        baseWithdrawERC20BridgeAdapter = BaseWithdrawERC20BridgeAdapter(deployWithCreate3(abi.encodePacked(type(BaseWithdrawERC20BridgeAdapter).creationCode), getSalt(BASE_WITHDRAW_ERC20_BRIDGE_ADAPTER_DEV)));
+        baseWithdrawERC20BridgeAdapter = BaseWithdrawERC20BridgeAdapter(deployWithCreate3(abi.encodePacked(type(BaseWithdrawERC20BridgeAdapter).creationCode), getSalt(BASE_WITHDRAW_ERC20_BRIDGE_ADAPTER)));
 
         vm.stopBroadcast();
     }
