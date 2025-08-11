@@ -3,7 +3,9 @@ pragma solidity ^0.8.28;
 
 import {stdJson} from "forge-std/StdJson.sol";
 import  "forge-std/Vm.sol";
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
+import { BeaconFactory } from "../../src/beacon-factory/BeaconFactory.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import {TopUpFactory} from "../../src/top-up/TopUpFactory.sol";
 import {Utils} from "../utils/Utils.sol";
@@ -19,17 +21,15 @@ struct TokenConfig {
     address oftAdapter;
 }
 
-interface IFactory {
-    function bridge(address token) external payable;
-    function getBridgeFee(address token) external view returns (address _token, uint256 _amount); 
-}
-
-contract TopUpSourceSetWETHConfig is Utils, GnosisHelpers, Test {
+contract TopUpSourceSetUSDTBase is Utils, GnosisHelpers, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-    address weth = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+
+    address newTopUpFactoryImp = 0x4c5644c0BCD100263d28c4eB735f9143eC83847F;
+    address newTopUpImp = 0x8fF38032083C0E36C3CdC8c509758514Fe0a49E2;
 
     TopUpFactory topUpFactory;
-    address scrollERC20BridgeAdapter; 
+    address baseWithdrawERC20BridgeAdapter; 
+    // TopUpDest is our mainnet TopUpSourceFactory contracts as we can't bridge directly to Base
     address topUpDest;
     function run() public {
 
@@ -43,83 +43,70 @@ contract TopUpSourceSetWETHConfig is Utils, GnosisHelpers, Test {
                 )
             )
         );
-        scrollERC20BridgeAdapter = stdJson.readAddress(
+        baseWithdrawERC20BridgeAdapter = stdJson.readAddress(
             deployments,
-            string.concat(".", "addresses", ".", "ScrollERC20BridgeAdapter")
+            string.concat(".", "addresses", ".", "BaseWithdrawERC20BridgeAdapter")
         );
 
-
-        string memory dir = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv(), "/"));
-        string memory chainDir = string.concat(scrollChainId, "/");
-        string memory file = string.concat(dir, chainDir, "deployments", ".json");
-        string memory scrollDeployments = vm.readFile(file);
-        topUpDest = stdJson.readAddress(
-            scrollDeployments,
-            string.concat(".", "addresses", ".", "TopUpDest")
-        );
+        // TopUpDest is our mainnet TopUpSourceFactory contracts as we can't bridge directly to scroll from base canonical
+        topUpDest = address(topUpFactory);
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
-        
+
         string memory fixturesFile = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv() ,"/fixtures/top-up-fixtures.json"));
         string memory fixtures = vm.readFile(fixturesFile);
         (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, chainId);
         string memory setTokenConfig = iToHex(abi.encodeWithSelector(TopUpFactory.setTokenConfig.selector, tokens, tokenConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, "0", true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, "0", false)));
 
-        vm.createDir("./output", true);
-        string memory path = string.concat("./output/TopUpWETHSetConfig-", chainId, ".json");
+        string memory upgradeTopUpFactory = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, newTopUpFactoryImp, ""));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), upgradeTopUpFactory, "0", false)));
+
+        string memory upgradeTopUp = iToHex(abi.encodeWithSelector(BeaconFactory.upgradeBeaconImplementation.selector, newTopUpImp, ""));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), upgradeTopUp, "0", true)));
+
+        vm.createDir("./output", true); 
+        string memory path = string.concat("./output/TopUpUSDTSetConfig-", chainId, ".json");
         vm.writeFile(path, txs);
 
-
-        /// below here is just a test
         executeGnosisTransactionBundle(path);
 
-        deal(tokens[0], address(topUpFactory), 1 ether);
-        (, uint256 fee) = IFactory(address(topUpFactory)).getBridgeFee(tokens[0]);
-        deal(address(vm.addr(1)), fee);
-        vm.prank(address(vm.addr(1)));
-        IFactory(address(topUpFactory)).bridge{value: fee}(tokens[0]);
-
-        
+        deal(tokens[0], address(topUpFactory), 100e6);
+        (, uint256 fee) = topUpFactory.getBridgeFee(tokens[0], 100e6);
+        topUpFactory.bridge{value: fee}(tokens[0], 100e6);
     }   
 
     // Helper function to parse token configs from JSON
     function parseTokenConfigs(string memory jsonString, string memory chainId) internal view returns (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) {
-        // Initialize arrays with size 1 since we only want ETHFI
+        // Initialize arrays with size 1 since we only want USDT
         tokens = new address[](1);
         tokenConfig = new TopUpFactory.TokenConfig[](1);
-        
+
         string memory base = string.concat(".", chainId, ".tokenConfigs[");
-        uint256 wethIndex = 0;
+        uint256 usdtIndex = 0;
         bool found = false;
-        
-        // Loop through configs to find ETHFI
+
+        // Loop through configs to find USDT
         for (uint256 i = 0; i < 20; i++) {
             string memory tokenName = stdJson.readString(jsonString, string.concat(base, vm.toString(i), "].token"));
-            if (keccak256(bytes(tokenName)) == keccak256(bytes("weth"))) {
-                wethIndex = i;
+            if (keccak256(bytes(tokenName)) == keccak256(bytes("USDT"))) {
+                usdtIndex = i;
                 found = true;
                 break;
             }
         }
-        
-        if (!found) revert("WETH token config not found");
-        
-        base = string.concat(base, vm.toString(wethIndex), "]");
-        
+
+        if (!found) revert("USDT token config not found");
+
+        base = string.concat(base, vm.toString(usdtIndex), "]");
+
         tokens[0] = stdJson.readAddress(jsonString, string.concat(base, ".address"));
         tokenConfig[0].recipientOnDestChain = topUpDest;
         tokenConfig[0].maxSlippageInBps = uint96(stdJson.readUint(jsonString, string.concat(base, ".maxSlippageInBps")));
-        tokenConfig[0].bridgeAdapter = address(scrollERC20BridgeAdapter);
-
-        address scrollGateway = stdJson.readAddress(jsonString, string.concat(base, ".scrollGatewayRouter"));
-        uint256 gasLimit = stdJson.readUint(jsonString, string.concat(base, ".gasLimitForScrollGateway"));
-        tokenConfig[0].additionalData = abi.encode(scrollGateway, gasLimit);
+        tokenConfig[0].bridgeAdapter = address(baseWithdrawERC20BridgeAdapter);
+        tokenConfig[0].additionalData = abi.encode(0, "");
 
         return (tokens, tokenConfig);
     }
-    
+
 }
-
-
-
