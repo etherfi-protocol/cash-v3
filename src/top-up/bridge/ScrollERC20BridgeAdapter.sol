@@ -16,7 +16,7 @@ contract ScrollERC20BridgeAdapter is BridgeAdapterBase {
     using SafeERC20 for IERC20;   
 
     /**
-     * @notice Emitted when ERC20 tokens are bridge
+     * @notice Emitted when ERC20 tokens are bridged
      * @param token The address of the token being bridged
      * @param amount The amount of tokens being bridged
      * @param destRecipient The recipient address on L2

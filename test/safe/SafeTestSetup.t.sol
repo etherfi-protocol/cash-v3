@@ -77,6 +77,7 @@ contract SafeTestSetup is Utils {
     address public thirdPartyRecoverySigner;
 
     IERC20 public usdcScroll = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
+    IERC20 public usdtScroll = IERC20(0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df);
     IERC20 public weETHScroll = IERC20(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
     IERC20 public scrToken = IERC20(0xd29687c813D741E2F938F4aC377128810E217b1b);
 
@@ -335,14 +336,25 @@ contract SafeTestSetup is Utils {
     }
 
     function _setupSettlementDispatcher() internal {
-        address[] memory tokens = new address[](1);
+        address[] memory tokens = new address[](2);
         tokens[0] = address(usdcScroll);
+        tokens[1] = address(usdtScroll);
 
-        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
+        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](2);
         destDatas[0] = SettlementDispatcher.DestinationData({
             destEid: optimismDestEid,
             destRecipient: owner,
-            stargate: stargateUsdcPool
+            stargate: stargateUsdcPool,
+            useCanonicalBridge: false,
+            minGasLimit: 0
+        });
+
+        destDatas[1] = SettlementDispatcher.DestinationData({
+            destEid: 0,
+            destRecipient: owner,
+            stargate: address(0),
+            useCanonicalBridge: true,
+            minGasLimit: 200_000
         });
 
         address settlementDispatcherRainImpl = address(new SettlementDispatcher(BinSponsor.Rain, address(dataProvider)));

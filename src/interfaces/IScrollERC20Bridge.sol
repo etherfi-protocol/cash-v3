@@ -17,3 +17,12 @@ interface IL1ERC20Gateway {
 interface IL1ERC20Messenger {
     function messageQueueV2() external view returns (address);
 }
+
+interface IL2GatewayRouter {
+    function withdrawERC20(address _token, address _to, uint256 _amount, uint256 _gasLimit) external payable;
+    function getERC20Gateway(address _token) external view returns (address);
+}
+
+interface IL2Messenger {
+    function sendMessage(address _to, uint256 _value, bytes memory _message, uint256 _gasLimit) external payable;
+}

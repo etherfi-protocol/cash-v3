@@ -22,6 +22,7 @@ contract TopUpSourceSetConfig is Utils {
     RoleRegistry roleRegistry;
     address stargateAdapter;
     address scrollERC20BridgeAdapter;
+    address baseWithdrawERC20GatewayAdapter;
     address etherFiOFTBridgeAdapter;
     address nttAdapter;
     address etherFiLiquidBridgeAdapter;
@@ -56,17 +57,24 @@ contract TopUpSourceSetConfig is Utils {
             string.concat(".", "addresses", ".", "NTTAdapter")
         );
 
+        etherFiLiquidBridgeAdapter = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "EtherFiLiquidBridgeAdapter")
+        );
+        
         if (block.chainid == 1) {
-            etherFiLiquidBridgeAdapter = stdJson.readAddress(
-                deployments,
-                string.concat(".", "addresses", ".", "EtherFiLiquidBridgeAdapter")
-            );
-
             scrollERC20BridgeAdapter = stdJson.readAddress(
                 deployments,
                 string.concat(".", "addresses", ".", "ScrollERC20BridgeAdapter")
             );
         }  
+
+        if (block.chainid == 8453) {
+            baseWithdrawERC20GatewayAdapter = stdJson.readAddress(
+                deployments,
+                string.concat(".", "addresses", ".", "BaseWithdrawERC20BridgeAdapter")
+            );
+        }
         
         string memory fixturesFile = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv() ,"/fixtures/top-up-fixtures.json"));
         string memory fixtures = vm.readFile(fixturesFile);
@@ -113,6 +121,13 @@ contract TopUpSourceSetConfig is Utils {
                 address scrollGateway = stdJson.readAddress(jsonString, string.concat(base, ".scrollGatewayRouter"));
                 uint256 gasLimit = stdJson.readUint(jsonString, string.concat(base, ".gasLimitForScrollGateway"));
                 tokenConfig[i].additionalData = abi.encode(scrollGateway, gasLimit);
+            } else if (block.chainid == 8453 && keccak256(bytes(bridge)) == keccak256(bytes("baseWithdrawErc20BridgeAdapter"))) {
+                tokenConfig[i].bridgeAdapter = baseWithdrawERC20GatewayAdapter;
+                uint256 gasLimit = stdJson.readUint(jsonString, string.concat(base, ".gasLimitForBaseGateway"));
+                tokenConfig[i].additionalData = abi.encode(gasLimit, hex'');
+
+                // USDT goes to topup factory on ETH and then is transferred to scroll
+                tokenConfig[i].recipientOnDestChain = address(topUpFactory);
             } else revert ("Unknown bridge");
 
             if (tokenConfig[i].recipientOnDestChain == address(0)) revert (string.concat("Invalid recipientOnDestChain for token ", stdJson.readString(jsonString, string.concat(base, ".token"))));

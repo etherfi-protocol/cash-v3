@@ -9,6 +9,7 @@ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
+import { IL2GatewayRouter, IL2Messenger } from "../interfaces/IScrollERC20Bridge.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -31,12 +32,26 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
         address destRecipient;
         /// @notice Address of the Stargate router to use for this token
         address stargate;
+        /// @notice Whether to use canonical bridge for the token
+        bool useCanonicalBridge;
+        /// @notice Minimum gas limit for the canonical bridge
+        uint64 minGasLimit;
     }
 
     /**
      * @notice Role identifier for accounts permitted to bridge tokens
      */
     bytes32 public constant SETTLEMENT_DISPATCHER_BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
+
+    /**
+     * @notice Address of the Scroll ERC20 Gateway Router
+     */
+    address public constant GATEWAY_ROUTER = 0x4C0926FF5252A435FD19e10ED15e5a249Ba19d79;
+
+    /**
+     * @notice Address of the Scroll ETH Messenger
+     */
+    address public constant ETH_MESSENGER = 0x781e90f1c8Fc4611c9b7497C3B47F99Ef6969CbC;
 
     /**
      * @notice Bin Sponsor for the settlement dispatcher
@@ -111,6 +126,14 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
      * @param amount Amount of the asset transferred
      */
     event TransferToRefundWallet(address asset, address refundWallet, uint256 amount);
+
+    /**
+     * @notice Emitted when tokens are withdrawn from scroll with the canonical bridge
+     * @param token Address of the token that was withdrawn
+     * @param recipient Address of the recipient
+     * @param amount Amount of the token that was withdrawn
+     */
+    event CanonicalBridgeWithdraw(address indexed token, address indexed recipient, uint256 amount);
 
     /**
      * @notice Thrown when input arrays have different lengths
@@ -321,16 +344,30 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
      * @custom:throws InsufficientMinReturn If the expected return is less than minReturnLD
      * @custom:throws InsufficientFeeToCoverCost If not enough ETH is provided for fees
      */
-    function bridge(address token, uint256 amount, uint256 minReturnLD) external payable whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {        
-        (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) = 
-            prepareRideBus(token, amount);
+    function bridge(address token, uint256 amount, uint256 minReturnLD) external payable whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        if (token == address(0) || amount == 0) revert InvalidValue();
+        
+        uint256 balance = 0;
+        if (token == ETH) balance = address(this).balance;
+        else balance = IERC20(token).balanceOf(address(this));
+        
+        if (balance < amount) revert InsufficientBalance();
 
-        if (minReturnLD > minReturnFromStargate) revert InsufficientMinReturn();
-        if (address(this).balance < valueToSend) revert InsufficientFeeToCoverCost();
+        DestinationData memory destData = _getSettlementDispatcherStorage().destinationData[token];
+        if (destData.useCanonicalBridge) {
+            _withdrawCanonicalBridge(token, destData.destRecipient, amount, destData.minGasLimit);
+        }
+        else {
+            (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) = 
+                prepareRideBus(token, amount);
 
-        if (token != ETH) IERC20(token).forceApprove(stargate, amount);
-        (, , Ticket memory ticket) = IStargate(stargate).sendToken{ value: valueToSend }(sendParam, messagingFee, payable(address(this)));
-        emit FundsBridgedWithStargate(token, amount, ticket);
+            if (minReturnLD > minReturnFromStargate) revert InsufficientMinReturn();
+            if (address(this).balance < valueToSend) revert InsufficientFeeToCoverCost();
+
+            if (token != ETH) IERC20(token).forceApprove(stargate, amount);
+            (, , Ticket memory ticket) = IStargate(stargate).sendToken{ value: valueToSend }(sendParam, messagingFee, payable(address(this)));
+            emit FundsBridgedWithStargate(token, amount, ticket);
+        }
     }
 
     /**
@@ -351,14 +388,7 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
         address token,
         uint256 amount
     ) public view returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
-        if (token == address(0) || amount == 0) revert InvalidValue();
         
-        uint256 balance = 0;
-        if (token == ETH) balance = address(this).balance;
-        else balance = IERC20(token).balanceOf(address(this));
-        
-        if (balance < amount) revert InsufficientBalance();
-
         DestinationData memory destData = _getSettlementDispatcherStorage().destinationData[token];
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
 
@@ -402,6 +432,29 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
     }
 
     /**
+     * @notice Withdraw tokens from scroll with the canonical bridge
+     * @dev Used by bridge function
+     * @param token Address of the token to withdraw
+     * @param recipient Address to receive the funds on ethereum
+     * @param amount Amount to withdraw
+     * @param minGasLimit Minimum gas limit for the withdrawal
+     */
+    function _withdrawCanonicalBridge(address token, address recipient, uint256 amount, uint256 minGasLimit) internal returns (uint256) {
+        if (token == ETH) {
+            IL2Messenger(ETH_MESSENGER).sendMessage{value: amount}(recipient, amount, "", minGasLimit);
+        }
+        else {
+            address gateway = IL2GatewayRouter(GATEWAY_ROUTER).getERC20Gateway(token);
+
+            IERC20(token).forceApprove(gateway, amount);
+            IL2GatewayRouter(GATEWAY_ROUTER).withdrawERC20(token, recipient, amount, minGasLimit);
+        }
+
+        emit CanonicalBridgeWithdraw(token, recipient, amount);
+        return amount;
+    }
+    
+    /**
      * @notice Internal function to handle withdrawal of tokens or ETH
      * @dev Used by both withdrawFunds and transferFundsToRefundWallet
      * @param token Address of the token to withdraw 
@@ -441,12 +494,17 @@ contract SettlementDispatcher is UpgradeableProxy, Constants {
         SettlementDispatcherStorage storage $ = _getSettlementDispatcherStorage();
 
         for (uint256 i = 0; i < len; ) {
-            if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate == address(0)) revert InvalidValue(); 
-            
-            if (tokens[i] == ETH) {
-                if (IStargate(destDatas[i].stargate).token() != address(0)) revert StargateValueInvalid(); 
+            if (destDatas[i].useCanonicalBridge) {
+                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate != address(0) ||  destDatas[i].destEid != 0) revert InvalidValue();
             }
-            else if (IStargate(destDatas[i].stargate).token() != tokens[i]) revert StargateValueInvalid();
+            else {
+                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate == address(0)) revert InvalidValue(); 
+            
+                if (tokens[i] == ETH) {
+                    if (IStargate(destDatas[i].stargate).token() != address(0)) revert StargateValueInvalid(); 
+                }
+                else if (IStargate(destDatas[i].stargate).token() != tokens[i]) revert StargateValueInvalid();
+            }
 
             $.destinationData[tokens[i]] = destDatas[i];
             unchecked {

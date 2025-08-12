@@ -325,7 +325,9 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         destDatas[0] = SettlementDispatcher.DestinationData({
             destEid: optimismDestEid,
             destRecipient: address(1),
-            stargate: address(stargateEthPool)
+            stargate: address(stargateEthPool),
+            useCanonicalBridge: false,
+            minGasLimit: 0
         });
 
         vm.prank(owner);
@@ -348,6 +350,60 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
 
         assertEq(address(settlementDispatcherReap).balance, balBefore - amount);
         assertGt(stargateBalAfter, stargateBalBefore);
+    }
+
+    function test_bridge_works_withCanonicalBridge() public {
+        uint256 balBefore = 1e6;
+        deal(address(usdtScroll), address(settlementDispatcherRain), balBefore);
+        deal(address(usdcScroll), address(settlementDispatcherRain), balBefore);
+
+        alice = makeAddr("alice");
+
+        vm.startPrank(owner);
+        settlementDispatcherRain.bridge(address(usdtScroll), balBefore, 1);
+        assertEq(usdtScroll.balanceOf(address(settlementDispatcherRain)), 0);
+        
+        address[] memory tokens = new address[](1);
+        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
+
+        tokens[0] = address(usdcScroll);
+        destDatas[0] = SettlementDispatcher.DestinationData({
+            destEid: 0,
+            destRecipient: alice,
+            stargate: address(0),
+            useCanonicalBridge: true,
+            minGasLimit: 200_000
+        });
+        settlementDispatcherRain.setDestinationData(tokens, destDatas);
+
+        settlementDispatcherRain.bridge(address(usdcScroll), balBefore, 1);
+        assertEq(usdcScroll.balanceOf(address(settlementDispatcherRain)), 0);
+    }
+
+    function test_bridge_works_withCanonicalBridge_ETH() public {
+        uint256 balBefore = 1e6;
+        deal(address(settlementDispatcherRain), balBefore);
+
+        alice = makeAddr("alice");
+
+        address[] memory tokens = new address[](1);
+        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
+
+        tokens[0] = address(ETH);
+        destDatas[0] = SettlementDispatcher.DestinationData({
+            destEid: 0,
+            destRecipient: alice,
+            stargate: address(0),
+            useCanonicalBridge: true,
+            minGasLimit: 200_000
+        });
+
+        vm.prank(owner);
+        settlementDispatcherRain.setDestinationData(tokens, destDatas);
+
+        vm.prank(owner);
+        settlementDispatcherRain.bridge(address(ETH), balBefore, 1);
+        assertEq(address(settlementDispatcherRain).balance, 0);
     }
 
     function test_bridge_reverts_whenCallerNotBridger() public {
@@ -496,7 +552,9 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         destDatas[0] = SettlementDispatcher.DestinationData({
             destEid: optimismDestEid,
             destRecipient: alice,
-            stargate: stargateUsdcPool
+            stargate: stargateUsdcPool,
+            useCanonicalBridge: false,
+            minGasLimit: 0
         });
     }
 }
