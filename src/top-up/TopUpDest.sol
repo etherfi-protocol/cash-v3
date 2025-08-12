@@ -5,6 +5,7 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
+import { Constants } from "../utils/Constants.sol";
 
 /**
  * @title TopUpDest
@@ -12,7 +13,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @dev Extends UpgradeableProxy with reentrancy protection and pause functionality
  * @author ether.fi
  */
-contract TopUpDest is UpgradeableProxy {
+contract TopUpDest is UpgradeableProxy, Constants {
     using SafeERC20 for IERC20;
 
     /// @notice Role identifier for accounts authorized to deposit tokens
@@ -22,6 +23,7 @@ contract TopUpDest is UpgradeableProxy {
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
     IEtherFiDataProvider public immutable etherFiDataProvider;
+    address public immutable weth;
 
     /**
      * @dev Storage structure for TopUpDest using ERC-7201 namespaced diamond storage pattern
@@ -84,8 +86,9 @@ contract TopUpDest is UpgradeableProxy {
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
      */
-    constructor(address _etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _weth) {
         etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
+        weth = _weth;
         _disableInitializers();
     }
 
@@ -258,6 +261,8 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws BalanceTooLow if the contract has insufficient token balance
      */
     function _transfer(address to, address token, uint256 amount) internal {
+        if (token == ETH) token = weth; 
+        
         if (IERC20(token).balanceOf(address(this)) < amount) revert BalanceTooLow();
         IERC20(token).safeTransfer(to, amount);
     }
