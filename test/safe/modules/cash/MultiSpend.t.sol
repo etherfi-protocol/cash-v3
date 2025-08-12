@@ -7,7 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-import { ICashModule, Mode, BinSponsor, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
+import { ICashModule, Mode, BinSponsor, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -63,7 +63,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;
@@ -128,7 +128,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
             CashbackTokens memory scr = CashbackTokens({
                 token: address(scrToken),
                 amountInUsd: 1e6,
-                cashbackType: CashbackTypes.Regular
+                cashbackType: 0
             });
 
             cashbackTokens[0] = scr;
@@ -191,7 +191,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;
@@ -235,7 +235,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;
@@ -279,7 +279,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;
@@ -324,7 +324,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;
@@ -356,7 +356,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;
@@ -484,7 +484,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;
@@ -531,7 +531,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;
@@ -588,7 +588,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;

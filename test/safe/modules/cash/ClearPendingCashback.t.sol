@@ -6,7 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Test } from "forge-std/Test.sol";
 
-import { ICashModule, BinSponsor, Mode, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
+import { ICashModule, BinSponsor, Mode, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../../../src/interfaces/ICashbackDispatcher.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { UpgradeableProxy } from "../../../../src/utils/UpgradeableProxy.sol";
@@ -97,7 +97,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
             CashbackTokens memory scrSafe = CashbackTokens({
                 token: address(scrToken),
                 amountInUsd: 1e6,
-                cashbackType: CashbackTypes.Regular
+                cashbackType: 0
             });
             cashbackTokens[0] = scrSafe;
             Cashback memory scrCashbackUser = Cashback({
@@ -150,7 +150,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         CashbackTokens memory scrSafe = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
         cashbackTokens[0] = scrSafe;
         Cashback memory scrCashbackUser = Cashback({
@@ -204,7 +204,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         CashbackTokens memory scrSafe = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
         cashbackTokens[0] = scrSafe;
         Cashback memory scrCashbackUser = Cashback({

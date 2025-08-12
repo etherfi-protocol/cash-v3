@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { CashModuleTestSetup, DebtManagerCore, DebtManagerAdmin, CashVerificationLib, ICashModule, IERC20, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
-import { BinSponsor, SafeTiers, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
+import { BinSponsor, SafeTiers, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { SignatureUtils } from "../../../../src/libraries/SignatureUtils.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { CashEventEmitter } from "../../../../src/modules/cash/CashEventEmitter.sol";
@@ -33,7 +33,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         safeTokens[0] = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
         cashbacks[0] = Cashback({
             to: address(safe),
@@ -44,7 +44,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         spenderTokens[0] = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 2e6,
-            cashbackType: CashbackTypes.Spender
+            cashbackType: 1
         });
         cashbacks[1] = Cashback({
             to: address(spender),
@@ -55,7 +55,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         referrerTokens[0] = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 2e6,
-            cashbackType: CashbackTypes.Referral
+            cashbackType: 2
         });
         cashbacks[2] = Cashback({
             to: address(referrer),
@@ -73,11 +73,11 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedCashbackToSafe, safeTokens[0].amountInUsd, CashbackTypes.Regular, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedCashbackToSafe, safeTokens[0].amountInUsd, 0, true);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, spenderTokens[0].amountInUsd, CashbackTypes.Spender, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, spenderTokens[0].amountInUsd, 1, true);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), amount, address(referrer), address(scrToken), expectedCashbackToReferrer, referrerTokens[0].amountInUsd, CashbackTypes.Referral, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(referrer), address(scrToken), expectedCashbackToReferrer, referrerTokens[0].amountInUsd, 2, true);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertEq(cashbackToken.balanceOf(address(safe)) - cashbackBalSafeBefore, expectedCashbackToSafe);
@@ -109,12 +109,12 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         safeTokens[0] = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
         safeTokens[1] = CashbackTokens({
             token: address(weETHScroll),
             amountInUsd: 10e6,
-            cashbackType: CashbackTypes.Promotion
+            cashbackType: 1
         });
         cashbacks[0] = Cashback({
             to: address(safe),
@@ -125,7 +125,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         spenderTokens[0] = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 2e6,
-            cashbackType: CashbackTypes.Spender
+            cashbackType: 1
         });
         cashbacks[1] = Cashback({
             to: address(spender),
@@ -143,11 +143,11 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedScrCashbackToSafe, safeTokens[0].amountInUsd, CashbackTypes.Regular, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedScrCashbackToSafe, safeTokens[0].amountInUsd, 0, true);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(weETHScroll), expectedWeETHCashbackToSafe, safeTokens[1].amountInUsd, CashbackTypes.Promotion, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(weETHScroll), expectedWeETHCashbackToSafe, safeTokens[1].amountInUsd, 1, true);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, spenderTokens[0].amountInUsd, CashbackTypes.Spender, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, spenderTokens[0].amountInUsd, 1, true);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertEq(scrToken.balanceOf(address(safe)) - scrBalSafeBefore, expectedScrCashbackToSafe);
@@ -163,7 +163,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         safeTokens[0] = CashbackTokens({
             token: address(weETHScroll),
             amountInUsd: 10e6,
-            cashbackType: CashbackTypes.Promotion
+            cashbackType: 1
         });
         cashbacks[0] = Cashback({
             to: address(safe),
@@ -179,7 +179,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), spendAmounts[0], address(safe), safeTokens[0].token, 0, safeTokens[0].amountInUsd, CashbackTypes.Promotion, false);
+        emit CashEventEmitter.Cashback(address(safe), spendAmounts[0], address(safe), safeTokens[0].token, 0, safeTokens[0].amountInUsd, 1, false);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertEq(cashModule.getPendingCashbackForToken(address(safe), address(safeTokens[0].token)), safeTokens[0].amountInUsd);
@@ -199,7 +199,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         safeTokens[0] = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
         cashbacks[0] = Cashback({
             to: address(safe),
@@ -210,7 +210,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         spenderTokens[0] = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 2e6,
-            cashbackType: CashbackTypes.Spender
+            cashbackType: 1
         });
         cashbacks[1] = Cashback({
             to: address(spender),
@@ -227,9 +227,9 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedCashbackToSafe, 1e6, CashbackTypes.Regular, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(safe), address(scrToken), expectedCashbackToSafe, 1e6, 0, true);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, 2e6, CashbackTypes.Spender, true);
+        emit CashEventEmitter.Cashback(address(safe), amount, address(spender), address(scrToken), expectedCashbackToSpender, 2e6, 1, true);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertEq(cashbackToken.balanceOf(address(safe)) - cashbackBalSafeBefore, expectedCashbackToSafe);
@@ -278,7 +278,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         CashbackTokens memory scrSafe = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
         cashbackTokens[0] = scrSafe;
         Cashback memory scrCashbackSafe = Cashback({
@@ -389,7 +389,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         CashbackTokens memory scrSafe = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
         cashbackTokens[0] = scrSafe;
         Cashback memory scrCashbackSafe = Cashback({
@@ -441,7 +441,7 @@ contract CashModuleCashbackTest is CashModuleTestSetup {
         CashbackTokens memory scrSafe = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
         cashbackTokens[0] = scrSafe;
         Cashback memory scrCashbackSafe = Cashback({

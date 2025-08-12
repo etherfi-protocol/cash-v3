@@ -11,7 +11,7 @@ import { CashbackDispatcher } from "../../../../src/cashback-dispatcher/Cashback
 import { DebtManagerAdmin } from "../../../../src/debt-manager/DebtManagerAdmin.sol";
 import { DebtManagerCore, DebtManagerStorageContract } from "../../../../src/debt-manager/DebtManagerCore.sol";
 import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
-import { Mode, SafeTiers, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, SafeTiers, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
