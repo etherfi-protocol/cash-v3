@@ -102,11 +102,11 @@ contract AaveV3WithdrawTest is AaveV3TestSetup {
         bytes memory withdrawSignature = abi.encodePacked(wr, ws, wv);
 
         vm.expectEmit(true, true, true, true);
-        emit AaveV3Module.WithdrawFromAave(address(safe), address(usdcScroll), collateralAmount);
+        emit AaveV3Module.WithdrawFromAave(address(safe), address(usdcScroll), 1000e6 - 1);
         aaveV3Module.withdraw(address(safe), address(usdcScroll), amountToWithdraw, owner1, withdrawSignature);
 
         uint256 balanceAfter = usdcScroll.balanceOf(address(safe));
-        assertEq(balanceAfter - balanceBefore, collateralAmount);
+        assertEq(balanceAfter - balanceBefore, 1000e6 - 1);
     }
 
     function test_withdraw_withdrawsETHFromPool() public {

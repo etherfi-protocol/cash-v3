@@ -261,8 +261,6 @@ contract TopUpDest is UpgradeableProxy, Constants {
      * @custom:throws BalanceTooLow if the contract has insufficient token balance
      */
     function _transfer(address to, address token, uint256 amount) internal {
-        if (token == ETH) token = weth; 
-        
         if (IERC20(token).balanceOf(address(this)) < amount) revert BalanceTooLow();
         IERC20(token).safeTransfer(to, amount);
     }
