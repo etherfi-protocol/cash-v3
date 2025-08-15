@@ -82,9 +82,11 @@ contract TopUp is Constants, Ownable {
     }
 
     function _handleETH(uint256 amount) internal {
-        IWETH(weth).deposit{value: amount}();
-        // This is done to emit a transfer event so we can just track WETH transfers to this contract
-        IWETH(weth).transfer(address(this), amount);
+        if (amount > 0) {
+            IWETH(weth).deposit{value: amount}();
+            // This is done to emit a transfer event so we can just track WETH transfers to this contract
+            IWETH(weth).transfer(address(this), amount);
+        }
     }
 
     /**
