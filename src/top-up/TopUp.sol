@@ -70,10 +70,11 @@ contract TopUp is Constants, Ownable {
             }
 
             balance = IERC20(tokens[i]).balanceOf(address(this));
-            if (balance > 0) IERC20(tokens[i]).safeTransfer(_owner, balance);
+            if (balance > 0) { 
+                IERC20(tokens[i]).safeTransfer(_owner, balance);
+                emit ProcessTopUp(tokens[i], balance);
+            }
             
-            emit ProcessTopUp(tokens[i], balance);
-
             unchecked {
                 ++i;
             }
