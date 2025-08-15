@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { SpendingLimit } from "../libraries/SpendingLimitLib.sol";
-import { Mode, SafeTiers, BinSponsor, CashbackTypes } from "./ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor } from "./ICashModule.sol";
 
 /**
  * @title ICashEventEmitter
@@ -46,7 +46,7 @@ interface ICashEventEmitter {
      * @param cashbackType Type of cashback
      * @param paid Whether the cashback was paid
      */
-    function emitCashbackEvent(address safe, uint256 spendingInUsd, address recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, CashbackTypes cashbackType, bool paid) external;
+    function emitCashbackEvent(address safe, uint256 spendingInUsd, address recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, uint256 cashbackType, bool paid) external;
 
     /**
      * @notice Emits the Spend event

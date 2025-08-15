@@ -56,13 +56,13 @@ contract TopUpTest is Test, Constants {
         vm.expectEmit(true, true, true, true);
         emit TopUp.ProcessTopUp(address(token), 100);
         vm.expectEmit(true, true, true, true);
-        emit TopUp.ProcessTopUp(address(ETH), 1 ether);
+        emit TopUp.ProcessTopUp(address(weth), 1 ether);
         topUp.processTopUp(tokens);
 
         assertEq(token.balanceOf(address(topUp)), 0, "TopUp contract should have 0 tokens");
-        assertEq(address(topUp).balance, 0, "TopUp contract should have 0 ETH");
+        assertEq(weth.balanceOf(address(topUp)), 0, "TopUp contract should have 0 ETH");
         assertEq(token.balanceOf(owner), 100, "Owner should have received tokens");
-        assertEq(owner.balance, 1 ether, "Owner should have received ETH");
+        assertEq(weth.balanceOf(owner), 1 ether, "Owner should have received ETH");
     }
 
     function test_ETH_transfers_convertItToWeth() public {

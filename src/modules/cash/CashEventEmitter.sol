@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Mode, SafeTiers, BinSponsor, CashbackTypes } from "../../interfaces/ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor } from "../../interfaces/ICashModule.sol";
 import { SpendingLimit } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
@@ -127,7 +127,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param cashbackType Type of cashback
      * @param paid Whether the cashback was successfully paid
      */
-    event Cashback(address indexed safe, uint256 spendingInUsd, address indexed recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, CashbackTypes cashbackType, bool indexed paid);
+    event Cashback(address indexed safe, uint256 spendingInUsd, address indexed recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, uint256 cashbackType, bool indexed paid);
         
     /**
      * @notice Emitted when pending cashback is cleared
@@ -285,7 +285,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param cashbackType Type of cashback
      * @param paid Whether the cashback was paid
      */
-    function emitCashbackEvent(address safe, uint256 spendingInUsd, address recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, CashbackTypes cashbackType, bool paid) external onlyCashModule {
+    function emitCashbackEvent(address safe, uint256 spendingInUsd, address recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, uint256 cashbackType, bool paid) external onlyCashModule {
         emit Cashback(safe, spendingInUsd, recipient, cashbackToken, cashbackAmountInToken, cashbackInUsd, cashbackType, paid);
     }
 

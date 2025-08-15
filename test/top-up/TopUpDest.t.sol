@@ -13,8 +13,9 @@ import { UpgradeableProxy, PausableUpgradeable } from "../../src/utils/Upgradeab
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 import { TopUpDestNativeGateway } from "../../src/top-up/TopUpDestNativeGateway.sol";
+import { Constants } from "../../src/utils/Constants.sol";
 
-contract TopUpDestTest is Test {
+contract TopUpDestTest is Test, Constants {
     TopUpDest public topUpDest;
     TopUpDestNativeGateway public topUpDestNativeGateway;
     RoleRegistry public roleRegistry;
@@ -31,6 +32,7 @@ contract TopUpDestTest is Test {
     address public user2;
     address public nonUser;
 
+    address public weth = 0x5300000000000000000000000000000000000004;
     bytes32 public constant TOP_UP_DEPOSITOR_ROLE = keccak256("DEPOSITOR_ROLE");
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
@@ -79,7 +81,7 @@ contract TopUpDestTest is Test {
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
         // Deploy TopUpDest
-        address topUpDestImpl = address(new TopUpDest(address(dataProvider)));
+        address topUpDestImpl = address(new TopUpDest(address(dataProvider), address(weth)));
         topUpDest = TopUpDest(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry)))));
         
         topUpDestNativeGateway = new TopUpDestNativeGateway(address(topUpDest));
@@ -95,7 +97,6 @@ contract TopUpDestTest is Test {
     }
 
     function test_sendingEthToTopUpDestNativeGateway_sendsWethToTopUpDest() public {        
-        address weth = address(topUpDestNativeGateway.weth());
         uint256 amount = 1 ether;
         deal(address(owner), amount);
 
@@ -198,6 +199,37 @@ contract TopUpDestTest is Test {
 
         vm.stopPrank();
     }
+
+    function test_topUpUserSafe_ETH_succeeds() public {
+        uint256 depositAmount = 2 ether;
+        uint256 topUpAmount = 1 ether;
+        // First deposit some tokens
+        vm.startPrank(depositor);
+        deal(address(weth), depositor, depositAmount);
+        IERC20(weth).approve(address(topUpDest), depositAmount);
+        topUpDest.deposit(address(weth), depositAmount);
+        vm.stopPrank();
+        
+        // Then top up a user
+        vm.startPrank(topUpRole);
+
+        uint256 chainId = 100;
+        bytes32 txHash = keccak256("transaction1");
+        bytes32 txId = topUpDest.getTxId(txHash, user1, address(ETH));
+
+        vm.expectEmit(true, true, true, true);
+        emit TopUpDest.TopUp(txId, user1, address(ETH), txHash, chainId, topUpAmount);
+        topUpDest.topUpUserSafe(txHash, user1, chainId, address(ETH), topUpAmount);
+
+        // Check state changes
+        assertTrue(topUpDest.isTransactionCompleted(txHash, user1, address(ETH)));
+        assertTrue(topUpDest.isTransactionCompletedByTxId(txId));
+        assertEq(IERC20(weth).balanceOf(user1), topUpAmount);
+        assertEq(IERC20(weth).balanceOf(address(topUpDest)), depositAmount - topUpAmount);
+
+        vm.stopPrank();
+    }
+
 
     function test_topUpUserSafe_single_succeeds() public {
         // First deposit some tokens
