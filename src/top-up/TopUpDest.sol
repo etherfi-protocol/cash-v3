@@ -5,7 +5,6 @@ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/Saf
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
-import { Constants } from "../utils/Constants.sol";
 
 /**
  * @title TopUpDest
@@ -13,7 +12,7 @@ import { Constants } from "../utils/Constants.sol";
  * @dev Extends UpgradeableProxy with reentrancy protection and pause functionality
  * @author ether.fi
  */
-contract TopUpDest is UpgradeableProxy, Constants {
+contract TopUpDest is UpgradeableProxy {
     using SafeERC20 for IERC20;
 
     /// @notice Role identifier for accounts authorized to deposit tokens
@@ -23,7 +22,6 @@ contract TopUpDest is UpgradeableProxy, Constants {
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
     IEtherFiDataProvider public immutable etherFiDataProvider;
-    address public immutable weth;
 
     /**
      * @dev Storage structure for TopUpDest using ERC-7201 namespaced diamond storage pattern
@@ -86,9 +84,8 @@ contract TopUpDest is UpgradeableProxy, Constants {
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
      */
-    constructor(address _etherFiDataProvider, address _weth) {
+    constructor(address _etherFiDataProvider) {
         etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
-        weth = _weth;
         _disableInitializers();
     }
 
