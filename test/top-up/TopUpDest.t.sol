@@ -81,7 +81,7 @@ contract TopUpDestTest is Test, Constants {
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
         // Deploy TopUpDest
-        address topUpDestImpl = address(new TopUpDest(address(dataProvider), address(weth)));
+        address topUpDestImpl = address(new TopUpDest(address(dataProvider)));
         topUpDest = TopUpDest(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry)))));
         
         topUpDestNativeGateway = new TopUpDestNativeGateway(address(topUpDest));
@@ -199,37 +199,6 @@ contract TopUpDestTest is Test, Constants {
 
         vm.stopPrank();
     }
-
-    function test_topUpUserSafe_ETH_succeeds() public {
-        uint256 depositAmount = 2 ether;
-        uint256 topUpAmount = 1 ether;
-        // First deposit some tokens
-        vm.startPrank(depositor);
-        deal(address(weth), depositor, depositAmount);
-        IERC20(weth).approve(address(topUpDest), depositAmount);
-        topUpDest.deposit(address(weth), depositAmount);
-        vm.stopPrank();
-        
-        // Then top up a user
-        vm.startPrank(topUpRole);
-
-        uint256 chainId = 100;
-        bytes32 txHash = keccak256("transaction1");
-        bytes32 txId = topUpDest.getTxId(txHash, user1, address(ETH));
-
-        vm.expectEmit(true, true, true, true);
-        emit TopUpDest.TopUp(txId, user1, address(ETH), txHash, chainId, topUpAmount);
-        topUpDest.topUpUserSafe(txHash, user1, chainId, address(ETH), topUpAmount);
-
-        // Check state changes
-        assertTrue(topUpDest.isTransactionCompleted(txHash, user1, address(ETH)));
-        assertTrue(topUpDest.isTransactionCompletedByTxId(txId));
-        assertEq(IERC20(weth).balanceOf(user1), topUpAmount);
-        assertEq(IERC20(weth).balanceOf(address(topUpDest)), depositAmount - topUpAmount);
-
-        vm.stopPrank();
-    }
-
 
     function test_topUpUserSafe_single_succeeds() public {
         // First deposit some tokens

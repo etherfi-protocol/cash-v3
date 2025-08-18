@@ -298,7 +298,7 @@ contract TopUpFactoryTest is Test, Constants {
         assertEq(address(topUpAddr).balance, 0, "TopUp contract should have 0 ETH");
         assertEq(usdc.balanceOf(address(factory)), 100, "Factory should have received USDC");
         assertEq(weETH.balanceOf(address(factory)), 1 ether, "Factory should have received weETH");
-        assertEq(address(factory).balance, 1 ether, "Factory should have received ETH");
+        assertEq(weth.balanceOf(address(factory)), 1 ether, "Factory should have received weth");
     }
 
     /// @dev Test processTopUp with invalid inputs
