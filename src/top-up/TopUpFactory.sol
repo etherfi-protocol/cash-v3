@@ -46,9 +46,6 @@ contract TopUpFactory is BeaconFactory, Constants {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpFactory")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant TopUpFactoryStorageLocation = 0xe4e747da44afe6bc45062fa78d7d038abc167c5a78dee3046108b9cc47b1b100;
 
-    /// @notice The ADMIN role for the TopUp factory
-    bytes32 public constant TOPUP_FACTORY_ADMIN_ROLE = keccak256("TOPUP_FACTORY_ADMIN_ROLE");
-
     /// @notice Max slippage allowed for bridging
     uint96 public constant MAX_ALLOWED_SLIPPAGE = 200; // 2%
 
@@ -119,12 +116,9 @@ contract TopUpFactory is BeaconFactory, Constants {
 
     /**
      * @notice Deploys a new TopUp contract instance
-     * @dev Only callable by addresses with TOPUP_FACTORY_ADMIN_ROLE
      * @param salt The salt value used for deterministic deployment
-     * @custom:throws OnlyAdmin if caller doesn't have admin role
      */
     function deployTopUpContract(bytes32 salt) external whenNotPaused {
-        if (!roleRegistry().hasRole(TOPUP_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         bytes memory initData = abi.encodeWithSelector(TopUp.initialize.selector, address(this));
         address deployed = _deployBeacon(salt, initData);
 

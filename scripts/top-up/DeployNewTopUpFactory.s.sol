@@ -7,7 +7,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import {TopUpFactory} from "../../src/top-up/TopUpFactory.sol";
 import {Utils} from "../utils/Utils.sol";
 
-contract UpgradeTopUpFactory is Utils {
+contract DeployTopUpFactory is Utils {
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 

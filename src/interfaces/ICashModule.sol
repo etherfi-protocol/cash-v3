@@ -8,16 +8,16 @@ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
-/**
- * @title CashbackTypes
- * @notice Defines the different cashback types
- */
-enum CashbackTypes {
-    Regular,
-    Spender, 
-    Promotion,
-    Referral
-}
+// /**
+//  * @title CashbackTypes
+//  * @notice Defines the different cashback types
+//  */
+// enum CashbackTypes {
+//     Regular,
+//     Spender, 
+//     Promotion,
+//     Referral
+// }
 
 /**
  * @title Cashback
@@ -35,7 +35,7 @@ struct Cashback {
 struct CashbackTokens {
     address token;
     uint256 amountInUsd;
-    CashbackTypes cashbackType;
+    uint256 cashbackType;
 }
 
 /**
