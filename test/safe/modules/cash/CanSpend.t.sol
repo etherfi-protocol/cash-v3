@@ -6,7 +6,7 @@ import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 
 import { PriceProvider, IAggregatorV3 } from "../../../../src/oracle/PriceProvider.sol"; 
-import { Mode, BinSponsor, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, BinSponsor, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
@@ -56,7 +56,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;

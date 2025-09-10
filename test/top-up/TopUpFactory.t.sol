@@ -89,7 +89,6 @@ contract TopUpFactoryTest is Test, Constants {
         implementation = new TopUp(address(weth));
         address factoryImpl = address(new TopUpFactory());
         factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
-        roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), admin);
 
         address[] memory tokens = new address[](9);
         tokens[0] = address(usdc);
@@ -139,13 +138,6 @@ contract TopUpFactoryTest is Test, Constants {
         TopUp topUp = TopUp(payable(topUpAddr));
 
         assertEq(topUp.owner(), address(factory), "Factory should be bridge owner");
-    }
-
-    /// @dev Test non-admin cannot deploy
-    function test_deployTopUpContract_reverts_whenCalledByNonAdmin() public {
-        vm.prank(user);
-        vm.expectRevert(TopUpFactory.OnlyAdmin.selector);
-        factory.deployTopUpContract(bytes32(uint256(1)));
     }
 
     /// @dev Test cannot deploy with same salt
@@ -306,7 +298,7 @@ contract TopUpFactoryTest is Test, Constants {
         assertEq(address(topUpAddr).balance, 0, "TopUp contract should have 0 ETH");
         assertEq(usdc.balanceOf(address(factory)), 100, "Factory should have received USDC");
         assertEq(weETH.balanceOf(address(factory)), 1 ether, "Factory should have received weETH");
-        assertEq(address(factory).balance, 1 ether, "Factory should have received ETH");
+        assertEq(weth.balanceOf(address(factory)), 1 ether, "Factory should have received weth");
     }
 
     /// @dev Test processTopUp with invalid inputs
@@ -763,7 +755,6 @@ contract TopUpFactoryTest is Test, Constants {
         implementation = new TopUp(address(weth));
         address factoryImpl = address(new TopUpFactory());
         factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
-        roleRegistry.grantRole(factory.TOPUP_FACTORY_ADMIN_ROLE(), admin);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(baseUsdt);

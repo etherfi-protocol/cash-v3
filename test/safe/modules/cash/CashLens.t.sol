@@ -5,7 +5,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 
-import { Mode, SafeCashData, BinSponsor, SafeData, Cashback, CashbackTokens, CashbackTypes } from "../../../../src/interfaces/ICashModule.sol";
+import { Mode, SafeCashData, BinSponsor, SafeData, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
@@ -214,7 +214,7 @@ contract CashLensTest is CashModuleTestSetup {
         CashbackTokens memory scr = CashbackTokens({
             token: address(scrToken),
             amountInUsd: 1e6,
-            cashbackType: CashbackTypes.Regular
+            cashbackType: 0
         });
 
         cashbackTokens[0] = scr;

@@ -7,10 +7,10 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import {TopUp} from "../../src/top-up/TopUp.sol";
 import {Utils} from "../utils/Utils.sol";
 
-contract UpgradeTopUp is Utils {
-
+contract DeployTopUp is Utils {
     address public BASE_WETH = 0x4200000000000000000000000000000000000006;
     address public ETH_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
+    address public ARBITRUM_WETH = 0x82aF49447D8a07e3bd95BD0d56f35241523fBab1;
     
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -21,6 +21,8 @@ contract UpgradeTopUp is Utils {
             TopUp topUp = new TopUp(ETH_WETH);
         } else if (block.chainid == 8453) {
             TopUp topUp = new TopUp(BASE_WETH);
+        } else if (block.chainid == 42161) {
+            TopUp topUp = new TopUp(ARBITRUM_WETH);
         } else {
             revert("Unsupported chain");
         }
