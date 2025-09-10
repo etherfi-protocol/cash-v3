@@ -13,8 +13,9 @@ import { UpgradeableProxy, PausableUpgradeable } from "../../src/utils/Upgradeab
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 import { TopUpDestNativeGateway } from "../../src/top-up/TopUpDestNativeGateway.sol";
+import { Constants } from "../../src/utils/Constants.sol";
 
-contract TopUpDestTest is Test {
+contract TopUpDestTest is Test, Constants {
     TopUpDest public topUpDest;
     TopUpDestNativeGateway public topUpDestNativeGateway;
     RoleRegistry public roleRegistry;
@@ -31,6 +32,7 @@ contract TopUpDestTest is Test {
     address public user2;
     address public nonUser;
 
+    address public weth = 0x5300000000000000000000000000000000000004;
     bytes32 public constant TOP_UP_DEPOSITOR_ROLE = keccak256("DEPOSITOR_ROLE");
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
@@ -95,7 +97,6 @@ contract TopUpDestTest is Test {
     }
 
     function test_sendingEthToTopUpDestNativeGateway_sendsWethToTopUpDest() public {        
-        address weth = address(topUpDestNativeGateway.weth());
         uint256 amount = 1 ether;
         deal(address(owner), amount);
 

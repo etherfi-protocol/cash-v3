@@ -54,7 +54,7 @@ contract TopUp is Constants, Ownable {
      * @custom:throws OnlyOwner if caller is not the owner
      * @custom:throws EthTransferFailed if ETH transfer fails
      */
-    function processTopUp(address[] calldata tokens) external {
+    function processTopUp(address[] memory tokens) external {
         address _owner = owner();
         if (_owner != msg.sender) revert OnlyOwner();
 
@@ -64,20 +64,28 @@ contract TopUp is Constants, Ownable {
             uint256 balance;
             if (tokens[i] == ETH) {
                 balance = address(this).balance;
-                if (balance > 0) {
-                    (bool success,) = _owner.call{ value: balance, gas: 10_000 }("");
-                    if (!success) revert EthTransferFailed();
-                }
-            } else {
-                balance = IERC20(tokens[i]).balanceOf(address(this));
-                if (balance > 0) IERC20(tokens[i]).safeTransfer(_owner, balance);
+                if (balance > 0) _handleETH(balance);
+                
+                tokens[i] = weth;
             }
 
-            emit ProcessTopUp(tokens[i], balance);
-
+            balance = IERC20(tokens[i]).balanceOf(address(this));
+            if (balance > 0) { 
+                IERC20(tokens[i]).safeTransfer(_owner, balance);
+                emit ProcessTopUp(tokens[i], balance);
+            }
+            
             unchecked {
                 ++i;
             }
+        }
+    }
+
+    function _handleETH(uint256 amount) internal {
+        if (amount > 0) {
+            IWETH(weth).deposit{value: amount}();
+            // This is done to emit a transfer event so we can just track WETH transfers to this contract
+            IWETH(weth).transfer(address(this), amount);
         }
     }
 
@@ -85,6 +93,6 @@ contract TopUp is Constants, Ownable {
      * @notice Deposits all ETH into WETH
      */
     receive() external payable {
-        IWETH(weth).deposit{value: msg.value}();
+        _handleETH(msg.value);
     }
 }
