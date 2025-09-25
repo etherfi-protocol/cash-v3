@@ -189,6 +189,7 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function getSettlementDispatcher(BinSponsor binSponsor) public view returns (address settlementDispatcher) {
         if (binSponsor == BinSponsor.Rain) settlementDispatcher = _getCashModuleStorage().settlementDispatcherRain;
+        else if (binSponsor == BinSponsor.PIX) settlementDispatcher = _getCashModuleStorage().settlementDispatcherPix;
         else settlementDispatcher = _getCashModuleStorage().settlementDispatcherReap;
 
         if (settlementDispatcher == address(0)) revert SettlementDispatcherNotSetForBinSponsor();
