@@ -15,7 +15,7 @@ import { SettlementDispatcher } from "../../src/settlement-dispatcher/Settlement
 
 contract UpgradePixVerifyBytecode is ContractCodeChecker, Test {
     address debtManagerCoreImpl = 0xD840daC5a5CEe82dC1a898a184A1Fa7E9Df97bf7;         
-    address debtManagerAdminImpl = 0xef41ADB815A209073FC54A635aFC71eeB6341aBb;
+    address debtManagerAdminImpl = 0x0c37dfd6B0649a9560BCa0CD8A9B300b5fd11089;
     address cashModuleCoreImpl = 0xE9EE6923D41Cf5F964F11065436BD90D4577B5e4;    
     address cashModuleSettersImpl = 0x0052F731a6BEA541843385ffBA408F52B74Cb624;    
     address cashEventEmitterImpl = 0x8c370794f54F00f12580913E4456d377eA116984;
