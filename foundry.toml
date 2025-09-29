@@ -23,11 +23,9 @@ scroll = "${SCROLL_RPC}"
 base = "${BASE_RPC}"
 
 [etherscan]
-mainnet = { key = "${MAINNET_ETHERSCAN_KEY}" }
-scroll = { key = "${SCROLLSCAN_KEY}" }
-base = { key = "${BASESCAN_KEY}" }
-
-
+mainnet = { key = "${ETHERSCAN_KEY}" }
+scroll = { key = "${ETHERSCAN_KEY}" }
+base = { key = "${ETHERSCAN_KEY}" }
 
 [fmt]
 line_length = 500
