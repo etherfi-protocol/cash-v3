@@ -31,6 +31,7 @@ contract UpgradePix is GnosisHelpers, Utils, Test {
     address cashModuleSettersImpl;
     address cashEventEmitterImpl;
     address debtManagerCoreImpl;
+    address debtManagerAdminImpl;
 
     address[] withdrawTokens;
     bool[] shouldWhitelist;
@@ -99,8 +100,10 @@ contract UpgradePix is GnosisHelpers, Utils, Test {
         cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
         debtManagerCoreImpl = address(new DebtManagerCore(dataProvider));
         cashEventEmitterImpl = address(new CashEventEmitter(cashModule));
+        debtManagerAdminImpl = address(new DebtManagerAdmin(dataProvider));
 
         UUPSUpgradeable(debtManager).upgradeToAndCall(debtManagerCoreImpl, "");
+        DebtManagerCore(debtManager).setAdminImpl(debtManagerAdminImpl);
         UUPSUpgradeable(cashModule).upgradeToAndCall(cashModuleCoreImpl, "");
         CashModuleCore(cashModule).setCashModuleSettersAddress(cashModuleSettersImpl);
         UUPSUpgradeable(cashEventEmitter).upgradeToAndCall(cashEventEmitterImpl, "");

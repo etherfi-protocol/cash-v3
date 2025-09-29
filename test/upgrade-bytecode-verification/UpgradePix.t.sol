@@ -10,11 +10,12 @@ import { CashModuleCore, BinSponsor } from "../../src/modules/cash/CashModuleCor
 import { CashModuleSetters } from "../../src/modules/cash/CashModuleSetters.sol";
 import { CashLens } from "../../src/modules/cash/CashLens.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
+import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
 import { SettlementDispatcher } from "../../src/settlement-dispatcher/SettlementDispatcher.sol";
-
 
 contract UpgradePixVerifyBytecode is ContractCodeChecker, Test {
     address debtManagerCoreImpl = 0xD840daC5a5CEe82dC1a898a184A1Fa7E9Df97bf7;         
+    address debtManagerAdminImpl = 0xef41ADB815A209073FC54A635aFC71eeB6341aBb;
     address cashModuleCoreImpl = 0xE9EE6923D41Cf5F964F11065436BD90D4577B5e4;    
     address cashModuleSettersImpl = 0x0052F731a6BEA541843385ffBA408F52B74Cb624;    
     address cashEventEmitterImpl = 0x8c370794f54F00f12580913E4456d377eA116984;
@@ -31,6 +32,7 @@ contract UpgradePixVerifyBytecode is ContractCodeChecker, Test {
 
     function test_upgradeMultispend_verifyBytecode() public {
         DebtManagerCore debtManagerCore = new DebtManagerCore(dataProvider);
+        DebtManagerAdmin debtManagerAdmin = new DebtManagerAdmin(dataProvider);
         SettlementDispatcher settlementDispatcherPix = new SettlementDispatcher(BinSponsor.PIX, dataProvider);
         CashEventEmitter cashEventEmitter = new CashEventEmitter(cashModule);
         CashModuleCore cashModuleCore = new CashModuleCore(dataProvider);
@@ -40,7 +42,12 @@ contract UpgradePixVerifyBytecode is ContractCodeChecker, Test {
         emit log_named_address("New deploy", address(debtManagerCore));
         emit log_named_address("Verifying contract", address(debtManagerCoreImpl));
         verifyContractByteCodeMatch(address(debtManagerCoreImpl), address(debtManagerCore));
-     
+
+        console.log("-------------- Debt Manager Admin ----------------");
+        emit log_named_address("New deploy", address(debtManagerAdmin));
+        emit log_named_address("Verifying contract", address(debtManagerAdminImpl));
+        verifyContractByteCodeMatch(address(debtManagerAdminImpl), address(debtManagerAdmin));
+
         console.log("-------------- Settlement Dispatcher Pix ----------------");
         emit log_named_address("New deploy", address(settlementDispatcherPix));
         emit log_named_address("Verifying contract", address(settlementDispatcherPixImpl));

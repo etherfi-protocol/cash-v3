@@ -31,6 +31,7 @@ contract UpgradePix is GnosisHelpers, Utils {
     address cashModuleSettersImpl;
     address cashEventEmitterImpl;
     address debtManagerCoreImpl;
+    address debtManagerAdminImpl;
 
     address public usdc = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
     address public usdt = 0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df;
@@ -102,6 +103,7 @@ contract UpgradePix is GnosisHelpers, Utils {
         cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
         debtManagerCoreImpl = address(new DebtManagerCore(dataProvider));
         cashEventEmitterImpl = address(new CashEventEmitter(cashModule));
+        debtManagerAdminImpl = address(new DebtManagerAdmin(dataProvider));
 
         string memory txs = getGnosisTransactions();
 
@@ -119,6 +121,9 @@ contract UpgradePix is GnosisHelpers, Utils {
 
         string memory debtManagerCoreUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, debtManagerCoreImpl, ""));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), debtManagerCoreUpgrade, "0", false)));
+
+        string memory debtManagerAdminUpgrade = iToHex(abi.encodeWithSelector(DebtManagerCore.setAdminImpl.selector, debtManagerAdminImpl));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), debtManagerAdminUpgrade, "0", false)));
 
         string memory cashModuleCoreUpgrade = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cashModuleCoreImpl, ""));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), cashModuleCoreUpgrade, "0", false)));
