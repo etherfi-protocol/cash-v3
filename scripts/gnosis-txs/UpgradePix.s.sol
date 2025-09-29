@@ -138,7 +138,7 @@ contract UpgradePix is GnosisHelpers, Utils {
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setSettlementDispatcher, "0", false)));
 
         string memory setLiquidAssetWithdrawQueue = iToHex(abi.encodeWithSelector(SettlementDispatcher.setLiquidAssetWithdrawQueue.selector, liquidUsd, liquidUsdBoringQueue));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(pixSettlementDispatcherProxy)), setLiquidAssetWithdrawQueue, "0", false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(pixSettlementDispatcherProxy)), setLiquidAssetWithdrawQueue, "0", true)));
 
         return txs;
     }
