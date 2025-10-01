@@ -1,0 +1,13 @@
+diff --git a/src/safe/RecoveryManager.sol b/src/safe/RecoveryManager.sol
+index 18edebf..3b0b53a 100644
+--- a/src/safe/RecoveryManager.sol
++++ b/src/safe/RecoveryManager.sol
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity ^0.8.28;
+ 
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
+ import { EtherFiSafeBase } from "./EtherFiSafeBase.sol";

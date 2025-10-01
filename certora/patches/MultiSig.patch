@@ -1,0 +1,13 @@
+diff --git a/src/safe/MultiSig.sol b/src/safe/MultiSig.sol
+index 5cf406a..0650c3d 100644
+--- a/src/safe/MultiSig.sol
++++ b/src/safe/MultiSig.sol
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity ^0.8.28;
+ 
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
+ import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";

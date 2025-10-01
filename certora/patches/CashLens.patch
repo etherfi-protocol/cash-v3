@@ -1,0 +1,13 @@
+diff --git a/src/modules/cash/CashLens.sol b/src/modules/cash/CashLens.sol
+index ad8030c..9c19769 100644
+--- a/src/modules/cash/CashLens.sol
++++ b/src/modules/cash/CashLens.sol
+@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
+ 
+ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
+ 
+ import { ICashModule, Mode, SafeCashData, SafeData, WithdrawalRequest, DebitModeMaxSpend } from "../../interfaces/ICashModule.sol";
