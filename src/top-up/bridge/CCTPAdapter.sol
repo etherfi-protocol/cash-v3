@@ -24,6 +24,9 @@ contract CCTPAdapter is BridgeAdapterBase {
      */
     event BridgeViaCCTP(address token, uint256 amount, uint32 destinationDomain, bytes32 mintRecipient);
 
+    // https://developers.circle.com/cctp/evm-smart-contracts
+    uint32 public constant DEST_DOMAIN_ETHEREUM = 0;
+
     /**
      * @notice Bridges tokens using the CCTP protocol
      * @dev Executes the bridge operation through CCTP's depositForBurn function
@@ -32,8 +35,6 @@ contract CCTPAdapter is BridgeAdapterBase {
      * @param destRecipient The recipient address on the destination chain
      * @param additionalData ABI-encoded data containing:
      *        - tokenMessenger: address of the CCTP TokenMessenger contract
-     *        - destinationDomain: destination domain ID
-     *        - maxFee: maximum fee to pay on destination domain (in burnToken units)
      *        - minFinalityThreshold: minimum finality threshold for message attestation
      */
     function bridge(
@@ -43,8 +44,8 @@ contract CCTPAdapter is BridgeAdapterBase {
         uint256 /*maxSlippage*/,
         bytes calldata additionalData
     ) external payable override {
-        (address tokenMessenger, uint32 destinationDomain, uint256 maxFee, uint32 minFinalityThreshold) = 
-            abi.decode(additionalData, (address, uint32, uint256, uint32));
+        (address tokenMessenger, uint32 minFinalityThreshold) = 
+            abi.decode(additionalData, (address, uint32));
 
         IERC20(token).forceApprove(tokenMessenger, amount);
 
@@ -52,15 +53,15 @@ contract CCTPAdapter is BridgeAdapterBase {
 
         ICCTPTokenMessenger(tokenMessenger).depositForBurn(
             amount,
-            destinationDomain,
+            DEST_DOMAIN_ETHEREUM,
             mintRecipient,
             token,
             bytes32(0),
-            maxFee,
+            0,
             minFinalityThreshold
         );
 
-        emit BridgeViaCCTP(token, amount, destinationDomain, mintRecipient);
+        emit BridgeViaCCTP(token, amount, DEST_DOMAIN_ETHEREUM, mintRecipient);
     }
 
     /**
