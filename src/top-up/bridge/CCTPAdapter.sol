@@ -35,6 +35,7 @@ contract CCTPAdapter is BridgeAdapterBase {
      * @param destRecipient The recipient address on the destination chain
      * @param additionalData ABI-encoded data containing:
      *        - tokenMessenger: address of the CCTP TokenMessenger contract
+     *        - maxFee: maximum fee to pay on the destination domain (0 for standard transfer, >0 for fast transfer)
      *        - minFinalityThreshold: minimum finality threshold for message attestation
      */
     function bridge(
@@ -44,8 +45,8 @@ contract CCTPAdapter is BridgeAdapterBase {
         uint256 /*maxSlippage*/,
         bytes calldata additionalData
     ) external payable override {
-        (address tokenMessenger, uint32 minFinalityThreshold) = 
-            abi.decode(additionalData, (address, uint32));
+        (address tokenMessenger, uint256 maxFee, uint32 minFinalityThreshold) = 
+            abi.decode(additionalData, (address, uint256, uint32));
 
         IERC20(token).forceApprove(tokenMessenger, amount);
 
@@ -57,7 +58,7 @@ contract CCTPAdapter is BridgeAdapterBase {
             mintRecipient,
             token,
             bytes32(0),
-            0,
+            maxFee,
             minFinalityThreshold
         );
 
