@@ -770,7 +770,7 @@ contract TopUpFactoryTest is Test, Constants {
         address[] memory cctpTokens = new address[](1);
         cctpTokens[0] = address(usdcBase);
         TopUpFactory.TokenConfig[] memory cctpConfigs = new TopUpFactory.TokenConfig[](1);
-        cctpConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: cctpAdapter, recipientOnDestChain: alice, maxSlippageInBps: 0, additionalData: abi.encode(cctpTokenMessenger, uint32(2000)) });
+        cctpConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: cctpAdapter, recipientOnDestChain: alice, maxSlippageInBps: 0, additionalData: abi.encode(cctpTokenMessenger, uint256(0), uint32(2000)) });
         factory.setTokenConfig(cctpTokens, cctpConfigs);
     }
 
@@ -810,6 +810,5 @@ contract TopUpFactoryTest is Test, Constants {
         emit TopUpFactory.Bridge(address(usdcBase), amount);
         factory.bridge(address(usdcBase), amount);
 
-        vm.stopPrank();
     }
 }
