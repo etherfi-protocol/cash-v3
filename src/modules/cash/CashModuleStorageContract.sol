@@ -67,6 +67,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         mapping(address account => mapping(address token => uint256 pendingCashback)) pendingCashbackForTokenInUsd;
         /// @notice Addresses of modules that can request withdrawals on behalf of safes
         EnumerableSetLib.AddressSet whitelistedModulesCanRequestWithdraw;
+        /// @notice Address of the SettlementDispatcher for PIX
+        address settlementDispatcherPix;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
