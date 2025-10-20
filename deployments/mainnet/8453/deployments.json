@@ -6,6 +6,7 @@
     "EtherFiOFTBridgeAdapter": "0x3E0ccbce6c3beC4826397005c877BE66C39D9912",
     "EtherFiLiquidBridgeAdapter": "0x38c541a32BFE45e266D0CdF2409ca0B73cC943d0",
     "NTTAdapter": "0x16B4AE4D4c96793524084A22E6f4c160cad08975",
-    "BaseWithdrawERC20BridgeAdapter": "0x83c536a18e295a5dbc8f678aa3e293ed7884044e"
+    "BaseWithdrawERC20BridgeAdapter": "0x83c536a18e295a5dbc8f678aa3e293ed7884044e",
+    "CCTPAdapter": "0x53a327cce6edd6a887169fa658271ff3588a383e"
   }
 }
