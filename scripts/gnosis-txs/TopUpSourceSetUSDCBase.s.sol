@@ -25,9 +25,6 @@ struct TokenConfig {
 contract TopUpSourceSetUSDCBase is Utils, GnosisHelpers, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-    address newTopUpFactoryImp = 0x4c5644c0BCD100263d28c4eB735f9143eC83847F;
-    address newTopUpImp = 0x8fF38032083C0E36C3CdC8c509758514Fe0a49E2;
-
     TopUpFactory topUpFactory;
     address cctpAdapter;
     // TopUpDest is our mainnet TopUpSourceFactory contract since CCTP bridges to mainnet
@@ -60,14 +57,8 @@ contract TopUpSourceSetUSDCBase is Utils, GnosisHelpers, Test {
         string memory fixtures = vm.readFile(fixturesFile);
         (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, chainId);
         string memory setTokenConfig = iToHex(abi.encodeWithSelector(TopUpFactory.setTokenConfig.selector, tokens, tokenConfig));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, "0", false)));
-
-        string memory upgradeTopUpFactory = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, newTopUpFactoryImp, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), upgradeTopUpFactory, "0", false)));
-
-        string memory upgradeTopUp = iToHex(abi.encodeWithSelector(BeaconFactory.upgradeBeaconImplementation.selector, newTopUpImp, ""));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), upgradeTopUp, "0", true)));
-
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(topUpFactory)), setTokenConfig, "0", true)));
+        
         vm.createDir("./output", true); 
         string memory path = string.concat("./output/TopUpUSDCSetConfig-", chainId, ".json");
         vm.writeFile(path, txs);
