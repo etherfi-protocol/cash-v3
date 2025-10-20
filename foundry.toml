@@ -24,8 +24,6 @@ base = "${BASE_RPC}"
 
 [etherscan]
 mainnet = { key = "${MAINNET_ETHERSCAN_KEY}" }
-scroll = { key = "${SCROLLSCAN_KEY}" }
-base = { key = "${BASESCAN_KEY}" }
 
 
 
