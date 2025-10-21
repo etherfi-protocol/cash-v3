@@ -62,9 +62,6 @@ contract WormholeModuleTest is SafeTestSetup {
         wormholeModule.requestBridge(address(safe), mainnetDestEid, address(0), 100e6, destRecipientAddr, new address[](0), new bytes[](0));
         
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        wormholeModule.requestBridge(address(safe), mainnetDestEid, address(1), 0, destRecipientAddr, new address[](0), new bytes[](0));
-        
-        vm.expectRevert(ModuleBase.InvalidInput.selector);
         wormholeModule.requestBridge(address(safe), mainnetDestEid, address(1), 100e6, address(0), new address[](0), new bytes[](0));
     }
 
@@ -81,15 +78,16 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_requestBridge_createsWithdrawal() public {
-        uint256 amount = 100e6;
+        uint256 amount = 100e18;
         deal(address(ethfi), address(safe), amount); 
 
         uint256 ethfiBalBefore = ethfi.balanceOf(address(safe));
 
         (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(ethfi), amount, destRecipientAddr);
 
+        uint256 amountWithoutDust = (amount / 10 ** dustDecimals) * 10 ** dustDecimals;
         vm.expectEmit(true, true, true, true);
-        emit WormholeModule.RequestBridgeWithWormhole(address(safe), mainnetDestEid, address(ethfi), amount, destRecipientAddr);
+        emit WormholeModule.RequestBridgeWithWormhole(address(safe), mainnetDestEid, address(ethfi), amountWithoutDust, destRecipientAddr);
         wormholeModule.requestBridge(address(safe), mainnetDestEid, address(ethfi), amount, destRecipientAddr, signers, signatures);
 
         uint256 ethfiBalAfter = ethfi.balanceOf(address(safe));
@@ -99,13 +97,13 @@ contract WormholeModuleTest is SafeTestSetup {
         WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
         assertEq(request.tokens.length, 1);
         assertEq(request.tokens[0], address(ethfi));
-        assertEq(request.amounts[0], amount);
+        assertEq(request.amounts[0], amountWithoutDust);
         assertEq(request.recipient, address(wormholeModule));
         
         WormholeModule.CrossChainWithdrawal memory withdrawal = wormholeModule.getPendingBridge(address(safe));
         assertEq(withdrawal.destEid, mainnetDestEid);
         assertEq(withdrawal.asset, address(ethfi));
-        assertEq(withdrawal.amount, amount);   
+        assertEq(withdrawal.amount, amountWithoutDust);
         assertEq(withdrawal.destRecipient, destRecipientAddr);
     }
 
@@ -161,7 +159,7 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_executeBridge_reverts_ifWithdrawalDelayIsNotOver() public {
-        uint256 amount = 100e6;
+        uint256 amount = 100e18;
         deal(address(ethfi), address(safe), amount); 
 
         (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(ethfi), amount, destRecipientAddr);
@@ -179,7 +177,7 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_requestWithdrawal_cancelsTheCurrentBridgeTx() public {
-        uint256 amount = 100e6;
+        uint256 amount = 100e18;
         deal(address(ethfi), address(safe), amount); 
 
         (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(ethfi), amount, destRecipientAddr);
@@ -201,7 +199,7 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_cancelBridge_works() public {
-        uint256 amount = 100e6;
+        uint256 amount = 100e18;
         deal(address(ethfi), address(safe), amount); 
 
         (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(ethfi), amount, destRecipientAddr);
@@ -232,7 +230,7 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_cancelBridge_reverts_whenInvalidSignatures() public {
-        uint256 amount = 100e6;
+        uint256 amount = 100e18;
         deal(address(ethfi), address(safe), amount); 
 
         (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(ethfi), amount, destRecipientAddr);
@@ -247,7 +245,7 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_cancelBridge_reverts_ifQuorumIsNotMet() public {
-        uint256 amount = 100e6;
+        uint256 amount = 100e18;
         deal(address(ethfi), address(safe), amount);
 
         (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(ethfi), amount, destRecipientAddr);
@@ -322,7 +320,7 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_requestBridge_insufficientAmount() public {
-        uint256 amount = 100e6;
+        uint256 amount = 100e18;
         
         // Don't fund the safe
         (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(ethfi), amount, destRecipientAddr);
@@ -334,7 +332,7 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_executeBridge_insufficientNativeFee() public {
-        uint256 amount = 100e6;
+        uint256 amount = 100e18;
         deal(address(ethfi), address(safe), amount);
         
         (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(ethfi), amount, destRecipientAddr);
@@ -353,7 +351,7 @@ contract WormholeModuleTest is SafeTestSetup {
     }
 
     function test_requestBridge_invalidInput() public {
-        uint256 amount = 100e10;
+        uint256 amount = 100e18;
         deal(address(ethfi), address(safe), amount);
         
         // Test with zero address for destRecipient
@@ -369,20 +367,6 @@ contract WormholeModuleTest is SafeTestSetup {
         vm.prank(sender);
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         wormholeModule.requestBridge(address(safe), mainnetDestEid, address(0), amount, destRecipientAddr, signers2, signatures2);
-
-        // Test with zero amount
-        (address[] memory signers3, bytes[] memory signatures3) = _getSignatures(mainnetDestEid, address(ethfi), 0, destRecipientAddr);
-        
-        vm.prank(sender);       
-        vm.expectRevert(ModuleBase.InvalidInput.selector);
-        wormholeModule.requestBridge(address(safe), mainnetDestEid, address(ethfi), 0, destRecipientAddr, signers3, signatures3);
-        
-        // Test with invalid slippage
-        (address[] memory signers4, bytes[] memory signatures4) = _getSignatures(mainnetDestEid, address(ethfi), 0, destRecipientAddr);
-        
-        vm.prank(sender);
-        vm.expectRevert(ModuleBase.InvalidInput.selector);
-        wormholeModule.requestBridge(address(safe), mainnetDestEid, address(ethfi), 0, destRecipientAddr, signers4, signatures4);
     }
 
     function test_setAssetConfig_invalidInput() public {

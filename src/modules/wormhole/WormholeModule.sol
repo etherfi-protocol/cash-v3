@@ -194,23 +194,30 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @custom:throws InvalidSignatures If the signatures are invalid
      */
     function requestBridge(address safe, uint16 destEid, address asset, uint256 amount, address destRecipient, address[] calldata signers, bytes[] calldata signatures) external payable nonReentrant onlyEtherFiSafe(safe) {
-        if (destRecipient == address(0) || asset == address(0) || amount == 0) revert InvalidInput();
+        if (destRecipient == address(0) || asset == address(0)) revert InvalidInput();
 
         _checkSignature(safe, destEid, asset, amount, destRecipient, signers, signatures);
 
-        cashModule.requestWithdrawalByModule(safe, asset, amount);
+        AssetConfig memory assetConfig = _getWormholeModuleStorage().assetConfig[asset];
 
-        emit RequestBridgeWithWormhole(safe, destEid, asset, amount, destRecipient);
+        if (assetConfig.nttManager == address(0)) revert InvalidInput();
+
+        uint256 amountWithoutDust = (amount / 10 ** assetConfig.dustDecimals) * 10 ** assetConfig.dustDecimals;
+        if (amountWithoutDust == 0) revert InvalidAmount();
+
+        cashModule.requestWithdrawalByModule(safe, asset, amountWithoutDust);
+
+        emit RequestBridgeWithWormhole(safe, destEid, asset, amountWithoutDust, destRecipient);
 
         (uint64 withdrawalDelay, , ) = cashModule.getDelays();
         if (withdrawalDelay == 0) {
-            _bridge(destEid, asset, amount, destRecipient);
-            emit BridgeWithWormhole(safe, destEid, asset, amount, destRecipient);
+            _bridge(destEid, asset, amountWithoutDust, destRecipient);
+            emit BridgeWithWormhole(safe, destEid, asset, amountWithoutDust, destRecipient);
         } else {
             _getWormholeModuleStorage().withdrawals[safe] = CrossChainWithdrawal({
                 destEid: destEid,
                 asset: asset,
-                amount: amount,
+                amount: amountWithoutDust,
                 destRecipient: destRecipient
             });
         }
@@ -366,11 +373,8 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
 
         IERC20(asset).forceApprove(assetConfig.nttManager, amount);
 
-        uint256 amountWithoutDust = (amount / 10 ** assetConfig.dustDecimals) * 10 ** assetConfig.dustDecimals;
-        if (amountWithoutDust == 0) revert InvalidAmount();
-
-        uint64 msgId = INttManager(assetConfig.nttManager).transfer{value: price}(amountWithoutDust, destEid, bytes32(uint256(uint160(destRecipient))));
-        emit BridgeViaNTT(asset, amountWithoutDust, msgId);
+        uint64 msgId = INttManager(assetConfig.nttManager).transfer{value: price}(amount, destEid, bytes32(uint256(uint160(destRecipient))));
+        emit BridgeViaNTT(asset, amount, msgId);
     }
     
     /**
