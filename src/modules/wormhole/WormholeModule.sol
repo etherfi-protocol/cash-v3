@@ -70,9 +70,6 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
     /// @notice Typehash for cancel bridge function signature
     bytes32 public constant CANCEL_BRIDGE_SIG = keccak256("cancelBridge");
 
-    /// @notice 100% in basis points (10,000)
-    uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
-
     /// @notice Error for Insufficient amount of asset in the safe
     error InsufficientAmount();
     
@@ -300,7 +297,7 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
         WormholeModuleStorage storage $ = _getWormholeModuleStorage();
 
         for (uint256 i = 0; i < len; ) {
-            if (assets[i] == address(0) || assetConfigs[i].nttManager == address(0) || assetConfigs[i].dustDecimals == 0) revert InvalidInput();
+            if (assets[i] == address(0) || assetConfigs[i].nttManager == address(0)) revert InvalidInput();
 
             $.assetConfig[assets[i]] = assetConfigs[i];
             unchecked {

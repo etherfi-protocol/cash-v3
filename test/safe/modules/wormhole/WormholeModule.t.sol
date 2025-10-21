@@ -389,15 +389,6 @@ contract WormholeModuleTest is SafeTestSetup {
         vm.prank(owner);
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         wormholeModule.setAssetConfig(assets, assetConfigs);
-
-        assetConfigs[0] = WormholeModule.AssetConfig({
-            nttManager: nttManager,
-            dustDecimals: 0
-        });
-
-        vm.prank(owner);
-        vm.expectRevert(ModuleBase.InvalidInput.selector);
-        wormholeModule.setAssetConfig(assets, assetConfigs);
     }
     
     function test_executeBridge_noWithdrawalsQueuedUp() public {
