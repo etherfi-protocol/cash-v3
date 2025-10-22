@@ -1,0 +1,13 @@
+diff --git a/src/modules/cash/CashModuleStorageContract.sol b/src/modules/cash/CashModuleStorageContract.sol
+index 608ce50..195c538 100644
+--- a/src/modules/cash/CashModuleStorageContract.sol
++++ b/src/modules/cash/CashModuleStorageContract.sol
+@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
+ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+ 
+ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
+ import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
+ import { Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";

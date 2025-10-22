@@ -1,0 +1,13 @@
+diff --git a/src/safe/ModuleManager.sol b/src/safe/ModuleManager.sol
+index 2c2b33c..c560775 100644
+--- a/src/safe/ModuleManager.sol
++++ b/src/safe/ModuleManager.sol
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity ^0.8.28;
+ 
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { IModule } from "../interfaces/IModule.sol";
+ import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";

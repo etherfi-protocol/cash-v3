@@ -1,0 +1,13 @@
+diff --git a/src/debt-manager/DebtManagerAdmin.sol b/src/debt-manager/DebtManagerAdmin.sol
+index 6972b1f..e2c0845 100644
+--- a/src/debt-manager/DebtManagerAdmin.sol
++++ b/src/debt-manager/DebtManagerAdmin.sol
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity ^0.8.28;
+ 
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
+ import { DebtManagerStorageContract } from "./DebtManagerStorageContract.sol";
