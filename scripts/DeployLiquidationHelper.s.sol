@@ -9,12 +9,16 @@ import {Utils, ChainConfig} from "./utils/Utils.sol";
 contract DeployLiquidationHelper is Utils {
     CashLiquidationHelper liquidationHelper;
 
+    address public usdc = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
+    address public usdt = 0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df;
+    address public liquidUsd = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
+    address public eUsd = 0x939778D83b46B456224A33Fb59630B11DEC56663;
+
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
         vm.startBroadcast(deployerPrivateKey);
 
-        ChainConfig memory chainConfig = getChainConfig(vm.toString(block.chainid));
         string memory deployments = readDeploymentFile();
 
         address debtManager = stdJson.readAddress(
@@ -22,9 +26,8 @@ contract DeployLiquidationHelper is Utils {
             string.concat(".", "addresses", ".", "DebtManager")
         );
 
-        address usdc = chainConfig.usdc;
-
-        liquidationHelper = new CashLiquidationHelper(debtManager, usdc);
+        
+        liquidationHelper = new CashLiquidationHelper(debtManager, usdc, usdt, liquidUsd, eUsd);
         vm.stopBroadcast();
     }    
 }
