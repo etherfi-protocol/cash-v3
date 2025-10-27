@@ -18,7 +18,8 @@
     "OpenOceanSwapModule": "0x4dEAa5f2e1CD1A792304d1649EdfA35D565F9346",
     "EtherFiLiquidModule": "0x2A0E60E26a118fF6F181B98666E6FD6BBf3e1826",
     "EtherFiStakeModule": "0x40c8438e9cc3B7817aeb117cd0d7B829c32bfEd8",
-    "CashLiquidationHelper": "0x56103F3DC21f182611601110F794686fdD8082ad",
-    "StargateModule": "0xC1ab383b81fD81803a54c4d50A7b7d4A31a317b4"
+    "CashLiquidationHelper": "0xFD77ff43E79E70c886a5712a8a128e52942B0B58",
+    "StargateModule": "0xC1ab383b81fD81803a54c4d50A7b7d4A31a317b4",
+    "WormholeModule": "0x96bae80F91DA04a59CeF9dCE3bB1081De041C1d5"
   }
 }
