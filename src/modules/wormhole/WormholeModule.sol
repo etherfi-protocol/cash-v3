@@ -12,7 +12,7 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
-import { INttManager } from "../../interfaces/INttManager.sol";
+import { INttManager } from "../../interfaces/INTTManager.sol";
 
 contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
     using MessageHashUtils for bytes32;
