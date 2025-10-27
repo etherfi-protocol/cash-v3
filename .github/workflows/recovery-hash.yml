@@ -48,22 +48,3 @@ jobs:
           RECOVERY_SAFE_ADDRESS: ${{ github.event.inputs.recovery_safe_address }}
           RECOVERY_NEW_OWNER: ${{ github.event.inputs.recovery_new_owner }}
           SCROLL_RPC: ${{ github.event.inputs.scroll_rpc }}
-      
-      - name: Extract Hash Values
-        if: success()
-        run: |
-          echo "================================================"
-          echo "RECOVERY MESSAGE HASH RESULTS"
-          echo "================================================"
-          echo ""
-          echo "Use these values for signing:"
-          echo ""
-          # Run the test again with minimal verbosity to extract just the hash values
-          OUTPUT=$(forge test --match-test test_BuildMessageHashAndDigestGithub -vv 2>&1)
-                    
-          # Extract and display the digest hash
-          DIGEST_HASH=$(echo "$OUTPUT" | grep -oP 'digestHash: 0x[a-fA-F0-9]{64}' | cut -d' ' -f2)
-          if [ ! -z "$DIGEST_HASH" ]; then
-            echo "Digest Hash (Sign This): $DIGEST_HASH"
-          fi
-          
