@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import {INttManager} from "../../interfaces/INttManager.sol";
+import {INttManager} from "../../interfaces/INTTManager.sol";
 import { BridgeAdapterBase } from "./BridgeAdapterBase.sol";
 
 /**
