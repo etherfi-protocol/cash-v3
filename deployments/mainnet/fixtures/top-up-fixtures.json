@@ -132,5 +132,28 @@
         "baseWithdrawERC20BridgeAdapter": "0x83c536a18e295a5dbc8f678aa3e293ed7884044e"
       }
     ]
+  },
+  "999": {
+    "weth": "0x5555555555555555555555555555555555555555",
+    "owner": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
+    "recoveryWallet": "0xA6cf33124cb342D1c604cAC87986B965F428AAC4",
+    "tokenConfigs": [
+      {
+        "token": "usdc",
+        "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
+        "bridge": "cctp",
+        "maxSlippageInBps": "0",
+        "cctpTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+        "maxFee": "0",
+        "minFinalityThreshold": "2000"
+      },
+      {
+        "token": "beHYPE",
+        "address": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
+        "bridge": "oftBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9"
+      }
+    ]
   }
 }
