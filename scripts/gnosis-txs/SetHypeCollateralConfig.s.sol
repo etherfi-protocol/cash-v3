@@ -14,9 +14,10 @@ contract SetHypeCollateralConfig is GnosisHelpers, Utils, Test {
     
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-    // HYPE tokens on Scroll
-    address public beHYPE = 0xA519AfBc91986c0e7501d7e34968FEE51CD901aC;
-    address public wHYPE = 0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E;
+    address public beHYPE;
+    address public wHYPE;
+    address public beHypeUsdOracle;
+    address public hypeUsdOracle;
 
     address debtManager;
     address priceProvider;
@@ -35,12 +36,34 @@ contract SetHypeCollateralConfig is GnosisHelpers, Utils, Test {
             string.concat(".", "addresses", ".", "PriceProvider")
         );
 
-        // Price provider configs (oracle set to address(0) - UPDATE LATER!)
+        string memory fixturesFile = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv() ,"/fixtures/fixtures.json"));
+        string memory fixtures = vm.readFile(fixturesFile);
+
+        beHYPE = stdJson.readAddress(
+            fixtures,
+            string.concat(".", chainId, ".", "beHYPE")
+        );
+
+        wHYPE = stdJson.readAddress(
+            fixtures,
+            string.concat(".", chainId, ".", "wHYPE")
+        );
+
+        beHypeUsdOracle = stdJson.readAddress(
+            fixtures,
+            string.concat(".", chainId, ".", "beHypeUsdOracle")
+        );
+
+        hypeUsdOracle = stdJson.readAddress(
+            fixtures,
+            string.concat(".", chainId, ".", "hypeUsdOracle")
+        );
+
         PriceProvider.Config memory wHypeUsdConfig = PriceProvider.Config({
-            oracle: address(0),  // TODO: Update with actual oracle address
+            oracle: hypeUsdOracle,
             priceFunctionCalldata: "",
             isChainlinkType: true,
-            oraclePriceDecimals: 8,  // Standard Chainlink decimals
+            oraclePriceDecimals: 8,
             maxStaleness: 2 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
@@ -49,10 +72,10 @@ contract SetHypeCollateralConfig is GnosisHelpers, Utils, Test {
         });
 
         PriceProvider.Config memory beHypeUsdConfig = PriceProvider.Config({
-            oracle: address(0),  // TODO: Update with actual oracle address
+            oracle: beHypeUsdOracle,
             priceFunctionCalldata: "",
             isChainlinkType: true,
-            oraclePriceDecimals: 8,  // Standard Chainlink decimals
+            oraclePriceDecimals: 8,
             maxStaleness: 2 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
@@ -68,14 +91,12 @@ contract SetHypeCollateralConfig is GnosisHelpers, Utils, Test {
         priceProviderConfigs[0] = wHypeUsdConfig;
         priceProviderConfigs[1] = beHypeUsdConfig;
 
-        // wHYPE config: LTV 45%, LT 65%, Liquidation Bonus 4%
         IDebtManager.CollateralTokenConfig memory wHypeConfig = IDebtManager.CollateralTokenConfig({
             ltv: 45e18,
             liquidationThreshold: 65e18,
             liquidationBonus: 4e18
         }); 
 
-        // beHYPE config: LTV 40%, LT 60%, Liquidation Bonus 5%
         IDebtManager.CollateralTokenConfig memory beHypeConfig = IDebtManager.CollateralTokenConfig({
             ltv: 40e18,
             liquidationThreshold: 60e18,
@@ -84,15 +105,12 @@ contract SetHypeCollateralConfig is GnosisHelpers, Utils, Test {
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
-        // Set price provider configs for both tokens
         string memory setPriceConfigs = iToHex(abi.encodeWithSelector(PriceProvider.setTokenConfig.selector, tokens, priceProviderConfigs));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), setPriceConfigs, "0", false)));
 
-        // Support wHYPE as collateral token
         string memory supportWHype = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, wHYPE, wHypeConfig));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), supportWHype, "0", false)));
         
-        // Support beHYPE as collateral token (last transaction)
         string memory supportBeHype = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, beHYPE, beHypeConfig));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), supportBeHype, "0", true)));
         
@@ -100,7 +118,6 @@ contract SetHypeCollateralConfig is GnosisHelpers, Utils, Test {
         string memory path = "./output/SetHypeCollateralConfig.json";
         vm.writeFile(path, txs);
 
-        /// below here is just a test
         executeGnosisTransactionBundle(path);
     }
 }
