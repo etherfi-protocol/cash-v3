@@ -157,7 +157,7 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
      */
     function _setCollateralTokenConfig(address collateralToken, CollateralTokenConfig memory config) internal {
         if (config.ltv > config.liquidationThreshold) revert LtvCannotBeGreaterThanLiquidationThreshold();
-        if (config.liquidationThreshold + config.liquidationBonus > HUNDRED_PERCENT) revert InvalidValue();
+        if (config.liquidationThreshold > MAX_LIQUIDATION_THRESHOLD || config.liquidationBonus > MAX_LIQUIDATION_BONUS) revert InvalidValue();
 
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 

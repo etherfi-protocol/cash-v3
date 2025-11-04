@@ -101,6 +101,12 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     /// @notice Maximum borrowing APY (50% / (365 days in seconds))
     uint64 public constant MAX_BORROW_APY = 1_585_489_599_188;
     
+    /// @notice Maximum permitted liquidation bonus (5.5%)
+    uint256 public constant MAX_LIQUIDATION_BONUS = 5.5e18;
+
+    /// @notice Maximum permitted liquidation threshold (90%)
+    uint256 public constant MAX_LIQUIDATION_THRESHOLD = 90e18;
+
     /// @notice Interface for accessing EtherFi data
     IEtherFiDataProvider public immutable etherFiDataProvider;
 
