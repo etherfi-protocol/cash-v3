@@ -31,7 +31,7 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
     /// @notice TypeHash for stake function signature 
     bytes32 public constant STAKE_SIG = keccak256("stake");
 
-    event StakeDeposit(address indexed safe, address indexed inputAsset, address indexed outputAsset, uint256 inputAmount, uint256 outputAmount);
+    event StakeDeposit(address indexed safe, address indexed inputAsset, address indexed outputAsset, uint256 inputAmount);
 
     /// @notice Thrown when the provided fee is insufficient for the cross-chain transaction
     error InsufficientFee();
@@ -104,12 +104,12 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
         data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(staker), amountToStake);
 
         to[1] = address(staker);
-        values[1] = quotedFee;
+        values[1] = msg.value;
         data[1] = abi.encodeWithSelector(IL2BeHYPEOAppStaker.stake.selector, amountToStake, safe);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
 
-        emit StakeDeposit(safe, whype, beHYPE, amountToStake, 0);
+        emit StakeDeposit(safe, whype, beHYPE, amountToStake);
     }
 }
 
