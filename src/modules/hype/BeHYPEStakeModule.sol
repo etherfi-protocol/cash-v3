@@ -93,28 +93,22 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
         if (amountToStake == 0) revert InvalidInput();
         _checkAmountAvailable(safe, whype, amountToStake);
 
-        // Quote the required cross-chain fee
         uint256 quotedFee = staker.quoteStake(amountToStake, safe);
         if (msg.value < quotedFee) revert InsufficientFee();
 
-        // Build batch transaction: approve WHYPE and stake
         address[] memory to = new address[](2);
         bytes[] memory data = new bytes[](2);
         uint256[] memory values = new uint256[](2);
 
-        // Step 1: Approve staker to spend WHYPE
         to[0] = whype;
         data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(staker), amountToStake);
 
-        // Step 2: Call stake with the quoted fee
         to[1] = address(staker);
         values[1] = quotedFee;
         data[1] = abi.encodeWithSelector(IL2BeHYPEOAppStaker.stake.selector, amountToStake, safe);
 
-        // Execute the batch transaction
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
 
-        // Emit event with 0 for output amount since delivery is async
         emit StakeDeposit(safe, whype, beHYPE, amountToStake, 0);
     }
 }
