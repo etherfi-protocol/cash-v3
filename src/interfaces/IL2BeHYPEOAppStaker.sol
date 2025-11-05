@@ -17,7 +17,7 @@ interface IL2BeHYPEOAppStaker {
     /**
      * @notice Stakes WHYPE tokens by sending them cross-chain to be staked on HyperEVM
      * @dev Reverts if the amount contains dust beyond shared decimal precision
-     * @param hypeAmountIn The amount of WHYPE tokens to stake (must not contain dust beyond shared decimal precision)
+     * @param hypeAmountIn The amount of WHYPE tokens to stake
      * @param receiver The user's cash safe address where beHYPE will be asynchronously delivered after staking completes
      */
     function stake(uint256 hypeAmountIn, address receiver) external payable;
