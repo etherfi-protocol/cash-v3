@@ -6,6 +6,7 @@ using CashModuleCoreHarness as cashModule;
 
 methods {
     function EtherFiSafeHarness.getSafeAdminRole(address) external returns (uint256) envfree;
+    function isModuleEnabled(address) external returns (bool) envfree;
 }
 
 // P-01. Arbitrary calls on the Safe should not leave it in a less healthy position
@@ -38,4 +39,22 @@ rule p01() {
     assert (debt > maxBorrowAmount && newMaxBorrowAmount != 0 && maxBorrowAmount != 0) => (debt/maxBorrowAmount) >= (newDebt / newMaxBorrowAmount);
     assert (debt > maxBorrowAmount && (newMaxBorrowAmount == 0 || maxBorrowAmount == 0)) => (debt * newMaxBorrowAmount) >= (newDebt * maxBorrowAmount);
     assert (debt <= maxBorrowAmount) => (newDebt <= newMaxBorrowAmount);
+}
+
+// Rule: A successful call to execTransactionFromModule must be from an enabled module
+// https://prover.certora.com/output/5524263/eb1249de2af9433ebcb0cf0b2e0b6ff9/?anonymousKey=99dd50ed92d73354b25dc6816deb889f8a91a0d2
+rule execTransactionFromModulePermissions(
+    address[] to,
+    uint256[] values,
+    bytes[] data
+) {
+    env e;
+    require to.length == values.length && to.length == data.length;
+
+    
+    bool isEnabled = isModuleEnabled(e.msg.sender);
+    
+    execTransactionFromModule(e, to, values, data);
+    
+    assert isEnabled => true;
 }
