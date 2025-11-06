@@ -7,6 +7,12 @@ using CashModuleCoreHarness as cashModule;
 methods {
     function EtherFiSafeHarness.getSafeAdminRole(address) external returns (uint256) envfree;
     function isModuleEnabled(address) external returns (bool) envfree;
+    function isOwner(address) external returns (bool) envfree;
+    function isRecoveryEnabled() external returns (bool) envfree;
+    function getRecoveryThreshold() external returns (uint8) envfree;
+    function isRecoverySigner(address) external returns (bool) envfree;
+    function getIncomingOwner() external returns (address) envfree;
+    function getIncomingOwnerStartTime() external returns (uint256) envfree;
 }
 
 // P-01. Arbitrary calls on the Safe should not leave it in a less healthy position
@@ -57,4 +63,64 @@ rule execTransactionFromModulePermissions(
     execTransactionFromModule(e, to, values, data);
     
     assert isEnabled => true;
+}
+
+// This rule checks that:
+// 1. Invalid inputs cause the call to revert (assert false if invalid input succeeds)
+// 2. Valid inputs result in correct post-conditions when call succeeds
+rule recoverSafeProperties(
+    address newOwner,
+    address[] recoverySigners,
+    bytes[] signatures
+) {
+    env e;
+    
+    bool isCurrentOwner = isOwner(e.msg.sender);
+    address oldIncomingOwner = getIncomingOwner();
+    uint256 oldIncomingOwnerStartTime = getIncomingOwnerStartTime();
+    
+    require newOwner != 0 && recoverySigners.length <= signatures.length && recoverySigners.length >= getRecoveryThreshold() && recoverySigners.length > 0 && isRecoverySigner(recoverySigners[0]) && isCurrentOwner && isRecoveryEnabled();
+    
+    recoverSafe(e, newOwner, recoverySigners, signatures);
+                
+    address newIncomingOwner = getIncomingOwner();
+    uint256 newIncomingOwnerStartTime = getIncomingOwnerStartTime();
+    
+    assert newIncomingOwner == newOwner && newIncomingOwnerStartTime > e.block.timestamp && (oldIncomingOwnerStartTime == 0 || newIncomingOwnerStartTime != oldIncomingOwnerStartTime) && isRecoveryEnabled();
+}
+
+/**
+ * @title Recovery is idempotent regarding contract state
+ * @notice Multiple recoveries can overwrite pending recovery
+ */
+rule recoveryCanBeOverwritten(
+    address newOwner1,
+    address[] recoverySigners1,
+    bytes[] signatures1,
+    address newOwner2,
+    address[] recoverySigners2,
+    bytes[] signatures2
+) {
+    env e1;
+    env e2;
+    require e2.block.timestamp >= e1.block.timestamp;
+    require isRecoveryEnabled() && newOwner1 != 0 && newOwner2 != 0;
+    require recoverySigners1.length <= signatures1.length && recoverySigners1.length >= getRecoveryThreshold() && recoverySigners1.length > 0;
+    require recoverySigners2.length <= signatures2.length && recoverySigners2.length >= getRecoveryThreshold() && recoverySigners2.length > 0;
+
+    // First recovery
+    recoverSafe@withrevert(e1, newOwner1, recoverySigners1, signatures1);
+    require !lastReverted;
+    
+    address incomingAfterFirst = getIncomingOwner();
+    assert incomingAfterFirst == newOwner1;
+    
+    // Second recovery
+    recoverSafe@withrevert(e2, newOwner2, recoverySigners2, signatures2);
+    require !lastReverted;
+    
+    address incomingAfterSecond = getIncomingOwner();
+    
+    assert incomingAfterSecond == newOwner2,
+        "Second recovery must overwrite first pending recovery";
 }
