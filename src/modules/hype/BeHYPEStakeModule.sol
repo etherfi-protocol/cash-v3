@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ModuleBase } from "../ModuleBase.sol";
@@ -96,18 +97,28 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
         uint256 quotedFee = staker.quoteStake(amountToStake, safe);
         if (msg.value < quotedFee) revert InsufficientFee();
 
-        address[] memory to = new address[](2);
-        bytes[] memory data = new bytes[](2);
-        uint256[] memory values = new uint256[](2);
+        Address.sendValue(payable(safe), quotedFee);
+
+        address[] memory to = new address[](3);
+        bytes[] memory data = new bytes[](3);
+        uint256[] memory values = new uint256[](3);
 
         to[0] = whype;
         data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(staker), amountToStake);
 
         to[1] = address(staker);
-        values[1] = msg.value;
+        values[1] = quotedFee;
         data[1] = abi.encodeWithSelector(IL2BeHYPEOAppStaker.stake.selector, amountToStake, safe);
 
+        to[2] = whype;
+        data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(staker), 0);
+
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        uint256 excessFee = msg.value - quotedFee;
+        if (excessFee > 0) {
+            Address.sendValue(payable(msg.sender), excessFee);
+        }
 
         emit StakeDeposit(safe, whype, beHYPE, amountToStake);
     }
