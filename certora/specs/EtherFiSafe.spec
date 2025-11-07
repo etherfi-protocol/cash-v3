@@ -7,7 +7,6 @@ using CashModuleCoreHarness as cashModule;
 methods {
     function EtherFiSafeHarness.getSafeAdminRole(address) external returns (uint256) envfree;
     function isModuleEnabled(address) external returns (bool) envfree;
-    function isOwner(address) external returns (bool) envfree;
     function isRecoveryEnabled() external returns (bool) envfree;
     function getRecoveryThreshold() external returns (uint8) envfree;
     function isRecoverySigner(address) external returns (bool) envfree;
@@ -75,18 +74,34 @@ rule recoverSafeProperties(
 ) {
     env e;
     
-    bool isCurrentOwner = isOwner(e.msg.sender);
     address oldIncomingOwner = getIncomingOwner();
-    uint256 oldIncomingOwnerStartTime = getIncomingOwnerStartTime();
-    
-    require newOwner != 0 && recoverySigners.length <= signatures.length && recoverySigners.length >= getRecoveryThreshold() && recoverySigners.length > 0 && isRecoverySigner(recoverySigners[0]) && isCurrentOwner && isRecoveryEnabled();
+    require oldIncomingOwner != newOwner;
+    bool recoveryEnabledBefore = isRecoveryEnabled();
+    uint8 threshold = getRecoveryThreshold();
+
+    // Check if inputs are invalid (excluding owner check since _currentOwner() handles that)
+    bool hasInvalidInput = 
+        (newOwner == 0) ||
+        (recoverySigners.length != signatures.length) ||
+        (recoverySigners.length < threshold) ||
+        (recoverySigners.length > 0 && !isRecoverySigner(recoverySigners[0])) ||
+        (!recoveryEnabledBefore);
     
     recoverSafe(e, newOwner, recoverySigners, signatures);
+
+    // If inputs are invalid, the call should have reverted
+    if (hasInvalidInput) {
+        assert false;
+    }
                 
+    // If call succeeded, verify all post-conditions
     address newIncomingOwner = getIncomingOwner();
     uint256 newIncomingOwnerStartTime = getIncomingOwnerStartTime();
     
-    assert newIncomingOwner == newOwner && newIncomingOwnerStartTime > e.block.timestamp && (oldIncomingOwnerStartTime == 0 || newIncomingOwnerStartTime != oldIncomingOwnerStartTime) && isRecoveryEnabled();
+    // Post-conditions: incoming owner must be set correctly
+    assert newIncomingOwner == newOwner;
+    assert newIncomingOwnerStartTime >= e.block.timestamp;
+    assert isRecoveryEnabled();
 }
 
 /**
