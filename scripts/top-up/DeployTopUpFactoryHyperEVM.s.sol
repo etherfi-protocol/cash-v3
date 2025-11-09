@@ -9,7 +9,7 @@ import {TopUpFactory} from "../../src/top-up/TopUpFactory.sol";
 import {TopUp} from "../../src/top-up/TopUp.sol";
 import {RoleRegistry} from "../../src/role-registry/RoleRegistry.sol";
 
-/**
+/**TopUpSourceFactory
  * @title DeployTopUpFactoryHyperEVM
  * @notice Deploys the complete TopUp factory infrastructure on HyperEVM using CREATE3
  * @dev This script deploys RoleRegistry and TopUpFactory with deterministic addresses

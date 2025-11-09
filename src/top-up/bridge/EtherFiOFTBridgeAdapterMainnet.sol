@@ -42,7 +42,7 @@ contract EtherFiOFTBridgeAdapterMainnet is BridgeAdapterBase {
         IOFT oftAdapter = IOFT(abi.decode(additionalData, (address)));
         uint256 minAmount = deductSlippage(amount, maxSlippage);
 
-        SendParam memory sendParam = SendParam({ dstEid: DEST_EID_SCROLL, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
+        SendParam memory sendParam = SendParam({ dstEid: DEST_EID_ETHEREUM, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
 
         MessagingFee memory messagingFee = oftAdapter.quoteSend(sendParam, false);
         if (address(this).balance < messagingFee.nativeFee) revert InsufficientNativeFee();
@@ -72,7 +72,7 @@ contract EtherFiOFTBridgeAdapterMainnet is BridgeAdapterBase {
         IOFT oftAdapter = IOFT(abi.decode(additionalData, (address)));
         uint256 minAmount = deductSlippage(amount, maxSlippage);
 
-        SendParam memory sendParam = SendParam({ dstEid: DEST_EID_SCROLL, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
+        SendParam memory sendParam = SendParam({ dstEid: DEST_EID_ETHEREUM, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
 
         MessagingFee memory messagingFee = oftAdapter.quoteSend(sendParam, false);
 
