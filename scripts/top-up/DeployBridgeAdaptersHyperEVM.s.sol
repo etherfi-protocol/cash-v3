@@ -25,19 +25,19 @@ contract DeployBridgeAdaptersHyperEVM is Utils {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // cctpAdapter = CCTPAdapter(
-        //     deployWithCreate3(
-        //         abi.encodePacked(type(CCTPAdapter).creationCode), 
-        //         getSalt(CCTP_ADAPTER)
-        //     )
-        // );
+        cctpAdapter = CCTPAdapter(
+            deployWithCreate3(
+                abi.encodePacked(type(CCTPAdapter).creationCode), 
+                getSalt(CCTP_ADAPTER)
+            )
+        );
 
-        // oftBridgeAdapter = EtherFiOFTBridgeAdapter(
-        //     deployWithCreate3(
-        //         abi.encodePacked(type(EtherFiOFTBridgeAdapter).creationCode), 
-        //         getSalt(ETHER_FI_OFT_BRIDGE_ADAPTER)
-        //     )
-        // );
+        oftBridgeAdapter = EtherFiOFTBridgeAdapter(
+            deployWithCreate3(
+                abi.encodePacked(type(EtherFiOFTBridgeAdapter).creationCode), 
+                getSalt(ETHER_FI_OFT_BRIDGE_ADAPTER)
+            )
+        );
 
         oftBridgeAdapterMainnet = EtherFiOFTBridgeAdapterMainnet(
             deployWithCreate3(
@@ -46,14 +46,14 @@ contract DeployBridgeAdaptersHyperEVM is Utils {
             )
         );
 
-        // require(
-        //     address(cctpAdapter) == EXPECTED_CCTP_ADAPTER,
-        //     "CCTPAdapter address mismatch"
-        // );
-        // require(
-        //     address(oftBridgeAdapter) == EXPECTED_OFT_ADAPTER,
-        //     "OFTBridgeAdapter address mismatch"
-        // );
+        require(
+            address(cctpAdapter) == EXPECTED_CCTP_ADAPTER,
+            "CCTPAdapter address mismatch"
+        );
+        require(
+            address(oftBridgeAdapter) == EXPECTED_OFT_ADAPTER,
+            "OFTBridgeAdapter address mismatch"
+        );
 
         vm.stopBroadcast();
     }

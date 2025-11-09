@@ -16,7 +16,7 @@ contract EtherFiOFTBridgeAdapterMainnet is BridgeAdapterBase {
     using SafeERC20 for IERC20;
 
     // https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
-    uint32 public constant DEST_EID_SCROLL = 30_101;
+    uint32 public constant DEST_EID_ETHEREUM = 30_101;
 
     /**
      * @notice Emitted when tokens are bridged through OFT
