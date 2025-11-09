@@ -44,10 +44,6 @@ contract SetTokenConfigHyperEVM is Utils {
 
         topUpFactory.setTokenConfig(tokens, tokenConfig);
 
-        topUpFactory.bridge{value: 44337530819375315}(USDT, 1000);
-        // topUpFactory.bridge{value: 0.01 ether}(BEHYPE, 1000000000000000);
-        // topUpFactory.bridge{value: 0.01 ether}(WHYPE, 1000000000000000);
-
         vm.stopBroadcast();
     }
 
@@ -81,30 +77,29 @@ contract SetTokenConfigHyperEVM is Utils {
         tokens = new address[](1);
         tokenConfig = new TopUpFactory.TokenConfig[](1);
 
-        // tokens[0] = USDC;
-        // tokenConfig[0].recipientOnDestChain = address(topUpFactory);
-        // tokenConfig[0].maxSlippageInBps = 0;
-        // tokenConfig[0].bridgeAdapter = cctpAdapter;
-        // tokenConfig[0].additionalData = abi.encode(CCTP_TOKEN_MESSENGER, uint256(0), uint32(2000));
-
-        // tokens[0] = BEHYPE;
-        // tokenConfig[0].recipientOnDestChain = 0x3a6A724595184dda4be69dB1Ce726F2Ac3D66B87; // top up dest address
-        // tokenConfig[0].maxSlippageInBps = 50;
-        // tokenConfig[0].bridgeAdapter = oftBridgeAdapter;
-        // tokenConfig[0].additionalData = abi.encode(0x637De4A55cdD37700F9B54451B709b01040D48dF);
-
-
-        tokens[0] = USDT;
+        tokens[0] = USDC;
         tokenConfig[0].recipientOnDestChain = address(topUpFactory);
-        tokenConfig[0].maxSlippageInBps = 50;
-        tokenConfig[0].bridgeAdapter = oftBridgeAdapterMainnet;
-        tokenConfig[0].additionalData = abi.encode(0x904861a24F30EC96ea7CFC3bE9EA4B476d237e98);
+        tokenConfig[0].maxSlippageInBps = 0;
+        tokenConfig[0].bridgeAdapter = cctpAdapter;
+        tokenConfig[0].additionalData = abi.encode(CCTP_TOKEN_MESSENGER, uint256(0), uint32(2000));
 
-        // tokens[1] = WHYPE;
-        // tokenConfig[1].recipientOnDestChain = address(topUpFactory);
-        // tokenConfig[1].maxSlippageInBps = 50;
-        // tokenConfig[1].bridgeAdapter = oftBridgeAdapter;
-        // tokenConfig[1].additionalData = abi.encode(0x2B7E48511ea616101834f09945c11F7d78D9136d);
+        tokens[1] = BEHYPE;
+        tokenConfig[1].recipientOnDestChain = 0x3a6A724595184dda4be69dB1Ce726F2Ac3D66B87; // top up dest address
+        tokenConfig[1].maxSlippageInBps = 50;
+        tokenConfig[1].bridgeAdapter = oftBridgeAdapter;
+        tokenConfig[1].additionalData = abi.encode(0x637De4A55cdD37700F9B54451B709b01040D48dF);
+
+        tokens[2] = USDT;
+        tokenConfig[2].recipientOnDestChain = address(topUpFactory);
+        tokenConfig[2].maxSlippageInBps = 50;
+        tokenConfig[2].bridgeAdapter = oftBridgeAdapterMainnet;
+        tokenConfig[2].additionalData = abi.encode(0x904861a24F30EC96ea7CFC3bE9EA4B476d237e98);
+
+        tokens[3] = WHYPE;
+        tokenConfig[3].recipientOnDestChain = 0x3a6A724595184dda4be69dB1Ce726F2Ac3D66B87;
+        tokenConfig[3].maxSlippageInBps = 50;
+        tokenConfig[3].bridgeAdapter = oftBridgeAdapter;
+        tokenConfig[3].additionalData = abi.encode(0x2B7E48511ea616101834f09945c11F7d78D9136d);
 
         return (tokens, tokenConfig);
     }

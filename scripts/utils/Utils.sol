@@ -34,7 +34,9 @@ contract Utils is Script {
     string internal TOP_UP_SOURCE_IMPL = "TopUpSourceImpl";
     string internal TOP_UP_SOURCE_IMPL_DEV = "TopUpSourceImplDev";
     string internal ROLE_REGISTRY_PROXY = "RoleRegistryProxy";
+    string internal ROLE_REGISTRY_PROXY_DEV = "RoleRegistryProxyDev";
     string internal ROLE_REGISTRY_IMPL = "RoleRegistryImpl";
+    string internal ROLE_REGISTRY_IMPL_DEV = "RoleRegistryImplDev";
     string internal ETHER_FI_OFT_BRIDGE_ADAPTER = "EtherFiOFTBridgeAdapter";
     string internal ETHER_FI_OFT_BRIDGE_ADAPTER_DEV = "EtherFiOFTBridgeAdapterDev";
     string internal ETHER_FI_OFT_BRIDGE_ADAPTER_MAINNET = "EtherFiOFTBridgeAdapterMainnet";

@@ -153,6 +153,20 @@
         "bridge": "oftBridgeAdapter",
         "maxSlippageInBps": "50",
         "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9"
+      },
+      {
+        "token": "usdt",
+        "address": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+        "bridge": "oftBridgeAdapterMainnet",
+        "maxSlippageInBps": "50",
+        "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb"
+      },
+      {
+        "token": "wHYPE",
+        "address": "0x5555555555555555555555555555555555555555",
+        "bridge": "oftBridgeAdapter",
+        "maxSlippageInBps": "50",
+        "oftAdapter": "0x2B7E48511ea616101834f09945c11F7d78D9136d"
       }
     ]
   }

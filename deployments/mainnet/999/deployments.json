@@ -1,6 +1,6 @@
 {
     "addresses": {
-      "RoleRegistry": "",
+      "RoleRegistry": "0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B",
       "TopUpSourceFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
       "CCTPAdapter": "0x53a327cce6edd6a887169fa658271ff3588a383e",
       "EtherFiOFTBridgeAdapter": "0x3E0ccbce6c3beC4826397005c877BE66C39D9912",
