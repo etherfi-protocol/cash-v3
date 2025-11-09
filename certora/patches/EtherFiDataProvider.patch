@@ -1,0 +1,13 @@
+diff --git a/src/data-provider/EtherFiDataProvider.sol b/src/data-provider/EtherFiDataProvider.sol
+index 7e54755..909da2d 100644
+--- a/src/data-provider/EtherFiDataProvider.sol
++++ b/src/data-provider/EtherFiDataProvider.sol
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity ^0.8.28;
+ 
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { IEtherFiSafeFactory } from "../interfaces/IEtherFiSafeFactory.sol";
+ import { IPriceProvider } from "../interfaces/IPriceProvider.sol";

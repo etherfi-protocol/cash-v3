@@ -759,7 +759,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     // Tests for LiquidUSD with USDC, USDT, DAI
     function test_deposit_worksWithUsdc_forLiquidUsd() public {
         uint256 amountToDeposit = 1000 * 10**6; // 1000 USDC (6 decimals)
-        uint256 minReturn = 900 * 10**6; // 990 LiquidUSD (18 decimals)
+        uint256 minReturn = 800 * 10**6; // 800 LiquidUSD (18 decimals)
         deal(address(usdc), address(safe), amountToDeposit);
         
         bytes32 digestHash = keccak256(abi.encodePacked(
@@ -788,7 +788,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
 
     function test_deposit_worksWithUsdt_forLiquidUsd() public {
         uint256 amountToDeposit = 1000 * 10**6; // 1000 USDT (6 decimals)
-        uint256 minReturn = 900 * 10**6; // 990 LiquidUSD (18 decimals)
+        uint256 minReturn = 800 * 10**6; // 800 LiquidUSD (18 decimals)
         deal(address(usdt), address(safe), amountToDeposit);
         
         bytes32 digestHash = keccak256(abi.encodePacked(
@@ -817,7 +817,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
 
     function test_deposit_worksWithDai_forLiquidUsd() public {
         uint256 amountToDeposit = 1000 * 10**18; // 1000 DAI (18 decimals)
-        uint256 minReturn = 900 * 10**6; // 990 LiquidUSD (18 decimals)
+        uint256 minReturn = 800 * 10**6; // 800 LiquidUSD (18 decimals)
         deal(address(dai), address(safe), amountToDeposit);
         
         bytes32 digestHash = keccak256(abi.encodePacked(

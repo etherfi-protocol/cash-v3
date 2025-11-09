@@ -19,11 +19,6 @@ contract DeployBridgeAdaptersHyperEVMDev is Utils {
     // Base dev deployments (only known entries enforced)
     address constant EXPECTED_OFT_ADAPTER_DEV = 0x6C6C72B148f76DD10fE61956b058e5f356907640;
 
-    // Base/mainnet production deployments (used to ensure we don't collide when dev salts are missing)
-    address constant EXPECTED_CCTP_ADAPTER_PROD = 0x53A327cce6eDD6A887169Fa658271ff3588a383e;
-    address constant EXPECTED_OFT_ADAPTER_PROD = 0x3E0ccbce6c3beC4826397005c877BE66C39D9912;
-    address constant EXPECTED_OFT_ADAPTER_MAINNET_PROD = 0x6dB93653C1617ec32764020DbB7521BB7c7294b0;
-
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 

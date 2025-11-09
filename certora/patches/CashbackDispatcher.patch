@@ -1,0 +1,13 @@
+diff --git a/src/cashback-dispatcher/CashbackDispatcher.sol b/src/cashback-dispatcher/CashbackDispatcher.sol
+index c99394d..37396e2 100644
+--- a/src/cashback-dispatcher/CashbackDispatcher.sol
++++ b/src/cashback-dispatcher/CashbackDispatcher.sol
+@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
+ import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { ICashModule, TokenDataInUsd } from "../interfaces/ICashModule.sol";
+ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";

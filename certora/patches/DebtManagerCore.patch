@@ -1,0 +1,13 @@
+diff --git a/src/debt-manager/DebtManagerCore.sol b/src/debt-manager/DebtManagerCore.sol
+index 3ef7847..cec5d9d 100644
+--- a/src/debt-manager/DebtManagerCore.sol
++++ b/src/debt-manager/DebtManagerCore.sol
+@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
+ 
+ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { ICashLens } from "../interfaces/ICashLens.sol";
+ import { ICashModule, BinSponsor } from "../interfaces/ICashModule.sol";
