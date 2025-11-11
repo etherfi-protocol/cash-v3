@@ -37,4 +37,3 @@ contract DeployBeHYPEStakeModule is Utils {
         vm.stopBroadcast();
     }
 }
-
