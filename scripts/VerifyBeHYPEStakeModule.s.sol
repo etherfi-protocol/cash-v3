@@ -8,7 +8,7 @@ import {BeHYPEStakeModule} from "../src/modules/hype/BeHYPEStakeModule.sol";
 import {ContractCodeChecker} from "./utils/ContractCodeChecker.sol";
 
 contract VerifyBeHYPEStakeModule is Script, ContractCodeChecker {
-    address internal constant DEPLOYED_MODULE = 0x7E5D3144067037Dc8f155d9d7eEcF7Fa3F060374;
+    address internal constant DEPLOYED_MODULE = 0x51142BC586A7b4cbECDCD5B0C68064714B322CBC;
     string internal constant DEFAULT_SCROLL_RPC = "https://rpc.scroll.io";
 
     function run() public {
