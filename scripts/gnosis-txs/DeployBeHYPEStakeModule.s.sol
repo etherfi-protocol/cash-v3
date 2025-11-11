@@ -14,6 +14,7 @@ contract DeployBeHYPEStakeModule is GnosisHelpers, Utils {
     address l2BeHypeStaker = 0x3f1Bdae959cEd680E434Fe201861E97976eA4A8F;
     address whypeToken = 0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E;
     address beHypeToken = 0xA519AfBc91986c0e7501d7e34968FEE51CD901aC;
+    uint32 refundGasLimit = 5_000;
 
     BeHYPEStakeModule public beHypeStakeModule;
 
@@ -30,18 +31,12 @@ contract DeployBeHYPEStakeModule is GnosisHelpers, Utils {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        address moduleAddress = deployWithCreate3(
-            abi.encodePacked(
-                type(BeHYPEStakeModule).creationCode,
-                abi.encode(
-                    dataProvider,
-                    l2BeHypeStaker,
-                    whypeToken,
-                    beHypeToken,
-                    refundGasLimit
-                )
-            ),
-            getSalt(BEHYPE_STAKE_MODULE)
+        beHypeStakeModule = new BeHYPEStakeModule(
+            dataProvider,
+            l2BeHypeStaker,
+            whypeToken,
+            beHypeToken,
+            refundGasLimit
         );
 
 
