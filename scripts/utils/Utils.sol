@@ -62,6 +62,7 @@ contract Utils is Script {
     string internal CASH_LENS_IMPL = "CashLensImpl";
     string internal CASH_LENS_PROXY = "CashLensProxy";
     string internal OPEN_OCEAN_SWAP_MODULE = "OpenOceanSwapModule";
+    string internal BEHYPE_STAKE_MODULE = "BeHYPEStakeModule";
 
     string internal CASH_EVENT_EMITTER_IMPL = "CashEventEmitterImpl";
     string internal CASH_EVENT_EMITTER_PROXY = "CashEventEmitterProxy";
