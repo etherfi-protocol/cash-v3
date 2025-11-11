@@ -24,7 +24,7 @@ contract DeployBeHYPEStakeModule is Utils {
 
         vm.startBroadcast();
 
-        beHypeStakeModule = new BeHYPEStakeModule(dataProvider, L2_BEHYPE_STAKER, WHYPE_TOKEN, BEHYPE_TOKEN);
+        beHypeStakeModule = new BeHYPEStakeModule(dataProvider, L2_BEHYPE_STAKER, WHYPE_TOKEN, BEHYPE_TOKEN, 5_000);
 
         address[] memory modules = new address[](1);
         modules[0] = address(beHypeStakeModule);
