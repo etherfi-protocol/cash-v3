@@ -20,6 +20,7 @@
     "EtherFiStakeModule": "0x5ac17A065B0e7070737daAc216B3D97c0c400Eec",
     "CashLiquidationHelper": "0x969Cf1dB5293B39F312e3b544a8633920F3D969C",
     "StargateModule": "0x6c906af3300294317C454A18AC552bAce9a72Fca",
-    "WormholeModule": "0x96F7C99AeBb38Ccc0Df091F1aD2b8f91ADBA2FCd"
+    "WormholeModule": "0x96F7C99AeBb38Ccc0Df091F1aD2b8f91ADBA2FCd",
+    "BeHYPEStakeModule": "0x93af03022FbAc2F5999d3ddCbd6a964E22c46338."
   }
 }
