@@ -9,6 +9,7 @@ import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { IL2BeHYPEOAppStaker } from "../../interfaces/IL2BeHYPEOAppStaker.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 
 /**
  * @title BeHYPEStakeModule
@@ -22,20 +23,38 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
 
     /// @notice Reference to the L2BeHYPEOAppStaker contract for staking operations
     IL2BeHYPEOAppStaker public immutable staker;
-    
+
     /// @notice Address of the WHYPE token contract
     address public immutable whype;
-    
+
     /// @notice Address of the beHYPE token contract (for event tracking)
     address public immutable beHYPE;
 
     /// @notice TypeHash for stake function signature 
     bytes32 public constant STAKE_SIG = keccak256("stake");
 
+    /// @custom:storage-location erc7201:etherfi.storage.BeHYPEStakeModule
+    struct BeHYPEStakeModuleStorage {
+        /// @notice Gas limit to use when refunding excess fees back to the admin
+        uint32 refundGasLimit;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.BeHYPEStakeModule")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant BeHYPEStakeModuleStorageLocation =
+        0x7360fa4520b143a14b5f377b55b454493ca513d405fba1b8dcff3eff4e862c00;
+
     event StakeDeposit(address indexed safe, address indexed inputAsset, address indexed outputAsset, uint256 inputAmount);
+    event RefundGasLimitUpdated(uint32 refundGasLimit);
 
     /// @notice Thrown when the provided fee is insufficient for the cross-chain transaction
     error InsufficientFee();
+    /// @notice Thrown when refunding excess fee back to the caller fails
+    error RefundFailed();
+    /// @notice Thrown when caller lacks the required module admin role
+    error Unauthorized();
+
+    /// @notice Role identifier for BeHYPE stake module administrators
+    bytes32 public constant BEHYPE_STAKE_MODULE_ADMIN_ROLE = keccak256("BEHYPE_STAKE_MODULE_ADMIN_ROLE");
 
     /**
      * @notice Contract constructor
@@ -45,11 +64,12 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
      * @param _beHYPE Address of the beHYPE token contract
      * @dev Initializes the contract with required contract references
      */
-    constructor(address _dataProvider, address _staker, address _whype, address _beHYPE) ModuleBase(_dataProvider) ModuleCheckBalance(_dataProvider) {
+    constructor(address _dataProvider, address _staker, address _whype, address _beHYPE, uint32 _refundGasLimit) ModuleBase(_dataProvider) ModuleCheckBalance(_dataProvider) {
         if (_staker == address(0) || _whype == address(0) || _beHYPE == address(0)) revert InvalidInput();
         staker = IL2BeHYPEOAppStaker(_staker);
         whype = _whype;
         beHYPE = _beHYPE;
+        _getBeHYPEStakeModuleStorage().refundGasLimit = _refundGasLimit;
     }
 
     /**
@@ -71,6 +91,28 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
         bytes32 digestHash = _getStakeDigestHash(safe, amountToStake);
         _verifyAdminSig(digestHash, signer, signature);
         _stake(safe, amountToStake);
+    }
+
+    /**
+     * @notice Sets the gas limit used when refunding excess fees
+     * @dev Setting the gas limit to zero resets it back to the default value
+     * @param refundGasLimit The gas limit to use when refunding excess fees
+     * @custom:throws Unauthorized If the caller lacks the module admin role
+     */
+    function setRefundGasLimit(uint32 refundGasLimit) external {
+        IRoleRegistry roleRegistry = IRoleRegistry(etherFiDataProvider.roleRegistry());
+        if (!roleRegistry.hasRole(BEHYPE_STAKE_MODULE_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+
+        _getBeHYPEStakeModuleStorage().refundGasLimit = refundGasLimit;
+        emit RefundGasLimitUpdated(refundGasLimit);
+    }
+
+    /**
+     * @notice Returns the gas limit used when refunding excess fees
+     * @return Gas limit configured for the module, falling back to the default when unset
+     */
+    function getRefundGasLimit() public view returns (uint32) {
+        return _getBeHYPEStakeModuleStorage().refundGasLimit;
     }
 
     /**
@@ -117,10 +159,30 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
 
         uint256 excessFee = msg.value - quotedFee;
         if (excessFee > 0) {
-            Address.sendValue(payable(msg.sender), excessFee);
+            _refundExcessFee(msg.sender, excessFee);
         }
 
         emit StakeDeposit(safe, whype, beHYPE, amountToStake);
+    }
+
+    /**
+     * @dev Returns the storage struct from the specified storage slot
+     * @return $ Reference to the BeHYPEStakeModuleStorage struct
+     */
+    function _getBeHYPEStakeModuleStorage() internal pure returns (BeHYPEStakeModuleStorage storage $) {
+        assembly {
+            $.slot := BeHYPEStakeModuleStorageLocation
+        }
+    }
+
+    /**
+     * @dev Refunds excess fees to the caller using a limited amount of gas
+     * @param refundRecipient The address receiving the refund
+     * @param amount The amount of ETH to refund
+     */
+    function _refundExcessFee(address refundRecipient, uint256 amount) internal {
+        (bool success, ) = payable(refundRecipient).call{ value: amount, gas: getRefundGasLimit() }("");
+        if (!success) revert RefundFailed();
     }
 }
 
