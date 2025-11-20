@@ -53,6 +53,13 @@ contract PixWalletAutoTopup is UUPSUpgradeable, EnumerableRoles, Ownable {
     event BridgeViaCCTP(address token, uint256 amount, uint32 destinationDomain, bytes32 mintRecipient);
 
     /**
+     * @notice Emitted when the Pix wallet on the Base network is set
+     * @param oldPixWalletOnBase The previous Pix wallet on the Base network
+     * @param newPixWalletOnBase The new Pix wallet on the Base network
+     */
+    event PixWalletSet(address indexed oldPixWalletOnBase, address indexed newPixWalletOnBase);
+
+    /**
      * @notice Error thrown when the input is invalid
      */
     error InvalidInput();
@@ -76,9 +83,12 @@ contract PixWalletAutoTopup is UUPSUpgradeable, EnumerableRoles, Ownable {
     /**
      * @notice Sets the Pix wallet on the Base network
      * @param _pixWalletOnBase The address of the Pix wallet on the Base network
+     * @custom:throws InvalidInput if the Pix wallet on the Base network is the zero address
+     * @custom:throws OnlyOwner if the caller is not the owner
      */
     function setPixWalletOnBase(address _pixWalletOnBase) external onlyOwner {
         if (_pixWalletOnBase == address(0)) revert InvalidInput();
+        emit PixWalletSet(pixWalletOnBase, _pixWalletOnBase);
         pixWalletOnBase = _pixWalletOnBase;
     }
 
