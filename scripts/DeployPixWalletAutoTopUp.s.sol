@@ -16,7 +16,7 @@ contract DeployPixWalletAutoTopup is Utils {
         vm.startBroadcast(deployerPrivateKey);
 
         address pixWalletAutoTopupImpl = address(new PixWalletAutoTopup());
-        address(new UUPSProxy(pixWalletAutoTopupImpl, abi.encodeWithSelector(PixWalletAutoTopup.initialize.selector, owner, pixWallet)));
+        address(new UUPSProxy(pixWalletAutoTopupImpl, abi.encodeWithSelector(PixWalletAutoTopup.initialize.selector, 0xA6cf33124cb342D1c604cAC87986B965F428AAC4, pixWallet)));
         
         vm.stopBroadcast();
     }
