@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {EnumerableSetLib} from "solady/utils/EnumerableSetLib.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
-import {IDebtManager} from "../interfaces/IDebtManager.sol";
-import {IEtherFiDataProvider} from "../interfaces/IEtherFiDataProvider.sol";
-import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
-import {
-    SpendingLimit,
-    SpendingLimitLib
-} from "../libraries/SpendingLimitLib.sol";
+import { IDebtManager } from "../interfaces/IDebtManager.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
+import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
 // /**
 //  * @title CashbackTypes
@@ -17,7 +14,7 @@ import {
 //  */
 // enum CashbackTypes {
 //     Regular,
-//     Spender,
+//     Spender, 
 //     Promotion,
 //     Referral
 // }
@@ -33,7 +30,7 @@ struct Cashback {
 
 /**
  * @title CashbackTokens
- * @notice Defines the structure of Cashback tokens
+ * @notice Defines the structure of Cashback tokens 
  */
 struct CashbackTokens {
     address token;
@@ -138,7 +135,7 @@ struct SafeCashConfig {
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
     /// @notice Incoming mode that will be applied after the delay
-    Mode incomingMode;
+    Mode incomingMode; 
 }
 
 /**
@@ -171,7 +168,7 @@ struct SafeCashData {
     uint256 totalCashbackEarnedInUsd;
     /// @notice Timestamp when a pending change to incoming mode mode will take effect (0 if no pending change)
     uint256 incomingModeStartTime;
-    /// @notice Maximum spendable amount in Debit mode
+    /// @notice Maximum spendable amount in Debit mode 
     DebitModeMaxSpend debitMaxSpend;
 }
 
@@ -180,7 +177,7 @@ struct SafeCashData {
  * @notice Data structure to return Debit mode max spend result
  */
 struct DebitModeMaxSpend {
-    /// @notice Tokens that can be spent. Order of token matter, Order determines
+    /// @notice Tokens that can be spent. Order of token matter, Order determines 
     /// priority for deficit coverage - earlier tokens are used first
     address[] spendableTokens;
     /// @notice Amounts of respective tokens that can be spent
@@ -307,11 +304,8 @@ interface ICashModule {
     /**
      * @notice Returns all the assets whitelisted for withdrawals
      * @return Array of whitelisted withdraw assets
-     */
-    function getWhitelistedWithdrawAssets()
-        external
-        view
-        returns (address[] memory);
+     */    
+    function getWhitelistedWithdrawAssets() external view returns (address[] memory);
 
     /**
      * @notice Retrieves cash configuration data for a Safe
@@ -328,10 +322,7 @@ interface ICashModule {
      * @return Boolean indicating if the transaction is cleared
      * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
      */
-    function transactionCleared(
-        address safe,
-        bytes32 txId
-    ) external view returns (bool);
+    function transactionCleared(address safe, bytes32 txId) external view returns (bool);
 
     /**
      * @notice Gets the debt manager contract
@@ -345,9 +336,7 @@ interface ICashModule {
      * @param binSponsor Bin sponsor for which the settlement dispatcher needs to be returned
      * @return settlementDispatcher The address of the settlement dispatcher
      */
-    function getSettlementDispatcher(
-        BinSponsor binSponsor
-    ) external view returns (address settlementDispatcher);
+    function getSettlementDispatcher(BinSponsor binSponsor) external view returns (address settlementDispatcher);
 
     /**
      * @notice Returns the EtherFiDataProvider contract reference
@@ -364,13 +353,7 @@ interface ICashModule {
      * @return data Pending cashback data for tokens in USD
      * @return totalCashbackInUsd Total pending cashback amount in USD
      */
-    function getPendingCashback(
-        address account,
-        address[] memory tokens
-    )
-        external
-        view
-        returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd);
+    function getPendingCashback(address account, address[] memory tokens) external view returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd);
 
     /**
      * @notice Gets the pending cashback amount for an account in USD for a specific token
@@ -379,10 +362,7 @@ interface ICashModule {
      * @param token Address of tokens for cashback
      * @return Pending cashback amount in USD for the token
      */
-    function getPendingCashbackForToken(
-        address account,
-        address token
-    ) external view returns (uint256);
+    function getPendingCashbackForToken(address account, address token) external view returns (uint256);
 
     /**
      * @notice Gets the current delay settings for the module
@@ -406,9 +386,7 @@ interface ICashModule {
      * @param safe Address of the EtherFi Safe
      * @return Timestamp when incoming mode will take effect, or 0 if not applicable
      */
-    function incomingModeStartTime(
-        address safe
-    ) external view returns (uint256);
+    function incomingModeStartTime(address safe) external view returns (uint256);
 
     /**
      * @notice Gets the pending withdrawal amount for a token
@@ -418,19 +396,13 @@ interface ICashModule {
      * @return Amount of tokens pending withdrawal
      * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
      */
-    function getPendingWithdrawalAmount(
-        address safe,
-        address token
-    ) external view returns (uint256);
+    function getPendingWithdrawalAmount(address safe, address token) external view returns (uint256);
 
     /**
      * @notice Returns the list of modules that can request withdrawals
      * @return Array of module addresses that can request withdrawals
      */
-    function getWhitelistedModulesCanRequestWithdraw()
-        external
-        view
-        returns (address[] memory);
+    function getWhitelistedModulesCanRequestWithdraw() external view returns (address[] memory);
 
     /**
      * @notice Sets up a new Safe's Cash Module with initial configuration
@@ -452,15 +424,7 @@ interface ICashModule {
      * @param _cashModuleSetters Address of the cash module setters contract
      * @custom:throws InvalidInput if any essential address is zero
      */
-    function initialize(
-        address _roleRegistry,
-        address _debtManager,
-        address _settlementDispatcherReap,
-        address _settlementDispatcherRain,
-        address _cashbackDispatcher,
-        address _cashEventEmitter,
-        address _cashModuleSetters
-    ) external;
+    function initialize(address _roleRegistry, address _debtManager, address _settlementDispatcherReap, address _settlementDispatcherRain, address _cashbackDispatcher, address _cashEventEmitter, address _cashModuleSetters) external;
 
     /**
      * @notice Cancel a pending withdrawal request
@@ -469,11 +433,7 @@ interface ICashModule {
      * @param signers Array of signers for the cancellation
      * @param signatures Array of signatures from the signers
      */
-    function cancelWithdrawal(
-        address safe,
-        address[] calldata signers,
-        bytes[] calldata signatures
-    ) external;
+    function cancelWithdrawal(address safe, address[] calldata signers, bytes[] calldata signatures) external;
 
     /**
      * @notice Cancels a pending withdrawal request by the module
@@ -491,11 +451,7 @@ interface ICashModule {
      * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
      * @custom:throws OnlyWhitelistedModuleCanRequestWithdraw if the caller is not a whitelisted module
      */
-    function requestWithdrawalByModule(
-        address safe,
-        address token,
-        uint256 amount
-    ) external;
+    function requestWithdrawalByModule(address safe, address token, uint256 amount) external;
 
     /**
      * @notice Configures which modules can request withdrawals
@@ -503,15 +459,12 @@ interface ICashModule {
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether to whitelist each module
      */
-    function configureModulesCanRequestWithdraw(
-        address[] calldata modules,
-        bool[] calldata shouldWhitelist
-    ) external;
+    function configureModulesCanRequestWithdraw(address[] calldata modules, bool[] calldata shouldWhitelist) external;
 
     /**
      * @notice Configures the withdraw assets whitelist
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param assets Array of asset addresses to configure
+     * @param assets Array of asset addresses to configure 
      * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
      * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
      * @custom:throws InvalidInput If the arrays are empty
@@ -519,10 +472,7 @@ interface ICashModule {
      * @custom:throws InvalidAddress If any address is the zero address
      * @custom:throws DuplicateElementFound If any address appears more than once in the addrs array
      */
-    function configureWithdrawAssets(
-        address[] calldata assets,
-        bool[] calldata shouldWhitelist
-    ) external;
+    function configureWithdrawAssets(address[] calldata assets, bool[] calldata shouldWhitelist) external;
 
     /**
      * @notice Sets the settlement dispatcher address for a bin sponsor
@@ -531,10 +481,7 @@ interface ICashModule {
      * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
      * @custom:throws InvalidInput if caller doesn't have the controller role
      */
-    function setSettlementDispatcher(
-        BinSponsor binSponsor,
-        address dispatcher
-    ) external;
+    function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external;
 
     /**
      * @notice Sets the tier for one or more safes
@@ -546,10 +493,7 @@ interface ICashModule {
      * @custom:throws OnlyEtherFiSafe if any address is not a valid EtherFi Safe
      * @custom:throws AlreadyInSameTier if a safe is already in the specified tier
      */
-    function setSafeTier(
-        address[] memory safes,
-        SafeTiers[] memory tiers
-    ) external;
+    function setSafeTier(address[] memory safes, SafeTiers[] memory tiers) external;
 
     /**
      * @notice Sets the time delays for withdrawals, spending limit changes, and mode changes
@@ -559,11 +503,7 @@ interface ICashModule {
      * @param modeDelay Delay in seconds before a mode change takes effect
      * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
      */
-    function setDelays(
-        uint64 withdrawalDelay,
-        uint64 spendLimitDelay,
-        uint64 modeDelay
-    ) external;
+    function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external;
 
     /**
      * @notice Sets the operating mode for a safe
@@ -577,12 +517,7 @@ interface ICashModule {
      * @custom:throws ModeAlreadySet if the safe is already in the requested mode
      * @custom:throws InvalidSignatures if signature verification fails
      */
-    function setMode(
-        address safe,
-        Mode mode,
-        address signer,
-        bytes calldata signature
-    ) external;
+    function setMode(address safe, Mode mode, address signer, bytes calldata signature) external;
 
     /**
      * @notice Updates the spending limits for a safe
@@ -596,13 +531,7 @@ interface ICashModule {
      * @custom:throws OnlySafeAdmin if signer is not a safe admin
      * @custom:throws InvalidSignatures if signature verification fails
      */
-    function updateSpendingLimit(
-        address safe,
-        uint256 dailyLimitInUsd,
-        uint256 monthlyLimitInUsd,
-        address signer,
-        bytes calldata signature
-    ) external;
+    function updateSpendingLimit(address safe, uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, address signer, bytes calldata signature) external;
 
     /**
      * @notice Processes a spending transaction with multiple tokens
@@ -620,24 +549,14 @@ interface ICashModule {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(
-        address safe,
-        bytes32 txId,
-        BinSponsor binSponsor,
-        address[] calldata tokens,
-        uint256[] calldata amountsInUsd,
-        Cashback[] calldata cashbacks
-    ) external;
+    function spend(address safe, bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  Cashback[] calldata cashbacks) external;
 
     /**
      * @notice Clears pending cashback for users
      * @param users Addresses of users to clear the pending cashback for
      * @param tokens Addresses of cashback tokens
      */
-    function clearPendingCashback(
-        address[] calldata users,
-        address[] calldata tokens
-    ) external;
+    function clearPendingCashback(address[] calldata users, address[] calldata tokens) external;
 
     /**
      * @notice Repays borrowed tokens
@@ -660,7 +579,7 @@ interface ICashModule {
      * @param safe Address of the EtherFi Safe
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
-     * @param recipient Address to receive the withdrawn tokens
+     * @param recipient Address to receive the withdrawn tokens 
      * @param signers Array of safe owner addresses signing the transaction
      * @param signatures Array of signatures from the safe owners
      * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
@@ -669,14 +588,7 @@ interface ICashModule {
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws InsufficientBalance if any token has insufficient balance
      */
-    function requestWithdrawal(
-        address safe,
-        address[] calldata tokens,
-        uint256[] calldata amounts,
-        address recipient,
-        address[] calldata signers,
-        bytes[] calldata signatures
-    ) external;
+    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external;
 
     /**
      * @notice Processes a pending withdrawal request after the delay period
@@ -703,11 +615,7 @@ interface ICashModule {
      * @param tokensToSend Array of token data with amounts to send to the liquidator
      * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
      */
-    function postLiquidate(
-        address safe,
-        address liquidator,
-        IDebtManager.LiquidationTokenData[] memory tokensToSend
-    ) external;
+    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
 
     /**
      * @notice Returns the current nonce for a Safe
