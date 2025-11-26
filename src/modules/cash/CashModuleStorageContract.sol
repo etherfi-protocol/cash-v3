@@ -69,6 +69,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         EnumerableSetLib.AddressSet whitelistedModulesCanRequestWithdraw;
         /// @notice Address of the SettlementDispatcher for PIX
         address settlementDispatcherPix;
+        /// @notice Address of the SettlementDispatcher for CardOrder
+        address settlementDispatcherCardOrder;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
