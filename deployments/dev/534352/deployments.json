@@ -10,6 +10,7 @@
     "SettlementDispatcherReap": "0xea6e574886797A65eD22CcF2307e48a83C355771",
     "SettlementDispatcherRain": "0x26d90676C6aeF2a09Cf383af499cc67E9D6ad7CA",
     "SettlementDispatcherPix": "0xBA0d6d689A0A2459C705D6210B42E45dB059D72f",
+    "SettlementDispatcherCardOrder": "0xa0fcb595aa9ff03ea609603a66f5b85471a2cefd",
     "TopUpDest": "0x06fe42Cf3C63412f1955758ce2798709476a38fd",
     "TopUpDestNativeGateway": "0x023aA54c7bcC6257733Db28bc5b9C11b886a4578",
     "OpenOceanSwapModule": "0x976e56Bb016A39480dD9c5044F52f3766212A376",
