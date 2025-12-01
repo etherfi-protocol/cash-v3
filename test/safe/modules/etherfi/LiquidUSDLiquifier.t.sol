@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 
 import { SafeTestSetup, MessageHashUtils } from "../..//SafeTestSetup.t.sol";
-import { LiquidUSDLiquifierModule, IERC20, SafeERC20, ModuleCheckBalance } from "../../../../src/modules/etherfi/LiquidUSDLiquifier.sol";
+import { LiquidUSDLiquifierModule, IERC20, SafeERC20, ModuleCheckBalance, UpgradeableProxy } from "../../../../src/modules/etherfi/LiquidUSDLiquifier.sol";
 import { BinSponsor, Cashback, Mode, SpendingLimit } from "../../../../src/interfaces/ICashModule.sol";
 import { CashEventEmitter } from "../cash/CashModuleTestSetup.t.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
@@ -147,6 +147,74 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         vm.prank(makeAddr("notSettlementDispatcherBridger"));
         vm.expectRevert(LiquidUSDLiquifierModule.OnlySettlementDispatcherBridger.selector);
         liquidUSDLiquifier.withdrawLiquidUSD(100e6, 100e6, discount, secondsToDeadline);
+    }
+
+    function test_withdrawFunds_succeeds_withErc20Token() public {
+        uint256 amount = 100e6;
+        deal(address(USDC), address(liquidUSDLiquifier), amount);
+
+        uint256 balBefore = USDC.balanceOf(owner);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit LiquidUSDLiquifierModule.FundsWithdrawn(address(USDC), amount, owner);
+        liquidUSDLiquifier.withdrawFunds(address(USDC), owner, amount);
+
+        uint256 balAfter = USDC.balanceOf(owner);
+
+        assertEq(balAfter, balBefore + amount);
+    }
+
+    function test_withdrawFunds_succeeds_withNativeToken() public {
+        uint256 amount = 100e6;
+        deal(address(liquidUSDLiquifier), 1 ether);
+
+        address recipient = makeAddr("recipient");
+
+        address ETH = liquidUSDLiquifier.ETH();
+
+        uint256 balBefore = address(recipient).balance;
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit LiquidUSDLiquifierModule.FundsWithdrawn(ETH, amount, recipient);
+        liquidUSDLiquifier.withdrawFunds(ETH, recipient, amount);
+
+        uint256 balAfter = address(recipient).balance;
+
+        assertEq(balAfter, balBefore + amount);
+    }
+
+    function test_withdrawFunds_reverts_whenRecipientAddressZero() public {
+        vm.prank(owner);
+        vm.expectRevert(LiquidUSDLiquifierModule.InvalidValue.selector);
+        liquidUSDLiquifier.withdrawFunds(address(USDC), address(0), 100e6);
+    }
+
+    function test_withdrawFunds_OnlyRoleRegistryOwner() public {
+        vm.prank(makeAddr("notRoleRegistryOwner"));
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        liquidUSDLiquifier.withdrawFunds(address(USDC), owner, 100e6);
+    }
+
+    function test_withdrawFunds_reverts_whenAmountZero() public {
+        address ETH = liquidUSDLiquifier.ETH();
+        deal(address(USDC), address(liquidUSDLiquifier), 0);
+        vm.prank(owner);
+        vm.expectRevert(LiquidUSDLiquifierModule.CannotWithdrawZeroAmount.selector);
+        liquidUSDLiquifier.withdrawFunds(address(USDC), owner, 0);
+
+        vm.prank(owner);
+        vm.expectRevert(LiquidUSDLiquifierModule.CannotWithdrawZeroAmount.selector);
+        liquidUSDLiquifier.withdrawFunds(address(ETH), owner, 0);
+    }
+
+    function test_withdrawFunds_reverts_whenWithdrawalFails() public {
+        address ETH = liquidUSDLiquifier.ETH();
+
+        vm.prank(owner);
+        vm.expectRevert(LiquidUSDLiquifierModule.WithdrawFundsFailed.selector);
+        liquidUSDLiquifier.withdrawFunds(address(ETH), owner, 100e6);
     }
 
     function _updateSpendingLimit(uint256 dailyLimit, uint256 monthlyLimit) internal {
