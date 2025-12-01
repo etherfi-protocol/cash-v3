@@ -14,7 +14,7 @@ import { CashEventEmitter } from "../src/modules/cash/CashEventEmitter.sol";
 import { ICashModule } from "../src/interfaces/ICashModule.sol";
 import { Utils } from "./utils/Utils.sol";
 
-contract DeploySettlementDispatcherV2 is Utils, Test {
+contract DeploySettlementDispatcherV2Dev is Utils, Test {
     function run() public {
         string memory deployments = readDeploymentFile();
         vm.startBroadcast();
