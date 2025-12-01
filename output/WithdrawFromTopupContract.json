@@ -1,0 +1,12 @@
+{
+  "chainId": "534352",
+  "safeAddress": "0xa6cf33124cb342d1c604cac87986b965f428aac4",
+  "meta": { "txBuilderVersion": "1.16.5" },
+  "transactions": [
+    {
+      "to": "0x3a6a724595184dda4be69db1ce726f2ac3d66b87",
+      "value": "0",
+      "data": "0xf3fef3a300000000000000000000000001f0a31698c4d065659b9bdc21b3610292a1c5060000000000000000000000000000000000000000000000056bc75e2d63100000"
+    }
+  ]
+}
