@@ -9,12 +9,13 @@ import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IBoringOnChainQueue } from "../../interfaces/IBoringOnChainQueue.sol";
+import { Constants } from "../../utils/Constants.sol";
 
 /**
  * @title LiquidUSDLiquifierModule
  * @notice Module for liquifying Liquid USD into USDC and repay on debt manager
  */
-contract LiquidUSDLiquifierModule is UpgradeableProxy, ModuleCheckBalance {
+contract LiquidUSDLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance {
     using SafeERC20 for IERC20;
 
     /// @notice Address of the Liquid USD token
@@ -52,6 +53,14 @@ contract LiquidUSDLiquifierModule is UpgradeableProxy, ModuleCheckBalance {
      * @param amountOutFromQueue Amount of USDC to receive
      */
     event LiquidUSDWithdrawalRequested(uint128 amount, uint128 amountOutFromQueue);
+
+    /**
+     * @notice Emitted when funds are withdrawn
+     * @param token Address of the token withdrawn
+     * @param amount Amount of tokens withdrawn
+     * @param recipient Address of the recipient
+     */
+    event FundsWithdrawn(address indexed token, uint256 amount, address indexed recipient);
     
     /// @notice Thrown when the account is not an instance of the deployed EtherfiSafe
     error OnlyEtherFiSafe();
@@ -65,6 +74,12 @@ contract LiquidUSDLiquifierModule is UpgradeableProxy, ModuleCheckBalance {
     error InsufficientReturnAmount();
     /// @notice Thrown when the caller is not a Settlement Dispatcher Bridger
     error OnlySettlementDispatcherBridger();
+    /// @notice Thrown when the value is invalid
+    error InvalidValue();
+    /// @notice Thrown when the amount is 0
+    error CannotWithdrawZeroAmount();
+    /// @notice Thrown when the withdrawal of funds fails
+    error WithdrawFundsFailed();
 
     /**
      * @notice Contract constructor
@@ -146,6 +161,42 @@ contract LiquidUSDLiquifierModule is UpgradeableProxy, ModuleCheckBalance {
         LIQUID_USD_BORING_QUEUE.requestOnChainWithdraw(address(USDC), amount, discount, secondsToDeadline);
 
         emit LiquidUSDWithdrawalRequested(amount, amountOutFromQueue);
+    }
+
+    /**
+     * @notice Withdraws funds from the contract
+     * @param token Address of the token to withdraw
+     * @param recipient Address to receive the withdrawn funds
+     * @param amount Amount of tokens to withdraw
+     */
+    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRoleRegistryOwner() {
+        if (recipient == address(0)) revert InvalidValue();
+        amount = _withdrawFunds(token, recipient, amount);
+        emit FundsWithdrawn(token, amount, recipient);
+    }
+
+    /**
+     * @notice Internal function to handle withdrawal of tokens or ETH
+     * @dev Used by both withdrawFunds and transferFundsToRefundWallet
+     * @param token Address of the token to withdraw 
+     * @param recipient Address to receive the withdrawn funds
+     * @param amount Amount to withdraw (0 to withdraw all available balance)
+     * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
+     * @custom:throws WithdrawFundsFailed If ETH transfer fails
+     */    
+    function _withdrawFunds(address token, address recipient, uint256 amount) internal returns (uint256) {
+        if (token == ETH) {
+            if (amount == 0) amount = address(this).balance;
+            if (amount == 0) revert CannotWithdrawZeroAmount();
+            (bool success, ) = payable(recipient).call{value: amount}("");
+            if (!success) revert  WithdrawFundsFailed();
+        } else {
+            if (amount == 0) amount = IERC20(token).balanceOf(address(this));
+            if (amount == 0) revert CannotWithdrawZeroAmount();
+            IERC20(token).safeTransfer(recipient, amount);
+        }
+
+        return amount;
     }
     
     /**
