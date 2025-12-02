@@ -8,6 +8,8 @@ import { console2 } from "forge-std/console2.sol";
 import { CashModuleCore } from "../src/modules/cash/CashModuleCore.sol";
 import { CashModuleSetters } from "../src/modules/cash/CashModuleSetters.sol";
 import { CashEventEmitter } from "../src/modules/cash/CashEventEmitter.sol";
+import { DebtManagerCore } from "../src/debt-manager/DebtManagerCore.sol";
+import { DebtManagerStorageContract } from "../src/debt-manager/DebtManagerStorageContract.sol";
 import { SettlementDispatcherV2 } from "../src/settlement-dispatcher/SettlementDispatcherV2.sol";
 import { UUPSProxy } from "../src/UUPSProxy.sol";
 import { BinSponsor } from "../src/interfaces/ICashModule.sol";
@@ -21,6 +23,7 @@ contract VerifySettlementDispatcherV2 is Script, Utils, ContractCodeChecker {
     address internal constant NEW_CASH_EVENT_EMITTER_IMPL = 0x8124a19dB8fEae123187C0B6Eb214f8ab294F6e6;
     address internal constant SETTLEMENT_DISPATCHER_V2_IMPL = 0x8fF38032083C0E36C3CdC8c509758514Fe0a49E2;
     address internal constant SETTLEMENT_DISPATCHER_V2_PROXY = 0x2539031cD38e98317Cd246c8ED36F31117e6725b;
+    address internal constant NEW_DEBT_MANAGER_CORE_IMPL = 0xa1C0F2e999EBfa91b8d0be2cC05A44223772896B;
 
     function run() public {
         string memory deployments = readDeploymentFile();
@@ -38,18 +41,12 @@ contract VerifySettlementDispatcherV2 is Script, Utils, ContractCodeChecker {
             string.concat(".", "addresses", ".", "RoleRegistry")
         );
 
-        console2.log("Deployed addresses:");
-        console2.log("  CashModuleCore:", NEW_CASH_MODULE_CORE_IMPL);
-        console2.log("  CashModuleSetters:", NEW_CASH_MODULE_SETTERS_IMPL);
-        console2.log("  CashEventEmitter:", NEW_CASH_EVENT_EMITTER_IMPL);
-        console2.log("  SettlementDispatcherV2 Impl:", SETTLEMENT_DISPATCHER_V2_IMPL);
-        console2.log("  SettlementDispatcherV2 Proxy:", SETTLEMENT_DISPATCHER_V2_PROXY);
-
         // Deploy contracts locally with same constructor parameters
         console2.log("\nDeploying contracts locally...");
         CashModuleCore localCashModuleCore = new CashModuleCore(dataProvider);
         CashModuleSetters localCashModuleSetters = new CashModuleSetters(dataProvider);
         CashEventEmitter localCashEventEmitter = new CashEventEmitter(cashModule);
+        DebtManagerCore localDebtManagerCore = new DebtManagerCore(dataProvider);
         SettlementDispatcherV2 localSettlementDispatcherV2 = new SettlementDispatcherV2(
             BinSponsor.CardOrder,
             dataProvider
@@ -64,6 +61,7 @@ contract VerifySettlementDispatcherV2 is Script, Utils, ContractCodeChecker {
         verifyContractByteCodeMatch(NEW_CASH_MODULE_CORE_IMPL, address(localCashModuleCore));
         verifyContractByteCodeMatch(NEW_CASH_MODULE_SETTERS_IMPL, address(localCashModuleSetters));
         verifyContractByteCodeMatch(NEW_CASH_EVENT_EMITTER_IMPL, address(localCashEventEmitter));
+        verifyContractByteCodeMatch(NEW_DEBT_MANAGER_CORE_IMPL, address(localDebtManagerCore));
 
         console2.log("\n=== Verifying Constructor and Bytecode for new contract: SettlementDispatcherV2 ===");
         verifySettlementDispatcherV2(dataProvider, roleRegistry, address(localSettlementDispatcherV2));
@@ -73,10 +71,12 @@ contract VerifySettlementDispatcherV2 is Script, Utils, ContractCodeChecker {
         address deployedCashModuleCoreDataProvider = address(CashModuleCore(NEW_CASH_MODULE_CORE_IMPL).etherFiDataProvider());
         address deployedCashModuleSettersDataProvider = address(CashModuleSetters(NEW_CASH_MODULE_SETTERS_IMPL).etherFiDataProvider());
         address deployedCashEventEmitterCashModule = address(CashEventEmitter(NEW_CASH_EVENT_EMITTER_IMPL).cashModule());
+        address deployedDebtManagerCoreDataProvider = address(DebtManagerCore(NEW_DEBT_MANAGER_CORE_IMPL).etherFiDataProvider());
 
         require(deployedCashModuleCoreDataProvider == expectedDataProvider, "CashModuleCore dataProvider mismatch");
         require(deployedCashModuleSettersDataProvider == expectedDataProvider, "CashModuleSetters dataProvider mismatch");
         require(deployedCashEventEmitterCashModule == expectedCashModule, "CashEventEmitter cashModule mismatch");
+        require(deployedDebtManagerCoreDataProvider == expectedDataProvider, "DebtManagerCore dataProvider mismatch");
         console2.log("Constructor parameters verified successfully");
     }
 
