@@ -70,7 +70,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit LiquidUSDLiquifierModule.RepaidUsingLiquidUSD(address(safe), usdAmount, liquidUsdAmount);
-        liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), liquidUsdAmount);
+        liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), usdAmount);
 
         uint256 debtAfter = debtManager.borrowingOf(address(safe), address(USDC));
         assertEq(debtBefore - debtAfter, usdAmount);
@@ -87,7 +87,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         uint256 liquidUsdAmountBefore = LIQUID_USD.balanceOf(address(safe));
 
         vm.prank(etherFiWallet);
-        liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), liquidUsdAmount);
+        liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), usdAmount);
 
         uint256 debtAfter = debtManager.borrowingOf(address(safe), address(USDC));
         uint256 liquidUsdAmountAfter = LIQUID_USD.balanceOf(address(safe));

@@ -105,12 +105,22 @@ contract LiquidUSDLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBal
     /**
      * @notice Repays using Liquid USD
      * @param user Address of the user
-     * @param liquidUsdAmount Amount of Liquid USD to repay
+     * @param usdAmount Amount of USD to repay
      * @dev Repays using Liquid USD
      */
-    function repayUsingLiquidUSD(address user, uint256 liquidUsdAmount) external onlyEtherFiSafe(user) onlyEtherFiWallet() {
+    function repayUsingLiquidUSD(address user, uint256 usdAmount) external onlyEtherFiSafe(user) onlyEtherFiWallet() {
+        uint256 liquidUsdAmount = convertUsdToLiquidUSD(usdAmount);
+        _repayUsingLiquidUSD(user, usdAmount, liquidUsdAmount);
+    }
+
+    /**
+     * @notice Internal function to repay using Liquid USD
+     * @param user Address of the user
+     * @param usdAmount Amount of USD to repay
+     * @param liquidUsdAmount Amount of Liquid USD to repay
+     */
+    function _repayUsingLiquidUSD(address user, uint256 usdAmount, uint256 liquidUsdAmount) internal {
         _checkAmountAvailable(user, address(LIQUID_USD), liquidUsdAmount);
-        uint256 usdAmount = convertLiquidUSDToUsd(liquidUsdAmount);
 
         if (USDC.balanceOf(address(this)) < usdAmount) revert InsufficientUsdcBalance();
 
