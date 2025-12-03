@@ -23,6 +23,19 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Install dependencies
+        run: pnpm install
+
       - name: Show Forge version
         run: |
           forge --version
@@ -39,7 +52,6 @@ jobs:
           MAINNET_RPC: ${{ secrets.MAINNET_RPC }}
           SCROLL_RPC: ${{ secrets.SCROLL_RPC }}
           BASE_RPC: ${{ secrets.BASE_RPC }}
-          ETHERSCAN_KEY: ${{ secrets.ETHERSCAN_KEY }}
           HYPEREVM_RPC: ${{ secrets.HYPEREVM_RPC }}
           ARBITRUM_RPC: ${{ secrets.ARBITRUM_RPC }}
           OPENOCEAN_API_KEY: ${{ secrets.OPENOCEAN_API_KEY }}
