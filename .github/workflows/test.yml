@@ -40,5 +40,7 @@ jobs:
           SCROLL_RPC: ${{ secrets.SCROLL_RPC }}
           BASE_RPC: ${{ secrets.BASE_RPC }}
           ETHERSCAN_KEY: ${{ secrets.ETHERSCAN_KEY }}
+          HYPEREVM_RPC: ${{ secrets.HYPEREVM_RPC }}
+          ARBITRUM_RPC: ${{ secrets.ARBITRUM_RPC }}
           OPENOCEAN_API_KEY: ${{ secrets.OPENOCEAN_API_KEY }}
         id: test
