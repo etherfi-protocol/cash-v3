@@ -55,4 +55,5 @@ jobs:
           HYPEREVM_RPC: ${{ secrets.HYPEREVM_RPC }}
           ARBITRUM_RPC: ${{ secrets.ARBITRUM_RPC }}
           OPENOCEAN_API_KEY: ${{ secrets.OPENOCEAN_API_KEY }}
+          TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
         id: test
