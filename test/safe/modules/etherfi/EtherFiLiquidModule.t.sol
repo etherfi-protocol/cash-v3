@@ -831,17 +831,10 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v); 
-        
-        uint256 daiBalBefore = dai.balanceOf(address(safe));
-        uint256 liquidUsdBalBefore = liquidUsd.balanceOf(address(safe));
-        
+
+        // DAI has been removed as a deposit asset so this test is now a negative test
+        vm.expectRevert(EtherFiLiquidModule.AssetNotSupportedForDeposit.selector);
         liquidModule.deposit(address(safe), address(dai), address(liquidUsd), amountToDeposit, minReturn, owner1, signature);
-        
-        uint256 daiBalAfter = dai.balanceOf(address(safe));
-        uint256 liquidUsdBalAfter = liquidUsd.balanceOf(address(safe));
-        
-        assertEq(daiBalAfter, daiBalBefore - amountToDeposit);
-        assertGt(liquidUsdBalAfter, liquidUsdBalBefore);
     }
 
     // Test for LiquidBTC with WBTC

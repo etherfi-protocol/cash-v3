@@ -12,14 +12,27 @@ contract RecoveryUsingSafeWithGithub is Test {
 
     EtherFiSafe safe;
     address newOwner;
+    address safeAddress;
 
     function setUp() public {
         string memory scrollRpc = vm.envString("SCROLL_RPC");
-        address safeAddress = vm.envAddress("RECOVERY_SAFE_ADDRESS");
-        newOwner = vm.envAddress("RECOVERY_NEW_OWNER");
+        
+        try vm.envAddress("RECOVERY_SAFE_ADDRESS") returns (address addr) {
+            safeAddress = addr;
+        } catch {
+            safeAddress = address(0);
+        }
+        try vm.envAddress("RECOVERY_NEW_OWNER") returns (address addr) {
+            newOwner = addr;
+        } catch {
+            newOwner = address(0);
+        }
 
-        if (safeAddress == address(0)) revert("RECOVERY_SAFE_ADDRESS is not set");
-        if (newOwner == address(0)) revert("RECOVERY_NEW_OWNER is not set");
+        // skip the tests if the env vars are not set
+        if (safeAddress == address(0) || newOwner == address(0)) {
+            vm.skip(true);
+            return;
+        }
 
         safe = EtherFiSafe(payable(safeAddress));
         if (bytes(scrollRpc).length == 0) scrollRpc = "https://rpc.scroll.io"; 
