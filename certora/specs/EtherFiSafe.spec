@@ -12,6 +12,8 @@ methods {
     function isRecoverySigner(address) external returns (bool) envfree;
     function getIncomingOwner() external returns (address) envfree;
     function getIncomingOwnerStartTime() external returns (uint256) envfree;
+    function nonce() external returns (uint256) envfree;
+    function useNonce() external returns (uint256);
 }
 
 // P-01. Arbitrary calls on the Safe should not leave it in a less healthy position
@@ -162,7 +164,7 @@ rule checkSignatures_RejectsNonOwner(
     
     // At least one signer is not an owner (but not zero)
     uint256 nonOwnerIndex;
-    require nonOwnerIndex < signers.length;
+    require nonOwnerIndex < threshold;
     require signers[nonOwnerIndex] != 0;
     require !isOwner(e, signers[nonOwnerIndex]);
     
@@ -203,7 +205,7 @@ rule checkSignatures_RejectsZeroAddress(
     
     uint256 zeroIndex;
     
-    require zeroIndex < signers.length,
+    require zeroIndex < threshold,
         "Index must be valid";
     
     require signers[zeroIndex] == 0,
@@ -357,4 +359,55 @@ rule checkSignatures_RejectsInvalidArrays(
     
     assert lastReverted || !result, 
         "checkSignatures must not return true";
+}
+
+/**
+ * @title useNonce reverts for non-module callers
+ */
+rule useNonce_OnlyModulesCanCall() {
+    env e;
+    
+    bool isEnabled = isModuleEnabled(e.msg.sender);
+    
+    useNonce@withrevert(e);
+    
+    // If caller is not an enabled module, the call must revert
+    assert !isEnabled => lastReverted,
+        "useNonce must revert when caller is not an enabled module";
+}
+
+/**
+ * @title useNonce increments nonce by exactly one
+ */
+rule useNonce_IncrementsNonceByOne() {
+    env e;
+    
+    uint256 nonceBefore = nonce();
+    require nonceBefore < max_uint256;
+    
+    require isModuleEnabled(e.msg.sender);
+    
+    useNonce(e);
+    
+    uint256 nonceAfter = nonce();
+    
+    assert nonceAfter == nonceBefore + 1,
+        "useNonce must increment nonce by exactly 1";
+}
+
+/**
+ * @title Nonce uniqueness - each call returns a unique value
+ */
+rule useNonce_ReturnsUniqueValues() {
+    env e1;
+    env e2;
+    
+    require isModuleEnabled(e1.msg.sender);
+    require isModuleEnabled(e2.msg.sender);
+    
+    uint256 nonce1 = useNonce(e1);
+    uint256 nonce2 = useNonce(e2);
+    
+    assert nonce1 != nonce2,
+        "Successive useNonce calls must return unique values";
 }
