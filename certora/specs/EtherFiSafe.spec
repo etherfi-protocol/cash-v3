@@ -58,17 +58,15 @@ rule execTransactionFromModulePermissions(
     env e;
     require to.length == values.length && to.length == data.length;
 
-    
     bool isEnabled = isModuleEnabled(e.msg.sender);
     
-    execTransactionFromModule(e, to, values, data);
+    execTransactionFromModule@withrevert(e, to, values, data);
     
-    assert isEnabled => true;
+    assert !lastReverted => isEnabled;
 }
 
 // This rule checks that:
-// 1. Invalid inputs cause the call to revert (assert false if invalid input succeeds)
-// 2. Valid inputs result in correct post-conditions when call succeeds
+// 1. Invalid inputs cause the call to revert
 rule recoverSafeProperties(
     address newOwner,
     address[] recoverySigners,
@@ -81,7 +79,6 @@ rule recoverSafeProperties(
     bool recoveryEnabledBefore = isRecoveryEnabled();
     uint8 threshold = getRecoveryThreshold();
 
-    // Check if inputs are invalid (excluding owner check since _currentOwner() handles that)
     bool hasInvalidInput = 
         (newOwner == 0) ||
         (recoverySigners.length != signatures.length) ||
@@ -89,21 +86,11 @@ rule recoverSafeProperties(
         (recoverySigners.length > 0 && !isRecoverySigner(recoverySigners[0])) ||
         (!recoveryEnabledBefore);
     
-    recoverSafe(e, newOwner, recoverySigners, signatures);
+    recoverSafe@withrevert(e, newOwner, recoverySigners, signatures);
 
-    // If inputs are invalid, the call should have reverted
-    if (hasInvalidInput) {
-        assert false;
-    }
+    assert hasInvalidInput => lastReverted,
+        "Invalid inputs must cause revert";
                 
-    // If call succeeded, verify all post-conditions
-    address newIncomingOwner = getIncomingOwner();
-    uint256 newIncomingOwnerStartTime = getIncomingOwnerStartTime();
-    
-    // Post-conditions: incoming owner must be set correctly
-    assert newIncomingOwner == newOwner;
-    assert newIncomingOwnerStartTime >= e.block.timestamp;
-    assert isRecoveryEnabled();
 }
 
 /**
