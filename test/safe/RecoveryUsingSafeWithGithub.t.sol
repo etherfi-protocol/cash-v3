@@ -46,13 +46,4 @@ contract RecoveryUsingSafeWithGithub is Test {
         emit log_named_bytes32("structHash", structHash);
         emit log_named_bytes32("digestHash", digestHash);
     }
-    
-    // function test_recoverSafeUsingGnosisSafe() public {
-    //     bytes[] memory signatures = new bytes[](2);
-    //     address[] memory recoverySigners = new address[](2);
-    //     recoverySigners[0] = 0xa265C271adbb0984EFd67310cfe85A77f449e291;
-    //     recoverySigners[1] = 0xbfCe61CE31359267605F18dcE65Cb6c3cc9694A7;
-
-    //     safe.recoverSafe(newOwner, recoverySigners, signatures);
-    // }
 }

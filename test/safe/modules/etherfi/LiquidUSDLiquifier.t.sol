@@ -78,8 +78,6 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
     function test_RepayUsingLiquidUSD_ReturnsExcessFunds() public {
         uint256 usdAmount = initialDebtAmount + 10e6;
-        uint256 liquidUsdAmount = debtManager.convertUsdToCollateralToken(address(LIQUID_USD), usdAmount);
-
         uint256 liquidUsdAmountToRepay = debtManager.convertUsdToCollateralToken(address(LIQUID_USD), initialDebtAmount);
 
         deal(address(USDC), address(liquidUSDLiquifier), usdAmount);
@@ -94,6 +92,16 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
         assertEq(debtAfter, 0);
         assertApproxEqAbs(liquidUsdAmountAfter, liquidUsdAmountBefore - liquidUsdAmountToRepay, 10);
+    }
+
+    function test_RepayUsingLiquidUSD_AmountZero() public {
+        vm.prank(etherFiWallet);
+        vm.expectRevert(LiquidUSDLiquifierModule.AmountZero.selector);
+        liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 0);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(LiquidUSDLiquifierModule.AmountZero.selector);
+        liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 1);
     }
 
     function test_RepayUsingLiquidUSD_InsufficientUsdcBalance() public {

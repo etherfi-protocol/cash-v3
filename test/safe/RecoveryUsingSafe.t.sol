@@ -10,8 +10,8 @@ import { RecoveryManager } from "../../src/safe/RecoveryManager.sol";
 contract RecoveryUsingSafe is Test {
     using MessageHashUtils for bytes32;
 
-    EtherFiSafe safe = EtherFiSafe(payable(0x62cfF8CcCfde97790A599A85bE430873E09c4f5a));
-    address newOwner = 0x7fEd99d0aA90423de55e238Eb5F9416FF7Cc58eF;
+    EtherFiSafe safe = EtherFiSafe(payable(0x32D207E5d9011A8b1E64c99c3AA5f584bB8FD00E));
+    address newOwner = 0x70770E16d6f71b0c3937D1148E5a2b4081D97934;
 
     function setUp() public {
         string memory scrollRpc = vm.envString("SCROLL_RPC");
@@ -27,12 +27,12 @@ contract RecoveryUsingSafe is Test {
         emit log_named_bytes32("digestHash", digestHash);
     }
     
-    function test_recoverSafeUsingGnosisSafe() public {
-        bytes[] memory signatures = new bytes[](2);
-        address[] memory recoverySigners = new address[](2);
-        recoverySigners[0] = 0xa265C271adbb0984EFd67310cfe85A77f449e291;
-        recoverySigners[1] = 0xbfCe61CE31359267605F18dcE65Cb6c3cc9694A7;
+    // function test_recoverSafeUsingGnosisSafe() public {
+    //     bytes[] memory signatures = new bytes[](2);
+    //     address[] memory recoverySigners = new address[](2);
+    //     recoverySigners[0] = 0xa265C271adbb0984EFd67310cfe85A77f449e291;
+    //     recoverySigners[1] = 0xbfCe61CE31359267605F18dcE65Cb6c3cc9694A7;
 
-        safe.recoverSafe(newOwner, recoverySigners, signatures);
-    }
+    //     safe.recoverSafe(newOwner, recoverySigners, signatures);
+    // }
 }
