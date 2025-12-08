@@ -228,7 +228,7 @@ rule checkSignatures_RejectsInsufficientSigners(
 ) {
     env e;
 
-    uint8 threshold = getThreshold(e);
+    require getThreshold(e) > 0;
     uint256 incomingOwnerStartTime = getIncomingOwnerStartTime();
     
     bool result = checkSignatures@withrevert(e, digestHash, signers, signatures);
@@ -292,7 +292,7 @@ rule checkSignatures_RejectsInvalidArrays(
     assert lastReverted || !result, 
         "checkSignatures must not return true";
 
-    satisfy e.msg.value == 0 && (signers.length == 0 || signers.length != signatures.length);
+    satisfy e.msg.value == 0 && (signers.length != signatures.length);
 }
 
 /**
