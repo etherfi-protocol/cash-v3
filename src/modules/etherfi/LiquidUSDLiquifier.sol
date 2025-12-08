@@ -80,6 +80,8 @@ contract LiquidUSDLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBal
     error CannotWithdrawZeroAmount();
     /// @notice Thrown when the withdrawal of funds fails
     error WithdrawFundsFailed();
+    /// @notice Thrown when the amount is zero
+    error AmountZero();
 
     /**
      * @notice Contract constructor
@@ -110,6 +112,8 @@ contract LiquidUSDLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBal
      */
     function repayUsingLiquidUSD(address user, uint256 usdAmount) external onlyEtherFiSafe(user) onlyEtherFiWallet() {
         uint256 liquidUsdAmount = convertUsdToLiquidUSD(usdAmount);
+
+        if (usdAmount == 0 || liquidUsdAmount == 0) revert AmountZero();
         _repayUsingLiquidUSD(user, usdAmount, liquidUsdAmount);
     }
 
