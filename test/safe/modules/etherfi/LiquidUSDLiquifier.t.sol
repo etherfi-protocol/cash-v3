@@ -94,13 +94,43 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         assertApproxEqAbs(liquidUsdAmountAfter, liquidUsdAmountBefore - liquidUsdAmountToRepay, 10);
     }
 
+    function test_RepayUsingLiquidUSD_WorksEvenWhenUserIsNotHealthy() public {
+        uint256 maxDebt = debtManager.getMaxBorrowAmount(address(safe), true);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(USDC);
+        uint256[] memory amountsInUsd = new uint256[](1);
+        amountsInUsd[0] = maxDebt - initialDebtAmount;
+        Cashback[] memory cashbacks = new Cashback[](0);
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("txId-1"), BinSponsor.Reap, tokens, amountsInUsd, cashbacks);
+
+        IDebtManager.CollateralTokenConfig memory newCollateralTokenConfig = IDebtManager.CollateralTokenConfig({
+            ltv: 49e18,
+            liquidationThreshold: 60e18,
+            liquidationBonus: 5e18
+        });
+
+        vm.prank(owner);
+        debtManager.setCollateralTokenConfig(address(LIQUID_USD), newCollateralTokenConfig);
+
+        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        debtManager.ensureHealth(address(safe));
+
+        deal(address(USDC), address(liquidUSDLiquifier), maxDebt);
+
+        vm.prank(etherFiWallet);
+        liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), maxDebt);
+    }
+
     function test_RepayUsingLiquidUSD_AmountZero() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(LiquidUSDLiquifierModule.AmountZero.selector);
         liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 0);
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(LiquidUSDLiquifierModule.AmountZero.selector);
+        vm.expectRevert(LiquidUSDLiquifierModule.LiquidUsdAmountZero.selector);
         liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 1);
     }
 

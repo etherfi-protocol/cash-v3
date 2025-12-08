@@ -82,6 +82,8 @@ contract LiquidUSDLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBal
     error WithdrawFundsFailed();
     /// @notice Thrown when the amount is zero
     error AmountZero();
+    /// @notice Thrown when the amount is zero for Liquid USD
+    error LiquidUsdAmountZero();
 
     /**
      * @notice Contract constructor
@@ -111,34 +113,17 @@ contract LiquidUSDLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBal
      * @dev Repays using Liquid USD
      */
     function repayUsingLiquidUSD(address user, uint256 usdAmount) external onlyEtherFiSafe(user) onlyEtherFiWallet() {
-        uint256 liquidUsdAmount = convertUsdToLiquidUSD(usdAmount);
-
-        if (usdAmount == 0 || liquidUsdAmount == 0) revert AmountZero();
-        _repayUsingLiquidUSD(user, usdAmount, liquidUsdAmount);
+        if (usdAmount == 0) revert AmountZero();
+        _repayUsingLiquidUSD(user, usdAmount);
     }
 
     /**
      * @notice Internal function to repay using Liquid USD
      * @param user Address of the user
      * @param usdAmount Amount of USD to repay
-     * @param liquidUsdAmount Amount of Liquid USD to repay
      */
-    function _repayUsingLiquidUSD(address user, uint256 usdAmount, uint256 liquidUsdAmount) internal {
-        _checkAmountAvailable(user, address(LIQUID_USD), liquidUsdAmount);
-
+    function _repayUsingLiquidUSD(address user, uint256 usdAmount) internal {
         if (USDC.balanceOf(address(this)) < usdAmount) revert InsufficientUsdcBalance();
-
-        address[] memory to = new address[](1);
-        bytes[] memory data = new bytes[](1);
-        uint256[] memory values = new uint256[](1);
-
-        to[0] = address(LIQUID_USD);
-        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(this), liquidUsdAmount);
-        values[0] = 0;
-
-        IEtherFiSafe(user).execTransactionFromModule(to, values, data);
-
-        LIQUID_USD.safeTransferFrom(user, address(this), liquidUsdAmount);
 
         uint256 usdcAmountBefore = USDC.balanceOf(address(this));
 
@@ -146,14 +131,25 @@ contract LiquidUSDLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBal
         debtManager.repay(user, address(USDC), usdAmount);
 
         uint256 usdcRepaid = usdcAmountBefore - USDC.balanceOf(address(this));
-        uint256 liquidUsdAmountRepaid = liquidUsdAmount;
 
         if (usdcRepaid > usdAmount) revert InvalidConversion();
-        else if (usdcRepaid < usdAmount) {
-            uint256 liquidUsdAmountToRepay = convertUsdToLiquidUSD(usdAmount - usdcRepaid);
-            liquidUsdAmountRepaid -= liquidUsdAmountToRepay;
-            LIQUID_USD.safeTransfer(user, liquidUsdAmountToRepay);
-        }
+
+        uint256 liquidUsdAmountRepaid = convertUsdToLiquidUSD(usdcRepaid);
+
+        if (liquidUsdAmountRepaid == 0) revert LiquidUsdAmountZero();
+        _checkAmountAvailable(user, address(LIQUID_USD), liquidUsdAmountRepaid);
+
+        address[] memory to = new address[](1);
+        bytes[] memory data = new bytes[](1);
+        uint256[] memory values = new uint256[](1);
+
+        to[0] = address(LIQUID_USD);
+        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(this), liquidUsdAmountRepaid);
+        values[0] = 0;
+
+        IEtherFiSafe(user).execTransactionFromModule(to, values, data);
+
+        LIQUID_USD.safeTransferFrom(user, address(this), liquidUsdAmountRepaid);
 
         emit RepaidUsingLiquidUSD(user, usdcRepaid, liquidUsdAmountRepaid);
     }
