@@ -14,7 +14,7 @@ contract DeployLiquidUSDLiquifierModule is Utils {
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
 
         string memory deployments = readDeploymentFile();
 
@@ -37,16 +37,14 @@ contract DeployLiquidUSDLiquifierModule is Utils {
 
         address liquidUSDLiquifierModuleImpl = address(new LiquidUSDLiquifierModule(debtManager, dataProvider));
         address liquidUSDLiquifierModuleProxy = address(new UUPSProxy(liquidUSDLiquifierModuleImpl, initializeData));
-
-        UUPSUpgradeable(liquidUSDLiquifierModuleProxy).upgradeToAndCall(liquidUSDLiquifierModuleImpl, "");
     
-        address[] memory modules = new address[](1);
-        modules[0] = liquidUSDLiquifierModuleProxy;
+        // address[] memory modules = new address[](1);
+        // modules[0] = liquidUSDLiquifierModuleProxy;
 
-        bool[] memory shouldWhitelist = new bool[](1);
-        shouldWhitelist[0] = true;
+        // bool[] memory shouldWhitelist = new bool[](1);
+        // shouldWhitelist[0] = true;
 
-        EtherFiDataProvider(dataProvider).configureDefaultModules(modules, shouldWhitelist);        
+        // EtherFiDataProvider(dataProvider).configureDefaultModules(modules, shouldWhitelist);        
 
         vm.stopBroadcast();
     }
