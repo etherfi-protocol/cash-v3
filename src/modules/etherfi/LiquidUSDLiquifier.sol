@@ -129,6 +129,7 @@ contract LiquidUSDLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBal
 
         USDC.forceApprove(address(debtManager), usdAmount);
         debtManager.repay(user, address(USDC), usdAmount);
+        USDC.forceApprove(address(debtManager), 0);
 
         uint256 usdcRepaid = usdcAmountBefore - USDC.balanceOf(address(this));
 
