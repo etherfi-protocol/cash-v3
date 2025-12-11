@@ -163,7 +163,7 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
                     addressToHex(debtManager),
                     setsETHFIConfig,
                     "0",
-                    true
+                    false
                 )
             )
         );
