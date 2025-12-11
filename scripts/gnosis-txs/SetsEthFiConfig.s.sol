@@ -23,6 +23,8 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
 
     address debtManager;
     address priceProvider;
+    address cashModule;
+    address liquidModule;
 
 
     function run() public {
