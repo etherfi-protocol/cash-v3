@@ -104,13 +104,21 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
             )
         );
 
+        address[] memory sETHFIArray = new address[](1);
+        sETHFIArray[0] = sETHFI;
+
+        boolean[] memory enableArray = new boolean[](1);
+        enableArray[0] = true;
+
+        address[] memory sETHFITellerArray = new address[](1);
+        sETHFITellerArray[0] = sETHFITeller;
 
         // Cash Module tx for configuring withdraw asset
         string memory sETHFICashModuleConfig = iToHex(
             abi.encodeWithSelector(
                 ICashModule.configureWithdrawAsset.selector,
-                sETHFI,
-                true
+                sETHFIArray,
+                enableArray
             )
         );
 
@@ -118,8 +126,8 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
         string memory sETHFILiquidModuleConfig = iToHex(
             abi.encodeWithSelector(
                 EtherFiLiquidModule.addLiquidAssets.selector,
-                sETHFI,
-                sETHFITeller
+                sETHFIArray,
+                sETHFITellerArray
             )
         );
 
