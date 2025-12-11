@@ -179,7 +179,7 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
                     addressToHex(liquidModule),
                     sETHFILiquidModuleConfig,
                     "0",
-                    true
+                    false
                 )
             )
         );
