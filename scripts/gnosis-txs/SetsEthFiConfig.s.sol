@@ -18,7 +18,7 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
     //Todo: Cross check Addresses
     address sETHFI = 0x86B5780b606940Eb59A062aA85a07959518c0161;
     address sEthFiUSDOracle = 0x0000000000000000000000000000000000000000;
-    address sETHFITeller = 0xe2acf9f80a2756E51D1e53F9f41583C84279Fb1f;
+    address sETHFITeller = 0x35dD2463fA7a335b721400C5Ad8Ba40bD85c179b;
     address sETHFIBoringQueue = 0xF03352da1536F31172A7F7cB092D4717DeDDd3CB;
 
     address debtManager;
