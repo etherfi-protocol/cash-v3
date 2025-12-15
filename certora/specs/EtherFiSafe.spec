@@ -77,13 +77,20 @@ rule recoverSafeProperties(
     require oldIncomingOwner != newOwner;
     bool recoveryEnabledBefore = isRecoveryEnabled();
     uint8 threshold = getRecoveryThreshold();
+    require threshold > 0;
+
+    bool hasInvalidInput = 
+        (newOwner == 0) ||
+        (recoverySigners.length != signatures.length) ||
+        (recoverySigners.length < threshold) ||
+        (!isRecoverySigner(recoverySigners[0])) ||
+        (!recoveryEnabledBefore);
     
     recoverSafe@withrevert(e, newOwner, recoverySigners, signatures);
 
-    assert !lastReverted,
+    assert hasInvalidInput => lastReverted,
         "Invalid inputs must cause revert";
-
-    satisfy newOwner != 0 && recoverySigners.length == signatures.length && recoverySigners.length >= threshold && recoverySigners.length > 0 && isRecoverySigner(recoverySigners[0]) && recoveryEnabledBefore;
+                
 }
 
 /**
@@ -149,9 +156,9 @@ rule checkSignatures_RejectsNonOwner(
         "checkSignatures must not return true when any signer is not an owner";
 
     satisfy e.msg.value == 0 && signers.length == signatures.length && signers.length > 0 &&
-        getThreshold(e) > 0 && signers.length >= getThreshold(e) &&
+        threshold > 0 && signers.length >= threshold &&
         (getIncomingOwnerStartTime() == 0 || e.block.timestamp <= getIncomingOwnerStartTime()) &&
-        nonOwnerIndex < getThreshold(e);
+        nonOwnerIndex < threshold;
 }
 
 /**
@@ -167,6 +174,7 @@ rule checkSignatures_RejectsZeroAddress(
     uint8 threshold = getThreshold(e);
         
     uint256 incomingOwnerStartTime = getIncomingOwnerStartTime();
+    require incomingOwnerStartTime == 0 || e.block.timestamp <= incomingOwnerStartTime;
     
     uint256 zeroIndex;
     
@@ -181,8 +189,7 @@ rule checkSignatures_RejectsZeroAddress(
         "checkSignatures must not return true";
 
     satisfy e.msg.value == 0 && signers.length == signatures.length && signers.length > 0 &&
-        getThreshold(e) > 0 && signers.length >= getThreshold(e) &&
-        (getIncomingOwnerStartTime() == 0 || e.block.timestamp <= getIncomingOwnerStartTime());
+        threshold > 0 && signers.length >= threshold;
 }
 
 /**
@@ -228,8 +235,9 @@ rule checkSignatures_RejectsInsufficientSigners(
 ) {
     env e;
 
-    require getThreshold(e) > 0;
-    uint256 incomingOwnerStartTime = getIncomingOwnerStartTime();
+    uint8 threshold = getThreshold(e);
+    require threshold > 0;
+    require signers.length < threshold;
     
     bool result = checkSignatures@withrevert(e, digestHash, signers, signatures);
     
@@ -237,7 +245,6 @@ rule checkSignatures_RejectsInsufficientSigners(
         "checkSignatures must not return true with insufficient signers";
 
     satisfy e.msg.value == 0 && signers.length == signatures.length && signers.length > 0 &&
-        getThreshold(e) > 0 && signers.length < getThreshold(e) &&
         (getIncomingOwnerStartTime() == 0 || e.block.timestamp <= getIncomingOwnerStartTime());
 }
 
@@ -286,13 +293,15 @@ rule checkSignatures_RejectsInvalidArrays(
     bytes[] signatures
 ) {
     env e;
+
+    require signers.length != signatures.length;
     
     bool result = checkSignatures@withrevert(e, digestHash, signers, signatures);
     
     assert lastReverted || !result, 
         "checkSignatures must not return true";
 
-    satisfy e.msg.value == 0 && (signers.length != signatures.length);
+    satisfy e.msg.value == 0;
 }
 
 /**
