@@ -12,12 +12,16 @@ import {PriceProvider, IAggregatorV3} from "../../src/oracle/PriceProvider.sol";
 import {GnosisHelpers} from "../utils/GnosisHelpers.sol";
 import {Utils} from "../utils/Utils.sol";
 
-contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
+interface ISEthFiOracle {
+    function latestAnswer() external view returns (int256);
+}
+
+contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     //Todo: Cross check Addresses
     address sETHFI = 0x86B5780b606940Eb59A062aA85a07959518c0161;
-    address sEthFiUSDOracle = 0x0000000000000000000000000000000000000000;
+    address sEthFiUSDOracle = 0xeA99E12b06C1606FCae968Cc6ceBB1A7A323E0f5;
     address sETHFITeller = 0x35dD2463fA7a335b721400C5Ad8Ba40bD85c179b;
     address sETHFIBoringQueue = 0xF03352da1536F31172A7F7cB092D4717DeDDd3CB;
 
@@ -55,8 +59,8 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
         // Configure sETHFI price oracle
         PriceProvider.Config memory sEthFiUSDConfig = PriceProvider.Config({
             oracle: sEthFiUSDOracle,
-            priceFunctionCalldata: "",
-            isChainlinkType: true,
+            priceFunctionCalldata: abi.encodeWithSelector(ISEthFiOracle.latestAnswer.selector),
+            isChainlinkType: false,
             oraclePriceDecimals: IAggregatorV3(sEthFiUSDOracle).decimals(),
             maxStaleness: 2 days,
             dataType: PriceProvider.ReturnType.Int256,
@@ -107,7 +111,7 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
         address[] memory sETHFIArray = new address[](1);
         sETHFIArray[0] = sETHFI;
 
-        boolean[] memory enableArray = new boolean[](1);
+        bool[] memory enableArray = new bool[](1);
         enableArray[0] = true;
 
         address[] memory sETHFITellerArray = new address[](1);
@@ -116,7 +120,7 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
         // Cash Module tx for configuring withdraw asset
         string memory sETHFICashModuleConfig = iToHex(
             abi.encodeWithSelector(
-                ICashModule.configureWithdrawAsset.selector,
+                ICashModule.configureWithdrawAssets.selector,
                 sETHFIArray,
                 enableArray
             )
@@ -208,7 +212,14 @@ contract SetsETHFIConfig is GnosisHelpers, Utils, Test {
         ); 
 
         vm.createDir("./output", true);
-        string memory path = "./output/SetsETHFIConfig.json";
+        string memory path = "./output/SetSETHFIConfig.json";
         vm.writeFile(path, txs);
+
+        executeGnosisTransactionBundle(path);
+
+        assert(IDebtManager(debtManager).isCollateralToken(sETHFI) == true);
+        assert(PriceProvider(priceProvider).price(sETHFI) != 0);
+        assert(address(EtherFiLiquidModule(liquidModule).liquidAssetToTeller(sETHFI)) == sETHFITeller);
+        assert(address(EtherFiLiquidModule(liquidModule).liquidWithdrawQueue(sETHFI)) == sETHFIBoringQueue);
     }
 }
