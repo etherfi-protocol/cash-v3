@@ -1,0 +1,9 @@
+Compiling 1 files with Solc 0.8.28
+Solc 0.8.28 finished in 1.32s
+Compiler run successful!
+
+Ran 1 test for test/safe/modules/frax/FraxModule.t.sol:FraxModuleTest
+[PASS] test_withdraw_successFraxUsd() (gas: 734285)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 24.55s (6.55s CPU time)
+
+Ran 1 test suite in 24.55s (24.55s CPU time): 1 tests passed, 0 failed, 0 skipped (1 total tests)

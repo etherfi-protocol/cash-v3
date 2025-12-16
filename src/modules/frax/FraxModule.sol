@@ -94,7 +94,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     /**
      * @dev Internal function to deposit USDC to FraxUSD custodian
      * @param safe The Safe address which holds the USDC tokens
-     * @param amountToDeposit The amount of USDC tokens to deposit
+     * @param amountToDeposit The amount of USDC tokens to deposit (6 decimals)
      * @custom:throws InvalidInput If amount or min return is zero
      * @custom:throws InsufficientReturnAmount If the FraxUSD received is less than expected
      */
@@ -124,7 +124,10 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
         
         uint256 fraxUSDTokenReceived = ERC20(fraxusd).balanceOf(safe) - fraxUSDTokenBefore;
-        if (fraxUSDTokenReceived < amountToDeposit) revert InsufficientReturnAmount();
+
+        //scale for decimals difference between USDC (6) and FraxUSD (18)
+        uint256 scaledAmountToDeposit = amountToDeposit * 10**12;
+        if (fraxUSDTokenReceived < scaledAmountToDeposit) revert InsufficientReturnAmount();
 
         emit USDCDeposit(safe, usdc, fraxusd, amountToDeposit, fraxUSDTokenReceived);
     }
@@ -132,7 +135,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     /**
      * @notice Withdraws from FraxUSD from the safe
      * @param safe The Safe address which holds the FraxUSD tokens 
-     * @param amountToWithdraw The amount of FraxUSD to withdraw
+     * @param amountToWithdraw The amount of FraxUSD to withdraw (18 decimals)
      * @param signer The address that signed the transaction 
      * @param signature The signature authorizing the transaction 
      * @dev Verifies signature then executes token approval and deposit through the Safe's module execution
@@ -183,8 +186,10 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
 
         uint256 usdcTokenReceived = ERC20(usdc).balanceOf(safe) - usdcTokenBefore;
-        if (usdcTokenReceived < amountToWithdraw) revert InsufficientReturnAmount();
+
+        uint256 scaledUsdcTokenReceived = usdcTokenReceived * 10**12; //scale for decimals difference between USDC (6) and FraxUSD (18)
+        if (scaledUsdcTokenReceived < amountToWithdraw) revert InsufficientReturnAmount();
         
-        emit USDCWithdrawal(safe, fraxusd, amountToWithdraw, usdcTokenReceived);
+        emit USDCWithdrawal(safe, fraxusd, amountToWithdraw, scaledUsdcTokenReceived);
     }
 }
