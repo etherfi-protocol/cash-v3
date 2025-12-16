@@ -15,7 +15,7 @@ interface ISEthFiOracle {
     function latestAnswer() external view returns (int256);
 }
 
-contract SetsETHFIConfig is Utils, Test {
+contract SupportSETHFI is Utils, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     //Todo: Cross check Addresses
