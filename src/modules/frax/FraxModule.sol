@@ -40,10 +40,10 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     bytes32 public constant ETHERFI_LIQUID_MODULE_ADMIN = keccak256("ETHERFI_LIQUID_MODULE_ADMIN");
 
     /// @notice Emitted when safe deposits into Liquid
-    event LiquidDeposit(address indexed safe, address indexed inputToken, address indexed outputToken, uint256 inputAmount, uint256 outputAmount);
+    event USDCDeposit(address indexed safe, address indexed inputToken, address indexed outputToken, uint256 inputAmount, uint256 outputAmount);
 
     /// @notice Emitted when safe withdraws from Liquid
-    event LiquidWithdrawal(address indexed safe, address indexed liquidAsset, uint256 amountToWithdraw, uint256 amountOut);
+    event USDCWithdrawal(address indexed safe, address indexed liquidAsset, uint256 amountToWithdraw, uint256 amountOut);
 
     /// @notice Error when the return amount is less than min return
     error InsufficientReturnAmount();
@@ -96,6 +96,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
      * @param safe The Safe address which holds the USDC tokens
      * @param amountToDeposit The amount of USDC tokens to deposit
      * @custom:throws InvalidInput If amount or min return is zero
+     * @custom:throws InsufficientReturnAmount If the FraxUSD received is less than expected
      */
     function _deposit(address safe, uint256 amountToDeposit) internal {
         
@@ -118,14 +119,14 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
             data[1] = abi.encodeWithSelector(IFraxCustodian.deposit.selector, amountToDeposit, safe);
         
 
-        uint256 liquidTokenBalBefore = ERC20(fraxusd).balanceOf(safe);
+        uint256 fraxUSDTokenBefore = ERC20(fraxusd).balanceOf(safe);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
         
-        uint256 liquidTokenReceived = ERC20(fraxusd).balanceOf(safe) - liquidTokenBalBefore;
-        if (liquidTokenReceived < amountToDeposit) revert InsufficientReturnAmount();
+        uint256 fraxUSDTokenReceived = ERC20(fraxusd).balanceOf(safe) - fraxUSDTokenBefore;
+        if (fraxUSDTokenReceived < amountToDeposit) revert InsufficientReturnAmount();
 
-        emit LiquidDeposit(safe, usdc, fraxusd, amountToDeposit, liquidTokenReceived);
+        emit USDCDeposit(safe, usdc, fraxusd, amountToDeposit, fraxUSDTokenReceived);
     }
 
     /**
@@ -160,6 +161,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
      * @param amountToWithdraw The amount of FraxuSD tokens to withdraw
      * @custom:throws InvalidInput If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidSignature If the signature is invalid
+     * @custom:throws InsufficientReturnAmount If the USDC received is less than expected
      */
     function _withdraw(address safe, uint128 amountToWithdraw) internal {
         if (amountToWithdraw == 0) revert InvalidInput();
@@ -176,8 +178,13 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
         to[1] = address(custodian);
         data[1] = abi.encodeWithSelector(IFraxCustodian.redeem.selector, amountToWithdraw, safe, safe);
 
+        uint256 usdcTokenBefore = ERC20(usdc).balanceOf(safe);
+
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        uint256 usdcTokenReceived = ERC20(usdc).balanceOf(safe) - usdcTokenBefore;
+        if (usdcTokenReceived < amountToWithdraw) revert InsufficientReturnAmount();
         
-        emit LiquidWithdrawal(safe, fraxusd, amountToWithdraw, amountToWithdraw);
+        emit USDCWithdrawal(safe, fraxusd, amountToWithdraw, usdcTokenReceived);
     }
 }
