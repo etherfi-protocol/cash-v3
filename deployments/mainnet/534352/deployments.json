@@ -13,6 +13,7 @@
     "SettlementDispatcherReap": "0x9623e86Df854FF3b48F7B4079a516a4F64861Db2",
     "SettlementDispatcherRain": "0x50A233C4a0Bb1d7124b0224880037d35767a501C",
     "SettlementDispatcherPix": "0xc5F2764383f93259Fba1D820b894B1DE0d47937e",
+    "SettlementDispatcherCardOrder": "0x2539031cD38e98317Cd246c8ED36F31117e6725b",
     "TopUpDest": "0x3a6A724595184dda4be69dB1Ce726F2Ac3D66B87",
     "TopUpDestNativeGateway": "0x83393192c7e8B3b9250312387f7C6B26495736aA",
     "OpenOceanSwapModule": "0x4dEAa5f2e1CD1A792304d1649EdfA35D565F9346",
@@ -20,6 +21,8 @@
     "EtherFiStakeModule": "0x40c8438e9cc3B7817aeb117cd0d7B829c32bfEd8",
     "CashLiquidationHelper": "0xFD77ff43E79E70c886a5712a8a128e52942B0B58",
     "StargateModule": "0xC1ab383b81fD81803a54c4d50A7b7d4A31a317b4",
-    "WormholeModule": "0x96bae80F91DA04a59CeF9dCE3bB1081De041C1d5"
+    "WormholeModule": "0x96bae80F91DA04a59CeF9dCE3bB1081De041C1d5",
+    "BeHYPEStakeModule": "0x51142BC586A7b4cbECDCD5B0C68064714B322CBC",
+    "LiquidUSDLiquifierModule": "0x23C4dc847Cd876D4ca2C15b4a1EAD349dC705082"
   }
 }

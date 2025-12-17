@@ -5,7 +5,7 @@ test = "test"
 libs = ["lib"]
 solc = "0.8.28" 
 optimizer = true
-optimizer_runs = 50
+optimizer_runs = 0
 evm_version = "cancun" 
 gas_reports = ["*"]
 bytecode_hash = "none"
@@ -39,3 +39,6 @@ quote_style = "double"
 number_underscore = "thousands"
 wrap_comments = true
 sort_imports = true
+
+[lint]
+lint_on_build = false

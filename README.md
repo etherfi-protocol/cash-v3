@@ -56,7 +56,12 @@ BASESCAN_KEY=
 Run the test suite with Forge:
 
 ```bash
-forge test
+pnpm install && forge test
+```
+
+Getting revert from the `The VM::deployCode` cheat code? Run:
+```bash
+forge clean && forge build 
 ```
 
 For specific test files:

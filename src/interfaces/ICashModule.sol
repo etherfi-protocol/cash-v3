@@ -54,7 +54,8 @@ struct TokenDataInUsd {
 enum BinSponsor {
     Reap,
     Rain,
-    PIX
+    PIX,
+    CardOrder
 }
 
 /**
