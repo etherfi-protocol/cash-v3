@@ -74,8 +74,8 @@ contract SetTokenConfigHyperEVM is Utils {
             string.concat(".", "addresses", ".", "EtherFiOFTBridgeAdapterMainnet")
         );
 
-        tokens = new address[](1);
-        tokenConfig = new TopUpFactory.TokenConfig[](1);
+        tokens = new address[](4);
+        tokenConfig = new TopUpFactory.TokenConfig[](4);
 
         tokens[0] = USDC;
         tokenConfig[0].recipientOnDestChain = address(topUpFactory);
