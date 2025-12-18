@@ -32,7 +32,7 @@ contract FraxModuleTest is SafeTestSetup {
         
         vm.startPrank(owner);
 
-        fraxModule = new FraxModule(address(fraxusd), address(usdc), address(dataProvider), custodian);
+        fraxModule = new FraxModule(address(dataProvider), address(fraxusd), address(usdc), custodian);
 
         address[] memory modules = new address[](1);
         modules[0] = address(fraxModule);
@@ -40,11 +40,7 @@ contract FraxModuleTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
         
-        bytes[] memory moduleSetupData = new bytes[](1);
-        moduleSetupData[0] = "";
-        
-        dataProvider.configureModules(modules, shouldWhitelist);
-        _configureModules(modules, shouldWhitelist, moduleSetupData);
+        dataProvider.configureDefaultModules(modules, shouldWhitelist);
         
         vm.stopPrank();
     }
