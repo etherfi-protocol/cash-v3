@@ -11,15 +11,15 @@ import { ChainConfig, Utils } from "./utils/Utils.sol";
 import { ICashModule } from "../src/interfaces/ICashModule.sol";
 
 contract DeployFraxModule is Utils {
-    address fraxusd = address(0x397F939C3b91A74C321ea7129396492bA9Cdce82);
-    address usdc = address(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
-    address custodian = address(0x05bF905356fbeA7E59500f904b908402dB7A53DD);
+    address fraxusd = 0x397F939C3b91A74C321ea7129396492bA9Cdce82;
+    address usdc = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
+    address custodian = 0x05bF905356fbeA7E59500f904b908402dB7A53DD;
+    address fraxUsdPriceOracle = 0xf376A91Ae078927eb3686D6010a6f1482424954E; //currently USDT/USD oracle
 
     IDebtManager debtManager;
     PriceProvider priceProvider;
     ICashModule cashModule;
 
-    address public fraxUsdPriceOracle = address(0x8D9C5FcEF6A3cAd8e4D3c3DEb2d2b6d8a1F2c4D5); //Todo: change this to actual oracle on scroll
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");

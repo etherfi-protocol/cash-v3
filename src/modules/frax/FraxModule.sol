@@ -40,10 +40,10 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     bytes32 public constant ETHERFI_LIQUID_MODULE_ADMIN = keccak256("ETHERFI_LIQUID_MODULE_ADMIN");
 
     /// @notice Emitted when safe deposits into Liquid
-    event USDCDeposit(address indexed safe, address indexed inputToken, address indexed outputToken, uint256 inputAmount, uint256 outputAmount);
+    event UsdcDeposit(address indexed safe, address indexed inputToken, address indexed outputToken, uint256 inputAmount, uint256 outputAmount);
 
     /// @notice Emitted when safe withdraws from Liquid
-    event USDCWithdrawal(address indexed safe, address indexed liquidAsset, uint256 amountToWithdraw, uint256 amountOut);
+    event UsdcWithdrawal(address indexed safe, address indexed liquidAsset, uint256 amountToWithdraw, uint256 amountOut);
 
     /// @notice Error when the return amount is less than min return
     error InsufficientReturnAmount();
@@ -129,7 +129,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
         uint256 scaledAmountToDeposit = amountToDeposit * 10**12;
         if (fraxUSDTokenReceived < scaledAmountToDeposit) revert InsufficientReturnAmount();
 
-        emit USDCDeposit(safe, usdc, fraxusd, amountToDeposit, fraxUSDTokenReceived);
+        emit UsdcDeposit(safe, usdc, fraxusd, amountToDeposit, fraxUSDTokenReceived);
     }
 
     /**
@@ -190,6 +190,6 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
         uint256 scaledUsdcTokenReceived = usdcTokenReceived * 10**12; //scale for decimals difference between USDC (6) and FraxUSD (18)
         if (scaledUsdcTokenReceived < amountToWithdraw) revert InsufficientReturnAmount();
         
-        emit USDCWithdrawal(safe, fraxusd, amountToWithdraw, scaledUsdcTokenReceived);
+        emit UsdcWithdrawal(safe, fraxusd, amountToWithdraw, scaledUsdcTokenReceived);
     }
 }
