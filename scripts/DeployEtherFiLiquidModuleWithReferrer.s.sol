@@ -43,6 +43,7 @@ contract DeployEtherFiLiquidModuleWithReferrer is Utils {
         EtherFiLiquidModuleWithReferrer liquidModule = new EtherFiLiquidModuleWithReferrer(assets, tellers, address(dataProvider), address(weth));
         
         ICashModule(cashModule).configureWithdrawAssets(assets, isWithdrawAsset);
+        ICashModule(cashModule).configureModulesCanRequestWithdraw(modules, shouldWhitelist);
 
         address[] memory modules = new address[](1);
         modules[0] = address(liquidModule);
