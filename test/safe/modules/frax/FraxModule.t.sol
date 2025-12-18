@@ -45,8 +45,6 @@ contract FraxModuleTest is SafeTestSetup {
         
         dataProvider.configureModules(modules, shouldWhitelist);
         _configureModules(modules, shouldWhitelist, moduleSetupData);
-
-        roleRegistry.grantRole(fraxModule.ETHERFI_LIQUID_MODULE_ADMIN(), owner);
         
         vm.stopPrank();
     }
@@ -62,7 +60,7 @@ contract FraxModuleTest is SafeTestSetup {
             address(fraxModule),
             fraxModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(amountToDeposit)
+            abi.encode(address(usdc), amountToDeposit)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -74,9 +72,9 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 fraxUsdExpected = amountToDeposit * 10**12; // scaled for decimals difference
 
         vm.expectEmit(true, true, true, true);
-        emit FraxModule.UsdcDeposit(address(safe), address(usdc), address(fraxusd), amountToDeposit, fraxUsdExpected);
+        emit FraxModule.Deposit(address(safe), address(usdc), amountToDeposit, fraxUsdExpected);
         
-        fraxModule.deposit(address(safe), amountToDeposit, owner1, signature);
+        fraxModule.deposit(address(safe), address(usdc), amountToDeposit, owner1, signature);
         
         uint256 usdcBalAfter = usdc.balanceOf(address(safe));
         uint256 fraxUsdBalAfter = fraxusd.balanceOf(address(safe));
@@ -107,7 +105,7 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 fraxUsdBalBefore = fraxusd.balanceOf(address(safe));
         
         vm.expectEmit(true, true, true, true);
-        emit FraxModule.UsdcWithdrawal(address(safe), address(fraxusd), amountToWithdraw, amountToWithdraw);
+        emit FraxModule.Withdrawal(address(safe), amountToWithdraw, amountToWithdraw);
         
         fraxModule.withdraw(address(safe), amountToWithdraw, owner1, signature);
         
@@ -127,7 +125,7 @@ contract FraxModuleTest is SafeTestSetup {
             address(fraxModule),
             fraxModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(amountToDeposit)
+            abi.encode(address(usdc), amountToDeposit)
         )).toEthSignedMessageHash();
 
         // Sign with a different private key
@@ -136,7 +134,7 @@ contract FraxModuleTest is SafeTestSetup {
         bytes memory invalidSignature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(); // Should revert due to ECDSA recovery failure
-        fraxModule.deposit(address(safe), amountToDeposit, owner1, invalidSignature);
+        fraxModule.deposit(address(safe), address(usdc), amountToDeposit, owner1, invalidSignature);
     }
 
     function test_deposit_revertsForNonAdminSigner() public {
@@ -152,7 +150,7 @@ contract FraxModuleTest is SafeTestSetup {
             address(fraxModule),
             fraxModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(amountToDeposit)
+            abi.encode(address(usdc), amountToDeposit)
         )).toEthSignedMessageHash();
 
         // Sign with owner1's private key
@@ -161,7 +159,7 @@ contract FraxModuleTest is SafeTestSetup {
 
         // Try to use a non-admin signer
         vm.expectRevert();
-        fraxModule.deposit(address(safe), amountToDeposit, nonAdmin, validSignature);
+        fraxModule.deposit(address(safe), address(usdc), amountToDeposit, nonAdmin, validSignature);
     }
     
     function test_deposit_revertsWithZeroAmount() public {        
@@ -175,14 +173,14 @@ contract FraxModuleTest is SafeTestSetup {
             address(fraxModule),
             fraxModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(amountToDeposit)
+            abi.encode(address(usdc), amountToDeposit)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        fraxModule.deposit(address(safe), amountToDeposit, owner1, signature);
+        fraxModule.deposit(address(safe), address(usdc), amountToDeposit, owner1, signature);
     }
 
     function test_deposit_revertsWithInsufficientBalance() public {
@@ -199,14 +197,14 @@ contract FraxModuleTest is SafeTestSetup {
             address(fraxModule),
             fraxModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(amountToDeposit)
+            abi.encode(address(usdc), amountToDeposit)
         )).toEthSignedMessageHash();
         
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
-        fraxModule.deposit(address(safe), amountToDeposit, owner1, signature);
+        fraxModule.deposit(address(safe), address(usdc), amountToDeposit, owner1, signature);
     }
 
 
