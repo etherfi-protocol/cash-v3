@@ -19,6 +19,7 @@ contract DeployFraxModule is Utils {
     IDebtManager debtManager;
     PriceProvider priceProvider;
     ICashModule cashModule;
+    address dataProvider;
 
 
     function run() public {
@@ -27,7 +28,7 @@ contract DeployFraxModule is Utils {
         vm.startBroadcast(deployerPrivateKey);
 
         string memory deployments = readDeploymentFile();
-        address dataProvider = stdJson.readAddress(deployments, string(abi.encodePacked(".", "addresses", ".", "EtherFiDataProvider")));
+        dataProvider = stdJson.readAddress(deployments, string(abi.encodePacked(".", "addresses", ".", "EtherFiDataProvider")));
 
         priceProvider = PriceProvider(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "PriceProvider")));
 
@@ -36,7 +37,7 @@ contract DeployFraxModule is Utils {
         cashModule = ICashModule(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "CashModule")));
 
         //deploy frax module
-        FraxModule fraxModule = new FraxModule(fraxusd, usdc, _etherFiDataProvider, custodian);
+        FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, usdc, custodian);
 
         address[] memory defaultModules = new address[](1);
         defaultModules[0] = address(fraxModule);
@@ -51,9 +52,11 @@ contract DeployFraxModule is Utils {
         tokens[0] = fraxusd;
 
         PriceProvider.Config memory fraxUsdConfig = PriceProvider.Config({ oracle: fraxUsdPriceOracle, priceFunctionCalldata: "", isChainlinkType: true, oraclePriceDecimals: IAggregatorV3(fraxUsdPriceOracle).decimals(), maxStaleness: 2 days, dataType: PriceProvider.ReturnType.Int256, isBaseTokenEth: false, isStableToken: true, isBaseTokenBtc: false });
+        PriceProvider.Config[] memory fraxUsdConfigs = new PriceProvider.Config[](1);
+        fraxUsdConfigs[0] = fraxUsdConfig;
 
         //price provider set oracle
-        PriceProvider(priceProvider).setTokenConfig(tokens, fraxUsdConfig);
+        PriceProvider(priceProvider).setTokenConfig(tokens, fraxUsdConfigs);
 
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
             //Todo: adjust these values if required
@@ -72,9 +75,6 @@ contract DeployFraxModule is Utils {
 
         address[] memory withdrawableAssets = new address[](1);
         withdrawableAssets[0] = address(fraxusd);
-
-        bool [] memory shouldWhitelist = new bool[](1);
-        shouldWhitelist[0] = true;
 
         //cash module set withdrawable asset
         ICashModule(cashModule).configureWithdrawAssets(withdrawableAssets, shouldWhitelist);
