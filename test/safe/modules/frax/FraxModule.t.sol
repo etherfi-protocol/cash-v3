@@ -74,7 +74,7 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 fraxUsdExpected = amountToDeposit * 10**12; // scaled for decimals difference
 
         vm.expectEmit(true, true, true, true);
-        emit FraxModule.USDCDeposit(address(safe), address(usdc), address(fraxusd), amountToDeposit, fraxUsdExpected);
+        emit FraxModule.UsdcDeposit(address(safe), address(usdc), address(fraxusd), amountToDeposit, fraxUsdExpected);
         
         fraxModule.deposit(address(safe), amountToDeposit, owner1, signature);
         
@@ -107,7 +107,7 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 fraxUsdBalBefore = fraxusd.balanceOf(address(safe));
         
         vm.expectEmit(true, true, true, true);
-        emit FraxModule.USDCWithdrawal(address(safe), address(fraxusd), amountToWithdraw, amountToWithdraw);
+        emit FraxModule.UsdcWithdrawal(address(safe), address(fraxusd), amountToWithdraw, amountToWithdraw);
         
         fraxModule.withdraw(address(safe), amountToWithdraw, owner1, signature);
         
