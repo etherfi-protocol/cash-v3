@@ -4,8 +4,8 @@ pragma solidity ^0.8.28;
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import { ICashModule, WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
-import { IEtherFiSafe } from "../../../../src/interfaces/IEtherFiSafe.sol";
 import { MessagingFee } from "../../../../src/interfaces/IFraxRemoteHop.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.sol";
@@ -22,6 +22,8 @@ contract FraxModuleTest is SafeTestSetup {
     address custodian = 0x05bF905356fbeA7E59500f904b908402dB7A53DD;
     address remoteHop = 0xF6f45CCB5E85D1400067ee66F9e168f83e86124E;
 
+    address depositAddress = 0xBdeb781661142740328fDefc1D9ecd03778fd810; //Fetched from Frax API for testing
+
     function setUp() public override {
         super.setUp();
 
@@ -35,7 +37,14 @@ contract FraxModuleTest is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
+        address[] memory assets = new address[](1);
+        assets[0] = address(fraxusd);
+
         dataProvider.configureDefaultModules(modules, shouldWhitelist);
+
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        cashModule.configureWithdrawAssets(assets, shouldWhitelist);
 
         vm.stopPrank();
     }
@@ -90,16 +99,14 @@ contract FraxModuleTest is SafeTestSetup {
         assertEq(fraxUsdBalAfter, fraxUsdBalBefore - amountToWithdraw);
     }
 
-    function test_AsyncWithdraw_success() public {
+    function test_requestAsyncWithdrawAndExecuteAsyncWithdraw_success() public {
         vm.prank(owner);
 
         uint256 amountToWithdraw = 1 * 10 ** 18;
         deal(address(fraxusd), address(safe), amountToWithdraw);
         deal(address(safe), 1 ether);
 
-        bytes32 depositAddress = bytes32(uint256(uint160(address(0xBdeb781661142740328fDefc1D9ecd03778fd810))));
-
-        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amountToWithdraw))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amountToWithdraw))).toEthSignedMessageHash();
 
         MessagingFee memory fee = fraxModule.quoteAsyncWithdraw(depositAddress, amountToWithdraw);
 
@@ -110,16 +117,73 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 fraxUsdBalBefore = fraxusd.balanceOf(address(safe));
 
         vm.expectEmit(true, true, true, true);
-        emit FraxModule.AsyncWithdrawal(address(safe), amountToWithdraw);
+        emit FraxModule.AsyncWithdrawalRequested(address(safe), amountToWithdraw, fraxModule.ETHEREUM_EID(), depositAddress);
 
-        fraxModule.asyncWithdraw(address(safe), depositAddress, amountToWithdraw, fee.nativeFee, owner1, signature);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amountToWithdraw, owner1, signature);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+
+        vm.expectEmit(true, true, true, true);
+        emit FraxModule.AsyncWithdrawalExecuted(address(safe), amountToWithdraw, fraxModule.ETHEREUM_EID(), depositAddress);
+        fraxModule.executeAsyncWithdraw{ value: fee.nativeFee }(address(safe));
 
         uint256 fraxUsdBalAfter = fraxusd.balanceOf(address(safe));
         assertEq(fraxUsdBalAfter, fraxUsdBalBefore - amountToWithdraw);
     }
 
+    function test_requestAsyncWithdrawal_createsWithdrawal() public {
+        vm.prank(owner);
+        uint256 amount = 1000 * 10 ** 18;
+        deal(address(fraxusd), address(safe), amount);
+
+        uint256 fraxUsdBalBefore = fraxusd.balanceOf(address(safe));
+
+        _requestAsyncWithdrawal(amount);
+
+        uint256 fraxUsdBalAfter = fraxusd.balanceOf(address(safe));
+        assertEq(fraxUsdBalAfter, fraxUsdBalBefore);
+
+        // Check that a withdrawal request was created
+        WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 1);
+        assertEq(request.tokens[0], address(fraxusd));
+        assertEq(request.amounts[0], amount);
+        assertEq(request.recipient, address(fraxModule));
+
+        FraxModule.AsyncWithdrawal memory withdrawal = fraxModule.getPendingWithdrawal(address(safe));
+        assertEq(withdrawal.amount, amount);
+        assertEq(withdrawal.recipient, depositAddress);
+    }
+
+    function test_requestAsyncWithdrawal_executesAsyncWithdrawal_whenTheWithdrawDelayIsZero() public {
+        // make withdraw delay 0
+        vm.prank(owner);
+        cashModule.setDelays(0, 0, 0);
+
+        uint256 amount = 10 * 10 ** 18;
+        deal(address(fraxusd), address(safe), amount);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), address(safe), abi.encode(address(fraxusd), depositAddress, amount))).toEthSignedMessageHash();
+
+        MessagingFee memory fee = fraxModule.quoteAsyncWithdraw(depositAddress, amount);
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        uint256 liquidAssetBalBefore = fraxusd.balanceOf(address(safe));
+
+        vm.expectEmit(true, true, true, true);
+        emit FraxModule.AsyncWithdrawalRequested(address(safe), amount, fraxModule.ETHEREUM_EID(), depositAddress);
+        vm.expectEmit(true, true, true, true);
+        emit FraxModule.AsyncWithdrawalExecuted(address(safe), amount, fraxModule.ETHEREUM_EID(), depositAddress);
+        fraxModule.requestAsyncWithdraw{ value: fee.nativeFee }(address(safe), depositAddress, amount, owner1, signature);
+
+        uint256 liquidAssetBalAfter = fraxusd.balanceOf(address(safe));
+        assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amount);
+    }
+
     //Revert cases
-    //Todo: add async withdraw revert test cases
 
     function test_deposit_revertsWhenInvalidSignature() public {
         uint256 amountToDeposit = 1000 * 10 ** 6; // 1000 USDC (6 decimals)
@@ -254,5 +318,71 @@ contract FraxModuleTest is SafeTestSetup {
 
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
         fraxModule.withdraw(address(fakeSafe), amountToWithdraw, owner1, invalidSignature);
+    }
+
+    function test_executeAsyncWithdrawal_reverts_ifWithdrawalDelayIsNotOver() public {
+
+        uint256 amount = 1000 * 10 ** 18;
+        deal(address(fraxusd), address(safe), amount);
+        deal(address(safe), 1 ether);
+
+        _requestAsyncWithdrawal(amount);
+
+        vm.expectRevert(ICashModule.CannotWithdrawYet.selector);
+        fraxModule.executeAsyncWithdraw{ value: 1 }(address(safe));
+    }
+
+    function test_executeAsyncWithdrawal_reverts_whenNoWithdrawalQueued() public {
+        vm.expectRevert(FraxModule.NoAsyncWithdrawalQueued.selector);
+        fraxModule.executeAsyncWithdraw{ value: 0 }(address(safe));
+    }
+
+    function test_requestAsyncWithdrawal_insufficientAmount() public {
+        uint256 amount = 1000 * 10 ** 18;
+        // deal less amount than required
+        deal(address(fraxusd), address(safe), amount - 1);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, owner1, signature);
+    }
+
+    function test_requestAsyncWithdrawal_invalidInput() public {
+        uint256 amount = 1000 * 10 ** 18;
+        deal(address(fraxusd), address(safe), amount);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, address(0), amount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        //Test with zero address for depositAddress
+        fraxModule.requestAsyncWithdraw(address(safe), address(0), amount, owner1, signature);
+
+        // Test with zero amount
+        bytes32 digestHash1 = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, 0))).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash1);
+        bytes memory signature1 = abi.encodePacked(r1, s1, v1);
+
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        //Test with zero address for depositAddress
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, 0, owner1, signature1);
+    }
+
+    function _requestAsyncWithdrawal(uint256 amount) internal {
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectEmit(true, true, true, true);
+        emit FraxModule.AsyncWithdrawalRequested(address(safe), amount, 30_101, depositAddress);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, owner1, signature);
     }
 }

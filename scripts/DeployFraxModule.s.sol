@@ -14,7 +14,8 @@ contract DeployFraxModule is Utils {
     address fraxusd = 0x397F939C3b91A74C321ea7129396492bA9Cdce82;
     address usdc = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
     address custodian = 0x05bF905356fbeA7E59500f904b908402dB7A53DD;
-    address fraxUsdPriceOracle = 0xf376A91Ae078927eb3686D6010a6f1482424954E; //currently USDT/USD oracle
+    address fraxUsdPriceOracle = 0x7be4f8b373853b74CDf48FE817bC2eB2272eBe45;
+    address remoteHop = 0xF6f45CCB5E85D1400067ee66F9e168f83e86124E;
 
     IDebtManager debtManager;
     PriceProvider priceProvider;
@@ -37,7 +38,7 @@ contract DeployFraxModule is Utils {
         cashModule = ICashModule(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "CashModule")));
 
         //deploy frax module
-        FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, usdc, custodian);
+        FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, usdc, custodian, remoteHop);
 
         address[] memory defaultModules = new address[](1);
         defaultModules[0] = address(fraxModule);
@@ -59,7 +60,6 @@ contract DeployFraxModule is Utils {
         PriceProvider(priceProvider).setTokenConfig(tokens, fraxUsdConfigs);
 
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
-            //Todo: adjust these values if required
             ltv: 90e18,
             liquidationThreshold: 95e18,
             liquidationBonus: 1e18
