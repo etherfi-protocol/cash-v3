@@ -6,6 +6,7 @@ import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/Reentran
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
+import { WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IFraxCustodian } from "../../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop, MessagingFee } from "../../interfaces/IFraxRemoteHop.sol";
@@ -22,9 +23,26 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
 
+    /**
+     * @notice Stores asynchronous withdrawal request details
+     * @param amount Amount of tokens to withdraw
+     * @param recipient Recipient address provided by Frax API
+     */
+    struct AsyncWithdrawal {
+        uint256 amount;
+        address recipient;
+    }
+
+    /// @notice Address of the USDC token
     address public immutable usdc;
+
+    /// @notice Address of the Frax USD token
     address public immutable fraxusd;
+
+    /// @notice Address of Frax USD Custodian
     address public immutable custodian;
+
+    /// @notice Address of the Frax USD Remote Hop contract
     address public immutable remoteHop;
 
     /// @notice Layerzero ethereum EID
@@ -37,19 +55,34 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     bytes32 public constant WITHDRAW_SIG = keccak256("withdraw");
 
     /// @notice TypeHash for async withdraw function signature
-    bytes32 public constant ASYNC_WITHDRAW_SIG = keccak256("asyncWithdraw");
+    bytes32 public constant REQUEST_ASYNC_WITHDRAW_SIG = keccak256("requestAsyncWithdraw");
 
-    /// @notice Emitted when safe deposits into FraxUSD
-    event Deposit(address indexed safe, address indexed inputToken, uint256 inputAmount, uint256 outputAmount);
+    /// @notice Cross-chain withdrawal requests for each Safe
+    mapping(address safe => AsyncWithdrawal withdrawal) private withdrawals;
 
-    /// @notice Emitted when safe withdraws from FraxUSD
-    event Withdrawal(address indexed safe, uint256 amountToWithdraw, uint256 amountOut);
+    /// @notice Error when native fee is insufficient
+    error InsufficientNativeFee();
 
-    /// @notice Emitted when safe creates a async withdrawal from FraxUSD
-    event AsyncWithdrawal(address indexed safe, uint256 amountToWithdraw);
+    /// @notice Error thrown when no async withdrawal is queued for FraxUSD
+    error NoAsyncWithdrawalQueued();
 
     /// @notice Error when the return amount is less than min return
     error InsufficientReturnAmount();
+
+    /// @notice Error thrown when no matching withdrawal is found for the safe
+    error CannotFindMatchingWithdrawalForSafe();
+
+    /// @notice Emitted when safe deposits USDC into Frax USD
+    event Deposit(address indexed safe, address indexed inputToken, uint256 inputAmount, uint256 outputAmount);
+
+    /// @notice Emitted when safe withdraws USDC from Frax USD (Synchronously)
+    event Withdrawal(address indexed safe, uint256 amountToWithdraw, uint256 amountOut);
+
+    /// @notice Emitted when safe creates an async withdrawal Request from FraxUSD
+    event AsyncWithdrawalRequested(address indexed safe, uint256 amountToWithdraw, uint32 dstEid, address to);
+
+    /// @notice Emitted when safe executes an async withdrawal from FraxUSD
+    event AsyncWithdrawalExecuted(address indexed safe, uint256 amountToWithdraw, uint32 dstEid, address to);
 
     /**
      * @notice Contract constructor
@@ -201,65 +234,110 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     }
 
     /**
+     * @notice Gets the pending withdrawal request for a safe
+     * @param safe Address of the EtherFi Safe
+     * @return AsyncWithdrawal containing the pending withdrawal request details
+     */        
+    function getPendingWithdrawal(address safe) external view returns (AsyncWithdrawal memory) {
+        return withdrawals[safe];
+    }
+
+    /**
      * @notice Function to quote bridging fee for async redemption
-     * @param _to Deposit address from Frax api
+     * @param _recipient Deposit address from Frax api
      * @param _withdrawAmount Amount to redeem asynchronously
      * @return fee MessagingFee struct quoting fee for bridging
      */
-    function quoteAsyncWithdraw(bytes32 _to, uint256 _withdrawAmount) external view returns (MessagingFee memory fee) {
+    function quoteAsyncWithdraw(address _recipient, uint256 _withdrawAmount) external view returns (MessagingFee memory fee) {
+        bytes32 _to = bytes32(bytes20(_recipient));
         return IFraxRemoteHop(remoteHop).quote(fraxusd, ETHEREUM_EID, _to, _withdrawAmount);
     }
 
     /**
-     * @notice Function to quote bridging fee for async redemption
+     * @notice Function to create a async withdrawal request
      * @param safe Address for user safe
-     * @param _to Deposit address from Frax api
-     * @param _withdrawAmount Amount to redeem asynchronously
-     * @param _nativeFee Value of native fee paid
-     * @param signature The signature authorizing this transaction
+     * @param _recipient Recipient address from Frax api
+     * @param _withdrawAmount Amount to withdraw asynchronously
      * @param signer The address that signed the transaction
+     * @param signature The signature authorizing this transaction
      */
-    function asyncWithdraw(address safe, bytes32 _to, uint256 _withdrawAmount, uint256 _nativeFee, address signer, bytes calldata signature) external payable onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = _getQuoteAsyncWithdrawDigestHash(safe, _to, _withdrawAmount);
+    function requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount, address signer, bytes calldata signature) external payable onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        bytes32 digestHash = _getRequestAsyncWithdrawDigestHash(safe, _recipient, _withdrawAmount);
         _verifyAdminSig(digestHash, signer, signature);
-        _asyncWithdraw(safe, _to, _withdrawAmount, _nativeFee);
+        _requestAsyncWithdraw(safe, _recipient, _withdrawAmount);
+    }
+
+    /**
+     * @notice Executes a previously requested async withdrawal transaction
+     * @param safe The Safe address that requested the withdrawal
+     * @dev Verifies the withdrawal request matches the stored withdrawal details before execution
+     * @custom:throws NoAsyncWithdrawalQueued If no async withdrawal request exists for the safe
+     * @custom:throws CannotFindMatchingWithdrawalForSafe If the withdrawal details don't match
+     */
+    function executeAsyncWithdraw(address safe) public payable nonReentrant onlyEtherFiSafe(safe) {
+        AsyncWithdrawal memory withdrawal = withdrawals[safe];
+        if (withdrawal.recipient == address(0)) revert NoAsyncWithdrawalQueued();
+
+        WithdrawalRequest memory withdrawalRequest = cashModule.getData(safe).pendingWithdrawalRequest;
+
+        if (withdrawalRequest.recipient != address(this) || withdrawalRequest.tokens.length != 1 || withdrawalRequest.tokens[0] != fraxusd || withdrawalRequest.amounts[0] != withdrawal.amount) revert CannotFindMatchingWithdrawalForSafe();
+        cashModule.processWithdrawal(safe);
+
+        _asyncWithdraw(safe, withdrawal.recipient, withdrawal.amount);
+        delete withdrawals[safe];
     }
 
     /**
      * @dev Creates a digest hash for the async withdraw operation
-     * @param _to Deposit address from Frax api
-     * @param _withdrawAmount Amount to redeem asynchronously
+     * @param _recipient Recipient address from Frax api
+     * @param _withdrawAmount Amount to withdraw asynchronously
      * @return The digest hash for signature verification
      */
-    function _getQuoteAsyncWithdrawDigestHash(address safe, bytes32 _to, uint256 _withdrawAmount) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(ASYNC_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(fraxusd, _to, _withdrawAmount))).toEthSignedMessageHash();
+    function _getRequestAsyncWithdrawDigestHash(address safe, address _recipient, uint256 _withdrawAmount) internal returns (bytes32) {
+        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
     }
 
     /**
-     * @notice Function to quote bridging fee for async redemption
+     * @notice Function to request an async withdrawal
      * @param safe Address for user safe
-     * @param _to Deposit address from Frax api
-     * @param _withdrawAmount Amount to redeem asynchronously
-     * @param _nativeFee Value of native fee paid
+     * @param _recipient Recipient address from Frax api
+     * @param _withdrawAmount Amount to withdraw asynchronously
+     * @custom:throws InvalidInput If the amount is zero
      */
-    function _asyncWithdraw(address safe, bytes32 _to, uint256 _withdrawAmount, uint256 _nativeFee) internal {
-        if (_withdrawAmount == 0) revert InvalidInput();
+    function _requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount) internal {
+        if (_withdrawAmount == 0 || _recipient == address(0)) revert InvalidInput();
 
-        _checkAmountAvailable(safe, fraxusd, _withdrawAmount);
+        cashModule.requestWithdrawalByModule(safe, fraxusd, _withdrawAmount);
 
-        address[] memory to = new address[](2);
-        bytes[] memory data = new bytes[](2);
-        uint256[] memory values = new uint256[](2);
+        emit AsyncWithdrawalRequested(safe, _withdrawAmount, ETHEREUM_EID, _recipient);
 
-        to[0] = fraxusd;
-        data[0] = abi.encodeWithSelector(ERC20.approve.selector, remoteHop, _withdrawAmount);
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        if (withdrawalDelay == 0) {
+            _asyncWithdraw(safe, _recipient, _withdrawAmount);
+        } else {
+            withdrawals[safe] = AsyncWithdrawal({ amount: _withdrawAmount, recipient: _recipient });
+        }
+    }
 
-        to[1] = remoteHop;
-        data[1] = abi.encodeWithSelector(IFraxRemoteHop.sendOFT.selector, fraxusd, ETHEREUM_EID, _to, _withdrawAmount);
-        values[1] = _nativeFee;
+    /**
+     * @notice Internal function to execute an async withdrawal
+     * @param safe The Safe address that requested the withdrawal
+     * @param _recipient Recipient address from Frax api
+     * @param _amount Amount to withdraw asynchronously
+     */
+    function _asyncWithdraw(address safe, address _recipient, uint256 _amount) internal {
+        if (_amount == 0) revert InvalidInput();
 
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        bytes32 _to = bytes32(bytes20(_recipient));
 
-        emit AsyncWithdrawal(safe, _withdrawAmount);
+        MessagingFee memory fee = IFraxRemoteHop(remoteHop).quote(fraxusd, ETHEREUM_EID, _to, _amount);
+        uint256 nativeFee = fee.nativeFee;
+
+        if (address(this).balance < nativeFee) revert InsufficientNativeFee();
+
+        ERC20(fraxusd).approve(remoteHop, _amount);
+        IFraxRemoteHop(remoteHop).sendOFT{ value: nativeFee }(fraxusd, ETHEREUM_EID, _to, _amount);
+
+        emit AsyncWithdrawalExecuted(safe, _amount, ETHEREUM_EID, _recipient);
     }
 }
