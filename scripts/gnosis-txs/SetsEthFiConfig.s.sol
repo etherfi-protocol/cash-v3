@@ -7,7 +7,8 @@ import {Test} from "forge-std/Test.sol";
 
 import {IDebtManager} from "../../src/interfaces/IDebtManager.sol";
 import {ICashModule} from "../../src/interfaces/ICashModule.sol";
-import {EtherFiLiquidModule} from "../../src/modules/etherfi/EtherFiLiquidModule.sol";
+import {EtherFiDataProvider} from "../../src/data-provider/EtherFiDataProvider.sol";
+import {EtherFiLiquidModuleWithReferrer} from "../../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
 import {PriceProvider, IAggregatorV3} from "../../src/oracle/PriceProvider.sol";
 import {GnosisHelpers} from "../utils/GnosisHelpers.sol";
 import {Utils} from "../utils/Utils.sol";
@@ -19,6 +20,8 @@ interface ISEthFiOracle {
 contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
+    address weth = 0x5300000000000000000000000000000000000004;
+
     //Todo: Cross check Addresses
     address sETHFI = 0x86B5780b606940Eb59A062aA85a07959518c0161;
     address sEthFiUSDOracle = 0xeA99E12b06C1606FCae968Cc6ceBB1A7A323E0f5;
@@ -28,12 +31,15 @@ contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
     address debtManager;
     address priceProvider;
     address cashModule;
-    address liquidModule;
+    address dataProvider;
+    address etherFiLiquidModuleWithReferrer;
 
 
     function run() public {
         string memory chainId = vm.toString(block.chainid);
         string memory deployments = readDeploymentFile();
+
+        vm.startBroadcast();
 
         // Load deployed contract addresses
         priceProvider = stdJson.readAddress(
@@ -46,14 +52,14 @@ contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
             string.concat(".", "addresses", ".", "DebtManager")
         );
 
+        dataProvider = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "EtherFiDataProvider")
+        );
+
         cashModule = stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "CashModule")
-        );
-
-        liquidModule = stdJson.readAddress(
-            deployments,
-            string.concat(".", "addresses", ".", "EtherFiLiquidModule")
         );
 
         // Configure sETHFI price oracle
@@ -117,8 +123,21 @@ contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
         address[] memory sETHFITellerArray = new address[](1);
         sETHFITellerArray[0] = sETHFITeller;
 
+        etherFiLiquidModuleWithReferrer = address(new EtherFiLiquidModuleWithReferrer(sETHFIArray, sETHFITellerArray, dataProvider, weth));
+
+        address[] memory modules = new address[](1);
+        modules[0] = address(etherFiLiquidModuleWithReferrer);
+
+        string memory configureDefaultModules = iToHex(
+            abi.encodeWithSelector(
+                EtherFiDataProvider.configureDefaultModules.selector,
+                modules,
+                enableArray
+            )
+        );
+
         // Cash Module tx for configuring withdraw asset
-        string memory sETHFICashModuleConfig = iToHex(
+        string memory setWithdrawableAsset = iToHex(
             abi.encodeWithSelector(
                 ICashModule.configureWithdrawAssets.selector,
                 sETHFIArray,
@@ -126,25 +145,22 @@ contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
             )
         );
 
-        // Liquid Module tx for adding liquid asset
-        string memory sETHFILiquidModuleConfig = iToHex(
+        string memory configureModulesCanRequestWithdraw = iToHex(
             abi.encodeWithSelector(
-                EtherFiLiquidModule.addLiquidAssets.selector,
-                sETHFIArray,
-                sETHFITellerArray
+                ICashModule.configureModulesCanRequestWithdraw.selector,
+                modules,
+                enableArray
             )
         );
 
         // Liquid Module tx for setting withdraw queue
         string memory sETHFILiquidModuleWithdrawQueueConfig = iToHex(
             abi.encodeWithSelector(
-                EtherFiLiquidModule.setLiquidAssetWithdrawQueue.selector,
+                EtherFiLiquidModuleWithReferrer.setLiquidAssetWithdrawQueue.selector,
                 sETHFI,
                 sETHFIBoringQueue
             )
         );
-
-
 
         // Added Price Provider transaction to bundle
         txs = string(
@@ -172,13 +188,38 @@ contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
             )
         );
 
+        // Added Data Provider transaction to bundle
+        txs = string(
+            abi.encodePacked(
+                txs,
+                _getGnosisTransaction(
+                    addressToHex(dataProvider),
+                    configureDefaultModules,
+                    "0",
+                    false
+                )
+            )
+        );
+
         // Added Cash Module transaction to bundle
         txs = string(
             abi.encodePacked(
                 txs,
                 _getGnosisTransaction(
                     addressToHex(cashModule),
-                    sETHFICashModuleConfig,
+                    setWithdrawableAsset,
+                    "0",
+                    false
+                )
+            )
+        );
+
+        txs = string(
+            abi.encodePacked(
+                txs,
+                _getGnosisTransaction(
+                    addressToHex(cashModule),
+                    configureModulesCanRequestWithdraw,
                     "0",
                     false
                 )
@@ -190,26 +231,15 @@ contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
             abi.encodePacked(
                 txs,
                 _getGnosisTransaction(
-                    addressToHex(liquidModule),
-                    sETHFILiquidModuleConfig,
-                    "0",
-                    false
-                )
-            )
-        );
-
-        // Added Liquid Module withdraw queue transaction to bundle
-        txs = string(
-            abi.encodePacked(
-                txs,
-                _getGnosisTransaction(
-                    addressToHex(liquidModule),
+                    addressToHex(etherFiLiquidModuleWithReferrer),
                     sETHFILiquidModuleWithdrawQueueConfig,
                     "0",
                     true
                 )
             )
-        ); 
+        );
+
+        vm.stopBroadcast();
 
         vm.createDir("./output", true);
         string memory path = "./output/SetSETHFIConfig.json";
@@ -219,7 +249,7 @@ contract SetSETHFIConfig is GnosisHelpers, Utils, Test {
 
         assert(IDebtManager(debtManager).isCollateralToken(sETHFI) == true);
         assert(PriceProvider(priceProvider).price(sETHFI) != 0);
-        assert(address(EtherFiLiquidModule(liquidModule).liquidAssetToTeller(sETHFI)) == sETHFITeller);
-        assert(address(EtherFiLiquidModule(liquidModule).liquidWithdrawQueue(sETHFI)) == sETHFIBoringQueue);
+        assert(address(EtherFiLiquidModuleWithReferrer(etherFiLiquidModuleWithReferrer).liquidAssetToTeller(sETHFI)) == sETHFITeller);
+        assert(address(EtherFiLiquidModuleWithReferrer(etherFiLiquidModuleWithReferrer).liquidWithdrawQueue(sETHFI)) == sETHFIBoringQueue);
     }
 }
