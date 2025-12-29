@@ -23,6 +23,7 @@
     "StargateModule": "0xC1ab383b81fD81803a54c4d50A7b7d4A31a317b4",
     "WormholeModule": "0x96bae80F91DA04a59CeF9dCE3bB1081De041C1d5",
     "BeHYPEStakeModule": "0x51142BC586A7b4cbECDCD5B0C68064714B322CBC",
+    "EtherFiLiquidModuleWithReferrer": "0x5BdD4b0D644c0A573E0eb526aB7D7d332AAaa50e",
     "LiquidUSDLiquifierModule": "0x23C4dc847Cd876D4ca2C15b4a1EAD349dC705082"
   }
 }
