@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {stdJson} from "forge-std/StdJson.sol";
+import {Test} from "forge-std/Test.sol";
 
 import {Utils} from "../utils/Utils.sol";
 import {GnosisHelpers} from "../utils/GnosisHelpers.sol";
@@ -12,14 +13,17 @@ import {TopUpFactory} from "../../src/top-up/TopUpFactory.sol";
  * @notice Configures USDC with CCTP adapter in TopUpFactory on Arbitrum
  * @dev Generates Gnosis Safe transaction JSON for configuration
  */
-contract DeployAndConfigureCCTPAdapterArbitrum is GnosisHelpers, Utils {
+contract DeployAndConfigureCCTPAdapterArbitrum is GnosisHelpers, Utils, Test {
 
-    address constant ARBITRUM_USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
-    address constant CCTP_TOKEN_MESSENGER = 0x19330d10D9Cc8751218eaf51E8885D058642E08A;
+    address constant ARBITRUM_USDC = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831;
+    address constant CCTP_TOKEN_MESSENGER = 0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d;
     
     address constant cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
     
     function run() public {
+
+        vm.createSelectFork("https://arb1.arbitrum.io/rpc");
+        
         string memory deployments = readTopUpSourceDeployment();
         
         address topUpFactoryAddress = stdJson.readAddress(
@@ -60,6 +64,14 @@ contract DeployAndConfigureCCTPAdapterArbitrum is GnosisHelpers, Utils {
         vm.writeFile("./output/ConfigureCCTPAdapterArbitrum.json", txs);
 
         executeGnosisTransactionBundle("./output/ConfigureCCTPAdapterArbitrum.json");
+
+        TopUpFactory topUpFactory = TopUpFactory(payable(topUpFactoryAddress));
+        uint256 amount = 1000e6; 
+        deal(ARBITRUM_USDC, address(topUpFactory), amount);
+        (, uint256 fee) = topUpFactory.getBridgeFee(ARBITRUM_USDC, amount);
+        deal(address(vm.addr(1)), fee);
+        vm.prank(address(vm.addr(1)));
+        topUpFactory.bridge{value: fee}(ARBITRUM_USDC, amount);
 
     }
 }
