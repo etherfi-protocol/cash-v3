@@ -60,6 +60,7 @@ contract DeployAndConfigureCCTPAdapterArbitrum is GnosisHelpers, Utils {
         vm.writeFile("./output/ConfigureCCTPAdapterArbitrum.json", txs);
 
         executeGnosisTransactionBundle("./output/ConfigureCCTPAdapterArbitrum.json");
+
     }
 }
 
