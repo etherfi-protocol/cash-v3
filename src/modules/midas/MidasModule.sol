@@ -54,7 +54,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     bytes32 public constant WITHDRAW_SIG = keccak256("withdraw");
 
     /// @notice TypeHash for async withdraw function signature
-    bytes32 public constant REQUEST_ASYNC_WITHDRAW_SIG = keccak256("requestWithdraw");
+    bytes32 public constant REQUEST_WITHDRAW_SIG = keccak256("requestWithdraw");
 
     /// @notice Cross-chain withdrawal requests for each Safe
     mapping(address safe => AsyncWithdrawal withdrawal) private withdrawals;
@@ -62,8 +62,8 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /// @notice Error when native fee is insufficient
     error InsufficientNativeFee();
 
-    /// @notice Error thrown when no async withdrawal is queued for FraxUSD
-    error NoAsyncWithdrawalQueued();
+    /// @notice Error thrown when no withdrawal is queued for Midas Vault
+    error NoWithdrawalQueued();
 
     /// @notice Error when the return amount is less than min return
     error InsufficientReturnAmount();
@@ -161,8 +161,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         to[0] = asset;
         data[0] = abi.encodeWithSelector(ERC20.approve.selector, address(depositVault), amount);
 
+        bytes32 referrerId = bytes32(bytes20(address(0)));
+
         to[1] = address(depositVault);
-        data[1] = abi.encodeWithSelector(IMidasVault.depositInstant.selector, asset, scaledAmount, minReturnAmount, 0x00); //Todo: Replace the 0x00 with referrerId
+        data[1] = abi.encodeWithSelector(IMidasVault.depositInstant.selector, asset, scaledAmount, minReturnAmount, referrerId);
 
         uint256 midasTokenBefore = ERC20(midasToken).balanceOf(safe);
 
@@ -275,7 +277,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      */
     function executeWithdraw(address safe) public payable nonReentrant onlyEtherFiSafe(safe) {
         AsyncWithdrawal memory withdrawal = withdrawals[safe];
-        if (withdrawal.asset == address(0)) revert NoAsyncWithdrawalQueued();
+        if (withdrawal.asset == address(0)) revert NoWithdrawalQueued();
 
         WithdrawalRequest memory withdrawalRequest = cashModule.getData(safe).pendingWithdrawalRequest;
 
@@ -293,7 +295,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @return The digest hash for signature verification
      */
     function _getRequestWithdrawDigestHash(address safe, address asset, uint256 amount) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(midasToken, asset, amount))).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(REQUEST_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(midasToken, asset, amount))).toEthSignedMessageHash();
     }
 
     /**

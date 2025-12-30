@@ -18,8 +18,7 @@ contract DeployMidasModule is Utils {
     address depositVault = 0xcA1C871f8ae2571Cb126A46861fc06cB9E645152;
     address redemptionVault = 0x904EA8d7FcaB7351758fAC82bDbc738E2010BC25;
 
-    //Todo: Update Midas price oracle
-    address midasPriceOracle = 0x7be4f8b373853b74CDf48FE817bC2eB2272eBe45;
+    address midasPriceOracle = 0xB2a4eC4C9b95D7a87bA3989d0FD38dFfDd944A24;
 
     IDebtManager debtManager;
     PriceProvider priceProvider;
@@ -55,7 +54,17 @@ contract DeployMidasModule is Utils {
         address[] memory tokens = new address[](1);
         tokens[0] = midasToken;
 
-        PriceProvider.Config memory midasConfig = PriceProvider.Config({ oracle: midasPrice, priceFunctionCalldata: "", isChainlinkType: true, oraclePriceDecimals: IAggregatorV3(fraxUsdPriceOracle).decimals(), maxStaleness: 2 days, dataType: PriceProvider.ReturnType.Int256, isBaseTokenEth: false, isStableToken: true, isBaseTokenBtc: false });
+        PriceProvider.Config memory midasConfig = PriceProvider.Config({
+            oracle: midasPriceOracle,
+            priceFunctionCalldata: "",
+            isChainlinkType: true, //chainlink type oracle
+            oraclePriceDecimals: IAggregatorV3(midasPriceOracle).decimals(),
+            maxStaleness: 2 days,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: true,
+            isBaseTokenBtc: false
+        });
         PriceProvider.Config[] memory midasConfigs = new PriceProvider.Config[](1);
         midasConfigs[0] = midasConfig;
 
