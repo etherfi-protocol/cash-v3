@@ -26,6 +26,9 @@ base = "${BASE_RPC}"
 mainnet = { key = "${ETHERSCAN_KEY}" }
 scroll = { key = "${ETHERSCAN_KEY}" }
 base = { key = "${ETHERSCAN_KEY}" }
+hyperevm  = { key = "${MAINNET_ETHERSCAN_KEY}", chain = 999 }
+
+
 
 [fmt]
 line_length = 500
