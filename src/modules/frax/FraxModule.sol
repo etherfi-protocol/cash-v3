@@ -163,8 +163,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
 
         uint256 fraxUSDTokenReceived = ERC20(fraxusd).balanceOf(safe) - fraxUSDTokenBefore;
 
-        uint8 decimals = ERC20(assetToDeposit).decimals();
-        uint256 scaledAmountToDeposit = (amountToDeposit * 10 ** 18) / 10 ** decimals;
+        uint256 scaledAmountToDeposit = amountToDeposit * 10 ** 12;
 
         if (fraxUSDTokenReceived < scaledAmountToDeposit) revert InsufficientReturnAmount();
 
@@ -237,7 +236,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
      * @notice Gets the pending withdrawal request for a safe
      * @param safe Address of the EtherFi Safe
      * @return AsyncWithdrawal containing the pending withdrawal request details
-     */        
+     */
     function getPendingWithdrawal(address safe) external view returns (AsyncWithdrawal memory) {
         return withdrawals[safe];
     }
