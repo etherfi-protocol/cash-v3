@@ -33,9 +33,6 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
         address recipient;
     }
 
-    /// @notice Address of the USDC token
-    address public immutable usdc;
-
     /// @notice Address of the Frax USD token
     address public immutable fraxusd;
 
@@ -76,7 +73,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     event Deposit(address indexed safe, address indexed inputToken, uint256 inputAmount, uint256 outputAmount);
 
     /// @notice Emitted when safe withdraws USDC from Frax USD (Synchronously)
-    event Withdrawal(address indexed safe, uint256 amountToWithdraw, uint256 amountOut);
+    event Withdrawal(address indexed safe, address indexed outputToken, uint256 amountToWithdraw, uint256 amountOut);
 
     /// @notice Emitted when safe creates an async withdrawal Request from FraxUSD
     event AsyncWithdrawalRequested(address indexed safe, uint256 amountToWithdraw, uint32 dstEid, address to);
@@ -88,68 +85,65 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
      * @notice Contract constructor
      * @param _etherFiDataProvider Address of the EtherFiDataProvider contract
      * @param _fraxusd Address of the FRAXUSD token
-     * @param _usdc Address of the USDC token
      * @param _custodian Address of the FraxUSD custodian
      * @param _remoteHop Remote Hop address of FraxUSD
      * @dev Initializes the contract with supported tokens
      * @custom:throws InvalidInput If any provided address is zero
      */
-    constructor(address _etherFiDataProvider, address _fraxusd, address _usdc, address _custodian, address _remoteHop) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _fraxusd, address _custodian, address _remoteHop) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         if (_etherFiDataProvider == address(0) || _fraxusd == address(0) || _remoteHop == address(0)) revert InvalidInput();
 
         fraxusd = _fraxusd;
-        usdc = _usdc;
         custodian = _custodian;
         remoteHop = _remoteHop;
     }
 
     /**
-     * @notice Deposits USDC and mints FraxUSD using signature verification
-     * @param safe The Safe address which holds the USDC tokens
+     * @notice Deposits Asset and mints FraxUSD using signature verification
+     * @param safe The Safe address which holds the asset tokens
      * @param assetToDeposit The address of the asset to deposit
-     * @param amountToDeposit The amount of USDC tokens to deposit
+     * @param amountToDeposit The amount of asset tokens to deposit
+     * @param minReturnAmount The minimum amount of asset to return (18 decimals - FraxUSD)
      * @param signer The address that signed the transaction
      * @param signature The signature authorizing the transaction
      * @dev Verifies signature then executes token approval and deposit through the Safe's module execution
      * @custom:throws InvalidInput If amount is zero
      * @custom:throws InvalidSignature If the signature is invalid
      */
-    function deposit(address safe, address assetToDeposit, uint256 amountToDeposit, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = _getDepositDigestHash(safe, assetToDeposit, amountToDeposit);
+    function deposit(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturnAmount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        bytes32 digestHash = _getDepositDigestHash(safe, assetToDeposit, amountToDeposit, minReturnAmount);
         _verifyAdminSig(digestHash, signer, signature);
-        _deposit(safe, assetToDeposit, amountToDeposit);
+        _deposit(safe, assetToDeposit, amountToDeposit, minReturnAmount);
     }
 
     /**
      * @dev Creates a digest hash for the deposit operation
-     * @param safe The Safe address which holds the USDC tokens
+     * @param safe The Safe address which holds the deposit tokens
      * @param amountToDeposit The amount to deposit
+     * @param minReturnAmount The minimum amount of asset to return (18 decimals - FraxUSD)
      * @return The digest hash for signature verification
      */
-    function _getDepositDigestHash(address safe, address assetToDeposit, uint256 amountToDeposit) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(DEPOSIT_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(assetToDeposit, amountToDeposit))).toEthSignedMessageHash();
+    function _getDepositDigestHash(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturnAmount) internal returns (bytes32) {
+        return keccak256(abi.encodePacked(DEPOSIT_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(assetToDeposit, amountToDeposit, minReturnAmount))).toEthSignedMessageHash();
     }
 
     /**
-     * @dev Internal function to deposit USDC to FraxUSD custodian
-     * @param safe The Safe address which holds the USDC tokens
+     * @dev Internal function to deposit Asset tokens to FraxUSD custodian
+     * @param safe The Safe address which holds the asset tokens
      * @param assetToDeposit The address of the asset to deposit
-     * @param amountToDeposit The amount of USDC tokens to deposit (6 decimals)
+     * @param amountToDeposit The amount of asset tokens to deposit
+     * @param minReturnAmount The minimum amount of asset to return (18 decimals - FraxUSD)
      * @custom:throws InvalidInput If amount or min return is zero
      * @custom:throws InsufficientReturnAmount If the FraxUSD received is less than expected
      */
-    function _deposit(address safe, address assetToDeposit, uint256 amountToDeposit) internal {
-        if (amountToDeposit == 0) revert InvalidInput();
+    function _deposit(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturnAmount) internal {
+        if (amountToDeposit == 0 || assetToDeposit == address(0)) revert InvalidInput();
 
         _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
 
-        address[] memory to;
-        bytes[] memory data;
-        uint256[] memory values;
-
-        to = new address[](2);
-        data = new bytes[](2);
-        values = new uint256[](2);
+        address[] memory to = new address[](2);
+        bytes[] memory data = new bytes[](2);
+        uint256[] memory values = new uint256[](2);
 
         to[0] = assetToDeposit;
         data[0] = abi.encodeWithSelector(ERC20.approve.selector, address(custodian), amountToDeposit);
@@ -163,9 +157,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
 
         uint256 fraxUSDTokenReceived = ERC20(fraxusd).balanceOf(safe) - fraxUSDTokenBefore;
 
-        uint256 scaledAmountToDeposit = amountToDeposit * 10 ** 12;
-
-        if (fraxUSDTokenReceived < scaledAmountToDeposit) revert InsufficientReturnAmount();
+        if (fraxUSDTokenReceived < minReturnAmount) revert InsufficientReturnAmount();
 
         emit Deposit(safe, assetToDeposit, amountToDeposit, fraxUSDTokenReceived);
     }
@@ -174,38 +166,44 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
      * @notice Withdraws from FraxUSD from the safe
      * @param safe The Safe address which holds the FraxUSD tokens
      * @param amountToWithdraw The amount of FraxUSD to withdraw (18 decimals)
+     * @param outputAsset The asset withdrawing to
+     * @param minReceiveAmount The minimum amount of asset to receive
      * @param signer The address that signed the transaction
      * @param signature The signature authorizing the transaction
      * @dev Verifies signature then executes token approval and deposit through the Safe's module execution
      * @custom:throws InvalidInput If amount or min return is zero
      * @custom:throws InvalidSignature If the signature is invalid
      */
-    function withdraw(address safe, uint128 amountToWithdraw, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = _getWithdrawDigestHash(safe, amountToWithdraw);
+    function withdraw(address safe, uint128 amountToWithdraw, address outputAsset, uint256 minReceiveAmount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        bytes32 digestHash = _getWithdrawDigestHash(safe, amountToWithdraw, outputAsset, minReceiveAmount);
         _verifyAdminSig(digestHash, signer, signature);
-        _withdraw(safe, amountToWithdraw);
+        _withdraw(safe, amountToWithdraw, outputAsset, minReceiveAmount);
     }
 
     /**
      * @dev Creates a digest hash for the withdraw operation
      * @param safe The Safe address which holds the FraxUSD tokens
      * @param amountToWithdraw The amount to withdraw
+     * @param outputAsset The asset withdrawing to
+     * @param minReceiveAmount The minimum amount of asset to receive
      * @return The digest hash for signature verification
      */
-    function _getWithdrawDigestHash(address safe, uint128 amountToWithdraw) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(amountToWithdraw))).toEthSignedMessageHash();
+    function _getWithdrawDigestHash(address safe, uint128 amountToWithdraw, address outputAsset, uint256 minReceiveAmount) internal returns (bytes32) {
+        return keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(amountToWithdraw, outputAsset, minReceiveAmount))).toEthSignedMessageHash();
     }
 
     /**
      * @notice Internal function which facilitates withdrawals from the safe
      * @param safe The Safe address which holds the FraxUSD tokens
      * @param amountToWithdraw The amount of FraxuSD tokens to withdraw
+     * @param outputAsset The asset withdrawing to
+     * @param minReceiveAmount The minimum amount of asset to receive (Decimal of Asset)
      * @custom:throws InvalidInput If the Safe doesn't have enough liquid asset balance
      * @custom:throws InvalidSignature If the signature is invalid
      * @custom:throws InsufficientReturnAmount If the USDC received is less than expected
      */
-    function _withdraw(address safe, uint128 amountToWithdraw) internal {
-        if (amountToWithdraw == 0) revert InvalidInput();
+    function _withdraw(address safe, uint128 amountToWithdraw, address outputAsset, uint256 minReceiveAmount) internal {
+        if (amountToWithdraw == 0 || outputAsset == address(0)) revert InvalidInput();
 
         _checkAmountAvailable(safe, fraxusd, amountToWithdraw);
 
@@ -219,17 +217,15 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
         to[1] = address(custodian);
         data[1] = abi.encodeWithSelector(IFraxCustodian.redeem.selector, amountToWithdraw, safe, safe);
 
-        uint256 usdcTokenBefore = ERC20(usdc).balanceOf(safe);
+        uint256 assetBefore = ERC20(outputAsset).balanceOf(safe);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
 
-        uint256 usdcTokenReceived = ERC20(usdc).balanceOf(safe) - usdcTokenBefore;
+        uint256 assetReceived = ERC20(outputAsset).balanceOf(safe) - assetBefore;
 
-        //scale for decimals difference between USDC (6) and FraxUSD (18)
-        uint256 scaledUsdcTokenReceived = usdcTokenReceived * 10 ** 12;
-        if (scaledUsdcTokenReceived < amountToWithdraw) revert InsufficientReturnAmount();
+        if (assetReceived < minReceiveAmount) revert InsufficientReturnAmount();
 
-        emit Withdrawal(safe, amountToWithdraw, scaledUsdcTokenReceived);
+        emit Withdrawal(safe, outputAsset, amountToWithdraw, assetReceived);
     }
 
     /**

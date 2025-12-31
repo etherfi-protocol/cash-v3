@@ -4,11 +4,11 @@ pragma solidity ^0.8.28;
 import { stdJson } from "forge-std/StdJson.sol";
 
 import { EtherFiDataProvider } from "../src/data-provider/EtherFiDataProvider.sol";
+import { ICashModule } from "../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 import { FraxModule } from "../src/modules/frax/FraxModule.sol";
 import { IAggregatorV3, PriceProvider } from "../src/oracle/PriceProvider.sol";
 import { ChainConfig, Utils } from "./utils/Utils.sol";
-import { ICashModule } from "../src/interfaces/ICashModule.sol";
 
 contract DeployFraxModule is Utils {
     address fraxusd = 0x397F939C3b91A74C321ea7129396492bA9Cdce82;
@@ -21,7 +21,6 @@ contract DeployFraxModule is Utils {
     PriceProvider priceProvider;
     ICashModule cashModule;
     address dataProvider;
-
 
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -40,19 +39,29 @@ contract DeployFraxModule is Utils {
         //deploy frax module
         FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, usdc, custodian, remoteHop);
 
-        address[] memory defaultModules = new address[](1);
-        defaultModules[0] = address(fraxModule);
+        address[] memory modules = new address[](1);
+        modules[0] = address(fraxModule);
 
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
         //configure default module in data provider
-        EtherFiDataProvider(dataProvider).configureDefaultModules(defaultModules, shouldWhitelist);
+        EtherFiDataProvider(dataProvider).configureDefaultModules(modules, shouldWhitelist);
 
         address[] memory tokens = new address[](1);
         tokens[0] = fraxusd;
 
-        PriceProvider.Config memory fraxUsdConfig = PriceProvider.Config({ oracle: fraxUsdPriceOracle, priceFunctionCalldata: "", isChainlinkType: true, oraclePriceDecimals: IAggregatorV3(fraxUsdPriceOracle).decimals(), maxStaleness: 2 days, dataType: PriceProvider.ReturnType.Int256, isBaseTokenEth: false, isStableToken: true, isBaseTokenBtc: false });
+        PriceProvider.Config memory fraxUsdConfig = PriceProvider.Config({
+            oracle: fraxUsdPriceOracle,
+            priceFunctionCalldata: "",
+            isChainlinkType: true,
+            oraclePriceDecimals: IAggregatorV3(fraxUsdPriceOracle).decimals(),
+            maxStaleness: 2 days,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: true, //Stable coin
+            isBaseTokenBtc: false
+        });
         PriceProvider.Config[] memory fraxUsdConfigs = new PriceProvider.Config[](1);
         fraxUsdConfigs[0] = fraxUsdConfig;
 
@@ -60,7 +69,7 @@ contract DeployFraxModule is Utils {
         PriceProvider(priceProvider).setTokenConfig(tokens, fraxUsdConfigs);
 
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
-            ltv: 90e18,
+            ltv: 90e18, //confirmed
             liquidationThreshold: 95e18,
             liquidationBonus: 1e18
         });
@@ -72,9 +81,10 @@ contract DeployFraxModule is Utils {
         debtManager.supportCollateralToken(address(fraxusd), collateralConfig);
         debtManager.supportBorrowToken(address(fraxusd), borrowApy, minShares);
 
-
         address[] memory withdrawableAssets = new address[](1);
         withdrawableAssets[0] = address(fraxusd);
+
+        ICashModule(cashModule).configureModulesCanRequestWithdraw(modules, shouldWhitelist);
 
         //cash module set withdrawable asset
         ICashModule(cashModule).configureWithdrawAssets(withdrawableAssets, shouldWhitelist);
