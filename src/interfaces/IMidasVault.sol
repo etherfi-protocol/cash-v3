@@ -34,7 +34,8 @@ interface IMidasVault {
      * Transfers fee in mToken to feeReceiver
      * @param tokenOut stable coin token address to redeem to
      * @param amountMTokenIn amount of mToken to redeem (decimals 18)
+     * @param recipient address to receive the redeemed tokens
      * @return request id
      */
-    function redeemRequest(address tokenOut, uint256 amountMTokenIn) external returns (uint256);
+    function redeemRequest(address tokenOut, uint256 amountMTokenIn, address recipient) external returns (uint256);
 }
