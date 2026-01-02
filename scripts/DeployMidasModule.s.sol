@@ -39,8 +39,32 @@ contract DeployMidasModule is Utils {
 
         cashModule = ICashModule(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "CashModule")));
 
+        // Prepare arrays for Midas module deployment
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = midasToken;
+
+        address[] memory depositVaults = new address[](1);
+        depositVaults[0] = depositVault;
+
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = redemptionVault;
+
+        // Supported assets for the Midas token (USDC and USDT)
+        address[] memory supportedAssets = new address[](2);
+        supportedAssets[0] = usdc;
+        supportedAssets[1] = usdt;
+
+        address[][] memory supportedAssetsArray = new address[][](1);
+        supportedAssetsArray[0] = supportedAssets;
+
         //deploy Midas module
-        MidasModule midasModule = new MidasModule(dataProvider, usdc, usdt, midasToken, depositVault, redemptionVault);
+        MidasModule midasModule = new MidasModule(
+            dataProvider,
+            midasTokens,
+            depositVaults,
+            redemptionVaults,
+            supportedAssetsArray
+        );
 
         address[] memory defaultModules = new address[](1);
         defaultModules[0] = address(midasModule);
@@ -71,7 +95,11 @@ contract DeployMidasModule is Utils {
         //price provider set oracle
         PriceProvider(priceProvider).setTokenConfig(tokens, midasConfigs);
 
-        IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({ ltv: 90e18, liquidationThreshold: 95e18, liquidationBonus: 1e18 });
+        IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
+            ltv: 90e18,
+            liquidationThreshold: 95e18,
+            liquidationBonus: 1e18 //confirmed with team
+        });
 
         uint64 borrowApy = 1; // ~0%
         uint128 minShares = type(uint128).max; // Since we dont want to use it in borrow mode
@@ -82,6 +110,8 @@ contract DeployMidasModule is Utils {
 
         address[] memory withdrawableAssets = new address[](1);
         withdrawableAssets[0] = address(midasToken);
+
+        ICashModule(cashModule).configureModulesCanRequestWithdraw(defaultModules, shouldWhitelist);
 
         //cash module set withdrawable asset
         ICashModule(cashModule).configureWithdrawAssets(withdrawableAssets, shouldWhitelist);
