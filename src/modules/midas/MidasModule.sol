@@ -419,7 +419,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     function _executeWithdraw(address safe, address midasToken, address _asset, uint256 _amount) internal {
         MidasVaultConfig memory vaultConfig = vaults[midasToken];
         ERC20(midasToken).approve(vaultConfig.redemptionVault, _amount);
-        IMidasVault(vaultConfig.redemptionVault).redeemRequest(_asset, _amount);
+        IMidasVault(vaultConfig.redemptionVault).redeemRequest(_asset, _amount, safe);
 
         emit WithdrawalExecuted(safe, _amount, _asset, midasToken);
     }
