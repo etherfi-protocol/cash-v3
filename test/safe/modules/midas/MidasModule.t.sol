@@ -10,6 +10,7 @@ import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.sol";
 import { MidasModule } from "../../../../src/modules/midas/MidasModule.sol";
 import { IAggregatorV3 } from "../../../../src/oracle/PriceProvider.sol";
+import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 
 contract MidasModuleTest is SafeTestSetup {
@@ -33,7 +34,25 @@ contract MidasModuleTest is SafeTestSetup {
 
         vm.startPrank(owner);
 
-        midasModule = new MidasModule(address(dataProvider), address(usdc), address(usdt), address(midasToken), depositVault, redemptionVault);
+        // Prepare arrays for Midas module deployment
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = address(midasToken);
+
+        address[] memory depositVaults = new address[](1);
+        depositVaults[0] = depositVault;
+
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = redemptionVault;
+
+        // Supported assets for the Midas token (USDC and USDT)
+        address[] memory supportedAssets = new address[](2);
+        supportedAssets[0] = address(usdc);
+        supportedAssets[1] = address(usdt);
+
+        address[][] memory supportedAssetsArray = new address[][](1);
+        supportedAssetsArray[0] = supportedAssets;
+
+        midasModule = new MidasModule(address(dataProvider), midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
 
         address[] memory modules = new address[](1);
         modules[0] = address(midasModule);
@@ -60,7 +79,7 @@ contract MidasModuleTest is SafeTestSetup {
 
         uint256 minReturnAmount = amount * 10 ** 12; //1:1 minting
 
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdc), amount, minReturnAmount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdc), address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -71,7 +90,7 @@ contract MidasModuleTest is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit MidasModule.Deposit(address(safe), address(usdc), amount, address(midasToken), minReturnAmount);
 
-        midasModule.deposit(address(safe), address(usdc), amount, minReturnAmount, owner1, signature);
+        midasModule.deposit(address(safe), address(usdc), address(midasToken), amount, minReturnAmount, owner1, signature);
 
         uint256 usdcAfter = usdc.balanceOf(address(safe));
         uint256 midasAfter = midasToken.balanceOf(address(safe));
@@ -86,7 +105,7 @@ contract MidasModuleTest is SafeTestSetup {
 
         uint256 minReturnAmount = amount * 10 ** 12; //1:1 minting
 
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdt), amount, minReturnAmount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdt), address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -97,7 +116,7 @@ contract MidasModuleTest is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit MidasModule.Deposit(address(safe), address(usdt), amount, address(midasToken), minReturnAmount);
 
-        midasModule.deposit(address(safe), address(usdt), amount, minReturnAmount, owner1, signature);
+        midasModule.deposit(address(safe), address(usdt), address(midasToken), amount, minReturnAmount, owner1, signature);
 
         uint256 usdtAfter = usdt.balanceOf(address(safe));
         uint256 midasAfter = midasToken.balanceOf(address(safe));
@@ -119,7 +138,7 @@ contract MidasModuleTest is SafeTestSetup {
         uint256 minReceiveAmount = amount - ((amount * instantFee) / 10_000); //subtracting the instantFee set in contract
         uint256 scaledMinReceiveAmount = minReceiveAmount / 10 ** 12;
 
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(amount, address(usdc), minReceiveAmount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(midasToken), amount, address(usdc), minReceiveAmount))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -130,7 +149,7 @@ contract MidasModuleTest is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit MidasModule.Withdrawal(address(safe), address(midasToken), amount, address(usdc), scaledMinReceiveAmount);
 
-        midasModule.withdraw(address(safe), amount, address(usdc), minReceiveAmount, owner1, signature);
+        midasModule.withdraw(address(safe), address(midasToken), amount, address(usdc), minReceiveAmount, owner1, signature);
 
         uint256 midasAfter = midasToken.balanceOf(address(safe));
         uint256 usdcAfter = usdc.balanceOf(address(safe));
@@ -151,7 +170,7 @@ contract MidasModuleTest is SafeTestSetup {
         uint256 minReceiveAmount = amount - ((amount * instantFee) / 10_000); //subtracting the instantFee set in contract
         uint256 scaledMinReceiveAmount = minReceiveAmount / 10 ** 12;
 
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(amount, address(usdt), minReceiveAmount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(midasToken), amount, address(usdt), minReceiveAmount))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -162,7 +181,7 @@ contract MidasModuleTest is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit MidasModule.Withdrawal(address(safe), address(midasToken), amount, address(usdt), scaledMinReceiveAmount);
 
-        midasModule.withdraw(address(safe), amount, address(usdt), minReceiveAmount, owner1, signature);
+        midasModule.withdraw(address(safe), address(midasToken), amount, address(usdt), minReceiveAmount, owner1, signature);
 
         uint256 midasAfter = midasToken.balanceOf(address(safe));
         uint256 usdtAfter = usdt.balanceOf(address(safe));
@@ -177,16 +196,7 @@ contract MidasModuleTest is SafeTestSetup {
         deal(address(midasToken), address(safe), amount);
         deal(address(safe), 1 ether);
 
-        bytes32 digestHash = keccak256(
-                abi.encodePacked(
-                    midasModule.REQUEST_WITHDRAW_SIG(),
-                    block.chainid,
-                    address(midasModule),
-                    midasModule.getNonce(address(safe)), //nonce
-                    safe,
-                    abi.encode(midasToken, address(usdc), amount)
-                )
-            ).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.REQUEST_WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), safe, abi.encode(address(midasToken), address(usdc), amount))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
 
@@ -197,7 +207,7 @@ contract MidasModuleTest is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit MidasModule.WithdrawalRequested(address(safe), amount, address(usdc), address(midasToken));
 
-        midasModule.requestWithdrawal(address(safe), address(usdc), amount, owner1, signature);
+        midasModule.requestWithdrawal(address(safe), address(midasToken), address(usdc), amount, owner1, signature);
 
         (uint64 withdrawalDelay,,) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay);
@@ -242,7 +252,7 @@ contract MidasModuleTest is SafeTestSetup {
         uint256 amount = 10 * 10 ** 18;
         deal(address(midasToken), address(safe), amount);
 
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.REQUEST_WITHDRAW_SIG(), block.chainid, address(midasModule), safe.nonce(), address(safe), abi.encode(address(midasToken), address(usdc), amount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.REQUEST_WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(midasToken), address(usdc), amount))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
@@ -253,7 +263,7 @@ contract MidasModuleTest is SafeTestSetup {
         emit MidasModule.WithdrawalRequested(address(safe), amount, address(usdc), address(midasToken));
         vm.expectEmit(true, true, true, true);
         emit MidasModule.WithdrawalExecuted(address(safe), amount, address(usdc), address(midasToken));
-        midasModule.requestWithdrawal(address(safe), address(usdc), amount, owner1, signature);
+        midasModule.requestWithdrawal(address(safe), address(midasToken), address(usdc), amount, owner1, signature);
 
         uint256 midasAfter = midasToken.balanceOf(address(safe));
         assertEq(midasAfter, midasBefore - amount);
@@ -267,7 +277,7 @@ contract MidasModuleTest is SafeTestSetup {
 
         uint256 minReturnAmount = amount * 10 ** 12;
 
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdc), amount, minReturnAmount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdc), address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
 
         // Sign with a different private key
         uint256 wrongPrivateKey = 0x54321;
@@ -275,7 +285,7 @@ contract MidasModuleTest is SafeTestSetup {
         bytes memory invalidSignature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(); // Should revert due to ECDSA recovery failure
-        midasModule.deposit(address(safe), address(usdc), amount, minReturnAmount, owner1, invalidSignature);
+        midasModule.deposit(address(safe), address(usdc), address(midasToken), amount, minReturnAmount, owner1, invalidSignature);
     }
 
     function test_deposit_revertsForNonAdminSigner() public {
@@ -294,7 +304,7 @@ contract MidasModuleTest is SafeTestSetup {
                     address(midasModule),
                     midasModule.getNonce(address(safe)), //nonce
                     address(safe),
-                    abi.encode(address(usdc), amount, minReturnAmount)
+                    abi.encode(address(usdc), address(midasToken), amount, minReturnAmount)
                 )
             ).toEthSignedMessageHash();
 
@@ -304,7 +314,7 @@ contract MidasModuleTest is SafeTestSetup {
 
         // Try to use a non-admin signer
         vm.expectRevert();
-        midasModule.deposit(address(safe), address(usdc), amount, minReturnAmount, nonAdmin, validSignature);
+        midasModule.deposit(address(safe), address(usdc), address(midasToken), amount, minReturnAmount, nonAdmin, validSignature);
     }
 
     function test_deposit_revertsWithZeroAmount() public {
@@ -320,7 +330,7 @@ contract MidasModuleTest is SafeTestSetup {
                     address(midasModule),
                     midasModule.getNonce(address(safe)), //nonce
                     address(safe),
-                    abi.encode(address(usdc), amount, minReturnAmount)
+                    abi.encode(address(usdc), address(midasToken), amount, minReturnAmount)
                 )
             ).toEthSignedMessageHash();
 
@@ -328,7 +338,7 @@ contract MidasModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        midasModule.deposit(address(safe), address(usdc), amount, minReturnAmount, owner1, signature);
+        midasModule.deposit(address(safe), address(usdc), address(midasToken), amount, minReturnAmount, owner1, signature);
     }
 
     function test_deposit_revertsWithInsufficientBalance() public {
@@ -348,7 +358,7 @@ contract MidasModuleTest is SafeTestSetup {
                     address(midasModule),
                     midasModule.getNonce(address(safe)), //nonce
                     address(safe),
-                    abi.encode(address(usdc), amount, minReturnAmount)
+                    abi.encode(address(usdc), address(midasToken), amount, minReturnAmount)
                 )
             ).toEthSignedMessageHash();
 
@@ -356,7 +366,7 @@ contract MidasModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
-        midasModule.deposit(address(safe), address(usdc), amount, minReturnAmount, owner1, signature);
+        midasModule.deposit(address(safe), address(usdc), address(midasToken), amount, minReturnAmount, owner1, signature);
     }
 
     function test_withdraw_revertsWithZeroAmount() public {
@@ -365,13 +375,13 @@ contract MidasModuleTest is SafeTestSetup {
         uint128 amount = 0;
         uint256 minReceiveAmount = 1000 * 10 ** 18;
 
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(amount, address(usdc), minReceiveAmount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(midasToken), amount, address(usdc), minReceiveAmount))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        midasModule.withdraw(address(safe), amount, address(usdc), minReceiveAmount, owner1, signature);
+        midasModule.withdraw(address(safe), address(midasToken), amount, address(usdc), minReceiveAmount, owner1, signature);
     }
 
     function test_withdraw_revertsWithInsufficientBalance() public {
@@ -393,7 +403,7 @@ contract MidasModuleTest is SafeTestSetup {
                     address(midasModule),
                     midasModule.getNonce(address(safe)), //nonce
                     address(safe),
-                    abi.encode(amount, address(usdc), minReceiveAmount)
+                    abi.encode(address(midasToken), amount, address(usdc), minReceiveAmount)
                 )
             ).toEthSignedMessageHash();
 
@@ -401,7 +411,7 @@ contract MidasModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
-        midasModule.withdraw(address(safe), amount, address(usdc), minReceiveAmount, owner1, signature);
+        midasModule.withdraw(address(safe), address(midasToken), amount, address(usdc), minReceiveAmount, owner1, signature);
     }
 
     function test_withdraw_revertsWithInvalidSignature() public {
@@ -421,7 +431,7 @@ contract MidasModuleTest is SafeTestSetup {
                     address(midasModule),
                     midasModule.getNonce(address(safe)), //nonce
                     address(safe),
-                    abi.encode(amount, address(usdc), minReceiveAmount)
+                    abi.encode(address(midasToken), amount, address(usdc), minReceiveAmount)
                 )
             ).toEthSignedMessageHash();
 
@@ -429,7 +439,7 @@ contract MidasModuleTest is SafeTestSetup {
         bytes memory invalidSignature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        midasModule.withdraw(address(safe), amount, address(usdc), minReceiveAmount, owner1, invalidSignature);
+        midasModule.withdraw(address(safe), address(midasToken), amount, address(usdc), minReceiveAmount, owner1, invalidSignature);
     }
 
     function test_withdraw_revertsForNonAdminSigner() public {
@@ -449,7 +459,7 @@ contract MidasModuleTest is SafeTestSetup {
                     address(midasModule),
                     uint256(0), // nonce
                     fakeSafe,
-                    abi.encode(amount, address(usdc), minReceiveAmount)
+                    abi.encode(address(midasToken), amount, address(usdc), minReceiveAmount)
                 )
             ).toEthSignedMessageHash();
 
@@ -457,7 +467,7 @@ contract MidasModuleTest is SafeTestSetup {
         bytes memory invalidSignature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
-        midasModule.withdraw(address(fakeSafe), amount, address(usdc), minReceiveAmount, owner1, invalidSignature);
+        midasModule.withdraw(address(fakeSafe), address(midasToken), amount, address(usdc), minReceiveAmount, owner1, invalidSignature);
     }
 
     function test_executeWithdrawal_reverts_ifWithdrawalDelayIsNotOver() public {
@@ -487,7 +497,7 @@ contract MidasModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
 
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
-        midasModule.requestWithdrawal(address(safe), address(usdc), amount, owner1, signature);
+        midasModule.requestWithdrawal(address(safe), address(midasToken), address(usdc), amount, owner1, signature);
     }
 
     function test_requestAsyncWithdrawal_invalidInput() public {
@@ -501,7 +511,7 @@ contract MidasModuleTest is SafeTestSetup {
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         //Test with zero address for asset
-        midasModule.requestWithdrawal(address(safe), address(0), amount, owner1, signature);
+        midasModule.requestWithdrawal(address(safe), address(midasToken), address(0), amount, owner1, signature);
 
         // Test with zero amount
         bytes32 digestHash1 = keccak256(abi.encodePacked(midasModule.REQUEST_WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), safe, abi.encode(address(midasToken), address(usdc), 0))).toEthSignedMessageHash();
@@ -511,7 +521,7 @@ contract MidasModuleTest is SafeTestSetup {
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         //Test with zero amount
-        midasModule.requestWithdrawal(address(safe), address(usdc), 0, owner1, signature1);
+        midasModule.requestWithdrawal(address(safe), address(midasToken), address(usdc), 0, owner1, signature1);
     }
 
     function _requestWithdrawal(uint256 amount) internal {
@@ -522,7 +532,7 @@ contract MidasModuleTest is SafeTestSetup {
                     address(midasModule),
                     midasModule.getNonce(address(safe)), //nonce
                     safe,
-                    abi.encode(midasToken, address(usdc), amount)
+                    abi.encode(address(midasToken), address(usdc), amount)
                 )
             ).toEthSignedMessageHash();
 
@@ -531,6 +541,353 @@ contract MidasModuleTest is SafeTestSetup {
 
         vm.expectEmit(true, true, true, true);
         emit MidasModule.WithdrawalRequested(address(safe), amount, address(usdc), address(midasToken));
-        midasModule.requestWithdrawal(address(safe), address(usdc), amount, owner1, signature);
+        midasModule.requestWithdrawal(address(safe), address(midasToken), address(usdc), amount, owner1, signature);
+    }
+
+    function test_deposit_revertsWithUnsupportedMidasToken() public {
+        uint256 amount = 1000 * 10 ** 6;
+        deal(address(usdc), address(safe), amount);
+        uint256 minReturnAmount = amount * 10 ** 12;
+
+        address unsupportedMidasToken = makeAddr("unsupportedMidasToken");
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdc), unsupportedMidasToken, amount, minReturnAmount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(MidasModule.UnsupportedMidasToken.selector);
+        midasModule.deposit(address(safe), address(usdc), unsupportedMidasToken, amount, minReturnAmount, owner1, signature);
+    }
+
+    function test_deposit_revertsWithUnsupportedAsset() public {
+        uint256 amount = 1000 * 10 ** 6;
+        IERC20 unsupportedAsset = IERC20(0x397F939C3b91A74C321ea7129396492bA9Cdce82); //Frax USD
+        deal(address(unsupportedAsset), address(safe), amount);
+        uint256 minReturnAmount = amount * 10 ** 12;
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(unsupportedAsset, address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(MidasModule.UnsupportedAsset.selector);
+        midasModule.deposit(address(safe), address(unsupportedAsset), address(midasToken), amount, minReturnAmount, owner1, signature);
+    }
+
+    function test_deposit_revertsWithInsufficientReturnAmount() public {
+        uint256 amount = 1000 * 10 ** 6;
+        deal(address(usdc), address(safe), amount);
+        // Set minReturnAmount higher than what the vault will return
+        // The vault will revert with CallFailed, not InsufficientReturnAmount
+        uint256 minReturnAmount = amount * 10 ** 12 + 1;
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdc), address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        // The vault call will fail first, causing CallFailed
+        vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.CallFailed.selector, 1));
+        midasModule.deposit(address(safe), address(usdc), address(midasToken), amount, minReturnAmount, owner1, signature);
+    }
+
+    function test_deposit_revertsWithZeroAddress() public {
+        uint256 amount = 1000 * 10 ** 6;
+        deal(address(usdc), address(safe), amount);
+        uint256 minReturnAmount = amount * 10 ** 12;
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(0), address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        midasModule.deposit(address(safe), address(0), address(midasToken), amount, minReturnAmount, owner1, signature);
+    }
+
+    function test_withdraw_revertsWithUnsupportedMidasToken() public {
+        uint128 amount = 1000 * 10 ** 18;
+        // Use a real address that isn't a supported Midas token
+        address unsupportedMidasToken = 0x397F939C3b91A74C321ea7129396492bA9Cdce82; //Frax USD
+        deal(address(midasToken), address(safe), amount);
+        uint256 minReceiveAmount = amount;
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(unsupportedMidasToken, amount, address(usdc), minReceiveAmount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(MidasModule.UnsupportedMidasToken.selector);
+        midasModule.withdraw(address(safe), unsupportedMidasToken, amount, address(usdc), minReceiveAmount, owner1, signature);
+    }
+
+    function test_withdraw_revertsWithUnsupportedAsset() public {
+        uint128 amount = 1000 * 10 ** 18;
+        deal(address(midasToken), address(safe), amount);
+        address unsupportedAsset = makeAddr("unsupportedAsset");
+        uint256 minReceiveAmount = amount;
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(midasToken), amount, unsupportedAsset, minReceiveAmount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(MidasModule.UnsupportedAsset.selector);
+        midasModule.withdraw(address(safe), address(midasToken), amount, unsupportedAsset, minReceiveAmount, owner1, signature);
+    }
+
+    function test_withdraw_revertsWithInsufficientReturnAmount() public {
+        vm.prank(owner);
+        uint128 amount = 1000 * 10 ** 18;
+        deal(address(midasToken), address(safe), amount);
+        deal(address(usdc), address(redemptionVault), 1); // Very small amount
+
+        uint256 minReceiveAmount = amount; // Expecting full amount but will receive very little
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(midasToken), amount, address(usdc), minReceiveAmount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        // The vault call will fail first, causing CallFailed
+        vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.CallFailed.selector, 1));
+        midasModule.withdraw(address(safe), address(midasToken), amount, address(usdc), minReceiveAmount, owner1, signature);
+    }
+
+    function test_requestWithdrawal_revertsWithUnsupportedMidasToken() public {
+        uint256 amount = 1000 * 10 ** 18;
+        // Use a real address that isn't a supported Midas token
+        address unsupportedMidasToken = 0x397F939C3b91A74C321ea7129396492bA9Cdce82; //Frax USD
+        deal(address(midasToken), address(safe), amount);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.REQUEST_WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), safe, abi.encode(unsupportedMidasToken, address(usdc), amount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(MidasModule.UnsupportedMidasToken.selector);
+        midasModule.requestWithdrawal(address(safe), unsupportedMidasToken, address(usdc), amount, owner1, signature);
+    }
+
+    function test_requestWithdrawal_revertsWithUnsupportedAsset() public {
+        uint256 amount = 1000 * 10 ** 18;
+        deal(address(midasToken), address(safe), amount);
+        address unsupportedAsset = makeAddr("unsupportedAsset");
+
+        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.REQUEST_WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), safe, abi.encode(address(midasToken), unsupportedAsset, amount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(MidasModule.UnsupportedAsset.selector);
+        midasModule.requestWithdrawal(address(safe), address(midasToken), unsupportedAsset, amount, owner1, signature);
+    }
+
+    function test_getPendingWithdrawal_returnsCorrectData() public {
+        uint256 amount = 1000 * 10 ** 18;
+        deal(address(midasToken), address(safe), amount);
+
+        _requestWithdrawal(amount);
+
+        MidasModule.AsyncWithdrawal memory withdrawal = midasModule.getPendingWithdrawal(address(safe));
+        assertEq(withdrawal.amount, amount);
+        assertEq(withdrawal.asset, address(usdc));
+        assertEq(withdrawal.midasToken, address(midasToken));
+    }
+
+    function test_getPendingWithdrawal_returnsEmptyWhenNoWithdrawal() public view {
+        MidasModule.AsyncWithdrawal memory withdrawal = midasModule.getPendingWithdrawal(address(safe));
+        assertEq(withdrawal.amount, 0);
+        assertEq(withdrawal.asset, address(0));
+        assertEq(withdrawal.midasToken, address(0));
+    }
+
+    // Admin function tests
+    function test_addMidasVaults_success() public {
+        vm.startPrank(owner);
+        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
+        vm.stopPrank();
+
+        address newMidasToken = makeAddr("newMidasToken");
+        address newDepositVault = makeAddr("newDepositVault");
+        address newRedemptionVault = makeAddr("newRedemptionVault");
+        address newAsset = makeAddr("newAsset");
+
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = newMidasToken;
+
+        address[] memory depositVaults = new address[](1);
+        depositVaults[0] = newDepositVault;
+
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = newRedemptionVault;
+
+        address[] memory supportedAssets = new address[](1);
+        supportedAssets[0] = newAsset;
+
+        address[][] memory supportedAssetsArray = new address[][](1);
+        supportedAssetsArray[0] = supportedAssets;
+
+        vm.expectEmit(true, true, true, true);
+        emit MidasModule.MidasVaultsAdded(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+
+        vm.prank(owner);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+
+        (address depositVaultResult, address redemptionVaultResult) = midasModule.vaults(newMidasToken);
+        assertEq(depositVaultResult, newDepositVault);
+        assertEq(redemptionVaultResult, newRedemptionVault);
+        assertTrue(midasModule.vaultSupportedAssets(newMidasToken, newAsset));
+    }
+
+    function test_addMidasVaults_revertsWhenUnauthorized() public {
+        address newMidasToken = makeAddr("newMidasToken");
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = newMidasToken;
+
+        address[] memory depositVaults = new address[](1);
+        depositVaults[0] = makeAddr("depositVault");
+
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = makeAddr("redemptionVault");
+
+        address[][] memory supportedAssetsArray = new address[][](1);
+        supportedAssetsArray[0] = new address[](0);
+
+        vm.expectRevert(MidasModule.Unauthorized.selector);
+        vm.prank(owner1);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+    }
+
+    function test_addMidasVaults_revertsWithArrayLengthMismatch() public {
+        vm.startPrank(owner);
+        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
+        vm.stopPrank();
+
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = makeAddr("midasToken");
+
+        address[] memory depositVaults = new address[](2); // Mismatch
+        depositVaults[0] = makeAddr("depositVault1");
+        depositVaults[1] = makeAddr("depositVault2");
+
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = makeAddr("redemptionVault");
+
+        address[][] memory supportedAssetsArray = new address[][](1);
+        supportedAssetsArray[0] = new address[](0);
+
+        vm.expectRevert(ModuleBase.ArrayLengthMismatch.selector);
+        vm.prank(owner);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+    }
+
+    function test_addMidasVaults_revertsWithZeroAddress() public {
+        vm.startPrank(owner);
+        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
+        vm.stopPrank();
+
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = address(0); // Zero address
+
+        address[] memory depositVaults = new address[](1);
+        depositVaults[0] = makeAddr("depositVault");
+
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = makeAddr("redemptionVault");
+
+        address[][] memory supportedAssetsArray = new address[][](1);
+        supportedAssetsArray[0] = new address[](0);
+
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        vm.prank(owner);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+    }
+
+    function test_removeMidasVaults_success() public {
+        vm.startPrank(owner);
+        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
+        vm.stopPrank();
+
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = address(midasToken);
+
+        vm.expectEmit(true, true, true, true);
+        emit MidasModule.MidasVaultsRemoved(midasTokens);
+
+        vm.prank(owner);
+        midasModule.removeMidasVaults(midasTokens);
+
+        (address depositVaultResult, address redemptionVaultResult) = midasModule.vaults(address(midasToken));
+        assertEq(depositVaultResult, address(0));
+        assertEq(redemptionVaultResult, address(0));
+    }
+
+    function test_removeMidasVaults_revertsWhenUnauthorized() public {
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = address(midasToken);
+
+        vm.expectRevert(MidasModule.Unauthorized.selector);
+        vm.prank(owner1);
+        midasModule.removeMidasVaults(midasTokens);
+    }
+
+    function test_addSupportedAssets_success() public {
+        vm.startPrank(owner);
+        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
+        vm.stopPrank();
+
+        address newAsset = makeAddr("newAsset");
+        address[] memory assets = new address[](1);
+        assets[0] = newAsset;
+
+        vm.expectEmit(true, true, true, true);
+        emit MidasModule.SupportedAssetsAdded(address(midasToken), assets);
+
+        vm.prank(owner);
+        midasModule.addSupportedAssets(address(midasToken), assets);
+
+        assertTrue(midasModule.vaultSupportedAssets(address(midasToken), newAsset));
+    }
+
+    function test_addSupportedAssets_revertsWithUnsupportedMidasToken() public {
+        vm.startPrank(owner);
+        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
+        vm.stopPrank();
+
+        address unsupportedMidasToken = makeAddr("unsupportedMidasToken");
+        address[] memory assets = new address[](1);
+        assets[0] = makeAddr("asset");
+
+        vm.expectRevert(MidasModule.UnsupportedMidasToken.selector);
+        vm.prank(owner);
+        midasModule.addSupportedAssets(unsupportedMidasToken, assets);
+    }
+
+    function test_removeSupportedAssets_success() public {
+        vm.startPrank(owner);
+        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
+        vm.stopPrank();
+
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+
+        vm.expectEmit(true, true, true, true);
+        emit MidasModule.SupportedAssetsRemoved(address(midasToken), assets);
+
+        vm.prank(owner);
+        midasModule.removeSupportedAssets(address(midasToken), assets);
+
+        assertFalse(midasModule.vaultSupportedAssets(address(midasToken), address(usdc)));
+    }
+
+    function test_removeSupportedAssets_revertsWhenUnauthorized() public {
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+
+        vm.expectRevert(MidasModule.Unauthorized.selector);
+        vm.prank(owner1);
+        midasModule.removeSupportedAssets(address(midasToken), assets);
     }
 }
