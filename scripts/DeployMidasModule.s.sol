@@ -49,21 +49,12 @@ contract DeployMidasModule is Utils {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = redemptionVault;
 
-        // Supported assets for the Midas token (USDC and USDT)
-        address[] memory supportedAssets = new address[](2);
-        supportedAssets[0] = usdc;
-        supportedAssets[1] = usdt;
-
-        address[][] memory supportedAssetsArray = new address[][](1);
-        supportedAssetsArray[0] = supportedAssets;
-
         //deploy Midas module
         MidasModule midasModule = new MidasModule(
             dataProvider,
             midasTokens,
             depositVaults,
-            redemptionVaults,
-            supportedAssetsArray
+            redemptionVaults
         );
 
         address[] memory defaultModules = new address[](1);

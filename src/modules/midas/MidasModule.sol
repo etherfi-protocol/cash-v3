@@ -38,9 +38,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /// @notice Mapping from Midas token to vault configuration
     mapping(address midasToken => MidasVaultConfig config) public vaults;
 
-    /// @notice Mapping from Midas token to supported assets
-    mapping(address midasToken => mapping(address asset => bool)) public vaultSupportedAssets;
-
     /// @notice Pending async withdrawal requests per Safe
     mapping(address safe => AsyncWithdrawal withdrawal) private withdrawals;
 
@@ -57,16 +54,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     bytes32 public constant MIDAS_MODULE_ADMIN = keccak256("MIDAS_MODULE_ADMIN");
 
     /// @notice Emitted when new Midas vaults are added to the module
-    event MidasVaultsAdded(address[] midasTokens, address[] depositVaults, address[] redemptionVaults, address[][] supportedAssets);
+    event MidasVaultsAdded(address[] midasTokens, address[] depositVaults, address[] redemptionVaults);
 
     /// @notice Emitted when Midas vaults are removed
     event MidasVaultsRemoved(address[] midasTokens);
-
-    /// @notice Emitted when supported assets are added for a Midas token
-    event SupportedAssetsAdded(address indexed midasToken, address[] assets);
-
-    /// @notice Emitted when supported assets are removed for a Midas token
-    event SupportedAssetsRemoved(address indexed midasToken, address[] assets);
 
     /// @notice Emitted when a Safe deposits assets into a Midas Vault
     event Deposit(address indexed safe, address indexed inputToken, uint256 inputAmount, address indexed outputToken, uint256 outputAmount);
@@ -104,24 +95,17 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param _midasTokens Array of Midas token addresses to initialize
      * @param _depositVaults Array of deposit vault addresses corresponding to the Midas tokens
      * @param _redemptionVaults Array of redemption vault addresses corresponding to the Midas tokens
-     * @param _supportedAssetsArray Array of arrays, where each inner array contains supported asset addresses for the corresponding Midas token
      * @custom:throws InvalidInput If any provided address is zero or arrays are empty
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      */
-    constructor(
-        address _etherFiDataProvider,
-        address[] memory _midasTokens,
-        address[] memory _depositVaults,
-        address[] memory _redemptionVaults,
-        address[][] memory _supportedAssetsArray
-    ) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address[] memory _midasTokens, address[] memory _depositVaults, address[] memory _redemptionVaults) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         if (_etherFiDataProvider == address(0)) revert InvalidInput();
 
         uint256 len = _midasTokens.length;
         if (len == 0) revert InvalidInput();
-        if (len != _depositVaults.length || len != _redemptionVaults.length || len != _supportedAssetsArray.length) revert ArrayLengthMismatch();
+        if (len != _depositVaults.length || len != _redemptionVaults.length) revert ArrayLengthMismatch();
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             address midasToken = _midasTokens[i];
             address depositVault = _depositVaults[i];
             address redemptionVault = _redemptionVaults[i];
@@ -129,18 +113,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
             if (midasToken == address(0) || depositVault == address(0) || redemptionVault == address(0)) revert InvalidInput();
 
             vaults[midasToken] = MidasVaultConfig({ depositVault: depositVault, redemptionVault: redemptionVault });
-
-            // Add supported assets for this Midas token
-            address[] memory assets = _supportedAssetsArray[i];
-            uint256 assetsLen = assets.length;
-            for (uint256 j = 0; j < assetsLen; ) {
-                address asset = assets[j];
-                if (asset == address(0)) revert InvalidInput();
-                vaultSupportedAssets[midasToken][asset] = true;
-                unchecked {
-                    ++j;
-                }
-            }
 
             unchecked {
                 ++i;
@@ -192,7 +164,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     function _scaleAmount(uint256 amount, address sourceToken, address targetToken) internal view returns (uint256) {
         uint8 sourceDecimals = ERC20(sourceToken).decimals();
         uint8 targetDecimals = ERC20(targetToken).decimals();
-        
+
         if (sourceDecimals == targetDecimals) return amount;
         if (sourceDecimals < targetDecimals) {
             return amount * 10 ** (targetDecimals - sourceDecimals);
@@ -206,7 +178,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param safe The Safe address which holds the deposit tokens
      * @param asset The address of the asset to deposit
      * @param midasToken The address of the Midas token to receive
-     * @param amount The amount of deposit tokens to deposit
+     * @param amount The amount of deposit tokens to deposit (in midasToken decimals)
      * @param minReturnAmount The minimum amount of tokens to return (in midasToken decimals)
      * @custom:throws InvalidInput If amount is zero or addresses are invalid
      * @custom:throws UnsupportedMidasToken If the Midas token is not supported
@@ -218,7 +190,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
 
         address depositVault = vaults[midasToken].depositVault;
         if (depositVault == address(0)) revert UnsupportedMidasToken();
-        if (!vaultSupportedAssets[midasToken][asset]) revert UnsupportedAsset();
 
         uint256 scaledAmount = _scaleAmount(amount, asset, midasToken);
         _checkAmountAvailable(safe, asset, amount);
@@ -294,7 +265,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         MidasVaultConfig memory vaultConfig = vaults[midasToken];
         address redemptionVault = vaultConfig.redemptionVault;
         if (redemptionVault == address(0)) revert UnsupportedMidasToken();
-        if (!vaultSupportedAssets[midasToken][asset]) revert UnsupportedAsset();
 
         _checkAmountAvailable(safe, midasToken, amount);
 
@@ -396,7 +366,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
 
         MidasVaultConfig memory vaultConfig = vaults[midasToken];
         if (vaultConfig.redemptionVault == address(0)) revert UnsupportedMidasToken();
-        if (!vaultSupportedAssets[midasToken][asset]) revert UnsupportedAsset();
 
         cashModule.requestWithdrawalByModule(safe, midasToken, amount);
         emit WithdrawalRequested(safe, amount, asset, midasToken);
@@ -429,20 +398,19 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param midasTokens Array of Midas token addresses to add
      * @param depositVaults Array of deposit vault addresses corresponding to the Midas tokens
      * @param redemptionVaults Array of redemption vault addresses corresponding to the Midas tokens
-     * @param supportedAssetsArray Array of arrays, where each inner array contains supported asset addresses for the corresponding Midas token
      * @dev Only callable by accounts with the MIDAS_MODULE_ADMIN role
      * @custom:throws Unauthorized If caller doesn't have the admin role
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
      */
-    function addMidasVaults(address[] calldata midasTokens, address[] calldata depositVaults, address[] calldata redemptionVaults, address[][] calldata supportedAssetsArray) external {
+    function addMidasVaults(address[] calldata midasTokens, address[] calldata depositVaults, address[] calldata redemptionVaults) external {
         if (!etherFiDataProvider.roleRegistry().hasRole(MIDAS_MODULE_ADMIN, msg.sender)) revert Unauthorized();
 
         uint256 len = midasTokens.length;
-        if (len != depositVaults.length || len != redemptionVaults.length || len != supportedAssetsArray.length) revert ArrayLengthMismatch();
+        if (len != depositVaults.length || len != redemptionVaults.length) revert ArrayLengthMismatch();
         if (len == 0) revert InvalidInput();
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             address midasToken = midasTokens[i];
             address depositVault = depositVaults[i];
             address redemptionVault = redemptionVaults[i];
@@ -451,78 +419,12 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
 
             vaults[midasToken] = MidasVaultConfig({ depositVault: depositVault, redemptionVault: redemptionVault });
 
-            // Add supported assets for this Midas token
-            address[] calldata assets = supportedAssetsArray[i];
-            uint256 assetsLen = assets.length;
-            for (uint256 j = 0; j < assetsLen; ) {
-                address asset = assets[j];
-                if (asset == address(0)) revert InvalidInput();
-                vaultSupportedAssets[midasToken][asset] = true;
-                unchecked {
-                    ++j;
-                }
-            }
-
             unchecked {
                 ++i;
             }
         }
 
-        emit MidasVaultsAdded(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
-    }
-
-    /**
-     * @notice Adds supported assets for a Midas token
-     * @param midasToken The Midas token address
-     * @param assets Array of asset addresses to add as supported
-     * @dev Only callable by accounts with the MIDAS_MODULE_ADMIN role
-     * @custom:throws Unauthorized If caller doesn't have the admin role
-     * @custom:throws InvalidInput If the array is empty or midasToken is zero
-     * @custom:throws UnsupportedMidasToken If the Midas token is not supported
-     */
-    function addSupportedAssets(address midasToken, address[] calldata assets) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(MIDAS_MODULE_ADMIN, msg.sender)) revert Unauthorized();
-        if (midasToken == address(0)) revert InvalidInput();
-        if (vaults[midasToken].depositVault == address(0)) revert UnsupportedMidasToken();
-
-        uint256 len = assets.length;
-        if (len == 0) revert InvalidInput();
-
-        for (uint256 i = 0; i < len; ) {
-            address asset = assets[i];
-            if (asset == address(0)) revert InvalidInput();
-            vaultSupportedAssets[midasToken][asset] = true;
-            unchecked {
-                ++i;
-            }
-        }
-
-        emit SupportedAssetsAdded(midasToken, assets);
-    }
-
-    /**
-     * @notice Removes supported assets for a Midas token
-     * @param midasToken The Midas token address
-     * @param assets Array of asset addresses to remove from supported list
-     * @dev Only callable by accounts with the MIDAS_MODULE_ADMIN role
-     * @custom:throws Unauthorized If caller doesn't have the admin role
-     * @custom:throws InvalidInput If the array is empty or midasToken is zero
-     */
-    function removeSupportedAssets(address midasToken, address[] calldata assets) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(MIDAS_MODULE_ADMIN, msg.sender)) revert Unauthorized();
-        if (midasToken == address(0)) revert InvalidInput();
-
-        uint256 len = assets.length;
-        if (len == 0) revert InvalidInput();
-
-        for (uint256 i = 0; i < len; ) {
-            vaultSupportedAssets[midasToken][assets[i]] = false;
-            unchecked {
-                ++i;
-            }
-        }
-
-        emit SupportedAssetsRemoved(midasToken, assets);
+        emit MidasVaultsAdded(midasTokens, depositVaults, redemptionVaults);
     }
 
     /**
@@ -538,7 +440,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         uint256 len = midasTokens.length;
         if (len == 0) revert InvalidInput();
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             delete vaults[midasTokens[i]];
             unchecked {
                 ++i;

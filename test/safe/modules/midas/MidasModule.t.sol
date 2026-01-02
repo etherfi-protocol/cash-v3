@@ -44,15 +44,7 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = redemptionVault;
 
-        // Supported assets for the Midas token (USDC and USDT)
-        address[] memory supportedAssets = new address[](2);
-        supportedAssets[0] = address(usdc);
-        supportedAssets[1] = address(usdt);
-
-        address[][] memory supportedAssetsArray = new address[][](1);
-        supportedAssetsArray[0] = supportedAssets;
-
-        midasModule = new MidasModule(address(dataProvider), midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+        midasModule = new MidasModule(address(dataProvider), midasTokens, depositVaults, redemptionVaults);
 
         address[] memory modules = new address[](1);
         modules[0] = address(midasModule);
@@ -560,21 +552,6 @@ contract MidasModuleTest is SafeTestSetup {
         midasModule.deposit(address(safe), address(usdc), unsupportedMidasToken, amount, minReturnAmount, owner1, signature);
     }
 
-    function test_deposit_revertsWithUnsupportedAsset() public {
-        uint256 amount = 1000 * 10 ** 6;
-        IERC20 unsupportedAsset = IERC20(0x397F939C3b91A74C321ea7129396492bA9Cdce82); //Frax USD
-        deal(address(unsupportedAsset), address(safe), amount);
-        uint256 minReturnAmount = amount * 10 ** 12;
-
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(unsupportedAsset, address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
-
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
-
-        vm.expectRevert(MidasModule.UnsupportedAsset.selector);
-        midasModule.deposit(address(safe), address(unsupportedAsset), address(midasToken), amount, minReturnAmount, owner1, signature);
-    }
-
     function test_deposit_revertsWithInsufficientReturnAmount() public {
         uint256 amount = 1000 * 10 ** 6;
         deal(address(usdc), address(safe), amount);
@@ -622,21 +599,6 @@ contract MidasModuleTest is SafeTestSetup {
         midasModule.withdraw(address(safe), unsupportedMidasToken, amount, address(usdc), minReceiveAmount, owner1, signature);
     }
 
-    function test_withdraw_revertsWithUnsupportedAsset() public {
-        uint128 amount = 1000 * 10 ** 18;
-        deal(address(midasToken), address(safe), amount);
-        address unsupportedAsset = makeAddr("unsupportedAsset");
-        uint256 minReceiveAmount = amount;
-
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(midasToken), amount, unsupportedAsset, minReceiveAmount))).toEthSignedMessageHash();
-
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
-
-        vm.expectRevert(MidasModule.UnsupportedAsset.selector);
-        midasModule.withdraw(address(safe), address(midasToken), amount, unsupportedAsset, minReceiveAmount, owner1, signature);
-    }
-
     function test_withdraw_revertsWithInsufficientReturnAmount() public {
         vm.prank(owner);
         uint128 amount = 1000 * 10 ** 18;
@@ -670,20 +632,6 @@ contract MidasModuleTest is SafeTestSetup {
         midasModule.requestWithdrawal(address(safe), unsupportedMidasToken, address(usdc), amount, owner1, signature);
     }
 
-    function test_requestWithdrawal_revertsWithUnsupportedAsset() public {
-        uint256 amount = 1000 * 10 ** 18;
-        deal(address(midasToken), address(safe), amount);
-        address unsupportedAsset = makeAddr("unsupportedAsset");
-
-        bytes32 digestHash = keccak256(abi.encodePacked(midasModule.REQUEST_WITHDRAW_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), safe, abi.encode(address(midasToken), unsupportedAsset, amount))).toEthSignedMessageHash();
-
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
-
-        vm.expectRevert(MidasModule.UnsupportedAsset.selector);
-        midasModule.requestWithdrawal(address(safe), address(midasToken), unsupportedAsset, amount, owner1, signature);
-    }
-
     function test_getPendingWithdrawal_returnsCorrectData() public {
         uint256 amount = 1000 * 10 ** 18;
         deal(address(midasToken), address(safe), amount);
@@ -712,7 +660,6 @@ contract MidasModuleTest is SafeTestSetup {
         address newMidasToken = makeAddr("newMidasToken");
         address newDepositVault = makeAddr("newDepositVault");
         address newRedemptionVault = makeAddr("newRedemptionVault");
-        address newAsset = makeAddr("newAsset");
 
         address[] memory midasTokens = new address[](1);
         midasTokens[0] = newMidasToken;
@@ -723,22 +670,15 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = newRedemptionVault;
 
-        address[] memory supportedAssets = new address[](1);
-        supportedAssets[0] = newAsset;
-
-        address[][] memory supportedAssetsArray = new address[][](1);
-        supportedAssetsArray[0] = supportedAssets;
-
         vm.expectEmit(true, true, true, true);
-        emit MidasModule.MidasVaultsAdded(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+        emit MidasModule.MidasVaultsAdded(midasTokens, depositVaults, redemptionVaults);
 
         vm.prank(owner);
-        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
 
         (address depositVaultResult, address redemptionVaultResult) = midasModule.vaults(newMidasToken);
         assertEq(depositVaultResult, newDepositVault);
         assertEq(redemptionVaultResult, newRedemptionVault);
-        assertTrue(midasModule.vaultSupportedAssets(newMidasToken, newAsset));
     }
 
     function test_addMidasVaults_revertsWhenUnauthorized() public {
@@ -752,12 +692,9 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = makeAddr("redemptionVault");
 
-        address[][] memory supportedAssetsArray = new address[][](1);
-        supportedAssetsArray[0] = new address[](0);
-
         vm.expectRevert(MidasModule.Unauthorized.selector);
         vm.prank(owner1);
-        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
     }
 
     function test_addMidasVaults_revertsWithArrayLengthMismatch() public {
@@ -775,12 +712,9 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = makeAddr("redemptionVault");
 
-        address[][] memory supportedAssetsArray = new address[][](1);
-        supportedAssetsArray[0] = new address[](0);
-
         vm.expectRevert(ModuleBase.ArrayLengthMismatch.selector);
         vm.prank(owner);
-        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
     }
 
     function test_addMidasVaults_revertsWithZeroAddress() public {
@@ -797,12 +731,9 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = makeAddr("redemptionVault");
 
-        address[][] memory supportedAssetsArray = new address[][](1);
-        supportedAssetsArray[0] = new address[](0);
-
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         vm.prank(owner);
-        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults, supportedAssetsArray);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
     }
 
     function test_removeMidasVaults_success() public {
@@ -833,61 +764,4 @@ contract MidasModuleTest is SafeTestSetup {
         midasModule.removeMidasVaults(midasTokens);
     }
 
-    function test_addSupportedAssets_success() public {
-        vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
-        vm.stopPrank();
-
-        address newAsset = makeAddr("newAsset");
-        address[] memory assets = new address[](1);
-        assets[0] = newAsset;
-
-        vm.expectEmit(true, true, true, true);
-        emit MidasModule.SupportedAssetsAdded(address(midasToken), assets);
-
-        vm.prank(owner);
-        midasModule.addSupportedAssets(address(midasToken), assets);
-
-        assertTrue(midasModule.vaultSupportedAssets(address(midasToken), newAsset));
-    }
-
-    function test_addSupportedAssets_revertsWithUnsupportedMidasToken() public {
-        vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
-        vm.stopPrank();
-
-        address unsupportedMidasToken = makeAddr("unsupportedMidasToken");
-        address[] memory assets = new address[](1);
-        assets[0] = makeAddr("asset");
-
-        vm.expectRevert(MidasModule.UnsupportedMidasToken.selector);
-        vm.prank(owner);
-        midasModule.addSupportedAssets(unsupportedMidasToken, assets);
-    }
-
-    function test_removeSupportedAssets_success() public {
-        vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.MIDAS_MODULE_ADMIN(), owner);
-        vm.stopPrank();
-
-        address[] memory assets = new address[](1);
-        assets[0] = address(usdc);
-
-        vm.expectEmit(true, true, true, true);
-        emit MidasModule.SupportedAssetsRemoved(address(midasToken), assets);
-
-        vm.prank(owner);
-        midasModule.removeSupportedAssets(address(midasToken), assets);
-
-        assertFalse(midasModule.vaultSupportedAssets(address(midasToken), address(usdc)));
-    }
-
-    function test_removeSupportedAssets_revertsWhenUnauthorized() public {
-        address[] memory assets = new address[](1);
-        assets[0] = address(usdc);
-
-        vm.expectRevert(MidasModule.Unauthorized.selector);
-        vm.prank(owner1);
-        midasModule.removeSupportedAssets(address(midasToken), assets);
-    }
 }
