@@ -244,7 +244,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
      * @return fee MessagingFee struct quoting fee for bridging
      */
     function quoteAsyncWithdraw(address _recipient, uint256 _withdrawAmount) external view returns (MessagingFee memory fee) {
-        bytes32 _to = bytes32(bytes20(_recipient));
+        bytes32 _to = bytes32(uint256(uint160(_recipient)));
         return IFraxRemoteHop(remoteHop).quote(fraxusd, ETHEREUM_EID, _to, _withdrawAmount);
     }
 
@@ -323,7 +323,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     function _asyncWithdraw(address safe, address _recipient, uint256 _amount) internal {
         if (_amount == 0) revert InvalidInput();
 
-        bytes32 _to = bytes32(bytes20(_recipient));
+        bytes32 _to = bytes32(uint256(uint160(_recipient)));
 
         MessagingFee memory fee = IFraxRemoteHop(remoteHop).quote(fraxusd, ETHEREUM_EID, _to, _amount);
         uint256 nativeFee = fee.nativeFee;
