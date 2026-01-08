@@ -6,7 +6,6 @@ import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/Reentran
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
-import { WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IMidasVault } from "../../interfaces/IMidasVault.sol";
 import { ModuleBase } from "../ModuleBase.sol";
@@ -28,27 +27,14 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         address redemptionVault;
     }
 
-    /// @notice Async withdrawal request details
-    struct AsyncWithdrawal {
-        uint256 amount;
-        address asset;
-        address midasToken;
-    }
-
     /// @notice Mapping from Midas token to vault configuration
     mapping(address midasToken => MidasVaultConfig config) public vaults;
-
-    /// @notice Pending async withdrawal requests per Safe
-    mapping(address safe => AsyncWithdrawal withdrawal) private withdrawals;
 
     /// @notice TypeHash for deposit function signature
     bytes32 public constant DEPOSIT_SIG = keccak256("deposit");
 
     /// @notice TypeHash for withdraw function signature
     bytes32 public constant WITHDRAW_SIG = keccak256("withdraw");
-
-    /// @notice TypeHash for async withdraw function signature
-    bytes32 public constant REQUEST_WITHDRAW_SIG = keccak256("requestWithdraw");
 
     /// @notice Role identifier for admins of the Midas Module
     bytes32 public constant MIDAS_MODULE_ADMIN = keccak256("MIDAS_MODULE_ADMIN");
@@ -62,32 +48,20 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /// @notice Emitted when a Safe deposits assets into a Midas Vault
     event Deposit(address indexed safe, address indexed inputToken, uint256 inputAmount, address indexed outputToken, uint256 outputAmount);
 
-    /// @notice Emitted when a Safe withdraws assets from a Midas Vault synchronously
-    event Withdrawal(address indexed safe, address indexed inputToken, uint256 inputAmount, address indexed outputToken, uint256 outputAmount);
-
     /// @notice Emitted when a Safe creates an async withdrawal request
-    event WithdrawalRequested(address indexed safe, uint256 amount, address asset, address midasToken);
-
-    /// @notice Emitted when an async withdrawal is executed
-    event WithdrawalExecuted(address indexed safe, uint256 amount, address asset, address midasToken);
+    event Withdrawal(address indexed safe, uint256 amount, address asset, address midasToken);
 
     /// @notice Thrown when return amount is less than minimum required
     error InsufficientReturnAmount();
 
-    /// @notice Thrown when no withdrawal is queued for the Safe
-    error NoWithdrawalQueued();
-
-    /// @notice Thrown when withdrawal request doesn't match stored details
-    error CannotFindMatchingWithdrawalForSafe();
-
     /// @notice Thrown when Midas token is not supported by the module
     error UnsupportedMidasToken();
 
-    /// @notice Thrown when asset is not supported for the Midas token
-    error UnsupportedAsset();
-
     /// @notice Thrown when caller lacks required authorization
     error Unauthorized();
+
+    /// @notice Thrown when token decimals exceed the maximum allowed (18)
+    error InvalidDecimals();
 
     /**
      * @notice Initializes the contract with Midas vaults and their supported assets
@@ -99,8 +73,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      */
     constructor(address _etherFiDataProvider, address[] memory _midasTokens, address[] memory _depositVaults, address[] memory _redemptionVaults) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
-        if (_etherFiDataProvider == address(0)) revert InvalidInput();
-
         uint256 len = _midasTokens.length;
         if (len == 0) revert InvalidInput();
         if (len != _depositVaults.length || len != _redemptionVaults.length) revert ArrayLengthMismatch();
@@ -132,7 +104,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @custom:throws InvalidInput If amount is zero or addresses are invalid
      * @custom:throws InvalidSignature If the signature is invalid
      * @custom:throws UnsupportedMidasToken If the Midas token is not supported
-     * @custom:throws UnsupportedAsset If the asset is not supported for the Midas token
      * @custom:throws InsufficientReturnAmount If the MidasToken received is less than expected
      */
     function deposit(address safe, address asset, address midasToken, uint256 amount, uint256 minReturnAmount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
@@ -160,10 +131,13 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param sourceToken The token address to get source decimals from
      * @param targetToken The token address to get target decimals from
      * @return The scaled amount
+     * @custom:throws InvalidDecimals If either token has decimals greater than 18
      */
     function _scaleAmount(uint256 amount, address sourceToken, address targetToken) internal view returns (uint256) {
         uint8 sourceDecimals = ERC20(sourceToken).decimals();
         uint8 targetDecimals = ERC20(targetToken).decimals();
+
+        if (sourceDecimals > 18 || targetDecimals > 18) revert InvalidDecimals();
 
         if (sourceDecimals == targetDecimals) return amount;
         if (sourceDecimals < targetDecimals) {
@@ -178,11 +152,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param safe The Safe address which holds the deposit tokens
      * @param asset The address of the asset to deposit
      * @param midasToken The address of the Midas token to receive
-     * @param amount The amount of deposit tokens to deposit (in midasToken decimals)
+     * @param amount The amount of deposit tokens to deposit (in asset decimals)
      * @param minReturnAmount The minimum amount of tokens to return (in midasToken decimals)
      * @custom:throws InvalidInput If amount is zero or addresses are invalid
      * @custom:throws UnsupportedMidasToken If the Midas token is not supported
-     * @custom:throws UnsupportedAsset If the asset is not supported for the Midas token
      * @custom:throws InsufficientReturnAmount If the MidasToken received is less than expected
      */
     function _deposit(address safe, address asset, address midasToken, uint256 amount, uint256 minReturnAmount) internal {
@@ -214,24 +187,22 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     }
 
     /**
-     * @notice Withdraws from Midas Vault synchronously
+     * @notice Creates a withdrawal request for a Midas token
      * @param safe The Safe address which holds the Midas tokens
      * @param midasToken The address of the Midas token to withdraw
      * @param amount The amount of Midas Token to withdraw (in midasToken decimals)
      * @param asset The asset to withdraw to
-     * @param minReceiveAmount The minimum tokens to receive of the asset (in midasToken decimals)
      * @param signer The address that signed the transaction
      * @param signature The signature authorizing the transaction
      * @custom:throws InvalidInput If amount is zero or addresses are invalid
      * @custom:throws InvalidSignature If the signature is invalid
      * @custom:throws UnsupportedMidasToken If the Midas token is not supported
-     * @custom:throws UnsupportedAsset If the asset is not supported for the Midas token
-     * @custom:throws InsufficientReturnAmount If the asset received is less than expected
+     * @dev Note: This creates an async withdrawal request via redeemRequest. The actual withdrawal completion is handled by the Midas vault.
      */
-    function withdraw(address safe, address midasToken, uint128 amount, address asset, uint256 minReceiveAmount, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = _getWithdrawDigestHash(safe, midasToken, amount, asset, minReceiveAmount);
+    function withdraw(address safe, address midasToken, uint128 amount, address asset, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        bytes32 digestHash = _getWithdrawDigestHash(safe, midasToken, amount, asset);
         _verifyAdminSig(digestHash, signer, signature);
-        _withdraw(safe, midasToken, amount, asset, minReceiveAmount);
+        _withdraw(safe, midasToken, amount, asset);
     }
 
     /**
@@ -240,11 +211,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param midasToken The Midas token to withdraw
      * @param amount The amount to withdraw (in midasToken decimals)
      * @param asset The asset to withdraw to
-     * @param minReceiveAmount The minimum tokens to receive (in midasToken decimals)
      * @return The digest hash for signature verification
      */
-    function _getWithdrawDigestHash(address safe, address midasToken, uint128 amount, address asset, uint256 minReceiveAmount) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(midasToken, amount, asset, minReceiveAmount))).toEthSignedMessageHash();
+    function _getWithdrawDigestHash(address safe, address midasToken, uint128 amount, address asset) internal returns (bytes32) {
+        return keccak256(abi.encodePacked(WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(midasToken, amount, asset))).toEthSignedMessageHash();
     }
 
     /**
@@ -253,13 +223,11 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param midasToken The address of the Midas token to withdraw
      * @param amount The amount of Midas Token to withdraw (in midasToken decimals)
      * @param asset The asset to withdraw to
-     * @param minReceiveAmount The minimum tokens to receive of the asset (in midasToken decimals)
      * @custom:throws InvalidInput If amount is zero or addresses are invalid
      * @custom:throws UnsupportedMidasToken If the Midas token is not supported
-     * @custom:throws UnsupportedAsset If the asset is not supported for the Midas token
-     * @custom:throws InsufficientReturnAmount If the asset received is less than expected
+     * @dev Note: This creates an async withdrawal request. The Midas vault will handle the actual redemption.
      */
-    function _withdraw(address safe, address midasToken, uint128 amount, address asset, uint256 minReceiveAmount) internal {
+    function _withdraw(address safe, address midasToken, uint128 amount, address asset) internal {
         if (amount == 0 || asset == address(0) || midasToken == address(0)) revert InvalidInput();
 
         MidasVaultConfig memory vaultConfig = vaults[midasToken];
@@ -276,121 +244,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         data[0] = abi.encodeWithSelector(ERC20.approve.selector, redemptionVault, amount);
 
         to[1] = redemptionVault;
-        data[1] = abi.encodeWithSelector(IMidasVault.redeemInstant.selector, asset, amount, minReceiveAmount);
-
-        uint256 tokensBefore = ERC20(asset).balanceOf(safe);
+        data[1] = abi.encodeWithSelector(IMidasVault.redeemRequest.selector, asset, amount, safe);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-
-        uint256 tokensReceived = ERC20(asset).balanceOf(safe) - tokensBefore;
-
-        // Scale for decimals difference between asset and MidasToken
-        uint256 scaledTokensReceived = _scaleAmount(tokensReceived, asset, midasToken);
-        if (scaledTokensReceived < minReceiveAmount) revert InsufficientReturnAmount();
-
-        emit Withdrawal(safe, midasToken, amount, asset, tokensReceived);
-    }
-
-    /**
-     * @notice Gets the pending withdrawal request for a safe
-     * @param safe Address of the EtherFi Safe
-     * @return AsyncWithdrawal containing the pending withdrawal request details
-     */
-    function getPendingWithdrawal(address safe) external view returns (AsyncWithdrawal memory) {
-        return withdrawals[safe];
-    }
-
-    /**
-     * @notice Creates an async withdrawal request
-     * @param safe Address for user safe
-     * @param midasToken The address of the Midas token to withdraw
-     * @param asset Address of asset to withdraw to
-     * @param amount Amount to withdraw asynchronously (in midasToken decimals)
-     * @param signer The address that signed the transaction
-     * @param signature The signature authorizing this transaction
-     * @custom:throws InvalidInput If amount is zero or addresses are invalid
-     * @custom:throws InvalidSignature If the signature is invalid
-     * @custom:throws UnsupportedMidasToken If the Midas token is not supported
-     * @custom:throws UnsupportedAsset If the asset is not supported for the Midas token
-     */
-    function requestWithdrawal(address safe, address midasToken, address asset, uint256 amount, address signer, bytes calldata signature) external payable onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        bytes32 digestHash = _getRequestWithdrawDigestHash(safe, midasToken, asset, amount);
-        _verifyAdminSig(digestHash, signer, signature);
-        _requestAsyncWithdraw(safe, midasToken, asset, amount);
-    }
-
-    /**
-     * @notice Executes a previously requested async withdrawal transaction
-     * @param safe The Safe address that requested the withdrawal
-     * @dev Verifies the withdrawal request matches the stored withdrawal details before execution
-     * @custom:throws NoWithdrawalQueued If no async withdrawal request exists for the safe
-     * @custom:throws CannotFindMatchingWithdrawalForSafe If the withdrawal details don't match
-     */
-    function executeWithdraw(address safe) public payable nonReentrant onlyEtherFiSafe(safe) {
-        AsyncWithdrawal memory withdrawal = withdrawals[safe];
-        if (withdrawal.asset == address(0)) revert NoWithdrawalQueued();
-
-        WithdrawalRequest memory withdrawalRequest = cashModule.getData(safe).pendingWithdrawalRequest;
-
-        if (withdrawalRequest.recipient != address(this) || withdrawalRequest.tokens.length != 1 || withdrawalRequest.tokens[0] != withdrawal.midasToken || withdrawalRequest.amounts[0] != withdrawal.amount) revert CannotFindMatchingWithdrawalForSafe();
-        cashModule.processWithdrawal(safe);
-
-        _executeWithdraw(safe, withdrawal.midasToken, withdrawal.asset, withdrawal.amount);
-        delete withdrawals[safe];
-    }
-
-    /**
-     * @dev Creates a digest hash for the async withdraw operation
-     * @param safe The Safe address
-     * @param midasToken The Midas token to withdraw
-     * @param asset Address of asset to withdraw to
-     * @param amount Amount to withdraw asynchronously
-     * @return The digest hash for signature verification
-     */
-    function _getRequestWithdrawDigestHash(address safe, address midasToken, address asset, uint256 amount) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(REQUEST_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(midasToken, asset, amount))).toEthSignedMessageHash();
-    }
-
-    /**
-     * @dev Requests an async withdrawal
-     * @param safe Address for user safe
-     * @param midasToken The address of the Midas token to withdraw
-     * @param asset Address of asset to withdraw to
-     * @param amount Amount to withdraw asynchronously
-     * @custom:throws InvalidInput If the amount is zero
-     * @custom:throws UnsupportedMidasToken If the Midas token is not supported
-     * @custom:throws UnsupportedAsset If the asset is not supported for the Midas token
-     */
-    function _requestAsyncWithdraw(address safe, address midasToken, address asset, uint256 amount) internal {
-        if (amount == 0 || asset == address(0) || midasToken == address(0)) revert InvalidInput();
-
-        MidasVaultConfig memory vaultConfig = vaults[midasToken];
-        if (vaultConfig.redemptionVault == address(0)) revert UnsupportedMidasToken();
-
-        cashModule.requestWithdrawalByModule(safe, midasToken, amount);
-        emit WithdrawalRequested(safe, amount, asset, midasToken);
-
-        (uint64 withdrawalDelay,,) = cashModule.getDelays();
-        if (withdrawalDelay == 0) {
-            _executeWithdraw(safe, midasToken, asset, amount);
-        } else {
-            withdrawals[safe] = AsyncWithdrawal({ amount: amount, asset: asset, midasToken: midasToken });
-        }
-    }
-
-    /**
-     * @dev Executes an async withdrawal (internal, assumes validation already done)
-     * @param safe The Safe address that requested the withdrawal
-     * @param midasToken The address of the Midas token to withdraw
-     * @param _asset The asset to withdraw to
-     * @param _amount Amount to withdraw asynchronously
-     */
-    function _executeWithdraw(address safe, address midasToken, address _asset, uint256 _amount) internal {
-        MidasVaultConfig memory vaultConfig = vaults[midasToken];
-        ERC20(midasToken).approve(vaultConfig.redemptionVault, _amount);
-        IMidasVault(vaultConfig.redemptionVault).redeemRequest(_asset, _amount, safe);
-
-        emit WithdrawalExecuted(safe, _amount, _asset, midasToken);
+        emit Withdrawal(safe, amount, asset, midasToken);
     }
 
     /**
