@@ -74,7 +74,7 @@ contract DeployMidasModule is Utils {
             priceFunctionCalldata: "",
             isChainlinkType: true, //chainlink type oracle
             oraclePriceDecimals: IAggregatorV3(midasPriceOracle).decimals(),
-            maxStaleness: 2 days,
+            maxStaleness: 30 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
             isStableToken: true,
@@ -101,8 +101,6 @@ contract DeployMidasModule is Utils {
 
         address[] memory withdrawableAssets = new address[](1);
         withdrawableAssets[0] = address(midasToken);
-
-        ICashModule(cashModule).configureModulesCanRequestWithdraw(defaultModules, shouldWhitelist);
 
         //cash module set withdrawable asset
         ICashModule(cashModule).configureWithdrawAssets(withdrawableAssets, shouldWhitelist);
