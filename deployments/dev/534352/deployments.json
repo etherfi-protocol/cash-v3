@@ -23,6 +23,7 @@
     "StargateModule": "0x6c906af3300294317C454A18AC552bAce9a72Fca",
     "WormholeModule": "0x96F7C99AeBb38Ccc0Df091F1aD2b8f91ADBA2FCd",
     "BeHYPEStakeModule": "0x89EFb0DB949f25E131239b5B41c3Ed5aFaeaaA35",
-    "LiquidUSDLiquifierModule": "0x1ca1349695E2584EBa01273Fd1EF9D0FffFBc852"
+    "LiquidUSDLiquifierModule": "0x1ca1349695E2584EBa01273Fd1EF9D0FffFBc852",
+    "MidasModule": "0xaF5d9AC2725Fdc1Be506347fe163Feac66D7Fdf4"
   }
 }
