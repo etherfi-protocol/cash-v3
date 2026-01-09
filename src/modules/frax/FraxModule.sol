@@ -6,7 +6,8 @@ import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/Reentran
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
-import { WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
+import { SafeData, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IFraxCustodian } from "../../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop, MessagingFee } from "../../interfaces/IFraxRemoteHop.sol";
@@ -19,7 +20,7 @@ import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
  * @notice Module for interacting with FraxUSD
  * @dev Extends ModuleBase to provide FraxUSD integration for Safes
  */
-contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient {
+contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
 
@@ -45,6 +46,10 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     /// @notice Layerzero ethereum EID
     uint32 public constant ETHEREUM_EID = 30_101;
 
+    /// @notice Dust threshold for LayerZero OFT decimal conversion (1e12)
+    /// @dev Amounts must be multiples of this value to avoid dust being locked
+    uint256 public constant DUST_THRESHOLD = 1e12;
+
     /// @notice TypeHash for deposit function signature
     bytes32 public constant DEPOSIT_SIG = keccak256("deposit");
 
@@ -53,6 +58,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
 
     /// @notice TypeHash for async withdraw function signature
     bytes32 public constant REQUEST_ASYNC_WITHDRAW_SIG = keccak256("requestAsyncWithdraw");
+
+    /// @notice TypeHash for cancel async withdraw function signature
+    bytes32 public constant CANCEL_ASYNC_WITHDRAW_SIG = keccak256("cancelAsyncWithdraw");
 
     /// @notice Cross-chain withdrawal requests for each Safe
     mapping(address safe => AsyncWithdrawal withdrawal) private withdrawals;
@@ -69,6 +77,18 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     /// @notice Error thrown when no matching withdrawal is found for the safe
     error CannotFindMatchingWithdrawalForSafe();
 
+    /// @notice Thrown when a caller lacks the proper authorization for an operation
+    error Unauthorized();
+
+    /// @notice Error for Invalid Owner quorum signatures
+    error InvalidSignatures();
+
+    /// @notice Error thrown when withdrawal amount contains dust (not a multiple of DUST_THRESHOLD)
+    error AmountContainsDust();
+
+    /// @notice Error thrown when custodian has insufficient balance for synchronous deposit
+    error InsufficientCustodianBalance();
+
     /// @notice Emitted when safe deposits USDC into Frax USD
     event Deposit(address indexed safe, address indexed inputToken, uint256 inputAmount, uint256 outputAmount);
 
@@ -81,6 +101,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     /// @notice Emitted when safe executes an async withdrawal from FraxUSD
     event AsyncWithdrawalExecuted(address indexed safe, uint256 amountToWithdraw, uint32 dstEid, address to);
 
+    /// @notice Emitted when an async withdrawal request is cancelled
+    event AsyncWithdrawalCancelled(address indexed safe, uint256 amountToWithdraw, uint32 dstEid, address to);
+
     /**
      * @notice Contract constructor
      * @param _etherFiDataProvider Address of the EtherFiDataProvider contract
@@ -91,7 +114,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
      * @custom:throws InvalidInput If any provided address is zero
      */
     constructor(address _etherFiDataProvider, address _fraxusd, address _custodian, address _remoteHop) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
-        if (_etherFiDataProvider == address(0) || _fraxusd == address(0) || _remoteHop == address(0)) revert InvalidInput();
+        if (_etherFiDataProvider == address(0) || _fraxusd == address(0) || _custodian == address(0) || _remoteHop == address(0)) revert InvalidInput();
 
         fraxusd = _fraxusd;
         custodian = _custodian;
@@ -134,12 +157,19 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
      * @param amountToDeposit The amount of asset tokens to deposit
      * @param minReturnAmount The minimum amount of asset to return (18 decimals - FraxUSD)
      * @custom:throws InvalidInput If amount or min return is zero
+     * @custom:throws InsufficientCustodianBalance If custodian doesn't have enough balance for synchronous deposit
      * @custom:throws InsufficientReturnAmount If the FraxUSD received is less than expected
      */
     function _deposit(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturnAmount) internal {
         if (amountToDeposit == 0 || assetToDeposit == address(0)) revert InvalidInput();
 
         _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
+
+        // Validate that custodian has sufficient balance for synchronous deposit
+        // The custodian needs at least minReturnAmount of fraxusd tokens to fulfill the deposit synchronously
+        // If it doesn't have enough, it will attempt a cross-chain mint which requires native fees and is async
+        uint256 custodianBalance = ERC20(fraxusd).balanceOf(custodian);
+        if (custodianBalance < minReturnAmount) revert InsufficientCustodianBalance();
 
         address[] memory to = new address[](2);
         bytes[] memory data = new bytes[](2);
@@ -283,6 +313,44 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     }
 
     /**
+     * @notice Cancels an async withdrawal request for a safe
+     * @param safe Address of the EtherFiSafe
+     * @param signers Array of addresses of safe owners that signed the transaction
+     * @param signatures Array of signatures from the signers
+     */
+    function cancelAsyncWithdraw(address safe, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
+        _checkCancelAsyncWithdrawSignature(safe, signers, signatures);
+
+        AsyncWithdrawal memory withdrawal = withdrawals[safe];
+        if (withdrawal.recipient == address(0)) revert NoAsyncWithdrawalQueued();
+
+        SafeData memory data = cashModule.getData(safe);
+        // If there is a withdrawal pending from this module on Cash Module, cancel it
+        if (data.pendingWithdrawalRequest.recipient == address(this)) cashModule.cancelWithdrawalByModule(safe);
+
+        if (withdrawal.recipient != address(0)) {
+            emit AsyncWithdrawalCancelled(safe, withdrawal.amount, ETHEREUM_EID, withdrawal.recipient);
+            delete withdrawals[safe];
+        }
+    }
+
+    /**
+     * @notice Cancels an async withdrawal request by the cash module
+     * @dev This function is intended to be called by the cash module to cancel an async withdrawal
+     * @param safe Address of the EtherFiSafe
+     */
+    function cancelBridgeByCashModule(address safe) external {
+        if (msg.sender != etherFiDataProvider.getCashModule()) revert Unauthorized();
+
+        AsyncWithdrawal memory withdrawal = withdrawals[safe];
+        // Return if no withdrawal found for Frax
+        if (withdrawal.recipient == address(0)) return;
+
+        emit AsyncWithdrawalCancelled(safe, withdrawal.amount, ETHEREUM_EID, withdrawal.recipient);
+        delete withdrawals[safe];
+    }
+
+    /**
      * @dev Creates a digest hash for the async withdraw operation
      * @param _recipient Recipient address from Frax api
      * @param _withdrawAmount Amount to withdraw asynchronously
@@ -293,14 +361,28 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient 
     }
 
     /**
+     * @dev Verifies that the transaction has been properly signed by the required signers
+     * @param safe Address of the EtherFiSafe
+     * @param signers Array of addresses that signed the transaction
+     * @param signatures Array of signatures from the signers
+     * @custom:throws InvalidSignatures if the signatures are invalid
+     */
+    function _checkCancelAsyncWithdrawSignature(address safe, address[] calldata signers, bytes[] calldata signatures) internal {
+        bytes32 digestHash = keccak256(abi.encodePacked(CANCEL_ASYNC_WITHDRAW_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
+    }
+
+    /**
      * @notice Function to request an async withdrawal
      * @param safe Address for user safe
      * @param _recipient Recipient address from Frax api
      * @param _withdrawAmount Amount to withdraw asynchronously
-     * @custom:throws InvalidInput If the amount is zero
+     * @custom:throws InvalidInput If the amount is zero or recipient is zero
+     * @custom:throws AmountContainsDust If the amount is not a multiple of DUST_THRESHOLD
      */
     function _requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount) internal {
         if (_withdrawAmount == 0 || _recipient == address(0)) revert InvalidInput();
+        if (_withdrawAmount % DUST_THRESHOLD != 0) revert AmountContainsDust();
 
         cashModule.requestWithdrawalByModule(safe, fraxusd, _withdrawAmount);
 
