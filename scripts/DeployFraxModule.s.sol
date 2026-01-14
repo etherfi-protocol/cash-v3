@@ -8,11 +8,10 @@ import { ICashModule } from "../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 import { FraxModule } from "../src/modules/frax/FraxModule.sol";
 import { IAggregatorV3, PriceProvider } from "../src/oracle/PriceProvider.sol";
-import { ChainConfig, Utils } from "./utils/Utils.sol";
+import { Utils } from "./utils/Utils.sol";
 
 contract DeployFraxModule is Utils {
     address fraxusd = 0x397F939C3b91A74C321ea7129396492bA9Cdce82;
-    address usdc = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
     address custodian = 0x05bF905356fbeA7E59500f904b908402dB7A53DD;
     address fraxUsdPriceOracle = 0x7be4f8b373853b74CDf48FE817bC2eB2272eBe45;
     address remoteHop = 0xF6f45CCB5E85D1400067ee66F9e168f83e86124E;
@@ -37,7 +36,7 @@ contract DeployFraxModule is Utils {
         cashModule = ICashModule(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "CashModule")));
 
         //deploy frax module
-        FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, usdc, custodian, remoteHop);
+        FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, custodian, remoteHop);
 
         address[] memory modules = new address[](1);
         modules[0] = address(fraxModule);
