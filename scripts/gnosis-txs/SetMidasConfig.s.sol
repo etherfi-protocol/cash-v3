@@ -74,9 +74,9 @@ contract SetMidasConfig is GnosisHelpers, Utils, Test {
 
         // Set collateral and borrow config in debt manager
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
-            ltv: 90e18,
-            liquidationThreshold: 95e18,
-            liquidationBonus: 1e18 // Todo: Check with Chaos Labs
+            ltv: 80e18,
+            liquidationThreshold: 90e18,
+            liquidationBonus: 2e18 // same as liquid USD
         });
 
         uint64 borrowApy = 1; // ~0%
