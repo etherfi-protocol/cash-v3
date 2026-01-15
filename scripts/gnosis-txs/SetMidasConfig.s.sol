@@ -19,7 +19,7 @@ contract SetMidasConfig is GnosisHelpers, Utils, Test {
 
     // Set this to the deployed MidasModule address after deployment
     // If the address is in the deployments file under "MidasModule", it will be read automatically
-    address midasModule;
+    address midasModule = 0xEE3Fb6914105BA01196ab26191C3BB7448016467;
 
     IDebtManager debtManager;
     PriceProvider priceProvider;
@@ -37,13 +37,6 @@ contract SetMidasConfig is GnosisHelpers, Utils, Test {
         debtManager = IDebtManager(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "DebtManager")));
 
         cashModule = ICashModule(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "CashModule")));
-
-        // Read MidasModule address from deployments file if it exists, otherwise use the constant
-        try stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "MidasModule")) returns (address deployedMidasModule) {
-            midasModule = deployedMidasModule;
-        } catch {
-            require(midasModule != address(0), "MidasModule address not set. Deploy MidasModule first or set the address in this script.");
-        }
 
         // Generate Gnosis transactions
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
