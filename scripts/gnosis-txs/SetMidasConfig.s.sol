@@ -67,10 +67,10 @@ contract SetMidasConfig is GnosisHelpers, Utils, Test {
             priceFunctionCalldata: "",
             isChainlinkType: true, // chainlink type oracle
             oraclePriceDecimals: IAggregatorV3(midasPriceOracle).decimals(),
-            maxStaleness: 2 days,
+            maxStaleness: 6 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: true,
+            isStableToken: false,
             isBaseTokenBtc: false
         });
         PriceProvider.Config[] memory midasConfigs = new PriceProvider.Config[](1);
