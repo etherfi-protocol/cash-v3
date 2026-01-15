@@ -12,12 +12,11 @@ contract DeployMidasModule is Utils {
     address redemptionVault = 0x904EA8d7FcaB7351758fAC82bDbc738E2010BC25;
 
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         string memory deployments = readDeploymentFile();
 
         address dataProvider = stdJson.readAddress(deployments, string(abi.encodePacked(".", "addresses", ".", "EtherFiDataProvider")));
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
 
         // Prepare arrays for Midas module deployment
         address[] memory midasTokens = new address[](1);
