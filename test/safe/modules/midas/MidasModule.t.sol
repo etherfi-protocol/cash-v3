@@ -69,7 +69,10 @@ contract MidasModuleTest is SafeTestSetup {
         uint256 amount = 1000 * 10 ** 6; // 1000 USDC (6 decimals)
         deal(address(usdc), address(safe), amount);
 
-        uint256 minReturnAmount = amount * 10 ** 12; //1:1 minting
+        (, int256 mTokenAnswer,,,) = mTokenOracle.latestRoundData();
+        uint8 mTokenDecimals = mTokenOracle.decimals();
+
+        uint256 minReturnAmount = amount * 10 ** (12 + mTokenDecimals) / uint256(mTokenAnswer);
 
         bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdc), address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
 
@@ -95,7 +98,10 @@ contract MidasModuleTest is SafeTestSetup {
         uint256 amount = 1000 * 10 ** 6; // 1000 USDT (6 decimals)
         deal(address(usdt), address(safe), amount);
 
-        uint256 minReturnAmount = amount * 10 ** 12; //1:1 minting
+        (, int256 mTokenAnswer,,,) = mTokenOracle.latestRoundData();
+        uint8 mTokenDecimals = mTokenOracle.decimals();
+
+        uint256 minReturnAmount = amount * 10 ** (12 + mTokenDecimals) / uint256(mTokenAnswer);
 
         bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdt), address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
 
@@ -160,7 +166,6 @@ contract MidasModuleTest is SafeTestSetup {
         uint256 midasAfter = midasToken.balanceOf(address(safe));
         assertEq(midasAfter, midasBefore - amount);
     }
-
 
     //Revert cases
 
@@ -352,7 +357,6 @@ contract MidasModuleTest is SafeTestSetup {
         midasModule.withdraw(address(fakeSafe), address(midasToken), amount, address(usdc), owner1, invalidSignature);
     }
 
-
     function test_deposit_revertsWithUnsupportedMidasToken() public {
         uint256 amount = 1000 * 10 ** 6;
         deal(address(usdc), address(safe), amount);
@@ -414,7 +418,6 @@ contract MidasModuleTest is SafeTestSetup {
         vm.expectRevert(MidasModule.UnsupportedMidasToken.selector);
         midasModule.withdraw(address(safe), unsupportedMidasToken, amount, address(usdc), owner1, signature);
     }
-
 
     // Admin function tests
     function test_addMidasVaults_success() public {
@@ -528,5 +531,4 @@ contract MidasModuleTest is SafeTestSetup {
         vm.prank(owner1);
         midasModule.removeMidasVaults(midasTokens);
     }
-
 }
