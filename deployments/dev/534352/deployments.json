@@ -25,6 +25,7 @@
     "BeHYPEStakeModule": "0x89EFb0DB949f25E131239b5B41c3Ed5aFaeaaA35",
     "LiquidUSDLiquifierModule": "0x1ca1349695E2584EBa01273Fd1EF9D0FffFBc852",
     "EtherFiLiquidModuleWithReferrer": "0xEBC674Ec6c5968bB52Ee3F02C2a6F9Efd4ffa10d",
-    "FraxModule": "0xC089660e3cdf91Dff690dA879927D5D74cAc4067"
+    "FraxModule": "0xC089660e3cdf91Dff690dA879927D5D74cAc4067",
+    "MidasModule": "0xaF5d9AC2725Fdc1Be506347fe163Feac66D7Fdf4"
   }
 }
