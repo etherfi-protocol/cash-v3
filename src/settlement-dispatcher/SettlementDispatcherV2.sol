@@ -10,6 +10,8 @@ import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
 import { IL2GatewayRouter, IL2Messenger } from "../interfaces/IScrollERC20Bridge.sol";
+import { IFraxCustodian } from "../interfaces/IFraxCustodian.sol";
+import { IMidasVault } from "../interfaces/IMidasVault.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -75,6 +77,12 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         mapping (address liquidToken => address boringQueue) liquidWithdrawQueue;
         /// @notice Configurable refund wallet address (falls back to data provider if not set)
         address refundWallet;
+        /// @notice Frax USD token address for redeem-to-USDC
+        address fraxUsd;
+        /// @notice Frax custodian address (used for redeem)
+        address fraxCustodian;
+        /// @notice Mapping of Midas token to redemption vault (e.g. Liquid Reserve)
+        mapping(address midasToken => address redemptionVault) midasRedemptionVault;
     }
 
     /**
@@ -145,6 +153,36 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     event RefundWalletSet(address indexed refundWallet);
 
     /**
+     * @notice Emitted when Frax config is set
+     * @param fraxUsd Frax USD token address
+     * @param fraxCustodian Frax custodian address
+     */
+    event FraxConfigSet(address indexed fraxUsd, address indexed fraxCustodian);
+
+    /**
+     * @notice Emitted when Frax is redeemed to USDC
+     * @param amount Amount of Frax USD redeemed
+     * @param amountOut Amount of USDC received
+     */
+    event FraxRedeemed(uint256 amount, uint256 amountOut);
+
+    /**
+     * @notice Emitted when Midas redemption vault is set for a token
+     * @param midasToken Midas token address
+     * @param redemptionVault Redemption vault address
+     */
+    event MidasRedemptionVaultSet(address indexed midasToken, address indexed redemptionVault);
+
+    /**
+     * @notice Emitted when Midas token is redeemed to asset
+     * @param midasToken Midas token address
+     * @param assetOut Asset received (e.g. USDC)
+     * @param amount Amount of Midas token redeemed
+     * @param minReceive Minimum amount of asset requested
+     */
+    event MidasRedeemed(address indexed midasToken, address indexed assetOut, uint256 amount, uint256 minReceive);
+
+    /**
      * @notice Thrown when input arrays have different lengths
      */
     error ArrayLengthMismatch();
@@ -208,6 +246,16 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @notice Thrown when the return amount is less than min return
      */
     error InsufficientReturnAmount();
+
+    /**
+     * @notice Thrown when Frax config (fraxUsd or fraxCustodian) is not set
+     */
+    error FraxConfigNotSet();
+
+    /**
+     * @notice Thrown when Midas redemption vault is not set for the token
+     */
+    error MidasRedemptionVaultNotSet();
 
     /**
      * @notice Constructor that disables initializers
@@ -318,6 +366,53 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     }
 
     /**
+     * @notice Sets the Frax config for redeem-to-USDC
+     * @dev Only callable by the role registry owner
+     * @param _fraxUsd Address of the Frax USD token
+     * @param _fraxCustodian Address of the Frax custodian
+     * @custom:throws InvalidValue If any address is zero
+     */
+    function setFraxConfig(address _fraxUsd, address _fraxCustodian) external onlyRoleRegistryOwner {
+        if (_fraxUsd == address(0) || _fraxCustodian == address(0)) revert InvalidValue();
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        $.fraxUsd = _fraxUsd;
+        $.fraxCustodian = _fraxCustodian;
+        emit FraxConfigSet(_fraxUsd, _fraxCustodian);
+    }
+
+    /**
+     * @notice Returns the Frax config (fraxUsd token and custodian addresses)
+     * @return fraxUsd_ Frax USD token address
+     * @return fraxCustodian_ Frax custodian address
+     */
+    function getFraxConfig() external view returns (address fraxUsd_, address fraxCustodian_) {
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        return ($.fraxUsd, $.fraxCustodian);
+    }
+
+    /**
+     * @notice Sets the Midas redemption vault for a Midas token (e.g. Liquid Reserve)
+     * @dev Only callable by the role registry owner
+     * @param midasToken Address of the Midas token
+     * @param redemptionVault Address of the redemption vault
+     * @custom:throws InvalidValue If any address is zero
+     */
+    function setMidasRedemptionVault(address midasToken, address redemptionVault) external onlyRoleRegistryOwner {
+        if (midasToken == address(0) || redemptionVault == address(0)) revert InvalidValue();
+        _getSettlementDispatcherV2Storage().midasRedemptionVault[midasToken] = redemptionVault;
+        emit MidasRedemptionVaultSet(midasToken, redemptionVault);
+    }
+
+    /**
+     * @notice Returns the Midas redemption vault for a token
+     * @param midasToken Address of the Midas token
+     * @return Redemption vault address
+     */
+    function getMidasRedemptionVault(address midasToken) external view returns (address) {
+        return _getSettlementDispatcherV2Storage().midasRedemptionVault[midasToken];
+    }
+
+    /**
      * @notice Function to withdraw liquid tokens inside the Settlement Dispatcher
      * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
      * @param liquidToken Address of the liquid token
@@ -338,6 +433,55 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         boringQueue.requestOnChainWithdraw(assetOut, amount, discount, secondsToDeadline);
 
         emit LiquidWithdrawalRequested(liquidToken, assetOut, amount, amountOutFromQueue);
+    }
+
+    /**
+     * @notice Redeems Frax USD held by the dispatcher into USDC via the Frax custodian
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE
+     * @param amount Amount of Frax USD to redeem
+     * @param minReceive Minimum amount of USDC to receive
+     * @custom:throws FraxConfigNotSet If fraxUsd or fraxCustodian is not set
+     * @custom:throws InvalidValue If amount is zero
+     * @custom:throws InsufficientBalance If dispatcher balance of Frax USD is less than amount
+     * @custom:throws InsufficientReturnAmount If USDC received is less than minReceive
+     */
+    function redeemFraxToUsdc(uint256 amount, uint256 minReceive) external nonReentrant onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        address _fraxUsd = $.fraxUsd;
+        address _fraxCustodian = $.fraxCustodian;
+        if (_fraxUsd == address(0) || _fraxCustodian == address(0)) revert FraxConfigNotSet();
+        if (IERC20(_fraxUsd).balanceOf(address(this)) < amount) revert InsufficientBalance();
+
+        IERC20(_fraxUsd).forceApprove(_fraxCustodian, amount);
+        uint256 amountOut = IFraxCustodian(_fraxCustodian).redeem(amount, address(this), address(this));
+        if (amountOut < minReceive) revert InsufficientReturnAmount();
+
+        emit FraxRedeemed(amount, amountOut);
+    }
+
+    /**
+     * @notice Requests redemption of a Midas token (e.g. Liquid Reserve) held by the dispatcher into an asset (e.g. USDC) via the Midas redemption vault.
+     * The vault will send the asset to this contract once the redemption is processed.
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE. Uses redeemRequest; funds are sent to this contract when the vault processes the request.
+     * @param midasToken Address of the Midas token to redeem
+     * @param assetOut Address of the asset to receive (e.g. USDC)
+     * @param amount Amount of Midas token to redeem
+     * @param minReceive Minimum amount of assetOut expected when the vault sends (for event/logging only; vault does not enforce at request time)
+     * @custom:throws MidasRedemptionVaultNotSet If redemption vault is not set for midasToken
+     * @custom:throws InvalidValue If amount is zero or any address is zero
+     * @custom:throws InsufficientBalance If dispatcher balance of midasToken is less than amount
+     */
+    function redeemMidasToAsset(address midasToken, address assetOut, uint256 amount, uint256 minReceive) external nonReentrant onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        if (midasToken == address(0) || assetOut == address(0)) revert InvalidValue();
+
+        address redemptionVault = _getSettlementDispatcherV2Storage().midasRedemptionVault[midasToken];
+        if (redemptionVault == address(0)) revert MidasRedemptionVaultNotSet();
+        if (IERC20(midasToken).balanceOf(address(this)) < amount) revert InsufficientBalance();
+
+        IERC20(midasToken).forceApprove(redemptionVault, amount);
+        IMidasVault(redemptionVault).redeemRequest(assetOut, amount, address(this));
+
+        emit MidasRedeemed(midasToken, assetOut, amount, minReceive);
     }
 
     /**
