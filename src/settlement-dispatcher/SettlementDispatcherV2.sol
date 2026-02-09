@@ -11,6 +11,7 @@ import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
 import { IL2GatewayRouter, IL2Messenger } from "../interfaces/IScrollERC20Bridge.sol";
 import { IFraxCustodian } from "../interfaces/IFraxCustodian.sol";
+import { IFraxRemoteHop } from "../interfaces/IFraxRemoteHop.sol";
 import { IMidasVault } from "../interfaces/IMidasVault.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { Constants } from "../utils/Constants.sol";
@@ -57,6 +58,17 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     address public constant ETH_MESSENGER = 0x781e90f1c8Fc4611c9b7497C3B47F99Ef6969CbC;
 
     /**
+     * @notice LayerZero Ethereum endpoint ID
+     */
+    uint32 public constant ETHEREUM_EID = 30_101;
+
+    /**
+     * @notice Dust threshold for LayerZero OFT decimal conversion (1e12)
+     * @dev Amounts must be multiples of this value to avoid dust being locked
+     */
+    uint256 public constant DUST_THRESHOLD = 1e12;
+
+    /**
      * @notice Bin Sponsor for the settlement dispatcher
      */
     BinSponsor public immutable binSponsor;
@@ -79,8 +91,10 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         address refundWallet;
         /// @notice Frax USD token address for redeem-to-USDC
         address fraxUsd;
-        /// @notice Frax custodian address (used for redeem)
+        /// @notice Frax custodian address (used for sync redeem)
         address fraxCustodian;
+        /// @notice Frax RemoteHop address (used for async redeem via LayerZero OFT)
+        address fraxRemoteHop;
         /// @notice Mapping of Midas token to redemption vault (e.g. Liquid Reserve)
         mapping(address midasToken => address redemptionVault) midasRedemptionVault;
     }
@@ -156,15 +170,23 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @notice Emitted when Frax config is set
      * @param fraxUsd Frax USD token address
      * @param fraxCustodian Frax custodian address
+     * @param fraxRemoteHop Frax RemoteHop address
      */
-    event FraxConfigSet(address indexed fraxUsd, address indexed fraxCustodian);
+    event FraxConfigSet(address indexed fraxUsd, address indexed fraxCustodian, address indexed fraxRemoteHop);
 
     /**
-     * @notice Emitted when Frax is redeemed to USDC
+     * @notice Emitted when Frax is redeemed to USDC (sync)
      * @param amount Amount of Frax USD redeemed
      * @param amountOut Amount of USDC received
      */
     event FraxRedeemed(uint256 amount, uint256 amountOut);
+
+    /**
+     * @notice Emitted when Frax USD is redeemed asynchronously via RemoteHop
+     * @param amount Amount of Frax USD sent cross-chain
+     * @param recipient Recipient address on Ethereum
+     */
+    event FraxAsyncRedeemed(uint256 amount, address indexed recipient);
 
     /**
      * @notice Emitted when Midas redemption vault is set for a token
@@ -251,6 +273,16 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @notice Thrown when Frax config (fraxUsd or fraxCustodian) is not set
      */
     error FraxConfigNotSet();
+
+    /**
+     * @notice Thrown when native fee is insufficient for LayerZero bridging
+     */
+    error InsufficientNativeFee();
+
+    /**
+     * @notice Thrown when amount contains dust (not a multiple of DUST_THRESHOLD)
+     */
+    error AmountContainsDust();
 
     /**
      * @notice Thrown when Midas redemption vault is not set for the token
@@ -366,28 +398,31 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     }
 
     /**
-     * @notice Sets the Frax config for redeem-to-USDC
+     * @notice Sets the Frax config for sync and async redeem
      * @dev Only callable by the role registry owner
      * @param _fraxUsd Address of the Frax USD token
-     * @param _fraxCustodian Address of the Frax custodian
-     * @custom:throws InvalidValue If any address is zero
+     * @param _fraxCustodian Address of the Frax custodian (for sync redeem)
+     * @param _fraxRemoteHop Address of the Frax RemoteHop contract (for async redeem via LayerZero OFT)
+     * @custom:throws InvalidValue If fraxUsd or fraxCustodian is zero
      */
-    function setFraxConfig(address _fraxUsd, address _fraxCustodian) external onlyRoleRegistryOwner {
+    function setFraxConfig(address _fraxUsd, address _fraxCustodian, address _fraxRemoteHop) external onlyRoleRegistryOwner {
         if (_fraxUsd == address(0) || _fraxCustodian == address(0)) revert InvalidValue();
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
         $.fraxUsd = _fraxUsd;
         $.fraxCustodian = _fraxCustodian;
-        emit FraxConfigSet(_fraxUsd, _fraxCustodian);
+        $.fraxRemoteHop = _fraxRemoteHop;
+        emit FraxConfigSet(_fraxUsd, _fraxCustodian, _fraxRemoteHop);
     }
 
     /**
-     * @notice Returns the Frax config (fraxUsd token and custodian addresses)
+     * @notice Returns the Frax config (fraxUsd token, custodian, and remoteHop addresses)
      * @return fraxUsd_ Frax USD token address
      * @return fraxCustodian_ Frax custodian address
+     * @return fraxRemoteHop_ Frax RemoteHop address
      */
-    function getFraxConfig() external view returns (address fraxUsd_, address fraxCustodian_) {
+    function getFraxConfig() external view returns (address fraxUsd_, address fraxCustodian_, address fraxRemoteHop_) {
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
-        return ($.fraxUsd, $.fraxCustodian);
+        return ($.fraxUsd, $.fraxCustodian, $.fraxRemoteHop);
     }
 
     /**
@@ -457,6 +492,50 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         if (amountOut < minReceive) revert InsufficientReturnAmount();
 
         emit FraxRedeemed(amount, amountOut);
+    }
+
+    /**
+     * @notice Quotes the LayerZero bridging fee for an async Frax redemption
+     * @param recipient Recipient address on Ethereum (from Frax API)
+     * @param amount Amount of Frax USD to bridge
+     * @return fee MessagingFee struct with native and lzToken fees
+     * @custom:throws FraxConfigNotSet If fraxRemoteHop is not set
+     */
+    function quoteAsyncFraxRedeem(address recipient, uint256 amount) external view returns (MessagingFee memory fee) {
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        if ($.fraxRemoteHop == address(0)) revert FraxConfigNotSet();
+        bytes32 _to = bytes32(uint256(uint160(recipient)));
+        return IFraxRemoteHop($.fraxRemoteHop).quote($.fraxUsd, ETHEREUM_EID, _to, amount);
+    }
+
+    /**
+     * @notice Redeems Frax USD asynchronously by bridging cross-chain to Ethereum via RemoteHop (LayerZero OFT)
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE. Requires ETH for LayerZero fees.
+     * @param amount Amount of Frax USD to bridge (must be a multiple of DUST_THRESHOLD)
+     * @param recipient Recipient address on Ethereum (from Frax API)
+     * @custom:throws FraxConfigNotSet If fraxUsd or fraxRemoteHop is not set
+     * @custom:throws InvalidValue If amount is zero or recipient is zero
+     * @custom:throws AmountContainsDust If amount is not a multiple of DUST_THRESHOLD
+     * @custom:throws InsufficientBalance If dispatcher balance of Frax USD is less than amount
+     * @custom:throws InsufficientNativeFee If contract ETH balance is less than the LayerZero fee
+     */
+    function redeemFraxAsync(uint256 amount, address recipient) external payable nonReentrant onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        address _fraxUsd = $.fraxUsd;
+        address _fraxRemoteHop = $.fraxRemoteHop;
+        if (_fraxUsd == address(0) || _fraxRemoteHop == address(0)) revert FraxConfigNotSet();
+        if (amount == 0 || recipient == address(0)) revert InvalidValue();
+        if (amount % DUST_THRESHOLD != 0) revert AmountContainsDust();
+        if (IERC20(_fraxUsd).balanceOf(address(this)) < amount) revert InsufficientBalance();
+
+        bytes32 _to = bytes32(uint256(uint160(recipient)));
+        MessagingFee memory fee = IFraxRemoteHop(_fraxRemoteHop).quote(_fraxUsd, ETHEREUM_EID, _to, amount);
+        if (address(this).balance < fee.nativeFee) revert InsufficientNativeFee();
+
+        IERC20(_fraxUsd).forceApprove(_fraxRemoteHop, amount);
+        IFraxRemoteHop(_fraxRemoteHop).sendOFT{ value: fee.nativeFee }(_fraxUsd, ETHEREUM_EID, _to, amount);
+
+        emit FraxAsyncRedeemed(amount, recipient);
     }
 
     /**
