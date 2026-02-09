@@ -9,6 +9,8 @@ import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol"
 import { SettlementDispatcherV2 } from "../../../../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
 import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
 import { IFraxCustodian } from "../../../../../src/interfaces/IFraxCustodian.sol";
+import { IFraxRemoteHop } from "../../../../../src/interfaces/IFraxRemoteHop.sol";
+import { MessagingFee } from "../../../../../src/interfaces/IOFT.sol";
 import { IMidasVault } from "../../../../../src/interfaces/IMidasVault.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 
@@ -66,6 +68,25 @@ contract MockMidasVault is IMidasVault {
     }
 }
 
+/**
+ * @notice Mock Frax RemoteHop: simulates LayerZero OFT bridging by pulling tokens and returning a fixed fee.
+ */
+contract MockFraxRemoteHop is IFraxRemoteHop {
+    uint256 public nativeFeeToReturn;
+
+    function setNativeFeeToReturn(uint256 _fee) external {
+        nativeFeeToReturn = _fee;
+    }
+
+    function sendOFT(address _oft, uint32, bytes32, uint256 _amountLD) external payable override {
+        IERC20(_oft).transferFrom(msg.sender, address(this), _amountLD);
+    }
+
+    function quote(address, uint32, bytes32, uint256) external view override returns (MessagingFee memory fee) {
+        return MessagingFee({ nativeFee: nativeFeeToReturn, lzTokenFee: 0 });
+    }
+}
+
 contract SettlementDispatcherV2Test is CashModuleTestSetup {
     address alice = makeAddr("alice");
     SettlementDispatcherV2 v2;
@@ -119,7 +140,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         custodian.setAmountOutToReturn(100e6);
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodian));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0));
 
         uint256 amount = 100e18;
         fraxUsdToken.mint(address(v2), amount);
@@ -143,7 +164,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         custodian.setAmountOutToReturn(50e6);
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodian));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0));
         fraxUsdToken.mint(address(v2), 100e18);
         deal(address(usdcScroll), address(custodian), 100e6);
 
@@ -156,7 +177,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
         MockFraxCustodian custodian = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodian));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0));
         fraxUsdToken.mint(address(v2), 100e18);
 
         vm.prank(alice);
@@ -221,6 +242,159 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         vm.prank(alice);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         v2.redeemMidasToAsset(address(midasToken), address(usdcScroll), 100e6, 100e6);
+    }
+
+    // --- Frax async redeem tests ---
+
+    function test_v2_setFraxConfig_withRemoteHop_succeeds() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcherV2.FraxConfigSet(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+
+        (address fraxUsd_, address fraxCustodian_, address fraxRemoteHop_) = v2.getFraxConfig();
+        assertEq(fraxUsd_, address(fraxUsdToken));
+        assertEq(fraxCustodian_, address(custodianMock));
+        assertEq(fraxRemoteHop_, address(remoteHopMock));
+    }
+
+    function test_v2_redeemFraxAsync_succeeds() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+        remoteHopMock.setNativeFeeToReturn(0.01 ether);
+
+        vm.prank(owner);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+
+        uint256 amount = 100e18;
+        address recipient = makeAddr("ethRecipient");
+        fraxUsdToken.mint(address(v2), amount);
+        vm.deal(address(v2), 1 ether);
+
+        uint256 fraxBefore = fraxUsdToken.balanceOf(address(v2));
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcherV2.FraxAsyncRedeemed(amount, recipient);
+        v2.redeemFraxAsync(amount, recipient);
+
+        assertEq(fraxUsdToken.balanceOf(address(v2)), fraxBefore - amount);
+        assertEq(fraxUsdToken.balanceOf(address(remoteHopMock)), amount);
+    }
+
+    function test_v2_redeemFraxAsync_reverts_whenRemoteHopNotSet() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+
+        vm.prank(owner);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(0));
+
+        fraxUsdToken.mint(address(v2), 100e18);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.FraxConfigNotSet.selector);
+        v2.redeemFraxAsync(100e18, makeAddr("recipient"));
+    }
+
+    function test_v2_redeemFraxAsync_reverts_whenAmountContainsDust() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+
+        vm.prank(owner);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+
+        uint256 dustyAmount = 100e18 + 1; // not a multiple of 1e12
+        fraxUsdToken.mint(address(v2), dustyAmount);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.AmountContainsDust.selector);
+        v2.redeemFraxAsync(dustyAmount, makeAddr("recipient"));
+    }
+
+    function test_v2_redeemFraxAsync_reverts_whenInsufficientBalance() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+
+        vm.prank(owner);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+
+        // Don't mint any tokens to v2
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InsufficientBalance.selector);
+        v2.redeemFraxAsync(100e18, makeAddr("recipient"));
+    }
+
+    function test_v2_redeemFraxAsync_reverts_whenInsufficientNativeFee() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+        remoteHopMock.setNativeFeeToReturn(1 ether);
+
+        vm.prank(owner);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+
+        fraxUsdToken.mint(address(v2), 100e18);
+        // Don't provide ETH to v2
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InsufficientNativeFee.selector);
+        v2.redeemFraxAsync(100e18, makeAddr("recipient"));
+    }
+
+    function test_v2_redeemFraxAsync_reverts_whenNotBridger() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+
+        vm.prank(owner);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        fraxUsdToken.mint(address(v2), 100e18);
+
+        vm.prank(alice);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        v2.redeemFraxAsync(100e18, makeAddr("recipient"));
+    }
+
+    function test_v2_redeemFraxAsync_reverts_whenInvalidValue() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+
+        vm.prank(owner);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        fraxUsdToken.mint(address(v2), 100e18);
+
+        // zero amount
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
+        v2.redeemFraxAsync(0, makeAddr("recipient"));
+
+        // zero recipient
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
+        v2.redeemFraxAsync(100e18, address(0));
+    }
+
+    function test_v2_quoteAsyncFraxRedeem_succeeds() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+        remoteHopMock.setNativeFeeToReturn(0.05 ether);
+
+        vm.prank(owner);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+
+        MessagingFee memory fee = v2.quoteAsyncFraxRedeem(makeAddr("recipient"), 100e18);
+        assertEq(fee.nativeFee, 0.05 ether);
+        assertEq(fee.lzTokenFee, 0);
     }
 }
 
