@@ -140,7 +140,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         custodian.setAmountOutToReturn(100e6);
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0), address(0));
 
         uint256 amount = 100e18;
         fraxUsdToken.mint(address(v2), amount);
@@ -164,7 +164,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         custodian.setAmountOutToReturn(50e6);
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0), address(0));
         fraxUsdToken.mint(address(v2), 100e18);
         deal(address(usdcScroll), address(custodian), 100e6);
 
@@ -177,7 +177,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
         MockFraxCustodian custodian = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0), address(0));
         fraxUsdToken.mint(address(v2), 100e18);
 
         vm.prank(alice);
@@ -250,16 +250,18 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
         MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+        address recipient = makeAddr("ethRecipient");
 
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcherV2.FraxConfigSet(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        emit SettlementDispatcherV2.FraxConfigSet(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), recipient);
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), recipient);
 
-        (address fraxUsd_, address fraxCustodian_, address fraxRemoteHop_) = v2.getFraxConfig();
+        (address fraxUsd_, address fraxCustodian_, address fraxRemoteHop_, address fraxAsyncRedeemRecipient_) = v2.getFraxConfig();
         assertEq(fraxUsd_, address(fraxUsdToken));
         assertEq(fraxCustodian_, address(custodianMock));
         assertEq(fraxRemoteHop_, address(remoteHopMock));
+        assertEq(fraxAsyncRedeemRecipient_, recipient);
     }
 
     function test_v2_redeemFraxAsync_succeeds() public {
@@ -267,12 +269,12 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
         remoteHopMock.setNativeFeeToReturn(0.01 ether);
+        address recipient = makeAddr("ethRecipient");
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), recipient);
 
         uint256 amount = 100e18;
-        address recipient = makeAddr("ethRecipient");
         fraxUsdToken.mint(address(v2), amount);
         vm.deal(address(v2), 1 ether);
 
@@ -281,7 +283,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit SettlementDispatcherV2.FraxAsyncRedeemed(amount, recipient);
-        v2.redeemFraxAsync(amount, recipient);
+        v2.redeemFraxAsync(amount);
 
         assertEq(fraxUsdToken.balanceOf(address(v2)), fraxBefore - amount);
         assertEq(fraxUsdToken.balanceOf(address(remoteHopMock)), amount);
@@ -292,13 +294,13 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(0));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(0), makeAddr("recipient"));
 
         fraxUsdToken.mint(address(v2), 100e18);
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcherV2.FraxConfigNotSet.selector);
-        v2.redeemFraxAsync(100e18, makeAddr("recipient"));
+        v2.redeemFraxAsync(100e18);
     }
 
     function test_v2_redeemFraxAsync_reverts_whenAmountContainsDust() public {
@@ -307,14 +309,14 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), makeAddr("recipient"));
 
         uint256 dustyAmount = 100e18 + 1; // not a multiple of 1e12
         fraxUsdToken.mint(address(v2), dustyAmount);
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcherV2.AmountContainsDust.selector);
-        v2.redeemFraxAsync(dustyAmount, makeAddr("recipient"));
+        v2.redeemFraxAsync(dustyAmount);
     }
 
     function test_v2_redeemFraxAsync_reverts_whenInsufficientBalance() public {
@@ -323,13 +325,13 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), makeAddr("recipient"));
 
         // Don't mint any tokens to v2
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcherV2.InsufficientBalance.selector);
-        v2.redeemFraxAsync(100e18, makeAddr("recipient"));
+        v2.redeemFraxAsync(100e18);
     }
 
     function test_v2_redeemFraxAsync_reverts_whenInsufficientNativeFee() public {
@@ -339,14 +341,14 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         remoteHopMock.setNativeFeeToReturn(1 ether);
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), makeAddr("recipient"));
 
         fraxUsdToken.mint(address(v2), 100e18);
         // Don't provide ETH to v2
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcherV2.InsufficientNativeFee.selector);
-        v2.redeemFraxAsync(100e18, makeAddr("recipient"));
+        v2.redeemFraxAsync(100e18);
     }
 
     function test_v2_redeemFraxAsync_reverts_whenNotBridger() public {
@@ -355,12 +357,12 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), makeAddr("recipient"));
         fraxUsdToken.mint(address(v2), 100e18);
 
         vm.prank(alice);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
-        v2.redeemFraxAsync(100e18, makeAddr("recipient"));
+        v2.redeemFraxAsync(100e18);
     }
 
     function test_v2_redeemFraxAsync_reverts_whenInvalidValue() public {
@@ -369,18 +371,27 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), makeAddr("recipient"));
         fraxUsdToken.mint(address(v2), 100e18);
 
         // zero amount
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
-        v2.redeemFraxAsync(0, makeAddr("recipient"));
+        v2.redeemFraxAsync(0);
+    }
 
-        // zero recipient
+    function test_v2_redeemFraxAsync_reverts_whenRecipientNotSet() public {
+        MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
+
         vm.prank(owner);
-        vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
-        v2.redeemFraxAsync(100e18, address(0));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), address(0));
+        fraxUsdToken.mint(address(v2), 100e18);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.FraxConfigNotSet.selector);
+        v2.redeemFraxAsync(100e18);
     }
 
     function test_v2_quoteAsyncFraxRedeem_succeeds() public {
@@ -390,9 +401,9 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         remoteHopMock.setNativeFeeToReturn(0.05 ether);
 
         vm.prank(owner);
-        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock));
+        v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(remoteHopMock), makeAddr("recipient"));
 
-        MessagingFee memory fee = v2.quoteAsyncFraxRedeem(makeAddr("recipient"), 100e18);
+        MessagingFee memory fee = v2.quoteAsyncFraxRedeem(100e18);
         assertEq(fee.nativeFee, 0.05 ether);
         assertEq(fee.lzTokenFee, 0);
     }

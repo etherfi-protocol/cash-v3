@@ -75,7 +75,7 @@ contract SettlementDispatcherV2ForkTest is Test {
 
         // Configure Frax on the dispatcher
         vm.prank(owner);
-        v2.setFraxConfig(FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP);
+        v2.setFraxConfig(FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP, FRAX_DEPOSIT_ADDRESS);
 
         // Fund the dispatcher with Frax USD and ensure custodian has USDC
         deal(FRAX_USD, address(v2), amount);
@@ -103,13 +103,13 @@ contract SettlementDispatcherV2ForkTest is Test {
 
         // Configure Frax
         vm.prank(owner);
-        v2.setFraxConfig(FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP);
+        v2.setFraxConfig(FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP, FRAX_DEPOSIT_ADDRESS);
 
         // Fund the dispatcher with Frax USD
         deal(FRAX_USD, address(v2), amount);
 
         // Quote the LZ fee
-        MessagingFee memory fee = v2.quoteAsyncFraxRedeem(FRAX_DEPOSIT_ADDRESS, amount);
+        MessagingFee memory fee = v2.quoteAsyncFraxRedeem(amount);
 
         // Fund dispatcher with ETH for the fee
         vm.deal(address(v2), fee.nativeFee + 0.1 ether);
@@ -117,7 +117,7 @@ contract SettlementDispatcherV2ForkTest is Test {
         uint256 fraxBefore = IERC20(FRAX_USD).balanceOf(address(v2));
 
         vm.prank(owner);
-        v2.redeemFraxAsync{ value: fee.nativeFee }(amount, FRAX_DEPOSIT_ADDRESS);
+        v2.redeemFraxAsync{ value: fee.nativeFee }(amount);
 
         uint256 fraxAfter = IERC20(FRAX_USD).balanceOf(address(v2));
 
@@ -127,9 +127,9 @@ contract SettlementDispatcherV2ForkTest is Test {
     function test_fork_quoteAsyncFraxRedeem() public {
         // Configure Frax
         vm.prank(owner);
-        v2.setFraxConfig(FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP);
+        v2.setFraxConfig(FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP, FRAX_DEPOSIT_ADDRESS);
 
-        MessagingFee memory fee = v2.quoteAsyncFraxRedeem(FRAX_DEPOSIT_ADDRESS, 100e18);
+        MessagingFee memory fee = v2.quoteAsyncFraxRedeem(100e18);
         assertGt(fee.nativeFee, 0, "Native fee should be > 0");
     }
 
@@ -163,12 +163,13 @@ contract SettlementDispatcherV2ForkTest is Test {
 
     function test_fork_setFraxConfig() public {
         vm.prank(owner);
-        v2.setFraxConfig(FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP);
+        v2.setFraxConfig(FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP, FRAX_DEPOSIT_ADDRESS);
 
-        (address fraxUsd_, address fraxCustodian_, address fraxRemoteHop_) = v2.getFraxConfig();
+        (address fraxUsd_, address fraxCustodian_, address fraxRemoteHop_, address fraxAsyncRedeemRecipient_) = v2.getFraxConfig();
         assertEq(fraxUsd_, FRAX_USD);
         assertEq(fraxCustodian_, FRAX_CUSTODIAN);
         assertEq(fraxRemoteHop_, FRAX_REMOTE_HOP);
+        assertEq(fraxAsyncRedeemRecipient_, FRAX_DEPOSIT_ADDRESS);
     }
 
     function test_fork_setMidasRedemptionVault() public {
