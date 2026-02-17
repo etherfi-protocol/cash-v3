@@ -91,7 +91,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         address refundWallet;
         /// @notice Frax USD token address for redeem-to-USDC
         address fraxUsd;
-        /// @notice Frax custodian address (used for sync redeem)
+        /// @notice Frax USDC custodian address (used for sync redeem)
         address fraxCustodian;
         /// @notice Frax RemoteHop address (used for async redeem via LayerZero OFT)
         address fraxRemoteHop;
@@ -482,7 +482,6 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @param amount Amount of Frax USD to redeem
      * @param minReceive Minimum amount of USDC to receive
      * @custom:throws FraxConfigNotSet If fraxUsd or fraxCustodian is not set
-     * @custom:throws InvalidValue If amount is zero
      * @custom:throws InsufficientBalance If dispatcher balance of Frax USD is less than amount
      * @custom:throws InsufficientReturnAmount If USDC received is less than minReceive
      */
@@ -491,6 +490,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         address _fraxUsd = $.fraxUsd;
         address _fraxCustodian = $.fraxCustodian;
         if (_fraxUsd == address(0) || _fraxCustodian == address(0)) revert FraxConfigNotSet();
+        if (amount < DUST_THRESHOLD) revert AmountContainsDust();
         if (IERC20(_fraxUsd).balanceOf(address(this)) < amount) revert InsufficientBalance();
 
         IERC20(_fraxUsd).forceApprove(_fraxCustodian, amount);
@@ -523,7 +523,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws InsufficientBalance If dispatcher balance of Frax USD is less than amount
      * @custom:throws InsufficientNativeFee If contract ETH balance is less than the LayerZero fee
      */
-    function redeemFraxAsync(uint256 amount) external payable nonReentrant onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+    function redeemFraxAsync(uint256 amount) external payable nonReentrant whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
         address _fraxUsd = $.fraxUsd;
         address _fraxRemoteHop = $.fraxRemoteHop;
