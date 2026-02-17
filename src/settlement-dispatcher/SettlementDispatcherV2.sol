@@ -482,6 +482,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @param amount Amount of Frax USD to redeem
      * @param minReceive Minimum amount of USDC to receive
      * @custom:throws FraxConfigNotSet If fraxUsd or fraxCustodian is not set
+     * @custom:throws AmountContainsDust If amount is less than DUST_THRESHOLD
      * @custom:throws InsufficientBalance If dispatcher balance of Frax USD is less than amount
      * @custom:throws InsufficientReturnAmount If USDC received is less than minReceive
      */
