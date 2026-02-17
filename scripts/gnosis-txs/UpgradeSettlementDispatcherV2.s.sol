@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {stdJson} from "forge-std/StdJson.sol";
 
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { SettlementDispatcher } from "../../src/settlement-dispatcher/SettlementDispatcher.sol";
 import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
@@ -30,6 +31,18 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers {
     address constant MIDAS_LR               = 0xb7Fb3768CAAC98354EaDF514b48f28F2fE822bF0;
     address constant MIDAS_REDEMPTION_VAULT = 0x904EA8d7FcaB7351758fAC82bDbc738E2010BC25;
 
+    // Tokens on Scroll
+    address constant USDC_SCROLL = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
+    address constant USDT_SCROLL = 0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df;
+
+    // Liquid USD withdraw queue
+    address constant LIQUID_USD              = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
+    address constant LIQUID_USD_BORING_QUEUE = 0x38FC1BA73b7ED289955a07d9F11A85b6E388064A;
+
+    // V1 destination recipients (re-set after upgrade since V2 uses a different storage slot)
+    address constant REAP_RAIN_DEST_RECIPIENT = 0x6f7F522075AA5483d049dF0Ef81FcdD3b0ace7f4;
+    address constant PIX_USDC_DEST_RECIPIENT  = 0xf76f1bea29b5f63409a9d9797540A8E7934B52ea;
+
     function run() public {
         string memory deployments = readDeploymentFile();
         string memory chainId = vm.toString(block.chainid);
@@ -41,6 +54,35 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers {
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
+        txs = _addUpgradeTransactions(txs, reapProxy, rainProxy, pixProxy, cardOrderProxy);
+        txs = _addFraxConfigTransactions(txs, reapProxy, rainProxy, pixProxy, cardOrderProxy);
+        txs = _addMidasConfigTransactions(txs, reapProxy, rainProxy, pixProxy, cardOrderProxy);
+
+
+        // Verify hardcoded V1 configs match on-chain state before we re-set them after upgrade
+        _verifyV1Configs(reapProxy, rainProxy, pixProxy);
+
+        // Re-set destination data + liquid queue (V2 uses a different storage slot so V1 data is lost)
+        txs = _addDestinationDataTransactions(txs, reapProxy, rainProxy, pixProxy);
+        txs = _addLiquidWithdrawQueueTransactions(txs, reapProxy, rainProxy, pixProxy, cardOrderProxy);
+
+        string memory path = string.concat("./output/UpgradeSettlementDispatcherV2-", chainId, ".json");
+        vm.writeFile(path, txs);
+
+        executeGnosisTransactionBundle(path);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Transaction builders
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function _addUpgradeTransactions(
+        string memory txs,
+        address reapProxy,
+        address rainProxy,
+        address pixProxy,
+        address cardOrderProxy
+    ) internal pure returns (string memory) {
         string memory upgradeData;
 
         upgradeData = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, reapImpl, ""));
@@ -55,7 +97,59 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers {
         upgradeData = iToHex(abi.encodeWithSelector(UUPSUpgradeable.upgradeToAndCall.selector, cardOrderImpl, ""));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cardOrderProxy), upgradeData, "0", false)));
 
-        // Set Frax config on each proxy
+        return txs;
+    }
+
+    function _addDestinationDataTransactions(
+        string memory txs,
+        address reapProxy,
+        address rainProxy,
+        address pixProxy
+    ) internal pure returns (string memory) {
+        // Reap & Rain share the same dest recipient for both USDC and USDT
+        string memory reapRainDestData = iToHex(abi.encodeWithSelector(
+            SettlementDispatcherV2.setDestinationData.selector,
+            _tokenPair(),
+            _destDataPair(REAP_RAIN_DEST_RECIPIENT, REAP_RAIN_DEST_RECIPIENT)
+        ));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(reapProxy), reapRainDestData, "0", false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(rainProxy), reapRainDestData, "0", false)));
+
+        // Pix has a different USDC recipient but same USDT recipient
+        string memory pixDestData = iToHex(abi.encodeWithSelector(
+            SettlementDispatcherV2.setDestinationData.selector,
+            _tokenPair(),
+            _destDataPair(PIX_USDC_DEST_RECIPIENT, REAP_RAIN_DEST_RECIPIENT)
+        ));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(pixProxy), pixDestData, "0", false)));
+
+        return txs;
+    }
+
+    function _addLiquidWithdrawQueueTransactions(
+        string memory txs,
+        address reapProxy,
+        address rainProxy,
+        address pixProxy,
+        address cardOrderProxy
+    ) internal pure returns (string memory) {
+        string memory queueData = iToHex(abi.encodeWithSelector(SettlementDispatcherV2.setLiquidAssetWithdrawQueue.selector, LIQUID_USD, LIQUID_USD_BORING_QUEUE));
+
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(reapProxy), queueData, "0", false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(rainProxy), queueData, "0", false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(pixProxy), queueData, "0", false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cardOrderProxy), queueData, "0", true)));
+
+        return txs;
+    }
+
+    function _addFraxConfigTransactions(
+        string memory txs,
+        address reapProxy,
+        address rainProxy,
+        address pixProxy,
+        address cardOrderProxy
+    ) internal pure returns (string memory) {
         string memory fraxData;
 
         fraxData = iToHex(abi.encodeWithSelector(SettlementDispatcherV2.setFraxConfig.selector, FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP, FRAX_DEPOSIT_ADDRESS_REAP));
@@ -70,17 +164,83 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers {
         fraxData = iToHex(abi.encodeWithSelector(SettlementDispatcherV2.setFraxConfig.selector, FRAX_USD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP, FRAX_DEPOSIT_ADDRESS_CARD_ORDER));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cardOrderProxy), fraxData, "0", false)));
 
-        // Set Midas redemption vault on each proxy
+        return txs;
+    }
+
+    function _addMidasConfigTransactions(
+        string memory txs,
+        address reapProxy,
+        address rainProxy,
+        address pixProxy,
+        address cardOrderProxy
+    ) internal pure returns (string memory) {
         string memory midasData = iToHex(abi.encodeWithSelector(SettlementDispatcherV2.setMidasRedemptionVault.selector, MIDAS_LR, MIDAS_REDEMPTION_VAULT));
 
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(reapProxy), midasData, "0", false)));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(rainProxy), midasData, "0", false)));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(pixProxy), midasData, "0", false)));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cardOrderProxy), midasData, "0", true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cardOrderProxy), midasData, "0", false)));
 
-        string memory path = string.concat("./output/UpgradeSettlementDispatcherV2-", chainId, ".json");
-        vm.writeFile(path, txs);
+        return txs;
+    }
 
-        executeGnosisTransactionBundle(path);
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Pre-upgrade verification
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function _verifyV1Configs(address reapProxy, address rainProxy, address pixProxy) internal view {
+        _verifyV1DestData("Reap", reapProxy, REAP_RAIN_DEST_RECIPIENT, REAP_RAIN_DEST_RECIPIENT);
+        _verifyV1DestData("Rain", rainProxy, REAP_RAIN_DEST_RECIPIENT, REAP_RAIN_DEST_RECIPIENT);
+        _verifyV1DestData("Pix", pixProxy, PIX_USDC_DEST_RECIPIENT, REAP_RAIN_DEST_RECIPIENT);
+
+        _verifyV1LiquidQueue("Reap", reapProxy);
+        _verifyV1LiquidQueue("Rain", rainProxy);
+        _verifyV1LiquidQueue("Pix", pixProxy);
+    }
+
+    function _verifyV1DestData(string memory name, address proxy, address expectedUsdcRecipient, address expectedUsdtRecipient) internal view {
+        SettlementDispatcher sd = SettlementDispatcher(payable(proxy));
+
+        SettlementDispatcher.DestinationData memory usdc = sd.destinationData(USDC_SCROLL);
+        require(usdc.destRecipient == expectedUsdcRecipient, string.concat(name, ": USDC destRecipient mismatch"));
+        require(usdc.useCanonicalBridge == true, string.concat(name, ": USDC useCanonicalBridge mismatch"));
+
+        SettlementDispatcher.DestinationData memory usdt = sd.destinationData(USDT_SCROLL);
+        require(usdt.destRecipient == expectedUsdtRecipient, string.concat(name, ": USDT destRecipient mismatch"));
+        require(usdt.useCanonicalBridge == true, string.concat(name, ": USDT useCanonicalBridge mismatch"));
+    }
+
+    function _verifyV1LiquidQueue(string memory name, address proxy) internal view {
+        SettlementDispatcher sd = SettlementDispatcher(payable(proxy));
+        address queue = sd.getLiquidAssetWithdrawQueue(LIQUID_USD);
+        require(queue == LIQUID_USD_BORING_QUEUE, string.concat(name, ": LIQUID_USD withdraw queue mismatch"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Helpers
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function _tokenPair() internal pure returns (address[] memory tokens) {
+        tokens = new address[](2);
+        tokens[0] = USDC_SCROLL;
+        tokens[1] = USDT_SCROLL;
+    }
+
+    function _destDataPair(address usdcRecipient, address usdtRecipient) internal pure returns (SettlementDispatcherV2.DestinationData[] memory destDatas) {
+        destDatas = new SettlementDispatcherV2.DestinationData[](2);
+        destDatas[0] = SettlementDispatcherV2.DestinationData({
+            destEid: 0,
+            destRecipient: usdcRecipient,
+            stargate: address(0),
+            useCanonicalBridge: true,
+            minGasLimit: 0
+        });
+        destDatas[1] = SettlementDispatcherV2.DestinationData({
+            destEid: 0,
+            destRecipient: usdtRecipient,
+            stargate: address(0),
+            useCanonicalBridge: true,
+            minGasLimit: 0
+        });
     }
 }
