@@ -22,10 +22,11 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers {
     address constant FRAX_USD              = 0x397F939C3b91A74C321ea7129396492bA9Cdce82;
     address constant FRAX_CUSTODIAN        = 0x05bF905356fbeA7E59500f904b908402dB7A53DD;
     address constant FRAX_REMOTE_HOP       = 0xF6f45CCB5E85D1400067ee66F9e168f83e86124E;
-    address constant FRAX_DEPOSIT_ADDRESS_REAP       = 0x8ff130cF5d1e7D055592a978bc68e0C0ff2A3A6f;
-    address constant FRAX_DEPOSIT_ADDRESS_RAIN       = 0x812174A1662Ddf543EB9ABE17687Ed539F859019;
-    address constant FRAX_DEPOSIT_ADDRESS_PIX        = 0xcb9d8F5D048046A69594A552d468215EbBEb088b;
-    address constant FRAX_DEPOSIT_ADDRESS_CARD_ORDER = 0x4C7fc68F658a51a196a4937bf9dacE86fe978e81;
+    // Generated using the Frax API
+    address constant FRAX_DEPOSIT_ADDRESS_REAP       = 0x0eD8993b5c9A707bfe0a04644B1C44456a61987D;
+    address constant FRAX_DEPOSIT_ADDRESS_RAIN       = 0x2D4f918E4020C79DE6284CFa46b8310FFf41B736;
+    address constant FRAX_DEPOSIT_ADDRESS_PIX        = 0x73880079a2660c1CBea7703436CD01ACD40492Ee;
+    address constant FRAX_DEPOSIT_ADDRESS_CARD_ORDER = 0x5fC3bA932482f93503f0f7eB558Af2eC9e44f3F2;
 
     // Midas infrastructure
     address constant MIDAS_LR               = 0xb7Fb3768CAAC98354EaDF514b48f28F2fE822bF0;
