@@ -2,14 +2,16 @@
 pragma solidity ^0.8.28;
 
 import {stdJson} from "forge-std/StdJson.sol";
+import {StdCheats} from "forge-std/StdCheats.sol";
 
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { SettlementDispatcher } from "../../src/settlement-dispatcher/SettlementDispatcher.sol";
 import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
+import { IRoleRegistry } from "../../src/interfaces/IRoleRegistry.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
-contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers {
+contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers, StdCheats {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     // Implementation addresses
@@ -71,6 +73,8 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers {
         vm.writeFile(path, txs);
 
         executeGnosisTransactionBundle(path);
+
+        _smokeTestRainDispatcher(rainProxy, cardOrderProxy);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -215,6 +219,57 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers {
         SettlementDispatcher sd = SettlementDispatcher(payable(proxy));
         address queue = sd.getLiquidAssetWithdrawQueue(LIQUID_USD);
         require(queue == LIQUID_USD_BORING_QUEUE, string.concat(name, ": LIQUID_USD withdraw queue mismatch"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Post-upgrade smoke tests (Rain dispatcher, one of each bridger op)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    function _smokeTestRainDispatcher(address rainProxy, address cardOrderProxy) internal {
+        SettlementDispatcherV2 rain = SettlementDispatcherV2(payable(rainProxy));
+        SettlementDispatcherV2 cardOrder = SettlementDispatcherV2(payable(cardOrderProxy));
+
+        address bridger = address(0xBEEF);
+        IRoleRegistry roleReg = rain.roleRegistry();
+        bytes32 bridgerRole = rain.SETTLEMENT_DISPATCHER_BRIDGER_ROLE();
+        vm.prank(roleReg.owner());
+        roleReg.grantRole(bridgerRole, bridger);
+
+        // 1. bridge USDC via canonical bridge
+        deal(USDC_SCROLL, rainProxy, 100e6);
+        vm.prank(bridger);
+        rain.bridge(USDC_SCROLL, 100e6, 0);
+
+        // 2. transferFundsToRefundWallet
+        deal(USDC_SCROLL, rainProxy, 100e6);
+        vm.prank(bridger);
+        rain.transferFundsToRefundWallet(USDC_SCROLL, 100e6);
+        // transferFundsToRefundWallet (card order)
+        deal(USDC_SCROLL, cardOrderProxy, 100e6);
+        vm.prank(bridger);
+        cardOrder.transferFundsToRefundWallet(USDC_SCROLL, 10e6);
+
+        // 3. redeemFraxToUsdc (sync)
+        deal(FRAX_USD, rainProxy, 100e18);
+        deal(USDC_SCROLL, FRAX_CUSTODIAN, 200e6);
+        vm.prank(bridger);
+        rain.redeemFraxToUsdc(100e18, 0);
+
+        // 4. redeemFraxAsync (via LayerZero OFT)
+        deal(FRAX_USD, rainProxy, 100e18);
+        vm.deal(rainProxy, 1 ether);
+        vm.prank(bridger);
+        rain.redeemFraxAsync(100e18);
+
+        // 5. redeemMidasToAsset
+        deal(MIDAS_LR, rainProxy, 100e18);
+        vm.prank(bridger);
+        rain.redeemMidasToAsset(MIDAS_LR, USDC_SCROLL, 100e18, 0);
+
+        // 6. withdrawLiquidAsset
+        deal(LIQUID_USD, rainProxy, 100e18);
+        vm.prank(bridger);
+        rain.withdrawLiquidAsset(LIQUID_USD, USDC_SCROLL, 100e18, 0, 0, 604800);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
