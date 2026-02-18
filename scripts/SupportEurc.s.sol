@@ -7,6 +7,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {IDebtManager} from "../src/interfaces/IDebtManager.sol";
 import {ICashModule} from "../src/interfaces/ICashModule.sol";
+import {CashbackDispatcher} from "../src/cashback-dispatcher/CashbackDispatcher.sol";
 import {EtherFiLiquidModule} from "../src/modules/etherfi/EtherFiLiquidModule.sol";
 import {PriceProvider, IAggregatorV3} from "../src/oracle/PriceProvider.sol";
 import {Utils} from "./utils/Utils.sol";
@@ -19,6 +20,7 @@ contract SupportEurc is Utils, Test {
     address debtManager;
     address priceProvider;
     address cashModule;
+    address cashbackDispatcher;
 
 
     function run() public {
@@ -41,6 +43,11 @@ contract SupportEurc is Utils, Test {
         cashModule = stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "CashModule")
+        );
+
+        cashbackDispatcher = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "CashbackDispatcher")
         );
 
         PriceProvider.Config memory eurcUsdConfig = PriceProvider.Config({
@@ -80,6 +87,8 @@ contract SupportEurc is Utils, Test {
 
         bool[] memory enableArray = new bool[](1);
         enableArray[0] = true;
+
+        CashbackDispatcher(cashbackDispatcher).configureCashbackToken(eurcArray, enableArray);
 
         ICashModule(cashModule).configureWithdrawAssets(eurcArray, enableArray);
 
