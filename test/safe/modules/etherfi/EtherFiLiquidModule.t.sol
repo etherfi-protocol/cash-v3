@@ -52,7 +52,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
 
     address liquidUsdAssetOut = address(usdc);
     address liquidEthAssetOut = address(weEth);
-    address liquidBtcAssetOut = address(wbtc);
+    address liquidBtcAssetOut = address(ebtc);
 
     uint16 discount = 1; 
     uint24 secondsToDeadline = 3 days;

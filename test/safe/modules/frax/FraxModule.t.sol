@@ -6,7 +6,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ICashModule, WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
-import { MessagingFee } from "../../../../src/interfaces/IFraxRemoteHop.sol";
+import { MessagingFee } from "../../../../src/interfaces/IOFT.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.sol";
 import { FraxModule } from "../../../../src/modules/frax/FraxModule.sol";
