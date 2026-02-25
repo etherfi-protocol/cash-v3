@@ -10,13 +10,6 @@ import { TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
-/**
- * Generic funds recovery script. Token address is read from TOKEN_ADDRESS env var.
- * Symbol is read from chain for the output filename; falls back to "TOKEN" if not available.
- *
- * Usage:
- *  source .env && TOKEN_ADDRESS={token address} forge script scripts/gnosis-txs/FundsRecoveryGeneric.s.sol:FundsRecoveryGeneric --rpc-url=$ARBITRUM_RPC
- */
 contract FundsRecoveryArbitrum is GnosisHelpers, Utils, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
