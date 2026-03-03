@@ -1,4 +1,4 @@
-name: CI
+name: Test
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: true
 
-    name: Foundry project
+    name: Run Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
