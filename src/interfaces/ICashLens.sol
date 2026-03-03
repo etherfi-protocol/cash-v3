@@ -21,9 +21,11 @@ interface ICashLens {
      * @notice Gets comprehensive cash data for a Safe
      * @dev Aggregates data from multiple sources including DebtManager and CashModule
      * @param safe Address of the EtherFi Safe
+     * @param debtServiceTokenPreference Optional ordered array of borrow tokens for debit calculations.
+     *                                   If empty, uses all available borrow tokens from DebtManager.
      * @return safeCashData Comprehensive data structure with collateral, borrows, limits, and more
      */
-    function getSafeCashData(address safe) external view returns (SafeCashData memory safeCashData);
+    function getSafeCashData(address safe, address[] memory debtServiceTokenPreference) external view returns (SafeCashData memory safeCashData);
 
     /**
      * @notice Gets the pending withdrawal amount for a token
