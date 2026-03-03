@@ -51,8 +51,8 @@ contract FraxModuleTest is SafeTestSetup {
 
     //Success cases
     function test_deposit_successFraxUsd() public {
-        uint256 amountToDeposit = 1000 * 10 ** 6; // 1000 USDC (6 decimals)
-        uint256 minReturnAmount = 1000 * 10 ** 18;
+        uint256 amountToDeposit = 10 * 10 ** 6; // 1000 USDC (6 decimals)
+        uint256 minReturnAmount = 10 * 10 ** 18;
         deal(address(usdc), address(safe), amountToDeposit);
         // Ensure custodian has sufficient balance for synchronous deposit
         deal(address(fraxusd), custodian, minReturnAmount);
