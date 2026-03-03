@@ -1,0 +1,23 @@
+diff --git a/contracts/utils/cryptography/MessageHashUtils.sol b/contracts/utils/cryptography/MessageHashUtils.sol
+index e1cbccb6..1bdb94de 100644
+--- a/contracts/utils/cryptography/MessageHashUtils.sol
++++ b/contracts/utils/cryptography/MessageHashUtils.sol
+@@ -28,11 +28,13 @@ library MessageHashUtils {
+      * See {ECDSA-recover}.
+      */
+     function toEthSignedMessageHash(bytes32 messageHash) internal pure returns (bytes32 digest) {
+-        assembly ("memory-safe") {
+-            mstore(0x00, "\x19Ethereum Signed Message:\n32") // 32 is the bytes-length of messageHash
+-            mstore(0x1c, messageHash) // 0x1c (28) is the length of the prefix
+-            digest := keccak256(0x00, 0x3c) // 0x3c is the length of the prefix (0x1c) + messageHash (0x20)
+-        }
++        // assembly ("memory-safe") {
++        //     mstore(0x00, "\x19Ethereum Signed Message:\n32") // 32 is the bytes-length of messageHash
++        //     mstore(0x1c, messageHash) // 0x1c (28) is the length of the prefix
++        //     digest := keccak256(0x00, 0x3c) // 0x3c is the length of the prefix (0x1c) + messageHash (0x20)
++        // }
++        // Munged, MH, equivalence proved: https://prover.certora.com/output/31688/d4bfe82b38e447048fa4ee117275398f/
++	return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+     }
+ 
+     /**

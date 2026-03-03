@@ -1,0 +1,40 @@
+name: Certora Prover Workflow
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  certora_run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      - name: Install forge dependencies
+        run: forge install
+      - name: Patch code
+        run: ./certora/scripts/patch.sh
+      - name: Run Certora pipeline
+        uses: Certora/certora-run-action@v2.3.0
+        with:
+          configurations: |-
+            certora/confs/CashModuleCore.conf --rule "p03"
+            certora/confs/EtherFiSafe.conf
+          solc-versions: 0.8.28
+          job-name: "Certora verification"
+          certora-key: ${{ secrets.CERTORAKEY }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,13 @@
+diff --git a/src/top-up/TopUpFactory.sol b/src/top-up/TopUpFactory.sol
+index b9b6d2f..c1c135b 100644
+--- a/src/top-up/TopUpFactory.sol
++++ b/src/top-up/TopUpFactory.sol
+@@ -2,7 +2,7 @@
+ pragma solidity ^0.8.28;
+ 
+ import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { BeaconFactory, UpgradeableBeacon } from "../beacon-factory/BeaconFactory.sol";
+ import { DelegateCallLib } from "../libraries/DelegateCallLib.sol";

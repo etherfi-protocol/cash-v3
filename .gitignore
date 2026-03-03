@@ -18,3 +18,6 @@ node_modules
 coverage_report
 broadcast
 **/*/.DS_Store
+
+# Certora
+.certora_internal/

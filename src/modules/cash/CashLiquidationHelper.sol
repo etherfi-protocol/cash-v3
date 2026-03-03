@@ -6,17 +6,24 @@ import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 contract CashLiquidationHelper {
     IDebtManager public immutable debtManager;
     address public immutable usdc;
+    address public immutable usdt;
+    address public immutable liquidUsd;
+    address public immutable eUsd;
 
     error InvalidInput();
 
-    constructor (address _debtManager, address _usdc) {
+    constructor (address _debtManager, address _usdc, address _usdt, address _liquidUsd, address _eUsd) {
         debtManager = IDebtManager(_debtManager);
         usdc = _usdc;
+        usdt = _usdt;
+        liquidUsd = _liquidUsd;
+        eUsd = _eUsd;
     }
 
     struct CashLiquidationData {
         address user;                   
         bool isLiquidatable;
+        bool isMostlyStables;
         uint256 maxBorrowAmount;           
         uint256 totalBorrowing;            
         uint256 liquidationBorrowAmount;   
@@ -45,9 +52,22 @@ contract CashLiquidationHelper {
 
     function _getUserData(address user) internal view returns (CashLiquidationData memory data) {
         data.user = user;
+        
+        (IDebtManager.TokenData[] memory totalCollaterals, uint256 totalCollateralInUsd, , uint256 totalBorrowing) = debtManager.getUserCurrentState(user);
+        
+        uint256 stableCount = 0;
+        for (uint256 i = 0; i < totalCollaterals.length; i++) {
+            if (totalCollaterals[i].token == usdc || totalCollaterals[i].token == usdt || totalCollaterals[i].token == liquidUsd || totalCollaterals[i].token == eUsd) {
+                stableCount += debtManager.convertCollateralTokenToUsd(totalCollaterals[i].token, totalCollaterals[i].amount);
+            }
+        }
+
+        data.isMostlyStables = stableCount > (3 * totalCollateralInUsd) / 4;
+
+
         data.isLiquidatable = debtManager.liquidatable(user);
         data.maxBorrowAmount = debtManager.getMaxBorrowAmount(user, true);
-        data.totalBorrowing = debtManager.borrowingOf(user, usdc);
+        data.totalBorrowing = totalBorrowing;
         data.liquidationBorrowAmount = debtManager.getMaxBorrowAmount(user, false);
 
         if (data.liquidationBorrowAmount > data.totalBorrowing) data.remainingAmtToLiquidation = data.liquidationBorrowAmount - data.totalBorrowing;

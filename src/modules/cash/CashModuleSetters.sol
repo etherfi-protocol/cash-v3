@@ -50,8 +50,13 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (binSponsor == BinSponsor.Rain) { 
             $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherRain, dispatcher);
             $.settlementDispatcherRain = dispatcher;
-        } 
-        else {
+        } else if (binSponsor == BinSponsor.PIX) {
+            $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherPix, dispatcher);
+            $.settlementDispatcherPix = dispatcher;
+        } else if (binSponsor == BinSponsor.CardOrder) {
+            $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherCardOrder, dispatcher);
+            $.settlementDispatcherCardOrder = dispatcher;
+        } else {
             $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherReap, dispatcher);
             $.settlementDispatcherReap = dispatcher;
         }

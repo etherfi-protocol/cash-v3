@@ -1,0 +1,13 @@
+diff --git a/src/libraries/EnumerableAddressWhitelistLib.sol b/src/libraries/EnumerableAddressWhitelistLib.sol
+index 0fcf543..a3e5b7a 100644
+--- a/src/libraries/EnumerableAddressWhitelistLib.sol
++++ b/src/libraries/EnumerableAddressWhitelistLib.sol
+@@ -1,7 +1,7 @@
+ // SPDX-License-Identifier: MIT
+ pragma solidity ^0.8.28;
+ 
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { ArrayDeDupLib } from "./ArrayDeDupLib.sol";
+ 

@@ -1,0 +1,13 @@
+diff --git a/src/safe/EtherFiSafe.sol b/src/safe/EtherFiSafe.sol
+index 9897cfb..f87d683 100644
+--- a/src/safe/EtherFiSafe.sol
++++ b/src/safe/EtherFiSafe.sol
+@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
+ 
+ import { NoncesUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/NoncesUpgradeable.sol";
+ import { EIP712Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+ 

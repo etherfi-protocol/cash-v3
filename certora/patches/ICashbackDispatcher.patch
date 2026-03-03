@@ -1,0 +1,11 @@
+diff --git a/src/interfaces/ICashbackDispatcher.sol b/src/interfaces/ICashbackDispatcher.sol
+index 56dd141..144bc38 100644
+--- a/src/interfaces/ICashbackDispatcher.sol
++++ b/src/interfaces/ICashbackDispatcher.sol
+@@ -104,4 +104,6 @@ interface ICashbackDispatcher {
+      * @param amount The amount to withdraw (0 for all available balance)
+      */
+     function withdrawFunds(address token, address recipient, uint256 amount) external;
++
++    function convertUsdToCashbackToken(address cashbackToken, uint256 cashbackInUsd) external view returns (uint256);
+ }
