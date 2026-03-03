@@ -9,6 +9,7 @@ env:
   MAINNET_RPC: ${{ secrets.MAINNET_RPC }}
   SCROLL_RPC: ${{ secrets.SCROLL_RPC }}
   BASE_RPC: ${{ secrets.BASE_RPC }}
+  ARBITRUM_RPC: ${{ secrets.ARBITRUM_RPC }}
   OPENOCEAN_API_KEY: ${{ secrets.OPENOCEAN_API_KEY }}
 
 jobs:
