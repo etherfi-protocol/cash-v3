@@ -447,7 +447,7 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
     ) internal returns (bytes memory data) {
         string[] memory inputs = new string[](10);
         inputs[0] = "npx";
-        inputs[1] = "ts-node";
+        inputs[1] = "tsx";
         inputs[2] = "test/getQuoteOpenOcean.ts";
         inputs[3] = chainId;
         inputs[4] = vm.toString(from);
