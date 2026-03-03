@@ -1,0 +1,50 @@
+name: Build Recovery Message Hash
+
+on:
+  workflow_dispatch:
+    inputs:
+      recovery_safe_address:
+        description: 'Recovery Safe Address (e.g., 0x...)'
+        required: true
+        type: string
+      recovery_new_owner:
+        description: 'New Owner Address (e.g., 0x...)'
+        required: true
+        type: string
+      scroll_rpc:
+        description: 'Scroll RPC URL (optional, defaults to public RPC)'
+        required: false
+        type: string
+        default: 'https://rpc.scroll.io'
+
+jobs:
+  build-message-hash:
+    name: Build Recovery Message Hash
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+      
+      - name: Display Input Parameters
+        run: |
+          echo "================================================"
+          echo "Recovery Safe Address: ${{ github.event.inputs.recovery_safe_address }}"
+          echo "New Owner Address: ${{ github.event.inputs.recovery_new_owner }}"
+          echo "Scroll RPC: ${{ github.event.inputs.scroll_rpc }}"
+          echo "================================================"
+      
+      - name: Run Build Message Hash Test
+        run: |
+          echo "Building message hash for recovery..."
+          forge test --match-test test_BuildMessageHashAndDigestGithub -vvv
+        env:
+          RECOVERY_SAFE_ADDRESS: ${{ github.event.inputs.recovery_safe_address }}
+          RECOVERY_NEW_OWNER: ${{ github.event.inputs.recovery_new_owner }}
+          SCROLL_RPC: ${{ github.event.inputs.scroll_rpc }}

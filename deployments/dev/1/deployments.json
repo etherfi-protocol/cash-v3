@@ -6,6 +6,7 @@
       "EtherFiOFTBridgeAdapter": "0x61fB314ccd2b3cada953Eb4Ab78ee7876c0BE9E2",
       "EtherFiLiquidBridgeAdapter": "0xf4f5a6c29807bfdfc8d5c572962b8781be951072",
       "NTTAdapter": "0x1DCCe2dA4Ba31e6f41FD4bF37DC8dc5A37582009",
-      "ScrollERC20BridgeAdapter": "0x46A2A0eDf74eD97A72518349B5ccBD53AABf8265"
+      "ScrollERC20BridgeAdapter": "0x46A2A0eDf74eD97A72518349B5ccBD53AABf8265",
+      "PixWalletAutoTopup": "0x6Bdc59A8Dd435c2Da4045522491eF5769944d33B"
     }
 }

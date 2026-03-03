@@ -5,7 +5,7 @@ test = "test"
 libs = ["lib"]
 solc = "0.8.28" 
 optimizer = true
-optimizer_runs = 50
+optimizer_runs = 0
 evm_version = "cancun" 
 gas_reports = ["*"]
 bytecode_hash = "none"
@@ -23,9 +23,10 @@ scroll = "${SCROLL_RPC}"
 base = "${BASE_RPC}"
 
 [etherscan]
-mainnet = { key = "${MAINNET_ETHERSCAN_KEY}" }
-scroll = { key = "${SCROLLSCAN_KEY}" }
-base = { key = "${BASESCAN_KEY}" }
+mainnet = { key = "${ETHERSCAN_KEY}" }
+scroll = { key = "${ETHERSCAN_KEY}" }
+base = { key = "${ETHERSCAN_KEY}" }
+hyperevm  = { key = "${ETHERSCAN_KEY}", chain = 999 }
 
 
 
@@ -38,3 +39,6 @@ quote_style = "double"
 number_underscore = "thousands"
 wrap_comments = true
 sort_imports = true
+
+[lint]
+lint_on_build = false

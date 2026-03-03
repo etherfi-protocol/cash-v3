@@ -1,0 +1,122 @@
+diff --git a/src/role-registry/RoleRegistry.sol b/src/role-registry/RoleRegistry.sol
+index ee3de69..6cf90d6 100644
+--- a/src/role-registry/RoleRegistry.sol
++++ b/src/role-registry/RoleRegistry.sol
+@@ -2,8 +2,8 @@
+ pragma solidity ^0.8.28;
+ 
+ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+-import { EnumerableRoles } from "solady/auth/EnumerableRoles.sol";
+-import { Ownable } from "solady/auth/Ownable.sol";
++import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
++import { AccessControlEnumerable } from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
+ 
+ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+ 
+@@ -13,7 +13,7 @@ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+  * @dev Implements UUPS upgradeability pattern and uses Solady's EnumerableRoles for efficient role management
+  * @author ether.fi
+  */
+-contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
++contract RoleRegistry is Ownable, UUPSUpgradeable, AccessControlEnumerable {
+     /**
+      * @notice Reference to the EtherFi data provider contract
+      * @dev Used for validating Safe addresses and other protocol integrations
+@@ -78,7 +78,7 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
+      * @param _etherFiDataProvider Address of the EtherFi data provider contract
+      * @custom:oz-upgrades-unsafe-allow constructor
+      */
+-    constructor(address _etherFiDataProvider) {
++    constructor(address _etherFiDataProvider) Ownable(msg.sender) {
+         _disableInitializers();
+ 
+         etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
+@@ -90,7 +90,7 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
+      * @param _owner Address that will be granted ownership of the contract
+      */
+     function initialize(address _owner) external initializer {
+-        _initializeOwner(_owner);
++        transferOwnership(_owner);
+         __UUPSUpgradeable_init();
+     }
+     
+@@ -134,7 +134,11 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
+ 
+         for (uint256 i = 0; i < len;) {
+             if (accounts[i] == address(0)) revert InvalidInput();
+-            _setRole(accounts[i], uint256(role), shouldAdd[i]);
++            if (shouldAdd[i]) {
++              grantRole(role, accounts[i]);
++            } else {
++              revokeRole(role, accounts[i]);
++            }
+             unchecked {
+                 ++i;
+             }
+@@ -181,7 +185,13 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
+      * @custom:throws EnumerableRolesUnauthorized if the account has none of the specified roles
+      */
+     function checkRoles(address account, bytes memory encodedRoles) external view {
+-        if (!_hasAnyRoles(account, encodedRoles)) __revertEnumerableRolesUnauthorized();
++        bytes32[] memory roles = abi.decode(encodedRoles, (bytes32[]));
++        for (uint256 i = 0; i < roles.length; ++i) {
++          if (hasRole(roles[i], account)) {
++            return;
++          }
++	}
++        __revertEnumerableRolesUnauthorized();
+     }
+ 
+     /**
+@@ -190,30 +200,30 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
+      * @param role The role identifier to check
+      * @param account The address to check the role for
+      * @return bool True if the account has the role, false otherwise
+-     */
+     function hasRole(bytes32 role, address account) public view returns (bool) {
+-        return hasRole(account, uint256(role));
++        return hasRole(role, account);
+     }
++     */
+ 
+     /**
+      * @notice Grants a role to an account
+      * @dev Only callable by the contract owner (handled in setRole function)
+      * @param role The role identifier to grant
+      * @param account The address to grant the role to
+-     */
+     function grantRole(bytes32 role, address account) external {
+-        setRole(account, uint256(role), true);
++        grantRole(account, role);
+     }
++     */
+ 
+     /**
+      * @notice Revokes a role from an account
+      * @dev Only callable by the contract owner (handled in setRole function)
+      * @param role The role identifier to revoke
+      * @param account The address to revoke the role from
+-     */
+     function revokeRole(bytes32 role, address account) external {
+         setRole(account, uint256(role), false);
+     }
++     */
+ 
+     /**
+      * @notice Gets all addresses that have a specific role
+@@ -222,7 +232,14 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
+      * @return Array of addresses that have the specified role
+      */
+     function roleHolders(bytes32 role) public view returns (address[] memory) {
+-        return roleHolders(uint256(role));
++        uint256 count = getRoleMemberCount(role);
++        address[] memory holders = new address[](count);
++
++        for (uint256 i = 0; i < count; ++i) {
++            holders[i] = getRoleMember(role, i);
++        }
++
++         return holders;
+     }
+ 
+     /**
