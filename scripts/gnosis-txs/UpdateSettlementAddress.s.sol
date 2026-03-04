@@ -64,14 +64,14 @@ contract UpdateSettlementAddress is Utils, GnosisHelpers, Test {
         string memory path = string.concat("./output/UpdateSettlementAddress.json");
         vm.writeFile(path, txs);
         executeGnosisTransactionBundle(path);
+
+        test();
     }
 
     function test() public {
         vm.startPrank(cashControllerSafe);
 
         RoleRegistry(roleRegistry).grantRole(SettlementDispatcher(payable(settlementDispatcherReap)).SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), cashControllerSafe);
-
-        uint256 amount = 10e6;
 
         vm.expectEmit(true, true, true, true);
         emit SettlementDispatcher.CanonicalBridgeWithdraw(usdcScroll, mainnetSettlementAddress, 10e6);
