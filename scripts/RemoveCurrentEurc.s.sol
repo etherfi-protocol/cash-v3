@@ -12,10 +12,8 @@ import {EtherFiLiquidModule} from "../src/modules/etherfi/EtherFiLiquidModule.so
 import {PriceProvider, IAggregatorV3} from "../src/oracle/PriceProvider.sol";
 import {Utils} from "./utils/Utils.sol";
 
-contract SupportEurc is Utils, Test {
-    address eurc = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
-    address eurcUsdOracle = 0x8d60a2B5E87ac714F2Bba57140981B79440E5feF;
-    uint64 borrowApyPerSecond = 317097919837; // 10% / (365 days in seconds)
+contract RemoveSupportEurc is Utils, Test {
+    address eurcDeployedByScroll = 0x174d1A887e971f7d0fe5C68b328c30e0ED743160;
 
     address debtManager;
     address priceProvider;
@@ -50,20 +48,10 @@ contract SupportEurc is Utils, Test {
             string.concat(".", "addresses", ".", "CashbackDispatcher")
         );
 
-        PriceProvider.Config memory eurcUsdConfig = PriceProvider.Config({
-            oracle: eurcUsdOracle,
-            priceFunctionCalldata: "",
-            isChainlinkType: true,
-            oraclePriceDecimals: IAggregatorV3(eurcUsdOracle).decimals(),
-            maxStaleness: 2 days,
-            dataType: PriceProvider.ReturnType.Int256,
-            isBaseTokenEth: false,
-            isStableToken: false,
-            isBaseTokenBtc: false
-        });
+        PriceProvider.Config memory eurcUsdConfig;
 
         address[] memory tokens = new address[](1);
-        tokens[0] = eurc;
+        tokens[0] = eurcDeployedByScroll;
 
         PriceProvider.Config[] memory priceProviderConfigs = new PriceProvider.Config[](1);
         priceProviderConfigs[0] = eurcUsdConfig;
@@ -76,17 +64,16 @@ contract SupportEurc is Utils, Test {
                 liquidationBonus: 1e18
             });
 
+        IDebtManager(debtManager).unsupportBorrowToken(eurcDeployedByScroll);
+        IDebtManager(debtManager).unsupportCollateralToken(eurcDeployedByScroll);
         PriceProvider(priceProvider).setTokenConfig(tokens, priceProviderConfigs);
 
-        IDebtManager(debtManager).supportCollateralToken(eurc, eurcConfig);
-
-        IDebtManager(debtManager).supportBorrowToken(eurc, borrowApyPerSecond, 10e6);
 
         address[] memory eurcArray = new address[](1);
-        eurcArray[0] = eurc;
+        eurcArray[0] = eurcDeployedByScroll;
 
         bool[] memory enableArray = new bool[](1);
-        enableArray[0] = true;
+        enableArray[0] = false;
 
         CashbackDispatcher(cashbackDispatcher).configureCashbackToken(eurcArray, enableArray);
 

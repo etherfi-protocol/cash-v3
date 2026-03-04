@@ -16,6 +16,7 @@ contract SupportEurc is GnosisHelpers, Utils, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     address eurc = 0x174d1A887e971f7d0fe5C68b328c30e0ED743160;
+    address newEurc = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
     address eurcUsdOracle = 0x8d60a2B5E87ac714F2Bba57140981B79440E5feF;
     uint64 borrowApyPerSecond = 126839167935; // 4% / (365 days in seconds)
     
@@ -61,7 +62,7 @@ contract SupportEurc is GnosisHelpers, Utils, Test {
         });
 
         address[] memory tokens = new address[](1);
-        tokens[0] = eurc;
+        tokens[0] = newEurc;
 
         bool[] memory enableArray = new bool[](1);
         enableArray[0] = true;
@@ -80,18 +81,20 @@ contract SupportEurc is GnosisHelpers, Utils, Test {
         string memory setEurcPriceProviderConfig = iToHex(abi.encodeWithSelector(PriceProvider.setTokenConfig.selector, tokens, priceProviderConfigs));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), setEurcPriceProviderConfig, "0", false)));
         
-        string memory setEurcConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, eurc, eurcConfig));
+        string memory setEurcConfig = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, newEurc, eurcConfig));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEurcConfig, "0", false)));
 
-        string memory setEurcBorrowToken = iToHex(abi.encodeWithSelector(IDebtManager.supportBorrowToken.selector, eurc, borrowApyPerSecond, 10e6));
+        string memory setEurcBorrowToken = iToHex(abi.encodeWithSelector(IDebtManager.supportBorrowToken.selector, newEurc, borrowApyPerSecond, 10e6));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), setEurcBorrowToken, "0", false)));
 
         string memory configureCashbackToken = iToHex(abi.encodeWithSelector(CashbackDispatcher.configureCashbackToken.selector, tokens, enableArray));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashbackDispatcher), configureCashbackToken, "0", false)));
 
         string memory configureCashModule = iToHex(abi.encodeWithSelector(ICashModule.configureWithdrawAssets.selector, tokens, enableArray));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), configureCashModule, "0", true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), configureCashModule, "0", false)));
         
+        txs = appendRemoveOldEurcTx(txs);
+
         vm.createDir("./output", true);
         string memory path = "./output/SupportEurc.json";
         vm.writeFile(path, txs);
@@ -99,8 +102,37 @@ contract SupportEurc is GnosisHelpers, Utils, Test {
         /// below here is just a test
         executeGnosisTransactionBundle(path);
 
-        assert(IDebtManager(debtManager).isCollateralToken(eurc) == true);
-        assert(IDebtManager(debtManager).isBorrowToken(eurc) == true);
-        assert(CashbackDispatcher(cashbackDispatcher).isCashbackToken(eurc) == true);
+        assert(IDebtManager(debtManager).isCollateralToken(newEurc) == true);
+        assert(IDebtManager(debtManager).isBorrowToken(newEurc) == true);
+        assert(CashbackDispatcher(cashbackDispatcher).isCashbackToken(newEurc) == true);
+    }
+
+    function appendRemoveOldEurcTx(string memory txs) internal view returns (string memory) {
+        address[] memory oldEurcArray = new address[](1);
+        oldEurcArray[0] = eurc;
+        
+        bool[] memory oldEnableArray = new bool[](1);
+        oldEnableArray[0] = false;
+
+        PriceProvider.Config memory oldEurcUsdConfig;
+        PriceProvider.Config[] memory oldPriceProviderConfigs = new PriceProvider.Config[](1);
+        oldPriceProviderConfigs[0] = oldEurcUsdConfig;
+
+        string memory removeOldEurcBorrowToken = iToHex(abi.encodeWithSelector(IDebtManager.unsupportBorrowToken.selector, eurc));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), removeOldEurcBorrowToken, "0", false)));
+
+        string memory removeOldEurcCollateralToken = iToHex(abi.encodeWithSelector(IDebtManager.unsupportCollateralToken.selector, eurc));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(debtManager), removeOldEurcCollateralToken, "0", false)));
+
+        string memory removeOldEurcPriceProviderConfig = iToHex(abi.encodeWithSelector(PriceProvider.setTokenConfig.selector, oldEurcArray, oldPriceProviderConfigs));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(priceProvider), removeOldEurcPriceProviderConfig, "0", false)));
+
+        string memory removeOldEurcCashbackToken = iToHex(abi.encodeWithSelector(CashbackDispatcher.configureCashbackToken.selector, oldEurcArray, oldEnableArray));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashbackDispatcher), removeOldEurcCashbackToken, "0", false)));
+
+        string memory removeOldEurcCashModule = iToHex(abi.encodeWithSelector(ICashModule.configureWithdrawAssets.selector, oldEurcArray, oldEnableArray));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), removeOldEurcCashModule, "0", true)));
+
+        return txs;
     }
 }
