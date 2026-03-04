@@ -22,6 +22,7 @@ contract UpdateSettlementAddress is Utils, GnosisHelpers, Test {
     address mainnetSettlementAddress = 0xEf92B8aF3C92Dc87D1526eFB195c514608De15B5;
     address settlementDispatcherReap;
     address settlementDispatcherRain;
+    address settlementDispatcherPix;
 
     function run() public {
         string memory chainId = vm.toString(block.chainid);
@@ -34,6 +35,10 @@ contract UpdateSettlementAddress is Utils, GnosisHelpers, Test {
         settlementDispatcherRain = stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "SettlementDispatcherRain")
+        );
+        settlementDispatcherPix = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "SettlementDispatcherPix")
         );
 
         address[] memory SettlementDispatcherTokens = new address[](2); 
@@ -59,7 +64,22 @@ contract UpdateSettlementAddress is Utils, GnosisHelpers, Test {
 
         string memory updateSettlementAddress = iToHex(abi.encodeWithSelector(SettlementDispatcher.setDestinationData.selector, SettlementDispatcherTokens, destDatas));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(settlementDispatcherReap), updateSettlementAddress, "0", false)));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(settlementDispatcherRain), updateSettlementAddress, "0", true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(settlementDispatcherRain), updateSettlementAddress, "0", false)));
+        
+        address[] memory SettlementDispatcherPixTokens = new address[](1); 
+        SettlementDispatcherPixTokens[0] = address(usdtScroll);
+        SettlementDispatcher.DestinationData[] memory destDatasPix = new SettlementDispatcher.DestinationData[](1);
+        destDatasPix[0] = SettlementDispatcher.DestinationData({
+            destEid: 0,
+            destRecipient: mainnetSettlementAddress,
+            stargate: address(0),
+            useCanonicalBridge: true,
+            minGasLimit: 0
+        });
+
+        string memory updateSettlementAddressPix = iToHex(abi.encodeWithSelector(SettlementDispatcher.setDestinationData.selector, SettlementDispatcherPixTokens, destDatasPix));
+
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(settlementDispatcherPix), updateSettlementAddressPix, "0", true)));
 
         string memory path = string.concat("./output/UpdateSettlementAddress.json");
         vm.writeFile(path, txs);
@@ -88,6 +108,10 @@ contract UpdateSettlementAddress is Utils, GnosisHelpers, Test {
         vm.expectEmit(true, true, true, true);
         emit SettlementDispatcher.CanonicalBridgeWithdraw(usdtScroll, mainnetSettlementAddress, 10e6);
         SettlementDispatcher(payable(settlementDispatcherRain)).bridge(usdtScroll, 10e6, 10e6);
+
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcher.CanonicalBridgeWithdraw(usdtScroll, mainnetSettlementAddress, 10e6);
+        SettlementDispatcher(payable(settlementDispatcherPix)).bridge(usdtScroll, 10e6, 10e6);
 
         vm.stopPrank();
     }
