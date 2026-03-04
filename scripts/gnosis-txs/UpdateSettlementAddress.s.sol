@@ -20,6 +20,7 @@ contract UpdateSettlementAddress is Utils, GnosisHelpers, Test {
     address public roleRegistry = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B;
 
     address mainnetSettlementAddress = 0xEf92B8aF3C92Dc87D1526eFB195c514608De15B5;
+    address pixUsdtSettlementAddress = 0x4358f4940283E6357128941a5c508e5F314D79CB;
     address settlementDispatcherReap;
     address settlementDispatcherRain;
     address settlementDispatcherPix;
@@ -71,7 +72,7 @@ contract UpdateSettlementAddress is Utils, GnosisHelpers, Test {
         SettlementDispatcher.DestinationData[] memory destDatasPix = new SettlementDispatcher.DestinationData[](1);
         destDatasPix[0] = SettlementDispatcher.DestinationData({
             destEid: 0,
-            destRecipient: mainnetSettlementAddress,
+            destRecipient: pixUsdtSettlementAddress,
             stargate: address(0),
             useCanonicalBridge: true,
             minGasLimit: 0
@@ -110,7 +111,7 @@ contract UpdateSettlementAddress is Utils, GnosisHelpers, Test {
         SettlementDispatcher(payable(settlementDispatcherRain)).bridge(usdtScroll, 10e6, 10e6);
 
         vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcher.CanonicalBridgeWithdraw(usdtScroll, mainnetSettlementAddress, 10e6);
+        emit SettlementDispatcher.CanonicalBridgeWithdraw(usdtScroll, pixUsdtSettlementAddress, 10e6);
         SettlementDispatcher(payable(settlementDispatcherPix)).bridge(usdtScroll, 10e6, 10e6);
 
         vm.stopPrank();
