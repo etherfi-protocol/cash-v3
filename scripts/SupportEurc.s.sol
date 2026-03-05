@@ -11,6 +11,7 @@ import {CashbackDispatcher} from "../src/cashback-dispatcher/CashbackDispatcher.
 import {EtherFiLiquidModule} from "../src/modules/etherfi/EtherFiLiquidModule.sol";
 import {PriceProvider, IAggregatorV3} from "../src/oracle/PriceProvider.sol";
 import {Utils} from "./utils/Utils.sol";
+import {StargateModule} from "../src/modules/stargate/StargateModule.sol";
 
 contract SupportEurc is Utils, Test {
     address eurc = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
@@ -21,6 +22,7 @@ contract SupportEurc is Utils, Test {
     address priceProvider;
     address cashModule;
     address cashbackDispatcher;
+    address stargateModule;
 
 
     function run() public {
@@ -50,6 +52,11 @@ contract SupportEurc is Utils, Test {
             string.concat(".", "addresses", ".", "CashbackDispatcher")
         );
 
+        stargateModule = stdJson.readAddress(
+            deployments,
+            string.concat(".", "addresses", ".", "StargateModule")
+        );
+
         PriceProvider.Config memory eurcUsdConfig = PriceProvider.Config({
             oracle: eurcUsdOracle,
             priceFunctionCalldata: "",
@@ -76,6 +83,16 @@ contract SupportEurc is Utils, Test {
                 liquidationBonus: 1e18
             });
 
+
+        address[] memory assets = new address[](1);
+        assets[0] = eurc;
+
+        StargateModule.AssetConfig[] memory eurcStargateConfigs = new StargateModule.AssetConfig[](1);
+        eurcStargateConfigs[0] = StargateModule.AssetConfig({
+            isOFT: true,
+            pool: address(eurc)
+        });
+
         PriceProvider(priceProvider).setTokenConfig(tokens, priceProviderConfigs);
 
         IDebtManager(debtManager).supportCollateralToken(eurc, eurcConfig);
@@ -91,6 +108,8 @@ contract SupportEurc is Utils, Test {
         CashbackDispatcher(cashbackDispatcher).configureCashbackToken(eurcArray, enableArray);
 
         ICashModule(cashModule).configureWithdrawAssets(eurcArray, enableArray);
+
+        StargateModule(payable(stargateModule)).setAssetConfig(assets, eurcStargateConfigs);
 
         vm.stopBroadcast();
     }
