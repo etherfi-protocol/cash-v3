@@ -8,7 +8,7 @@ import { IStargate, Ticket } from "../interfaces/IStargate.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
-import { MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
+import { IOFT, MessagingFee, MessagingReceipt, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
 import { IL2GatewayRouter, IL2Messenger } from "../interfaces/IScrollERC20Bridge.sol";
 import { IFraxCustodian } from "../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop } from "../interfaces/IFraxRemoteHop.sol";
@@ -40,6 +40,8 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         bool useCanonicalBridge;
         /// @notice Minimum gas limit for the canonical bridge
         uint64 minGasLimit;
+        /// @notice Whether the token is an OFT
+        bool isOFT;
     }
 
     /**
@@ -121,6 +123,13 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @param ticket Stargate ticket containing details of the bridge transaction
      */
     event FundsBridgedWithStargate(address indexed token, uint256 amount, Ticket ticket);
+
+    /**
+     * @notice Emitted when funds are successfully bridged via OFT
+     * @param token Address of the token that was bridged
+     * @param amount Amount of tokens that were bridged
+     */
+    event FundsBridgedWithOFT(address indexed token, uint256 amount);
     
     /**
      * @notice Emitted when funds are withdrawn from the contract
@@ -610,9 +619,18 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         DestinationData memory destData = _getSettlementDispatcherV2Storage().destinationData[token];
         if (destData.useCanonicalBridge) {
             _withdrawCanonicalBridge(token, destData.destRecipient, amount, destData.minGasLimit);
-        }
-        else {
-            (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) = 
+        } else if (destData.isOFT) {
+            (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) =
+                prepareOftSend(token, amount);
+
+            if (minReturnLD > minReturnFromOft) revert InsufficientMinReturn();
+            if (address(this).balance < valueToSend) revert InsufficientFeeToCoverCost();
+
+            if (IOFT(oft).approvalRequired()) IERC20(token).forceApprove(oft, amount);
+            IOFT(oft).send{ value: valueToSend }(sendParam, messagingFee, payable(address(this)));
+            emit FundsBridgedWithOFT(token, amount);
+        } else {
+            (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) =
                 prepareRideBus(token, amount);
 
             if (minReturnLD > minReturnFromStargate) revert InsufficientMinReturn();
@@ -667,6 +685,44 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         if (IStargate(stargate).token() == address(0x0)) {
             valueToSend += sendParam.amountLD;
         }
+    }
+
+    /**
+     * @notice Prepares parameters for bridging via OFT
+     * @param token Address of the token to bridge
+     * @param amount Amount of the token to bridge
+     * @return oft Address of the OFT contract
+     * @return valueToSend Amount of ETH needed for the transaction
+     * @return minReturnFromOft Minimum amount expected to be received on destination
+     * @return sendParam OFT SendParam struct with bridging details
+     * @return messagingFee MessagingFee struct with fee details
+     * @custom:throws DestinationDataNotSet If destination data is not set for the token
+     * @custom:throws InsufficientMinReturn If the quoted return is less than expected
+     */
+    function prepareOftSend(
+        address token,
+        uint256 amount
+    ) public view returns (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) {
+        DestinationData memory destData = _getSettlementDispatcherV2Storage().destinationData[token];
+        if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
+
+        oft = destData.stargate;
+        sendParam = SendParam({
+            dstEid: destData.destEid,
+            to: bytes32(uint256(uint160(destData.destRecipient))),
+            amountLD: amount,
+            minAmountLD: amount,
+            extraOptions: hex"0003",
+            composeMsg: new bytes(0),
+            oftCmd: new bytes(0)
+        });
+
+        (, , OFTReceipt memory receipt) = IOFT(oft).quoteOFT(sendParam);
+        sendParam.minAmountLD = receipt.amountReceivedLD;
+        minReturnFromOft = receipt.amountReceivedLD;
+
+        messagingFee = IOFT(oft).quoteSend(sendParam, false);
+        valueToSend = messagingFee.nativeFee;
     }
 
     /**
