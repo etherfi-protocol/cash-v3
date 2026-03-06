@@ -22,6 +22,8 @@ import { Constants } from "../../../../../src/utils/Constants.sol";
 contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
     address alice = makeAddr("alice");
 
+    uint32 ethereumEid = 30101;
+
     address liquidUsd = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
     address boringQueueLiquidUsd = 0x38FC1BA73b7ED289955a07d9F11A85b6E388064A;
     uint16 discount = 1;
@@ -34,7 +36,6 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         emit SettlementDispatcher.LiquidWithdrawQueueSet(liquidUsd, address(boringQueueLiquidUsd));
         settlementDispatcherReap.setLiquidAssetWithdrawQueue(liquidUsd, address(boringQueueLiquidUsd));
     }
-
 
     function test_getRefundWallet_returnsCorrectAddress() public {
         // Initially should be address(0)
