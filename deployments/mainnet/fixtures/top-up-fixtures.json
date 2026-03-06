@@ -84,10 +84,9 @@
       {
         "token": "EURC",
         "address": "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c",
-        "bridge": "scrollERC20BridgeAdapter",
+        "bridge": "oftBridgeAdapter",
         "maxSlippageInBps": "0",
-        "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
-        "gasLimitForScrollGateway": "200000"
+        "oftAdapter": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11"
       }
     ]
   },

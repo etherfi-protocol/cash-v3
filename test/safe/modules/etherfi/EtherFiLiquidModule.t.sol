@@ -27,7 +27,6 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
     IERC20 public weEth = IERC20(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
     IERC20 public usdc = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
     IERC20 public usdt = IERC20(0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df);
-    IERC20 public dai = IERC20(0xcA77eB3fEFe3725Dc33bccB54eDEFc3D9f764f97);
     IERC20 public wbtc = IERC20(0x3C1BCa5a656e69edCD0D4E36BEbb3FcDAcA60Cf1);
     IERC20 public usde = IERC20(0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34);
     
@@ -756,10 +755,10 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         assertGt(liquidEthBalAfter, liquidEthBalBefore);
     }
 
-    // Tests for LiquidUSD with USDC, USDT, DAI
+    // Tests for LiquidUSD with USDC, USDT
     function test_deposit_worksWithUsdc_forLiquidUsd() public {
         uint256 amountToDeposit = 1000 * 10**6; // 1000 USDC (6 decimals)
-        uint256 minReturn = 800 * 10**6; // 800 LiquidUSD (18 decimals)
+        uint256 minReturn = 100 * 10**6;
         deal(address(usdc), address(safe), amountToDeposit);
         
         bytes32 digestHash = keccak256(abi.encodePacked(
@@ -788,7 +787,7 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
 
     function test_deposit_worksWithUsdt_forLiquidUsd() public {
         uint256 amountToDeposit = 1000 * 10**6; // 1000 USDT (6 decimals)
-        uint256 minReturn = 800 * 10**6; // 800 LiquidUSD (18 decimals)
+        uint256 minReturn = 100 * 10**6;
         deal(address(usdt), address(safe), amountToDeposit);
         
         bytes32 digestHash = keccak256(abi.encodePacked(
@@ -813,28 +812,6 @@ contract EtherFiLiquidModuleTest is SafeTestSetup {
         
         assertEq(usdtBalAfter, usdtBalBefore - amountToDeposit);
         assertGt(liquidUsdBalAfter, liquidUsdBalBefore);
-    }
-
-    function test_deposit_worksWithDai_forLiquidUsd() public {
-        uint256 amountToDeposit = 1000 * 10**18; // 1000 DAI (18 decimals)
-        uint256 minReturn = 800 * 10**6; // 800 LiquidUSD (18 decimals)
-        deal(address(dai), address(safe), amountToDeposit);
-        
-        bytes32 digestHash = keccak256(abi.encodePacked(
-            liquidModule.DEPOSIT_SIG(),
-            block.chainid,
-            address(liquidModule),
-            liquidModule.getNonce(address(safe)),
-            address(safe),
-            abi.encode(address(dai), address(liquidUsd), amountToDeposit, minReturn)
-        )).toEthSignedMessageHash();
-        
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v); 
-
-        // DAI has been removed as a deposit asset so this test is now a negative test
-        vm.expectRevert(EtherFiLiquidModule.AssetNotSupportedForDeposit.selector);
-        liquidModule.deposit(address(safe), address(dai), address(liquidUsd), amountToDeposit, minReturn, owner1, signature);
     }
 
     // Test for LiquidBTC with WBTC

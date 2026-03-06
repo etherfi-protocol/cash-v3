@@ -25,7 +25,7 @@ contract TopUpSourceSetEURCMainnet is Utils, GnosisHelpers, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     TopUpFactory topUpFactory;
-    address scrollERC20BridgeAdapter; 
+    address oftBridge; 
     address topUpDest;
 
     function run() public {
@@ -40,9 +40,9 @@ contract TopUpSourceSetEURCMainnet is Utils, GnosisHelpers, Test {
                 )
             )
         );
-        scrollERC20BridgeAdapter = stdJson.readAddress(
+        oftBridge = stdJson.readAddress(
             deployments,
-            string.concat(".", "addresses", ".", "ScrollERC20BridgeAdapter")
+            string.concat(".", "addresses", ".", "EtherFiOFTBridgeAdapter")
         );
 
         string memory dir = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv(), "/"));
@@ -102,10 +102,9 @@ contract TopUpSourceSetEURCMainnet is Utils, GnosisHelpers, Test {
         tokens[0] = stdJson.readAddress(jsonString, string.concat(base, ".address"));
         tokenConfig[0].recipientOnDestChain = topUpDest;
         tokenConfig[0].maxSlippageInBps = uint96(stdJson.readUint(jsonString, string.concat(base, ".maxSlippageInBps")));
-        tokenConfig[0].bridgeAdapter = address(scrollERC20BridgeAdapter);
-        address gatewayRouter = stdJson.readAddress(jsonString, string.concat(base, ".scrollGatewayRouter"));
-        uint256 gasLimit = stdJson.readUint(jsonString, string.concat(base, ".gasLimitForScrollGateway"));
-        tokenConfig[0].additionalData = abi.encode(gatewayRouter, gasLimit);
+        tokenConfig[0].bridgeAdapter = address(oftBridge);
+        address oftAdapter = stdJson.readAddress(jsonString, string.concat(base, ".oftAdapter"));
+        tokenConfig[0].additionalData = abi.encode(oftAdapter);
 
         return (tokens, tokenConfig);
     }
