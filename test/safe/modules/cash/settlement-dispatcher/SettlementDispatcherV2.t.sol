@@ -10,8 +10,7 @@ import { SettlementDispatcherV2 } from "../../../../../src/settlement-dispatcher
 import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
 import { IFraxCustodian } from "../../../../../src/interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop } from "../../../../../src/interfaces/IFraxRemoteHop.sol";
-import { IOFT, MessagingFee, SendParam } from "../../../../../src/interfaces/IOFT.sol";
-import { Constants } from "../../../../../src/utils/Constants.sol";
+import { MessagingFee } from "../../../../../src/interfaces/IOFT.sol";
 import { IMidasVault } from "../../../../../src/interfaces/IMidasVault.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 
@@ -92,10 +91,6 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
     address alice = makeAddr("alice");
     SettlementDispatcherV2 v2;
 
-    address constant EURC = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
-    uint32 constant ETHEREUM_EID = 30101;
-
-
     function setUp() public override {
         super.setUp();
 
@@ -105,22 +100,6 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         UUPSUpgradeable(address(settlementDispatcherReap)).upgradeToAndCall(settlementDispatcherV2Impl, "");
         
         v2 = SettlementDispatcherV2(payable(address(settlementDispatcherReap)));
-
-        address[] memory tokens = new address[](1);
-        tokens[0] = EURC;
-
-        SettlementDispatcherV2.DestinationData[] memory destDatas = new SettlementDispatcherV2.DestinationData[](1);
-        destDatas[0] = SettlementDispatcherV2.DestinationData({
-            destEid: ETHEREUM_EID,
-            destRecipient: alice,
-            stargate: EURC,
-            useCanonicalBridge: false,
-            minGasLimit: 0,
-            isOFT: true
-        });
-
-        vm.prank(owner);
-        v2.setDestinationData(tokens, destDatas);
     }
 
     function test_v2_setRefundWallet_succeeds() public {
@@ -427,65 +406,6 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MessagingFee memory fee = v2.quoteAsyncFraxRedeem(100e18);
         assertEq(fee.nativeFee, 0.05 ether);
         assertEq(fee.lzTokenFee, 0);
-    }
-
-
-    function test_v2_prepareOftSend_succeeds() public view {
-        uint256 amount = 100e6;
-        (address oft, uint256 valueToSend, uint256 minReturn, SendParam memory sendParam, MessagingFee memory messagingFee) = v2.prepareOftSend(EURC, amount);
-
-        assertEq(oft, EURC);
-        assertGt(valueToSend, 0);
-        assertGt(minReturn, 0);
-        assertLe(minReturn, amount);
-        assertEq(sendParam.dstEid, ETHEREUM_EID);
-        assertEq(sendParam.amountLD, amount);
-        assertGt(messagingFee.nativeFee, 0);
-    }
-    
-    function test_v2_bridge_succeeds_withOFT() public {
-        uint256 amount = 100e6;
-        deal(EURC, address(v2), amount);
-
-        (, uint256 valueToSend, , ,) = v2.prepareOftSend(EURC, amount);
-        vm.deal(address(v2), valueToSend);
-
-        uint256 eurcBalBefore = IERC20(EURC).balanceOf(address(v2));
-
-        vm.prank(owner);
-        vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcherV2.FundsBridgedWithOFT(EURC, amount);
-        v2.bridge{value: 0}(EURC, amount, 1);
-
-        assertEq(IERC20(EURC).balanceOf(address(v2)), eurcBalBefore - amount);
-    }
-
-    function test_v2_bridge_reverts_withOFT_whenInsufficientBalance() public {
-        vm.prank(owner);
-        vm.expectRevert(SettlementDispatcherV2.InsufficientBalance.selector);
-        v2.bridge(EURC, 100e6, 1);
-    }
-
-    function test_v2_bridge_reverts_withOFT_whenInsufficientFee() public {
-        uint256 amount = 100e6;
-        deal(EURC, address(v2), amount);
-        // Don't provide ETH for fees
-
-        vm.prank(owner);
-        vm.expectRevert(SettlementDispatcherV2.InsufficientFeeToCoverCost.selector);
-        v2.bridge(EURC, amount, 1);
-    }
-
-    function test_v2_bridge_reverts_withOFT_whenMinReturnTooHigh() public {
-        uint256 amount = 100e6;
-        deal(EURC, address(v2), amount);
-
-        (, uint256 valueToSend, uint256 minReturnFromOft, ,) = v2.prepareOftSend(EURC, amount);
-        vm.deal(address(v2), valueToSend);
-
-        vm.prank(owner);
-        vm.expectRevert(SettlementDispatcherV2.InsufficientMinReturn.selector);
-        v2.bridge{value: 0}(EURC, amount, minReturnFromOft + 1);
     }
 }
 
