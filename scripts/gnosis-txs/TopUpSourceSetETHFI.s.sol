@@ -23,7 +23,7 @@ contract TopUpSourceSetETHFI is Utils, GnosisHelpers, Test {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     TopUpFactory topUpFactory;
-    address nttAdapter; 
+    address etherFiOFTBridgeAdapter; 
     address topUpDest;
     function run() public {
 
@@ -37,9 +37,9 @@ contract TopUpSourceSetETHFI is Utils, GnosisHelpers, Test {
                 )
             )
         );
-        nttAdapter = stdJson.readAddress(
+        etherFiOFTBridgeAdapter = stdJson.readAddress(
             deployments,
-            string.concat(".", "addresses", ".", "NTTAdapter")
+            string.concat(".", "addresses", ".", "EtherFiOFTBridgeAdapter")
         );
 
 
@@ -68,11 +68,34 @@ contract TopUpSourceSetETHFI is Utils, GnosisHelpers, Test {
         /// below here is just a test
         executeGnosisTransactionBundle(path);
 
+        // On L2 chains the OFT uses mint/burn, so simulate the token upgrade + setMinter
+        if (block.chainid != 1) {
+            address l2Token = tokens[0];
+            address l2TokenImpl = 0xCF5d8bC4aC508A26b038d91E8CAcA318A177b6c1;
+            address oft = 0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f;
+
+            (bool ok, bytes memory result) = l2Token.staticcall(abi.encodeWithSignature("owner()"));
+            require(ok, "owner() call failed");
+            address tokenOwner = abi.decode(result, (address));
+
+            vm.startPrank(tokenOwner);
+            (bool s1,) = l2Token.call(abi.encodeWithSignature(
+                "upgradeToAndCall(address,bytes)",
+                l2TokenImpl,
+                abi.encodeWithSignature("initializeV2()")
+            ));
+            require(s1, "upgradeToAndCall failed");
+
+            (bool s2,) = l2Token.call(abi.encodeWithSignature("setMinter(address)", oft));
+            require(s2, "setMinter failed");
+            vm.stopPrank();
+        }
+
         deal(tokens[0], address(topUpFactory), 1 ether);
-        (, uint256 fee) = topUpFactory.getBridgeFee(tokens[0]);
+        (, uint256 fee) = topUpFactory.getBridgeFee(tokens[0], 1 ether);
         deal(address(vm.addr(1)), fee);
         vm.prank(address(vm.addr(1)));
-        topUpFactory.bridge{value: fee}(tokens[0]);
+        topUpFactory.bridge{value: fee}(tokens[0], 1 ether);
     }   
 
     // Helper function to parse token configs from JSON
@@ -102,8 +125,8 @@ contract TopUpSourceSetETHFI is Utils, GnosisHelpers, Test {
         tokens[0] = stdJson.readAddress(jsonString, string.concat(base, ".address"));
         tokenConfig[0].recipientOnDestChain = topUpDest;
         tokenConfig[0].maxSlippageInBps = uint96(stdJson.readUint(jsonString, string.concat(base, ".maxSlippageInBps")));
-        tokenConfig[0].bridgeAdapter = address(nttAdapter);
-        tokenConfig[0].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".nttManager")), stdJson.readUint(jsonString, string.concat(base, ".dustDecimals")));
+        tokenConfig[0].bridgeAdapter = etherFiOFTBridgeAdapter;
+        tokenConfig[0].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".oftAdapter")));
 
         return (tokens, tokenConfig);
     }
