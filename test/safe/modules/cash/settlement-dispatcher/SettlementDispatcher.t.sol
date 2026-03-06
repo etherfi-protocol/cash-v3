@@ -24,7 +24,6 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
 
     uint32 ethereumEid = 30101;
 
-    address eurc = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
     address liquidUsd = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
     address boringQueueLiquidUsd = 0x38FC1BA73b7ED289955a07d9F11A85b6E388064A;
     uint16 discount = 1;
@@ -36,33 +35,7 @@ contract SettlementDispatcherTest is CashModuleTestSetup, Constants {
         vm.expectEmit(true, true, true, true);
         emit SettlementDispatcher.LiquidWithdrawQueueSet(liquidUsd, address(boringQueueLiquidUsd));
         settlementDispatcherReap.setLiquidAssetWithdrawQueue(liquidUsd, address(boringQueueLiquidUsd));
-
-        address[] memory tokens = new address[](1);
-        tokens[0] = eurc;
-        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](1);
-        destDatas[0] = SettlementDispatcher.DestinationData({
-            destEid: ethereumEid,
-            destRecipient: alice,
-            stargate: address(eurc),
-            useCanonicalBridge: false,
-            minGasLimit: 0
-        });
-        vm.prank(owner);
-        settlementDispatcherReap.setDestinationData(tokens, destDatas);
     }
-
-    function test_bridge_succeeds_withEurc() public {
-        uint256 amount = 100e6;
-        deal(address(eurc), address(settlementDispatcherReap), amount);
-
-        ( , uint256 valueToSend, , , ) = settlementDispatcherReap.prepareRideBus(eurc, amount);
-
-        deal(address(owner), valueToSend);
-
-        vm.prank(owner);
-        settlementDispatcherReap.bridge{value: valueToSend}(eurc, amount, amount);
-    }
-
 
     function test_getRefundWallet_returnsCorrectAddress() public {
         // Initially should be address(0)

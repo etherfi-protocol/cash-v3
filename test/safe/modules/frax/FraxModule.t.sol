@@ -12,6 +12,10 @@ import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.s
 import { FraxModule } from "../../../../src/modules/frax/FraxModule.sol";
 import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 
+interface IFraxCustodian {
+    function maxDeposit(address recipient) external view returns (uint256);
+}
+
 contract FraxModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
@@ -51,8 +55,9 @@ contract FraxModuleTest is SafeTestSetup {
 
     //Success cases
     function test_deposit_successFraxUsd() public {
-        uint256 amountToDeposit = 10 * 10 ** 6; // 1000 USDC (6 decimals)
-        uint256 minReturnAmount = 10 * 10 ** 18;
+        uint256 maxDeposit = IFraxCustodian(custodian).maxDeposit(address(safe));
+        uint256 amountToDeposit = maxDeposit;
+        uint256 minReturnAmount = (maxDeposit * 10 ** 18) / 10 ** 6;
         deal(address(usdc), address(safe), amountToDeposit);
         // Ensure custodian has sufficient balance for synchronous deposit
         deal(address(fraxusd), custodian, minReturnAmount);
