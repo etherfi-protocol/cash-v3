@@ -14,6 +14,7 @@ import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 
 interface IFraxCustodian {
     function maxDeposit(address recipient) external view returns (uint256);
+    function mintCap() external view returns (uint256);
 }
 
 contract FraxModuleTest is SafeTestSetup {
@@ -55,9 +56,12 @@ contract FraxModuleTest is SafeTestSetup {
 
     //Success cases
     function test_deposit_successFraxUsd() public {
+        uint256 mintCap = (IFraxCustodian(custodian).mintCap() * 10 ** 6) / 10 ** 18;
         uint256 maxDeposit = IFraxCustodian(custodian).maxDeposit(address(safe));
-        uint256 amountToDeposit = maxDeposit;
-        uint256 minReturnAmount = (maxDeposit * 10 ** 18) / 10 ** 6;
+        uint256 maxAmountToDeposit = 10 * 10 ** 6;
+        uint256 amountToDeposit = maxDeposit > mintCap ? mintCap : maxDeposit;
+        amountToDeposit = amountToDeposit > maxAmountToDeposit ? maxAmountToDeposit : amountToDeposit;
+        uint256 minReturnAmount = (amountToDeposit * 10 ** 18) / 10 ** 6;
         deal(address(usdc), address(safe), amountToDeposit);
         // Ensure custodian has sufficient balance for synchronous deposit
         deal(address(fraxusd), custodian, minReturnAmount);
