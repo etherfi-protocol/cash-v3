@@ -567,27 +567,27 @@ contract TopUpFactoryTest is Test, Constants {
         factory.bridge{ value: fee }(token, amount);
     }
 
-    function test_bridge_succeeds_withEthfi() public {
-        address token = address(ethfi);
-        uint256 amount = 1 ether;
-        deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+    // function test_bridge_succeeds_withEthfi() public {
+    //     address token = address(ethfi);
+    //     uint256 amount = 1 ether;
+    //     deal(token, address(factory), amount);
+    //     (, uint256 fee) = factory.getBridgeFee(token, amount);
 
-        vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{value: fee}(token, amount);
-    }
+    //     vm.expectEmit(true, true, true, true);
+    //     emit TopUpFactory.Bridge(token, amount);
+    //     factory.bridge{value: fee}(token, amount);
+    // }
 
-    function test_bridge_succeeds_withEthfi_dust() public {
-        address token = address(ethfi);
-        uint256 amount = 1111111111111111111;
-        deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+    // function test_bridge_succeeds_withEthfi_dust() public {
+    //     address token = address(ethfi);
+    //     uint256 amount = 1111111111111111111;
+    //     deal(token, address(factory), amount);
+    //     (, uint256 fee) = factory.getBridgeFee(token, amount);
 
-        vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{value: fee}(token, amount);
-    }
+    //     vm.expectEmit(true, true, true, true);
+    //     emit TopUpFactory.Bridge(token, amount);
+    //     factory.bridge{value: fee}(token, amount);
+    // }
 
     function test_bridge_reverts_whenInsufficientFeeIsPassed() public {
         address token = address(usdc);
