@@ -309,19 +309,19 @@ contract SetupOptimism is Utils {
 
         console.log("");
         console.log("=== VERIFYING IMPLEMENTATION SLOTS ===");
-        _assertImpl("DataProvider", address(dataProvider));
-        _assertImpl("RoleRegistry", address(roleRegistry));
-        _assertImpl("CashModule", address(cashModule));
-        _assertImpl("PriceProvider", address(priceProvider));
-        _assertImpl("CashbackDispatcher", address(cashbackDispatcher));
-        _assertImpl("CashLens", address(cashLens));
-        _assertImpl("EtherFiHook", address(hook));
-        _assertImpl("EtherFiSafeFactory", address(safeFactory));
-        _assertImpl("DebtManager", address(debtManager));
-        _assertImpl("SettlementDispatcherReap", address(settlementDispatcherReap));
-        _assertImpl("SettlementDispatcherRain", address(settlementDispatcherRain));
-        _assertImpl("CashEventEmitter", address(cashEventEmitter));
-        _assertImpl("TopUpDest", address(topUpDest));
+        _assertImplAndInit("DataProvider", address(dataProvider));
+        _assertImplAndInit("RoleRegistry", address(roleRegistry));
+        _assertImplAndInit("CashModule", address(cashModule));
+        _assertImplAndInit("PriceProvider", address(priceProvider));
+        _assertImplAndInit("CashbackDispatcher", address(cashbackDispatcher));
+        _assertImplAndInit("CashLens", address(cashLens));
+        _assertImplAndInit("EtherFiHook", address(hook));
+        _assertImplAndInit("EtherFiSafeFactory", address(safeFactory));
+        _assertImplAndInit("DebtManager", address(debtManager));
+        _assertImplAndInit("SettlementDispatcherReap", address(settlementDispatcherReap));
+        _assertImplAndInit("SettlementDispatcherRain", address(settlementDispatcherRain));
+        _assertImplAndInit("CashEventEmitter", address(cashEventEmitter));
+        _assertImplAndInit("TopUpDest", address(topUpDest));
     }
 
     function _assertAddress(string memory name, address deployed, address expected) internal pure {
@@ -334,11 +334,25 @@ contract SetupOptimism is Utils {
         console.log(string.concat("[OK] ", name), deployed);
     }
 
-    function _assertImpl(string memory name, address proxy) internal view {
+    /// @notice Verify proxy has: valid impl, initialized > 0, AND roleRegistry points to OUR RoleRegistry
+    function _assertImplAndInit(string memory name, address proxy) internal view {
+        // Check EIP-1967 impl slot
         address impl = address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
         require(impl != address(0), string.concat(name, " impl is zero"));
         require(impl.code.length > 0, string.concat(name, " impl has no code"));
-        console.log(string.concat("[OK] ", name, " impl ="), impl);
+
+        // Check OZ Initializable storage slot — must be > 0 (initialized)
+        bytes32 OZ_INIT_SLOT = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
+        uint256 initVersion = uint256(vm.load(proxy, OZ_INIT_SLOT));
+        require(initVersion > 0, string.concat(name, " NOT initialized (version=0)"));
+
+        // Check UpgradeableProxy.roleRegistry points to OUR RoleRegistry (not an attacker's)
+        // Storage slot: 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500
+        bytes32 ROLE_REGISTRY_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
+        address storedRoleRegistry = address(uint160(uint256(vm.load(proxy, ROLE_REGISTRY_SLOT))));
+        require(storedRoleRegistry == address(roleRegistry), string.concat(name, " roleRegistry mismatch - possible hijack!"));
+
+        console.log(string.concat("[OK] ", name, " impl="), impl, string.concat(" init=", vm.toString(initVersion), " roleRegistry=OK"));
     }
 
     function _setupPriceProvider(address _roleRegistry) internal {
