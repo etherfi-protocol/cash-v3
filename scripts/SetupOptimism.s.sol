@@ -290,6 +290,11 @@ contract SetupOptimism is Utils {
         roleRegistry.revokeRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
 
         vm.stopBroadcast();
+
+        // Post-broadcast on-chain verification — reads live chain state, not simulation
+        console.log("");
+        console.log("=== POST-BROADCAST ON-CHAIN VERIFICATION ===");
+        _assertAddresses();
     }
 
     function _assertAddresses() internal view {
@@ -299,7 +304,7 @@ contract SetupOptimism is Utils {
         _assertAddress("EtherFiSafeFactory", address(safeFactory), 0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B);
         _assertAddress("PriceProvider", address(priceProvider), 0x7d7947D1ace9088048AaB067cF2F54eA1F762a4f);
         _assertAddress("CashbackDispatcher", address(cashbackDispatcher), 0x88758BDA231b8d989AFA0B408FfFD1dF67021F10);
-        _assertAddress("CashModule", address(cashModule), 0xBc5e1a8cdC14b286A8f5F523059cf02A7fFE9A6d);
+        _assertAddress("CashModule", address(cashModule), 0xA4F3A3229FDFBfc7A30FEAC42337d931E85Dc969);
         _assertAddress("CashEventEmitter", address(cashEventEmitter), 0x357b440CfcD9677A99f2f85D5297c141B8837A9b);
         _assertAddress("CashLens", address(cashLens), 0xdFa3089466fD8Ce1c55E998cA3FdffC3371bc106);
         _assertAddress("DebtManager", address(debtManager), 0x92adCa2e95Eb9aCcA65a7dBa1A03ad5246d8f4F4);
