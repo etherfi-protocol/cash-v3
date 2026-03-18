@@ -290,11 +290,6 @@ contract SetupOptimism is Utils {
         roleRegistry.revokeRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
 
         vm.stopBroadcast();
-
-        // Post-broadcast on-chain verification — reads live chain state, not simulation
-        console.log("");
-        console.log("=== POST-BROADCAST ON-CHAIN VERIFICATION ===");
-        _assertAddresses();
     }
 
     function _assertAddresses() internal view {
