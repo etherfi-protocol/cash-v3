@@ -446,7 +446,7 @@ contract SetupOptimism is Utils {
     function _setupDebtManager(address _roleRegistry) internal {
         debtManagerCoreImpl = deployCreate3(abi.encodePacked(type(DebtManagerCore).creationCode, abi.encode(address(dataProvider))), SALT_DEBT_MANAGER_CORE_IMPL);
         debtManagerAdminImpl = deployCreate3(abi.encodePacked(type(DebtManagerAdmin).creationCode, abi.encode(address(dataProvider))), SALT_DEBT_MANAGER_ADMIN_IMPL);
-        debtManagerInitializerImpl = deployCreate3(abi.encodePacked(type(DebtManagerInitializer).creationCode, abi.encode(debtManagerInitializerImpl, address(dataProvider))), SALT_DEBT_MANAGER_INIT_IMPL);
+        debtManagerInitializerImpl = deployCreate3(abi.encodePacked(type(DebtManagerInitializer).creationCode, abi.encode(address(dataProvider))), SALT_DEBT_MANAGER_INIT_IMPL);
         debtManager = IDebtManager(deployCreate3(
             abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(debtManagerInitializerImpl, abi.encodeCall(DebtManagerInitializer.initialize, (_roleRegistry)))),
             SALT_DEBT_MANAGER_PROXY
