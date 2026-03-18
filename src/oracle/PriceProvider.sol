@@ -80,13 +80,13 @@ contract PriceProvider is UpgradeableProxy {
      * @notice Special address used to request WETH/USD price
      * @dev Similar to ETH_USD_ORACLE_SELECTOR but for wrapped ETH
      */
-    address public constant WETH_USD_ORACLE_SELECTOR = 0x4200000000000000000000000000000000000006;
+    address public constant WETH_USD_ORACLE_SELECTOR = 0x5300000000000000000000000000000000000004;
     
     /**
      * @notice Special address used to request WBTC/USD price
      * @dev Similar to ETH_USD_ORACLE_SELECTOR but for wrapped BTC
      */
-    address public constant WBTC_USD_ORACLE_SELECTOR = 0x68f180fcCe6836688e9084f035309E29Bf0A2095;
+    address public constant WBTC_USD_ORACLE_SELECTOR = 0x3C1BCa5a656e69edCD0D4E36BEbb3FcDAcA60Cf1;
     
     /**
      * @notice Decimal precision used for all price outputs from this contract
