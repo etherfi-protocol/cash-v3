@@ -1,0 +1,89 @@
+# Safe Proxy Deployment
+
+When writing deployment scripts for upgradeable proxies in this repo, you MUST follow these rules. They exist because a MEV bot hijacked our CashModule proxy on Optimism by front-running the `initialize()` call.
+
+## Rules
+
+### 1. ALWAYS initialize a proxy in the same transaction as deployment
+
+This is the most important rule. It applies to ALL proxy deployments — deterministic or not.
+
+- Pass init calldata as the second argument to the proxy constructor.
+- NEVER deploy with empty init data (`""`) and call `initialize()` separately — this creates a window where anyone can front-run the init and take ownership.
+
+```solidity
+// WRONG — front-runnable, regardless of how the proxy is deployed
+proxy = new UUPSProxy(impl, "");
+proxy.initialize(args);  // MEV bot calls this first!
+
+// CORRECT — atomic deploy + init, no front-running possible
+proxy = new UUPSProxy(impl, abi.encodeCall(Contract.initialize, (args)));
+```
+
+### 2. When there are circular dependencies, use deterministic deploys with address prediction
+
+If contracts reference each other (e.g. DataProvider needs CashModule and CashModule needs DataProvider), use CREATE2 or CREATE3 to precompute addresses and break the cycle. Non-deterministic deploys (`new`) are fine when there are no circular dependencies, as long as Rule 1 is followed.
+
+- Precompute addresses from CREATE3 salts BEFORE deploying using `CREATE3.predictDeterministicAddress(salt, deployer)`.
+- Pass predicted addresses into initialization data so contracts can reference each other at deploy time.
+- Use a struct to avoid stack-too-deep.
+
+```solidity
+Predicted memory p = _predictAll();
+
+// Both contracts can reference each other via predicted addresses
+dataProvider = deployCreate3(
+    abi.encodePacked(type(UUPSProxy).creationCode,
+        abi.encode(dpImpl, abi.encodeCall(DataProvider.initialize, (p.cashModule, ...)))),
+    SALT_DATA_PROVIDER_PROXY
+);
+
+cashModule = deployCreate3(
+    abi.encodePacked(type(UUPSProxy).creationCode,
+        abi.encode(cmImpl, abi.encodeCall(CashModule.initialize, (p.dataProvider, ...)))),
+    SALT_CASH_MODULE_PROXY
+);
+```
+
+### 3. Post-deployment verification MUST check implementation AND ownership
+
+After deployment, verify two things for every proxy:
+
+**a) The EIP-1967 implementation slot contains the exact address we deployed as the impl.** This catches cases where an attacker front-ran the CREATE3 intermediate proxy and deployed a different contract at our deterministic address.
+
+```solidity
+bytes32 EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+address actualImpl = address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
+require(actualImpl == expectedImpl, "impl mismatch");
+```
+
+**b) The roleRegistry stored in the proxy points to OUR RoleRegistry.** Checking `initialized > 0` alone is NOT sufficient — an attacker's `initialize()` also sets this flag. The real check is who controls the upgrade path.
+
+```solidity
+bytes32 ROLE_REGISTRY_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
+address storedRR = address(uint160(uint256(vm.load(proxy, ROLE_REGISTRY_SLOT))));
+require(storedRR == address(ourRoleRegistry), "roleRegistry mismatch - possible hijack!");
+```
+
+### 4. Run on-chain verification after every deployment
+
+After broadcast, run a verification script (e.g. `VerifyOptimismDeployment.s.sol`) against the live RPC to confirm:
+- All contracts have code at their expected addresses
+- All proxies have the **correct implementation address** in the EIP-1967 slot (not just non-zero — the EXACT impl we deployed)
+- All proxies are initialized (version > 0)
+- All proxies have OUR roleRegistry (hijack detection)
+- All cross-references between contracts are correct
+- RoleRegistry owner is the expected deployer
+
+```bash
+ENV=dev forge script scripts/VerifyOptimismDeployment.s.sol --tc VerifyOptimismDeployment --rpc-url $OPTIMISM_RPC -vvvv
+```
+
+### 5. Make deployment scripts idempotent
+
+- Check if a contract already exists at the predicted address and skip if so.
+- This allows safe re-runs if a deployment partially fails.
+
+## Background: The CashModule Incident
+
+On Optimism dev, CashModule proxy was deployed with empty init data due to a circular dependency between DataProvider and CashModule. A MEV bot front-ran `initialize()` within 1 block, gaining permanent control of the upgrade path via a fake roleRegistry. The proxy was unrecoverable and had to be abandoned and redeployed at a new address.
