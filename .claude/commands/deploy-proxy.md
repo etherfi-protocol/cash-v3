@@ -1,8 +1,8 @@
-# Safe Proxy Deployment
+# Safe Proxy Deployment & Upgrade
 
-When writing deployment scripts for upgradeable proxies in this repo, you MUST follow these rules. They exist because a MEV bot hijacked our CashModule proxy on Optimism by front-running the `initialize()` call.
+When writing deployment or upgrade scripts for smart contracts in this repo, you MUST follow these rules. They exist because a MEV bot hijacked our CashModule proxy on Optimism by front-running the `initialize()` call.
 
-## Rules
+## Proxy Deployment Rules
 
 ### 1. ALWAYS initialize a proxy in the same transaction as deployment
 
@@ -24,19 +24,8 @@ proxy = new UUPSProxy(impl, abi.encodeCall(Contract.initialize, (args)));
 
 If contracts reference each other (e.g. DataProvider needs CashModule and CashModule needs DataProvider), use CREATE2 or CREATE3 to precompute addresses and break the cycle. Non-deterministic deploys (`new`) are fine when there are no circular dependencies, as long as Rule 1 is followed.
 
-- Precompute addresses from CREATE3 salts BEFORE deploying using `CREATE3.predictDeterministicAddress(salt, deployer)`.
-- Pass predicted addresses into initialization data so contracts can reference each other at deploy time.
-- Use a struct to avoid stack-too-deep.
-
 ```solidity
-Predicted memory p = _predictAll();
-
-// Both contracts can reference each other via predicted addresses
-dataProvider = deployCreate3(
-    abi.encodePacked(type(UUPSProxy).creationCode,
-        abi.encode(dpImpl, abi.encodeCall(DataProvider.initialize, (p.cashModule, ...)))),
-    SALT_DATA_PROVIDER_PROXY
-);
+Predicted memory p = _predictAll();  // precompute all addresses from salts
 
 cashModule = deployCreate3(
     abi.encodePacked(type(UUPSProxy).creationCode,
@@ -45,41 +34,86 @@ cashModule = deployCreate3(
 );
 ```
 
-### 3. Post-deployment verification MUST check implementation AND ownership
+## Immutable-Style Upgrades (Constructor Params)
 
-After deployment, verify two things for every proxy:
+### 3. Verify every constructor parameter
 
-**a) The EIP-1967 implementation slot contains the exact address we deployed as the impl.** This catches cases where an attacker front-ran the CREATE3 intermediate proxy and deployed a different contract at our deterministic address.
+Most protocol upgrades use immutable-style patterns where critical addresses are set in the constructor. For every `new Contract(...)` deployment, check:
 
-```solidity
-bytes32 EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-address actualImpl = address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
-require(actualImpl == expectedImpl, "impl mismatch");
-```
-
-**b) The roleRegistry stored in the proxy points to OUR RoleRegistry.** Checking `initialized > 0` alone is NOT sufficient — an attacker's `initialize()` also sets this flag. The real check is who controls the upgrade path.
+- **Correct order** — constructor args must match the constructor signature exactly. A swapped `address` param silently compiles but points to the wrong contract.
+- **Correct value** — each address must be the right contract for the current chain. Cross-check against `deployments.json` or fixtures.
+- **No zero addresses** — unless explicitly intended.
 
 ```solidity
-bytes32 ROLE_REGISTRY_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
-address storedRR = address(uint160(uint256(vm.load(proxy, ROLE_REGISTRY_SLOT))));
-require(storedRR == address(ourRoleRegistry), "roleRegistry mismatch - possible hijack!");
+// constructor(address _cashModule, address _dataProvider) — order matters!
+new CashLens(cashModule, dataProvider);  // correct
+new CashLens(dataProvider, cashModule);  // WRONG — args swapped, compiles fine
 ```
 
-### 4. Run on-chain verification after every deployment
+### 4. For already-deployed impls, verify constructor params via bytecode comparison
 
-After broadcast, run a verification script (e.g. `VerifyOptimismDeployment.s.sol`) against the live RPC to confirm:
-- All contracts have code at their expected addresses
-- All proxies have the **correct implementation address** in the EIP-1967 slot (not just non-zero — the EXACT impl we deployed)
-- All proxies are initialized (version > 0)
-- All proxies have OUR roleRegistry (hijack detection)
-- All cross-references between contracts are correct
-- RoleRegistry owner is the expected deployer
+Use the `ContractCodeChecker` pattern (see `scripts/utils/ContractCodeChecker.sol`) to deploy locally with the same constructor args and compare bytecode against the on-chain impl:
+
+```solidity
+// Pattern from test/upgrade-bytecode-verification/
+CashModuleCore localDeploy = new CashModuleCore(dataProvider);
+verifyContractByteCodeMatch(deployedImplAddress, address(localDeploy));
+```
+
+Reference: `test/upgrade-bytecode-verification/` contains examples (e.g., `UpgradePix.t.sol`).
+
+## Storage Layout Safety
+
+### 5. Run storage layout check before any upgrade
+
+Compare the storage layout of old and new implementations. Storage slot collisions silently corrupt proxy state.
+
+```bash
+forge inspect OldContract storageLayout > old_layout.json
+forge inspect NewContract storageLayout > new_layout.json
+diff old_layout.json new_layout.json
+```
+
+Rules:
+- New storage variables must only be APPENDED, never inserted
+- No existing variable can change type (e.g., `uint256` to `address`)
+- No existing variable can be removed or reordered
+- For ERC-7201 namespaced storage, append new fields to end of struct
+- Gap variables (`uint256[50] __gap`) must be decremented when new fields are added
+
+## Timelock & Ownership Safety
+
+### 6. Post-operation hook: verify timelock owner is unchanged
+
+Every deployment or upgrade script MUST verify that the timelock owner/admin has not changed after execution. If a malicious transaction was injected into a timelock batch, it could transfer ownership mid-execution.
+
+```solidity
+// MUST be the last check — after all operations complete
+address currentOwner = RoleRegistry(ROLE_REGISTRY).owner();
+require(currentOwner == expectedOwner, "CRITICAL: timelock owner changed!");
+```
+
+This is critical because a timelock batch can contain multiple operations — if an attacker injects a `transferOwnership()` call into the middle of a batch, all subsequent operations execute under the attacker's control, and the change is invisible unless explicitly checked.
+
+## Post-Deployment Verification
+
+### 7. Check implementation AND ownership for every proxy
+
+After deployment, verify for every proxy:
+
+- **EIP-1967 impl slot** contains the EXACT impl address we deployed (not just non-zero)
+- **Ownership** — roleRegistry in storage slot `0xa5586bb7...f500` points to OUR RoleRegistry
+- **Initialized** — OZ slot is > 0 (but this alone is NOT sufficient — attacker init also sets it)
+
+### 8. Run on-chain verification after every deployment
+
+After broadcast, run `VerifyOptimismDeployment.s.sol` (or equivalent) against the live RPC.
 
 ```bash
 ENV=dev forge script scripts/VerifyOptimismDeployment.s.sol --tc VerifyOptimismDeployment --rpc-url $OPTIMISM_RPC -vvvv
 ```
 
-### 5. Make deployment scripts idempotent
+### 9. Make deployment scripts idempotent
 
 - Check if a contract already exists at the predicted address and skip if so.
 - This allows safe re-runs if a deployment partially fails.
