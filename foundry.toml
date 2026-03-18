@@ -21,11 +21,13 @@ runs = 10000
 mainnet = "${MAINNET_RPC}"
 scroll = "${SCROLL_RPC}"
 base = "${BASE_RPC}"
+optimism = "${OPTIMISM_RPC}"
 
 [etherscan]
 mainnet = { key = "${ETHERSCAN_KEY}" }
 scroll = { key = "${ETHERSCAN_KEY}" }
 base = { key = "${ETHERSCAN_KEY}" }
+optimism = { key = "${ETHERSCAN_KEY}" }
 hyperevm  = { key = "${ETHERSCAN_KEY}", chain = 999 }
 
 

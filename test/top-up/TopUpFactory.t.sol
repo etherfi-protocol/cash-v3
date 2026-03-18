@@ -67,7 +67,9 @@ contract TopUpFactoryTest is Test, Constants {
     address public eUsdTeller = address(0xCc9A7620D0358a521A068B444846E3D5DebEa8fA);
 
     function setUp() public {
-        vm.createSelectFork("https://ethereum-rpc.publicnode.com");
+        string memory rpcUrl = vm.envString("MAINNET_RPC");
+        if (bytes(rpcUrl).length == 0) rpcUrl = "https://mainnet.gateway.tenderly.co";
+        vm.createSelectFork(rpcUrl);
 
         owner = makeAddr("owner");
         admin = makeAddr("admin");
