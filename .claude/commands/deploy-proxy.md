@@ -125,6 +125,8 @@ Reference: `scripts/ReserveAddresses.s.sol` and `scripts/VerifyReservedAddresses
 
 When writing a deployment script (e.g., `scripts/SetupFoo.s.sol`), you MUST also write a corresponding verification script (e.g., `scripts/VerifyFoo.s.sol`) that runs against the live chain AFTER broadcast txs confirm. This is NOT optional.
 
+The verification script MUST use `require()` for every check — never just log `[FAIL]` and continue. The script must revert on any failure so the exit code is non-zero and CI/wrappers can trust it.
+
 The verification script MUST check for every deployed proxy:
 
 - **EIP-1967 impl slot** contains the EXACT predicted CREATE3 impl address (computed from the impl salt + Nick's factory). Not just non-zero — the exact address. This confirms no one swapped in a malicious impl.
