@@ -9,7 +9,7 @@ import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
 
 /// @title VerifyReservedAddresses
 /// @notice Post-deployment verification for reserved RoleRegistry + SafeFactory addresses.
-///         Run against live RPC AFTER broadcast txs have confirmed.
+///         Reverts on any failed check so CI/scripts can rely on exit code.
 ///
 /// Usage:
 ///   forge script scripts/VerifyReservedAddresses.s.sol --rpc-url <RPC>
@@ -40,98 +40,68 @@ contract VerifyReservedAddresses is Script {
         console.log("SafeFactory: ", safeFactory);
         console.log("");
 
-        // ── 1. Contract existence ──
-        console.log("--- 1. Contract existence ---");
-        _checkCode("RoleRegistry", roleRegistry);
-        _checkCode("SafeFactory", safeFactory);
-
-        // ── 2. EIP-1967 impl addresses ──
         address expectedRRImpl = CREATE3.predictDeterministicAddress(SALT_ROLE_REGISTRY_IMPL, NICKS_FACTORY);
         address expectedPHImpl = CREATE3.predictDeterministicAddress(SALT_PLACEHOLDER_IMPL, NICKS_FACTORY);
 
+        // ── 1. Contract existence ──
+        console.log("--- 1. Contract existence ---");
+        require(roleRegistry.code.length > 0, "RoleRegistry has no code");
+        console.log("  [OK] RoleRegistry");
+        require(safeFactory.code.length > 0, "SafeFactory has no code");
+        console.log("  [OK] SafeFactory");
+
+        // ── 2. EIP-1967 impl addresses ──
         console.log("");
         console.log("--- 2. Impl addresses ---");
-        _checkImpl("RoleRegistry", roleRegistry, expectedRRImpl);
-        _checkImpl("SafeFactory", safeFactory, expectedPHImpl);
+
+        address rrImpl = address(uint160(uint256(vm.load(roleRegistry, EIP1967_IMPL_SLOT))));
+        require(rrImpl == expectedRRImpl, "RoleRegistry impl mismatch — possible hijack");
+        require(rrImpl.code.length > 0, "RoleRegistry impl has no code");
+        console.log("  [OK] RoleRegistry impl=", rrImpl);
+
+        address sfImpl = address(uint160(uint256(vm.load(safeFactory, EIP1967_IMPL_SLOT))));
+        require(sfImpl == expectedPHImpl, "SafeFactory impl mismatch — possible hijack");
+        require(sfImpl.code.length > 0, "SafeFactory impl has no code");
+        console.log("  [OK] SafeFactory impl=", sfImpl);
 
         // ── 3. Initialization ──
         console.log("");
         console.log("--- 3. Initialization ---");
-        _checkInit("RoleRegistry", roleRegistry);
-        _checkInit("SafeFactory", safeFactory);
+
+        uint256 rrInit = uint256(vm.load(roleRegistry, OZ_INIT_SLOT));
+        require(rrInit > 0, "RoleRegistry NOT initialized");
+        console.log("  [OK] RoleRegistry initialized (v=", vm.toString(rrInit), ")");
+
+        uint256 sfInit = uint256(vm.load(safeFactory, OZ_INIT_SLOT));
+        require(sfInit > 0, "SafeFactory NOT initialized");
+        console.log("  [OK] SafeFactory initialized (v=", vm.toString(sfInit), ")");
 
         // ── 4. RoleRegistry ownership ──
         console.log("");
         console.log("--- 4. Ownership ---");
-        if (roleRegistry.code.length > 0) {
-            address owner = RoleRegistry(roleRegistry).owner();
-            if (owner == OWNER) {
-                console.log("  [OK] RoleRegistry owner =", owner);
-            } else {
-                console.log("  [FAIL] RoleRegistry owner mismatch");
-                console.log("    actual:  ", owner);
-                console.log("    expected:", OWNER);
-            }
-        }
+
+        address owner = RoleRegistry(roleRegistry).owner();
+        require(owner == OWNER, "RoleRegistry wrong owner — possible hijack");
+        console.log("  [OK] RoleRegistry owner =", owner);
 
         // ── 5. SafeFactory points to our RoleRegistry ──
         console.log("");
         console.log("--- 5. SafeFactory roleRegistry ref ---");
-        if (safeFactory.code.length > 0) {
-            address storedRR = address(uint160(uint256(vm.load(safeFactory, ROLE_REGISTRY_SLOT))));
-            if (storedRR == roleRegistry) {
-                console.log("  [OK] SafeFactory -> RoleRegistry");
-            } else {
-                console.log("  [FAIL] SafeFactory wrong roleRegistry");
-                console.log("    stored:  ", storedRR);
-                console.log("    expected:", roleRegistry);
-            }
-        }
+
+        address storedRR = address(uint160(uint256(vm.load(safeFactory, ROLE_REGISTRY_SLOT))));
+        require(storedRR == roleRegistry, "SafeFactory wrong roleRegistry — possible hijack");
+        console.log("  [OK] SafeFactory -> RoleRegistry");
 
         // ── 6. Upgrade authorization ──
         console.log("");
         console.log("--- 6. Upgrade auth ---");
-        if (roleRegistry.code.length > 0) {
-            try RoleRegistry(roleRegistry).onlyUpgrader(OWNER) {
-                console.log("  [OK] OWNER can upgrade SafeFactory");
-            } catch {
-                console.log("  [FAIL] OWNER cannot upgrade");
-            }
-        }
+
+        RoleRegistry(roleRegistry).onlyUpgrader(OWNER); // reverts internally if not authorized
+        console.log("  [OK] OWNER can upgrade");
 
         console.log("");
         console.log("==========================================");
-    }
-
-    function _checkCode(string memory name, address addr) internal view {
-        if (addr.code.length > 0) {
-            console.log(string.concat("  [OK] ", name));
-        } else {
-            console.log(string.concat("  [FAIL] ", name, " - no code"));
-        }
-    }
-
-    function _checkImpl(string memory name, address proxy, address expectedImpl) internal view {
-        if (proxy.code.length == 0) return;
-        address impl = address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
-        if (impl == expectedImpl && impl.code.length > 0) {
-            console.log(string.concat("  [OK] ", name, " impl="), impl);
-        } else if (impl != expectedImpl) {
-            console.log(string.concat("  [FAIL] ", name, " impl mismatch"));
-            console.log("    actual:  ", impl);
-            console.log("    expected:", expectedImpl);
-        } else {
-            console.log(string.concat("  [FAIL] ", name, " impl has no code"));
-        }
-    }
-
-    function _checkInit(string memory name, address proxy) internal view {
-        if (proxy.code.length == 0) return;
-        uint256 v = uint256(vm.load(proxy, OZ_INIT_SLOT));
-        if (v > 0) {
-            console.log(string.concat("  [OK] ", name, " initialized (v=", vm.toString(v), ")"));
-        } else {
-            console.log(string.concat("  [FAIL] ", name, " - NOT initialized"));
-        }
+        console.log("  ALL CHECKS PASSED");
+        console.log("==========================================");
     }
 }
