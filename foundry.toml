@@ -28,6 +28,7 @@ sonic = "${SONIC_RPC}"
 avalanche = "${AVALANCHE_RPC}"
 mantle = "${MANTLE_RPC}"
 plasma = "${PLASMA_RPC}"
+tempo = "${TEMPO_RPC}"
 
 [etherscan]
 mainnet = { key = "${ETHERSCAN_KEY}" }
@@ -41,6 +42,7 @@ sonic = { key = "${ETHERSCAN_KEY}" }
 avalanche = { key = "${SNOWTRACE_KEY}", chain = 43114, url = "https://api.snowtrace.io/api" }
 mantle = { key = "${ETHERSCAN_KEY}" }
 plasma = { key = "${ETHERSCAN_KEY}", chain = 9745, url = "https://api.etherscan.io/v2/api?chainid=9745" }
+tempo = { key = "${ETHERSCAN_KEY}", chain = 4217, url = "https://api.etherscan.io/v2/api?chainid=4217" }
 
 
 [fmt]
