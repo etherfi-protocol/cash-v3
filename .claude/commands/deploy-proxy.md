@@ -95,23 +95,56 @@ require(currentOwner == expectedOwner, "CRITICAL: timelock owner changed!");
 
 This is critical because a timelock batch can contain multiple operations — if an attacker injects a `transferOwnership()` call into the middle of a batch, all subsequent operations execute under the attacker's control, and the change is invisible unless explicitly checked.
 
+## Implementation Address Verification
+
+### 7. ALWAYS deploy impls via CREATE3 with deterministic salts
+
+Implementation contracts MUST be deployed via CREATE3 with a deterministic salt so that verification scripts can confirm the EIP-1967 impl slot contains the exact expected address. This catches attacks where someone deploys a different impl at an unexpected address.
+
+```solidity
+// Use a descriptive salt for the impl
+bytes32 constant SALT_MY_CONTRACT_IMPL = keccak256("MyDeployScript.MyContractImpl");
+
+// Deploy impl via CREATE3 (NOT regular `new`)
+address impl = deployCreate3(
+    abi.encodePacked(type(MyContract).creationCode, abi.encode(arg)),
+    SALT_MY_CONTRACT_IMPL
+);
+
+// Verification: check the proxy's impl slot matches the predicted address
+address expectedImpl = CREATE3.predictDeterministicAddress(SALT_MY_CONTRACT_IMPL, NICKS_FACTORY);
+address actualImpl = address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
+require(actualImpl == expectedImpl, "impl address mismatch");
+```
+
+Reference: `scripts/ReserveAddresses.s.sol` and `scripts/VerifyReservedAddresses.s.sol`.
+
 ## Post-Deployment Verification
 
-### 7. Check implementation AND ownership for every proxy
+### 8. Every deployment script MUST have a companion verification script
 
-After deployment, verify for every proxy:
+When writing a deployment script (e.g., `scripts/SetupFoo.s.sol`), you MUST also write a corresponding verification script (e.g., `scripts/VerifyFoo.s.sol`) that runs against the live chain AFTER broadcast txs confirm. This is NOT optional.
 
-- **EIP-1967 impl slot** contains the EXACT impl address we deployed (not just non-zero)
-- **Ownership** — roleRegistry in storage slot `0xa5586bb7...f500` points to OUR RoleRegistry
-- **Initialized** — OZ slot is > 0 (but this alone is NOT sufficient — attacker init also sets it)
+The verification script MUST check for every deployed proxy:
 
-### 8. Run on-chain verification after every deployment
+- **EIP-1967 impl slot** contains the EXACT predicted CREATE3 impl address (computed from the impl salt + Nick's factory). Not just non-zero — the exact address. This confirms no one swapped in a malicious impl.
+- **Ownership** — roleRegistry in storage slot `0xa5586bb7...f500` points to OUR RoleRegistry (hijack detection)
+- **Initialized** — OZ Initializable slot is > 0 (but this alone is NOT sufficient — attacker init also sets it)
+- **Cross-references** — contracts that reference each other (e.g., DataProvider.getCashModule()) return the correct addresses
 
-After broadcast, run `VerifyOptimismDeployment.s.sol` (or equivalent) against the live RPC.
-
-```bash
-ENV=dev forge script scripts/VerifyOptimismDeployment.s.sol --tc VerifyOptimismDeployment --rpc-url $OPTIMISM_RPC -vvvv
+```solidity
+// Pattern: verify impl address matches what we deployed via CREATE3
+address expectedImpl = CREATE3.predictDeterministicAddress(SALT_MY_CONTRACT_IMPL, NICKS_FACTORY);
+address actualImpl = address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
+require(actualImpl == expectedImpl, "impl address mismatch — possible hijack");
 ```
+
+The verification script must be runnable independently without broadcasting:
+```bash
+forge script scripts/VerifyFoo.s.sol --rpc-url <LIVE_RPC>
+```
+
+Reference: `scripts/VerifyReservedAddresses.s.sol`, `scripts/VerifyOptimismProd.s.sol`.
 
 ### 9. Make deployment scripts idempotent
 

@@ -22,6 +22,12 @@ mainnet = "${MAINNET_RPC}"
 scroll = "${SCROLL_RPC}"
 base = "${BASE_RPC}"
 optimism = "${OPTIMISM_RPC}"
+polygon = "${POLYGON_RPC}"
+linea = "${LINEA_RPC}"
+sonic = "${SONIC_RPC}"
+avalanche = "${AVALANCHE_RPC}"
+mantle = "${MANTLE_RPC}"
+plasma = "${PLASMA_RPC}"
 
 [etherscan]
 mainnet = { key = "${ETHERSCAN_KEY}" }
@@ -29,7 +35,12 @@ scroll = { key = "${ETHERSCAN_KEY}" }
 base = { key = "${ETHERSCAN_KEY}" }
 optimism = { key = "${ETHERSCAN_KEY}" }
 hyperevm  = { key = "${ETHERSCAN_KEY}", chain = 999 }
-
+polygon = { key = "${ETHERSCAN_KEY}" }
+linea = { key = "${ETHERSCAN_KEY}" }
+sonic = { key = "${ETHERSCAN_KEY}" }
+avalanche = { key = "${SNOWTRACE_KEY}", chain = 43114, url = "https://api.snowtrace.io/api" }
+mantle = { key = "${ETHERSCAN_KEY}" }
+plasma = { key = "${ETHERSCAN_KEY}", chain = 9745, url = "https://api.etherscan.io/v2/api?chainid=9745" }
 
 
 [fmt]
