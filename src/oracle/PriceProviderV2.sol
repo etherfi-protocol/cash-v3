@@ -198,9 +198,16 @@ contract PriceProviderV2 is UpgradeableProxy {
             if (baseConfig.baseAsset != address(0)) revert InvalidBaseAsset();
 
             uint256 basePrice = _fetchRawPrice(baseConfig);
+            uint8 basePriceDecimals = baseConfig.oraclePriceDecimals;
+
+            if (baseConfig.isStableToken) {
+                basePrice = _getStablePrice(basePrice, basePriceDecimals);
+                basePriceDecimals = decimals();
+            }
+
             return rawPrice.mulDiv(
                 basePrice * 10 ** decimals(),
-                10 ** (baseConfig.oraclePriceDecimals + config.oraclePriceDecimals),
+                10 ** (basePriceDecimals + config.oraclePriceDecimals),
                 Math.Rounding.Floor
             );
         }
