@@ -375,8 +375,8 @@ contract PriceProviderV2Test is Test {
         priceProvider.setTokenConfig(tokens, configs);
     }
 
-    function test_price_reverts_invalidBaseAsset_chained() public {
-        // Set up: base1 -> base2 -> USD (chaining not allowed)
+    function test_setTokenConfig_reverts_invalidBaseAsset_chained() public {
+        // Set up: base1 -> base2 -> USD (chaining not allowed, caught at config time)
         address base2 = makeAddr("base2");
         address base1 = makeAddr("base1");
         address token = makeAddr("token");
@@ -409,8 +409,11 @@ contract PriceProviderV2Test is Test {
             baseAsset: base2
         }));
 
-        // token has baseAsset = base1 (which itself has a base asset -> should revert)
-        _addToken(token, PriceProviderV2.Config({
+        // token has baseAsset = base1 (which itself has a base asset -> should revert at config time)
+        address[] memory tokens = new address[](1);
+        tokens[0] = token;
+        PriceProviderV2.Config[] memory configs = new PriceProviderV2.Config[](1);
+        configs[0] = PriceProviderV2.Config({
             oracle: mockOracle3,
             priceFunctionCalldata: hex"",
             isChainlinkType: true,
@@ -419,10 +422,11 @@ contract PriceProviderV2Test is Test {
             dataType: PriceProviderV2.ReturnType.Int256,
             isStableToken: false,
             baseAsset: base1
-        }));
+        });
 
+        vm.prank(owner);
         vm.expectRevert(PriceProviderV2.InvalidBaseAsset.selector);
-        priceProvider.price(token);
+        priceProvider.setTokenConfig(tokens, configs);
     }
 
     function test_price_reverts_oraclePriceTooOld() public {
@@ -796,6 +800,103 @@ contract PriceProviderV2Test is Test {
         address unconfigured = makeAddr("unconfigured");
         PriceProviderV2.Config memory config = priceProvider.tokenConfig(unconfigured);
         assertEq(config.oracle, address(0));
+    }
+
+    // ---------------------------------------------------------------
+    // maxStaleness validation
+    // ---------------------------------------------------------------
+
+    function test_setTokenConfig_reverts_maxStalenessCannotBeZero_chainlink() public {
+        address token = makeAddr("token");
+        address mockOracle = address(new MockChainlinkOracle(100000000, 8));
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = token;
+        PriceProviderV2.Config[] memory configs = new PriceProviderV2.Config[](1);
+        configs[0] = PriceProviderV2.Config({
+            oracle: mockOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 0,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: false,
+            baseAsset: address(0)
+        });
+
+        vm.prank(owner);
+        vm.expectRevert(PriceProviderV2.MaxStalenessCannotBeZero.selector);
+        priceProvider.setTokenConfig(tokens, configs);
+    }
+
+    function test_setTokenConfig_succeeds_maxStalenessZero_nonChainlink() public {
+        address token = makeAddr("token");
+        address mockOracle = address(new MockUint256Oracle(2_000000000000000000));
+
+        PriceProviderV2.Config memory config = PriceProviderV2.Config({
+            oracle: mockOracle,
+            priceFunctionCalldata: abi.encodeWithSelector(MockUint256Oracle.getRate.selector),
+            isChainlinkType: false,
+            oraclePriceDecimals: 18,
+            maxStaleness: 0,
+            dataType: PriceProviderV2.ReturnType.Uint256,
+            isStableToken: false,
+            baseAsset: eth
+        });
+
+        // Should not revert — maxStaleness = 0 is fine for non-Chainlink oracles
+        _addToken(token, config);
+        assertEq(priceProvider.tokenConfig(token).oracle, mockOracle);
+    }
+
+    // ---------------------------------------------------------------
+    // removeTokenConfig
+    // ---------------------------------------------------------------
+
+    function test_removeTokenConfig_succeeds() public {
+        // matic is not configured yet, add it first
+        _addToken(matic, maticConfig);
+        assertEq(priceProvider.tokenConfig(matic).oracle, maticUsdOracle);
+
+        vm.prank(owner);
+        priceProvider.removeTokenConfig(matic);
+
+        assertEq(priceProvider.tokenConfig(matic).oracle, address(0));
+    }
+
+    function test_removeTokenConfig_emitsEvent() public {
+        _addToken(matic, maticConfig);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit PriceProviderV2.TokenConfigRemoved(matic);
+        priceProvider.removeTokenConfig(matic);
+    }
+
+    function test_removeTokenConfig_priceRevertsAfterRemoval() public {
+        _addToken(matic, maticConfig);
+        // Verify price works before removal
+        priceProvider.price(matic);
+
+        vm.prank(owner);
+        priceProvider.removeTokenConfig(matic);
+
+        vm.expectRevert(PriceProviderV2.TokenOracleNotSet.selector);
+        priceProvider.price(matic);
+    }
+
+    function test_removeTokenConfig_reverts_unauthorized() public {
+        address notOwner = makeAddr("notOwner");
+        vm.prank(notOwner);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        priceProvider.removeTokenConfig(eth);
+    }
+
+    function test_removeTokenConfig_reverts_tokenConfigNotSet() public {
+        address unconfigured = makeAddr("unconfigured");
+        vm.prank(owner);
+        vm.expectRevert(PriceProviderV2.TokenConfigNotSet.selector);
+        priceProvider.removeTokenConfig(unconfigured);
     }
 
     // ---------------------------------------------------------------

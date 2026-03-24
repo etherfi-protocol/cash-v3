@@ -98,6 +98,12 @@ contract PriceProviderV2 is UpgradeableProxy {
     event TokenConfigSet(address[] tokens, Config[] configs);
 
     /**
+     * @notice Emitted when a token's price configuration is removed
+     * @param token Address of the token whose config was removed
+     */
+    event TokenConfigRemoved(address token);
+
+    /**
      * @notice Thrown when trying to get a price for a token with no configured oracle
      */
     error TokenOracleNotSet();
@@ -129,6 +135,14 @@ contract PriceProviderV2 is UpgradeableProxy {
      * @notice Thrown when a token's baseAsset references an oracle that is not yet configured
      */
     error BaseAssetOracleNotSet();
+    /**
+     * @notice Thrown when a Chainlink oracle config has maxStaleness set to zero
+     */
+    error MaxStalenessCannotBeZero();
+    /**
+     * @notice Thrown when trying to remove a token config that is not set
+     */
+    error TokenConfigNotSet();
 
     /**
      * @notice Constructor that disables initializers
@@ -173,6 +187,18 @@ contract PriceProviderV2 is UpgradeableProxy {
      */
     function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyRole(PRICE_PROVIDER_ADMIN_ROLE) {
         _setTokenConfig(_tokens, _configs);
+    }
+
+    /**
+     * @notice Removes the price oracle configuration for a token
+     * @dev Only callable by addresses with PRICE_PROVIDER_ADMIN_ROLE
+     * @param _token Address of the token to remove the config for
+     */
+    function removeTokenConfig(address _token) external onlyRole(PRICE_PROVIDER_ADMIN_ROLE) {
+        PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
+        if ($.tokenConfig[_token].oracle == address(0)) revert TokenConfigNotSet();
+        delete $.tokenConfig[_token];
+        emit TokenConfigRemoved(_token);
     }
 
     /**
@@ -246,7 +272,10 @@ contract PriceProviderV2 is UpgradeableProxy {
             return uint256(priceInt256);
         }
 
-        return abi.decode(data, (uint256));
+        uint256 decodedPrice = abi.decode(data, (uint256));
+        if (decodedPrice == 0) revert InvalidPrice();
+
+        return decodedPrice;
     }
 
     /**
@@ -278,8 +307,11 @@ contract PriceProviderV2 is UpgradeableProxy {
         PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
 
         for (uint256 i = 0; i < len; ) {
+            if (_configs[i].isChainlinkType && _configs[i].maxStaleness == 0) revert MaxStalenessCannotBeZero();
+
             if (_configs[i].baseAsset != address(0)) {
                 if ($.tokenConfig[_configs[i].baseAsset].oracle == address(0)) revert BaseAssetOracleNotSet();
+                if ($.tokenConfig[_configs[i].baseAsset].baseAsset != address(0)) revert InvalidBaseAsset();
             }
             $.tokenConfig[_tokens[i]] = _configs[i];
             unchecked {
