@@ -298,6 +298,47 @@ contract PriceProviderV2Test is Test {
         assertEq(priceProvider.price(usdc), 950000);
     }
 
+    function test_price_stableBaseAsset_clampAppliedToConversion() public {
+        // Base asset is a stablecoin (e.g., USDC at 0.999 — within 1% → clamped to 1.0)
+        address stableBase = makeAddr("stableBase");
+        address stableBaseOracle = address(new MockChainlinkOracle(99900000, 8)); // 0.999 USD
+
+        _addToken(stableBase, PriceProviderV2.Config({
+            oracle: stableBaseOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 1 days,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: true,
+            baseAsset: address(0)
+        }));
+
+        // Token priced in the stable base at 2.5x
+        address token = makeAddr("stableBasedToken");
+        address tokenOracle = address(new MockChainlinkOracle(2_50000000, 8));
+
+        _addToken(token, PriceProviderV2.Config({
+            oracle: tokenOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 1 days,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: false,
+            baseAsset: stableBase
+        }));
+
+        // Direct price of stableBase: clamped to STABLE_PRICE = 1000000
+        assertEq(priceProvider.price(stableBase), priceProvider.STABLE_PRICE());
+
+        // Token price should use clamped base (1.0), not raw (0.999)
+        // 2.5 * 1.0 = 2.5 USD -> 2500000
+        // _getStablePrice returns 1000000 (6 decimals), so:
+        // rawPrice(250000000) * 1000000 * 10^6 / 10^(6 + 8) = 2500000
+        assertEq(priceProvider.price(token), 2500000);
+    }
+
     // ---------------------------------------------------------------
     // Error cases
     // ---------------------------------------------------------------
