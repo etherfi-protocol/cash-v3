@@ -97,23 +97,50 @@ contract PriceProviderV2 is UpgradeableProxy {
      */
     event TokenConfigSet(address[] tokens, Config[] configs);
 
+    /**
+     * @notice Thrown when trying to get a price for a token with no configured oracle
+     */
     error TokenOracleNotSet();
+    /**
+     * @notice Thrown when the price oracle call fails
+     */
     error PriceOracleFailed();
+    /**
+     * @notice Thrown when the oracle price is invalid
+     */
     error InvalidPrice();
+    /**
+     * @notice Thrown when the oracle price is too old
+     */
     error OraclePriceTooOld();
+    /**
+     * @notice Thrown when the arrays have different lengths
+     */
     error ArrayLengthMismatch();
+    /**
+     * @notice Thrown when a stablecoin price is calculated as zero
+     */
     error StablePriceCannotBeZero();
-    /// @notice Thrown when a base asset has baseAsset != address(0) (chaining not supported)
+    /**
+     * @notice Thrown when a base asset has baseAsset != address(0) (chaining not supported)
+     */
     error InvalidBaseAsset();
-    /// @notice Thrown when a token's baseAsset references an oracle that is not yet configured
+    /**
+     * @notice Thrown when a token's baseAsset references an oracle that is not yet configured
+     */
     error BaseAssetOracleNotSet();
 
+    /**
+     * @notice Constructor that disables initializers
+     * @dev Cannot be called again after deployment (UUPS pattern)
+     */
     constructor() {
         _disableInitializers();
     }
 
     /**
      * @notice Initializes the contract with role registry and token configurations
+     * @dev Can only be called once due to initializer modifier
      * @param _roleRegistry Address of the role registry contract
      * @param _tokens Array of token addresses to configure
      * @param _configs Array of configurations corresponding to each token
