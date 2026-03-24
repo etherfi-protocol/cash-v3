@@ -77,17 +77,41 @@ address currentOwner = RoleRegistry(ROLE_REGISTRY).owner();
 require(currentOwner == expectedOwner, "CRITICAL: timelock owner changed!");
 ```
 
+## Implementation Address Verification
+
+### 7. ALWAYS deploy impls via CREATE3 with deterministic salts
+
+Implementation contracts MUST be deployed via CREATE3 with a deterministic salt so that verification scripts can confirm the EIP-1967 impl slot contains the exact expected address. This catches attacks where someone deploys a different impl at an unexpected address.
+
+```solidity
+// Use a descriptive salt for the impl
+bytes32 constant SALT_MY_CONTRACT_IMPL = keccak256("MyDeployScript.MyContractImpl");
+
+// Deploy impl via CREATE3 (NOT regular `new`)
+address impl = deployCreate3(
+    abi.encodePacked(type(MyContract).creationCode, abi.encode(arg)),
+    SALT_MY_CONTRACT_IMPL
+);
+
+// Verification: check the proxy's impl slot matches the predicted address
+address expectedImpl = CREATE3.predictDeterministicAddress(SALT_MY_CONTRACT_IMPL, NICKS_FACTORY);
+address actualImpl = address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
+require(actualImpl == expectedImpl, "impl address mismatch");
+```
+
+Reference: `scripts/ReserveAddresses.s.sol` and `scripts/VerifyReservedAddresses.s.sol`.
+
 ## Post-Deployment Verification
 
-### 7. Check implementation slot contains the EXACT impl we deployed
+### 8. Check implementation slot contains the EXACT impl we deployed
 
-Not just non-zero — the exact address. Also verify roleRegistry in storage slot `0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500` points to OUR RoleRegistry.
+Not just non-zero — the exact predicted CREATE3 address. Also verify roleRegistry in storage slot `0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500` points to OUR RoleRegistry.
 
-### 8. Run on-chain verification after every deployment
+### 9. Run on-chain verification after every deployment
 
 Run `VerifyOptimismDeployment.s.sol` or equivalent against live RPC after broadcast.
 
-### 9. Make deployment scripts idempotent
+### 10. Make deployment scripts idempotent
 
 Skip already-deployed contracts. Allow safe re-runs on partial failure.
 
