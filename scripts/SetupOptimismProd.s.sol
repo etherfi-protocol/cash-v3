@@ -42,7 +42,7 @@ contract SetupOptimismProd is Utils {
     // Verified against on-chain txs to 0x4e59b44847b379578588920cA78FbF26c0B4956C on chain 534352
 
     // Implementation salts
-    bytes32 constant SALT_DATA_PROVIDER_IMPL         = 0x33426737cdc104136d409e458c4cd0e95193cebd080c1e44b289dbc1e940beaa; // keccak256("EtherFiDataProviderImpl")
+    bytes32 constant SALT_DATA_PROVIDER_IMPL          = 0x33426737cdc104136d409e458c4cd0e95193cebd080c1e44b289dbc1e940beaa; // keccak256("EtherFiDataProviderImpl")
     bytes32 constant SALT_ROLE_REGISTRY_IMPL          = 0x32e997ba554122714b8ab01335f36a045850032102a6a6946442eaecac753c3a; // keccak256("RoleRegistryImpl")
     bytes32 constant SALT_CASH_MODULE_SETTERS_IMPL    = 0x6ef7c305c72e716956d108ae8afca5f89a4ce45a74918b403f75d104122ba8d7; // keccak256("CashModuleSettersImpl")
     bytes32 constant SALT_CASH_MODULE_CORE_IMPL       = 0xaf898630953f50a7c1d33680fc7dcf155f3c8143df1c74df7490ef62c98b8248; // keccak256("CashModuleCoreImpl")
@@ -290,16 +290,25 @@ contract SetupOptimismProd is Utils {
             SALT_TOP_UP_DEST_PROXY
         ));
 
-        console.log("Configuring...");
-        _configureWithdrawTokens();
-        _grantRoles();
-        _configureDebtManager();
-
-        _assertDeployment();
-
         _writeDeployments();
 
-        roleRegistry.revokeRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
+        // Owner-gated operations: skip if deployer is not the RoleRegistry owner
+        // (e.g. when upgrading from placeholder where owner is a Gnosis Safe).
+        // In that case, use the gnosis-txs/SetupOptimismProdGnosis.s.sol script instead.
+        if (deployer == roleRegistry.owner()) {
+            console.log("Configuring (deployer is owner)...");
+            _configureWithdrawTokens();
+            _grantRoles();
+            _configureDebtManager();
+
+            _assertDeployment();
+
+            roleRegistry.revokeRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
+        } else {
+            console.log("SKIPPING configuration — deployer is not RoleRegistry owner.");
+            console.log("  RoleRegistry owner:", roleRegistry.owner());
+            console.log("  Run gnosis-txs/SetupOptimismProdGnosis.s.sol for owner-gated operations.");
+        }
 
         vm.stopBroadcast();
     }
