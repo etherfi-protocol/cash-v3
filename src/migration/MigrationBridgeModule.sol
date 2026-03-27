@@ -253,6 +253,15 @@ contract MigrationBridgeModule is UpgradeableProxy {
     function _bridgeAllForSafe(address safe) internal returns (uint256 ethUsed) {
         if (!dataProvider.isEtherFiSafe(safe)) revert NotEtherFiSafe();
 
+        ICashModule cashModule = ICashModule(dataProvider.getCashModule());
+        SafeData memory safeData = cashModule.getData(safe);
+        SafeTiers tier = cashModule.getSafeTier(safe);
+
+        CashLens cashLens = CashLens(dataProvider.getCashLens());
+        uint256 creditMax = cashLens.getMaxSpendCredit(safe);
+        IDebtManager debtManager = cashModule.getDebtManager();
+        uint256 debitMax = cashLens.getMaxSpendDebit(safe, debtManager.getBorrowTokens()).totalSpendableInUsd;
+
         MigrationBridgeModuleStorage storage $ = _getMigrationBridgeModuleStorage();
         uint256 bridgedCount;
         uint256 len = $.tokens.length;
@@ -289,15 +298,6 @@ contract MigrationBridgeModule is UpgradeableProxy {
             }
             unchecked { ++i; }
         }
-
-        ICashModule cashModule = ICashModule(dataProvider.getCashModule());
-        SafeData memory safeData = cashModule.getData(safe);
-        SafeTiers tier = cashModule.getSafeTier(safe);
-
-        CashLens cashLens = CashLens(dataProvider.getCashLens());
-        uint256 creditMax = cashLens.getMaxSpendCredit(safe);
-        IDebtManager debtManager = cashModule.getDebtManager();
-        uint256 debitMax = cashLens.getMaxSpendDebit(safe, debtManager.getBorrowTokens()).totalSpendableInUsd;
 
         emit BridgeAllExecuted(
             safe,
