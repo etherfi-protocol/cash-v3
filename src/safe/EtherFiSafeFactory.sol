@@ -55,7 +55,6 @@ contract EtherFiSafeFactory is BeaconFactory {
      * @param _etherFiSafeImpl Address of the EtherFiSafe implementation contract
      */
     function reinitialize(address _etherFiSafeImpl) external reinitializer(2) {
-        if (roleRegistry().owner() != msg.sender) revert OnlyAdmin();
         __BeaconFactory_initialize(address(roleRegistry()), _etherFiSafeImpl);
     }
 
