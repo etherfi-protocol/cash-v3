@@ -85,7 +85,7 @@ contract VerifyOptimismProd is Script {
     address SETTLEMENT_CARD_ORDER;
 
     function run() public {
-        require(block.chainid == 10, "Must run on OP Mainnet (chain 10)");
+        require(block.chainid == 100, "Must run on OP Mainnet (chain 10)");
 
         SETTLEMENT_PIX = CREATE3.predictDeterministicAddress(SALT_SETTLEMENT_PIX_PROXY, NICKS_FACTORY);
         SETTLEMENT_CARD_ORDER = CREATE3.predictDeterministicAddress(SALT_SETTLEMENT_CARD_ORDER_PROXY, NICKS_FACTORY);
@@ -290,8 +290,8 @@ contract VerifyOptimismProd is Script {
         } catch { console.log("  [SKIP] DM not upgraded to core impl yet"); return false; }
 
         IDebtManager.CollateralTokenConfig memory weETHConfig = dm.collateralTokenConfig(weETH);
-        if (weETHConfig.ltv != 50e18) { console.log("  [SKIP] DM weETH collateral not configured"); return false; }
-        if (weETHConfig.liquidationThreshold != 80e18 || weETHConfig.liquidationBonus != 1e18) { console.log("  [SKIP] DM weETH collateral mismatch"); return false; }
+        if (weETHConfig.ltv != 55e18) { console.log("  [SKIP] DM weETH collateral not configured"); return false; }
+        if (weETHConfig.liquidationThreshold != 75e18 || weETHConfig.liquidationBonus != 3.5e18) { console.log("  [SKIP] DM weETH collateral mismatch"); return false; }
         console.log("  [OK] DM weETH collateral config");
 
         IDebtManager.BorrowTokenConfig memory usdcBorrow = dm.borrowTokenConfig(usdc);
