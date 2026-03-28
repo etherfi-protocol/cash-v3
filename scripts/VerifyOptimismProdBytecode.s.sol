@@ -90,8 +90,8 @@ contract VerifyOptimismProdBytecode is Script, ContractCodeChecker {
         console2.log("1. EtherFiDataProvider");
         verifyContractByteCodeMatch(_getImpl(dp), address(new EtherFiDataProvider()));
 
-        console2.log("2. RoleRegistry");
-        verifyContractByteCodeMatch(_getImpl(_proxy(SALT_ROLE_REGISTRY_PROXY)), address(new RoleRegistry(dp)));
+        console2.log("2. RoleRegistry (impl: 0xBbdfD3a5)");
+        verifyContractByteCodeMatch(0xBbdfD3a5f661698f44276c8Af600B76AE9A506dC, address(new RoleRegistry(dp)));
 
         console2.log("3. CashModuleCore");
         verifyContractByteCodeMatch(_getImpl(cm), address(new CashModuleCore(dp)));
@@ -122,13 +122,16 @@ contract VerifyOptimismProdBytecode is Script, ContractCodeChecker {
         console2.log("10. EtherFiSafe");
         verifyContractByteCodeMatch(_proxy(SALT_SAFE_IMPL), address(new EtherFiSafe(dp)));
 
-        console2.log("11. EtherFiSafeFactory");
-        verifyContractByteCodeMatch(_getImpl(_proxy(SALT_SAFE_FACTORY_PROXY)), address(new EtherFiSafeFactory()));
+        console2.log("11. EtherFiSafeFactory (impl: 0xAE143062)");
+        verifyContractByteCodeMatch(0xAE143062e65EDBEBfc4EdED8a31092e3FdB496B8, address(new EtherFiSafeFactory()));
     }
 
     function _verifyDebtManager() internal {
-        console2.log("12. DebtManagerCore");
-        verifyContractByteCodeMatch(_getImpl(_proxy(SALT_DEBT_MANAGER_PROXY)), address(new DebtManagerCore(dp)));
+        console2.log("12. DebtManagerCore (impl via CREATE3)");
+        verifyContractByteCodeMatch(
+            _implCreate3(0xd7d8accf3671d756a509daca0abd0356c4079376519f8b6e1796646b98b5f9bc),
+            address(new DebtManagerCore(dp))
+        );
 
         console2.log("13. DebtManagerAdmin");
         verifyContractByteCodeMatch(
