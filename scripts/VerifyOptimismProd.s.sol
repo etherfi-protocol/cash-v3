@@ -85,7 +85,7 @@ contract VerifyOptimismProd is Script {
     address SETTLEMENT_CARD_ORDER;
 
     function run() public {
-        require(block.chainid == 100, "Must run on OP Mainnet (chain 10)");
+        require(block.chainid == 10, "Must run on OP Mainnet (chain 10)");
 
         SETTLEMENT_PIX = CREATE3.predictDeterministicAddress(SALT_SETTLEMENT_PIX_PROXY, NICKS_FACTORY);
         SETTLEMENT_CARD_ORDER = CREATE3.predictDeterministicAddress(SALT_SETTLEMENT_CARD_ORDER_PROXY, NICKS_FACTORY);
@@ -105,7 +105,7 @@ contract VerifyOptimismProd is Script {
         // They will fail if the gnosis batch hasn't been executed yet.
         console.log("");
         console.log("--- Post-gnosis configuration checks ---");
-        bool gnosisOk = false;
+        bool gnosisOk = true;
         gnosisOk = _tryPriceProviderOracles() && gnosisOk;
         gnosisOk = _tryCashModuleConfig() && gnosisOk;
         gnosisOk = _tryDebtManagerConfig() && gnosisOk;
