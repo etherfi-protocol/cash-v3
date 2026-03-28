@@ -296,7 +296,7 @@ contract VerifyOptimismProd is Script {
 
         IDebtManager.BorrowTokenConfig memory usdcBorrow = dm.borrowTokenConfig(usdc);
         uint128 expectedMinShares = uint128(10 * 10 ** IERC20Metadata(usdc).decimals());
-        if (usdcBorrow.borrowApy != 1 || usdcBorrow.minShares != expectedMinShares) { console.log("  [SKIP] DM USDC borrow not configured"); return false; }
+        if (usdcBorrow.borrowApy != 126839167935 || usdcBorrow.minShares != expectedMinShares) { console.log("  [SKIP] DM USDC borrow not configured"); return false; }
         console.log("  [OK] DM USDC borrow config");
         return true;
     }
@@ -367,7 +367,7 @@ contract VerifyOptimismProd is Script {
         } catch { console.log("  [SKIP] ETH oracle not configured"); return false; }
 
         try pp.price(usdc) returns (uint256 usdcPrice) {
-            if (usdcPrice == 0 || usdcPrice < 0.95e18 || usdcPrice > 1.05e18) { console.log("  [SKIP] USDC price out of range"); return false; }
+            if (usdcPrice == 0 || usdcPrice < 0.95e6 || usdcPrice > 1.05e6) { console.log("  [SKIP] USDC price out of range"); return false; }
             console.log("  [OK] USDC price:", usdcPrice);
         } catch { console.log("  [SKIP] USDC oracle not configured"); return false; }
 
