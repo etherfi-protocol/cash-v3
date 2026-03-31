@@ -6,167 +6,457 @@
     "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
     "owner": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
     "recoveryWallet": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
-    "tokenConfigs": [
-      {
-        "token": "usdc",
-        "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-        "bridge": "scrollERC20BridgeAdapter",
-        "maxSlippageInBps": "0",
-        "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
-        "gasLimitForScrollGateway": "200000"
-      },
-      {
-        "token": "weETH",
-        "address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-        "bridge": "oftBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "oftAdapter": "0xcd2eb13D6831d4602D80E5db9230A57596CDCA63"
-      },
-      {
-        "token": "weth",
-        "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
-        "bridge": "stargate",
-        "maxSlippageInBps": "50",
-        "stargatePool": "0x77b2043768d28E9C9aB44E1aBfC95944bcE57931"
-      },
-      {
-        "token": "liquidEth",
-        "address": "0xf0bb20865277aBd641a307eCe5Ee04E79073416C",
-        "bridge": "liquidBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "teller": "0x9AA79C84b79816ab920bBcE20f8f74557B514734"
-      },
-      {
-        "token": "liquidUsd",
-        "address": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
-        "bridge": "liquidBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "teller": "0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387"
-      },
-      {
-        "token": "liquidBtc",
-        "address": "0x5f46d540b6eD704C3c8789105F30E075AA900726",
-        "bridge": "liquidBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "teller": "0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353"
-      },
-      {
-        "token": "eUsd",
-        "address": "0x939778D83b46B456224A33Fb59630B11DEC56663",
-        "bridge": "liquidBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "teller": "0xCc9A7620D0358a521A068B444846E3D5DebEa8fA"
-      },
-      {
-        "token": "eBTC",
-        "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
-        "bridge": "liquidBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268"
-      },
-      {
-        "token": "ETHFI",
-        "address": "0xFe0c30065B384F05761f15d0CC899D4F9F9Cc0eB",
-        "bridge": "nttAdapter",
-        "maxSlippageInBps": "0",
-        "nttManager": "0x344169Cc4abE9459e77bD99D13AA8589b55b6174",
-        "dustDecimals": "10"
-      },
-      {
-        "token": "USDT",
-        "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
-        "bridge": "scrollERC20BridgeAdapter",
-        "maxSlippageInBps": "0",
-        "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
-        "gasLimitForScrollGateway": "200000"
-      },
-      {
-        "token": "EURC",
-        "address": "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c",
-        "bridge": "oftBridgeAdapter",
-        "maxSlippageInBps": "0",
-        "oftAdapter": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11"
-      }
-    ]
+    "destChainIds": ["534352", "10"],
+    "tokenConfigs": {
+      "534352": [
+        {
+          "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "name": "usdc",
+          "bridge": "scrollERC20BridgeAdapter",
+          "maxSlippageInBps": "0",
+          "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
+          "gasLimitForScrollGateway": "200000"
+        },
+        {
+          "address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+          "name": "weETH",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0xcd2eb13D6831d4602D80E5db9230A57596CDCA63",
+          "destEid": "30214"
+        },
+        {
+          "address": "0xFe0c30065B384F05761f15d0CC899D4F9F9Cc0eB",
+          "name": "ETHFI",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "oftAdapter": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c",
+          "name": "EURC",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "oftAdapter": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+          "destEid": "30214"
+        },
+        {
+          "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+          "name": "weth",
+          "bridge": "scrollERC20BridgeAdapter",
+          "maxSlippageInBps": "0",
+          "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
+          "gasLimitForScrollGateway": "200000"
+        },
+        {
+          "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "name": "USDT",
+          "bridge": "scrollERC20BridgeAdapter",
+          "maxSlippageInBps": "0",
+          "scrollGatewayRouter": "0xF8B1378579659D8F7EE5f3C929c2f3E332E41Fd6",
+          "gasLimitForScrollGateway": "200000"
+        },
+        {
+          "address": "0xf0bb20865277aBd641a307eCe5Ee04E79073416C",
+          "name": "liquidEth",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x9AA79C84b79816ab920bBcE20f8f74557B514734",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+          "name": "liquidUsd",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x5f46d540b6eD704C3c8789105F30E075AA900726",
+          "name": "liquidBtc",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+          "name": "eUsd",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0xCc9A7620D0358a521A068B444846E3D5DebEa8fA",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
+          "name": "eBTC",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x86B5780b606940Eb59A062aA85a07959518c0161",
+          "name": "sETHFI",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x35dD2463fA7a335b721400C5Ad8Ba40bD85c179b",
+          "destEid": "30214"
+        }
+      ],
+      "10": [
+        {
+          "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "name": "usdc",
+          "bridge": "cctp",
+          "destDomain": "2",
+          "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "maxFee": "0",
+          "minFinalityThreshold": "2000",
+          "maxSlippageInBps": "0"
+        },
+        {
+          "address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+          "name": "weETH",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0xcd2eb13D6831d4602D80E5db9230A57596CDCA63",
+          "destEid": "30111"
+        },
+        {
+          "address": "0xFe0c30065B384F05761f15d0CC899D4F9F9Cc0eB",
+          "name": "ETHFI",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "oftAdapter": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+          "name": "eUsd",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0x1aD405EB8BA94F5770EC61cB2DcE2A2AF174b5cb",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c",
+          "name": "EURC",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "oftAdapter": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+          "destEid": "30111"
+        },
+        {
+          "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+          "name": "weth",
+          "bridge": "optimismBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "l2Token": "0x4200000000000000000000000000000000000006",
+          "minGasLimit": "200000"
+        },
+        {
+          "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "name": "USDT",
+          "bridge": "optimismBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "l2Token": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+          "minGasLimit": "200000"
+        },
+        {
+          "address": "0xf0bb20865277aBd641a307eCe5Ee04E79073416C",
+          "name": "liquidEth",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x9AA79C84b79816ab920bBcE20f8f74557B514734",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+          "name": "liquidUsd",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x5f46d540b6eD704C3c8789105F30E075AA900726",
+          "name": "liquidBtc",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
+          "name": "eBTC",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268",
+          "destEid": "30111"
+        },
+        {
+          "address": "0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29",
+          "name": "frxUSD",
+          "bridge": "hopBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "hopContract": "0x3ad4dC2319394bB4BE99A0e4aE2AbF7bCEbD648E",
+          "oftToken": "0x566a6442A5A6e9895B9dCA97cC7879D632c6e4B0",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x86B5780b606940Eb59A062aA85a07959518c0161",
+          "name": "sETHFI",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x35dD2463fA7a335b721400C5Ad8Ba40bD85c179b",
+          "destEid": "30111"
+        }
+      ]
+    }
   },
   "8453": {
     "weth": "0x4200000000000000000000000000000000000006",
     "owner": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
     "recoveryWallet": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
-    "tokenConfigs": [
-      {
-        "token": "usdc",
-        "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "bridge": "stargate",
-        "maxSlippageInBps": "50",
-        "stargatePool": "0x27a16dc786820B16E5c9028b75B99F6f604b5d26"
-      },
-      {
-        "token": "weETH",
-        "address": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
-        "bridge": "oftBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "oftAdapter": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A"
-      },
-      {
-        "token": "weth",
-        "address": "0x4200000000000000000000000000000000000006",
-        "bridge": "stargate",
-        "maxSlippageInBps": "50",
-        "stargatePool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7"
-      },
-      {
-        "token": "eBTC",
-        "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
-        "bridge": "liquidBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268"
-      },
-      {
-        "token": "ETHFI",
-        "address": "0x6C240DDA6b5c336DF09A4D011139beAAa1eA2Aa2",
-        "bridge": "nttAdapter",
-        "maxSlippageInBps": "0",
-        "nttManager": "0xE87797A1aFb329216811dfA22C87380128CA17d8",
-        "dustDecimals": "10"
-      },
-      {
-        "token": "usdt",
-        "address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
-        "bridge": "baseWithdrawErc20BridgeAdapter",
-        "maxSlippageInBps": "0",
-        "gasLimitForBaseGateway": "200000"
-      }
-    ]
+    "destChainIds": ["534352", "10"],
+    "tokenConfigs": {
+      "534352": [
+        {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "name": "usdc",
+          "destChainId": "534352",
+          "bridge": "stargate",
+          "maxSlippageInBps": "50",
+          "stargatePool": "0x27a16dc786820B16E5c9028b75B99F6f604b5d26",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
+          "name": "weETH",
+          "destChainId": "534352",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x4200000000000000000000000000000000000006",
+          "name": "weth",
+          "destChainId": "534352",
+          "bridge": "stargate",
+          "maxSlippageInBps": "50",
+          "stargatePool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
+          "name": "eBTC",
+          "destChainId": "534352",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268",
+          "destEid": "30214"
+        },
+        {
+          "address": "0x6C240DDA6b5c336DF09A4D011139beAAa1eA2Aa2",
+          "name": "ETHFI",
+          "destChainId": "534352",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "oftAdapter": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+          "destEid": "30214"
+        },
+        {
+          "address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+          "name": "USDT",
+          "destChainId": "534352",
+          "bridge": "baseWithdrawErc20BridgeAdapter",
+          "maxSlippageInBps": "0",
+          "gasLimitForBaseGateway": "200000"
+        }
+      ],
+      "10": [
+        {
+          "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "name": "usdc",
+          "destChainId": "10",
+          "bridge": "cctp",
+          "destDomain": "2",
+          "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "maxFee": "0",
+          "minFinalityThreshold": "2000",
+          "maxSlippageInBps": "0"
+        },
+        {
+          "address": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
+          "name": "weETH",
+          "destChainId": "10",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x4200000000000000000000000000000000000006",
+          "name": "weth",
+          "destChainId": "10",
+          "bridge": "stargate",
+          "maxSlippageInBps": "50",
+          "stargatePool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
+          "name": "eBTC",
+          "destChainId": "10",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x6C240DDA6b5c336DF09A4D011139beAAa1eA2Aa2",
+          "name": "ETHFI",
+          "destChainId": "10",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "0",
+          "oftAdapter": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+          "destEid": "30111"
+        },
+        {
+          "address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
+          "name": "USDT",
+          "destChainId": "10",
+          "bridge": "baseWithdrawErc20BridgeAdapter",
+          "maxSlippageInBps": "0",
+          "gasLimitForBaseGateway": "200000"
+        }
+      ]
+    }
   },
   "999": {
     "weth": "0x5555555555555555555555555555555555555555",
     "owner": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
     "recoveryWallet": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
-    "tokenConfigs": [
-      {
-        "token": "usdc",
-        "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
-        "bridge": "cctp",
-        "maxSlippageInBps": "0",
-        "cctpTokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
-        "maxFee": "0",
-        "minFinalityThreshold": "2000"
-      },
-      {
-        "token": "beHYPE",
-        "address": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
-        "bridge": "oftBridgeAdapter",
-        "maxSlippageInBps": "50",
-        "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9"
-      },
-      {
-        "token": "usdt",
-        "address": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
-        "bridge": "oftBridgeAdapterMainnet",
-        "maxSlippageInBps": "50",
-        "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb"
-      }
-    ]
+    "destChainIds": ["534352", "10"],
+    "tokenConfigs": {
+      "534352": [
+        {
+          "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
+          "name": "usdc",
+          "destChainId": "534352",
+          "bridge": "cctp",
+          "destDomain": "0",
+          "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "maxFee": "0",
+          "minFinalityThreshold": "2000",
+          "maxSlippageInBps": "0"
+        },
+        {
+          "address": "0x5555555555555555555555555555555555555555",
+          "name": "wHYPE",
+          "destChainId": "534352",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0x2B7E48511ea616101834f09945c11F7d78D9136d",
+          "destEid": "30214"
+        },
+        {
+          "address": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
+          "name": "beHYPE",
+          "destChainId": "534352",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
+          "destEid": "30214"
+        },
+        {
+          "address": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+          "name": "usdt",
+          "destChainId": "534352",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+          "destEid": "30214"
+        }
+      ],
+      "10": [
+        {
+          "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
+          "name": "usdc",
+          "destChainId": "10",
+          "bridge": "cctp",
+          "destDomain": "2",
+          "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "maxSlippageInBps": "0",
+          "maxFee": "0",
+          "minFinalityThreshold": "2000"
+        },
+        {
+          "address": "0x5555555555555555555555555555555555555555",
+          "name": "wHYPE",
+          "destChainId": "534352",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0x2B7E48511ea616101834f09945c11F7d78D9136d",
+          "destEid": "30111"
+        },
+        {
+          "address": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
+          "name": "beHYPE",
+          "destChainId": "10",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
+          "destEid": "30111"
+        },
+        {
+          "address": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+          "name": "usdt",
+          "destChainId": "10",
+          "bridge": "oftBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+          "destEid": "30111"
+        }
+      ]
+    }
+  },
+  "42161": {
+    "weth": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+    "owner": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
+    "recoveryWallet": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
+    "destChainIds": ["534352", "10"],
+    "tokenConfigs": {
+      "534352": [
+        {
+          "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
+          "name": "usdc",
+          "destChainId": "534352",
+          "bridge": "cctp",
+          "destDomain": "0",
+          "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "maxFee": "0",
+          "minFinalityThreshold": "2000",
+          "maxSlippageInBps": "0"
+        }
+      ],
+      "10": [
+        {
+          "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
+          "name": "usdc",
+          "destChainId": "10",
+          "bridge": "cctp",
+          "destDomain": "2",
+          "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "maxSlippageInBps": "0",
+          "maxFee": "0",
+          "minFinalityThreshold": "2000"
+        }
+      ]
+    }
   }
 }

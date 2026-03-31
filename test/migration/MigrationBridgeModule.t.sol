@@ -9,6 +9,8 @@ import { MigrationBridgeModule } from "../../src/migration/MigrationBridgeModule
 import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
+import { TopUpDestWithMigration } from "../../src/top-up/TopUpDestWithMigration.sol";
 
 /**
  * @title MigrationBridgeModuleTest
@@ -17,6 +19,7 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
  */
 contract MigrationBridgeModuleTest is SafeTestSetup {
     MigrationBridgeModule migrationModule;
+    TopUpDestWithMigration topUpDestV2;
 
     address supplier;
 
@@ -64,11 +67,20 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
 
         vm.startPrank(owner);
 
-        // Deploy migration module as UUPS proxy
-        address migrationImpl = address(new MigrationBridgeModule(address(dataProvider)));
+        // Deploy TopUpDest proxy, then upgrade to V2 after migration module is known
+        address topUpDestImpl = address(new TopUpDest(address(dataProvider)));
+        address topUpDestProxy = address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry))));
+
+        // Deploy migration module as UUPS proxy (with topUpDest address)
+        address migrationImpl = address(new MigrationBridgeModule(address(dataProvider), topUpDestProxy));
         migrationModule = MigrationBridgeModule(payable(address(
             new UUPSProxy(migrationImpl, abi.encodeWithSelector(MigrationBridgeModule.initialize.selector, address(roleRegistry)))
         )));
+
+        // Upgrade TopUpDest to V2 with migration module as authorized caller
+        address topUpDestV2Impl = address(new TopUpDestWithMigration(address(dataProvider), address(migrationModule)));
+        UUPSUpgradeable(topUpDestProxy).upgradeToAndCall(topUpDestV2Impl, "");
+        topUpDestV2 = TopUpDestWithMigration(topUpDestProxy);
 
         // Register as default module so it can call execTransactionFromModule on any safe
         address[] memory modules = new address[](1);
@@ -328,6 +340,48 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
         vm.prank(supplier);
         vm.expectRevert(EtherFiHook.OnlyAdmin.selector);
         hook.setMigrationModule(makeAddr("newModule"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //              MIGRATION BLOCKS TOP-UPS TESTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function test_bridgeAll_marksSafesAsMigrated() public {
+        // Configure USDC as canonical
+        _configureCanonical(USDC);
+
+        // Grant top-up roles to supplier
+        vm.startPrank(owner);
+        roleRegistry.grantRole(keccak256("DEPOSITOR_ROLE"), supplier);
+        roleRegistry.grantRole(keccak256("TOP_UP_ROLE"), supplier);
+        vm.stopPrank();
+
+        // Fund TopUpDest with USDC
+        deal(USDC, supplier, 100_000e6);
+        vm.startPrank(supplier);
+        IERC20(USDC).approve(address(topUpDestV2), 100_000e6);
+        topUpDestV2.deposit(USDC, 100_000e6);
+        vm.stopPrank();
+
+        // Verify top-up works before migration
+        vm.prank(supplier);
+        topUpDestV2.topUpUserSafe(keccak256("tx_before"), address(safe), 100, USDC, 1e6);
+
+        // Verify safe is not migrated
+        assertFalse(topUpDestV2.isMigrated(address(safe)));
+
+        // Give safe some USDC and bridge all
+        deal(USDC, address(safe), 10_000e6);
+        vm.prank(etherFiWallet);
+        migrationModule.bridgeAll(_safes(address(safe)));
+
+        // Verify safe is now migrated
+        assertTrue(topUpDestV2.isMigrated(address(safe)));
+
+        // Verify top-ups are blocked after migration
+        vm.prank(supplier);
+        vm.expectRevert(TopUpDestWithMigration.SafeMigrated.selector);
+        topUpDestV2.topUpUserSafe(keccak256("tx_after"), address(safe), 100, USDC, 1e6);
     }
 
     // ═══════════════════════════════════════════════════════════════

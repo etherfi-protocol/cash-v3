@@ -2,10 +2,12 @@
     "addresses": {
       "RoleRegistry": "0xa322a04d1e2Cb44672473740F9F35B057FA29CFB",
       "TopUpSourceFactory": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
-      "StargateAdapter": "0x04238598eFFE31AB66F1fdeCbfBd59aa4117D69A",
-      "EtherFiOFTBridgeAdapter": "0x61fB314ccd2b3cada953Eb4Ab78ee7876c0BE9E2",
-      "EtherFiLiquidBridgeAdapter": "0xf4f5a6c29807bfdfc8d5c572962b8781be951072",
-      "NTTAdapter": "0x1DCCe2dA4Ba31e6f41FD4bF37DC8dc5A37582009",
+      "StargateAdapter": "0x98A824ba25e8B0a865113A06949f73B8749D1444",
+      "OptimismBridgeAdapter": "0xcD8F1f89F65a53e28F6B7E0Df7184e00080BbEfB",
+      "HopBridgeAdapter": "0xDf76325f1a9E6C6B246BEDe638A54003b40a8cBA",
+      "EtherFiOFTBridgeAdapter": "0x94094b297Db6f0967Dc8e0403147e0c45F7F04d7",
+      "EtherFiLiquidBridgeAdapter": "0x8F8792221b7d41C7a11C71c04d325D5aA4D2A1D6",
+      "CCTPAdapter": "0x695B13F329F146D87b52364aD7bcc48560567270",
       "ScrollERC20BridgeAdapter": "0x46A2A0eDf74eD97A72518349B5ccBD53AABf8265",
       "PixWalletAutoTopup": "0x6Bdc59A8Dd435c2Da4045522491eF5769944d33B"
     }

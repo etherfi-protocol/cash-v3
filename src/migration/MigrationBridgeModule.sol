@@ -14,16 +14,9 @@ import { IL2GatewayRouter } from "../interfaces/IScrollERC20Bridge.sol";
 import { ICashModule, Mode, SafeTiers, SafeData } from "../interfaces/ICashModule.sol";
 import { CashLens } from "../modules/cash/CashLens.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
+import { IHopV2 } from "../interfaces/IHopV2.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
-
-/**
- * @title IHopV2
- * @notice Interface for the Frax Hop V2 cross-chain bridge (hub-and-spoke via Fraxtal)
- */
-interface IHopV2 {
-    function sendOFT(address oft, uint32 dstEid, bytes32 recipient, uint256 amount) external payable;
-    function quote(address oft, uint32 dstEid, bytes32 recipient, uint256 amount, uint128 dstGas, bytes calldata data) external view returns (uint256);
-}
+import { TopUpDestWithMigration } from "../top-up/TopUpDestWithMigration.sol";
 
 /**
  * @title MigrationBridgeModule
@@ -94,6 +87,9 @@ contract MigrationBridgeModule is UpgradeableProxy {
     /// @notice Interface for accessing protocol data (safes, modules, cash module)
     IEtherFiDataProvider public immutable dataProvider;
 
+    /// @notice TopUpDest contract to mark safes as migrated (blocks future top-ups)
+    TopUpDestWithMigration public immutable topUpDest;
+
     /// @notice Role required to call bridgeAll (same as CashModule's wallet role)
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
 
@@ -149,8 +145,9 @@ contract MigrationBridgeModule is UpgradeableProxy {
      *      on the implementation contract to prevent direct initialization.
      * @param _dataProvider Address of the EtherFiDataProvider contract
      */
-    constructor(address _dataProvider) {
+    constructor(address _dataProvider, address _topUpDest) {
         dataProvider = IEtherFiDataProvider(_dataProvider);
+        topUpDest = TopUpDestWithMigration(_topUpDest);
         _disableInitializers();
     }
 
@@ -224,6 +221,9 @@ contract MigrationBridgeModule is UpgradeableProxy {
             unchecked { ++s; }
         }
 
+        // Mark safes as migrated on TopUpDest to block future top-ups
+        topUpDest.setMigrated(safes);
+
         uint256 remaining = address(this).balance;
         if (remaining > 0) {
             (bool ok,) = msg.sender.call{ value: remaining }("");
@@ -253,14 +253,7 @@ contract MigrationBridgeModule is UpgradeableProxy {
     function _bridgeAllForSafe(address safe) internal returns (uint256 ethUsed) {
         if (!dataProvider.isEtherFiSafe(safe)) revert NotEtherFiSafe();
 
-        ICashModule cashModule = ICashModule(dataProvider.getCashModule());
-        SafeData memory safeData = cashModule.getData(safe);
-        SafeTiers tier = cashModule.getSafeTier(safe);
-
-        CashLens cashLens = CashLens(dataProvider.getCashLens());
-        uint256 creditMax = cashLens.getMaxSpendCredit(safe);
-        IDebtManager debtManager = cashModule.getDebtManager();
-        uint256 debitMax = cashLens.getMaxSpendDebit(safe, debtManager.getBorrowTokens()).totalSpendableInUsd;
+        (SafeData memory safeData, SafeTiers tier, uint256 creditMax, uint256 debitMax) = _getSafeInfo(safe);
 
         MigrationBridgeModuleStorage storage $ = _getMigrationBridgeModuleStorage();
         uint256 bridgedCount;
@@ -307,6 +300,20 @@ contract MigrationBridgeModule is UpgradeableProxy {
             creditMax,
             debitMax
         );
+    }
+
+    /**
+     * @dev Reads safe info from CashModule and CashLens to reduce stack depth in _bridgeAllForSafe
+     */
+    function _getSafeInfo(address safe) internal view returns (SafeData memory safeData, SafeTiers tier, uint256 creditMax, uint256 debitMax) {
+        ICashModule cashModule = ICashModule(dataProvider.getCashModule());
+        safeData = cashModule.getData(safe);
+        tier = cashModule.getSafeTier(safe);
+
+        CashLens cashLens = CashLens(dataProvider.getCashLens());
+        creditMax = cashLens.getMaxSpendCredit(safe);
+        IDebtManager debtManager = cashModule.getDebtManager();
+        debitMax = cashLens.getMaxSpendDebit(safe, debtManager.getBorrowTokens()).totalSpendableInUsd;
     }
 
     /**

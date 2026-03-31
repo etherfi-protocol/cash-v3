@@ -193,7 +193,7 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws TopUpAlreadyProcessed if the transaction has already been processed
      * @custom:throws BalanceTooLow if the contract has insufficient token balance
      */
-    function _topUp(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) internal {
+    function _topUp(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) internal virtual {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
         bytes32 txId = getTxId(txHash, user, token);
