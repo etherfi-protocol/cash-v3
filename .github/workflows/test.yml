@@ -12,6 +12,7 @@ env:
   BASE_RPC: ${{ secrets.BASE_RPC }}
   ARBITRUM_RPC: ${{ secrets.ARBITRUM_RPC }}
   HYPEREVM_RPC: ${{ secrets.HYPEREVM_RPC }}
+  OPTIMISM_RPC: ${{ secrets.OPTIMISM_RPC }}
   OPENOCEAN_API_KEY: ${{ secrets.OPENOCEAN_API_KEY }}
 
 jobs:
