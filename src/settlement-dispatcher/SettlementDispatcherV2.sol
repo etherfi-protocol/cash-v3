@@ -342,7 +342,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @param token Address of the token
      * @return Destination data struct for the specified token
      */
-    function destinationData(address token) public view returns (DestinationData memory) {
+    function destinationData(address token) public view virtual returns (DestinationData memory) {
         return _getSettlementDispatcherV2Storage().destinationData[token];
     }
 
@@ -355,7 +355,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws InvalidValue If any address parameter is zero
      * @custom:throws StargateValueInvalid If the Stargate router doesn't support the token
      */
-    function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external onlyRoleRegistryOwner {
+    function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external virtual onlyRoleRegistryOwner {
         _setDestinationData(tokens, destDatas);
     }
 
@@ -607,7 +607,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws InsufficientMinReturn If the expected return is less than minReturnLD
      * @custom:throws InsufficientFeeToCoverCost If not enough ETH is provided for fees
      */
-    function bridge(address token, uint256 amount, uint256 minReturnLD) external payable whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+    function bridge(address token, uint256 amount, uint256 minReturnLD) external payable virtual whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
         if (token == address(0) || amount == 0) revert InvalidValue();
         
         uint256 balance = 0;
@@ -659,8 +659,8 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     function prepareRideBus(
         address token,
         uint256 amount
-    ) public view returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
-        
+    ) public view virtual returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
+
         DestinationData memory destData = _getSettlementDispatcherV2Storage().destinationData[token];
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
 
@@ -702,7 +702,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     function prepareOftSend(
         address token,
         uint256 amount
-    ) public view returns (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) {
+    ) public view virtual returns (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) {
         DestinationData memory destData = _getSettlementDispatcherV2Storage().destinationData[token];
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
 
