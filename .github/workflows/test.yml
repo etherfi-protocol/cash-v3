@@ -6,7 +6,7 @@ on:
 
 env:
   FOUNDRY_PROFILE: ci
-  ENV: ${{ secrets.ENV || 'PROD' }}
+  ENV: ${{ secrets.ENV || 'mainnet' }}
   MAINNET_RPC: ${{ secrets.MAINNET_RPC }}
   SCROLL_RPC: ${{ secrets.SCROLL_RPC }}
   BASE_RPC: ${{ secrets.BASE_RPC }}
