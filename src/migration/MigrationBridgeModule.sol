@@ -213,7 +213,7 @@ contract MigrationBridgeModule is UpgradeableProxy {
      *      Only callable by accounts with ETHER_FI_WALLET_ROLE.
      * @param safes Array of EtherFi Safe addresses to process
      */
-    function bridgeAll(address[] calldata safes) external payable {
+    function bridgeAll(address[] calldata safes) external payable nonReentrant {
         if (!dataProvider.roleRegistry().hasRole(ETHER_FI_WALLET_ROLE, msg.sender)) revert OnlyEtherFiWallet();
 
         for (uint256 s = 0; s < safes.length;) {
