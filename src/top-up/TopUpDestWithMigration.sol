@@ -33,7 +33,7 @@ contract TopUpDestWithMigration is TopUpDest {
     /// @notice Emitted when a safe's migration status is updated
     event SafeMigrationSet(address indexed safe, bool migrated);
 
-    constructor(address _etherFiDataProvider, address _migrationModule) TopUpDest(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _weth, address _migrationModule) TopUpDest(_etherFiDataProvider, _weth) {
         migrationModule = _migrationModule;
     }
 

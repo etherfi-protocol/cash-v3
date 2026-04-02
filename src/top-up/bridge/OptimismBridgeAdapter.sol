@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+import { IWETH } from "../../interfaces/IWETH.sol";
 import { IL1StandardBridge } from "../../interfaces/IL1StandardBridge.sol";
 import { BridgeAdapterBase } from "./BridgeAdapterBase.sol";
 
@@ -19,6 +20,9 @@ contract OptimismBridgeAdapter is BridgeAdapterBase {
 
     /// @notice Optimism L1 Standard Bridge on Ethereum mainnet
     address public constant L1_STANDARD_BRIDGE = 0x99C9fc46f92E8a1c0deC1b1747d010903E884bE1;
+
+    /// @notice WETH address on L1
+    address public constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
     /// @notice Emitted when tokens are bridged to Optimism
     event BridgeToOptimism(address indexed l1Token, address indexed l2Token, address destRecipient, uint256 amount);
@@ -39,18 +43,30 @@ contract OptimismBridgeAdapter is BridgeAdapterBase {
         uint256, // maxSlippage (unused for native bridge)
         bytes calldata additionalData
     ) external payable override {
+        if (token == WETH) {
+            IWETH(WETH).withdraw(amount);
+            token = ETH;
+        }
+
         (address l2Token, uint32 minGasLimit) = abi.decode(additionalData, (address, uint32));
 
-        IERC20(token).forceApprove(L1_STANDARD_BRIDGE, amount);
-
-        IL1StandardBridge(L1_STANDARD_BRIDGE).depositERC20To(
-            token,
-            l2Token,
-            destRecipient,
-            amount,
-            minGasLimit,
-            ""
-        );
+        if (token != ETH) {
+            IERC20(token).forceApprove(L1_STANDARD_BRIDGE, amount);
+            IL1StandardBridge(L1_STANDARD_BRIDGE).depositERC20To(
+                token,
+                l2Token,
+                destRecipient,
+                amount,
+                minGasLimit,
+                ""
+            );
+        } else {
+            IL1StandardBridge(L1_STANDARD_BRIDGE).depositETHTo{value: amount}(
+                destRecipient,
+                minGasLimit,
+                ""
+            );
+        }
 
         emit BridgeToOptimism(token, l2Token, destRecipient, amount);
     }

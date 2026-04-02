@@ -147,7 +147,7 @@ contract MigrationBridgeModule is UpgradeableProxy {
      */
     constructor(address _dataProvider, address _topUpDest) {
         dataProvider = IEtherFiDataProvider(_dataProvider);
-        topUpDest = TopUpDestWithMigration(_topUpDest);
+        topUpDest = TopUpDestWithMigration(payable(_topUpDest));
         _disableInitializers();
     }
 

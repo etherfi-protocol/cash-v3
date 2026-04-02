@@ -108,10 +108,10 @@ contract SanityTest is Utils {
             string.concat(".", "addresses", ".", "SettlementDispatcherRain")
         )));
         
-        topUpDest = TopUpDest(stdJson.readAddress(
+        topUpDest = TopUpDest(payable(stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "TopUpDest")
-        ));
+        )));
         
         cashModule = ICashModule(stdJson.readAddress(
             deployments, 

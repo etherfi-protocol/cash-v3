@@ -28,6 +28,8 @@ contract TopUpDestWithMigrationTest is Test {
     address public user2;
     address public nonUser;
 
+    address public weth = 0x5300000000000000000000000000000000000004;
+
     bytes32 public constant TOP_UP_DEPOSITOR_ROLE = keccak256("DEPOSITOR_ROLE");
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
@@ -65,14 +67,14 @@ contract TopUpDestWithMigrationTest is Test {
         roleRegistry.grantRole(TOP_UP_ROLE, topUpRole);
 
         // Deploy as TopUpDest first, then upgrade to V2 (mimics real upgrade path)
-        address topUpDestImpl = address(new TopUpDest(dataProvider));
+        address topUpDestImpl = address(new TopUpDest(dataProvider, weth));
         address proxy = address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry))));
 
         // Upgrade to V2
-        address topUpDestV2Impl = address(new TopUpDestWithMigration(dataProvider, migrationModule));
+        address topUpDestV2Impl = address(new TopUpDestWithMigration(dataProvider, weth, migrationModule));
         UUPSUpgradeable(proxy).upgradeToAndCall(topUpDestV2Impl, "");
 
-        topUpDest = TopUpDestWithMigration(proxy);
+        topUpDest = TopUpDestWithMigration(payable(proxy));
 
         vm.stopPrank();
 

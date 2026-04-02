@@ -39,4 +39,16 @@ interface IL1StandardBridge {
         uint32 _minGasLimit,
         bytes calldata _extraData
     ) external;
+
+    /**
+     * @notice Deposits an amount of ETH to a specified recipient on L2.
+     * @param _to          Recipient address on L2.
+     * @param _minGasLimit Minimum gas limit for the deposit message on L2.
+     * @param _extraData   Optional data to forward to L2.
+     */
+    function depositETHTo(
+        address _to,
+        uint32 _minGasLimit,
+        bytes calldata _extraData
+    ) external payable;
 }

@@ -68,7 +68,7 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
         vm.startPrank(owner);
 
         // Deploy TopUpDest proxy, then upgrade to V2 after migration module is known
-        address topUpDestImpl = address(new TopUpDest(address(dataProvider)));
+        address topUpDestImpl = address(new TopUpDest(address(dataProvider), WETH));
         address topUpDestProxy = address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry))));
 
         // Deploy migration module as UUPS proxy (with topUpDest address)
@@ -78,9 +78,9 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
         )));
 
         // Upgrade TopUpDest to V2 with migration module as authorized caller
-        address topUpDestV2Impl = address(new TopUpDestWithMigration(address(dataProvider), address(migrationModule)));
+        address topUpDestV2Impl = address(new TopUpDestWithMigration(address(dataProvider), WETH, address(migrationModule)));
         UUPSUpgradeable(topUpDestProxy).upgradeToAndCall(topUpDestV2Impl, "");
-        topUpDestV2 = TopUpDestWithMigration(topUpDestProxy);
+        topUpDestV2 = TopUpDestWithMigration(payable(topUpDestProxy));
 
         // Register as default module so it can call execTransactionFromModule on any safe
         address[] memory modules = new address[](1);
