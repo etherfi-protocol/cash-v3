@@ -54,6 +54,12 @@ contract DeployOptimismProdModules is GnosisHelpers, Utils, Test {
     address constant sethfiTeller = 0x35dD2463fA7a335b721400C5Ad8Ba40bD85c179b;
     address constant sETHFIBoringQueue = 0xF03352da1536F31172A7F7cB092D4717DeDDd3CB;
 
+    // Boring queues (same as Scroll)
+    address constant liquidEthBoringQueue = 0x0D2dF071207E18Ca8638b4f04E98c53155eC2cE0;
+    address constant liquidBtcBoringQueue = 0x77A2fd42F8769d8063F2E75061FC200014E41Edf;
+    address constant liquidUsdBoringQueue = 0x38FC1BA73b7ED289955a07d9F11A85b6E388064A;
+    address constant ebtcBoringQueue = 0x686696A3e59eE16e8A8533d84B62cfA504827135;
+
     // Stargate
     address constant stargateUsdcPool = 0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0;
 
@@ -281,9 +287,32 @@ contract DeployOptimismProdModules is GnosisHelpers, Utils, Test {
             "0", false
         )));
 
+        // Set boring queues on EtherFiLiquidModuleWithReferrer (sETHFI)
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(
             addressToHex(liquidModuleReferrer),
             iToHex(abi.encodeWithSelector(EtherFiLiquidModuleWithReferrer.setLiquidAssetWithdrawQueue.selector, sethfi, sETHFIBoringQueue)),
+            "0", false
+        )));
+
+        // Set boring queues on EtherFiLiquidModule (liquidEth, liquidBtc, liquidUsd)
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(
+            addressToHex(liquidModule),
+            iToHex(abi.encodeWithSelector(EtherFiLiquidModule.setLiquidAssetWithdrawQueue.selector, liquidEth, liquidEthBoringQueue)),
+            "0", false
+        )));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(
+            addressToHex(liquidModule),
+            iToHex(abi.encodeWithSelector(EtherFiLiquidModule.setLiquidAssetWithdrawQueue.selector, liquidBtc, liquidBtcBoringQueue)),
+            "0", false
+        )));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(
+            addressToHex(liquidModule),
+            iToHex(abi.encodeWithSelector(EtherFiLiquidModule.setLiquidAssetWithdrawQueue.selector, liquidUsd, liquidUsdBoringQueue)),
+            "0", false
+        )));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(
+            addressToHex(liquidModule),
+            iToHex(abi.encodeWithSelector(EtherFiLiquidModule.setLiquidAssetWithdrawQueue.selector, ebtc, ebtcBoringQueue)),
             "0", false
         )));
 

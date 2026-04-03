@@ -57,6 +57,12 @@ contract DeployOptimismDevModules is Utils {
     address constant sethfiTeller = 0x35dD2463fA7a335b721400C5Ad8Ba40bD85c179b;
     address constant sETHFIBoringQueue = 0xF03352da1536F31172A7F7cB092D4717DeDDd3CB;
 
+    // Boring queues (same as Scroll)
+    address constant liquidEthBoringQueue = 0x0D2dF071207E18Ca8638b4f04E98c53155eC2cE0;
+    address constant liquidBtcBoringQueue = 0x77A2fd42F8769d8063F2E75061FC200014E41Edf;
+    address constant liquidUsdBoringQueue = 0x38FC1BA73b7ED289955a07d9F11A85b6E388064A;
+    address constant ebtcBoringQueue = 0x686696A3e59eE16e8A8533d84B62cfA504827135;
+
     // Stargate
     address constant stargateUsdcPool = 0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0;
 
@@ -208,8 +214,16 @@ contract DeployOptimismDevModules is Utils {
 
         bytes32 ETHERFI_LIQUID_MODULE_ADMIN = keccak256("ETHERFI_LIQUID_MODULE_ADMIN");
         RoleRegistry(d.roleRegistry).grantRole(ETHERFI_LIQUID_MODULE_ADMIN, deployer);
+
+        // Set boring queues on EtherFiLiquidModuleWithReferrer
         EtherFiLiquidModuleWithReferrer(d.liquidModuleReferrer).setLiquidAssetWithdrawQueue(sethfi, sETHFIBoringQueue);
         console.log("  EtherFiLiquidModuleWithReferrer:", d.liquidModuleReferrer);
+
+        // Set boring queues on EtherFiLiquidModule
+        EtherFiLiquidModule(d.liquidModule).setLiquidAssetWithdrawQueue(liquidEth, liquidEthBoringQueue);
+        EtherFiLiquidModule(d.liquidModule).setLiquidAssetWithdrawQueue(liquidBtc, liquidBtcBoringQueue);
+        EtherFiLiquidModule(d.liquidModule).setLiquidAssetWithdrawQueue(liquidUsd, liquidUsdBoringQueue);
+        EtherFiLiquidModule(d.liquidModule).setLiquidAssetWithdrawQueue(ebtc, ebtcBoringQueue);
 
         console.log("Deploying StargateModule...");
         address[] memory stargateAssets = new address[](2);
