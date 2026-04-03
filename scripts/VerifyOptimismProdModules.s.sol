@@ -11,6 +11,7 @@ import { EtherFiLiquidModule } from "../src/modules/etherfi/EtherFiLiquidModule.
 import { EtherFiLiquidModuleWithReferrer } from "../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
 import { StargateModule } from "../src/modules/stargate/StargateModule.sol";
 import { FraxModule } from "../src/modules/frax/FraxModule.sol";
+import { EtherFiStakeModule } from "../src/modules/etherfi/EtherFiStakeModule.sol";
 import { PriceProvider } from "../src/oracle/PriceProvider.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
@@ -38,6 +39,7 @@ contract VerifyOptimismProdModules is GnosisHelpers, Utils {
     bytes32 constant SALT_FRAX_MODULE              = keccak256("DeployOptimismProdModules.FraxModule");
     bytes32 constant SALT_LIQUIFIER_IMPL           = keccak256("DeployOptimismProdModules.LiquidUSDLiquifierImpl");
     bytes32 constant SALT_LIQUIFIER_PROXY          = keccak256("DeployOptimismProdModules.LiquidUSDLiquifierProxy");
+    bytes32 constant SALT_STAKE_MODULE             = keccak256("DeployOptimismProdModules.EtherFiStakeModule");
 
     address constant weth = 0x4200000000000000000000000000000000000006;
     address constant sethfi = 0x86B5780b606940Eb59A062aA85a07959518c0161;
@@ -51,6 +53,7 @@ contract VerifyOptimismProdModules is GnosisHelpers, Utils {
         address liquidModuleReferrer;
         address stargateModule;
         address fraxModule;
+        address stakeModule;
         address liquifierProxy;
         address liquifierImpl;
         address roleRegistry;
@@ -66,6 +69,7 @@ contract VerifyOptimismProdModules is GnosisHelpers, Utils {
         p.fraxModule = CREATE3.predictDeterministicAddress(SALT_FRAX_MODULE, NICKS_FACTORY);
         p.liquifierProxy = CREATE3.predictDeterministicAddress(SALT_LIQUIFIER_PROXY, NICKS_FACTORY);
         p.liquifierImpl = CREATE3.predictDeterministicAddress(SALT_LIQUIFIER_IMPL, NICKS_FACTORY);
+        p.stakeModule = CREATE3.predictDeterministicAddress(SALT_STAKE_MODULE, NICKS_FACTORY);
 
         string memory deployments = readDeploymentFile();
         p.roleRegistry = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "RoleRegistry"));
@@ -137,6 +141,8 @@ contract VerifyOptimismProdModules is GnosisHelpers, Utils {
         console.log("  [OK] FraxModule:", p.fraxModule);
         require(p.liquifierProxy.code.length > 0, "LiquidUSDLiquifierModule proxy has no code");
         console.log("  [OK] LiquidUSDLiquifierModule proxy:", p.liquifierProxy);
+        require(p.stakeModule.code.length > 0, "EtherFiStakeModule has no code");
+        console.log("  [OK] EtherFiStakeModule:", p.stakeModule);
     }
 
     function _checkProxy(Predicted memory p) internal view {
@@ -161,6 +167,10 @@ contract VerifyOptimismProdModules is GnosisHelpers, Utils {
 
         require(EtherFiLiquidModuleWithReferrer(p.liquidModuleReferrer).weth() == weth, "LiquidModuleReferrer weth wrong");
         console.log("  [OK] EtherFiLiquidModuleWithReferrer weth correct (OP)");
+
+        require(EtherFiStakeModule(p.stakeModule).weth() == weth, "StakeModule weth wrong");
+        require(address(EtherFiStakeModule(p.stakeModule).weETH()) == 0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF, "StakeModule weETH wrong");
+        console.log("  [OK] EtherFiStakeModule weth + weETH correct (OP)");
     }
 
     function _checkConfig(Predicted memory p) internal view {

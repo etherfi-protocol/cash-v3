@@ -13,6 +13,7 @@ import { EtherFiLiquidModule } from "../src/modules/etherfi/EtherFiLiquidModule.
 import { EtherFiLiquidModuleWithReferrer } from "../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
 import { StargateModule } from "../src/modules/stargate/StargateModule.sol";
 import { FraxModule } from "../src/modules/frax/FraxModule.sol";
+import { EtherFiStakeModule } from "../src/modules/etherfi/EtherFiStakeModule.sol";
 import { EtherFiDataProvider } from "../src/data-provider/EtherFiDataProvider.sol";
 import { IAggregatorV3, PriceProvider } from "../src/oracle/PriceProvider.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
@@ -35,11 +36,13 @@ contract DeployOptimismDevModules is Utils {
     bytes32 public constant SALT_LIQUID_MODULE_REFERRER       = keccak256("DeployOptimismDevModules.EtherFiLiquidModuleWithReferrer");
     bytes32 public constant SALT_STARGATE_MODULE              = keccak256("DeployOptimismDevModules.StargateModule");
     bytes32 public constant SALT_FRAX_MODULE                  = keccak256("DeployOptimismDevModules.FraxModule");
+    bytes32 public constant SALT_STAKE_MODULE                = keccak256("DeployOptimismDevModules.EtherFiStakeModule");
 
     // OP chain addresses
     address constant weth = 0x4200000000000000000000000000000000000006;
     address constant usdc = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     address constant weETH = 0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF;
+    address constant syncPool = 0xC9475e18E2C5C26EA6ADCD55fabE07920beA887e;
     address constant usdt = 0x94b008aA00579c1307B0EF2c499aD98a8ce58e58;
 
     // EtherFi Liquid vault assets (same as Scroll)
@@ -84,6 +87,7 @@ contract DeployOptimismDevModules is Utils {
         address liquidModuleReferrer;
         address stargateModule;
         address fraxModule;
+        address stakeModule;
     }
 
     // --- CREATE3 deploy helper (idempotent — skips if already deployed) ---
@@ -125,11 +129,11 @@ contract DeployOptimismDevModules is Utils {
         d.priceProvider = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "PriceProvider"));
         d.cashModule = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "CashModule"));
 
-        _deploySettlementDispatchers(d);
+        // _deploySettlementDispatchers(d);
         _deployModules(d);
         _configureModules(d);
-        _configureOracles(d.priceProvider);
-        _configureDebtManager(d.debtManager);
+        // _configureOracles(d.priceProvider);
+        // _configureDebtManager(d.debtManager);
 
         vm.stopBroadcast();
     }
@@ -246,22 +250,31 @@ contract DeployOptimismDevModules is Utils {
             SALT_FRAX_MODULE
         );
         console.log("  FraxModule:", d.fraxModule);
+
+        console.log("Deploying EtherFiStakeModule...");
+        d.stakeModule = deployCreate3(
+            abi.encodePacked(type(EtherFiStakeModule).creationCode, abi.encode(d.dataProvider, syncPool, weth, weETH)),
+            SALT_STAKE_MODULE
+        );
+        console.log("  EtherFiStakeModule:", d.stakeModule);
     }
 
     function _configureModules(Deployed memory d) internal {
         console.log("Configuring modules...");
 
-        address[] memory defaultModules = new address[](4);
+        address[] memory defaultModules = new address[](5);
         defaultModules[0] = d.liquidModule;
         defaultModules[1] = d.liquidModuleReferrer;
         defaultModules[2] = d.fraxModule;
         defaultModules[3] = d.stargateModule;
+        defaultModules[0] = d.stakeModule;
 
-        bool[] memory shouldWhitelist = new bool[](4);
+        bool[] memory shouldWhitelist = new bool[](5);
         shouldWhitelist[0] = true;
         shouldWhitelist[1] = true;
         shouldWhitelist[2] = true;
         shouldWhitelist[3] = true;
+        shouldWhitelist[4] = true;
 
         EtherFiDataProvider(d.dataProvider).configureDefaultModules(defaultModules, shouldWhitelist);
 

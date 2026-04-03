@@ -12,6 +12,7 @@ import { EtherFiLiquidModule } from "../src/modules/etherfi/EtherFiLiquidModule.
 import { EtherFiLiquidModuleWithReferrer } from "../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
 import { StargateModule } from "../src/modules/stargate/StargateModule.sol";
 import { FraxModule } from "../src/modules/frax/FraxModule.sol";
+import { EtherFiStakeModule } from "../src/modules/etherfi/EtherFiStakeModule.sol";
 import { BinSponsor } from "../src/interfaces/ICashModule.sol";
 import { Utils } from "./utils/Utils.sol";
 
@@ -38,6 +39,7 @@ contract VerifyOptimismDevModules is Utils {
     bytes32 constant SALT_LIQUID_MODULE_REFERRER       = keccak256("DeployOptimismDevModules.EtherFiLiquidModuleWithReferrer");
     bytes32 constant SALT_STARGATE_MODULE              = keccak256("DeployOptimismDevModules.StargateModule");
     bytes32 constant SALT_FRAX_MODULE                  = keccak256("DeployOptimismDevModules.FraxModule");
+    bytes32 constant SALT_STAKE_MODULE                = keccak256("DeployOptimismDevModules.EtherFiStakeModule");
 
     // Expected external addresses
     address constant sethfi = 0x86B5780b606940Eb59A062aA85a07959518c0161;
@@ -55,6 +57,7 @@ contract VerifyOptimismDevModules is Utils {
         address liquidModuleReferrer;
         address stargateModule;
         address fraxModule;
+        address stakeModule;
         address dataProvider;
         address roleRegistry;
     }
@@ -70,6 +73,7 @@ contract VerifyOptimismDevModules is Utils {
         p.liquidModuleReferrer = CREATE3.predictDeterministicAddress(SALT_LIQUID_MODULE_REFERRER, NICKS_FACTORY);
         p.stargateModule = CREATE3.predictDeterministicAddress(SALT_STARGATE_MODULE, NICKS_FACTORY);
         p.fraxModule = CREATE3.predictDeterministicAddress(SALT_FRAX_MODULE, NICKS_FACTORY);
+        p.stakeModule = CREATE3.predictDeterministicAddress(SALT_STAKE_MODULE, NICKS_FACTORY);
 
         string memory deployments = readDeploymentFile();
         p.dataProvider = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "EtherFiDataProvider"));
@@ -115,6 +119,8 @@ contract VerifyOptimismDevModules is Utils {
         console.log("  [OK] StargateModule:", p.stargateModule);
         require(p.fraxModule.code.length > 0, "FraxModule has no code");
         console.log("  [OK] FraxModule:", p.fraxModule);
+        require(p.stakeModule.code.length > 0, "EtherFiStakeModule has no code");
+        console.log("  [OK] EtherFiStakeModule:", p.stakeModule);
     }
 
     function _checkImplSlots(Predicted memory p) internal view {
@@ -170,6 +176,10 @@ contract VerifyOptimismDevModules is Utils {
 
         require(EtherFiLiquidModuleWithReferrer(p.liquidModuleReferrer).weth() == 0x4200000000000000000000000000000000000006, "LiquidModuleReferrer weth wrong");
         console.log("  [OK] EtherFiLiquidModuleWithReferrer weth correct (OP)");
+
+        require(EtherFiStakeModule(p.stakeModule).weth() == 0x4200000000000000000000000000000000000006, "StakeModule weth wrong");
+        require(address(EtherFiStakeModule(p.stakeModule).weETH()) == 0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF, "StakeModule weETH wrong");
+        console.log("  [OK] EtherFiStakeModule weth + weETH correct (OP)");
     }
 
     function _checkConfig(Predicted memory p) internal view {

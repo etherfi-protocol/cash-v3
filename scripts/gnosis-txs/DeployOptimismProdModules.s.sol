@@ -11,6 +11,7 @@ import { EtherFiLiquidModule } from "../../src/modules/etherfi/EtherFiLiquidModu
 import { EtherFiLiquidModuleWithReferrer } from "../../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
 import { StargateModule } from "../../src/modules/stargate/StargateModule.sol";
 import { FraxModule } from "../../src/modules/frax/FraxModule.sol";
+import { EtherFiStakeModule } from "../../src/modules/etherfi/EtherFiStakeModule.sol";
 import { LiquidUSDLiquifierModule } from "../../src/modules/etherfi/LiquidUSDLiquifier.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { IAggregatorV3, PriceProvider } from "../../src/oracle/PriceProvider.sol";
@@ -32,12 +33,14 @@ contract DeployOptimismProdModules is GnosisHelpers, Utils, Test {
     bytes32 public constant SALT_FRAX_MODULE              = keccak256("DeployOptimismProdModules.FraxModule");
     bytes32 public constant SALT_LIQUIFIER_IMPL           = keccak256("DeployOptimismProdModules.LiquidUSDLiquifierImpl");
     bytes32 public constant SALT_LIQUIFIER_PROXY          = keccak256("DeployOptimismProdModules.LiquidUSDLiquifierProxy");
+    bytes32 public constant SALT_STAKE_MODULE             = keccak256("DeployOptimismProdModules.EtherFiStakeModule");
 
     // OP chain addresses
     address constant weth = 0x4200000000000000000000000000000000000006;
     address constant usdc = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     address constant weETH = 0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF;
     address constant usdt = 0x94b008aA00579c1307B0EF2c499aD98a8ce58e58;
+    address constant syncPool = 0xC9475e18E2C5C26EA6ADCD55fabE07920beA887e;
 
     // EtherFi Liquid vault assets (same as Scroll)
     address constant liquidEth = 0xf0bb20865277aBd641a307eCe5Ee04E79073416C;
@@ -74,6 +77,7 @@ contract DeployOptimismProdModules is GnosisHelpers, Utils, Test {
     address liquidModuleReferrer;
     address stargateModule;
     address fraxModule;
+    address stakeModule;
     address liquifierProxy;
 
     // Addresses from deployments.json
@@ -198,6 +202,13 @@ contract DeployOptimismProdModules is GnosisHelpers, Utils, Test {
             SALT_FRAX_MODULE
         );
         console.log("  FraxModule:", fraxModule);
+
+        console.log("Deploying EtherFiStakeModule...");
+        stakeModule = deployCreate3(
+            abi.encodePacked(type(EtherFiStakeModule).creationCode, abi.encode(dataProvider, syncPool, weth, weETH)),
+            SALT_STAKE_MODULE
+        );
+        console.log("  EtherFiStakeModule:", stakeModule);
     }
 
     function _deployLiquifier() internal {
@@ -236,17 +247,19 @@ contract DeployOptimismProdModules is GnosisHelpers, Utils, Test {
     }
 
     function _buildModuleConfigTxs(string memory txs) internal view returns (string memory) {
-        address[] memory defaultModules = new address[](4);
+        address[] memory defaultModules = new address[](5);
         defaultModules[0] = liquidModule;
         defaultModules[1] = liquidModuleReferrer;
         defaultModules[2] = fraxModule;
         defaultModules[3] = stargateModule;
+        defaultModules[4] = stakeModule;
 
-        bool[] memory enable = new bool[](4);
+        bool[] memory enable = new bool[](5);
         enable[0] = true;
         enable[1] = true;
         enable[2] = true;
         enable[3] = true;
+        enable[4] = true;
 
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(
             addressToHex(dataProvider),

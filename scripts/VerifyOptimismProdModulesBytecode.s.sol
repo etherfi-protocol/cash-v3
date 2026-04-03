@@ -13,6 +13,7 @@ import { EtherFiLiquidModule } from "../src/modules/etherfi/EtherFiLiquidModule.
 import { EtherFiLiquidModuleWithReferrer } from "../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
 import { StargateModule } from "../src/modules/stargate/StargateModule.sol";
 import { FraxModule } from "../src/modules/frax/FraxModule.sol";
+import { EtherFiStakeModule } from "../src/modules/etherfi/EtherFiStakeModule.sol";
 import { LiquidUSDLiquifierModule } from "../src/modules/etherfi/LiquidUSDLiquifier.sol";
 
 /// @title Bytecode verification for OP Mainnet prod module deployment
@@ -33,11 +34,13 @@ contract VerifyOptimismProdModulesBytecode is Script, ContractCodeChecker, Utils
     bytes32 constant SALT_FRAX_MODULE              = keccak256("DeployOptimismProdModules.FraxModule");
     bytes32 constant SALT_LIQUIFIER_IMPL           = keccak256("DeployOptimismProdModules.LiquidUSDLiquifierImpl");
     bytes32 constant SALT_LIQUIFIER_PROXY          = keccak256("DeployOptimismProdModules.LiquidUSDLiquifierProxy");
+    bytes32 constant SALT_STAKE_MODULE             = keccak256("DeployOptimismProdModules.EtherFiStakeModule");
 
     // OP chain addresses (constructor args)
     address constant weth = 0x4200000000000000000000000000000000000006;
     address constant usdc = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     address constant weETH = 0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF;
+    address constant syncPool = 0xC9475e18E2C5C26EA6ADCD55fabE07920beA887e;
 
     // Liquid vault assets (same as Scroll)
     address constant liquidEth = 0xf0bb20865277aBd641a307eCe5Ee04E79073416C;
@@ -79,6 +82,7 @@ contract VerifyOptimismProdModulesBytecode is Script, ContractCodeChecker, Utils
         _verifyLiquidModuleWithReferrer();
         _verifyStargateModule();
         _verifyFraxModule();
+        _verifyStakeModule();
         _verifyLiquifierImpl();
 
         console2.log("\n==========================================");
@@ -143,8 +147,16 @@ contract VerifyOptimismProdModulesBytecode is Script, ContractCodeChecker, Utils
         verifyContractByteCodeMatch(onchain, local);
     }
 
+    function _verifyStakeModule() internal {
+        console2.log("5. EtherFiStakeModule");
+        address onchain = CREATE3.predictDeterministicAddress(SALT_STAKE_MODULE, NICKS_FACTORY);
+
+        address local = address(new EtherFiStakeModule(dp, syncPool, weth, weETH));
+        verifyContractByteCodeMatch(onchain, local);
+    }
+
     function _verifyLiquifierImpl() internal {
-        console2.log("5. LiquidUSDLiquifierModule (impl)");
+        console2.log("6. LiquidUSDLiquifierModule (impl)");
         address liquifierProxy = CREATE3.predictDeterministicAddress(SALT_LIQUIFIER_PROXY, NICKS_FACTORY);
         address expectedImpl = CREATE3.predictDeterministicAddress(SALT_LIQUIFIER_IMPL, NICKS_FACTORY);
 
