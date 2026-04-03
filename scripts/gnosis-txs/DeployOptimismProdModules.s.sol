@@ -335,37 +335,63 @@ contract DeployOptimismProdModules is GnosisHelpers, Utils, Test {
         PriceProvider.Config[] memory priceConfigs = new PriceProvider.Config[](5);
 
         priceConfigs[0] = PriceProvider.Config({
-            oracle: frxUSDPriceOracle, priceFunctionCalldata: "", isChainlinkType: true,
-            oraclePriceDecimals: IAggregatorV3(frxUSDPriceOracle).decimals(), maxStaleness: 14 days,
-            dataType: PriceProvider.ReturnType.Int256, isBaseTokenEth: false, isStableToken: true, isBaseTokenBtc: false
+            oracle: frxUSDPriceOracle, 
+            priceFunctionCalldata: "", 
+            isChainlinkType: true,
+            oraclePriceDecimals: IAggregatorV3(frxUSDPriceOracle).decimals(), 
+            maxStaleness: 14 days,
+            dataType: PriceProvider.ReturnType.Int256, 
+            isBaseTokenEth: false, 
+            isStableToken: true, 
+            isBaseTokenBtc: false
         });
 
         priceConfigs[1] = PriceProvider.Config({
             oracle: address(liquidEthAccountant),
             priceFunctionCalldata: abi.encodeWithSelector(AccountantWithRateProviders.getRate.selector),
-            isChainlinkType: false, oraclePriceDecimals: liquidEthAccountant.decimals(), maxStaleness: 2 days,
-            dataType: PriceProvider.ReturnType.Uint256, isBaseTokenEth: true, isStableToken: false, isBaseTokenBtc: false
+            isChainlinkType: false, 
+            oraclePriceDecimals: liquidEthAccountant.decimals(), 
+            maxStaleness: 2 days,
+            dataType: PriceProvider.ReturnType.Uint256, 
+            isBaseTokenEth: true, 
+            isStableToken: false, 
+            isBaseTokenBtc: false
         });
 
         priceConfigs[2] = PriceProvider.Config({
             oracle: address(liquidBtcAccountant),
             priceFunctionCalldata: abi.encodeWithSelector(AccountantWithRateProviders.getRate.selector),
-            isChainlinkType: false, oraclePriceDecimals: liquidBtcAccountant.decimals(), maxStaleness: 2 days,
-            dataType: PriceProvider.ReturnType.Uint256, isBaseTokenEth: false, isStableToken: false, isBaseTokenBtc: true
+            isChainlinkType: false, 
+            oraclePriceDecimals: liquidBtcAccountant.decimals(), 
+            maxStaleness: 2 days,
+            dataType: PriceProvider.ReturnType.Uint256, 
+            isBaseTokenEth: false, 
+            isStableToken: false, 
+            isBaseTokenBtc: true
         });
 
         priceConfigs[3] = PriceProvider.Config({
             oracle: address(liquidUsdAccountant),
             priceFunctionCalldata: abi.encodeWithSelector(AccountantWithRateProviders.getRate.selector),
-            isChainlinkType: false, oraclePriceDecimals: liquidUsdAccountant.decimals(), maxStaleness: 2 days,
-            dataType: PriceProvider.ReturnType.Uint256, isBaseTokenEth: false, isStableToken: false, isBaseTokenBtc: false
+            isChainlinkType: false, 
+            oraclePriceDecimals: liquidUsdAccountant.decimals(), 
+            maxStaleness: 2 days,
+            dataType: PriceProvider.ReturnType.Uint256, 
+            isBaseTokenEth: false, 
+            isStableToken: false, 
+            isBaseTokenBtc: false
         });
 
         priceConfigs[4] = PriceProvider.Config({
             oracle: address(ebtcAccountant),
             priceFunctionCalldata: abi.encodeWithSelector(AccountantWithRateProviders.getRate.selector),
-            isChainlinkType: false, oraclePriceDecimals: ebtcAccountant.decimals(), maxStaleness: 2 days,
-            dataType: PriceProvider.ReturnType.Uint256, isBaseTokenEth: false, isStableToken: false, isBaseTokenBtc: true
+            isChainlinkType: false, 
+            oraclePriceDecimals: ebtcAccountant.decimals(), 
+            maxStaleness: 2 days,
+            dataType: PriceProvider.ReturnType.Uint256, 
+            isBaseTokenEth: false, 
+            isStableToken: false, 
+            isBaseTokenBtc: true
         });
 
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(
