@@ -6,13 +6,10 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 import { Mode, BinSponsor, Cashback } from "../../../../src/interfaces/ICashModule.sol";
-import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { TopUpDest } from "../../../../src/top-up/TopUpDest.sol";
 import { TopUpDestWithMigration } from "../../../../src/top-up/TopUpDestWithMigration.sol";
-import { CashModuleCoreWithMigration } from "../../../../src/modules/cash/CashModuleCoreWithMigration.sol";
+import { DebtManagerCoreWithMigration } from "../../../../src/debt-manager/DebtManagerCoreWithMigration.sol";
 import { CashLensWithMigration } from "../../../../src/modules/cash/CashLensWithMigration.sol";
-import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
-import { CashModuleCore } from "../../../../src/modules/cash/CashModuleCore.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
 /**
@@ -23,8 +20,6 @@ contract MigrationSpendBlockTest is CashModuleTestSetup {
     TopUpDestWithMigration public topUpDest;
     address public migrationModule;
     address constant WETH = 0x5300000000000000000000000000000000000004;
-
-    CashLensWithMigration public cashLensMigration;
 
     function setUp() public override {
         super.setUp();
@@ -40,14 +35,13 @@ contract MigrationSpendBlockTest is CashModuleTestSetup {
         UUPSUpgradeable(topUpDestProxy).upgradeToAndCall(topUpDestV2Impl, "");
         topUpDest = TopUpDestWithMigration(payable(topUpDestProxy));
 
-        // Upgrade CashModule to CashModuleCoreWithMigration
-        address newCashModuleImpl = address(new CashModuleCoreWithMigration(address(dataProvider), address(topUpDest)));
-        UUPSUpgradeable(address(cashModule)).upgradeToAndCall(newCashModuleImpl, "");
+        // Upgrade DebtManager to DebtManagerCoreWithMigration
+        address newDebtManagerImpl = address(new DebtManagerCoreWithMigration(address(dataProvider), address(topUpDest)));
+        UUPSUpgradeable(address(debtManager)).upgradeToAndCall(newDebtManagerImpl, "");
 
         // Upgrade CashLens to CashLensWithMigration
         address newCashLensImpl = address(new CashLensWithMigration(address(cashModule), address(dataProvider), address(topUpDest)));
         UUPSUpgradeable(address(cashLens)).upgradeToAndCall(newCashLensImpl, "");
-        cashLensMigration = CashLensWithMigration(address(cashLens));
 
         vm.stopPrank();
     }
@@ -89,7 +83,7 @@ contract MigrationSpendBlockTest is CashModuleTestSetup {
         Cashback[] memory cashbacks;
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(CashModuleCoreWithMigration.SafeMigrated.selector);
+        vm.expectRevert(DebtManagerCoreWithMigration.SafeMigrated.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, tokens, amounts, cashbacks);
     }
 
