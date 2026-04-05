@@ -134,14 +134,6 @@
           "destEid": "30111"
         },
         {
-          "address": "0x939778D83b46B456224A33Fb59630B11DEC56663",
-          "name": "eUsd",
-          "bridge": "oftBridgeAdapter",
-          "maxSlippageInBps": "50",
-          "oftAdapter": "0x1aD405EB8BA94F5770EC61cB2DcE2A2AF174b5cb",
-          "destEid": "30111"
-        },
-        {
           "address": "0x1aBaEA1f7C830bD89Acc67eC4af516284b1bC33c",
           "name": "EURC",
           "bridge": "oftBridgeAdapter",
@@ -198,20 +190,28 @@
           "destEid": "30111"
         },
         {
+          "address": "0x86B5780b606940Eb59A062aA85a07959518c0161",
+          "name": "sETHFI",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0x35dD2463fA7a335b721400C5Ad8Ba40bD85c179b",
+          "destEid": "30111"
+        },
+        {
+          "address": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+          "name": "eUsd",
+          "bridge": "liquidBridgeAdapter",
+          "maxSlippageInBps": "50",
+          "teller": "0xCc9A7620D0358a521A068B444846E3D5DebEa8fA",
+          "destEid": "30111"
+        },
+        {
           "address": "0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29",
           "name": "frxUSD",
           "bridge": "hopBridgeAdapter",
           "maxSlippageInBps": "0",
           "hopContract": "0x3ad4dC2319394bB4BE99A0e4aE2AbF7bCEbD648E",
           "oftToken": "0x566a6442A5A6e9895B9dCA97cC7879D632c6e4B0",
-          "destEid": "30111"
-        },
-        {
-          "address": "0x86B5780b606940Eb59A062aA85a07959518c0161",
-          "name": "sETHFI",
-          "bridge": "liquidBridgeAdapter",
-          "maxSlippageInBps": "50",
-          "teller": "0x35dD2463fA7a335b721400C5Ad8Ba40bD85c179b",
           "destEid": "30111"
         }
       ]
