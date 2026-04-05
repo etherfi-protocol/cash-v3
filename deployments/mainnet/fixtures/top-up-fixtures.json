@@ -227,7 +227,6 @@
         {
           "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
           "name": "usdc",
-          "destChainId": "534352",
           "bridge": "cctp",
           "destDomain": "0",
           "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
@@ -239,7 +238,6 @@
         {
           "address": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
           "name": "weETH",
-          "destChainId": "534352",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
@@ -248,7 +246,6 @@
         {
           "address": "0x4200000000000000000000000000000000000006",
           "name": "weth",
-          "destChainId": "534352",
           "bridge": "stargate",
           "maxSlippageInBps": "50",
           "stargatePool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7",
@@ -257,7 +254,6 @@
         {
           "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
           "name": "eBTC",
-          "destChainId": "534352",
           "bridge": "liquidBridgeAdapter",
           "maxSlippageInBps": "50",
           "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268",
@@ -266,7 +262,6 @@
         {
           "address": "0x6C240DDA6b5c336DF09A4D011139beAAa1eA2Aa2",
           "name": "ETHFI",
-          "destChainId": "534352",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "0",
           "oftAdapter": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
@@ -275,7 +270,6 @@
         {
           "address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
           "name": "USDT",
-          "destChainId": "534352",
           "bridge": "baseWithdrawErc20BridgeAdapter",
           "maxSlippageInBps": "0",
           "gasLimitForBaseGateway": "200000",
@@ -286,7 +280,6 @@
         {
           "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
           "name": "usdc",
-          "destChainId": "10",
           "bridge": "cctp",
           "destDomain": "2",
           "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
@@ -297,7 +290,6 @@
         {
           "address": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
           "name": "weETH",
-          "destChainId": "10",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
@@ -306,7 +298,6 @@
         {
           "address": "0x4200000000000000000000000000000000000006",
           "name": "weth",
-          "destChainId": "10",
           "bridge": "stargate",
           "maxSlippageInBps": "50",
           "stargatePool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7",
@@ -315,7 +306,6 @@
         {
           "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
           "name": "eBTC",
-          "destChainId": "10",
           "bridge": "liquidBridgeAdapter",
           "maxSlippageInBps": "50",
           "teller": "0x6Ee3aaCcf9f2321E49063C4F8da775DdBd407268",
@@ -324,7 +314,6 @@
         {
           "address": "0x6C240DDA6b5c336DF09A4D011139beAAa1eA2Aa2",
           "name": "ETHFI",
-          "destChainId": "10",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "0",
           "oftAdapter": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
@@ -333,7 +322,6 @@
         {
           "address": "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
           "name": "USDT",
-          "destChainId": "10",
           "bridge": "baseWithdrawErc20BridgeAdapter",
           "maxSlippageInBps": "0",
           "gasLimitForBaseGateway": "200000",
@@ -352,7 +340,6 @@
         {
           "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
           "name": "usdc",
-          "destChainId": "534352",
           "bridge": "cctp",
           "destDomain": "0",
           "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
@@ -364,7 +351,6 @@
         {
           "address": "0x5555555555555555555555555555555555555555",
           "name": "wHYPE",
-          "destChainId": "534352",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0x2B7E48511ea616101834f09945c11F7d78D9136d",
@@ -373,7 +359,6 @@
         {
           "address": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
           "name": "beHYPE",
-          "destChainId": "534352",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
@@ -382,7 +367,6 @@
         {
           "address": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
           "name": "usdt",
-          "destChainId": "534352",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
@@ -394,7 +378,6 @@
         {
           "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
           "name": "usdc",
-          "destChainId": "10",
           "bridge": "cctp",
           "destDomain": "2",
           "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
@@ -405,7 +388,6 @@
         {
           "address": "0x5555555555555555555555555555555555555555",
           "name": "wHYPE",
-          "destChainId": "534352",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0x2B7E48511ea616101834f09945c11F7d78D9136d",
@@ -414,7 +396,6 @@
         {
           "address": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
           "name": "beHYPE",
-          "destChainId": "10",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
@@ -423,7 +404,6 @@
         {
           "address": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
           "name": "usdt",
-          "destChainId": "10",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
@@ -443,7 +423,6 @@
         {
           "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
           "name": "usdc",
-          "destChainId": "534352",
           "bridge": "cctp",
           "destDomain": "0",
           "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
@@ -457,7 +436,6 @@
         {
           "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
           "name": "usdc",
-          "destChainId": "10",
           "bridge": "cctp",
           "destDomain": "2",
           "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
