@@ -207,7 +207,7 @@ contract CashLens is UpgradeableProxy {
     /**
      * @notice Credit mode specific checks
      */
-    function _creditModeCheck(address safe, address[] memory tokens, uint256[] memory amounts, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
+    function _creditModeCheck(address safe, address[] memory tokens, uint256[] memory amounts, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData) internal view virtual returns (bool, string memory) {
         // credit mode should only have 1 token
         // Check if debt manager has enough liquidity
         if (IERC20(tokens[0]).balanceOf(address(debtManager)) < amounts[0]) return (false, "Insufficient liquidity in debt manager to cover the loan");
