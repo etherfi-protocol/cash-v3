@@ -1,23 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 
 contract CashLiquidationHelper {
+    using EnumerableSetLib for EnumerableSetLib.AddressSet;
+
     IDebtManager public immutable debtManager;
-    address public immutable usdc;
-    address public immutable usdt;
-    address public immutable liquidUsd;
-    address public immutable eUsd;
+    EnumerableSetLib.AddressSet private stableAssets;
 
     error InvalidInput();
 
-    constructor (address _debtManager, address _usdc, address _usdt, address _liquidUsd, address _eUsd) {
+    constructor (address _debtManager,  address _eUsd) {
         debtManager = IDebtManager(_debtManager);
-        usdc = _usdc;
-        usdt = _usdt;
-        liquidUsd = _liquidUsd;
-        eUsd = _eUsd;
+        stableAssets.add(_eUsd);
+        address[] memory borrowTokens = debtManager.getBorrowTokens();
+        for (uint256 i = 0; i < borrowTokens.length; i++) {
+            stableAssets.add(borrowTokens[i]);
+        }
     }
 
     struct CashLiquidationData {
@@ -29,6 +30,17 @@ contract CashLiquidationHelper {
         uint256 liquidationBorrowAmount;   
         uint256 remainingAmtToLiquidation; 
     } 
+
+    function getStableAssets() external view returns (address[] memory) {                                                                                                       
+      return stableAssets.values();                                 
+    }
+
+    function updateStableAssets () external {
+        address[] memory stableAssetsFromDebtManager = debtManager.getBorrowTokens();
+        for (uint256 i = 0; i < stableAssetsFromDebtManager.length; i++) {
+            stableAssets.add(stableAssetsFromDebtManager[i]);
+        }
+    }
 
     function getUserData(address user) external view returns (CashLiquidationData memory) {
         return _getUserData(user);
@@ -57,13 +69,12 @@ contract CashLiquidationHelper {
         
         uint256 stableCount = 0;
         for (uint256 i = 0; i < totalCollaterals.length; i++) {
-            if (totalCollaterals[i].token == usdc || totalCollaterals[i].token == usdt || totalCollaterals[i].token == liquidUsd || totalCollaterals[i].token == eUsd) {
+            if (stableAssets.contains(totalCollaterals[i].token)) {
                 stableCount += debtManager.convertCollateralTokenToUsd(totalCollaterals[i].token, totalCollaterals[i].amount);
             }
         }
 
         data.isMostlyStables = stableCount > (3 * totalCollateralInUsd) / 4;
-
 
         data.isLiquidatable = debtManager.liquidatable(user);
         data.maxBorrowAmount = debtManager.getMaxBorrowAmount(user, true);
@@ -71,5 +82,5 @@ contract CashLiquidationHelper {
         data.liquidationBorrowAmount = debtManager.getMaxBorrowAmount(user, false);
 
         if (data.liquidationBorrowAmount > data.totalBorrowing) data.remainingAmtToLiquidation = data.liquidationBorrowAmount - data.totalBorrowing;
-    }
+    }                                                                                                                                                                 
 }
