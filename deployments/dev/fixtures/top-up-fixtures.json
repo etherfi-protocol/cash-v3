@@ -228,10 +228,13 @@
           "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
           "name": "usdc",
           "destChainId": "534352",
-          "bridge": "stargate",
-          "maxSlippageInBps": "50",
-          "stargatePool": "0x27a16dc786820B16E5c9028b75B99F6f604b5d26",
-          "destEid": "30214"
+          "bridge": "cctp",
+          "destDomain": "0",
+          "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
+          "maxFee": "0",
+          "minFinalityThreshold": "2000",
+          "maxSlippageInBps": "0",
+          "destRecipient": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B"
         },
         {
           "address": "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A",
@@ -275,7 +278,8 @@
           "destChainId": "534352",
           "bridge": "baseWithdrawErc20BridgeAdapter",
           "maxSlippageInBps": "0",
-          "gasLimitForBaseGateway": "200000"
+          "gasLimitForBaseGateway": "200000",
+          "destRecipient": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B"
         }
       ],
       "10": [
@@ -332,7 +336,8 @@
           "destChainId": "10",
           "bridge": "baseWithdrawErc20BridgeAdapter",
           "maxSlippageInBps": "0",
-          "gasLimitForBaseGateway": "200000"
+          "gasLimitForBaseGateway": "200000",
+          "destRecipient": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B"
         }
       ]
     }
@@ -353,7 +358,8 @@
           "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
           "maxFee": "0",
           "minFinalityThreshold": "2000",
-          "maxSlippageInBps": "0"
+          "maxSlippageInBps": "0",
+          "destRecipient": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B"
         },
         {
           "address": "0x5555555555555555555555555555555555555555",
@@ -380,7 +386,8 @@
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
-          "destEid": "30214"
+          "destRecipient": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
+          "destEid": "30101"
         }
       ],
       "10": [
@@ -420,7 +427,8 @@
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
           "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
-          "destEid": "30111"
+          "destRecipient": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
+          "destEid": "30101"
         }
       ]
     }
@@ -441,7 +449,8 @@
           "tokenMessenger": "0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d",
           "maxFee": "0",
           "minFinalityThreshold": "2000",
-          "maxSlippageInBps": "0"
+          "maxSlippageInBps": "0",
+          "destRecipient": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B"
         }
       ],
       "10": [

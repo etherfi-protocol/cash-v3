@@ -65,6 +65,11 @@ abstract contract TopUpConfigHelper is Utils {
                 string memory bridge = stdJson.readString(fixtures, string.concat(base, ".bridge"));
                 _parseBridgeConfig(configs[idx], bridge, fixtures, base);
 
+                // Override recipient if destRecipient is specified in the fixture
+                if (_hasDestRecipient(fixtures, base)) {
+                    configs[idx].recipientOnDestChain = address(topUpFactory);
+                }
+
                 string memory name = stdJson.readString(fixtures, string.concat(base, ".name"));
                 require(configs[idx].recipientOnDestChain != address(0), string.concat("No recipient: ", name));
                 require(configs[idx].bridgeAdapter != address(0), string.concat("No adapter: ", name));
@@ -212,6 +217,11 @@ abstract contract TopUpConfigHelper is Utils {
         if (!vm.exists(file)) revert(string.concat("No deployment for chain ", destChainId));
         string memory dep = vm.readFile(file);
         return stdJson.readAddress(dep, ".addresses.TopUpDest");
+    }
+
+    function _hasDestRecipient(string memory json, string memory base) internal pure returns (bool) {
+        try vm.parseJsonString(json, string.concat(base, ".destRecipient")) returns (string memory) { return true; }
+        catch { return false; }
     }
 
     function _getArrayLength(string memory json, string memory path) internal pure returns (uint256) {
