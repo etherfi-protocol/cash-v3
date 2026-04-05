@@ -10,6 +10,7 @@ import { TopUpDest } from "../../../../src/top-up/TopUpDest.sol";
 import { TopUpDestWithMigration } from "../../../../src/top-up/TopUpDestWithMigration.sol";
 import { DebtManagerCoreWithMigration } from "../../../../src/debt-manager/DebtManagerCoreWithMigration.sol";
 import { CashLensWithMigration } from "../../../../src/modules/cash/CashLensWithMigration.sol";
+import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
 /**
@@ -83,7 +84,7 @@ contract MigrationSpendBlockTest is CashModuleTestSetup {
         Cashback[] memory cashbacks;
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(DebtManagerCoreWithMigration.SafeMigrated.selector);
+        vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.CallFailed.selector, 0));
         cashModule.spend(address(safe), txId, BinSponsor.Reap, tokens, amounts, cashbacks);
     }
 
