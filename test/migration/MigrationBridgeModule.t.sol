@@ -56,9 +56,13 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
     // Frax Hop V2 on Scroll
     address constant FRAX_HOP = 0x0000006D38568b00B457580b734e0076C62de659;
 
+    // Liquid Reserve OFT
+    address constant LIQUID_RESERVE_OFT = 0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a;
+
     // LZ endpoint IDs
     uint32 constant ETHEREUM_EID = 30_101;
     uint32 constant HYPEREVM_EID = 30_367;
+    uint32 constant OPTIMISM_EID = 30_111;
 
     function setUp() public override {
         super.setUp();
@@ -603,6 +607,27 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
 
         assertEq(IERC20(WHYPE).balanceOf(address(safe)), 0, "wHYPE not bridged");
         assertEq(IERC20(BEHYPE).balanceOf(address(safe)), 0, "beHype not bridged");
+    }
+
+    function test_bridgeAll_oftLiquidReserveToOptimism() public {
+        deal(LIQUID_RESERVE, address(safe), 300e18);
+
+        address[] memory t = new address[](1);
+        MigrationBridgeModule.TokenBridgeConfig[] memory c = new MigrationBridgeModule.TokenBridgeConfig[](1);
+        t[0] = LIQUID_RESERVE;
+        c[0] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, LIQUID_RESERVE_OFT, OPTIMISM_EID);
+
+        vm.prank(owner);
+        migrationModule.configureTokens(t, c);
+
+        uint256 fee = migrationModule.quoteBridgeAll(_safes(address(safe)));
+        assertGt(fee, 0, "OFT to OP should require LZ fee");
+
+        vm.deal(etherFiWallet, fee + 1 ether);
+        vm.prank(etherFiWallet);
+        migrationModule.bridgeAll{ value: fee }(_safes(address(safe)));
+
+        assertEq(IERC20(LIQUID_RESERVE).balanceOf(address(safe)), 0, "LiquidReserve not bridged");
     }
 
     function test_bridgeAll_skipTokensUntouched() public {

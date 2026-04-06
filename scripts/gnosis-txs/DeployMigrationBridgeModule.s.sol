@@ -61,9 +61,11 @@ contract DeployMigrationBridgeModule is GnosisHelpers, Utils {
 
     address constant ETHFI_LZ_ADAPTER = 0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f;
     address constant FRAX_HOP = 0x0000006D38568b00B457580b734e0076C62de659;
+    address constant LIQUID_RESERVE_OFT = 0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a;
 
     uint32 constant ETHEREUM_EID = 30_101;
     uint32 constant HYPEREVM_EID = 30_367;
+    uint32 constant OPTIMISM_EID = 30_111;
 
     function run() public {
         string memory chainId = vm.toString(block.chainid);
@@ -207,9 +209,9 @@ contract DeployMigrationBridgeModule is GnosisHelpers, Utils {
         tokens[12] = WHYPE;  configs[12] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, WHYPE, HYPEREVM_EID);
         tokens[13] = BEHYPE; configs[13] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, BEHYPE, HYPEREVM_EID);
 
-        tokens[14] = FRXUSD; configs[14] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.HOP, FRAX_HOP, ETHEREUM_EID);
+        tokens[14] = FRXUSD; configs[14] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, FRXUSD, OPTIMISM_EID);
 
         tokens[15] = SCR;             configs[15] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.SKIP, address(0), 0);
-        tokens[16] = LIQUID_RESERVE;  configs[16] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.SKIP, address(0), 0);
+        tokens[16] = LIQUID_RESERVE;  configs[16] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, LIQUID_RESERVE_OFT, OPTIMISM_EID);
     }
 }
