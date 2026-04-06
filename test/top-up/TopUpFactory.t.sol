@@ -158,6 +158,8 @@ contract TopUpFactoryTest is Test, Constants {
         });
         factory.setTokenConfig(hopTokens, hopChainIds, hopConfigs);
 
+        roleRegistry.grantRole(factory.TOPUP_FACTORY_BRIDGER_ROLE(), address(this));
+
         vm.stopPrank();
     }
 
@@ -488,6 +490,12 @@ contract TopUpFactoryTest is Test, Constants {
     }
 
     /// @dev Test bridging functionality
+    function test_bridge_reverts_whenCallerNotBridger() public {
+        vm.prank(user);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        factory.bridge(address(usdc), 1, DEST_CHAIN_ID);
+    }
+
     function test_bridge_reverts_whenZeroBalance() public {
         vm.expectRevert(TopUpFactory.AmountCannotBeZero.selector);
         factory.bridge(address(weETH), 0, DEST_CHAIN_ID);
@@ -820,6 +828,9 @@ contract TopUpFactoryTest is Test, Constants {
         TopUpFactory.TokenConfig[] memory cctpConfigs = new TopUpFactory.TokenConfig[](1);
         cctpConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: cctpAdapter, recipientOnDestChain: alice, maxSlippageInBps: 0, additionalData: abi.encode(uint32(0), cctpTokenMessenger, uint256(0), uint32(2000)) });
         factory.setTokenConfig(cctpTokens, _chainIds(1), cctpConfigs);
+
+        roleRegistry.grantRole(factory.TOPUP_FACTORY_BRIDGER_ROLE(), address(this));
+        vm.stopPrank();
     }
 
     function test_baseBaseWithdrawAdapter() public {
@@ -831,8 +842,6 @@ contract TopUpFactoryTest is Test, Constants {
         factory.bridge(address(baseUsdt), balBefore, DEST_CHAIN_ID);
 
         assertEq(baseUsdt.balanceOf(address(factory)), 0);
-
-        vm.stopPrank();
     }
 
     function test_baseCCTPAdapter() public {
@@ -844,8 +853,6 @@ contract TopUpFactoryTest is Test, Constants {
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(address(usdcBase), amount, DEST_CHAIN_ID);
         factory.bridge(address(usdcBase), amount, DEST_CHAIN_ID);
-
-        vm.stopPrank();
     }
 
     function test_baseCCTPAdapter_dust() public {

@@ -53,6 +53,9 @@ contract TopUpFactory is BeaconFactory, Constants {
     /// @notice Max slippage allowed for bridging
     uint96 public constant MAX_ALLOWED_SLIPPAGE = 200; // 2%
 
+    /// @notice Role identifier for accounts authorized to bridge tokens
+    bytes32 public constant TOPUP_FACTORY_BRIDGER_ROLE = keccak256("TOPUP_FACTORY_BRIDGER_ROLE");
+
     /// @notice Emitted when tokens are bridged to the destination chain
     /// @param token The address of the token being bridged
     /// @param amount The amount of tokens being bridged
@@ -219,7 +222,7 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @custom:throws AmountCannotBeZero if amount passed is zero
      * @custom:throws InsufficientBalance if contract has insufficient balance of the specified token
      */
-    function bridge(address token, uint256 amount, uint256 destChainId) external payable whenNotPaused {
+    function bridge(address token, uint256 amount, uint256 destChainId) external payable whenNotPaused onlyRole(TOPUP_FACTORY_BRIDGER_ROLE) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
