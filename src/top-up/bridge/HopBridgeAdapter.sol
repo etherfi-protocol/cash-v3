@@ -8,11 +8,11 @@ import { BridgeAdapterBase } from "./BridgeAdapterBase.sol";
 
 /**
  * @title HopBridgeAdapter
- * @notice Adapter for bridging OFT tokens (e.g. frxUSD) via the Frax Hop V2 hub-and-spoke bridge.
+ * @notice Adapter for bridging OFT tokens (e.g. frxUSD) via the Frax Hop V1 bridge.
  *         Tokens route through Fraxtal before arriving at the destination chain.
  * @dev Called via delegateCall from TopUpFactory.
  *      additionalData is ABI-encoded as (address hopContract, address oftToken, uint32 destEid)
- *      - hopContract: The Hop V2 router contract
+ *      - hopContract: The Hop V1 router contract
  *      - oftToken: The OFT token address (e.g. frxUSD)
  *      - destEid: LayerZero destination endpoint ID
  * @author ether.fi
@@ -23,7 +23,7 @@ contract HopBridgeAdapter is BridgeAdapterBase {
     event BridgeViaHop(address indexed token, address destRecipient, uint256 amount, uint32 destEid);
 
     /**
-     * @notice Bridges OFT tokens via Hop V2
+     * @notice Bridges OFT tokens via Hop V1
      * @dev The token parameter is the underlying ERC20. The OFT token wraps it.
      *      Flow: approve underlying → hop.sendOFT(oft, destEid, recipient, amount)
      * @param token The underlying token address held by the factory
@@ -45,7 +45,7 @@ contract HopBridgeAdapter is BridgeAdapterBase {
         // Approve the underlying token to the hop contract
         IERC20(token).forceApprove(hopContract, amount);
 
-        // Bridge via Hop V2
+        // Bridge via Hop V1
         IFraxRemoteHop(hopContract).sendOFT{ value: msg.value }(oftToken, destEid, recipient, amount);
 
         // Reset approval
@@ -55,7 +55,7 @@ contract HopBridgeAdapter is BridgeAdapterBase {
     }
 
     /**
-     * @notice Returns the bridge fee for Hop V2
+     * @notice Returns the bridge fee for Hop V1
      * @dev Queries the hop contract for the LZ messaging fee
      */
     function getBridgeFee(
