@@ -361,7 +361,7 @@
           "name": "beHYPE",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
-          "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
+          "oftAdapter": "0x637De4A55cdD37700F9B54451B709b01040D48dF",
           "destEid": "30214"
         },
         {
@@ -369,7 +369,7 @@
           "name": "usdt",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
-          "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+          "oftAdapter": "0x904861a24F30EC96ea7CFC3bE9EA4B476d237e98",
           "destRecipient": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
           "destEid": "30101"
         }
@@ -398,7 +398,7 @@
           "name": "beHYPE",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
-          "oftAdapter": "0xd8fc8f0b03eba61f64d08b0bef69d80916e5dda9",
+          "oftAdapter": "0x637De4A55cdD37700F9B54451B709b01040D48dF",
           "destEid": "30111"
         },
         {
@@ -406,7 +406,7 @@
           "name": "usdt",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
-          "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+          "oftAdapter": "0x904861a24F30EC96ea7CFC3bE9EA4B476d237e98",
           "destRecipient": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
           "destEid": "30101"
         }
