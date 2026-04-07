@@ -421,7 +421,7 @@
     "tokenConfigs": {
       "534352": [
         {
-          "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
+          "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
           "name": "usdc",
           "bridge": "cctp",
           "destDomain": "0",
@@ -434,7 +434,7 @@
       ],
       "10": [
         {
-          "address": "0xb88339cb7199b77e23db6e890353e22632ba630f",
+          "address": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
           "name": "usdc",
           "bridge": "cctp",
           "destDomain": "2",
