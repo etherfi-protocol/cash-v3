@@ -89,6 +89,7 @@ contract DeployScrollMigration is GnosisHelpers, Utils, Test {
     // ── OFT / bridge addresses ──
     address constant ETHFI_LZ_ADAPTER    = 0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f;
     address constant LIQUID_RESERVE_OFT  = 0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a;
+    address constant FRAX_HOP = 0x0000006D38568b00B457580b734e0076C62de659;
 
     // ── LZ endpoint IDs ──
     uint32 constant ETHEREUM_EID = 30_101;
@@ -346,7 +347,7 @@ contract DeployScrollMigration is GnosisHelpers, Utils, Test {
         tokens[13] = BEHYPE; configs[13] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, BEHYPE, HYPEREVM_EID);
 
         // OFT bridge -> Optimism
-        tokens[14] = FRXUSD; configs[14] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.HOP, FRXUSD, OPTIMISM_EID);
+        tokens[14] = FRXUSD; configs[14] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.HOP, FRAX_HOP, OPTIMISM_EID);
 
         // OFT bridge -> Optimism (Liquid Reserve)
         tokens[15] = LIQUID_RESERVE;  configs[15] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, LIQUID_RESERVE_OFT, OPTIMISM_EID);
