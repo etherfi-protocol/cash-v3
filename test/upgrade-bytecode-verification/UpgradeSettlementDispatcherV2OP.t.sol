@@ -18,10 +18,10 @@ contract SettlementDispatcherV2OPVerifyBytecode is ContractCodeChecker, Test {
     address constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     // Must match salts in UpgradeSettlementDispatcherV2OP.s.sol
-    bytes32 constant SALT_REAP_IMPL       = keccak256("UpgradeSettlementDispatcherV2OP.ReapImpl");
-    bytes32 constant SALT_RAIN_IMPL       = keccak256("UpgradeSettlementDispatcherV2OP.RainImpl");
-    bytes32 constant SALT_PIX_IMPL        = keccak256("UpgradeSettlementDispatcherV2OP.PixImpl");
-    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherV2OP.CardOrderImpl");
+    bytes32 constant SALT_REAP_IMPL       = keccak256("UpgradeSettlementDispatcherWithCCTP.ReapImpl");
+    bytes32 constant SALT_RAIN_IMPL       = keccak256("UpgradeSettlementDispatcherWithCCTP.RainImpl");
+    bytes32 constant SALT_PIX_IMPL        = keccak256("UpgradeSettlementDispatcherWithCCTP.PixImpl");
+    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherWithCCTP.CardOrderImpl");
 
     // OP mainnet DataProvider — read from deployments/mainnet/10/deployments.json after full deploy
     address constant dataProvider = 0xDC515Cb479a64552c5A11a57109C314E40A1A778;
