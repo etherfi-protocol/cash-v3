@@ -13,6 +13,8 @@
     "RoleRegistry": "0xa322a04d1e2Cb44672473740F9F35B057FA29CFB",
     "SettlementDispatcherRain": "0x26d90676C6aeF2a09Cf383af499cc67E9D6ad7CA",
     "SettlementDispatcherReap": "0xea6e574886797A65eD22CcF2307e48a83C355771",
+    "SettlementDispatcherPix": "0xe61c5A65d26fDf27260cf34281a691a227C34bA3",
+    "SettlementDispatcherCardOrder": "0x8e7AB8E9037FBd6C91f3758c6c9E2abf92675Aea",
     "TopUpDest": "0x06fe42Cf3C63412f1955758ce2798709476a38fd",
     "EtherFiLiquidModule": "0x7a9294A22A5863942135430e6F736B82C210a787",
     "EtherFiLiquidModuleWithReferrer": "0x5a38410881153157c9Dbb402C26AE21BC09fc259",
