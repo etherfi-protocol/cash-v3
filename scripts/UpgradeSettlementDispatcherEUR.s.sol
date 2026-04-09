@@ -63,7 +63,8 @@ contract UpgradeSettlementDispatcherEUR is Utils {
             useCanonicalBridge: false,
             minGasLimit: 0,
             isOFT: true,
-            remoteToken: address(0)
+            remoteToken: address(0),
+            useCCTP: false
         });
 
         SettlementDispatcherV2(payable(settlementDispatcherRain)).setDestinationData(tokens, destDatas);

@@ -74,7 +74,8 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
             useCanonicalBridge: true,
             minGasLimit: minGasLimit,
             isOFT: false,
-            remoteToken: remoteToken
+            remoteToken: remoteToken,
+            useCCTP: false
         });
 
         dispatcher.setDestinationData(tokens, destDatas);
@@ -275,7 +276,8 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
             useCanonicalBridge: true,
             minGasLimit: 200_000,
             isOFT: false,
-            remoteToken: USDT_L1
+            remoteToken: USDT_L1,
+            useCCTP: false
         });
 
         vm.prank(owner);
@@ -295,7 +297,8 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
             useCanonicalBridge: true,
             minGasLimit: 200_000,
             isOFT: false,
-            remoteToken: USDT_L1
+            remoteToken: USDT_L1,
+            useCCTP: false
         });
 
         vm.prank(owner);

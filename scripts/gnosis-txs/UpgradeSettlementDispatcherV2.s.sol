@@ -291,7 +291,8 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers, StdCheats {
             useCanonicalBridge: true,
             minGasLimit: 0,
             isOFT: false,
-            remoteToken: address(0)
+            remoteToken: address(0),
+            useCCTP: false
         });
         destDatas[1] = SettlementDispatcherV2.DestinationData({
             destEid: 0,
@@ -300,7 +301,8 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers, StdCheats {
             useCanonicalBridge: true,
             minGasLimit: 0,
             isOFT: false,
-            remoteToken: address(0)
+            remoteToken: address(0),
+            useCCTP: false
         });
     }
 }

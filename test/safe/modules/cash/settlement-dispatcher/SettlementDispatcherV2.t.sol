@@ -117,7 +117,8 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
             useCanonicalBridge: false,
             minGasLimit: 0,
             isOFT: true,
-            remoteToken: address(0)
+            remoteToken: address(0),
+            useCCTP: false
         });
 
         vm.prank(owner);

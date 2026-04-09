@@ -68,7 +68,8 @@ contract UpgradeSettlementDispatcherEUR is Utils, GnosisHelpers, Test {
             useCanonicalBridge: false,
             minGasLimit: 0,
             isOFT: true,
-            remoteToken: address(0)
+            remoteToken: address(0),
+            useCCTP: false
         });
 
         settlementDispatcherRainImpl = address(new SettlementDispatcherV2(BinSponsor.Rain, dataProvider));

@@ -28,10 +28,10 @@ contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChe
     bytes32 constant ROLE_REGISTRY_SLOT  = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
 
     // Must match salts in UpgradeSettlementDispatcherV2OP.s.sol
-    bytes32 constant SALT_REAP_IMPL       = keccak256("UpgradeSettlementDispatcher.ReapImpl");
-    bytes32 constant SALT_RAIN_IMPL       = keccak256("UpgradeSettlementDispatcher.RainImpl");
-    bytes32 constant SALT_PIX_IMPL        = keccak256("UpgradeSettlementDispatcher.PixImpl");
-    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcher.CardOrderImpl");
+    bytes32 constant SALT_REAP_IMPL       = keccak256("UpgradeSettlementDispatcherWithCCTP.ReapImpl");
+    bytes32 constant SALT_RAIN_IMPL       = keccak256("UpgradeSettlementDispatcherWithCCTP.RainImpl");
+    bytes32 constant SALT_PIX_IMPL        = keccak256("UpgradeSettlementDispatcherWithCCTP.PixImpl");
+    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherWithCCTP.CardOrderImpl");
 
     address constant ROLE_REGISTRY = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B;
     address constant DATA_PROVIDER = 0xDC515Cb479a64552c5A11a57109C314E40A1A778;
@@ -157,7 +157,6 @@ contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChe
         console.log("--- 9. Settlement recipients ---");
         _verifySettlementRecipients("Reap", REAP_PROXY);
         _verifySettlementRecipients("Rain", RAIN_PROXY);
-        _verifySettlementRecipients("PIX", PIX_PROXY);
         _verifySettlementRecipients("CardOrder", CARD_ORDER_PROXY);
 
         console.log("");

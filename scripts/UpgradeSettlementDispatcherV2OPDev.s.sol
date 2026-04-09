@@ -24,10 +24,10 @@ contract UpgradeSettlementDispatcherV2OPDev is Utils {
     bytes32 constant ROLE_REGISTRY_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
 
     // CREATE3 salts (dev-specific to avoid collision with mainnet)
-    bytes32 constant SALT_REAP_IMPL = keccak256("UpgradeSettlementDispatcherV2OPDev.ReapImpl");
-    bytes32 constant SALT_RAIN_IMPL = keccak256("UpgradeSettlementDispatcherV2OPDev.RainImpl");
-    bytes32 constant SALT_PIX_IMPL = keccak256("UpgradeSettlementDispatcherV2OPDev.PixImpl");
-    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherV2OPDev.CardOrderImpl");
+    bytes32 constant SALT_REAP_IMPL = keccak256("UpgradeSettlementDispatcherWithCCTPDev.ReapImpl");
+    bytes32 constant SALT_RAIN_IMPL = keccak256("UpgradeSettlementDispatcherWithCCTPDev.RainImpl");
+    bytes32 constant SALT_PIX_IMPL = keccak256("UpgradeSettlementDispatcherWithCCTPDev.PixImpl");
+    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherWithCCTPDev.CardOrderImpl");
 
     // Dev deployment addresses
     address constant DATA_PROVIDER = 0x4a9c44c97BBf6079db37C4769AebE425bBcDD09a;
@@ -55,6 +55,13 @@ contract UpgradeSettlementDispatcherV2OPDev is Utils {
     address constant USDC_OP              = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     address constant USDT_OP              = 0x94b008aA00579c1307B0EF2c499aD98a8ce58e58;
     address constant SETTLEMENT_RECIPIENT = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
+
+    // CCTP (PIX USDC → Base)
+    address constant CCTP_TOKEN_MESSENGER    = 0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d;
+    uint32 constant CCTP_DEST_DOMAIN_BASE    = 6;
+    uint256 constant CCTP_MAX_FEE            = 0;
+    uint32 constant CCTP_MIN_FINALITY        = 2000;
+    address constant PIX_CCTP_RECIPIENT_BASE = 0xC6a422C4e3bE35d5191862259Ac0192e4B2aB104;
 
     function run() public {
         address owner = RoleRegistry(ROLE_REGISTRY).owner();
@@ -136,9 +143,39 @@ contract UpgradeSettlementDispatcherV2OPDev is Utils {
 
         SettlementDispatcherV2(payable(REAP_PROXY)).setSettlementRecipients(tokens, recipients);
         SettlementDispatcherV2(payable(RAIN_PROXY)).setSettlementRecipients(tokens, recipients);
-        SettlementDispatcherV2(payable(PIX_PROXY)).setSettlementRecipients(tokens, recipients);
         SettlementDispatcherV2(payable(CARD_ORDER_PROXY)).setSettlementRecipients(tokens, recipients);
+
+        // PIX: only USDT via settle (USDC goes via CCTP)
+        address[] memory pixTokens = new address[](1);
+        pixTokens[0] = USDT_OP;
+        address[] memory pixRecipients = new address[](1);
+        pixRecipients[0] = SETTLEMENT_RECIPIENT;
+        SettlementDispatcherV2(payable(PIX_PROXY)).setSettlementRecipients(pixTokens, pixRecipients);
         console.log("  [OK] Settlement recipients set");
+
+        // ── 6. PIX CCTP config (USDC → Base) ──
+        console.log("");
+        console.log("=== Setting PIX CCTP Config ===");
+
+        SettlementDispatcherV2(payable(PIX_PROXY)).setCCTPConfig(CCTP_TOKEN_MESSENGER, CCTP_DEST_DOMAIN_BASE, CCTP_MAX_FEE, CCTP_MIN_FINALITY);
+
+        address[] memory cctpTokens = new address[](1);
+        cctpTokens[0] = USDC_OP;
+
+        SettlementDispatcherV2.DestinationData[] memory cctpDest = new SettlementDispatcherV2.DestinationData[](1);
+        cctpDest[0] = SettlementDispatcherV2.DestinationData({
+            destEid: 0,
+            destRecipient: PIX_CCTP_RECIPIENT_BASE,
+            stargate: address(0),
+            useCanonicalBridge: false,
+            minGasLimit: 0,
+            isOFT: false,
+            remoteToken: address(0),
+            useCCTP: true
+        });
+
+        SettlementDispatcherV2(payable(PIX_PROXY)).setDestinationData(cctpTokens, cctpDest);
+        console.log("  [OK] PIX CCTP config set");
 
         vm.stopBroadcast();
 
@@ -150,6 +187,9 @@ contract UpgradeSettlementDispatcherV2OPDev is Utils {
         _verify("Rain", RAIN_PROXY, rainImpl, FRAX_DEPOSIT_RAIN);
         _verify("Pix", PIX_PROXY, pixImpl, FRAX_DEPOSIT_PIX);
         _verify("CardOrder", CARD_ORDER_PROXY, cardOrderImpl, FRAX_DEPOSIT_CARD_ORDER);
+
+        // PIX CCTP verification
+        _verifyPixCCTP();
 
         address currentOwner = RoleRegistry(ROLE_REGISTRY).owner();
         require(currentOwner == owner, "CRITICAL: RoleRegistry owner changed!");
@@ -203,10 +243,28 @@ contract UpgradeSettlementDispatcherV2OPDev is Utils {
         // Liquid queue
         require(sd.getLiquidAssetWithdrawQueue(LIQUID_USD) == LIQUID_USD_BORING_QUEUE, string.concat(name, ": liquid queue mismatch"));
 
-        // Settlement recipients
-        require(sd.getSettlementRecipient(USDC_OP) == SETTLEMENT_RECIPIENT, string.concat(name, ": USDC recipient mismatch"));
+        // Settlement recipients (PIX USDC goes via CCTP, verified separately)
+        if (proxy != PIX_PROXY) {
+            require(sd.getSettlementRecipient(USDC_OP) == SETTLEMENT_RECIPIENT, string.concat(name, ": USDC recipient mismatch"));
+        }
         require(sd.getSettlementRecipient(USDT_OP) == SETTLEMENT_RECIPIENT, string.concat(name, ": USDT recipient mismatch"));
 
         console.log(string.concat("  [OK] ", name, " - all checks passed"));
+    }
+
+    function _verifyPixCCTP() internal view {
+        SettlementDispatcherV2 sd = SettlementDispatcherV2(payable(PIX_PROXY));
+
+        (address messenger_, uint32 domain_, uint256 maxFee_, uint32 minFinality_) = sd.getCCTPConfig();
+        require(messenger_ == CCTP_TOKEN_MESSENGER, "PIX: CCTP messenger mismatch");
+        require(domain_ == CCTP_DEST_DOMAIN_BASE, "PIX: CCTP domain mismatch");
+        require(maxFee_ == CCTP_MAX_FEE, "PIX: CCTP maxFee mismatch");
+        require(minFinality_ == CCTP_MIN_FINALITY, "PIX: CCTP minFinality mismatch");
+
+        SettlementDispatcherV2.DestinationData memory dest = sd.destinationData(USDC_OP);
+        require(dest.useCCTP == true, "PIX: USDC not set to CCTP");
+        require(dest.destRecipient == PIX_CCTP_RECIPIENT_BASE, "PIX: USDC CCTP recipient mismatch");
+
+        console.log("  [OK] PIX CCTP config + USDC destination verified");
     }
 }

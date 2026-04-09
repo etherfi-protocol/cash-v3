@@ -13,6 +13,7 @@ import { IL2StandardBridge } from "../interfaces/IL2StandardBridge.sol";
 import { IFraxCustodian } from "../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop } from "../interfaces/IFraxRemoteHop.sol";
 import { IMidasVault } from "../interfaces/IMidasVault.sol";
+import { ICCTPTokenMessenger } from "../interfaces/ICCTPTokenMessenger.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -44,6 +45,8 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         bool isOFT;
         /// @notice L1 token address used by bridgeERC20To on the OP canonical bridge
         address remoteToken;
+        /// @notice Whether to use CCTP for bridging this token
+        bool useCCTP;
     }
 
     /**
@@ -100,6 +103,14 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         mapping(address midasToken => address redemptionVault) midasRedemptionVault;
         /// @notice Per-token settlement recipient for same-chain transfers
         mapping(address token => address recipient) settlementRecipient;
+        /// @notice CCTP TokenMessenger address
+        address cctpTokenMessenger;
+        /// @notice CCTP destination domain (e.g. 0 for Ethereum)
+        uint32 cctpDestinationDomain;
+        /// @notice CCTP max fee in burn token units (0 for standard transfer)
+        uint256 cctpMaxFee;
+        /// @notice CCTP minimum finality threshold
+        uint32 cctpMinFinalityThreshold;
     }
 
     /**
@@ -226,6 +237,16 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     event SettlementRecipientSet(address indexed token, address indexed recipient);
 
     /**
+     * @notice Emitted when funds are bridged via CCTP
+     */
+    event FundsBridgedWithCCTP(address indexed token, uint256 amount, uint32 destinationDomain, address indexed recipient);
+
+    /**
+     * @notice Emitted when CCTP config is set
+     */
+    event CCTPConfigSet(address indexed tokenMessenger, uint32 destinationDomain, uint256 maxFee, uint32 minFinalityThreshold);
+
+    /**
      * @notice Thrown when input arrays have different lengths
      */
     error ArrayLengthMismatch();
@@ -314,6 +335,11 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @notice Thrown when no settlement recipient is configured for the token
      */
     error SettlementRecipientNotSet();
+
+    /**
+     * @notice Thrown when CCTP config is not set
+     */
+    error CCTPConfigNotSet();
 
     /**
      * @notice Constructor that disables initializers
@@ -634,7 +660,9 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
         
-        if (destData.useCanonicalBridge) {
+        if (destData.useCCTP) {
+            _bridgeViaCCTP(token, destData.destRecipient, amount);
+        } else if (destData.useCanonicalBridge) {
             _withdrawCanonicalBridge(token, destData.remoteToken, destData.destRecipient, amount, destData.minGasLimit);
         } else if (destData.isOFT) {
             (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) =
@@ -820,16 +848,20 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
 
         for (uint256 i = 0; i < len; ) {
-            if (destDatas[i].useCanonicalBridge) {
-                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate != address(0) || destDatas[i].destEid != 0) revert InvalidValue();
+            if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0)) revert InvalidValue();
+
+            if (destDatas[i].useCCTP) {
+                // CCTP: only needs token + recipient; stargate/canonical fields must be unset
+                if (destDatas[i].stargate != address(0) || destDatas[i].useCanonicalBridge) revert InvalidValue();
+            } else if (destDatas[i].useCanonicalBridge) {
+                if (destDatas[i].stargate != address(0) || destDatas[i].destEid != 0) revert InvalidValue();
                 // ERC20 canonical bridge requires a remoteToken (L1 address); ETH does not
                 if (tokens[i] != ETH && destDatas[i].remoteToken == address(0)) revert InvalidValue();
-            }
-            else {
-                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate == address(0)) revert InvalidValue(); 
-            
+            } else {
+                if (destDatas[i].stargate == address(0)) revert InvalidValue();
+
                 if (tokens[i] == ETH) {
-                    if (IStargate(destDatas[i].stargate).token() != address(0)) revert StargateValueInvalid(); 
+                    if (IStargate(destDatas[i].stargate).token() != address(0)) revert StargateValueInvalid();
                 }
                 else if (IStargate(destDatas[i].stargate).token() != tokens[i]) revert StargateValueInvalid();
             }
@@ -841,6 +873,59 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         }
 
         emit DestinationDataSet(tokens, destDatas);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //              CCTP BRIDGING
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Sets CCTP configuration for cross-chain USDC bridging
+     * @dev Only callable by the role registry owner
+     * @param _tokenMessenger Address of the CCTP TokenMessenger contract
+     * @param _destinationDomain CCTP destination domain (e.g. 0 for Ethereum)
+     * @param _maxFee Maximum fee in burn token units (0 for standard transfer)
+     * @param _minFinalityThreshold Minimum finality threshold for attestation
+     */
+    function setCCTPConfig(address _tokenMessenger, uint32 _destinationDomain, uint256 _maxFee, uint32 _minFinalityThreshold) external onlyRoleRegistryOwner {
+        if (_tokenMessenger == address(0)) revert InvalidValue();
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        $.cctpTokenMessenger = _tokenMessenger;
+        $.cctpDestinationDomain = _destinationDomain;
+        $.cctpMaxFee = _maxFee;
+        $.cctpMinFinalityThreshold = _minFinalityThreshold;
+        emit CCTPConfigSet(_tokenMessenger, _destinationDomain, _maxFee, _minFinalityThreshold);
+    }
+
+    /**
+     * @notice Returns the CCTP configuration
+     */
+    function getCCTPConfig() external view returns (address tokenMessenger_, uint32 destinationDomain_, uint256 maxFee_, uint32 minFinalityThreshold_) {
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        return ($.cctpTokenMessenger, $.cctpDestinationDomain, $.cctpMaxFee, $.cctpMinFinalityThreshold);
+    }
+
+    /**
+     * @notice Bridges tokens via CCTP (Circle Cross-Chain Transfer Protocol)
+     * @dev Called internally by bridge() when destData.useCCTP is true
+     */
+    function _bridgeViaCCTP(address token, address recipient, uint256 amount) internal {
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        address tokenMessenger = $.cctpTokenMessenger;
+        if (tokenMessenger == address(0)) revert CCTPConfigNotSet();
+
+        IERC20(token).forceApprove(tokenMessenger, amount);
+        ICCTPTokenMessenger(tokenMessenger).depositForBurn(
+            amount,
+            $.cctpDestinationDomain,
+            bytes32(uint256(uint160(recipient))),
+            token,
+            bytes32(0),
+            $.cctpMaxFee,
+            $.cctpMinFinalityThreshold
+        );
+
+        emit FundsBridgedWithCCTP(token, amount, $.cctpDestinationDomain, recipient);
     }
 
     // ═══════════════════════════════════════════════════════════════
