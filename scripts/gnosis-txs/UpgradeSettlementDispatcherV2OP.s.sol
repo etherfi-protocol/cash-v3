@@ -28,10 +28,10 @@ contract UpgradeSettlementDispatcherV2OP is Utils, GnosisHelpers {
     bytes32 constant ROLE_REGISTRY_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
 
     // CREATE3 salts for deterministic impl addresses
-    bytes32 constant SALT_REAP_IMPL       = keccak256("UpgradeSettlementDispatcherV2OP.ReapImpl");
-    bytes32 constant SALT_RAIN_IMPL       = keccak256("UpgradeSettlementDispatcherV2OP.RainImpl");
-    bytes32 constant SALT_PIX_IMPL        = keccak256("UpgradeSettlementDispatcherV2OP.PixImpl");
-    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherV2OP.CardOrderImpl");
+    bytes32 constant SALT_REAP_IMPL       = keccak256("UpgradeSettlementDispatcherV2.ReapImpl");
+    bytes32 constant SALT_RAIN_IMPL       = keccak256("UpgradeSettlementDispatcherV2.RainImpl");
+    bytes32 constant SALT_PIX_IMPL        = keccak256("UpgradeSettlementDispatcherV2.PixImpl");
+    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherV2.CardOrderImpl");
 
     // Liquid USD + Boring Queue
     address constant LIQUID_USD              = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;

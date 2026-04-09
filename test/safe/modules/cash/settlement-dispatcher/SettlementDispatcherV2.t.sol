@@ -116,7 +116,8 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
             stargate: EURC,
             useCanonicalBridge: false,
             minGasLimit: 0,
-            isOFT: true
+            isOFT: true,
+            remoteToken: address(0)
         });
 
         vm.prank(owner);

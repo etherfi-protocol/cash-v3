@@ -24,6 +24,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
     bytes32 constant BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
     address constant L2_STANDARD_BRIDGE = 0x4200000000000000000000000000000000000010;
     address constant USDT_OP = 0x94b008aA00579c1307B0EF2c499aD98a8ce58e58;
+    address constant USDT_L1 = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
 
     function setUp() public {
         string memory opRpc = vm.envString("OPTIMISM_RPC");
@@ -61,7 +62,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
     //                  HELPERS
     // ═══════════════════════════════════════════════════════════════
 
-    function _setCanonicalBridgeDestination(address token, address recipient, uint64 minGasLimit) internal {
+    function _setCanonicalBridgeDestination(address token, address remoteToken, address recipient, uint64 minGasLimit) internal {
         address[] memory tokens = new address[](1);
         tokens[0] = token;
 
@@ -72,7 +73,8 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
             stargate: address(0),
             useCanonicalBridge: true,
             minGasLimit: minGasLimit,
-            isOFT: false
+            isOFT: false,
+            remoteToken: remoteToken
         });
 
         dispatcher.setDestinationData(tokens, destDatas);
@@ -87,7 +89,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
         uint64 minGasLimit = 200_000;
 
         vm.prank(owner);
-        _setCanonicalBridgeDestination(USDT_OP, alice, minGasLimit);
+        _setCanonicalBridgeDestination(USDT_OP, USDT_L1, alice, minGasLimit);
 
         deal(USDT_OP, address(dispatcher), amount);
 
@@ -106,13 +108,13 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
         uint64 minGasLimit = 150_000;
 
         vm.prank(owner);
-        _setCanonicalBridgeDestination(USDT_OP, alice, minGasLimit);
+        _setCanonicalBridgeDestination(USDT_OP, USDT_L1, alice, minGasLimit);
 
         deal(USDT_OP, address(dispatcher), amount);
 
         vm.expectCall(
             L2_STANDARD_BRIDGE,
-            abi.encodeCall(IL2StandardBridge.withdrawTo, (USDT_OP, alice, amount, uint32(minGasLimit), ""))
+            abi.encodeCall(IL2StandardBridge.bridgeERC20To, (USDT_OP, USDT_L1, alice, amount, uint32(minGasLimit), ""))
         );
 
         vm.prank(bridger);
@@ -123,7 +125,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
         uint256 amount = 1000e6;
 
         vm.prank(owner);
-        _setCanonicalBridgeDestination(USDT_OP, alice, 200_000);
+        _setCanonicalBridgeDestination(USDT_OP, USDT_L1, alice, 200_000);
 
         deal(USDT_OP, address(dispatcher), amount);
 
@@ -142,7 +144,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
         uint64 minGasLimit = 200_000;
 
         vm.prank(owner);
-        _setCanonicalBridgeDestination(ETH, alice, minGasLimit);
+        _setCanonicalBridgeDestination(ETH, address(0), alice, minGasLimit);
 
         vm.deal(address(dispatcher), amount);
 
@@ -161,7 +163,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
         uint64 minGasLimit = 100_000;
 
         vm.prank(owner);
-        _setCanonicalBridgeDestination(ETH, alice, minGasLimit);
+        _setCanonicalBridgeDestination(ETH, address(0), alice, minGasLimit);
 
         vm.deal(address(dispatcher), amount);
 
@@ -179,7 +181,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
         uint256 amount = 2 ether;
 
         vm.prank(owner);
-        _setCanonicalBridgeDestination(ETH, alice, 200_000);
+        _setCanonicalBridgeDestination(ETH, address(0), alice, 200_000);
 
         vm.deal(address(dispatcher), amount);
 
@@ -195,7 +197,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
 
     function test_bridge_canonicalBridge_reverts_whenInsufficientBalance_ERC20() public {
         vm.prank(owner);
-        _setCanonicalBridgeDestination(USDT_OP, alice, 200_000);
+        _setCanonicalBridgeDestination(USDT_OP, USDT_L1, alice, 200_000);
 
         vm.prank(bridger);
         vm.expectRevert(SettlementDispatcherV2.InsufficientBalance.selector);
@@ -204,7 +206,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
 
     function test_bridge_canonicalBridge_reverts_whenInsufficientBalance_ETH() public {
         vm.prank(owner);
-        _setCanonicalBridgeDestination(ETH, alice, 200_000);
+        _setCanonicalBridgeDestination(ETH, address(0), alice, 200_000);
 
         vm.prank(bridger);
         vm.expectRevert(SettlementDispatcherV2.InsufficientBalance.selector);
@@ -221,7 +223,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
 
     function test_bridge_canonicalBridge_reverts_whenNotBridger() public {
         vm.prank(owner);
-        _setCanonicalBridgeDestination(USDT_OP, alice, 200_000);
+        _setCanonicalBridgeDestination(USDT_OP, USDT_L1, alice, 200_000);
 
         deal(USDT_OP, address(dispatcher), 100e6);
 
@@ -232,7 +234,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
 
     function test_bridge_canonicalBridge_reverts_whenZeroAmount() public {
         vm.prank(owner);
-        _setCanonicalBridgeDestination(USDT_OP, alice, 200_000);
+        _setCanonicalBridgeDestination(USDT_OP, USDT_L1, alice, 200_000);
 
         vm.prank(bridger);
         vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
@@ -251,7 +253,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
 
     function test_setDestinationData_canonicalBridge_succeeds() public {
         vm.prank(owner);
-        _setCanonicalBridgeDestination(USDT_OP, alice, 200_000);
+        _setCanonicalBridgeDestination(USDT_OP, USDT_L1, alice, 200_000);
 
         SettlementDispatcherV2.DestinationData memory dest = dispatcher.destinationData(USDT_OP);
         assertEq(dest.destRecipient, alice);
@@ -272,7 +274,8 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
             stargate: makeAddr("stargate"),
             useCanonicalBridge: true,
             minGasLimit: 200_000,
-            isOFT: false
+            isOFT: false,
+            remoteToken: USDT_L1
         });
 
         vm.prank(owner);
@@ -291,7 +294,8 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
             stargate: address(0),
             useCanonicalBridge: true,
             minGasLimit: 200_000,
-            isOFT: false
+            isOFT: false,
+            remoteToken: USDT_L1
         });
 
         vm.prank(owner);

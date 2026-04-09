@@ -31,6 +31,26 @@ interface IL2StandardBridge {
     ) external payable;
 
     /**
+     * @notice Sends ERC20 tokens to a receiver's address on L1. Used for tokens that are not
+     *         OptimismMintableERC20 (e.g. native USDC).
+     *
+     * @param _localToken  Address of the ERC20 on L2.
+     * @param _remoteToken Address of the corresponding ERC20 on L1.
+     * @param _to          Recipient account on L1.
+     * @param _amount      Amount of local tokens to bridge.
+     * @param _minGasLimit Minimum gas limit to use for the transaction.
+     * @param _extraData   Extra data attached to the withdrawal.
+     */
+    function bridgeERC20To(
+        address _localToken,
+        address _remoteToken,
+        address _to,
+        uint256 _amount,
+        uint32 _minGasLimit,
+        bytes calldata _extraData
+    ) external payable;
+
+    /**
      * @notice Initiates a withdrawal of ETH from L2 to L1 to a target account on L1.
      *
      * @param _to          Recipient account on L1.

@@ -62,7 +62,8 @@ contract UpgradeSettlementDispatcherEUR is Utils {
             stargate: address(EURC),
             useCanonicalBridge: false,
             minGasLimit: 0,
-            isOFT: true
+            isOFT: true,
+            remoteToken: address(0)
         });
 
         SettlementDispatcherV2(payable(settlementDispatcherRain)).setDestinationData(tokens, destDatas);

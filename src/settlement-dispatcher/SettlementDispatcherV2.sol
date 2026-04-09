@@ -42,6 +42,8 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         uint64 minGasLimit;
         /// @notice Whether the token is an OFT
         bool isOFT;
+        /// @notice L1 token address used by bridgeERC20To on the OP canonical bridge
+        address remoteToken;
     }
 
     /**
@@ -633,7 +635,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
         
         if (destData.useCanonicalBridge) {
-            _withdrawCanonicalBridge(token, destData.destRecipient, amount, destData.minGasLimit);
+            _withdrawCanonicalBridge(token, destData.remoteToken, destData.destRecipient, amount, destData.minGasLimit);
         } else if (destData.isOFT) {
             (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) =
                 prepareOftSend(token, amount);
@@ -758,18 +760,19 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Withdraw tokens to L1 via the OP Stack canonical bridge
-     * @dev Used by bridge function
+     * @dev Uses bridgeERC20To for ERC20s and bridgeETHTo for ETH
      * @param token Address of the token to withdraw
+     * @param remoteToken Address of the corresponding L1 token (ignored for ETH)
      * @param recipient Address to receive the funds on L1
      * @param amount Amount to withdraw
      * @param minGasLimit Minimum gas limit for the withdrawal
      */
-    function _withdrawCanonicalBridge(address token, address recipient, uint256 amount, uint64 minGasLimit) internal returns (uint256) {
+    function _withdrawCanonicalBridge(address token, address remoteToken, address recipient, uint256 amount, uint64 minGasLimit) internal returns (uint256) {
         if (token == ETH) {
             IL2StandardBridge(L2_STANDARD_BRIDGE).bridgeETHTo{ value: amount }(recipient, uint32(minGasLimit), "");
         } else {
             IERC20(token).forceApprove(L2_STANDARD_BRIDGE, amount);
-            IL2StandardBridge(L2_STANDARD_BRIDGE).withdrawTo(token, recipient, amount, uint32(minGasLimit), "");
+            IL2StandardBridge(L2_STANDARD_BRIDGE).bridgeERC20To(token, remoteToken, recipient, amount, uint32(minGasLimit), "");
         }
 
         emit CanonicalBridgeWithdraw(token, recipient, amount);
@@ -817,7 +820,9 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
         for (uint256 i = 0; i < len; ) {
             if (destDatas[i].useCanonicalBridge) {
-                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate != address(0) ||  destDatas[i].destEid != 0) revert InvalidValue();
+                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate != address(0) || destDatas[i].destEid != 0) revert InvalidValue();
+                // ERC20 canonical bridge requires a remoteToken (L1 address); ETH does not
+                if (tokens[i] != ETH && destDatas[i].remoteToken == address(0)) revert InvalidValue();
             }
             else {
                 if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate == address(0)) revert InvalidValue(); 

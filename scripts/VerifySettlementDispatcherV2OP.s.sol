@@ -28,10 +28,10 @@ contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChe
     bytes32 constant ROLE_REGISTRY_SLOT  = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
 
     // Must match salts in UpgradeSettlementDispatcherV2OP.s.sol
-    bytes32 constant SALT_REAP_IMPL       = keccak256("UpgradeSettlementDispatcherV2OP.ReapImpl");
-    bytes32 constant SALT_RAIN_IMPL       = keccak256("UpgradeSettlementDispatcherV2OP.RainImpl");
-    bytes32 constant SALT_PIX_IMPL        = keccak256("UpgradeSettlementDispatcherV2OP.PixImpl");
-    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherV2OP.CardOrderImpl");
+    bytes32 constant SALT_REAP_IMPL       = keccak256("UpgradeSettlementDispatcherV2.ReapImpl");
+    bytes32 constant SALT_RAIN_IMPL       = keccak256("UpgradeSettlementDispatcherV2.RainImpl");
+    bytes32 constant SALT_PIX_IMPL        = keccak256("UpgradeSettlementDispatcherV2.PixImpl");
+    bytes32 constant SALT_CARD_ORDER_IMPL = keccak256("UpgradeSettlementDispatcherV2.CardOrderImpl");
 
     address constant ROLE_REGISTRY = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B;
     address constant DATA_PROVIDER = 0xDC515Cb479a64552c5A11a57109C314E40A1A778;
