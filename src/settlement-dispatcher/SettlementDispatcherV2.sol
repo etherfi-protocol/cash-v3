@@ -773,6 +773,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         } else {
             IERC20(token).forceApprove(L2_STANDARD_BRIDGE, amount);
             IL2StandardBridge(L2_STANDARD_BRIDGE).bridgeERC20To(token, remoteToken, recipient, amount, uint32(minGasLimit), "");
+            IERC20(token).forceApprove(L2_STANDARD_BRIDGE, 0);
         }
 
         emit CanonicalBridgeWithdraw(token, recipient, amount);
