@@ -2,12 +2,15 @@
 pragma solidity ^0.8.28;
 
 import { Script } from "forge-std/Script.sol";
+import { StdCheats } from "forge-std/StdCheats.sol";
 import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
 import { CREATE3 } from "solady/utils/CREATE3.sol";
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
+import { IRoleRegistry } from "../src/interfaces/IRoleRegistry.sol";
 import { SettlementDispatcherV2 } from "../src/settlement-dispatcher/SettlementDispatcherV2.sol";
 import { BinSponsor } from "../src/interfaces/ICashModule.sol";
 import { ContractCodeChecker } from "./utils/ContractCodeChecker.sol";
@@ -20,7 +23,7 @@ import { Utils } from "./utils/Utils.sol";
 ///
 /// Usage:
 ///   source .env && ENV=mainnet forge script scripts/VerifySettlementDispatcherV2OP.s.sol --rpc-url optimism
-contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChecker {
+contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChecker, StdCheats {
     address constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     bytes32 constant EIP1967_IMPL_SLOT   = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
@@ -201,6 +204,11 @@ contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChe
         require(pixUsdcDest.destRecipient == PIX_CCTP_RECIPIENT_BASE, "PIX: USDC CCTP recipient mismatch");
         console.log("  [OK] PIX USDC -> CCTP Base");
 
+        // ── 12. Smoke tests ──
+        console.log("");
+        console.log("--- 12. Smoke tests ---");
+        _smokeTests();
+
         console.log("");
         console.log("=============================================");
         console.log("  ALL CHECKS PASSED");
@@ -264,5 +272,112 @@ contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChe
 
     function _currentImpl(address proxy) internal view returns (address) {
         return address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Smoke tests — grant bridger role to a test address, exercise
+    //  settle / bridge / refund, then verify balances land correctly
+    // ═══════════════════════════════════════════════════════════════
+
+    function _smokeTests() internal {
+        address bridger = address(0xBEEF);
+        RoleRegistry rr = RoleRegistry(ROLE_REGISTRY);
+        bytes32 bridgerRole = SettlementDispatcherV2(payable(REAP_PROXY)).SETTLEMENT_DISPATCHER_BRIDGER_ROLE();
+
+        vm.prank(rr.owner());
+        rr.grantRole(bridgerRole, bridger);
+
+        // 1. Rain: settle USDC → SETTLEMENT_RECIPIENT
+        {
+            uint256 amount = 100e6;
+            deal(USDC_OP, RAIN_PROXY, amount);
+            uint256 recipientBefore = IERC20(USDC_OP).balanceOf(SETTLEMENT_RECIPIENT);
+
+            vm.prank(bridger);
+            SettlementDispatcherV2(payable(RAIN_PROXY)).settle(USDC_OP, amount);
+
+            uint256 recipientAfter = IERC20(USDC_OP).balanceOf(SETTLEMENT_RECIPIENT);
+            require(recipientAfter - recipientBefore == amount, "Rain: USDC settle amount mismatch");
+            console.log("  [OK] Rain settle USDC -> SETTLEMENT_RECIPIENT");
+
+            deal(USDT_OP, RAIN_PROXY, amount);
+            recipientBefore = IERC20(USDT_OP).balanceOf(SETTLEMENT_RECIPIENT);
+
+            vm.prank(bridger);
+            SettlementDispatcherV2(payable(RAIN_PROXY)).settle(USDT_OP, amount);
+
+            recipientAfter = IERC20(USDT_OP).balanceOf(SETTLEMENT_RECIPIENT);
+            require(recipientAfter - recipientBefore == amount, "Reap: USDT settle amount mismatch");
+            console.log("  [OK] Rain settle USDT -> SETTLEMENT_RECIPIENT");
+        }
+
+        deal(USDC_OP, REAP_PROXY, 0);
+        deal(USDT_OP, REAP_PROXY, 0);
+
+        // 2. Reap: settle USDT → SETTLEMENT_RECIPIENT
+        {
+            uint256 amount = 100e6;
+            deal(USDC_OP, REAP_PROXY, amount);
+            uint256 recipientBefore = IERC20(USDC_OP).balanceOf(SETTLEMENT_RECIPIENT);
+
+            vm.prank(bridger);
+            SettlementDispatcherV2(payable(REAP_PROXY)).settle(USDC_OP, amount);
+
+            uint256 recipientAfter = IERC20(USDC_OP).balanceOf(SETTLEMENT_RECIPIENT);
+            require(recipientAfter - recipientBefore == amount, "Reap: USDC settle amount mismatch");
+            console.log("  [OK] Reap settle USDC -> SETTLEMENT_RECIPIENT");
+
+            deal(USDT_OP, REAP_PROXY, amount);
+            recipientBefore = IERC20(USDT_OP).balanceOf(SETTLEMENT_RECIPIENT);
+
+            vm.prank(bridger);
+            SettlementDispatcherV2(payable(REAP_PROXY)).settle(USDT_OP, amount);
+
+            recipientAfter = IERC20(USDT_OP).balanceOf(SETTLEMENT_RECIPIENT);
+            require(recipientAfter - recipientBefore == amount, "Reap: USDT settle amount mismatch");
+            console.log("  [OK] Reap settle USDT -> SETTLEMENT_RECIPIENT");
+        }
+
+        // 3. PIX: settle USDT → PIX_USDT_SETTLEMENT_RECIPIENT
+        {
+            uint256 amount = 75e6;
+            deal(USDT_OP, PIX_PROXY, amount);
+            uint256 recipientBefore = IERC20(USDT_OP).balanceOf(PIX_USDT_SETTLEMENT_RECIPIENT);
+
+            vm.prank(bridger);
+            SettlementDispatcherV2(payable(PIX_PROXY)).settle(USDT_OP, amount);
+
+            uint256 recipientAfter = IERC20(USDT_OP).balanceOf(PIX_USDT_SETTLEMENT_RECIPIENT);
+            require(recipientAfter - recipientBefore == amount, "PIX: USDT settle amount mismatch");
+            console.log("  [OK] PIX settle USDT -> PIX_USDT_SETTLEMENT_RECIPIENT");
+        }
+
+        // 4. CardOrder: transferFundsToRefundWallet USDC → CARD_ORDER_REFUND_WALLET
+        {
+            uint256 amount = 25e6;
+            deal(USDC_OP, CARD_ORDER_PROXY, amount);
+            uint256 refundBefore = IERC20(USDC_OP).balanceOf(CARD_ORDER_REFUND_WALLET);
+
+            vm.prank(bridger);
+            SettlementDispatcherV2(payable(CARD_ORDER_PROXY)).transferFundsToRefundWallet(USDC_OP, amount);
+
+            uint256 refundAfter = IERC20(USDC_OP).balanceOf(CARD_ORDER_REFUND_WALLET);
+            require(refundAfter - refundBefore == amount, "CardOrder: refund wallet amount mismatch");
+            console.log("  [OK] CardOrder transferFundsToRefundWallet USDC -> CARD_ORDER_REFUND_WALLET");
+        }
+
+        // 5. PIX: bridge USDC via CCTP (tokens burned by TokenMessenger)
+        {
+            uint256 amount = 100e6;
+            deal(USDC_OP, PIX_PROXY, amount);
+            uint256 dispatcherBefore = IERC20(USDC_OP).balanceOf(PIX_PROXY);
+
+            vm.prank(bridger);
+            SettlementDispatcherV2(payable(PIX_PROXY)).bridge(USDC_OP, amount, 0);
+
+            uint256 dispatcherAfter = IERC20(USDC_OP).balanceOf(PIX_PROXY);
+            require(dispatcherBefore - dispatcherAfter == amount, "PIX: CCTP bridge amount mismatch");
+            console.log("  [OK] PIX bridge USDC via CCTP (tokens burned)");
+        }
     }
 }
