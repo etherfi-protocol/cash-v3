@@ -61,6 +61,19 @@ contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChe
     address constant USDT_OP              = 0x94b008aA00579c1307B0EF2c499aD98a8ce58e58;
     address constant SETTLEMENT_RECIPIENT = 0xe04031f03DeB0aD7010C5AD0D70e9f1611Aa85DD;
 
+    // CardOrder refund wallet
+    address constant CARD_ORDER_REFUND_WALLET = 0xDe2fea8fDeb5643DfEFCbD0af8BE0a2925a53aC8;
+
+    // PIX USDT settlement recipient
+    address constant PIX_USDT_SETTLEMENT_RECIPIENT = 0x4358f4940283E6357128941a5c508e5F314D79CB;
+
+    // CCTP (PIX USDC → Base)
+    address constant CCTP_TOKEN_MESSENGER    = 0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d;
+    uint32 constant CCTP_DEST_DOMAIN_BASE    = 6;
+    uint256 constant CCTP_MAX_FEE            = 0;
+    uint32 constant CCTP_MIN_FINALITY        = 2000;
+    address constant PIX_CCTP_RECIPIENT_BASE = 0xC6a422C4e3bE35d5191862259Ac0192e4B2aB104;
+
     function run() public {
         address expectedReapImpl      = CREATE3.predictDeterministicAddress(SALT_REAP_IMPL, NICKS_FACTORY);
         address expectedRainImpl      = CREATE3.predictDeterministicAddress(SALT_RAIN_IMPL, NICKS_FACTORY);
@@ -152,12 +165,41 @@ contract VerifySettlementDispatcherV2OP is Utils, GnosisHelpers, ContractCodeChe
         _verifyLiquidQueue("PIX", PIX_PROXY);
         _verifyLiquidQueue("CardOrder", CARD_ORDER_PROXY);
 
-        // ── 9. Settlement recipients ──
+        // ── 9. Settlement recipients (Reap + Rain) ──
         console.log("");
         console.log("--- 9. Settlement recipients ---");
         _verifySettlementRecipients("Reap", REAP_PROXY);
         _verifySettlementRecipients("Rain", RAIN_PROXY);
-        _verifySettlementRecipients("CardOrder", CARD_ORDER_PROXY);
+
+        // ── 10. CardOrder refund wallet ──
+        console.log("");
+        console.log("--- 10. CardOrder refund wallet ---");
+        address cardOrderRefund = SettlementDispatcherV2(payable(CARD_ORDER_PROXY)).getRefundWallet();
+        require(cardOrderRefund == CARD_ORDER_REFUND_WALLET, "CardOrder: refund wallet mismatch");
+        console.log("  [OK] CardOrder refund wallet");
+
+        // ── 11. PIX config (USDT settle + USDC CCTP) ──
+        console.log("");
+        console.log("--- 11. PIX config ---");
+
+        // PIX USDT settlement
+        address pixUsdtRecipient = SettlementDispatcherV2(payable(PIX_PROXY)).getSettlementRecipient(USDT_OP);
+        require(pixUsdtRecipient == PIX_USDT_SETTLEMENT_RECIPIENT, "PIX: USDT settlement recipient mismatch");
+        console.log("  [OK] PIX USDT settlement recipient");
+
+        // PIX CCTP config
+        (address messenger_, uint32 domain_, uint256 maxFee_, uint32 minFinality_) = SettlementDispatcherV2(payable(PIX_PROXY)).getCCTPConfig();
+        require(messenger_ == CCTP_TOKEN_MESSENGER, "PIX: CCTP messenger mismatch");
+        require(domain_ == CCTP_DEST_DOMAIN_BASE, "PIX: CCTP domain mismatch");
+        require(maxFee_ == CCTP_MAX_FEE, "PIX: CCTP maxFee mismatch");
+        require(minFinality_ == CCTP_MIN_FINALITY, "PIX: CCTP minFinality mismatch");
+        console.log("  [OK] PIX CCTP config");
+
+        // PIX USDC destination data uses CCTP
+        SettlementDispatcherV2.DestinationData memory pixUsdcDest = SettlementDispatcherV2(payable(PIX_PROXY)).destinationData(USDC_OP);
+        require(pixUsdcDest.useCCTP == true, "PIX: USDC not set to CCTP");
+        require(pixUsdcDest.destRecipient == PIX_CCTP_RECIPIENT_BASE, "PIX: USDC CCTP recipient mismatch");
+        console.log("  [OK] PIX USDC -> CCTP Base");
 
         console.log("");
         console.log("=============================================");

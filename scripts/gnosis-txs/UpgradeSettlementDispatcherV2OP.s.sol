@@ -55,6 +55,12 @@ contract UpgradeSettlementDispatcherV2OP is Utils, GnosisHelpers {
     // RAIN settlement recipient on OP (JV gave)
     address constant SETTLEMENT_RECIPIENT = 0xe04031f03DeB0aD7010C5AD0D70e9f1611Aa85DD;
 
+    // CardOrder refund wallet
+    address constant CARD_ORDER_REFUND_WALLET = 0xDe2fea8fDeb5643DfEFCbD0af8BE0a2925a53aC8;
+
+    // PIX USDT settlement recipient
+    address constant PIX_USDT_SETTLEMENT_RECIPIENT = 0x4358f4940283E6357128941a5c508e5F314D79CB;
+
     // CCTP (PIX USDC → Base)
     address constant CCTP_TOKEN_MESSENGER    = 0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d;
     uint32 constant CCTP_DEST_DOMAIN_BASE    = 6;
@@ -120,8 +126,22 @@ contract UpgradeSettlementDispatcherV2OP is Utils, GnosisHelpers {
         // Liquid USD boring queue (all 4 dispatchers)
         txs = _addLiquidQueueTransactions(txs, REAP_PROXY, RAIN_PROXY, PIX_PROXY, CARD_ORDER_PROXY);
 
-        // Settlement recipients for USDC + USDT (3 dispatchers excluding pix)
-        txs = _addSettlementRecipientTransactions(txs, REAP_PROXY, RAIN_PROXY, CARD_ORDER_PROXY);
+        // Settlement recipients for USDC + USDT (Reap + Rain only)
+        txs = _addSettlementRecipientTransactions(txs, REAP_PROXY, RAIN_PROXY);
+
+        // CardOrder: set refund wallet (no settlement recipients)
+        string memory refundData = iToHex(abi.encodeWithSelector(SettlementDispatcherV2.setRefundWallet.selector, CARD_ORDER_REFUND_WALLET));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(CARD_ORDER_PROXY), refundData, "0", false)));
+
+        // PIX: USDT settlement recipient
+        {
+            address[] memory pixTokens = new address[](1);
+            pixTokens[0] = USDT_OP;
+            address[] memory pixRecipients = new address[](1);
+            pixRecipients[0] = PIX_USDT_SETTLEMENT_RECIPIENT;
+            string memory pixSettleData = iToHex(abi.encodeWithSelector(SettlementDispatcherV2.setSettlementRecipients.selector, pixTokens, pixRecipients));
+            txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(PIX_PROXY), pixSettleData, "0", false)));
+        }
 
         // CCTP config for PIX dispatcher (USDC → Base)
         txs = _addPixCCTPTransactions(txs);
@@ -157,10 +177,19 @@ contract UpgradeSettlementDispatcherV2OP is Utils, GnosisHelpers {
         _verifyLiquidQueue("PIX", PIX_PROXY);
         _verifyLiquidQueue("CardOrder", CARD_ORDER_PROXY);
 
-        // Verify settlement recipients
+        // Verify settlement recipients (Reap + Rain)
         _verifySettlementRecipients("Reap", REAP_PROXY);
         _verifySettlementRecipients("Rain", RAIN_PROXY);
-        _verifySettlementRecipients("CardOrder", CARD_ORDER_PROXY);
+
+        // Verify CardOrder refund wallet
+        address cardOrderRefund = SettlementDispatcherV2(payable(CARD_ORDER_PROXY)).getRefundWallet();
+        require(cardOrderRefund == CARD_ORDER_REFUND_WALLET, "CardOrder: refund wallet mismatch");
+        console.log("  [OK] CardOrder refund wallet");
+
+        // Verify PIX USDT settlement recipient
+        address pixUsdtRecipient = SettlementDispatcherV2(payable(PIX_PROXY)).getSettlementRecipient(USDT_OP);
+        require(pixUsdtRecipient == PIX_USDT_SETTLEMENT_RECIPIENT, "PIX: USDT settlement recipient mismatch");
+        console.log("  [OK] PIX USDT settlement recipient");
 
         // Verify PIX CCTP config
         _verifyPixCCTP();
@@ -257,8 +286,7 @@ contract UpgradeSettlementDispatcherV2OP is Utils, GnosisHelpers {
     function _addSettlementRecipientTransactions(
         string memory txs,
         address reapProxy,
-        address rainProxy,
-        address cardOrderProxy
+        address rainProxy
     ) internal pure returns (string memory) {
         address[] memory tokens = new address[](2);
         tokens[0] = USDC_OP;
@@ -272,7 +300,6 @@ contract UpgradeSettlementDispatcherV2OP is Utils, GnosisHelpers {
 
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(reapProxy), data, "0", false)));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(rainProxy), data, "0", false)));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cardOrderProxy), data, "0", false)));
 
         return txs;
     }
