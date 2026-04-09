@@ -487,5 +487,132 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         vm.expectRevert(SettlementDispatcherV2.InsufficientMinReturn.selector);
         v2.bridge{value: 0}(EURC, amount, minReturnFromOft + 1);
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    //                  SETTLE (SAME-CHAIN TRANSFER)
+    // ═══════════════════════════════════════════════════════════════
+
+    function _setRecipient(address token, address recipient) internal {
+        address[] memory t = new address[](1);
+        t[0] = token;
+        address[] memory r = new address[](1);
+        r[0] = recipient;
+        v2.setSettlementRecipients(t, r);
+    }
+
+    function test_v2_settle_succeeds() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+        address recipient = makeAddr("settleRecipient");
+
+        vm.prank(owner);
+        _setRecipient(address(token), recipient);
+
+        token.mint(address(v2), 1000e6);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcherV2.FundsSettled(address(token), recipient, 500e6);
+        v2.settle(address(token), 500e6);
+
+        assertEq(token.balanceOf(recipient), 500e6);
+        assertEq(token.balanceOf(address(v2)), 500e6);
+    }
+
+    function test_v2_settle_differentRecipientsPerToken() public {
+        MockERC20 tokenA = new MockERC20("USDC", "USDC", 6);
+        MockERC20 tokenB = new MockERC20("USDT", "USDT", 6);
+        address recipientA = makeAddr("recipientA");
+        address recipientB = makeAddr("recipientB");
+
+        vm.startPrank(owner);
+        _setRecipient(address(tokenA), recipientA);
+        _setRecipient(address(tokenB), recipientB);
+        vm.stopPrank();
+
+        tokenA.mint(address(v2), 1000e6);
+        tokenB.mint(address(v2), 500e6);
+
+        vm.startPrank(owner);
+        v2.settle(address(tokenA), 1000e6);
+        v2.settle(address(tokenB), 500e6);
+        vm.stopPrank();
+
+        assertEq(tokenA.balanceOf(recipientA), 1000e6);
+        assertEq(tokenB.balanceOf(recipientB), 500e6);
+    }
+
+    function test_v2_settle_reverts_whenRecipientNotSet() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+        token.mint(address(v2), 100e6);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.SettlementRecipientNotSet.selector);
+        v2.settle(address(token), 100e6);
+    }
+
+    function test_v2_settle_reverts_whenInsufficientBalance() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        _setRecipient(address(token), alice);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InsufficientBalance.selector);
+        v2.settle(address(token), 100e6);
+    }
+
+    function test_v2_settle_reverts_whenNotBridger() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        _setRecipient(address(token), alice);
+        token.mint(address(v2), 100e6);
+
+        vm.prank(alice);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        v2.settle(address(token), 100e6);
+    }
+
+    function test_v2_settle_reverts_whenZeroAmount() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        _setRecipient(address(token), alice);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
+        v2.settle(address(token), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //                  ADMIN: SETTLEMENT RECIPIENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function test_v2_setSettlementRecipient_succeeds() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcherV2.SettlementRecipientSet(address(token), alice);
+        _setRecipient(address(token), alice);
+
+        assertEq(v2.getSettlementRecipient(address(token)), alice);
+    }
+
+    function test_v2_setSettlementRecipient_reverts_whenNotOwner() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(alice);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        _setRecipient(address(token), alice);
+    }
+
+    function test_v2_setSettlementRecipient_reverts_whenZeroAddress() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
+        _setRecipient(address(token), address(0));
+    }
 }
 

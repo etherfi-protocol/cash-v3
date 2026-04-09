@@ -9,7 +9,7 @@ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { IOFT, MessagingFee, MessagingReceipt, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
-import { IL2GatewayRouter, IL2Messenger } from "../interfaces/IScrollERC20Bridge.sol";
+import { IL2StandardBridge } from "../interfaces/IL2StandardBridge.sol";
 import { IFraxCustodian } from "../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop } from "../interfaces/IFraxRemoteHop.sol";
 import { IMidasVault } from "../interfaces/IMidasVault.sol";
@@ -50,14 +50,9 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     bytes32 public constant SETTLEMENT_DISPATCHER_BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
 
     /**
-     * @notice Address of the Scroll ERC20 Gateway Router
+     * @notice Address of the OP Stack L2 Standard Bridge
      */
-    address public constant GATEWAY_ROUTER = 0x4C0926FF5252A435FD19e10ED15e5a249Ba19d79;
-
-    /**
-     * @notice Address of the Scroll ETH Messenger
-     */
-    address public constant ETH_MESSENGER = 0x781e90f1c8Fc4611c9b7497C3B47F99Ef6969CbC;
+    address public constant L2_STANDARD_BRIDGE = 0x4200000000000000000000000000000000000010;
 
     /**
      * @notice LayerZero Ethereum endpoint ID
@@ -101,6 +96,8 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         address fraxAsyncRedeemRecipient;
         /// @notice Mapping of Midas token to redemption vault (e.g. Liquid Reserve)
         mapping(address midasToken => address redemptionVault) midasRedemptionVault;
+        /// @notice Per-token settlement recipient for same-chain transfers
+        mapping(address token => address recipient) settlementRecipient;
     }
 
     /**
@@ -164,7 +161,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     event TransferToRefundWallet(address asset, address refundWallet, uint256 amount);
 
     /**
-     * @notice Emitted when tokens are withdrawn from scroll with the canonical bridge
+     * @notice Emitted when tokens are withdrawn to L1 via the canonical bridge
      * @param token Address of the token that was withdrawn
      * @param recipient Address of the recipient
      * @param amount Amount of the token that was withdrawn
@@ -215,6 +212,16 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @param minReceive Minimum amount of asset requested
      */
     event MidasRedeemed(address indexed midasToken, address indexed assetOut, uint256 amount, uint256 minReceive);
+
+    /**
+     * @notice Emitted when tokens are settled (transferred to the per-token recipient)
+     */
+    event FundsSettled(address indexed token, address indexed recipient, uint256 amount);
+
+    /**
+     * @notice Emitted when a settlement recipient is configured for a token
+     */
+    event SettlementRecipientSet(address indexed token, address indexed recipient);
 
     /**
      * @notice Thrown when input arrays have different lengths
@@ -300,6 +307,11 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @notice Thrown when Midas redemption vault is not set for the token
      */
     error MidasRedemptionVaultNotSet();
+
+    /**
+     * @notice Thrown when no settlement recipient is configured for the token
+     */
+    error SettlementRecipientNotSet();
 
     /**
      * @notice Constructor that disables initializers
@@ -617,6 +629,9 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         if (balance < amount) revert InsufficientBalance();
 
         DestinationData memory destData = _getSettlementDispatcherV2Storage().destinationData[token];
+
+        if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
+        
         if (destData.useCanonicalBridge) {
             _withdrawCanonicalBridge(token, destData.destRecipient, amount, destData.minGasLimit);
         } else if (destData.isOFT) {
@@ -742,22 +757,19 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     }
 
     /**
-     * @notice Withdraw tokens from scroll with the canonical bridge
+     * @notice Withdraw tokens to L1 via the OP Stack canonical bridge
      * @dev Used by bridge function
      * @param token Address of the token to withdraw
-     * @param recipient Address to receive the funds on ethereum
+     * @param recipient Address to receive the funds on L1
      * @param amount Amount to withdraw
      * @param minGasLimit Minimum gas limit for the withdrawal
      */
-    function _withdrawCanonicalBridge(address token, address recipient, uint256 amount, uint256 minGasLimit) internal returns (uint256) {
+    function _withdrawCanonicalBridge(address token, address recipient, uint256 amount, uint64 minGasLimit) internal returns (uint256) {
         if (token == ETH) {
-            IL2Messenger(ETH_MESSENGER).sendMessage{value: amount}(recipient, amount, "", minGasLimit);
-        }
-        else {
-            address gateway = IL2GatewayRouter(GATEWAY_ROUTER).getERC20Gateway(token);
-
-            IERC20(token).forceApprove(gateway, amount);
-            IL2GatewayRouter(GATEWAY_ROUTER).withdrawERC20(token, recipient, amount, minGasLimit);
+            IL2StandardBridge(L2_STANDARD_BRIDGE).bridgeETHTo{ value: amount }(recipient, uint32(minGasLimit), "");
+        } else {
+            IERC20(token).forceApprove(L2_STANDARD_BRIDGE, amount);
+            IL2StandardBridge(L2_STANDARD_BRIDGE).withdrawTo(token, recipient, amount, uint32(minGasLimit), "");
         }
 
         emit CanonicalBridgeWithdraw(token, recipient, amount);
@@ -823,6 +835,54 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         }
 
         emit DestinationDataSet(tokens, destDatas);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //              SAME-CHAIN SETTLEMENT
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Sets settlement recipients for multiple tokens at once
+     * @dev Only callable by the role registry owner. Each token can have a different recipient.
+     * @param tokens Array of token addresses to configure
+     * @param recipients Array of recipient addresses corresponding to each token
+     */
+    function setSettlementRecipients(address[] calldata tokens, address[] calldata recipients) external onlyRoleRegistryOwner {
+        if (tokens.length != recipients.length) revert ArrayLengthMismatch();
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        for (uint256 i = 0; i < tokens.length;) {
+            if (tokens[i] == address(0) || recipients[i] == address(0)) revert InvalidValue();
+            $.settlementRecipient[tokens[i]] = recipients[i];
+            emit SettlementRecipientSet(tokens[i], recipients[i]);
+            unchecked { ++i; }
+        }
+    }
+
+    /**
+     * @notice Returns the settlement recipient configured for a specific token
+     * @param token Address of the token to query
+     * @return The recipient address for the specified token
+     */
+    function getSettlementRecipient(address token) external view returns (address) {
+        return _getSettlementDispatcherV2Storage().settlementRecipient[token];
+    }
+
+    /**
+     * @notice Settles funds by transferring tokens directly to the per-token settlement recipient
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE when not paused.
+     *      Intended for same-chain settlement (e.g. USDC/USDT on Optimism).
+     * @param token Address of the token to settle
+     * @param amount Amount of tokens to transfer to the recipient
+     */
+    function settle(address token, uint256 amount) external nonReentrant whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        if (token == address(0) || amount == 0) revert InvalidValue();
+
+        address recipient = _getSettlementDispatcherV2Storage().settlementRecipient[token];
+        if (recipient == address(0)) revert SettlementRecipientNotSet();
+        if (IERC20(token).balanceOf(address(this)) < amount) revert InsufficientBalance();
+
+        IERC20(token).safeTransfer(recipient, amount);
+        emit FundsSettled(token, recipient, amount);
     }
 
     /**

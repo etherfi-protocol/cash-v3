@@ -29,4 +29,17 @@ interface IL2StandardBridge {
         uint32 _minGasLimit,
         bytes calldata _extraData
     ) external payable;
+
+    /**
+     * @notice Initiates a withdrawal of ETH from L2 to L1 to a target account on L1.
+     *
+     * @param _to          Recipient account on L1.
+     * @param _minGasLimit Minimum gas limit to use for the transaction.
+     * @param _extraData   Extra data attached to the withdrawal.
+     */
+    function bridgeETHTo(
+        address _to,
+        uint32 _minGasLimit,
+        bytes calldata _extraData
+    ) external payable;
 }
