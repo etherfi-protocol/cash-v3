@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { console } from "forge-std/console.sol";
 import { CREATE3 } from "solady/utils/CREATE3.sol";
+import { Test } from "forge-std/Test.sol";
 
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { LiquidUSDLiquifierOPModule } from "../../src/modules/etherfi/LiquidUSDLiquifierOP.sol";
@@ -17,7 +18,7 @@ import { Utils } from "../utils/Utils.sol";
 /// Usage:
 ///   source .env && ENV=mainnet forge script scripts/gnosis-txs/UpgradeLiquidUSDLiquifierOP.s.sol \
 ///     --rpc-url $OPTIMISM_RPC --broadcast --account deployer
-contract UpgradeLiquidUSDLiquifierOP is Utils, GnosisHelpers {
+contract UpgradeLiquidUSDLiquifierOP is Utils, GnosisHelpers, Test {
     address constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     bytes32 constant SALT_IMPL = keccak256("UpgradeLiquidUSDLiquifierOP.Impl");
@@ -66,6 +67,17 @@ contract UpgradeLiquidUSDLiquifierOP is Utils, GnosisHelpers {
         console.log("=== Simulating Gnosis Bundle ===");
         executeGnosisTransactionBundle(path);
         console.log("  Simulation OK");
+
+        address safe = 0x3f07a5603665033B04AD0eD4ebc0419F982d9F94;
+        address liquidUsd = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
+        address usdc = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+        address etherfiWallet = 0xdC45DB93c3fC37272f40812bBa9C4Bad91344b46;
+
+        deal(usdc, LIQUIFIER_PROXY, 1000e6);
+        deal(liquidUsd, safe, 1000e6);
+
+        vm.prank(etherfiWallet);
+        LiquidUSDLiquifierOPModule(LIQUIFIER_PROXY).repayUsingLiquidUSD(safe, 100e6);
     }
 
     function deployCreate3(bytes memory creationCode, bytes32 salt) internal returns (address deployed) {
