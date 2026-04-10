@@ -15,6 +15,7 @@ import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/Settleme
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 import { EtherFiLiquidModule } from "../../src/modules/etherfi/EtherFiLiquidModule.sol";
 import { EtherFiLiquidModuleWithReferrer } from "../../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
+import { StargateModule } from "../../src/modules/stargate/StargateModule.sol";
 
 /// @title OP Mainnet Config Verification
 /// @notice Reads expected config from config.json, resolves token names via fixtures.json
@@ -178,6 +179,40 @@ contract VerifyOPConfig is Utils {
             address token = _resolveToken(names[i]);
             uint256 p = priceProvider.price(token);
             assertTrue(p > 0, string.concat("Zero price for: ", names[i]));
+        }
+    }
+
+    function test_config_priceProvider_oracleAddresses() public view {
+        string[] memory names = stdJson.readStringArray(config, ".priceProvider.tokensWithPrice");
+        for (uint256 i = 0; i < names.length; i++) {
+            string memory oracleKey = string.concat(".priceProvider.oracles.", names[i], ".oracle");
+            if (!vm.keyExistsJson(config, oracleKey)) continue;
+
+            address expectedOracle = stdJson.readAddress(config, oracleKey);
+            address token = _resolveToken(names[i]);
+            PriceProvider.Config memory cfg = priceProvider.tokenConfig(token);
+            assertEq(cfg.oracle, expectedOracle, string.concat("Oracle mismatch for: ", names[i]));
+        }
+    }
+
+    // ---- Stargate Module ----
+
+    function test_config_stargateModule_usdcPool() public view {
+        StargateModule sm = StargateModule(payable(stdJson.readAddress(deployments, ".addresses.StargateModule")));
+        address expectedPool = stdJson.readAddress(config, ".stargateModule.stargatePool.usdc");
+        StargateModule.AssetConfig memory cfg = sm.getAssetConfig(_resolveToken("usdc"));
+        assertFalse(cfg.isOFT, "USDC should not be OFT");
+        assertEq(cfg.pool, expectedPool, "USDC stargate pool mismatch");
+    }
+
+    function test_config_stargateModule_oftAssets() public view {
+        StargateModule sm = StargateModule(payable(stdJson.readAddress(deployments, ".addresses.StargateModule")));
+        string[] memory names = stdJson.readStringArray(config, ".stargateModule.oft");
+        for (uint256 i = 0; i < names.length; i++) {
+            address token = _resolveToken(names[i]);
+            StargateModule.AssetConfig memory cfg = sm.getAssetConfig(token);
+            assertTrue(cfg.isOFT, string.concat("Not OFT: ", names[i]));
+            assertEq(cfg.pool, token, string.concat("OFT pool mismatch: ", names[i]));
         }
     }
 
