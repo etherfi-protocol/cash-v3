@@ -15,9 +15,6 @@ import { BridgeAdapterBase } from "./BridgeAdapterBase.sol";
 contract EtherFiOFTBridgeAdapter is BridgeAdapterBase {
     using SafeERC20 for IERC20;
 
-    // https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
-    uint32 public constant DEST_EID_SCROLL = 30_214;
-
     /**
      * @notice Emitted when tokens are bridged through OFT
      * @param token The address of the token being bridged
@@ -34,15 +31,16 @@ contract EtherFiOFTBridgeAdapter is BridgeAdapterBase {
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
      * @param maxSlippage Maximum allowed slippage in basis points
-     * @param additionalData ABI-encoded OFT adapter address
+     * @param additionalData ABI-encoded (address oftAdapter, uint32 destEid)
      * @custom:throws InsufficientNativeFee if msg.value is less than required fee
      * @custom:throws InsufficientMinAmount if received amount is less than minimum
      */
     function bridge(address token, uint256 amount, address destRecipient, uint256 maxSlippage, bytes calldata additionalData) external payable override {
-        IOFT oftAdapter = IOFT(abi.decode(additionalData, (address)));
+        (address oftAddr, uint32 destEid) = abi.decode(additionalData, (address, uint32));
+        IOFT oftAdapter = IOFT(oftAddr);
         uint256 minAmount = deductSlippage(amount, maxSlippage);
 
-        SendParam memory sendParam = SendParam({ dstEid: DEST_EID_SCROLL, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
+        SendParam memory sendParam = SendParam({ dstEid: destEid, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
 
         MessagingFee memory messagingFee = oftAdapter.quoteSend(sendParam, false);
         if (address(this).balance < messagingFee.nativeFee) revert InsufficientNativeFee();
@@ -62,17 +60,18 @@ contract EtherFiOFTBridgeAdapter is BridgeAdapterBase {
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
      * @param maxSlippage Maximum allowed slippage in basis points
-     * @param additionalData ABI-encoded OFT adapter address
+     * @param additionalData ABI-encoded (address oftAdapter, uint32 destEid)
      * @return ETH address and the required native token fee amount
      */
     function getBridgeFee(address token, uint256 amount, address destRecipient, uint256 maxSlippage, bytes calldata additionalData) external view override returns (address, uint256) {
         // Silence compiler warning on unused variables.
         token = token;
 
-        IOFT oftAdapter = IOFT(abi.decode(additionalData, (address)));
+        (address oftAddr, uint32 destEid) = abi.decode(additionalData, (address, uint32));
+        IOFT oftAdapter = IOFT(oftAddr);
         uint256 minAmount = deductSlippage(amount, maxSlippage);
 
-        SendParam memory sendParam = SendParam({ dstEid: DEST_EID_SCROLL, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
+        SendParam memory sendParam = SendParam({ dstEid: destEid, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: minAmount, extraOptions: hex"0003", composeMsg: new bytes(0), oftCmd: new bytes(0) });
 
         MessagingFee memory messagingFee = oftAdapter.quoteSend(sendParam, false);
 

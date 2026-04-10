@@ -126,9 +126,13 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
         cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
+        SpendingLimit memory limitBeforeRenewal = cashLens.applicableSpendingLimit(address(safe));
+        vm.warp(limitBeforeRenewal.dailyRenewalTimestamp + 1);
         // Since the time for renewal is in the past, spentToday should be 0
-        assertEq(cashLens.applicableSpendingLimit(address(safe)).spentToday, 0);
-        assertEq(cashLens.applicableSpendingLimit(address(safe)).spentThisMonth, amount);
+        SpendingLimit memory renewedLimit = cashLens.applicableSpendingLimit(address(safe));
+        assertEq(renewedLimit.spentToday, 0);
+        // spentThisMonth also resets if the monthly renewal coincides with the daily one (last day of month)
+        bool monthAlsoRenewed = limitBeforeRenewal.dailyRenewalTimestamp == limitBeforeRenewal.monthlyRenewalTimestamp;
+        assertEq(renewedLimit.spentThisMonth, monthAlsoRenewed ? 0 : amount);
     }
 }

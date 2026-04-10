@@ -81,8 +81,8 @@ contract TopUpDestTest is Test, Constants {
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
         // Deploy TopUpDest
-        address topUpDestImpl = address(new TopUpDest(address(dataProvider)));
-        topUpDest = TopUpDest(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry)))));
+        address topUpDestImpl = address(new TopUpDest(address(dataProvider), weth));
+        topUpDest = TopUpDest(payable(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry))))));
         
         topUpDestNativeGateway = new TopUpDestNativeGateway(address(topUpDest));
         
@@ -483,5 +483,19 @@ contract TopUpDestTest is Test, Constants {
 
         // Check getEtherFiDataProvider
         assertEq(address(topUpDest.etherFiDataProvider()), address(dataProvider));
+    }
+
+    function test_receive_depositsEthAsWeth() public {
+        uint256 amount = 1 ether;
+        deal(address(owner), amount);
+
+        uint256 balanceBefore = IERC20(weth).balanceOf(address(topUpDest));
+
+        vm.prank(owner);
+        (bool success, ) = address(topUpDestNativeGateway).call{value: amount}("");
+        assertTrue(success);
+
+        uint256 balanceAfter = IERC20(weth).balanceOf(address(topUpDest));
+        assertEq(balanceAfter - balanceBefore, amount);
     }
 }
