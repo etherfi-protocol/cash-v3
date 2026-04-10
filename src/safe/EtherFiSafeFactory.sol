@@ -48,6 +48,17 @@ contract EtherFiSafeFactory is BeaconFactory {
     }
 
     /**
+     * @notice Reinitializes the factory when upgrading from a placeholder deployment
+     * @dev Sets up the beacon that was not created during placeholder initialization.
+     *      Used when the proxy was initially deployed with EtherFiPlaceholder and later
+     *      upgraded to the real EtherFiSafeFactory implementation.
+     * @param _etherFiSafeImpl Address of the EtherFiSafe implementation contract
+     */
+    function reinitialize(address _etherFiSafeImpl) external reinitializer(2) {
+        __BeaconFactory_initialize(address(roleRegistry()), _etherFiSafeImpl);
+    }
+
+    /**
      * @dev Returns the storage struct for EtherFiSafeFactory
      * @return $ Reference to the EtherFiSafeFactoryStorage struct
      */
