@@ -9,6 +9,8 @@ import { MigrationBridgeModule } from "../../src/migration/MigrationBridgeModule
 import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
+import { TopUpDestWithMigration } from "../../src/top-up/TopUpDestWithMigration.sol";
 
 /**
  * @title MigrationBridgeModuleTest
@@ -17,6 +19,7 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
  */
 contract MigrationBridgeModuleTest is SafeTestSetup {
     MigrationBridgeModule migrationModule;
+    TopUpDestWithMigration topUpDestV2;
 
     address supplier;
 
@@ -53,9 +56,13 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
     // Frax Hop V2 on Scroll
     address constant FRAX_HOP = 0x0000006D38568b00B457580b734e0076C62de659;
 
+    // Liquid Reserve OFT
+    address constant LIQUID_RESERVE_OFT = 0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a;
+
     // LZ endpoint IDs
     uint32 constant ETHEREUM_EID = 30_101;
     uint32 constant HYPEREVM_EID = 30_367;
+    uint32 constant OPTIMISM_EID = 30_111;
 
     function setUp() public override {
         super.setUp();
@@ -64,11 +71,20 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
 
         vm.startPrank(owner);
 
-        // Deploy migration module as UUPS proxy
-        address migrationImpl = address(new MigrationBridgeModule(address(dataProvider)));
+        // Deploy TopUpDest proxy, then upgrade to V2 after migration module is known
+        address topUpDestImpl = address(new TopUpDest(address(dataProvider), WETH));
+        address topUpDestProxy = address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry))));
+
+        // Deploy migration module as UUPS proxy (with topUpDest address)
+        address migrationImpl = address(new MigrationBridgeModule(address(dataProvider), topUpDestProxy));
         migrationModule = MigrationBridgeModule(payable(address(
             new UUPSProxy(migrationImpl, abi.encodeWithSelector(MigrationBridgeModule.initialize.selector, address(roleRegistry)))
         )));
+
+        // Upgrade TopUpDest to V2 with migration module as authorized caller
+        address topUpDestV2Impl = address(new TopUpDestWithMigration(address(dataProvider), WETH, address(migrationModule)));
+        UUPSUpgradeable(topUpDestProxy).upgradeToAndCall(topUpDestV2Impl, "");
+        topUpDestV2 = TopUpDestWithMigration(payable(topUpDestProxy));
 
         // Register as default module so it can call execTransactionFromModule on any safe
         address[] memory modules = new address[](1);
@@ -331,6 +347,48 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //              MIGRATION BLOCKS TOP-UPS TESTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function test_bridgeAll_marksSafesAsMigrated() public {
+        // Configure USDC as canonical
+        _configureCanonical(USDC);
+
+        // Grant top-up roles to supplier
+        vm.startPrank(owner);
+        roleRegistry.grantRole(keccak256("DEPOSITOR_ROLE"), supplier);
+        roleRegistry.grantRole(keccak256("TOP_UP_ROLE"), supplier);
+        vm.stopPrank();
+
+        // Fund TopUpDest with USDC
+        deal(USDC, supplier, 100_000e6);
+        vm.startPrank(supplier);
+        IERC20(USDC).approve(address(topUpDestV2), 100_000e6);
+        topUpDestV2.deposit(USDC, 100_000e6);
+        vm.stopPrank();
+
+        // Verify top-up works before migration
+        vm.prank(supplier);
+        topUpDestV2.topUpUserSafe(keccak256("tx_before"), address(safe), 100, USDC, 1e6);
+
+        // Verify safe is not migrated
+        assertFalse(topUpDestV2.isMigrated(address(safe)));
+
+        // Give safe some USDC and bridge all
+        deal(USDC, address(safe), 10_000e6);
+        vm.prank(etherFiWallet);
+        migrationModule.bridgeAll(_safes(address(safe)));
+
+        // Verify safe is now migrated
+        assertTrue(topUpDestV2.isMigrated(address(safe)));
+
+        // Verify top-ups are blocked after migration
+        vm.prank(supplier);
+        vm.expectRevert(TopUpDestWithMigration.SafeMigrated.selector);
+        topUpDestV2.topUpUserSafe(keccak256("tx_after"), address(safe), 100, USDC, 1e6);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //                    QUOTE TESTS
     // ═══════════════════════════════════════════════════════════════
 
@@ -410,7 +468,7 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
         t[13] = BEHYPE; c[13] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, BEHYPE, HYPEREVM_EID);
 
         // Hop to Ethereum: frxUSD (via Frax Hop V2 → Fraxtal → Ethereum)
-        t[14] = FRXUSD; c[14] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.HOP, FRAX_HOP, ETHEREUM_EID);
+        t[14] = FRXUSD; c[14] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.HOP, FRAX_HOP, OPTIMISM_EID);
 
         // Skip: SCR, LiquidReserve (by omission)
         t[15] = SCR; c[15] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.SKIP, address(0), 0);
@@ -549,6 +607,27 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
 
         assertEq(IERC20(WHYPE).balanceOf(address(safe)), 0, "wHYPE not bridged");
         assertEq(IERC20(BEHYPE).balanceOf(address(safe)), 0, "beHype not bridged");
+    }
+
+    function test_bridgeAll_oftLiquidReserveToOptimism() public {
+        deal(LIQUID_RESERVE, address(safe), 300e18);
+
+        address[] memory t = new address[](1);
+        MigrationBridgeModule.TokenBridgeConfig[] memory c = new MigrationBridgeModule.TokenBridgeConfig[](1);
+        t[0] = LIQUID_RESERVE;
+        c[0] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, LIQUID_RESERVE_OFT, OPTIMISM_EID);
+
+        vm.prank(owner);
+        migrationModule.configureTokens(t, c);
+
+        uint256 fee = migrationModule.quoteBridgeAll(_safes(address(safe)));
+        assertGt(fee, 0, "OFT to OP should require LZ fee");
+
+        vm.deal(etherFiWallet, fee + 1 ether);
+        vm.prank(etherFiWallet);
+        migrationModule.bridgeAll{ value: fee }(_safes(address(safe)));
+
+        assertEq(IERC20(LIQUID_RESERVE).balanceOf(address(safe)), 0, "LiquidReserve not bridged");
     }
 
     function test_bridgeAll_skipTokensUntouched() public {

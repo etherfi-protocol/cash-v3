@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IWETH } from "../interfaces/IWETH.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
@@ -20,6 +21,8 @@ contract TopUpDest is UpgradeableProxy {
 
     /// @notice Role identifier for accounts authorized to top up user safes
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
+
+    IWETH public immutable weth;
 
     IEtherFiDataProvider public immutable etherFiDataProvider;
 
@@ -84,7 +87,8 @@ contract TopUpDest is UpgradeableProxy {
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
      */
-    constructor(address _etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _weth) {
+        weth = IWETH(_weth);
         etherFiDataProvider = IEtherFiDataProvider(_etherFiDataProvider);
         _disableInitializers();
     }
@@ -193,7 +197,7 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws TopUpAlreadyProcessed if the transaction has already been processed
      * @custom:throws BalanceTooLow if the contract has insufficient token balance
      */
-    function _topUp(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) internal {
+    function _topUp(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) internal virtual {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
         bytes32 txId = getTxId(txHash, user, token);
@@ -247,6 +251,10 @@ contract TopUpDest is UpgradeableProxy {
      */
     function isTransactionCompletedByTxId(bytes32 txId) external view returns (bool) {
         return _getTopUpDestStorage().transactionCompleted[txId];
+    }
+
+    receive() external payable {
+        weth.deposit{value: msg.value}();
     }
 
     /**

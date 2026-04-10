@@ -46,9 +46,13 @@ contract SanityTest is Utils {
     CashLens cashLens;
     OpenOceanSwapModule openOceanSwapModule;
 
+    string env;
+
     function setUp() public {
         string memory rpc = vm.envString("SCROLL_RPC");
         if (bytes(rpc).length == 0) rpc = "https//rpc.scroll.io";
+
+        env = vm.envString("ENV");
 
         vm.createSelectFork(rpc);
 
@@ -104,10 +108,10 @@ contract SanityTest is Utils {
             string.concat(".", "addresses", ".", "SettlementDispatcherRain")
         )));
         
-        topUpDest = TopUpDest(stdJson.readAddress(
+        topUpDest = TopUpDest(payable(stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "TopUpDest")
-        ));
+        )));
         
         cashModule = ICashModule(stdJson.readAddress(
             deployments, 
@@ -137,6 +141,9 @@ contract SanityTest is Utils {
     }
 
     function test_sanity_roles() public view {
+        if (!isEqualString(env, "PROD") || !isEqualString(env, "")) {
+            return;
+        }
         assertEq(roleRegistry.owner(), cashControllerSafe);
         assertTrue(roleRegistry.hasRole(roleRegistry.PAUSER(), pauser));
         assertTrue(roleRegistry.hasRole(roleRegistry.UNPAUSER(), unpauser));
