@@ -468,7 +468,7 @@ contract MigrationBridgeModuleTest is SafeTestSetup {
         t[13] = BEHYPE; c[13] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.OFT, BEHYPE, HYPEREVM_EID);
 
         // Hop to Ethereum: frxUSD (via Frax Hop V2 → Fraxtal → Ethereum)
-        t[14] = FRXUSD; c[14] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.HOP, FRAX_HOP, ETHEREUM_EID);
+        t[14] = FRXUSD; c[14] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.HOP, FRAX_HOP, OPTIMISM_EID);
 
         // Skip: SCR, LiquidReserve (by omission)
         t[15] = SCR; c[15] = MigrationBridgeModule.TokenBridgeConfig(MigrationBridgeModule.BridgeType.SKIP, address(0), 0);
