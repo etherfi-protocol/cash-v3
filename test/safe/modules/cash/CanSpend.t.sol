@@ -54,7 +54,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -74,11 +74,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_succeeds_inDebitMode_whenBalanceAvailable() public {
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 100e6;
         
-        deal(address(usdcScroll), address(safe), amounts[0]);
+        deal(address(usdc), address(safe), amounts[0]);
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, true);
         assertEq(reason, "");
@@ -89,22 +89,22 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 100e6;
 
-        deal(address(weETHScroll), address(safe), 1 ether);
-        deal(address(usdcScroll), address(debtManager), amounts[0]);
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(debtManager), amounts[0]);
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, true);
         assertEq(reason, "");
     }
 
     function test_canSpend_fails_inDebitMode_whenBalanceTooLow() public view {
-        uint256 bal = usdcScroll.balanceOf(address(safe));
+        uint256 bal = usdc.balanceOf(address(safe));
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = bal + 1;
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
@@ -117,12 +117,12 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 100e6;
 
-        deal(address(weETHScroll), address(safe), 1 ether);
-        deal(address(usdcScroll), address(debtManager), amounts[0] - 1);
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(debtManager), amounts[0] - 1);
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
         assertEq(reason, "Insufficient liquidity in debt manager to cover the loan");
@@ -133,16 +133,16 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256 withdrawalBal = 900e6;
         uint256 balToTransfer = totalBal - withdrawalBal;
 
-        deal(address(usdcScroll), address(safe), totalBal);
+        deal(address(usdc), address(safe), totalBal);
 
         address[] memory withdrawTokens = new address[](1);
-        withdrawTokens[0] = address(usdcScroll);
+        withdrawTokens[0] = address(usdc);
         uint256[] memory withdrawAmounts = new uint256[](1);
         withdrawAmounts[0] = withdrawalBal;
         _requestWithdrawal(withdrawTokens, withdrawAmounts, withdrawRecipient);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = balToTransfer;
 
@@ -155,14 +155,14 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
-        deal(address(usdcScroll), address(debtManager), 1 ether);
+        deal(address(usdc), address(debtManager), 1 ether);
         uint256 totalBal = 1000e6;
         uint256 withdrawalAmt = 200e6;
         uint256 balToTransfer = 400e6; // still with 800 USDC after withdrawal we can borrow 400 USDC as ltv = 50%
-        deal(address(usdcScroll), address(safe), totalBal);
+        deal(address(usdc), address(safe), totalBal);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmt;
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
@@ -175,7 +175,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_fails_inDebitMode_whenWithdrawalRequestBlocksIt() public {
-        address token = address(usdcScroll);
+        address token = address(usdc);
         uint256 bal = 100e6;
         deal(token, address(safe), bal);
 
@@ -193,7 +193,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_fails_inCreditMode_whenWithdrawalRequestBlocksIt() public {
-        address token = address(usdcScroll);
+        address token = address(usdc);
         uint256 bal = 100e6;
         deal(token, address(safe), bal);
 
@@ -219,7 +219,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         _setMode(Mode.Credit);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 50e6;
 
@@ -229,13 +229,13 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_fails_inDebitMode_whenWithdrawalRequestBlocksItWithMultipleTokens() public {
-        address token = address(usdcScroll);
+        address token = address(usdc);
         uint256 bal = 100e6;
         deal(token, address(safe), bal);
-        deal(address(weETHScroll), address(safe), bal);
+        deal(address(weETH), address(safe), bal);
 
         address[] memory tokens = new address[](2);
-        tokens[0] = address(weETHScroll);
+        tokens[0] = address(weETH);
         tokens[1] = token;
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = 10e6;
@@ -243,7 +243,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = bal;
 
@@ -253,11 +253,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_fails_whenTxIdIsAlreadyCleared() public {
-        deal(address(usdcScroll), address(safe), 100 ether);
+        deal(address(usdc), address(safe), 100 ether);
         uint256 amountToSpend = 100e6;
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountToSpend;
 
@@ -274,11 +274,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_fails_inDebitMode_whenDailySpendingLimitIsTooLow() public {
         uint256 amountToSpend = 100e6;
-        deal(address(usdcScroll), address(safe), amountToSpend);
+        deal(address(usdc), address(safe), amountToSpend);
         _updateSpendingLimit(amountToSpend - 1, 1 ether);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountToSpend;
 
@@ -290,11 +290,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_fails_inDebitMode_whenDailySpendingLimitIsExhausted() public {
-        deal(address(usdcScroll), address(safe), 100 ether);
+        deal(address(usdc), address(safe), 100 ether);
         uint256 amountToSpend = 100e6;
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = dailyLimitInUsd - amountToSpend + 1;
 
@@ -304,7 +304,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountToSpend;
 
@@ -314,11 +314,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_succeeds_inDebitMode_whenSpendingLimitRenews() public {
-        deal(address(usdcScroll), address(safe), 100 ether);
+        deal(address(usdc), address(safe), 100 ether);
         uint256 amountToSpend = 100e6;
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = dailyLimitInUsd - amountToSpend + 1;
 
@@ -328,7 +328,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountToSpend;
 
@@ -340,11 +340,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_fails_inDebitMode_whenIncomingDailySpendingLimitIsTooLow() public {
         uint256 amountToSpend = 100e6;
-        deal(address(usdcScroll), address(safe), amountToSpend);
+        deal(address(usdc), address(safe), amountToSpend);
         _updateSpendingLimit(amountToSpend - 1, 1 ether);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountToSpend;
 
@@ -355,11 +355,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_fails_inDebitMode_whenIncomingDailySpendingLimitIsExhausted() public {
         uint256 amountToSpend = 100e6;
-        deal(address(usdcScroll), address(safe), 10 ether);
+        deal(address(usdc), address(safe), 10 ether);
         _updateSpendingLimit(amountToSpend - 1, 1 ether);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 1;
 
@@ -371,7 +371,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountToSpend;
 
@@ -387,11 +387,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_succeeds_inDebitMode_whenIncomingDailySpendingLimitRenews() public {
         uint256 amountToSpend = 100e6;
-        deal(address(usdcScroll), address(safe), 10 ether);
+        deal(address(usdc), address(safe), 10 ether);
         _updateSpendingLimit(amountToSpend, 1 ether);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 1;
 
@@ -405,7 +405,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountToSpend;
 
@@ -415,14 +415,14 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_fails_inDebitMode_whenDailyLimitIsLowerThanAmountUsed() public {
-        deal(address(usdcScroll), address(safe), 10 ether);
+        deal(address(usdc), address(safe), 10 ether);
 
         uint256 amount = 100e6;
 
         _updateSpendingLimit(amount - 1, 1 ether);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
 
@@ -434,11 +434,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_fails_inDebitMode_whenIncomingDailyLimitIsLowerThanAmountUsed() public {
-        deal(address(usdcScroll), address(safe), 10 ether);
+        deal(address(usdc), address(safe), 10 ether);
 
         uint256 amount = 100e6;
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -450,7 +450,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         _updateSpendingLimit(amount - 1, 1 ether);
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
 
@@ -472,7 +472,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         // Test with mismatched array lengths
         tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         amountsInUsd = new uint256[](2);
         amountsInUsd[0] = 1000e6;
         amountsInUsd[1] = 500e6;
@@ -484,7 +484,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         // Test with zero total amount
         tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         amountsInUsd = new uint256[](1);
         amountsInUsd[0] = 0;
         
@@ -501,8 +501,8 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         // Try to spend multiple tokens in credit mode
         address[] memory tokens = new address[](2);
-        tokens[0] = address(usdcScroll);
-        tokens[1] = address(weETHScroll);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
         uint256[] memory amountsInUsd = new uint256[](2);
         amountsInUsd[0] = 1000e6;
         amountsInUsd[1] = 500e6;
@@ -515,21 +515,21 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_debitMode() public {
         vm.prank(owner);
-        debtManager.supportBorrowToken(address(weETHScroll), borrowApyPerSecond, minShares);        
+        debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);        
 
         // Setup test state with multiple tokens
-        deal(address(weETHScroll), address(safe), 5 ether);
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(weETH), address(safe), 5 ether);
+        deal(address(usdc), address(safe), 10000e6);
         
         // Try to spend multiple tokens in debit mode
         address[] memory tokens = new address[](2);
-        tokens[0] = address(usdcScroll);
-        tokens[1] = address(weETHScroll);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
         uint256[] memory amountsInUsd = new uint256[](2);
         
         // Convert to actual token amounts in USD
-        uint256 usdcValueInUsd = debtManager.convertCollateralTokenToUsd(address(usdcScroll), 1000e6);
-        uint256 weEthValueInUsd = debtManager.convertCollateralTokenToUsd(address(weETHScroll), 1 ether);
+        uint256 usdcValueInUsd = debtManager.convertCollateralTokenToUsd(address(usdc), 1000e6);
+        uint256 weEthValueInUsd = debtManager.convertCollateralTokenToUsd(address(weETH), 1 ether);
         
         amountsInUsd[0] = usdcValueInUsd;
         amountsInUsd[1] = weEthValueInUsd;
@@ -542,13 +542,13 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_exceedBalance() public {
         // Setup test state with specific balance
-        deal(address(usdcScroll), address(safe), 5000e6);
+        deal(address(usdc), address(safe), 5000e6);
         
         // Try to spend more than available balance
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amountsInUsd = new uint256[](1);
-        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdcScroll), 10000e6); // More than balance
+        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdc), 10000e6); // More than balance
         
         (bool canSpend, string memory message) = cashLens.canSpend(address(safe), txId, tokens, amountsInUsd);
         
@@ -558,21 +558,21 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_withWithdrawalRequests() public {
         // Setup test state with collateral
-        deal(address(weETHScroll), address(safe), 5 ether);
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(weETH), address(safe), 5 ether);
+        deal(address(usdc), address(safe), 10000e6);
         
         // Create a withdrawal request
         address[] memory withdrawTokens = new address[](1);
-        withdrawTokens[0] = address(usdcScroll);
+        withdrawTokens[0] = address(usdc);
         uint256[] memory withdrawAmounts = new uint256[](1);
         withdrawAmounts[0] = 5000e6; // Withdraw half of USDC
         _requestWithdrawal(withdrawTokens, withdrawAmounts, withdrawRecipient);
         
         // Try to spend an amount under the remaining balance
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory amountsInUsd = new uint256[](1);
-        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdcScroll), 3000e6); // 3000 < (10000-5000)
+        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdc), 3000e6); // 3000 < (10000-5000)
         
         (bool canSpend, string memory message) = cashLens.canSpend(address(safe), txId, spendTokens, amountsInUsd);
         
@@ -580,7 +580,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         assertEq(message, "", "Error message should be empty");
         
         // Try to spend more than the remaining balance
-        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdcScroll), 6000e6); // 6000 > (10000-5000)
+        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdc), 6000e6); // 6000 > (10000-5000)
         
         (canSpend, message) = cashLens.canSpend(address(safe), txId, spendTokens, amountsInUsd);
         
@@ -590,14 +590,14 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpend_exceedsSpendingLimit() public {
         // Setup test state with collateral
-        deal(address(usdcScroll), address(safe), 50000e6);
+        deal(address(usdc), address(safe), 50000e6);
         
         // Set up a smaller spending limit
         _updateSpendingLimit(5000e6, 50000e6); // Daily limit of 5000 USDC
         
         // Try to spend more than daily limit
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amountsInUsd = new uint256[](1);
         amountsInUsd[0] = 7000e6; // > 5000 daily limit
         
@@ -626,11 +626,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     function test_canSpend_alreadyCleared() public {
         // Setup a transaction and mark it as cleared
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1000e6;
         
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(usdc), address(safe), 10000e6);
 
         Cashback[] memory cashbacks;
 
@@ -649,11 +649,11 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
 
     function test_canSpend_fails_whenDuplicateTokensArePassed() public {
-        uint256 bal = usdcScroll.balanceOf(address(safe));
+        uint256 bal = usdc.balanceOf(address(safe));
 
         address[] memory tokens = new address[](2);
-        tokens[0] = address(usdcScroll);
-        tokens[1] = address(usdcScroll);
+        tokens[0] = address(usdc);
+        tokens[1] = address(usdc);
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = bal + 1;
         amounts[1] = bal + 1;
@@ -662,14 +662,14 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     }
     
     function test_canSpendSingleToken_debitMode_firstTokenWorks() public {
-        deal(address(usdcScroll), address(safe), 1000e6);
+        deal(address(usdc), address(safe), 1000e6);
         deal(address(liquidUsdScroll), address(safe), 1000e18);
         
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](2);
-        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[0] = address(usdc);
         debitPrefs[1] = address(liquidUsdScroll);
         
         uint256 amountInUsd = 500e6; // 500 USD
@@ -677,7 +677,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
-        assertEq(token, address(usdcScroll), "Should return first preference token");
+        assertEq(token, address(usdc), "Should return first preference token");
         assertTrue(canSpend, "Should be able to spend");
         assertEq(message, "", "Should have no error message");
     }
@@ -687,10 +687,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         deal(address(liquidUsdScroll), address(safe), 1000e18);
         
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](2);
-        debitPrefs[0] = address(usdcScroll); // No balance
+        debitPrefs[0] = address(usdc); // No balance
         debitPrefs[1] = address(liquidUsdScroll); // Has balance
         
         uint256 amountInUsd = 500e6; // 500 USD
@@ -707,33 +707,33 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
-        deal(address(weETHScroll), address(safe), 1 ether);
-        deal(address(usdcScroll), address(debtManager), 10000e6);
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(debtManager), 10000e6);
         
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](1);
-        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 500e6; // 500 USD
         
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Credit), "Should return credit mode");
-        assertEq(token, address(usdcScroll), "Should return USDC");
+        assertEq(token, address(usdc), "Should return USDC");
         assertTrue(canSpend, "Should be able to spend in credit mode");
         assertEq(message, "", "Should have no error message");
     }
 
     function test_canSpendSingleToken_noTokensWork() public {
-        deal(address(usdcScroll), address(safe), 100e6);
+        deal(address(usdc), address(safe), 100e6);
         
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](2);
-        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[0] = address(usdc);
         debitPrefs[1] = address(liquidUsdScroll);
         
         uint256 amountInUsd = 500e6; 
@@ -741,7 +741,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
-        assertEq(token, address(usdcScroll), "Should return first preference token");
+        assertEq(token, address(usdc), "Should return first preference token");
         assertFalse(canSpend, "Should not be able to spend");
         assertEq(message, "Insufficient token balance for debit mode spending", "Should return first token's error");
     }
@@ -763,10 +763,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpendSingleToken_zeroAmount() public view {
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](1);
-        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 0; // Zero amount
         
@@ -774,16 +774,16 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
             cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Debit), "Should return current mode");
-        assertEq(token, address(usdcScroll), "Should return first preference");
+        assertEq(token, address(usdc), "Should return first preference");
         assertFalse(canSpend, "Should not be able to spend");
         assertEq(message, "Amount cannot be zero", "Should indicate zero amount");
     }
 
     function test_canSpendSingleToken_transactionAlreadyCleared() public {
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(usdc), address(safe), 10000e6);
         
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1000e6;
 
@@ -794,38 +794,38 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         // Try canSpendSingleToken with cleared txId
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](1);
-        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 500e6;
         
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Debit), "Should return current mode");
-        assertEq(token, address(usdcScroll), "Should return first preference");
+        assertEq(token, address(usdc), "Should return first preference");
         assertFalse(canSpend, "Should not be able to spend");
         assertEq(message, "Transaction already cleared", "Should indicate cleared transaction");
     }
 
     function test_canSpendSingleToken_withPendingWithdrawals() public {
         // Setup balances
-        deal(address(usdcScroll), address(safe), 1000e6);
+        deal(address(usdc), address(safe), 1000e6);
         deal(address(liquidUsdScroll), address(safe), 1000e18);
         
         // Request withdrawal that affects USDC
         address[] memory withdrawTokens = new address[](1);
-        withdrawTokens[0] = address(usdcScroll);
+        withdrawTokens[0] = address(usdc);
         uint256[] memory withdrawAmounts = new uint256[](1);
         withdrawAmounts[0] = 800e6; // Leave only 200 USDC
         _requestWithdrawal(withdrawTokens, withdrawAmounts, withdrawRecipient);
         
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](2);
-        debitPrefs[0] = address(usdcScroll); // Will fail due to withdrawal
+        debitPrefs[0] = address(usdc); // Will fail due to withdrawal
         debitPrefs[1] = address(liquidUsdScroll); // Should work
         
         uint256 amountInUsd = 500e6; // More than remaining USDC
@@ -844,36 +844,36 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         // No collateral, but debt manager has liquidity
-        deal(address(usdcScroll), address(debtManager), 10000e6);
+        deal(address(usdc), address(debtManager), 10000e6);
         
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](1);
-        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 500e6;
         
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Credit), "Should return credit mode");
-        assertEq(token, address(usdcScroll), "Should return USDC");
+        assertEq(token, address(usdc), "Should return USDC");
         assertFalse(canSpend, "Should not be able to spend without collateral");
         assertEq(message, "Insufficient borrowing power", "Should indicate borrowing power issue");
     }
 
     function test_canSpendSingleToken_spendingLimitExceeded() public {
         // Setup balance
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(usdc), address(safe), 10000e6);
         
         // Update spending limit to be lower
         _updateSpendingLimit(100e6, 10000e6); // Daily limit of 100 USD
         
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](1);
-        debitPrefs[0] = address(usdcScroll);
+        debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 200e6; // Exceeds daily limit
         
@@ -883,30 +883,30 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
-        assertEq(token, address(usdcScroll), "Should return first preference");
+        assertEq(token, address(usdc), "Should return first preference");
         assertFalse(canSpend, "Should not be able to spend over limit");
         assertEq(message, "Daily available spending limit less than amount requested", "Should indicate limit exceeded");
     }
 
     function test_canSpendSingleToken_unsupportedTokenInPreferences() public {
         // Setup balance
-        deal(address(usdcScroll), address(safe), 1000e6);
+        deal(address(usdc), address(safe), 1000e6);
         
         address unsupportedToken = makeAddr("unsupportedToken");
         
         address[] memory creditPrefs = new address[](1);
-        creditPrefs[0] = address(usdcScroll);
+        creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](2);
         debitPrefs[0] = unsupportedToken; // Not a borrow token
-        debitPrefs[1] = address(usdcScroll);
+        debitPrefs[1] = address(usdc);
         
         uint256 amountInUsd = 500e6;
         
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
-        assertEq(token, address(usdcScroll), "Should skip unsupported and use USDC");
+        assertEq(token, address(usdc), "Should skip unsupported and use USDC");
         assertTrue(canSpend, "Should be able to spend with valid token");
         assertEq(message, "", "Should have no error message");
     }

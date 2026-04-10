@@ -9,7 +9,7 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
     function test_updateSpendingLimit_works() public {
-        deal(address(usdcScroll), address(safe), 1000e6);
+        deal(address(usdc), address(safe), 1000e6);
 
         uint256 dailySpendingLimitInUsd = 100e6;
         uint256 monthlySpendingLimitInUsd = 1000e6;
@@ -22,7 +22,7 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         assertEq(spendingLimitBefore.spentThisMonth, 0);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = transferAmount;
 
@@ -99,10 +99,10 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         uint256 dailyLimit = spendingLimit.dailyLimit;
         uint256 amount = dailyLimit / 2;
 
-        deal(address(usdcScroll), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 1 ether);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 

@@ -60,32 +60,32 @@ contract CashLensTest is CashModuleTestSetup {
         debtManager.supportBorrowToken(address(liquidUsdScroll), borrowApyPerSecond, minShares);
 
         // Add some collateral to safe for tests
-        deal(address(weETHScroll), address(safe), 10 ether);
-        deal(address(usdcScroll), address(safe), 50000e6);
+        deal(address(weETH), address(safe), 10 ether);
+        deal(address(usdc), address(safe), 50000e6);
         
         // Ensure debt manager has sufficient liquidity
-        deal(address(usdcScroll), address(debtManager), 100000e6);
+        deal(address(usdc), address(debtManager), 100000e6);
 
         vm.stopPrank();
     }
 
     function test_getUserCollateralForToken() public {
         uint256 depositAmount = 5 ether;
-        deal(address(weETHScroll), address(safe), depositAmount);
+        deal(address(weETH), address(safe), depositAmount);
         
         // Check initial collateral
-        uint256 collateral = cashLens.getUserCollateralForToken(address(safe), address(weETHScroll));
+        uint256 collateral = cashLens.getUserCollateralForToken(address(safe), address(weETH));
         assertEq(collateral, depositAmount, "Initial collateral should match deposit");
         
         // Create a withdrawal request
         address[] memory tokens = new address[](1);
-        tokens[0] = address(weETHScroll);
+        tokens[0] = address(weETH);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 2 ether; // Withdraw 2 ETH
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         // Check collateral after withdrawal request
-        collateral = cashLens.getUserCollateralForToken(address(safe), address(weETHScroll));
+        collateral = cashLens.getUserCollateralForToken(address(safe), address(weETH));
         assertEq(collateral, depositAmount - 2 ether, "Collateral should be reduced by withdrawal amount");
     }
 
@@ -98,8 +98,8 @@ contract CashLensTest is CashModuleTestSetup {
 
     function test_getUserTotalCollateral() public {
         // Add multiple collateral types
-        deal(address(weETHScroll), address(safe), 5 ether);
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(weETH), address(safe), 5 ether);
+        deal(address(usdc), address(safe), 10000e6);
         
         // Check initial collateral
         IDebtManager.TokenData[] memory collateral = cashLens.getUserTotalCollateral(address(safe));
@@ -109,8 +109,8 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Create withdrawal requests
         address[] memory tokens = new address[](2);
-        tokens[0] = address(weETHScroll);
-        tokens[1] = address(usdcScroll);
+        tokens[0] = address(weETH);
+        tokens[1] = address(usdc);
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = 2 ether;     // Withdraw 2 ETH
         amounts[1] = 5000e6;      // Withdraw 5000 USDC
@@ -124,9 +124,9 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Find the right token in the array and check the amount
         for (uint256 i = 0; i < collateral.length; i++) {
-            if (collateral[i].token == address(weETHScroll)) {
+            if (collateral[i].token == address(weETH)) {
                 assertEq(collateral[i].amount, 3 ether, "weETH amount should be reduced by withdrawal");
-            } else if (collateral[i].token == address(usdcScroll)) {
+            } else if (collateral[i].token == address(usdc)) {
                 assertEq(collateral[i].amount, 5000e6, "USDC amount should be reduced by withdrawal");
             }
         }
@@ -134,12 +134,12 @@ contract CashLensTest is CashModuleTestSetup {
 
     function test_getSafeCashData() public {
         // Setup test state
-        deal(address(weETHScroll), address(safe), 5 ether);
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(weETH), address(safe), 5 ether);
+        deal(address(usdc), address(safe), 10000e6);
         
         // Create a withdrawal request
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 5000e6;
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
@@ -159,7 +159,7 @@ contract CashLensTest is CashModuleTestSetup {
         // Verify withdrawal request
         assertEq(data.withdrawalRequest.tokens.length, 1, "Should have one withdrawal token");
         assertEq(data.withdrawalRequest.amounts.length, 1, "Should have one withdrawal amount");
-        assertEq(data.withdrawalRequest.tokens[0], address(usdcScroll), "Withdrawal token should be USDC");
+        assertEq(data.withdrawalRequest.tokens[0], address(usdc), "Withdrawal token should be USDC");
         assertEq(data.withdrawalRequest.amounts[0], 5000e6, "Withdrawal amount should be 5000 USDC");
         
         // Verify total values
@@ -170,8 +170,8 @@ contract CashLensTest is CashModuleTestSetup {
 
     function test_getSafeCashData_inCreditMode() public {
         // Setup test state
-        deal(address(weETHScroll), address(safe), 5 ether);
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(weETH), address(safe), 5 ether);
+        deal(address(usdc), address(safe), 10000e6);
         
         // Set to credit mode
         _setMode(Mode.Credit);
@@ -195,7 +195,7 @@ contract CashLensTest is CashModuleTestSetup {
 
     function test_getSafeCashData_withBorrows() public {
         // Setup test state
-        deal(address(weETHScroll), address(safe), 5 ether);
+        deal(address(weETH), address(safe), 5 ether);
         
         // Set to credit mode and wait for it to activate
         _setMode(Mode.Credit);
@@ -204,7 +204,7 @@ contract CashLensTest is CashModuleTestSetup {
         uint256 spendAmount = 1000e6;
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
 
@@ -212,7 +212,7 @@ contract CashLensTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -235,7 +235,7 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Verify borrows
         assertEq(data.borrows.length, 1, "Should have one borrow entry");
-        assertEq(data.borrows[0].token, address(usdcScroll), "Borrow token should be USDC");
+        assertEq(data.borrows[0].token, address(usdc), "Borrow token should be USDC");
         assertApproxEqAbs(data.borrows[0].amount, spendAmount, 1, "Borrow amount should match spend amount");
         
         // Verify total borrow
@@ -286,22 +286,22 @@ contract CashLensTest is CashModuleTestSetup {
 
     function test_getPendingWithdrawalAmount() public {
         // Initially no withdrawals
-        uint256 amount = cashLens.getPendingWithdrawalAmount(address(safe), address(usdcScroll));
+        uint256 amount = cashLens.getPendingWithdrawalAmount(address(safe), address(usdc));
         assertEq(amount, 0, "No pending withdrawals initially");
         
         // Create a withdrawal request
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 5000e6;
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         // Check withdrawal amount
-        amount = cashLens.getPendingWithdrawalAmount(address(safe), address(usdcScroll));
+        amount = cashLens.getPendingWithdrawalAmount(address(safe), address(usdc));
         assertEq(amount, 5000e6, "Should have pending withdrawal");
         
         // Check non-existent withdrawal
-        amount = cashLens.getPendingWithdrawalAmount(address(safe), address(weETHScroll));
+        amount = cashLens.getPendingWithdrawalAmount(address(safe), address(weETH));
         assertEq(amount, 0, "Should have no pending withdrawal for weETH");
     }
 
@@ -372,17 +372,17 @@ contract CashLensTest is CashModuleTestSetup {
 
     function test_getCollateralBalanceWithTokensSubtracted_allTokens() public {
         // Setup test state with multiple tokens
-        deal(address(weETHScroll), address(safe), 5 ether);
-        deal(address(usdcScroll), address(safe), 10000e6);
+        deal(address(weETH), address(safe), 5 ether);
+        deal(address(usdc), address(safe), 10000e6);
         
         // Simulate spending all tokens
         address[] memory tokens = new address[](2);
-        tokens[0] = address(usdcScroll);
-        tokens[1] = address(weETHScroll);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
         
         uint256[] memory amountsInUsd = new uint256[](2);
-        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdcScroll), 10000e6);
-        amountsInUsd[1] = debtManager.convertCollateralTokenToUsd(address(weETHScroll), 5 ether);
+        amountsInUsd[0] = debtManager.convertCollateralTokenToUsd(address(usdc), 10000e6);
+        amountsInUsd[1] = debtManager.convertCollateralTokenToUsd(address(weETH), 5 ether);
         
         // Set to debit mode to test subtraction
         SafeData memory safeData = cashModule.getData(address(safe));

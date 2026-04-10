@@ -98,20 +98,20 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         
         // Setup a spend transaction
         uint256 spendAmountInUsd = 50e6; // $50 in USDC
-        uint256 tokenAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), spendAmountInUsd);
+        uint256 tokenAmount = debtManager.convertUsdToCollateralToken(address(usdc), spendAmountInUsd);
         
         // Fund the safe
-        deal(address(usdcScroll), address(safe), tokenAmount);
+        deal(address(usdc), address(safe), tokenAmount);
         
         // Prepare spend parameters
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmountInUsd;
         
         // Track initial balance of the new dispatcher
-        uint256 dispatcherBalanceBefore = usdcScroll.balanceOf(newDispatcher);
+        uint256 dispatcherBalanceBefore = usdc.balanceOf(newDispatcher);
 
         Cashback[] memory cashbacks;
         
@@ -120,11 +120,11 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify tokens were transferred to the new settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), 0);
-        assertEq(usdcScroll.balanceOf(newDispatcher), dispatcherBalanceBefore + tokenAmount);
+        assertEq(usdc.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(newDispatcher), dispatcherBalanceBefore + tokenAmount);
         
         // Original settlement dispatcher should not have received tokens
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), 0);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), 0);
     }
     
     function test_setSettlementDispatcher_differentDispatchersForDifferentBinSponsors() public {
@@ -143,21 +143,21 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         
         // Setup a spend transaction
         uint256 spendAmountInUsd = 50e6; // $50 in USDC
-        uint256 tokenAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), spendAmountInUsd);
+        uint256 tokenAmount = debtManager.convertUsdToCollateralToken(address(usdc), spendAmountInUsd);
         
         // Fund the safe
-        deal(address(usdcScroll), address(safe), tokenAmount * 2); // Fund enough for two transactions
+        deal(address(usdc), address(safe), tokenAmount * 2); // Fund enough for two transactions
         
         // Prepare spend parameters
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmountInUsd;
         
         // Track initial balances
-        uint256 rainDispatcherBalanceBefore = usdcScroll.balanceOf(rainDispatcher);
-        uint256 reapDispatcherBalanceBefore = usdcScroll.balanceOf(reapDispatcher);
+        uint256 rainDispatcherBalanceBefore = usdc.balanceOf(rainDispatcher);
+        uint256 reapDispatcherBalanceBefore = usdc.balanceOf(reapDispatcher);
 
         Cashback[] memory cashbacks;
         
@@ -166,8 +166,8 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Rain, spendTokens, spendAmounts, cashbacks);
         
         // Verify tokens went to Rain dispatcher
-        assertEq(usdcScroll.balanceOf(rainDispatcher), rainDispatcherBalanceBefore + tokenAmount);
-        assertEq(usdcScroll.balanceOf(reapDispatcher), reapDispatcherBalanceBefore); // No change
+        assertEq(usdc.balanceOf(rainDispatcher), rainDispatcherBalanceBefore + tokenAmount);
+        assertEq(usdc.balanceOf(reapDispatcher), reapDispatcherBalanceBefore); // No change
         
         // Execute another spend with Reap bin sponsor
         bytes32 txId2 = keccak256("txId2");
@@ -175,7 +175,7 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId2, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify tokens went to Reap dispatcher
-        assertEq(usdcScroll.balanceOf(rainDispatcher), rainDispatcherBalanceBefore + tokenAmount); // No change
-        assertEq(usdcScroll.balanceOf(reapDispatcher), reapDispatcherBalanceBefore + tokenAmount);
+        assertEq(usdc.balanceOf(rainDispatcher), rainDispatcherBalanceBefore + tokenAmount); // No change
+        assertEq(usdc.balanceOf(reapDispatcher), reapDispatcherBalanceBefore + tokenAmount);
     }
 }

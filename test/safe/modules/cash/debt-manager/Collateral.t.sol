@@ -25,8 +25,8 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
     function setUp() public override {
         super.setUp();
 
-        deal(address(usdcScroll), owner, 1 ether);
-        deal(address(weETHScroll), owner, 1000 ether);
+        deal(address(usdc), owner, 1 ether);
+        deal(address(weETH), owner, 1000 ether);
     }
 
     function test_setCollateralTokenConfig_reverts_whenLtvGreaterThanLiquidationThreshold() public {
@@ -38,7 +38,7 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         vm.expectRevert(
             IDebtManager.LtvCannotBeGreaterThanLiquidationThreshold.selector
         );
-        debtManager.setCollateralTokenConfig(address(weETHScroll), collateralTokenConfig);
+        debtManager.setCollateralTokenConfig(address(weETH), collateralTokenConfig);
         vm.stopPrank();
     }
 
@@ -47,7 +47,7 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         address newCollateralToken = address(new MockERC20("CollToken", "CTK", 18));
         
         priceProvider = PriceProvider(
-            address(new MockPriceProvider(mockWeETHPriceInUsd, address(usdcScroll)))
+            address(new MockPriceProvider(mockWeETHPriceInUsd, address(usdc)))
         );
 
         dataProvider.setPriceProvider(address(priceProvider));
@@ -70,18 +70,18 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         assertEq(configFromContract.liquidationBonus, newLiquidationBonus);
         
         assertEq(debtManager.getCollateralTokens().length, 3);
-        assertTrue(debtManager.isCollateralToken(address(weETHScroll)));
-        assertTrue(debtManager.isCollateralToken(address(usdcScroll)));
+        assertTrue(debtManager.isCollateralToken(address(weETH)));
+        assertTrue(debtManager.isCollateralToken(address(usdc)));
         assertTrue(debtManager.isCollateralToken(address(newCollateralToken)));
 
-        debtManager.unsupportCollateralToken(address(weETHScroll));
+        debtManager.unsupportCollateralToken(address(weETH));
         assertEq(debtManager.getCollateralTokens().length, 2);
-        assertTrue(debtManager.isCollateralToken(address(usdcScroll)));
+        assertTrue(debtManager.isCollateralToken(address(usdc)));
         assertTrue(debtManager.isCollateralToken(address(newCollateralToken)));
-        assertFalse(debtManager.isCollateralToken(address(weETHScroll)));
+        assertFalse(debtManager.isCollateralToken(address(weETH)));
 
         IDebtManager.CollateralTokenConfig memory configWethFromContract = debtManager
-            .collateralTokenConfig(address(weETHScroll));
+            .collateralTokenConfig(address(weETH));
         assertEq(configWethFromContract.ltv, 0);
         assertEq(configWethFromContract.liquidationThreshold, 0);
         assertEq(configWethFromContract.liquidationBonus, 0);
@@ -90,7 +90,7 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
     }
 
     function test_supportCollateralToken_reverts_whenCallerNotAdmin() public {
-        address newCollateralToken = address(usdcScroll);
+        address newCollateralToken = address(usdc);
 
         IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
         collateralTokenConfig.ltv = newLtv;
@@ -107,14 +107,14 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         // Second part of previously: test_OnlyAdminCanSupportOrUnsupportCollateral
         vm.startPrank(notOwner);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
-        debtManager.unsupportCollateralToken(address(weETHScroll));
+        debtManager.unsupportCollateralToken(address(weETH));
         vm.stopPrank();
     }
 
     function test_unsupportCollateralToken_reverts_whenTokenIsBorrowToken() public {
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.BorrowTokenCannotBeRemovedFromCollateral.selector);
-        debtManager.unsupportCollateralToken(address(usdcScroll));
+        debtManager.unsupportCollateralToken(address(usdc));
         vm.stopPrank();
     }
 
@@ -126,7 +126,7 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
 
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.AlreadyCollateralToken.selector);
-        debtManager.supportCollateralToken(address(weETHScroll), collateralTokenConfig);
+        debtManager.supportCollateralToken(address(weETH), collateralTokenConfig);
         vm.stopPrank();
     }
 
@@ -162,7 +162,7 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         address zeroValueToken = address(new MockERC20("ZeroToken", "ZTK", 18));
         
         // Create a mock price provider that returns zero for the token
-        MockPriceProvider mockPriceProviderZero = new MockPriceProvider(0, address(usdcScroll));
+        MockPriceProvider mockPriceProviderZero = new MockPriceProvider(0, address(usdc));
         dataProvider.setPriceProvider(address(mockPriceProviderZero));
         
         IDebtManager.CollateralTokenConfig memory collateralTokenConfig;
@@ -179,16 +179,16 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
     function test_setCollateralTokenConfig_updatesConfig_forExistingToken() public {
         vm.startPrank(owner);
         
-        IDebtManager.CollateralTokenConfig memory originalConfig = debtManager.collateralTokenConfig(address(weETHScroll));
+        IDebtManager.CollateralTokenConfig memory originalConfig = debtManager.collateralTokenConfig(address(weETH));
         
         IDebtManager.CollateralTokenConfig memory newConfig;
         newConfig.ltv = newLtv; // 80e18
         newConfig.liquidationThreshold = newLiquidationThreshold; // 85e18
         newConfig.liquidationBonus = newLiquidationBonus; // 10e18
 
-        debtManager.setCollateralTokenConfig(address(weETHScroll), newConfig);
+        debtManager.setCollateralTokenConfig(address(weETH), newConfig);
         
-        IDebtManager.CollateralTokenConfig memory updatedConfig = debtManager.collateralTokenConfig(address(weETHScroll));
+        IDebtManager.CollateralTokenConfig memory updatedConfig = debtManager.collateralTokenConfig(address(weETH));
         
         assertEq(updatedConfig.ltv, newLtv);
         assertEq(updatedConfig.liquidationThreshold, newLiquidationThreshold);
@@ -210,7 +210,7 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         invalidConfig.liquidationBonus = 15e18; // This makes threshold + bonus = 105%, which exceeds 100%
         
         vm.expectRevert(IDebtManager.InvalidValue.selector);
-        debtManager.setCollateralTokenConfig(address(weETHScroll), invalidConfig);
+        debtManager.setCollateralTokenConfig(address(weETH), invalidConfig);
         
         vm.stopPrank();
     }

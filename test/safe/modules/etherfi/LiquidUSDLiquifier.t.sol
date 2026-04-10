@@ -3,8 +3,9 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 
+import { ChainConfig } from "../../../utils/Utils.sol";
 import { SafeTestSetup, MessageHashUtils } from "../..//SafeTestSetup.t.sol";
-import { LiquidUSDLiquifierModule, IERC20, SafeERC20, ModuleCheckBalance, UpgradeableProxy } from "../../../../src/modules/etherfi/LiquidUSDLiquifier.sol";
+import { LiquidUSDLiquifierOPModule, IERC20, SafeERC20, ModuleCheckBalance, UpgradeableProxy } from "../../../../src/modules/etherfi/LiquidUSDLiquifierOP.sol";
 import { BinSponsor, Cashback, Mode, SpendingLimit } from "../../../../src/interfaces/ICashModule.sol";
 import { CashEventEmitter } from "../cash/CashModuleTestSetup.t.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
@@ -18,11 +19,11 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
     using SafeERC20 for IERC20;
     using MessageHashUtils for bytes32;
 
-    LiquidUSDLiquifierModule public liquidUSDLiquifier;
+    LiquidUSDLiquifierOPModule public liquidUSDLiquifier;
 
-    IERC20 public LIQUID_USD = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
-    IERC20 public USDC = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
-    ILayerZeroTeller liquidUsdTeller = ILayerZeroTeller(0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387);
+    IERC20 public LIQUID_USD;
+    IERC20 public USDC;
+    ILayerZeroTeller public liquidUsdTeller;
 
     uint256 initialLiquidUSDBalance = 10000e6;
     uint256 initialUSDCBalance = 10000e6;
@@ -31,13 +32,20 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
     uint24 secondsToDeadline = 3 days;
 
     function setUp() public override {
+        ChainConfig memory _cc = getChainConfig();
+        vm.skip(_cc.liquidUsd == address(0), "Liquid USD does not exist on this chain");
+
         super.setUp();
+
+        LIQUID_USD = IERC20(chainConfig.liquidUsd);
+        USDC = IERC20(chainConfig.usdc);
+        liquidUsdTeller = ILayerZeroTeller(chainConfig.liquidUsdTeller);
 
         _setLiquidUsdAsCollateralAndBorrowToken();
         _updateSpendingLimit(10000e6, 10000e6);
 
-        address liquidUsdLiquifierImpl = address(new LiquidUSDLiquifierModule(address(debtManager), address(dataProvider)));
-        liquidUSDLiquifier = LiquidUSDLiquifierModule(address(new UUPSProxy(liquidUsdLiquifierImpl, "")));
+        address liquidUsdLiquifierImpl = address(new LiquidUSDLiquifierOPModule(address(debtManager), address(dataProvider)));
+        liquidUSDLiquifier = LiquidUSDLiquifierOPModule(address(new UUPSProxy(liquidUsdLiquifierImpl, "")));
         liquidUSDLiquifier.initialize(address(roleRegistry));
 
         address[] memory modules = new address[](1);
@@ -69,7 +77,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit LiquidUSDLiquifierModule.RepaidUsingLiquidUSD(address(safe), usdAmount, liquidUsdAmount);
+        emit LiquidUSDLiquifierOPModule.RepaidUsingLiquidUSD(address(safe), usdAmount, liquidUsdAmount);
         liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), usdAmount);
 
         uint256 debtAfter = debtManager.borrowingOf(address(safe), address(USDC));
@@ -126,11 +134,11 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
     function test_RepayUsingLiquidUSD_AmountZero() public {
         vm.prank(etherFiWallet);
-        vm.expectRevert(LiquidUSDLiquifierModule.AmountZero.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.AmountZero.selector);
         liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 0);
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(LiquidUSDLiquifierModule.LiquidUsdAmountZero.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.LiquidUsdAmountZero.selector);
         liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 1);
     }
 
@@ -138,7 +146,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         deal(address(USDC), address(liquidUSDLiquifier), 0);
     
         vm.prank(etherFiWallet);
-        vm.expectRevert(LiquidUSDLiquifierModule.InsufficientUsdcBalance.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.InsufficientUsdcBalance.selector);
         liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 10e6);
     }
 
@@ -152,7 +160,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
     function test_RepayUsingLiquidUSD_OnlyEtherFiWallet() public {
         vm.prank(makeAddr("notEtherFiWallet"));
-        vm.expectRevert(LiquidUSDLiquifierModule.OnlyEtherFiWallet.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.OnlyEtherFiWallet.selector);
         liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 10e6);
     }
 
@@ -162,11 +170,11 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
         deal(address(LIQUID_USD), address(liquidUSDLiquifier), amount);
 
-        uint128 amountOut = liquidUSDLiquifier.LIQUID_USD_BORING_QUEUE().previewAssetsOut(address(usdcScroll), amount, discount);
+        uint128 amountOut = liquidUSDLiquifier.LIQUID_USD_BORING_QUEUE().previewAssetsOut(address(usdc), amount, discount);
 
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit LiquidUSDLiquifierModule.LiquidUSDWithdrawalRequested(amount, amountOut);
+        emit LiquidUSDLiquifierOPModule.LiquidUSDWithdrawalRequested(amount, amountOut);
         liquidUSDLiquifier.withdrawLiquidUSD(amount, minReturn, discount, secondsToDeadline);
     }
 
@@ -177,13 +185,13 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         deal(address(LIQUID_USD), address(liquidUSDLiquifier), amount);
 
         vm.prank(owner);
-        vm.expectRevert(LiquidUSDLiquifierModule.InsufficientReturnAmount.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.InsufficientReturnAmount.selector);
         liquidUSDLiquifier.withdrawLiquidUSD(amount, minReturn, discount, secondsToDeadline);
     }
 
     function test_WithdrawLiquidUSD_OnlySettlementDispatcherBridger() public {
         vm.prank(makeAddr("notSettlementDispatcherBridger"));
-        vm.expectRevert(LiquidUSDLiquifierModule.OnlySettlementDispatcherBridger.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.OnlySettlementDispatcherBridger.selector);
         liquidUSDLiquifier.withdrawLiquidUSD(100e6, 100e6, discount, secondsToDeadline);
     }
 
@@ -195,7 +203,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit LiquidUSDLiquifierModule.FundsWithdrawn(address(USDC), amount, owner);
+        emit LiquidUSDLiquifierOPModule.FundsWithdrawn(address(USDC), amount, owner);
         liquidUSDLiquifier.withdrawFunds(address(USDC), owner, amount);
 
         uint256 balAfter = USDC.balanceOf(owner);
@@ -215,7 +223,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit LiquidUSDLiquifierModule.FundsWithdrawn(ETH, amount, recipient);
+        emit LiquidUSDLiquifierOPModule.FundsWithdrawn(ETH, amount, recipient);
         liquidUSDLiquifier.withdrawFunds(ETH, recipient, amount);
 
         uint256 balAfter = address(recipient).balance;
@@ -225,7 +233,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
     function test_withdrawFunds_reverts_whenRecipientAddressZero() public {
         vm.prank(owner);
-        vm.expectRevert(LiquidUSDLiquifierModule.InvalidValue.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.InvalidValue.selector);
         liquidUSDLiquifier.withdrawFunds(address(USDC), address(0), 100e6);
     }
 
@@ -239,11 +247,11 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         address ETH = liquidUSDLiquifier.ETH();
         deal(address(USDC), address(liquidUSDLiquifier), 0);
         vm.prank(owner);
-        vm.expectRevert(LiquidUSDLiquifierModule.CannotWithdrawZeroAmount.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.CannotWithdrawZeroAmount.selector);
         liquidUSDLiquifier.withdrawFunds(address(USDC), owner, 0);
 
         vm.prank(owner);
-        vm.expectRevert(LiquidUSDLiquifierModule.CannotWithdrawZeroAmount.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.CannotWithdrawZeroAmount.selector);
         liquidUSDLiquifier.withdrawFunds(address(ETH), owner, 0);
     }
 
@@ -251,7 +259,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         address ETH = liquidUSDLiquifier.ETH();
 
         vm.prank(owner);
-        vm.expectRevert(LiquidUSDLiquifierModule.WithdrawFundsFailed.selector);
+        vm.expectRevert(LiquidUSDLiquifierOPModule.WithdrawFundsFailed.selector);
         liquidUSDLiquifier.withdrawFunds(address(ETH), owner, 100e6);
     }
 

@@ -12,25 +12,30 @@ import { MidasModule } from "../../../../src/modules/midas/MidasModule.sol";
 import { IAggregatorV3 } from "../../../../src/oracle/PriceProvider.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
+import { ChainConfig } from "../../../utils/Utils.sol";
 
 contract MidasModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
     MidasModule midasModule;
 
-    IERC20 midasToken = IERC20(0xb7Fb3768CAAC98354EaDF514b48f28F2fE822bF0);
-    IERC20 usdc = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
-    IERC20 usdt = IERC20(0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df);
-
-    address depositVault = 0xcA1C871f8ae2571Cb126A46861fc06cB9E645152;
-    address redemptionVault = 0x904EA8d7FcaB7351758fAC82bDbc738E2010BC25;
+    IERC20 midasToken;
+    address depositVault;
+    address redemptionVault;
 
     IAggregatorV3 usdtOracle = IAggregatorV3(0xf376A91Ae078927eb3686D6010a6f1482424954E);
     IAggregatorV3 usdcOracle = IAggregatorV3(0x43d12Fb3AfCAd5347fA764EeAB105478337b7200);
     IAggregatorV3 mTokenOracle = IAggregatorV3(0xB2a4eC4C9b95D7a87bA3989d0FD38dFfDd944A24);
 
     function setUp() public override {
+        ChainConfig memory _cc = getChainConfig();
+        vm.skip(_cc.midasToken == address(0), "Midas vaults do not exist on this chain");
+
         super.setUp();
+
+        midasToken = IERC20(chainConfig.midasToken);
+        depositVault = chainConfig.midasDepositVault;
+        redemptionVault = chainConfig.midasRedemptionVault;
 
         vm.startPrank(owner);
 

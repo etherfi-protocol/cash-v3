@@ -25,17 +25,17 @@ contract AaveV3RewardsTest is AaveV3TestSetup {
             address(aaveV3Module), 
             aaveV3Module.getNonce(address(safe)), 
             address(safe), 
-            abi.encode(ETH, collateralAmount)
+            abi.encode(eth, collateralAmount)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, supplyDigestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        aaveV3Module.supply(address(safe), ETH, collateralAmount, owner1, signature);
+        aaveV3Module.supply(address(safe), eth, collateralAmount, owner1, signature);
 
         // Setup for aToken asset array
         reserveAssets = new address[](1);
-        IAavePoolV3.ReserveDataLegacy memory reserveData = aaveV3Module.aaveV3Pool().getReserveData(ETH);
+        IAavePoolV3.ReserveDataLegacy memory reserveData = aaveV3Module.aaveV3Pool().getReserveData(eth);
         reserveAssets[0] = reserveData.aTokenAddress;
 
         // Mock reward token (could be any token in real scenario)

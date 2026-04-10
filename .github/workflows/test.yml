@@ -7,6 +7,8 @@ on:
 env:
   FOUNDRY_PROFILE: ci
   ENV: ${{ secrets.ENV || 'mainnet' }}
+  TEST_CHAIN: ${{ secrets.TEST_CHAIN || '10' }}
+  TEST_RPC: ${{ secrets.TEST_RPC || 'https://mainnet.optimism.io' }}
   MAINNET_RPC: ${{ secrets.MAINNET_RPC }}
   SCROLL_RPC: ${{ secrets.SCROLL_RPC }}
   BASE_RPC: ${{ secrets.BASE_RPC }}
