@@ -37,10 +37,14 @@ contract TopUpFactory is BeaconFactory, Constants {
     struct TopUpFactoryStorage {
         /// @notice Set containing addresses of all deployed TopUp instances
         EnumerableSetLib.AddressSet deployedAddresses;
-        /// @notice Mapping of token addresses to their bridge configuration
+        /// @notice Mapping of token addresses to their bridge configuration (deprecated, use tokenChainConfig)
         mapping(address token => TokenConfig config) tokenConfig;
         /// @notice Address of the wallet used for emergency fund recovery
         address recoveryWallet;
+        /// @notice Mapping of token + destination chain ID to bridge configuration
+        mapping(address token => mapping(uint256 chainId => TokenConfig config)) tokenChainConfig;
+        /// @notice Set of tokens that have at least one chain configured
+        EnumerableSetLib.AddressSet supportedTokens;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -49,10 +53,13 @@ contract TopUpFactory is BeaconFactory, Constants {
     /// @notice Max slippage allowed for bridging
     uint96 public constant MAX_ALLOWED_SLIPPAGE = 200; // 2%
 
+    /// @notice Role identifier for accounts authorized to bridge tokens
+    bytes32 public constant TOPUP_FACTORY_BRIDGER_ROLE = keccak256("TOPUP_FACTORY_BRIDGER_ROLE");
+
     /// @notice Emitted when tokens are bridged to the destination chain
     /// @param token The address of the token being bridged
     /// @param amount The amount of tokens being bridged
-    event Bridge(address indexed token, uint256 amount);
+    event Bridge(address indexed token, uint256 amount, uint256 indexed destChainId);
 
     /// @notice Emitted when funds are recovered to the recovery wallet
     /// @param recoveryWallet The address receiving the recovered funds
@@ -68,7 +75,7 @@ contract TopUpFactory is BeaconFactory, Constants {
     /// @notice Emitted when the tokens are configured
     /// @param tokens Array of token addresses
     /// @param config Array of TokenConfig struct
-    event TokenConfigSet(address[] tokens, TokenConfig[] config);
+    event TokenConfigSet(address[] tokens, uint256[] chainIds, TokenConfig[] config);
 
     /// @notice Error thrown when a non-admin tries to deploy a topUp contract
     error OnlyAdmin();
@@ -98,6 +105,8 @@ contract TopUpFactory is BeaconFactory, Constants {
     error InsufficientFeePassed();
     /// @notice Error thrown when ETH transfer fails
     error NativeTransferFailed();
+    /// @notice Error thrown when chain ID is zero
+    error ChainIdCannotBeZero();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -184,22 +193,24 @@ contract TopUpFactory is BeaconFactory, Constants {
      *   - maxSlippageInBps exceeds MAX_ALLOWED_SLIPPAGE
      * @custom:emits TokenConfigSet when configs are updated
      */
-    function setTokenConfig(address[] calldata tokens, TokenConfig[] calldata configs) external onlyRoleRegistryOwner {
+    function setTokenConfig(address[] calldata tokens, uint256[] calldata chainIds, TokenConfig[] calldata configs) external onlyRoleRegistryOwner {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
-        if (len != configs.length) revert ArrayLengthMismatch();
+        if (len != configs.length || len != chainIds.length) revert ArrayLengthMismatch();
 
         for (uint256 i = 0; i < len;) {
             if (tokens[i] == address(0)) revert TokenCannotBeZeroAddress();
+            if (chainIds[i] == 0) revert ChainIdCannotBeZero();
             if (configs[i].bridgeAdapter == address(0) || configs[i].recipientOnDestChain == address(0) || configs[i].maxSlippageInBps > MAX_ALLOWED_SLIPPAGE) revert InvalidConfig();
 
-            $.tokenConfig[tokens[i]] = configs[i];
+            $.tokenChainConfig[tokens[i]][chainIds[i]] = configs[i];
+            $.supportedTokens.add(tokens[i]);
             unchecked {
                 ++i;
             }
         }
 
-        emit TokenConfigSet(tokens, configs);
+        emit TokenConfigSet(tokens, chainIds, configs);
     }
 
     /**
@@ -211,22 +222,25 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @custom:throws AmountCannotBeZero if amount passed is zero
      * @custom:throws InsufficientBalance if contract has insufficient balance of the specified token
      */
-    function bridge(address token, uint256 amount) external payable whenNotPaused {
+    function bridge(address token, uint256 amount, uint256 destChainId) external payable whenNotPaused onlyRole(TOPUP_FACTORY_BRIDGER_ROLE) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
+        if (destChainId == 0) revert ChainIdCannotBeZero();
         if (amount == 0) revert AmountCannotBeZero();
-        if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
+
+        TokenConfig storage config = $.tokenChainConfig[token][destChainId];
+        if (config.bridgeAdapter == address(0)) revert TokenConfigNotSet();
 
         uint256 balance = token == ETH ? address(this).balance : IERC20(token).balanceOf(address(this));
         if (balance < amount) revert InsufficientBalance();
 
-        (, uint256 bridgeFee) = getBridgeFee(token, amount);
+        (, uint256 bridgeFee) = getBridgeFee(token, amount, destChainId);
         if (bridgeFee > msg.value) revert InsufficientFeePassed();
 
-        DelegateCallLib.delegateCall($.tokenConfig[token].bridgeAdapter, abi.encodeWithSelector(BridgeAdapterBase.bridge.selector, token, amount, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData));
+        DelegateCallLib.delegateCall(config.bridgeAdapter, abi.encodeWithSelector(BridgeAdapterBase.bridge.selector, token, amount, config.recipientOnDestChain, config.maxSlippageInBps, config.additionalData));
 
-        emit Bridge(token, amount);
+        emit Bridge(token, amount, destChainId);
     }
 
     /**
@@ -243,7 +257,7 @@ contract TopUpFactory is BeaconFactory, Constants {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
-        if ($.tokenConfig[token].bridgeAdapter != address(0)) revert OnlyUnsupportedTokens();
+        if ($.supportedTokens.contains(token)) revert OnlyUnsupportedTokens();
         if ($.recoveryWallet == address(0)) revert RecoveryWalletNotSet();
 
         if (token == ETH) {
@@ -282,14 +296,17 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @custom:throws TokenConfigNotSet if bridge configuration is not set for the token
      * @custom:throws AmountCannotBeZero if contract has no balance of the specified token
      */
-    function getBridgeFee(address token, uint256 amount) public view returns (address _token, uint256 _amount) {
+    function getBridgeFee(address token, uint256 amount, uint256 destChainId) public view returns (address _token, uint256 _amount) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
-        if ($.tokenConfig[token].bridgeAdapter == address(0)) revert TokenConfigNotSet();
+        if (destChainId == 0) revert ChainIdCannotBeZero();
         if (amount == 0) revert AmountCannotBeZero();
 
-        return BridgeAdapterBase($.tokenConfig[token].bridgeAdapter).getBridgeFee(token, amount, $.tokenConfig[token].recipientOnDestChain, $.tokenConfig[token].maxSlippageInBps, $.tokenConfig[token].additionalData);
+        TokenConfig storage config = $.tokenChainConfig[token][destChainId];
+        if (config.bridgeAdapter == address(0)) revert TokenConfigNotSet();
+
+        return BridgeAdapterBase(config.bridgeAdapter).getBridgeFee(token, amount, config.recipientOnDestChain, config.maxSlippageInBps, config.additionalData);
     }
 
     /**
@@ -330,9 +347,9 @@ contract TopUpFactory is BeaconFactory, Constants {
      * @param token The address of the token to query
      * @return Configuration parameters for the specified token
      */
-    function getTokenConfig(address token) external view returns (TokenConfig memory) {
+    function getTokenConfig(address token, uint256 destChainId) external view returns (TokenConfig memory) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
-        return $.tokenConfig[token];
+        return $.tokenChainConfig[token][destChainId];
     }
 
     /**
@@ -353,7 +370,12 @@ contract TopUpFactory is BeaconFactory, Constants {
      */
     function isTokenSupported(address token) external view returns (bool) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
-        return $.tokenConfig[token].bridgeAdapter != address(0);
+        return $.supportedTokens.contains(token);
+    }
+
+    function isTokenSupportedOnChain(address token, uint256 destChainId) external view returns (bool) {
+        TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
+        return $.tokenChainConfig[token][destChainId].bridgeAdapter != address(0);
     }
 
     /**

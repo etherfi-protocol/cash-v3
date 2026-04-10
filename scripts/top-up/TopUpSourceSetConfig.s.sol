@@ -1,178 +1,32 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {stdJson} from "forge-std/StdJson.sol";
+import { stdJson } from "forge-std/StdJson.sol";
+import { console } from "forge-std/console.sol";
 
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import {TopUpFactory} from "../../src/top-up/TopUpFactory.sol";
-import {RoleRegistry} from "../../src/role-registry/RoleRegistry.sol";
-import {Utils} from "../utils/Utils.sol";
+import { TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
+import { TopUpConfigHelper } from "../utils/TopUpConfigHelper.sol";
 
-struct TokenConfig {
-    string token;
-    string bridge;
-    address recipient;
-    uint256 slippage;
-    address stargatePool;
-    address oftAdapter;
-}
+/// @title TopUpSourceSetConfig
+/// @notice Reads token bridge configs from fixtures and sets them on the TopUpFactory (EOA broadcast).
+///
+/// Usage:
+///   PRIVATE_KEY=0x... forge script scripts/top-up/TopUpSourceSetConfig.s.sol --rpc-url <RPC> --broadcast
+contract TopUpSourceSetConfig is TopUpConfigHelper {
 
-contract TopUpSourceSetConfig is Utils {
-    TopUpFactory topUpFactory;
-    RoleRegistry roleRegistry;
-    address stargateAdapter;
-    address scrollERC20BridgeAdapter;
-    address baseWithdrawERC20GatewayAdapter;
-    address etherFiOFTBridgeAdapter;
-    address nttAdapter;
-    address etherFiLiquidBridgeAdapter;
-    
-    function run() public {
+    function run() public virtual {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
-        vm.startBroadcast(deployerPrivateKey);
-        
         string memory deployments = readTopUpSourceDeployment();
+        topUpFactory = TopUpFactory(payable(stdJson.readAddress(deployments, ".addresses.TopUpSourceFactory")));
+        _loadAdapters(deployments);
 
-        topUpFactory = TopUpFactory(
-            payable(
-                stdJson.readAddress(
-                    deployments,
-                    string.concat(".", "addresses", ".", "TopUpSourceFactory")
-                )
-            )
-        );
+        (address[] memory tokens, uint256[] memory chainIds, TopUpFactory.TokenConfig[] memory configs) = parseAllTokenConfigs();
 
-        stargateAdapter = stdJson.readAddress(
-            deployments,
-            string.concat(".", "addresses", ".", "StargateAdapter")
-        );
-
-        etherFiOFTBridgeAdapter = stdJson.readAddress(
-            deployments,
-            string.concat(".", "addresses", ".", "EtherFiOFTBridgeAdapter")
-        );
-        nttAdapter = stdJson.readAddress(
-            deployments,
-            string.concat(".", "addresses", ".", "NTTAdapter")
-        );
-
-        etherFiLiquidBridgeAdapter = stdJson.readAddress(
-            deployments,
-            string.concat(".", "addresses", ".", "EtherFiLiquidBridgeAdapter")
-        );
-        
-        if (block.chainid == 1) {
-            scrollERC20BridgeAdapter = stdJson.readAddress(
-                deployments,
-                string.concat(".", "addresses", ".", "ScrollERC20BridgeAdapter")
-            );
-        }  
-
-        if (block.chainid == 8453) {
-            baseWithdrawERC20GatewayAdapter = stdJson.readAddress(
-                deployments,
-                string.concat(".", "addresses", ".", "BaseWithdrawERC20BridgeAdapter")
-            );
-        }
-        
-        string memory fixturesFile = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv() ,"/fixtures/top-up-fixtures.json"));
-        string memory fixtures = vm.readFile(fixturesFile);
-
-        (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) = parseTokenConfigs(fixtures, vm.toString(block.chainid));
-
-        topUpFactory.setTokenConfig(tokens, tokenConfig);
-    
+        vm.startBroadcast(deployerPrivateKey);
+        topUpFactory.setTokenConfig(tokens, chainIds, configs);
         vm.stopBroadcast();
-    }   
 
-    // Helper function to parse token configs from JSON
-    function parseTokenConfigs(string memory jsonString, string memory chainId) internal view returns (address[] memory tokens, TopUpFactory.TokenConfig[] memory tokenConfig) {
-        uint256 count = getTokenConfigsLength(jsonString, chainId);
-        tokens = new address[](count);
-        tokenConfig = new TopUpFactory.TokenConfig[](count);
-        
-        (address topUpDest, address topUpDestNativeGateway) = getTopUpDestAndNativeGateway();
-        address weth = stdJson.readAddress(jsonString, string.concat(".", chainId, ".weth"));
-        
-        for (uint256 i = 0; i < count; i++) {
-            string memory base = string.concat(".", chainId, ".tokenConfigs[", vm.toString(i), "]");
-            
-            tokens[i] = stdJson.readAddress(jsonString, string.concat(base, ".address"));
-            tokenConfig[i].recipientOnDestChain = (tokens[i] == weth) ? topUpDestNativeGateway : topUpDest;
-
-            tokenConfig[i].maxSlippageInBps = uint96(stdJson.readUint(jsonString, string.concat(base, ".maxSlippageInBps")));
-            string memory bridge = stdJson.readString(jsonString, string.concat(base, ".bridge"));
-
-            if (keccak256(bytes(bridge)) == keccak256(bytes("stargate"))) {
-                tokenConfig[i].bridgeAdapter = stargateAdapter;
-                tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".stargatePool")));
-            } else if (keccak256(bytes(bridge)) == keccak256(bytes("oftBridgeAdapter"))) {
-                tokenConfig[i].bridgeAdapter = etherFiOFTBridgeAdapter;
-                tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".oftAdapter")));
-            } else if (keccak256(bytes(bridge)) == keccak256(bytes("nttAdapter"))) {
-                tokenConfig[i].bridgeAdapter = nttAdapter;
-                tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".nttManager")), stdJson.readUint(jsonString, string.concat(base, ".dustDecimals")));
-            } else if (block.chainid == 1 && keccak256(bytes(bridge)) == keccak256(bytes("liquidBridgeAdapter"))) {
-                tokenConfig[i].bridgeAdapter = etherFiLiquidBridgeAdapter;
-                tokenConfig[i].additionalData = abi.encode(stdJson.readAddress(jsonString, string.concat(base, ".teller")));
-            } else if (block.chainid == 1 && keccak256(bytes(bridge)) == keccak256(bytes("scrollERC20BridgeAdapter"))) {
-                tokenConfig[i].bridgeAdapter = scrollERC20BridgeAdapter;
-                address scrollGateway = stdJson.readAddress(jsonString, string.concat(base, ".scrollGatewayRouter"));
-                uint256 gasLimit = stdJson.readUint(jsonString, string.concat(base, ".gasLimitForScrollGateway"));
-                tokenConfig[i].additionalData = abi.encode(scrollGateway, gasLimit);
-            } else if (block.chainid == 8453 && keccak256(bytes(bridge)) == keccak256(bytes("baseWithdrawErc20BridgeAdapter"))) {
-                tokenConfig[i].bridgeAdapter = baseWithdrawERC20GatewayAdapter;
-                uint256 gasLimit = stdJson.readUint(jsonString, string.concat(base, ".gasLimitForBaseGateway"));
-                tokenConfig[i].additionalData = abi.encode(gasLimit, hex'');
-
-                // USDT goes to topup factory on ETH and then is transferred to scroll
-                tokenConfig[i].recipientOnDestChain = address(topUpFactory);
-            } else revert ("Unknown bridge");
-
-            if (tokenConfig[i].recipientOnDestChain == address(0)) revert (string.concat("Invalid recipientOnDestChain for token ", stdJson.readString(jsonString, string.concat(base, ".token"))));
-            if (tokenConfig[i].maxSlippageInBps > 10000) revert (string.concat("Invalid maxSlippageInBps for token ", stdJson.readString(jsonString, string.concat(base, ".token"))));
-            if (tokenConfig[i].bridgeAdapter == address(0)) revert (string.concat("Invalid bridgeAdapter for token ", stdJson.readString(jsonString, string.concat(base, ".token"))));
-        }
-        
-        return (tokens, tokenConfig);
-    }
-
-    function getTokenConfigsLength(string memory jsonString, string memory chainId) internal pure returns (uint256) {
-        // First, let's try to parse the entire tokenConfigs array as raw bytes
-        bytes memory arrayData = stdJson.parseRaw(jsonString, string.concat(".", chainId, ".tokenConfigs"));
-        
-        // Now we need to decode this. The array is ABI-encoded.
-        // For an array of structs, it starts with the array length
-        
-        // Direct decode of the length
-        // ABI encoding for dynamic types: first 32 bytes = offset, then at offset: 32 bytes = length
-        uint256 arrayLength;
-        assembly {
-            // Skip the first 32 bytes (offset) and read the length
-            arrayLength := mload(add(arrayData, 0x40))
-        }
-        
-        return arrayLength;
-}
-
-    function getTopUpDestAndNativeGateway() internal view returns (address, address) {
-        string memory dir = string.concat(vm.projectRoot(), string.concat("/deployments/", getEnv(), "/"));
-        string memory chainDir = string.concat(scrollChainId, "/");
-        string memory file = string.concat(dir, chainDir, "deployments", ".json");
-
-        if (!vm.exists(file)) revert ("Scroll deployment file not found");
-        string memory deployments = vm.readFile(file);
-
-        address topUpDest = stdJson.readAddress(
-            deployments,
-            string.concat(".", "addresses", ".", "TopUpDest")
-        );
-        address topUpDestNativeGateway = stdJson.readAddress(
-            deployments,
-            string.concat(".", "addresses", ".", "TopUpDestNativeGateway")
-        );
-
-        return (topUpDest, topUpDestNativeGateway);
+        console.log("Configured %s token+chain pairs", tokens.length);
     }
 }

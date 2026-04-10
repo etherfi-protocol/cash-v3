@@ -46,7 +46,7 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
             safes.push(IEtherFiSafe(deployedSafe));
             
             // Setup borrower with sufficient collateral
-            deal(address(weETHScroll), deployedSafe, INITIAL_COLLATERAL_IN_WEETH);
+            deal(address(weETH), deployedSafe, INITIAL_COLLATERAL_IN_WEETH);
             
             uint256 nonce = cashModule.getNonce(address(deployedSafe));
             bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.SET_MODE_METHOD, block.chainid, address(deployedSafe), nonce, abi.encode(Mode.Credit))).toEthSignedMessageHash();
@@ -61,7 +61,7 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
         ( , , uint64 modeDelay) = cashModule.getDelays();
         vm.warp(block.timestamp + modeDelay + 1);
         
-        borrowToken = address(usdcScroll);
+        borrowToken = address(usdc);
         deal(borrowToken, address(debtManager), 1 ether); 
     }
     

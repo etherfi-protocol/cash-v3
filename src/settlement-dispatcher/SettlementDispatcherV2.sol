@@ -9,10 +9,11 @@ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IBoringOnChainQueue } from "../interfaces/IBoringOnChainQueue.sol";
 import { BinSponsor } from "../interfaces/ICashModule.sol";
 import { IOFT, MessagingFee, MessagingReceipt, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
-import { IL2GatewayRouter, IL2Messenger } from "../interfaces/IScrollERC20Bridge.sol";
+import { IL2StandardBridge } from "../interfaces/IL2StandardBridge.sol";
 import { IFraxCustodian } from "../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop } from "../interfaces/IFraxRemoteHop.sol";
 import { IMidasVault } from "../interfaces/IMidasVault.sol";
+import { ICCTPTokenMessenger } from "../interfaces/ICCTPTokenMessenger.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -42,6 +43,10 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         uint64 minGasLimit;
         /// @notice Whether the token is an OFT
         bool isOFT;
+        /// @notice L1 token address used by bridgeERC20To on the OP canonical bridge
+        address remoteToken;
+        /// @notice Whether to use CCTP for bridging this token
+        bool useCCTP;
     }
 
     /**
@@ -50,14 +55,9 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     bytes32 public constant SETTLEMENT_DISPATCHER_BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
 
     /**
-     * @notice Address of the Scroll ERC20 Gateway Router
+     * @notice Address of the OP Stack L2 Standard Bridge
      */
-    address public constant GATEWAY_ROUTER = 0x4C0926FF5252A435FD19e10ED15e5a249Ba19d79;
-
-    /**
-     * @notice Address of the Scroll ETH Messenger
-     */
-    address public constant ETH_MESSENGER = 0x781e90f1c8Fc4611c9b7497C3B47F99Ef6969CbC;
+    address public constant L2_STANDARD_BRIDGE = 0x4200000000000000000000000000000000000010;
 
     /**
      * @notice LayerZero Ethereum endpoint ID
@@ -101,6 +101,16 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         address fraxAsyncRedeemRecipient;
         /// @notice Mapping of Midas token to redemption vault (e.g. Liquid Reserve)
         mapping(address midasToken => address redemptionVault) midasRedemptionVault;
+        /// @notice Per-token settlement recipient for same-chain transfers
+        mapping(address token => address recipient) settlementRecipient;
+        /// @notice CCTP TokenMessenger address
+        address cctpTokenMessenger;
+        /// @notice CCTP destination domain (e.g. 0 for Ethereum)
+        uint32 cctpDestinationDomain;
+        /// @notice CCTP max fee in burn token units (0 for standard transfer)
+        uint256 cctpMaxFee;
+        /// @notice CCTP minimum finality threshold
+        uint32 cctpMinFinalityThreshold;
     }
 
     /**
@@ -164,7 +174,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     event TransferToRefundWallet(address asset, address refundWallet, uint256 amount);
 
     /**
-     * @notice Emitted when tokens are withdrawn from scroll with the canonical bridge
+     * @notice Emitted when tokens are withdrawn to L1 via the canonical bridge
      * @param token Address of the token that was withdrawn
      * @param recipient Address of the recipient
      * @param amount Amount of the token that was withdrawn
@@ -215,6 +225,26 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @param minReceive Minimum amount of asset requested
      */
     event MidasRedeemed(address indexed midasToken, address indexed assetOut, uint256 amount, uint256 minReceive);
+
+    /**
+     * @notice Emitted when tokens are settled (transferred to the per-token recipient)
+     */
+    event FundsSettled(address indexed token, address indexed recipient, uint256 amount);
+
+    /**
+     * @notice Emitted when a settlement recipient is configured for a token
+     */
+    event SettlementRecipientSet(address indexed token, address indexed recipient);
+
+    /**
+     * @notice Emitted when funds are bridged via CCTP
+     */
+    event FundsBridgedWithCCTP(address indexed token, uint256 amount, uint32 destinationDomain, address indexed recipient);
+
+    /**
+     * @notice Emitted when CCTP config is set
+     */
+    event CCTPConfigSet(address indexed tokenMessenger, uint32 destinationDomain, uint256 maxFee, uint32 minFinalityThreshold);
 
     /**
      * @notice Thrown when input arrays have different lengths
@@ -302,6 +332,16 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     error MidasRedemptionVaultNotSet();
 
     /**
+     * @notice Thrown when no settlement recipient is configured for the token
+     */
+    error SettlementRecipientNotSet();
+
+    /**
+     * @notice Thrown when CCTP config is not set
+     */
+    error CCTPConfigNotSet();
+
+    /**
      * @notice Constructor that disables initializers
      * @dev Cannot be called again after deployment (UUPS pattern)
      */
@@ -342,7 +382,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @param token Address of the token
      * @return Destination data struct for the specified token
      */
-    function destinationData(address token) public view returns (DestinationData memory) {
+    function destinationData(address token) public view virtual returns (DestinationData memory) {
         return _getSettlementDispatcherV2Storage().destinationData[token];
     }
 
@@ -355,7 +395,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws InvalidValue If any address parameter is zero
      * @custom:throws StargateValueInvalid If the Stargate router doesn't support the token
      */
-    function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external onlyRoleRegistryOwner {
+    function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external virtual onlyRoleRegistryOwner {
         _setDestinationData(tokens, destDatas);
     }
 
@@ -607,7 +647,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws InsufficientMinReturn If the expected return is less than minReturnLD
      * @custom:throws InsufficientFeeToCoverCost If not enough ETH is provided for fees
      */
-    function bridge(address token, uint256 amount, uint256 minReturnLD) external payable whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+    function bridge(address token, uint256 amount, uint256 minReturnLD) external payable virtual whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
         if (token == address(0) || amount == 0) revert InvalidValue();
         
         uint256 balance = 0;
@@ -617,8 +657,13 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         if (balance < amount) revert InsufficientBalance();
 
         DestinationData memory destData = _getSettlementDispatcherV2Storage().destinationData[token];
-        if (destData.useCanonicalBridge) {
-            _withdrawCanonicalBridge(token, destData.destRecipient, amount, destData.minGasLimit);
+
+        if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
+        
+        if (destData.useCCTP) {
+            _bridgeViaCCTP(token, destData.destRecipient, amount);
+        } else if (destData.useCanonicalBridge) {
+            _withdrawCanonicalBridge(token, destData.remoteToken, destData.destRecipient, amount, destData.minGasLimit);
         } else if (destData.isOFT) {
             (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) =
                 prepareOftSend(token, amount);
@@ -659,8 +704,8 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     function prepareRideBus(
         address token,
         uint256 amount
-    ) public view returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
-        
+    ) public view virtual returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
+
         DestinationData memory destData = _getSettlementDispatcherV2Storage().destinationData[token];
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
 
@@ -702,7 +747,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     function prepareOftSend(
         address token,
         uint256 amount
-    ) public view returns (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) {
+    ) public view virtual returns (address oft, uint256 valueToSend, uint256 minReturnFromOft, SendParam memory sendParam, MessagingFee memory messagingFee) {
         DestinationData memory destData = _getSettlementDispatcherV2Storage().destinationData[token];
         if (destData.destRecipient == address(0)) revert DestinationDataNotSet();
 
@@ -742,22 +787,21 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     }
 
     /**
-     * @notice Withdraw tokens from scroll with the canonical bridge
-     * @dev Used by bridge function
+     * @notice Withdraw tokens to L1 via the OP Stack canonical bridge
+     * @dev Uses bridgeERC20To for ERC20s and bridgeETHTo for ETH
      * @param token Address of the token to withdraw
-     * @param recipient Address to receive the funds on ethereum
+     * @param remoteToken Address of the corresponding L1 token (ignored for ETH)
+     * @param recipient Address to receive the funds on L1
      * @param amount Amount to withdraw
      * @param minGasLimit Minimum gas limit for the withdrawal
      */
-    function _withdrawCanonicalBridge(address token, address recipient, uint256 amount, uint256 minGasLimit) internal returns (uint256) {
+    function _withdrawCanonicalBridge(address token, address remoteToken, address recipient, uint256 amount, uint64 minGasLimit) internal returns (uint256) {
         if (token == ETH) {
-            IL2Messenger(ETH_MESSENGER).sendMessage{value: amount}(recipient, amount, "", minGasLimit);
-        }
-        else {
-            address gateway = IL2GatewayRouter(GATEWAY_ROUTER).getERC20Gateway(token);
-
-            IERC20(token).forceApprove(gateway, amount);
-            IL2GatewayRouter(GATEWAY_ROUTER).withdrawERC20(token, recipient, amount, minGasLimit);
+            IL2StandardBridge(L2_STANDARD_BRIDGE).bridgeETHTo{ value: amount }(recipient, uint32(minGasLimit), "");
+        } else {
+            IERC20(token).forceApprove(L2_STANDARD_BRIDGE, amount);
+            IL2StandardBridge(L2_STANDARD_BRIDGE).bridgeERC20To(token, remoteToken, recipient, amount, uint32(minGasLimit), "");
+            IERC20(token).forceApprove(L2_STANDARD_BRIDGE, 0);
         }
 
         emit CanonicalBridgeWithdraw(token, recipient, amount);
@@ -804,14 +848,20 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
 
         for (uint256 i = 0; i < len; ) {
-            if (destDatas[i].useCanonicalBridge) {
-                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate != address(0) ||  destDatas[i].destEid != 0) revert InvalidValue();
-            }
-            else {
-                if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0) || destDatas[i].stargate == address(0)) revert InvalidValue(); 
-            
+            if (tokens[i] == address(0) || destDatas[i].destRecipient == address(0)) revert InvalidValue();
+
+            if (destDatas[i].useCCTP) {
+                // CCTP: only needs token + recipient; stargate/canonical fields must be unset
+                if (destDatas[i].stargate != address(0) || destDatas[i].useCanonicalBridge) revert InvalidValue();
+            } else if (destDatas[i].useCanonicalBridge) {
+                if (destDatas[i].stargate != address(0) || destDatas[i].destEid != 0) revert InvalidValue();
+                // ERC20 canonical bridge requires a remoteToken (L1 address); ETH does not
+                if (tokens[i] != ETH && destDatas[i].remoteToken == address(0)) revert InvalidValue();
+            } else {
+                if (destDatas[i].stargate == address(0)) revert InvalidValue();
+
                 if (tokens[i] == ETH) {
-                    if (IStargate(destDatas[i].stargate).token() != address(0)) revert StargateValueInvalid(); 
+                    if (IStargate(destDatas[i].stargate).token() != address(0)) revert StargateValueInvalid();
                 }
                 else if (IStargate(destDatas[i].stargate).token() != tokens[i]) revert StargateValueInvalid();
             }
@@ -823,6 +873,107 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
         }
 
         emit DestinationDataSet(tokens, destDatas);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //              CCTP BRIDGING
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Sets CCTP configuration for cross-chain USDC bridging
+     * @dev Only callable by the role registry owner
+     * @param _tokenMessenger Address of the CCTP TokenMessenger contract
+     * @param _destinationDomain CCTP destination domain (e.g. 0 for Ethereum)
+     * @param _maxFee Maximum fee in burn token units (0 for standard transfer)
+     * @param _minFinalityThreshold Minimum finality threshold for attestation
+     */
+    function setCCTPConfig(address _tokenMessenger, uint32 _destinationDomain, uint256 _maxFee, uint32 _minFinalityThreshold) external onlyRoleRegistryOwner {
+        if (_tokenMessenger == address(0)) revert InvalidValue();
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        $.cctpTokenMessenger = _tokenMessenger;
+        $.cctpDestinationDomain = _destinationDomain;
+        $.cctpMaxFee = _maxFee;
+        $.cctpMinFinalityThreshold = _minFinalityThreshold;
+        emit CCTPConfigSet(_tokenMessenger, _destinationDomain, _maxFee, _minFinalityThreshold);
+    }
+
+    /**
+     * @notice Returns the CCTP configuration
+     */
+    function getCCTPConfig() external view returns (address tokenMessenger_, uint32 destinationDomain_, uint256 maxFee_, uint32 minFinalityThreshold_) {
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        return ($.cctpTokenMessenger, $.cctpDestinationDomain, $.cctpMaxFee, $.cctpMinFinalityThreshold);
+    }
+
+    /**
+     * @notice Bridges tokens via CCTP (Circle Cross-Chain Transfer Protocol)
+     * @dev Called internally by bridge() when destData.useCCTP is true
+     */
+    function _bridgeViaCCTP(address token, address recipient, uint256 amount) internal {
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        address tokenMessenger = $.cctpTokenMessenger;
+        if (tokenMessenger == address(0)) revert CCTPConfigNotSet();
+
+        IERC20(token).forceApprove(tokenMessenger, amount);
+        ICCTPTokenMessenger(tokenMessenger).depositForBurn(
+            amount,
+            $.cctpDestinationDomain,
+            bytes32(uint256(uint160(recipient))),
+            token,
+            bytes32(0),
+            $.cctpMaxFee,
+            $.cctpMinFinalityThreshold
+        );
+
+        emit FundsBridgedWithCCTP(token, amount, $.cctpDestinationDomain, recipient);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //              SAME-CHAIN SETTLEMENT
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * @notice Sets settlement recipients for multiple tokens at once
+     * @dev Only callable by the role registry owner. Each token can have a different recipient.
+     * @param tokens Array of token addresses to configure
+     * @param recipients Array of recipient addresses corresponding to each token
+     */
+    function setSettlementRecipients(address[] calldata tokens, address[] calldata recipients) external onlyRoleRegistryOwner {
+        if (tokens.length != recipients.length) revert ArrayLengthMismatch();
+        SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
+        for (uint256 i = 0; i < tokens.length;) {
+            if (tokens[i] == address(0) || recipients[i] == address(0)) revert InvalidValue();
+            $.settlementRecipient[tokens[i]] = recipients[i];
+            emit SettlementRecipientSet(tokens[i], recipients[i]);
+            unchecked { ++i; }
+        }
+    }
+
+    /**
+     * @notice Returns the settlement recipient configured for a specific token
+     * @param token Address of the token to query
+     * @return The recipient address for the specified token
+     */
+    function getSettlementRecipient(address token) external view returns (address) {
+        return _getSettlementDispatcherV2Storage().settlementRecipient[token];
+    }
+
+    /**
+     * @notice Settles funds by transferring tokens directly to the per-token settlement recipient
+     * @dev Only callable by addresses with SETTLEMENT_DISPATCHER_BRIDGER_ROLE when not paused.
+     *      Intended for same-chain settlement (e.g. USDC/USDT on Optimism).
+     * @param token Address of the token to settle
+     * @param amount Amount of tokens to transfer to the recipient
+     */
+    function settle(address token, uint256 amount) external nonReentrant whenNotPaused onlyRole(SETTLEMENT_DISPATCHER_BRIDGER_ROLE) {
+        if (token == address(0) || amount == 0) revert InvalidValue();
+
+        address recipient = _getSettlementDispatcherV2Storage().settlementRecipient[token];
+        if (recipient == address(0)) revert SettlementRecipientNotSet();
+        if (IERC20(token).balanceOf(address(this)) < amount) revert InsufficientBalance();
+
+        IERC20(token).safeTransfer(recipient, amount);
+        emit FundsSettled(token, recipient, amount);
     }
 
     /**

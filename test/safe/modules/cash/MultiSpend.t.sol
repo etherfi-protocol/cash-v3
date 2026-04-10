@@ -20,9 +20,9 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
     function setUp() public override {
         super.setUp();
         
-        // Support weETHScroll as another borrow token
+        // Support weETH as another borrow token
         vm.prank(owner);
-        debtManager.supportBorrowToken(address(weETHScroll), borrowApyPerSecond, minShares);
+        debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);
     }
 
     function test_spend_variousTokenProportions_inDebitMode() public {
@@ -35,16 +35,16 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
             uint256 weETHAmountInUsd = 50e6; // $50 in weETH
             
             // Convert to token amounts
-            uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-            uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+            uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+            uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
             
             // Fund the safe with both tokens
-            deal(address(usdcScroll), address(safe), usdcAmount);
-            deal(address(weETHScroll), address(safe), weETHAmount);
+            deal(address(usdc), address(safe), usdcAmount);
+            deal(address(weETH), address(safe), weETHAmount);
             
             // Create spending transaction with multiple tokens
-            spendTokens[0] = address(usdcScroll);
-            spendTokens[1] = address(weETHScroll);
+            spendTokens[0] = address(usdc);
+            spendTokens[1] = address(weETH);
             
             spendAmounts[0] = usdcAmountInUsd;
             spendAmounts[1] = weETHAmountInUsd;
@@ -54,14 +54,14 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         }
         
         // Track initial balances
-        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
-        uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherUsdcBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherWeETHBalBefore = weETH.balanceOf(address(settlementDispatcherReap));
 
         Cashback[] memory cashbacks = new Cashback[](1);
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -82,10 +82,10 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), 0);
-        assertEq(weETHScroll.balanceOf(address(safe)), 0);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0]);
-        assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1]);
+        assertEq(usdc.balanceOf(address(safe)), 0);
+        assertEq(weETH.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0]);
+        assertEq(weETH.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1]);
     }
 
     function test_spend_asymmetricalTokenDistribution_inDebitMode() public {        
@@ -100,15 +100,15 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
             uint256 weETHAmountInUsd = 20e6; // $20 in weETH
             
             // Convert to token amounts
-            uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-            uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+            uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+            uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
             
             // Fund the safe with both tokens
-            deal(address(usdcScroll), address(safe), usdcAmount * 2); // Give extra for follow-up test
-            deal(address(weETHScroll), address(safe), weETHAmount * 2); // Give extra for follow-up test
+            deal(address(usdc), address(safe), usdcAmount * 2); // Give extra for follow-up test
+            deal(address(weETH), address(safe), weETHAmount * 2); // Give extra for follow-up test
 
-            spendTokens[0] = address(usdcScroll);
-            spendTokens[1] = address(weETHScroll);
+            spendTokens[0] = address(usdc);
+            spendTokens[1] = address(weETH);
             
             spendAmounts[0] = usdcAmountInUsd;
             spendAmounts[1] = weETHAmountInUsd;
@@ -119,14 +119,14 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
 
         {
             // Track initial balances
-            uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
-            uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
+            uint256 settlementDispatcherUsdcBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
+            uint256 settlementDispatcherWeETHBalBefore = weETH.balanceOf(address(settlementDispatcherReap));
 
             Cashback[] memory cashbacks = new Cashback[](1);
             CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
             CashbackTokens memory scr = CashbackTokens({
-                token: address(scrToken),
+                token: address(cashbackToken),
                 amountInUsd: 1e6,
                 cashbackType: 0
             });
@@ -147,10 +147,10 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
             cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
             
             // Verify tokens were transferred to settlement dispatcher
-            assertEq(usdcScroll.balanceOf(address(safe)), tokenAmounts[0]);
-            assertEq(weETHScroll.balanceOf(address(safe)), tokenAmounts[1]);
-            assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0]);
-            assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1]);
+            assertEq(usdc.balanceOf(address(safe)), tokenAmounts[0]);
+            assertEq(weETH.balanceOf(address(safe)), tokenAmounts[1]);
+            assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0]);
+            assertEq(weETH.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1]);
 
             // Execute another spend with different transaction ID
             bytes32 txId2 = keccak256("txId2");
@@ -158,10 +158,10 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
             cashModule.spend(address(safe), txId2, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
             
             // Verify tokens were transferred again
-            assertEq(usdcScroll.balanceOf(address(safe)), 0);
-            assertEq(weETHScroll.balanceOf(address(safe)), 0);
-            assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0] * 2);
-            assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1] * 2);
+            assertEq(usdc.balanceOf(address(safe)), 0);
+            assertEq(weETH.balanceOf(address(safe)), 0);
+            assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + tokenAmounts[0] * 2);
+            assertEq(weETH.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + tokenAmounts[1] * 2);
         }
         
     }
@@ -171,15 +171,15 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256 usdcAmountInUsd = 50e6;
         uint256 weETHAmountInUsd = 50e6;
         
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
         
         // Only fund with USDC, not with weETH
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), 0); // No weETH
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), 0); // No weETH
         
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
@@ -189,7 +189,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -214,16 +214,16 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256 usdcAmountInUsd = 50e6;
         uint256 weETHAmountInUsd = 50e6;
         
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
         
         // Fund with full USDC amount, but only half of the weETH amount
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount / 2);
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), weETHAmount / 2);
         
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
@@ -233,7 +233,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -257,17 +257,17 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256 usdcAmountInUsd = 50e6;
         uint256 weETHAmountInUsd = 50e6;
         
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
         
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount);
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), weETHAmount);
         
-        uint256 safeTokenBalBefore = scrToken.balanceOf(address(safe));
+        uint256 safeTokenBalBefore = cashbackToken.balanceOf(address(safe));
         
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
@@ -277,7 +277,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -296,7 +296,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify cashback was received
-        assertGt(scrToken.balanceOf(address(safe)), safeTokenBalBefore);
+        assertGt(cashbackToken.balanceOf(address(safe)), safeTokenBalBefore);
     }
 
     function test_spend_exceedsDailyLimit_multipleTokens() public {
@@ -304,15 +304,15 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256 usdcAmountInUsd = dailyLimitInUsd / 2 + 1e6;  // Just over half the daily limit
         uint256 weETHAmountInUsd = dailyLimitInUsd / 2 + 1e6; // Just over half the daily limit
         
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
         
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount);
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), weETHAmount);
         
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
@@ -322,7 +322,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -347,14 +347,14 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         WithdrawalTestData memory data = _setupWithdrawalTest();
         
         // Setup initial balances tracking
-        uint256 usdcBalanceBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
-        uint256 weETHBalanceBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 usdcBalanceBefore = usdc.balanceOf(address(settlementDispatcherReap));
+        uint256 weETHBalanceBefore = weETH.balanceOf(address(settlementDispatcherReap));
 
         Cashback[] memory cashbacks = new Cashback[](1);
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -393,29 +393,29 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         data.withdrawalAmountInUsd = 20e6;
         
         // Convert amounts to token units
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), data.usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), data.weETHAmountInUsd);
-        data.withdrawalAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), data.withdrawalAmountInUsd);
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), data.usdcAmountInUsd);
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), data.weETHAmountInUsd);
+        data.withdrawalAmount = debtManager.convertUsdToCollateralToken(address(usdc), data.withdrawalAmountInUsd);
         
         // Fund the safe
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount);
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), weETHAmount);
         
         // Setup a pending withdrawal for USDC
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = data.withdrawalAmount;
         
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), data.withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), data.withdrawalAmount);
         
         // Prepare spend tokens and amounts
         data.spendTokens = new address[](2);
-        data.spendTokens[0] = address(usdcScroll);
-        data.spendTokens[1] = address(weETHScroll);
+        data.spendTokens[0] = address(usdc);
+        data.spendTokens[1] = address(weETH);
         
         data.spendAmounts = new uint256[](2);
         data.spendAmounts[0] = data.usdcAmountInUsd - data.withdrawalAmountInUsd;  // Spend all except withdrawal amount
@@ -432,26 +432,26 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
     ) internal view {
         // Calculate expected USDC spend amount
         uint256 expectedUsdcAmount = debtManager.convertUsdToCollateralToken(
-            address(usdcScroll), 
+            address(usdc), 
             data.usdcAmountInUsd - data.withdrawalAmountInUsd
         );
         
         // Expected weETH spend amount
         uint256 expectedWeETHAmount = debtManager.convertUsdToCollateralToken(
-            address(weETHScroll), 
+            address(weETH), 
             data.weETHAmountInUsd
         );
         
         // Verify safe balances
-        assertEq(usdcScroll.balanceOf(address(safe)), data.withdrawalAmount);
-        assertEq(weETHScroll.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(address(safe)), data.withdrawalAmount);
+        assertEq(weETH.balanceOf(address(safe)), 0);
         
         // Verify settlement dispatcher balances
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), usdcBalanceBefore + expectedUsdcAmount);
-        assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), weETHBalanceBefore + expectedWeETHAmount);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), usdcBalanceBefore + expectedUsdcAmount);
+        assertEq(weETH.balanceOf(address(settlementDispatcherReap)), weETHBalanceBefore + expectedWeETHAmount);
         
         // Verify pending withdrawal still exists
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), data.withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), data.withdrawalAmount);
     }
 
 
@@ -460,19 +460,19 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256 usdcAmountInUsd = 50e6;
         uint256 weETHAmountInUsd = 50e6;
         
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
         
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount);
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), weETHAmount);
         
         // Switch to credit mode
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
@@ -482,7 +482,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -507,15 +507,15 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256 usdcAmountInUsd = 50e6;
         uint256 weETHAmountInUsd = 50e6;
         
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
         
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount);
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), weETHAmount);
         
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
@@ -529,7 +529,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -560,8 +560,8 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         // We'll add a third token (SCR token) for this test
         vm.startPrank(owner);
         IDebtManager.CollateralTokenConfig memory collateralTokenConfig = IDebtManager.CollateralTokenConfig({ltv: ltv, liquidationThreshold: liquidationThreshold, liquidationBonus: liquidationBonus});
-        debtManager.supportCollateralToken(address(scrToken), collateralTokenConfig);
-        debtManager.supportBorrowToken(address(scrToken), borrowApyPerSecond, minShares);
+        debtManager.supportCollateralToken(address(cashbackToken), collateralTokenConfig);
+        debtManager.supportBorrowToken(address(cashbackToken), borrowApyPerSecond, minShares);
         vm.stopPrank();
         
         // Setup three tokens with sample amounts
@@ -571,9 +571,9 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256 totalSpendInUsd = usdcAmountInUsd + weETHAmountInUsd + scrAmountInUsd;
         
         // Convert to token amounts and fund the safe
-        _fundSafeWithTokenAmount(address(usdcScroll), usdcAmountInUsd);
-        _fundSafeWithTokenAmount(address(weETHScroll), weETHAmountInUsd);
-        _fundSafeWithTokenAmount(address(scrToken), scrAmountInUsd);
+        _fundSafeWithTokenAmount(address(usdc), usdcAmountInUsd);
+        _fundSafeWithTokenAmount(address(weETH), weETHAmountInUsd);
+        _fundSafeWithTokenAmount(address(cashbackToken), scrAmountInUsd);
         
         // Store initial balances
         uint256[] memory initialBalances = _getSettlementDispatcherBalances();
@@ -586,7 +586,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -607,14 +607,14 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         
         // Verify safe balances are zero, not for scroll since there was cashback
-        assertEq(usdcScroll.balanceOf(address(safe)), 0);
-        assertEq(weETHScroll.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(address(safe)), 0);
+        assertEq(weETH.balanceOf(address(safe)), 0);
         
         // Verify settlement dispatcher received the tokens
         uint256[] memory expectedIncreases = new uint256[](3);
-        expectedIncreases[0] = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        expectedIncreases[1] = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
-        expectedIncreases[2] = debtManager.convertUsdToCollateralToken(address(scrToken), scrAmountInUsd);
+        expectedIncreases[0] = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+        expectedIncreases[1] = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
+        expectedIncreases[2] = debtManager.convertUsdToCollateralToken(address(cashbackToken), scrAmountInUsd);
         
         _verifySettlementDispatcherBalances(initialBalances, expectedIncreases);
     }
@@ -628,9 +628,9 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
     // Helper function to get settlement dispatcher balances for the three tokens
     function _getSettlementDispatcherBalances() internal view returns (uint256[] memory) {
         uint256[] memory balances = new uint256[](3);
-        balances[0] = usdcScroll.balanceOf(address(settlementDispatcherReap));
-        balances[1] = weETHScroll.balanceOf(address(settlementDispatcherReap));
-        balances[2] = scrToken.balanceOf(address(settlementDispatcherReap));
+        balances[0] = usdc.balanceOf(address(settlementDispatcherReap));
+        balances[1] = weETH.balanceOf(address(settlementDispatcherReap));
+        balances[2] = cashbackToken.balanceOf(address(settlementDispatcherReap));
         return balances;
     }
     
@@ -640,15 +640,15 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256[] memory expectedIncreases
     ) internal view {
         assertEq(
-            usdcScroll.balanceOf(address(settlementDispatcherReap)), 
+            usdc.balanceOf(address(settlementDispatcherReap)), 
             initialBalances[0] + expectedIncreases[0]
         );
         assertEq(
-            weETHScroll.balanceOf(address(settlementDispatcherReap)), 
+            weETH.balanceOf(address(settlementDispatcherReap)), 
             initialBalances[1] + expectedIncreases[1]
         );
         assertEq(
-            scrToken.balanceOf(address(settlementDispatcherReap)), 
+            cashbackToken.balanceOf(address(settlementDispatcherReap)),
             initialBalances[2] + expectedIncreases[2]
         );
     }
@@ -664,9 +664,9 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         uint256[] memory tokenAmounts
     ) {
         spendTokens = new address[](3);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
-        spendTokens[2] = address(scrToken);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
+        spendTokens[2] = address(cashbackToken);
         
         spendAmounts = new uint256[](3);
         spendAmounts[0] = usdcAmountInUsd;
@@ -674,9 +674,9 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         spendAmounts[2] = scrAmountInUsd;
         
         tokenAmounts = new uint256[](3);
-        tokenAmounts[0] = debtManager.convertUsdToCollateralToken(address(usdcScroll), usdcAmountInUsd);
-        tokenAmounts[1] = debtManager.convertUsdToCollateralToken(address(weETHScroll), weETHAmountInUsd);
-        tokenAmounts[2] = debtManager.convertUsdToCollateralToken(address(scrToken), scrAmountInUsd);
+        tokenAmounts[0] = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
+        tokenAmounts[1] = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
+        tokenAmounts[2] = debtManager.convertUsdToCollateralToken(address(cashbackToken), scrAmountInUsd);
         
         return (spendTokens, spendAmounts, tokenAmounts);
     }

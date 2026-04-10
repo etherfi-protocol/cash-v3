@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { SafeTestSetup, MessageHashUtils } from "../../SafeTestSetup.t.sol";
+import { ChainConfig } from "../../../utils/Utils.sol";
 import { EtherFiStakeModule, ModuleCheckBalance } from "../../../../src/modules/etherfi/EtherFiStakeModule.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { IL2SyncPool } from "../../../../src/interfaces/IL2SyncPool.sol";
@@ -13,18 +14,24 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
 
     EtherFiStakeModule public stakeModule;
 
-    IERC20 weth = IERC20(0x5300000000000000000000000000000000000004);
-    IERC20 weEth = IERC20(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
-    address syncPool = 0x750cf0fd3bc891D8D864B732BC4AD340096e5e68;
-    address ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+    IERC20 weth;
+    IERC20 weEth;
+    address syncPool;
     address randomERC20 = address(0x123); // Mock address for unsupported token
-    
+
     function setUp() public override {
+        ChainConfig memory _cc = getChainConfig();
+        vm.skip(_cc.syncPool == address(0));
+
         super.setUp();
+
+        weth = IERC20(chainConfig.weth);
+        weEth = IERC20(chainConfig.weETH);
+        syncPool = chainConfig.syncPool;
 
         vm.startPrank(owner);
 
-        stakeModule = new EtherFiStakeModule(address(dataProvider), syncPool, address(weth), address(weEth));
+        stakeModule = new EtherFiStakeModule(address(dataProvider), chainConfig.syncPool, chainConfig.weth, address(weETH));
 
         address[] memory modules = new address[](1);
         modules[0] = address(stakeModule);
@@ -52,7 +59,7 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             stakeModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
@@ -61,7 +68,7 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
         uint256 ethBalBefore = address(safe).balance;
         uint256 weEthBalBefore = weEth.balanceOf(address(safe));
         
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
         
         uint256 ethBalAfter = address(safe).balance;
         uint256 weEthBalAfter = weEth.balanceOf(address(safe));
@@ -139,14 +146,14 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             stakeModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
     }
     
     function test_deposit_revertsOnZeroMinReturn() public {
@@ -160,14 +167,14 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             stakeModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
     }
     
     function test_deposit_revertsOnInsufficientBalance_ETH() public {
@@ -181,14 +188,14 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             stakeModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
     }
     
     function test_deposit_revertsOnInsufficientBalance_WETH() public {
@@ -223,7 +230,7 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             stakeModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         // Sign with a different private key
@@ -232,7 +239,7 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
     }
     
     function test_deposit_revertsOnNonAdminSigner() public {
@@ -250,14 +257,14 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             stakeModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(nonAdminPk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(ModuleBase.OnlySafeAdmin.selector);
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, nonAdmin, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, nonAdmin, signature);
     }
     
     function test_deposit_revertsOnInsufficientReturnAmount() public {
@@ -268,7 +275,7 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
         // Mock the syncPool.deposit call to not mint enough weETH
         vm.mockCall(
             syncPool,
-            abi.encodeWithSelector(IL2SyncPool.deposit.selector, ETH, amount, minReturn),
+            abi.encodeWithSelector(IL2SyncPool.deposit.selector, eth, amount, minReturn),
             abi.encode()
         );
         
@@ -291,14 +298,14 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             stakeModule.getNonce(address(safe)),
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectRevert(EtherFiStakeModule.InsufficientReturnAmount.selector);
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
     }
     
     function test_deposit_incrementsNonce() public {
@@ -314,13 +321,13 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             nonceBefore,
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
         
         uint256 nonceAfter = stakeModule.getNonce(address(safe));
         assertEq(nonceAfter, nonceBefore + 1);
@@ -339,18 +346,18 @@ contract EtherFiStakeModuleTest is SafeTestSetup {
             address(stakeModule),
             nonce,
             address(safe),
-            abi.encode(ETH, amount, minReturn)
+            abi.encode(eth, amount, minReturn)
         )).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
         // First deposit should succeed
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
         
         // Second deposit with the same signature should fail because nonce has increased
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        stakeModule.deposit(address(safe), ETH, amount, minReturn, owner1, signature);
+        stakeModule.deposit(address(safe), eth, amount, minReturn, owner1, signature);
     }
     
     function test_constructor_setsCorrectValues() public view {

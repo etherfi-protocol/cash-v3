@@ -25,7 +25,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
 
         // remove all supplies from debt manager
         vm.startPrank(owner);
-        debtManager.withdrawBorrowToken(address(usdcScroll), debtManager.supplierBalance(owner, address(usdcScroll)));
+        debtManager.withdrawBorrowToken(address(usdc), debtManager.supplierBalance(owner, address(usdc)));
         vm.stopPrank();
 
         // Setup for credit mode
@@ -33,12 +33,12 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         // Add collateral and supply tokens
-        deal(address(weETHScroll), address(safe), collateralAmount);
-        deal(address(usdcScroll), address(owner), 1000e6);
+        deal(address(weETH), address(safe), collateralAmount);
+        deal(address(usdc), address(owner), 1000e6);
         
         vm.startPrank(owner);
-        IERC20(address(usdcScroll)).approve(address(debtManager), 1000e6);
-        debtManager.supply(owner, address(usdcScroll), 1000e6);
+        IERC20(address(usdc)).approve(address(debtManager), 1000e6);
+        debtManager.supply(owner, address(usdc), 1000e6);
         vm.stopPrank();
 
         // Setup a borrow amount
@@ -47,11 +47,11 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
 
     // Test getUserCollateralForToken external function
     function test_getUserCollateralForToken() public view {
-        (uint256 tokenAmount, uint256 usdAmount) = debtManager.getUserCollateralForToken(address(safe), address(weETHScroll));
+        (uint256 tokenAmount, uint256 usdAmount) = debtManager.getUserCollateralForToken(address(safe), address(weETH));
         
         // Verify returned amounts
         assertEq(tokenAmount, collateralAmount, "Token amount should match the collateral amount");
-        uint256 expectedUsdAmount = debtManager.convertCollateralTokenToUsd(address(weETHScroll), collateralAmount);
+        uint256 expectedUsdAmount = debtManager.convertCollateralTokenToUsd(address(weETH), collateralAmount);
         assertEq(usdAmount, expectedUsdAmount, "USD amount should match the converted collateral value");
     }
 
@@ -66,7 +66,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
     // Test getUserCurrentState comprehensive function
     function test_getUserCurrentState() public {
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
@@ -86,15 +86,15 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         
         // Verify collateral data
         assertEq(totalCollaterals.length, 1, "Should have one collateral token");
-        assertEq(totalCollaterals[0].token, address(weETHScroll), "Collateral token should be weETHScroll");
+        assertEq(totalCollaterals[0].token, address(weETH), "Collateral token should be weETH");
         assertEq(totalCollaterals[0].amount, collateralAmount, "Collateral amount should match");
         
-        uint256 expectedCollateralInUsd = debtManager.convertCollateralTokenToUsd(address(weETHScroll), collateralAmount);
+        uint256 expectedCollateralInUsd = debtManager.convertCollateralTokenToUsd(address(weETH), collateralAmount);
         assertEq(totalCollateralInUsd, expectedCollateralInUsd, "Total collateral in USD should match");
         
         // Verify borrowing data
         assertEq(borrowings.length, 1, "Should have one borrowed token");
-        assertEq(borrowings[0].token, address(usdcScroll), "Borrowed token should be USDC");
+        assertEq(borrowings[0].token, address(usdc), "Borrowed token should be USDC");
         assertApproxEqAbs(borrowings[0].amount, borrowAmt, 1, "Borrowed amount should match");
         assertApproxEqAbs(totalBorrowings, borrowAmt, 1, "Total borrowings should match");
     }
@@ -103,7 +103,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
     function test_getCollateralValueInUsd() public {
         // Test with a single collateral token
         uint256 collateralValue = debtManager.getCollateralValueInUsd(address(safe));
-        uint256 expectedValue = debtManager.convertCollateralTokenToUsd(address(weETHScroll), collateralAmount);
+        uint256 expectedValue = debtManager.convertCollateralTokenToUsd(address(weETH), collateralAmount);
         assertEq(collateralValue, expectedValue, "Collateral value should match expected USD value");
         
         // Add a second collateral token
@@ -158,7 +158,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         
         // Borrow some tokens (but less than max)
         vm.prank(address(safe));
-        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), borrowAmt);
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
         
         // Position should still be healthy
         debtManager.ensureHealth(address(safe));
@@ -168,10 +168,10 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         // Borrow maximum amount
         uint256 maxBorrowAmount = debtManager.getMaxBorrowAmount(address(safe), true);
         vm.prank(address(safe));
-        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), maxBorrowAmount);
+        debtManager.borrow(BinSponsor.Reap, address(usdc), maxBorrowAmount);
         
         // Manipulate price to make position unhealthy
-        MockPriceProvider mockPriceProvider = new MockPriceProvider(1500e6, address(usdcScroll)); // Half the original price
+        MockPriceProvider mockPriceProvider = new MockPriceProvider(1500e6, address(usdc)); // Half the original price
         vm.prank(owner);
         dataProvider.setPriceProvider(address(mockPriceProvider));
         
@@ -248,7 +248,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         assertEq(supplies.length, 2, "Should have two supplied tokens");
         
         // Check total value
-        uint256 usdcValue = debtManager.convertCollateralTokenToUsd(address(usdcScroll), 1000e6);
+        uint256 usdcValue = debtManager.convertCollateralTokenToUsd(address(usdc), 1000e6);
         uint256 secondTokenValue = debtManager.convertCollateralTokenToUsd(address(secondToken), secondTokenAmount);
 
         uint256 expectedTotal = usdcValue + secondTokenValue;
@@ -260,7 +260,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         bool foundSecondToken = false;
         
         for (uint256 i = 0; i < supplies.length; i++) {
-            if (supplies[i].token == address(usdcScroll)) {
+            if (supplies[i].token == address(usdc)) {
                 foundUsdc = true;
                 assertEq(supplies[i].amount, 1000e6, "USDC amount should match");
             } else if (supplies[i].token == address(secondToken)) {
@@ -280,7 +280,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         
         // Borrow half
         vm.prank(address(safe));
-        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), initialCapacity / 2);
+        debtManager.borrow(BinSponsor.Reap, address(usdc), initialCapacity / 2);
         
         // Check remaining capacity
         uint256 remainingCapacity = debtManager.remainingBorrowingCapacityInUSD(address(safe));
@@ -288,7 +288,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         
         // Borrow remaining amount
         vm.prank(address(safe));
-        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), remainingCapacity);
+        debtManager.borrow(BinSponsor.Reap, address(usdc), remainingCapacity);
         
         // Should have no remaining capacity
         uint256 finalCapacity = debtManager.remainingBorrowingCapacityInUSD(address(safe));
@@ -341,7 +341,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         assertEq(collateralTokens.length, 2, "Should have two collateral tokens");
         
         // Check total value
-        uint256 weEthValue = debtManager.convertCollateralTokenToUsd(address(weETHScroll), collateralAmount);
+        uint256 weEthValue = debtManager.convertCollateralTokenToUsd(address(weETH), collateralAmount);
         uint256 secondTokenValue = debtManager.convertCollateralTokenToUsd(secondToken, secondTokenAmount);
         uint256 expectedTotal = weEthValue + secondTokenValue;
         
@@ -352,7 +352,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         bool foundSecondToken = false;
         
         for (uint256 i = 0; i < collateralTokens.length; i++) {
-            if (collateralTokens[i].token == address(weETHScroll)) {
+            if (collateralTokens[i].token == address(weETH)) {
                 foundWeEth = true;
                 assertEq(collateralTokens[i].amount, collateralAmount, "weETH amount should match");
             } else if (collateralTokens[i].token == secondToken) {

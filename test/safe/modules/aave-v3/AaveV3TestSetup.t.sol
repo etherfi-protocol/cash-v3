@@ -7,20 +7,19 @@ import { Test } from "forge-std/Test.sol";
 
 import { AaveV3Module, ModuleBase, ModuleCheckBalance } from "../../../../src/modules/aave-v3/AaveV3Module.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
+import { ChainConfig } from "../../../utils/Utils.sol";
 
 contract AaveV3TestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
     AaveV3Module public aaveV3Module;
-    address public aaveV3PoolScroll = 0x11fCfe756c05AD438e312a7fd934381537D3cFfe;
-    address public aaveV3IncentivesManagerScroll = 0xa3f3100C4f1D0624DB9DB97b40C13885Ce297799;
-    address public aaveWrappedTokenGateway = 0xE79Ca44408Dae5a57eA2a9594532f1E84d2edAa4;
-    address ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     function setUp() public virtual override {
+        ChainConfig memory _cc = getChainConfig();
+        vm.skip(_cc.aaveV3Pool == address(0));
         super.setUp();
 
-        aaveV3Module = new AaveV3Module(aaveV3PoolScroll, aaveV3IncentivesManagerScroll, address(aaveWrappedTokenGateway), address(dataProvider));
+        aaveV3Module = new AaveV3Module(chainConfig.aaveV3Pool, chainConfig.aaveV3IncentivesManager, chainConfig.aaveWrappedTokenGateway, address(dataProvider));
 
         address[] memory modules = new address[](1);
         modules[0] = address(aaveV3Module);

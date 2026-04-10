@@ -24,9 +24,6 @@ contract CCTPAdapter is BridgeAdapterBase {
      */
     event BridgeViaCCTP(address token, uint256 amount, uint32 destinationDomain, bytes32 mintRecipient);
 
-    // https://developers.circle.com/cctp/evm-smart-contracts
-    uint32 public constant DEST_DOMAIN_ETHEREUM = 0;
-
     /**
      * @notice Bridges tokens using the CCTP protocol
      * @dev Executes the bridge operation through CCTP's depositForBurn function
@@ -45,8 +42,8 @@ contract CCTPAdapter is BridgeAdapterBase {
         uint256 /*maxSlippage*/,
         bytes calldata additionalData
     ) external payable override {
-        (address tokenMessenger, uint256 maxFee, uint32 minFinalityThreshold) = 
-            abi.decode(additionalData, (address, uint256, uint32));
+        (uint32 destDomain, address tokenMessenger, uint256 maxFee, uint32 minFinalityThreshold) = 
+            abi.decode(additionalData, (uint32, address, uint256, uint32));
 
         IERC20(token).forceApprove(tokenMessenger, amount);
 
@@ -54,7 +51,7 @@ contract CCTPAdapter is BridgeAdapterBase {
 
         ICCTPTokenMessenger(tokenMessenger).depositForBurn(
             amount,
-            DEST_DOMAIN_ETHEREUM,
+            destDomain,
             mintRecipient,
             token,
             bytes32(0),
@@ -62,7 +59,7 @@ contract CCTPAdapter is BridgeAdapterBase {
             minFinalityThreshold
         );
 
-        emit BridgeViaCCTP(token, amount, DEST_DOMAIN_ETHEREUM, mintRecipient);
+        emit BridgeViaCCTP(token, amount, destDomain, mintRecipient);
     }
 
     /**
