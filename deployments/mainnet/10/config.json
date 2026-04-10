@@ -113,8 +113,34 @@
   "priceProvider": {
     "tokensWithPrice": [
       "usdc", "usdt", "weETH", "weth", "eurc", "wHYPE", "beHYPE", "liquidReserve",
-      "fraxusd", "liquidEth", "liquidBtc", "liquidUsd", "ebtc", "eUSD"
-    ]
+      "fraxusd", "liquidEth", "liquidBtc", "liquidUsd", "ebtc", "eUSD",
+      "sethfi", "ethfi"
+    ],
+    "oracles": {
+      "usdc":           { "oracle": "0x16a9FA2FDa030272Ce99B29CF780dFA30361E0f3", "type": "chainlink", "decimals": 8 },
+      "usdt":           { "oracle": "0xECef79E109e997bCA29c1c0897ec9d7b03647F5E", "type": "chainlink", "decimals": 8 },
+      "weETH":          { "oracle": "0xb4479d436DDa5c1A79bD88D282725615202406E3", "type": "chainlink", "decimals": 18 },
+      "weth":           { "oracle": "0x13e3Ee699D1909E989722E753853AE30b17e08c5", "type": "chainlink", "decimals": 8 },
+      "ETH":            { "oracle": "0x13e3Ee699D1909E989722E753853AE30b17e08c5", "type": "chainlink", "decimals": 8 },
+      "fraxusd":        { "oracle": "0x8BF42811876e1B692d0E70F61b80e1fbc68Ef1bf", "type": "chainlink", "decimals": 18 },
+      "OP":             { "oracle": "0x0D276FC14719f9292D5C1eA2198673d1f4269246", "type": "chainlink", "decimals": 8 },
+      "WBTC":           { "oracle": "0xD702DD976Fb76Fffc2D3963D037dfDae5b04E593", "type": "chainlink", "decimals": 8 },
+      "liquidEth":      { "oracle": "0x0d05D94a5F1E76C18fbeB7A13d17C8a314088198", "type": "accountant", "decimals": 18 },
+      "liquidBtc":      { "oracle": "0xEa23aC6D7D11f6b181d6B98174D334478ADAe6b0", "type": "accountant", "decimals": 8 },
+      "liquidUsd":      { "oracle": "0xc315D6e14DDCDC7407784e2Caf815d131Bc1D3E7", "type": "accountant", "decimals": 6 },
+      "ebtc":           { "oracle": "0x1b293DC39F94157fA0D1D36d7e0090C8B8B8c13F", "type": "accountant", "decimals": 8 },
+      "eUSD":           { "oracle": "0xEB440B36f61Bf62E0C54C622944545f159C3B790", "type": "accountant", "decimals": 18 },
+      "liquidReserve":  { "oracle": "0x58dDf77A329CcbE2F4C2114C64ed9E12Ec8a1356", "type": "chainlink", "decimals": 8 },
+      "sethfi":         { "oracle": "0x8454985aA5bc30162aC258D3CCf89E9BA6604d99", "type": "pyth", "decimals": 16 },
+      "ethfi":          { "oracle": "0x3E377b4e02bc848Ade3c289477F21441b7e014C2", "type": "pyth", "decimals": 16 },
+      "wHYPE":          { "oracle": "0x1f860581483253B81ECB0E89b2b978A202de553d", "type": "pyth", "decimals": 16 },
+      "beHYPE":         { "oracle": "0x2ACd77fefED51Fa80FBF1520701c73Ac506D4381", "type": "pyth", "decimals": 16 },
+      "eurc":           { "oracle": "0x62779cdAadd1eB782eb4fF534739B55763A48385", "type": "pyth", "decimals": 16 }
+    }
+  },
+  "stargateModule": {
+    "stargatePool": { "usdc": "0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0" },
+    "oft": ["weETH", "ethfi", "wHYPE", "beHYPE", "eurc"]
   },
   "settlementDispatchers": {
     "fraxConfig": {
