@@ -289,14 +289,20 @@ contract UpgradeSettlementDispatcherV2 is Utils, GnosisHelpers, StdCheats {
             destRecipient: usdcRecipient,
             stargate: address(0),
             useCanonicalBridge: true,
-            minGasLimit: 0
+            minGasLimit: 0,
+            isOFT: false,
+            remoteToken: address(0),
+            useCCTP: false
         });
         destDatas[1] = SettlementDispatcherV2.DestinationData({
             destEid: 0,
             destRecipient: usdtRecipient,
             stargate: address(0),
             useCanonicalBridge: true,
-            minGasLimit: 0
+            minGasLimit: 0,
+            isOFT: false,
+            remoteToken: address(0),
+            useCCTP: false
         });
     }
 }

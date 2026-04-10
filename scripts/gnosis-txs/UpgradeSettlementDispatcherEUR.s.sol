@@ -67,7 +67,9 @@ contract UpgradeSettlementDispatcherEUR is Utils, GnosisHelpers, Test {
             stargate: address(EURC),
             useCanonicalBridge: false,
             minGasLimit: 0,
-            isOFT: true
+            isOFT: true,
+            remoteToken: address(0),
+            useCCTP: false
         });
 
         settlementDispatcherRainImpl = address(new SettlementDispatcherV2(BinSponsor.Rain, dataProvider));

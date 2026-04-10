@@ -11,6 +11,7 @@ import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.sol";
 import { FraxModule } from "../../../../src/modules/frax/FraxModule.sol";
 import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
+import { ChainConfig } from "../../../utils/Utils.sol";
 
 interface IFraxCustodian {
     function maxDeposit(address recipient) external view returns (uint256);
@@ -22,15 +23,21 @@ contract FraxModuleTest is SafeTestSetup {
 
     FraxModule fraxModule;
 
-    IERC20 usdc = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
-    IERC20 fraxusd = IERC20(0x397F939C3b91A74C321ea7129396492bA9Cdce82);
-    address custodian = 0x05bF905356fbeA7E59500f904b908402dB7A53DD;
-    address remoteHop = 0xF6f45CCB5E85D1400067ee66F9e168f83e86124E;
+    IERC20 fraxusd;
+    address custodian;
+    address remoteHop;
 
     address depositAddress = 0xBdeb781661142740328fDefc1D9ecd03778fd810; //Fetched from Frax API for testing
 
     function setUp() public override {
+        ChainConfig memory _cc = getChainConfig();
+        vm.skip(_cc.fraxusd == address(0));
+
         super.setUp();
+
+        fraxusd = IERC20(chainConfig.fraxusd);
+        custodian = chainConfig.fraxCustodian;
+        remoteHop = chainConfig.fraxRemoteHop;
 
         vm.startPrank(owner);
 
