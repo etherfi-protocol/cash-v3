@@ -95,7 +95,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         );
 
         uint256 cashbackInUsdc = 1e6;
-        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackInUsdc);
+        uint256 cashbackInToken = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackInUsdc);
 
         uint256 safeScrBalBefore = cashbackToken.balanceOf(address(safe));
 
@@ -103,11 +103,11 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInScroll, cashbackInUsdc, 0, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInToken, cashbackInUsdc, 0, true);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 safeScrBalAfter = cashbackToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
+        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInToken, 1000);
     }
 
     function test_processCashback_providesCashback_inCreditFlow() public {
@@ -128,7 +128,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         );
 
         uint256 cashbackInUsdc = 1e6;
-        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackInUsdc);
+        uint256 cashbackInToken = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackInUsdc);
 
         uint256 safeScrBalBefore = cashbackToken.balanceOf(address(safe));
 
@@ -136,11 +136,11 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInScroll, cashbackInUsdc, 0, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInToken, cashbackInUsdc, 0, true);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 safeScrBalAfter = cashbackToken.balanceOf(address(safe));
-        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInScroll, 1000);
+        assertApproxEqAbs(safeScrBalAfter - safeScrBalBefore, cashbackInToken, 1000);
     }
 
     function test_processCashback_paysPending_whenFundsBecomesAvailable() public {
@@ -157,7 +157,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
             0
         );
 
-        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackAmountUsd);
+        uint256 cashbackInToken = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackAmountUsd);
 
         // Check initial state
         assertEq(cashModule.getPendingCashbackForToken(address(safe), address(cashbackToken)), 0);
@@ -168,7 +168,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         // First spend - creates pending cashback
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInScroll, cashbackAmountUsd, 0, false);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInToken, cashbackAmountUsd, 0, false);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify pending cashback
@@ -184,9 +184,9 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         // Second spend - should clear pending and give new cashback
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(cashbackToken), cashbackInScroll, cashbackAmountUsd);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(cashbackToken), cashbackInToken, cashbackAmountUsd);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInScroll, cashbackAmountUsd, 0, true);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInToken, cashbackAmountUsd, 0, true);
 
         // Create new arrays to avoid stack issues
         (address[] memory spendTokens2, uint256[] memory spendAmounts2) = _createSpendArrays(address(usdc), spendAmt);
@@ -194,7 +194,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
         // Verify results
         assertEq(cashModule.getPendingCashbackForToken(address(safe), address(cashbackToken)), 0);
-        assertApproxEqAbs(cashbackToken.balanceOf(address(safe)) - safeScrBalBefore, 2 * cashbackInScroll, 1000);
+        assertApproxEqAbs(cashbackToken.balanceOf(address(safe)) - safeScrBalBefore, 2 * cashbackInToken, 1000);
     }
 
     function test_processCashback_clearsPendingButDoesNotGiveCurrentCashback_whenInsufficientFundsForTotal() public {
@@ -212,7 +212,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
             0
         );
 
-        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackAmountUsd);
+        uint256 cashbackInToken = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackAmountUsd);
 
         assertEq(cashModule.getPendingCashbackForToken(address(safe), address(cashbackToken)), 0);
         uint256 safeScrBalBefore = cashbackToken.balanceOf(address(safe));
@@ -222,7 +222,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         // First spend - creates pending
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInScroll, cashbackAmountUsd, 0, false);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInToken, cashbackAmountUsd, 0, false);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertEq(cashbackToken.balanceOf(address(safe)), safeScrBalBefore);
@@ -230,22 +230,22 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
         // Add funds for only one cashback
         deal(address(usdc), address(safe), spendAmt);
-        deal(address(cashbackToken), address(cashbackDispatcher), cashbackInScroll);
+        deal(address(cashbackToken), address(cashbackDispatcher), cashbackInToken);
 
         safeScrBalBefore = cashbackToken.balanceOf(address(safe));
 
         // Second spend - should clear pending but not give new cashback
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(cashbackToken), cashbackInScroll, cashbackAmountUsd);
+        emit CashEventEmitter.PendingCashbackCleared(address(safe), address(cashbackToken), cashbackInToken, cashbackAmountUsd);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInScroll, cashbackAmountUsd, 0, false);
+        emit CashEventEmitter.Cashback(address(safe), spendAmt, address(safe), address(cashbackToken), cashbackInToken, cashbackAmountUsd, 0, false);
 
         (address[] memory spendTokens2, uint256[] memory spendAmounts2) = _createSpendArrays(address(usdc), spendAmt);
         cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens2, spendAmounts2, cashbacks);
 
         assertEq(cashModule.getPendingCashbackForToken(address(safe), address(cashbackToken)), cashbackAmountUsd);
-        assertApproxEqAbs(cashbackToken.balanceOf(address(safe)) - safeScrBalBefore, cashbackInScroll, 1000);
+        assertApproxEqAbs(cashbackToken.balanceOf(address(safe)) - safeScrBalBefore, cashbackInToken, 1000);
     }
 
     // Rest of the test functions remain the same...
@@ -420,8 +420,8 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertEq(cashModule.getPendingCashbackForToken(address(safe), address(cashbackToken)), cashbackAmountUsd);
 
         // Now add tokens to the dispatcher
-        uint256 cashbackInScroll = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackAmountUsd);
-        deal(address(cashbackToken), address(cashbackDispatcher), cashbackInScroll);
+        uint256 cashbackInToken = cashbackDispatcher.convertUsdToCashbackToken(address(cashbackToken), cashbackAmountUsd);
+        deal(address(cashbackToken), address(cashbackDispatcher), cashbackInToken);
 
         // Test clearing the pending cashback directly
         vm.prank(address(cashModule));
@@ -432,7 +432,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertTrue(success, "Should successfully clear cashback");
 
         // Check balance was transferred to safe
-        assertApproxEqAbs(cashbackToken.balanceOf(address(safe)), cashbackInScroll, 1000, "Safe should receive tokens");
+        assertApproxEqAbs(cashbackToken.balanceOf(address(safe)), cashbackInToken, 1000, "Safe should receive tokens");
     }
 
     function test_clearPendingCashback_noPendingCashback() public {
