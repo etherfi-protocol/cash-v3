@@ -7,6 +7,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 
+import { IERC1271 } from "../interfaces/IOneInch.sol";
 import { IEtherFiHook } from "../interfaces/IEtherFiHook.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
@@ -23,10 +24,31 @@ import { EtherFiSafeBase } from "./EtherFiSafeBase.sol";
  * @dev Combines ModuleManager and MultiSig functionality with EIP-712 signature verification
  * @author ether.fi
  */
-contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSig{
+contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSig, IERC1271 {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
+
+    /// @custom:storage-location erc7201:etherfi.storage.ERC1271
+    struct ERC1271Storage {
+        /// @notice Order hashes authorized by modules for ERC-1271 validation
+        mapping(bytes32 orderHash => bool authorized) authorizedOrderHashes;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.ERC1271")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant ERC1271StorageLocation = 0x95f3323d4da52a4232223e5d284728adc716e07261fde28fdddfa1e90df38000;
+
+    function _getERC1271Storage() internal pure returns (ERC1271Storage storage $) {
+        assembly {
+            $.slot := ERC1271StorageLocation
+        }
+    }
+
+    /// @notice Emitted when a module authorizes an order hash
+    event OrderHashAuthorized(address indexed module, bytes32 indexed orderHash);
+
+    /// @notice Emitted when a module revokes an order hash
+    event OrderHashRevoked(address indexed module, bytes32 indexed orderHash);
 
     /**
      * @notice Contract constructor
@@ -230,6 +252,44 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
     function useNonce() external returns (uint256) {
         if (!isModuleEnabled(msg.sender)) revert OnlyModules();
         return _useNonce();
+    }
+
+    // ══════════════════════════════════════════════
+    //  ERC-1271: Smart Contract Signature Validation
+    // ══════════════════════════════════════════════
+
+    /**
+     * @notice Authorizes an order hash for ERC-1271 signature validation
+     * @param hash The order hash to authorize
+     * @custom:throws OnlyModules If the caller is not an enabled module
+     */
+    function authorizeOrderHash(bytes32 hash) external {
+        if (!isModuleEnabled(msg.sender)) revert OnlyModules();
+        _getERC1271Storage().authorizedOrderHashes[hash] = true;
+        emit OrderHashAuthorized(msg.sender, hash);
+    }
+
+    /**
+     * @notice Revokes a previously authorized order hash
+     * @param hash The order hash to revoke
+     * @custom:throws OnlyModules If the caller is not an enabled module
+     */
+    function revokeOrderHash(bytes32 hash) external {
+        if (!isModuleEnabled(msg.sender)) revert OnlyModules();
+        delete _getERC1271Storage().authorizedOrderHashes[hash];
+        emit OrderHashRevoked(msg.sender, hash);
+    }
+
+    /**
+     * @notice ERC-1271 signature validation
+     * @param hash The hash to validate
+     * @return magicValue 0x1626ba7e if authorized, 0xffffffff otherwise
+     */
+    function isValidSignature(bytes32 hash, bytes calldata) external view override returns (bytes4) {
+        if (_getERC1271Storage().authorizedOrderHashes[hash]) {
+            return 0x1626ba7e;
+        }
+        return 0xffffffff;
     }
 
     /**
