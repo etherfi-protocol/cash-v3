@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import {OpenOceanSwapDescription, IOpenOceanCaller, IOpenOceanRouter} from "../../interfaces/IOpenOcean.sol";
+import {OpenOceanSwapDescription, OpenOceanSimpleSwapDescription, IOpenOceanCaller, IOpenOceanRouter} from "../../interfaces/IOpenOcean.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
@@ -43,6 +43,13 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
     error InvalidSignatures();
     /// @notice Thrown when slippage from OpenOcean is too high
     error SlippageTooHigh();
+    /// @notice Thrown when the router calldata uses an unrecognised function selector
+    error UnsupportedRouterSelector();
+
+    /// @dev Function selector for IOpenOceanRouter.swap (10-field description)
+    bytes4 private constant SWAP_SELECTOR = 0x90411a32;
+    /// @dev Function selector for IOpenOceanRouter.simpleSwap (9-field description)
+    bytes4 private constant SIMPLE_SWAP_SELECTOR = 0x0a9704d5;
 
     /**
      * @notice Initializes the OpenOceanSwapModule
@@ -245,7 +252,12 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
      * @param fromAssetAmount Amount of the source token
      * @param minToAssetAmount Minimum expected amount of destination token
      * @param data Additional swap data
-     * @dev Decodes the provided data and constructs the OpenOcean swap description
+     * @dev Branches on the router function selector to decode with the matching
+     *      struct layout.  `swap` uses the 10-field OpenOceanSwapDescription
+     *      (includes `guaranteedAmount`); `simpleSwap` uses the 9-field
+     *      OpenOceanSimpleSwapDescription (omits `guaranteedAmount`).
+     *      Using the wrong struct causes the ABI decoder to misinterpret
+     *      offsets and Panic(0x41).
      */
     function _validateSwapData(
         address safe,
@@ -255,15 +267,32 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
         uint256 minToAssetAmount,
         bytes calldata data
     ) internal pure {
-        (, OpenOceanSwapDescription memory swapDesc) = abi.decode(data[4:], (address, OpenOceanSwapDescription));
+        bytes4 selector = bytes4(data[:4]);
 
-        if (
-            swapDesc.srcToken != IERC20(fromAsset) ||
-            swapDesc.dstToken != IERC20(toAsset) || 
-            swapDesc.dstReceiver != payable(safe) || 
-            swapDesc.amount != fromAssetAmount 
-        ) revert InvalidInput();
+        if (selector == SIMPLE_SWAP_SELECTOR) {
+            (, OpenOceanSimpleSwapDescription memory desc,) = abi.decode(data[4:], (address, OpenOceanSimpleSwapDescription, IOpenOceanCaller.CallDescription[]));
+            _checkSwapFields(address(desc.srcToken), address(desc.dstToken), desc.dstReceiver, desc.amount, desc.minReturnAmount, safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount);
+        } else if (selector == SWAP_SELECTOR) {
+            (, OpenOceanSwapDescription memory desc,) = abi.decode(data[4:], (address, OpenOceanSwapDescription, IOpenOceanCaller.CallDescription[]));
+            _checkSwapFields(address(desc.srcToken), address(desc.dstToken), desc.dstReceiver, desc.amount, desc.minReturnAmount, safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount);
+        } else {
+            revert UnsupportedRouterSelector();
+        }
+    }
 
-        if (swapDesc.minReturnAmount < minToAssetAmount) revert SlippageTooHigh();
+    function _checkSwapFields(
+        address srcToken,
+        address dstToken,
+        address dstReceiver,
+        uint256 amount,
+        uint256 minReturnAmount,
+        address safe,
+        address fromAsset,
+        address toAsset,
+        uint256 fromAssetAmount,
+        uint256 minToAssetAmount
+    ) private pure {
+        if (srcToken != fromAsset || dstToken != toAsset || dstReceiver != safe || amount != fromAssetAmount) revert InvalidInput();
+        if (minReturnAmount < minToAssetAmount) revert SlippageTooHigh();
     }
 }

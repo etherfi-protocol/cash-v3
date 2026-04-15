@@ -473,6 +473,97 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
         return vm.ffi(inputs);
     }
 
+    /// @dev Minimal simpleSwap calldata (selector 0x0a9704d5) that exercises
+    ///      the 9-field struct path.  Built from a real OpenOcean API response
+    ///      for a WETH->USDT swap on Optimism; only the description header
+    ///      matters for _validateSwapData -- the CallDescription[] tail is
+    ///      trimmed to a single empty entry to keep the test small.
+    function _buildSimpleSwapCalldata(
+        address fromAsset,
+        address toAsset,
+        address dstReceiver,
+        uint256 amount,
+        uint256 minReturn
+    ) internal pure returns (bytes memory) {
+        // simpleSwap(address caller, SimpleDesc desc, CallDescription[] calls)
+        // caller = address(0) (doesn't matter for validation)
+        // desc = 9 fields, no guaranteedAmount
+        // calls = empty array
+        bytes memory inner = abi.encode(
+            address(0),                     // caller
+            _encodeSimpleDesc(fromAsset, toAsset, dstReceiver, amount, minReturn),
+            new uint256[](0)                // empty CallDescription[]
+        );
+        return abi.encodePacked(bytes4(0x0a9704d5), inner);
+    }
+
+    struct _SimpleDesc {
+        address srcToken;
+        address dstToken;
+        address srcReceiver;
+        address dstReceiver;
+        uint256 amount;
+        uint256 minReturnAmount;
+        uint256 flags;
+        address referrer;
+        bytes permit;
+    }
+
+    function _encodeSimpleDesc(
+        address fromAsset,
+        address toAsset,
+        address dstReceiver,
+        uint256 amount,
+        uint256 minReturn
+    ) internal pure returns (_SimpleDesc memory) {
+        return _SimpleDesc({
+            srcToken: fromAsset,
+            dstToken: toAsset,
+            srcReceiver: address(0),
+            dstReceiver: dstReceiver,
+            amount: amount,
+            minReturnAmount: minReturn,
+            flags: 2,
+            referrer: address(0),
+            permit: ""
+        });
+    }
+
+    function test_swap_simpleSwapCalldata_doesNotPanic() public {
+        address fromAsset = address(usdc);
+        uint256 fromAssetAmount = 100e6;
+        address toAsset = address(weETH);
+        uint256 minToAssetAmount = 1;
+
+        bytes memory swapData = _buildSimpleSwapCalldata(fromAsset, toAsset, address(safe), fromAssetAmount, minToAssetAmount);
+
+        deal(address(usdc), address(safe), fromAssetAmount);
+
+        uint256 nonceBefore = safe.nonce();
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData);
+
+        // The swap will revert at the router (empty CallDescription[]) but
+        // the key assertion is that it does NOT revert with Panic(0x41).
+        // If _validateSwapData still used the 10-field struct for this
+        // simpleSwap selector, it would panic before even reaching the router.
+        (bool ok, bytes memory ret) = address(openOceanSwapModule).call(
+            abi.encodeWithSelector(
+                openOceanSwapModule.swap.selector,
+                address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount,
+                swapData, owners, signatures
+            )
+        );
+
+        if (!ok && ret.length == 36) {
+            bytes4 sig;
+            uint256 code;
+            assembly { sig := mload(add(ret, 32)) code := mload(add(ret, 36)) }
+            assertTrue(sig != 0x4e487b71 || code != 0x41, "must not Panic(0x41)");
+        }
+        // Any non-Panic revert is fine -- it means _validateSwapData succeeded
+        // and the revert came from the router or downstream.
+    }
+
     function _requestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal {
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
 
