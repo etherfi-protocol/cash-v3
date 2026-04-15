@@ -50,5 +50,19 @@ interface IEtherFiSafe {
      */
     function useNonce() external returns (uint256);
 
-    function isAdmin(address account) external view returns (bool); 
+    function isAdmin(address account) external view returns (bool);
+
+    /**
+     * @notice Authorizes an order hash for ERC-1271 signature validation
+     * @dev Can only be called by enabled modules
+     * @param hash The order hash to authorize
+     */
+    function authorizeOrderHash(bytes32 hash) external;
+
+    /**
+     * @notice Revokes a previously authorized order hash
+     * @dev Can only be called by enabled modules
+     * @param hash The order hash to revoke
+     */
+    function revokeOrderHash(bytes32 hash) external;
 }
