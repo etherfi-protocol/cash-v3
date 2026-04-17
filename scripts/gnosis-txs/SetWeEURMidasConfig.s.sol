@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { stdJson } from "forge-std/StdJson.sol";
 import { Test } from "forge-std/Test.sol";
-import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
@@ -13,15 +12,12 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
 contract SetWeEURMidasConfig is GnosisHelpers, Utils, Test {
-    address constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-
-    bytes32 public constant SALT_MIDAS_MODULE = keccak256("DeployOptimismProdModules.MidasModule");
 
     address constant WEEUR_TOKEN = 0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13;
     address constant PRICE_ORACLE = 0x01b910C1aa51cdC4a2a84d76CB255C4974Bf8A19;
 
-    address midasModule = CREATE3.predictDeterministicAddress(SALT_MIDAS_MODULE, NICKS_FACTORY);
+    address constant midasModule = 0x2D43400058cE6810916Fd312FB38a7DcdF9708aa;
 
     IDebtManager debtManager;
     PriceProvider priceProvider;
