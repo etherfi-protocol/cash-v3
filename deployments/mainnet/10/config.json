@@ -93,7 +93,7 @@
       "wHYPE":          { "ltvBps": 4500, "liqThresholdBps": 6500, "liqBonusBps": 400 },
       "beHYPE":         { "ltvBps": 4000, "liqThresholdBps": 6000, "liqBonusBps": 500 },
       "liquidReserve":  { "ltvBps": 8000, "liqThresholdBps": 9000, "liqBonusBps": 100 },
-      "weEUR":          { "ltvBps": 8000, "liqThresholdBps": 9000, "liqBonusBps": 200 }
+      "weEUR":          { "ltvBps": 7500, "liqThresholdBps": 9000, "liqBonusBps": 200 }
     },
     "borrowTokens": ["usdc", "fraxusd", "liquidUsd", "usdt", "liquidReserve", "eurc"]
   },

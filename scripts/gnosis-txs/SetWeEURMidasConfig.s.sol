@@ -66,9 +66,9 @@ contract SetWeEURMidasConfig is GnosisHelpers, Utils, Test {
         string memory setTokenConfig = iToHex(abi.encodeWithSelector(PriceProvider.setTokenConfig.selector, tokens, configs));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(priceProvider)), setTokenConfig, "0", false)));
 
-        // 3. Configure collateral in DebtManager (matching liquidUSD: 80/90/2)
+        // 3. Configure collateral in DebtManager
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
-            ltv: 80e18,
+            ltv: 75e18,
             liquidationThreshold: 90e18,
             liquidationBonus: 2e18
         });

@@ -80,7 +80,7 @@ contract DeployWeEURMidasModuleDev is Utils {
 
         // 4. Configure collateral in DebtManager
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
-            ltv: 80e18,
+            ltv: 75e18,
             liquidationThreshold: 90e18,
             liquidationBonus: 2e18
         });
