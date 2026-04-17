@@ -22,6 +22,7 @@
     "StargateModule": "0xb23450a5238Ee4e1AE082204eC221b49E935A22C",
     "EtherFiStakeModule": "0xBf3f1A1cEC22eec7F6cE7dDa4Ac9AB808DF46439",
     "LiquidUSDLiquifierModule": "0x4f740E62011F582570E6d8d3431aad0046B7f74b",
-    "CashLiquidationHelper": "0x731E3B8f012C701FCB74d21380C5C28937830Ab5"
+    "CashLiquidationHelper": "0x731E3B8f012C701FCB74d21380C5C28937830Ab5",
+    "MidasModule": "0x292b353d262e00a215e096a97596b55f8afb00df"
   }
 }

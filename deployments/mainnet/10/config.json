@@ -71,7 +71,8 @@
       "FraxModule",
       "StargateModule",
       "EtherFiStakeModule",
-      "LiquidUSDLiquifierModule"
+      "LiquidUSDLiquifierModule",
+      "MidasModule"
     ]
   },
   "debtManager": {
@@ -91,14 +92,15 @@
       "sethfi":         { "ltvBps": 2000, "liqThresholdBps": 5000, "liqBonusBps": 500 },
       "wHYPE":          { "ltvBps": 4500, "liqThresholdBps": 6500, "liqBonusBps": 400 },
       "beHYPE":         { "ltvBps": 4000, "liqThresholdBps": 6000, "liqBonusBps": 500 },
-      "liquidReserve":  { "ltvBps": 8000, "liqThresholdBps": 9000, "liqBonusBps": 100 }
+      "liquidReserve":  { "ltvBps": 8000, "liqThresholdBps": 9000, "liqBonusBps": 100 },
+      "weEUR":          { "ltvBps": 7500, "liqThresholdBps": 9000, "liqBonusBps": 200 }
     },
     "borrowTokens": ["usdc", "fraxusd", "liquidUsd", "usdt", "liquidReserve", "eurc"]
   },
   "cashModule": {
     "withdrawAssets": [
       "usdc", "weth", "weETH", "usdt", "eurc", "wHYPE", "beHYPE", "liquidReserve",
-      "sethfi", "fraxusd", "liquidUsd", "ebtc", "liquidEth", "liquidBtc"
+      "sethfi", "fraxusd", "liquidUsd", "ebtc", "liquidEth", "liquidBtc", "weEUR"
     ],
     "modulesCanRequestWithdraw": [
       "EtherFiLiquidModuleWithReferrer",
@@ -114,7 +116,7 @@
     "tokensWithPrice": [
       "usdc", "usdt", "weETH", "weth", "eurc", "wHYPE", "beHYPE", "liquidReserve",
       "fraxusd", "liquidEth", "liquidBtc", "liquidUsd", "ebtc", "eUSD",
-      "sethfi", "ethfi"
+      "sethfi", "ethfi", "weEUR"
     ],
     "oracles": {
       "usdc":           { "oracle": "0x16a9FA2FDa030272Ce99B29CF780dFA30361E0f3", "type": "chainlink", "decimals": 8 },
@@ -135,7 +137,8 @@
       "ethfi":          { "oracle": "0x3E377b4e02bc848Ade3c289477F21441b7e014C2", "type": "pyth", "decimals": 16 },
       "wHYPE":          { "oracle": "0x1f860581483253B81ECB0E89b2b978A202de553d", "type": "pyth", "decimals": 16 },
       "beHYPE":         { "oracle": "0x2ACd77fefED51Fa80FBF1520701c73Ac506D4381", "type": "pyth", "decimals": 16 },
-      "eurc":           { "oracle": "0x62779cdAadd1eB782eb4fF534739B55763A48385", "type": "pyth", "decimals": 16 }
+      "eurc":           { "oracle": "0x62779cdAadd1eB782eb4fF534739B55763A48385", "type": "pyth", "decimals": 16 },
+      "weEUR":          { "oracle": "0x01b910C1aa51cdC4a2a84d76CB255C4974Bf8A19", "type": "chainlink", "decimals": 8 }
     }
   },
   "stargateModule": {
