@@ -12,7 +12,7 @@ import { MidasModule } from "../src/modules/midas/MidasModule.sol";
 import { IAggregatorV3, PriceProvider } from "../src/oracle/PriceProvider.sol";
 import { Utils } from "./utils/Utils.sol";
 
-contract DeployWeEURMidasModule is Utils {
+contract DeployWeEURMidasModuleDev is Utils {
     bytes32 public constant SALT_MIDAS_MODULE = keccak256("DeployOptimismDevModules.MidasModule");
 
     address constant WEEUR_TOKEN = 0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13;
@@ -80,9 +80,9 @@ contract DeployWeEURMidasModule is Utils {
 
         // 4. Configure collateral in DebtManager
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
-            ltv: 80e18,
-            liquidationThreshold: 90e18,
-            liquidationBonus: 2e18
+            ltv: 90e18,
+            liquidationThreshold: 95e18,
+            liquidationBonus: 1e18
         });
 
         debtManager.supportCollateralToken(WEEUR_TOKEN, collateralConfig);
