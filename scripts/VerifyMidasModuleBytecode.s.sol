@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import { Script } from "forge-std/Script.sol";
 import { console2 } from "forge-std/console2.sol";
 import { stdJson } from "forge-std/StdJson.sol";
-import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { ContractCodeChecker } from "./utils/ContractCodeChecker.sol";
 import { Utils } from "./utils/Utils.sol";
@@ -18,9 +17,7 @@ import { MidasModule } from "../src/modules/midas/MidasModule.sol";
 /// Usage:
 ///   ENV=mainnet forge script scripts/VerifyMidasModuleBytecode.s.sol --rpc-url $OPTIMISM_RPC -vvv
 contract VerifyMidasModuleBytecode is Script, ContractCodeChecker, Utils {
-    address constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-
-    bytes32 constant SALT_MIDAS_MODULE = keccak256("DeployOptimismProdModules.MidasModule");
+    address constant MIDAS_MODULE = 0x2D43400058cE6810916Fd312FB38a7DcdF9708aa;
 
     address constant WEEUR_TOKEN = 0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13;
     address constant DEPOSIT_VAULT = 0xF1b45eE795C8e1B858e191654C95A1B33c573632;
@@ -32,12 +29,10 @@ contract VerifyMidasModuleBytecode is Script, ContractCodeChecker, Utils {
         string memory deployments = readDeploymentFile();
         address dp = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "EtherFiDataProvider"));
 
-        address onchain = CREATE3.predictDeterministicAddress(SALT_MIDAS_MODULE, NICKS_FACTORY);
-
         console2.log("==========================================");
         console2.log("  MidasModule Bytecode Verification");
         console2.log("==========================================\n");
-        console2.log("On-chain address:", onchain);
+        console2.log("On-chain address:", MIDAS_MODULE);
 
         address[] memory midasTokens = new address[](1);
         midasTokens[0] = WEEUR_TOKEN;
@@ -49,7 +44,7 @@ contract VerifyMidasModuleBytecode is Script, ContractCodeChecker, Utils {
         redemptionVaults[0] = REDEMPTION_VAULT;
 
         address local = address(new MidasModule(dp, midasTokens, depositVaults, redemptionVaults));
-        verifyContractByteCodeMatch(onchain, local);
+        verifyContractByteCodeMatch(MIDAS_MODULE, local);
 
         console2.log("\n==========================================");
         console2.log("  Bytecode Verification Complete");
