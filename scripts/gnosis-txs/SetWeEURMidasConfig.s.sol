@@ -57,7 +57,7 @@ contract SetWeEURMidasConfig is GnosisHelpers, Utils, Test {
             maxStaleness: 6 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: true,
+            isStableToken: false,
             isBaseTokenBtc: false
         });
         PriceProvider.Config[] memory configs = new PriceProvider.Config[](1);

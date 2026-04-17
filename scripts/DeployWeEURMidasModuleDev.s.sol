@@ -72,7 +72,7 @@ contract DeployWeEURMidasModuleDev is Utils {
             maxStaleness: 30 days,
             dataType: PriceProvider.ReturnType.Int256,
             isBaseTokenEth: false,
-            isStableToken: true,
+            isStableToken: false,
             isBaseTokenBtc: false
         });
 
