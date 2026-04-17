@@ -35,48 +35,48 @@ contract DeployWeEURMidasModuleDev is Utils {
         ICashModule cashModule = ICashModule(stdJson.readAddress(deployments, ".addresses.CashModule"));
 
         // 1. Deploy MidasModule via CREATE3
-        address[] memory midasTokens = new address[](1);
-        midasTokens[0] = WEEUR_TOKEN;
+        // address[] memory midasTokens = new address[](1);
+        // midasTokens[0] = WEEUR_TOKEN;
 
-        address[] memory depositVaults = new address[](1);
-        depositVaults[0] = DEPOSIT_VAULT;
+        // address[] memory depositVaults = new address[](1);
+        // depositVaults[0] = DEPOSIT_VAULT;
 
-        address[] memory redemptionVaults = new address[](1);
-        redemptionVaults[0] = REDEMPTION_VAULT;
+        // address[] memory redemptionVaults = new address[](1);
+        // redemptionVaults[0] = REDEMPTION_VAULT;
 
-        address midasModule = deployWithCreate3(
-            abi.encodePacked(type(MidasModule).creationCode, abi.encode(dataProvider, midasTokens, depositVaults, redemptionVaults)),
-            SALT_MIDAS_MODULE
-        );
-        console.log("MidasModule:", midasModule);
+        // address midasModule = deployWithCreate3(
+        //     abi.encodePacked(type(MidasModule).creationCode, abi.encode(dataProvider, midasTokens, depositVaults, redemptionVaults)),
+        //     SALT_MIDAS_MODULE
+        // );
+        // console.log("MidasModule:", midasModule);
 
-        // 2. Whitelist as default module in DataProvider
-        address[] memory defaultModules = new address[](1);
-        defaultModules[0] = midasModule;
+        // // 2. Whitelist as default module in DataProvider
+        // address[] memory defaultModules = new address[](1);
+        // defaultModules[0] = midasModule;
 
-        bool[] memory shouldWhitelist = new bool[](1);
-        shouldWhitelist[0] = true;
+        // bool[] memory shouldWhitelist = new bool[](1);
+        // shouldWhitelist[0] = true;
 
-        EtherFiDataProvider(dataProvider).configureDefaultModules(defaultModules, shouldWhitelist);
+        // EtherFiDataProvider(dataProvider).configureDefaultModules(defaultModules, shouldWhitelist);
 
-        // 3. Configure price oracle
-        address[] memory tokens = new address[](1);
-        tokens[0] = WEEUR_TOKEN;
+        // // 3. Configure price oracle
+        // address[] memory tokens = new address[](1);
+        // tokens[0] = WEEUR_TOKEN;
 
-        PriceProvider.Config[] memory configs = new PriceProvider.Config[](1);
-        configs[0] = PriceProvider.Config({
-            oracle: PRICE_ORACLE,
-            priceFunctionCalldata: "",
-            isChainlinkType: true,
-            oraclePriceDecimals: IAggregatorV3(PRICE_ORACLE).decimals(),
-            maxStaleness: 30 days,
-            dataType: PriceProvider.ReturnType.Int256,
-            isBaseTokenEth: false,
-            isStableToken: true,
-            isBaseTokenBtc: false
-        });
+        // PriceProvider.Config[] memory configs = new PriceProvider.Config[](1);
+        // configs[0] = PriceProvider.Config({
+        //     oracle: PRICE_ORACLE,
+        //     priceFunctionCalldata: "",
+        //     isChainlinkType: true,
+        //     oraclePriceDecimals: IAggregatorV3(PRICE_ORACLE).decimals(),
+        //     maxStaleness: 30 days,
+        //     dataType: PriceProvider.ReturnType.Int256,
+        //     isBaseTokenEth: false,
+        //     isStableToken: true,
+        //     isBaseTokenBtc: false
+        // });
 
-        priceProvider.setTokenConfig(tokens, configs);
+        // priceProvider.setTokenConfig(tokens, configs);
 
         // 4. Configure collateral in DebtManager
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
@@ -87,11 +87,11 @@ contract DeployWeEURMidasModuleDev is Utils {
 
         debtManager.supportCollateralToken(WEEUR_TOKEN, collateralConfig);
 
-        // 5. Allow withdrawal via CashModule
-        address[] memory withdrawableAssets = new address[](1);
-        withdrawableAssets[0] = WEEUR_TOKEN;
+        // // 5. Allow withdrawal via CashModule
+        // address[] memory withdrawableAssets = new address[](1);
+        // withdrawableAssets[0] = WEEUR_TOKEN;
 
-        cashModule.configureWithdrawAssets(withdrawableAssets, shouldWhitelist);
+        // cashModule.configureWithdrawAssets(withdrawableAssets, shouldWhitelist);
 
         vm.stopBroadcast();
     }
