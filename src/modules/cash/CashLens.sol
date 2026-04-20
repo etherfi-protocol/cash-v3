@@ -7,6 +7,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 
 import { ICashModule, Mode, SafeCashData, SafeData, WithdrawalRequest, DebitModeMaxSpend } from "../../interfaces/ICashModule.sol";
+import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
@@ -32,6 +33,8 @@ contract CashLens is UpgradeableProxy {
     ICashModule public immutable cashModule;
     /// @notice Reference to the deployed EtherFiDataProvider contract
     IEtherFiDataProvider public immutable dataProvider;
+    /// @notice Reference to the deployed PendingHoldsModule contract
+    IPendingHoldsModule public immutable pendingHoldsModule;
 
     /// @notice Constant representing 100% with 18 decimal places
     uint256 public constant HUNDRED_PERCENT = 100e18;
@@ -42,13 +45,17 @@ contract CashLens is UpgradeableProxy {
     error NotABorrowToken();
 
     /**
-     * @notice Initializes the CashLens contract with a reference to the CashModule
-     * @param _cashModule Address of the deployed CashModule contract
+     * @notice Initializes the CashLens contract with references to the CashModule and PendingHoldsModule
+     * @dev Adding pendingHoldsModule as an immutable requires a new proxy deployment — existing proxies
+     *      cannot adopt new constructor immutables via upgrade.
+     * @param _cashModule Address of the deployed CashModule (Core) proxy
      * @param _dataProvider Address of the deployed EtherFiDataProvider contract
+     * @param _pendingHoldsModule Address of the deployed PendingHoldsModule proxy
      */
-    constructor(address _cashModule, address _dataProvider) {
+    constructor(address _cashModule, address _dataProvider, address _pendingHoldsModule) {
         cashModule = ICashModule(_cashModule);
         dataProvider = IEtherFiDataProvider(_dataProvider);
+        pendingHoldsModule = IPendingHoldsModule(_pendingHoldsModule);
 
         _disableInitializers();
     }
@@ -166,7 +173,9 @@ contract CashLens is UpgradeableProxy {
         // In Credit mode, only one token is allowed
         if (mode == Mode.Credit && tokens.length > 1) return (false, "Only one token allowed in Credit mode");
         
-        // Check spending limit
+        // Check spending limit. When PendingHoldsModule is active, holds are charged to
+        // spentToday/spentThisMonth at addHold() time, so the limit already reflects in-flight
+        // hold consumption — no manual deduction needed here.
         (bool withinLimit, string memory limitMessage) = safeData.spendingLimit.canSpend(totalSpendingInUsd);
         if (!withinLimit) return (false, limitMessage);
         
@@ -675,7 +684,48 @@ contract CashLens is UpgradeableProxy {
         assembly ("memory-safe") {
             mstore(tokenAmounts, m)
         }
-        
+
         return (tokenAmounts, "");
+    }
+
+    // -------------------------------------------------------------------------
+    // Pending holds views
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Returns the spendable balance for a safe
+     * @dev Delegates to rawSpendable() which already reflects hold consumption — holds are
+     *      charged to spentToday/spentThisMonth at addHold() time, so no separate deduction
+     *      is needed here.
+     * @param safe Address of the EtherFi Safe
+     * @return Spendable amount in USD (1e6)
+     */
+    function spendable(address safe) external view returns (uint256) {
+        return cashModule.rawSpendable(safe);
+    }
+
+    /**
+     * @notice Convenience aggregator returning all pending-holds state for a safe in one call
+     * @dev Useful for debugging card declines and manual reconciliation.
+     *      Holds are charged to spentToday/spentThisMonth at addHold() time, so spendableAmt
+     *      already reflects all in-flight hold consumption.
+     *
+     *      IMPORTANT: totalHolds is already embedded in spendableAmt. Do NOT subtract
+     *      totalHolds from spendableAmt — that double-counts and understates available capacity.
+     *
+     *      rawSpendableAmt is provided alongside spendableAmt for convenience; both values are
+     *      always identical under the current design. Callers that need only the spendable balance
+     *      should prefer spendable() or rawSpendable() directly.
+     * @param safe Address of the EtherFi Safe
+     * @return totalHolds Sum of active hold amounts in USD (1e6) — for display/withdrawal guard only
+     * @return spendableAmt Remaining spendable capacity in USD (1e6), holds already reflected
+     * @return rawSpendableAmt Identical to spendableAmt; both equal cashModule.rawSpendable(safe)
+     */
+    function holdsSummary(address safe) external view returns (uint256 totalHolds, uint256 spendableAmt, uint256 rawSpendableAmt) {
+        rawSpendableAmt = cashModule.rawSpendable(safe);
+        spendableAmt = rawSpendableAmt;
+        if (address(pendingHoldsModule) != address(0)) {
+            totalHolds = pendingHoldsModule.totalPendingHolds(safe);
+        }
     }
 }

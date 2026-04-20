@@ -331,6 +331,17 @@ interface ICashModule {
     function getDebtManager() external view returns (IDebtManager);
 
     /**
+     * @notice Returns the remaining spendable capacity for a safe based on its spending limits
+     * @dev Returns min(remainingDailyLimit, remainingMonthlyLimit) in USD (1e6).
+     *      When PendingHoldsModule is active, holds are charged to spentToday/spentThisMonth at
+     *      addHold() time, so this value already reflects in-flight hold consumption — callers
+     *      do NOT need to subtract totalPendingHolds() separately.
+     * @param safe Address of the EtherFi Safe
+     * @return Spendable amount in USD (1e6), reflecting in-flight hold consumption
+     */
+    function rawSpendable(address safe) external view returns (uint256);
+
+    /**
      * @notice Gets the settlement dispatcher address
      * @dev The settlement dispatcher receives the funds that are spent
      * @param binSponsor Bin sponsor for which the settlement dispatcher needs to be returned
@@ -535,7 +546,19 @@ interface ICashModule {
 
     /**
      * @notice Processes a spending transaction with multiple tokens
-     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
+     * @dev Unified settlement path — handles both normal holds and recovery (no-hold) cases.
+     *      Only callable by EtherFi wallet for valid EtherFi Safe addresses.
+     *
+     *      Limit accounting:
+     *        - Hold exists, non-forced: charge/release delta between settlement and hold amount.
+     *        - Hold exists, forced:     no limit adjustment (forced holds bypass limits).
+     *        - No hold:                 no limit charge (Settlement is KING — bypass).
+     *        - No PHM module set:       charge spendingLimit directly (legacy path).
+     *
+     *      Partial settlement: if the safe has insufficient balance, the Spend event reflects the
+     *      actually transferred amount. The remainder is tracked as a forced hold for later
+     *      clearance by a dedicated special function.
+     *
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
      * @param binSponsor Bin sponsor used for spending
@@ -544,12 +567,11 @@ interface ICashModule {
      * @param cashbacks Struct of Cashback to be given
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
      * @custom:throws UnsupportedToken if any token is not supported
-     * @custom:throws AmountZero if any converted amount is zero
+     * @custom:throws AmountZero if total amounts are zero
      * @custom:throws ArrayLengthMismatch if token and amount arrays have different lengths
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
-     * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  Cashback[] calldata cashbacks) external;
+    function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external;
 
     /**
      * @notice Clears pending cashback for users
@@ -640,4 +662,11 @@ interface ICashModule {
      * @return SafeTiers Tier of the safe
      */
     function getSafeTier(address safe) external view returns (SafeTiers);
+
+    /**
+     * @notice Sets the PendingHoldsModule address
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE.
+     * @param _pendingHoldsModule Address of the deployed PendingHoldsModule proxy
+     */
+    function setPendingHoldsModule(address _pendingHoldsModule) external;
 }

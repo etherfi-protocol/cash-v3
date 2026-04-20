@@ -18,6 +18,7 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
 import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
+import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
 
 
 /**
@@ -332,7 +333,11 @@ function _requestWithdrawal(address safe, address[] memory tokens, uint256[] mem
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
         if (tokens.length > 1) tokens.checkDuplicates();
-        
+
+        // Block withdrawals while pending holds exist — the safe's balance is committed to unsettled card txns
+        address phm = $.pendingHoldsModule;
+        if (phm != address(0) && IPendingHoldsModule(phm).totalPendingHolds(safe) > 0) revert WithdrawalBlockedByPendingHolds();
+
         _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 
@@ -346,5 +351,114 @@ function _requestWithdrawal(address safe, address[] memory tokens, uint256[] mem
         _getDebtManager().ensureHealth(safe);
 
         if ($.withdrawalDelay == 0) _processWithdrawal(safe);
+    }
+
+    // -------------------------------------------------------------------------
+    // Repayment — moved here from CashModuleCore to preserve Core's 24KB ceiling
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Repays borrowed tokens
+     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses.
+     *      Routed from Core via fallback() delegatecall.
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to repay
+     * @param amountInUsd Amount to repay in USD
+     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     */
+    function repay(address safe, address token, uint256 amountInUsd) public whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
+        IDebtManager debtManager = _getDebtManager();
+        if (!_isBorrowToken(debtManager, token)) revert OnlyBorrowToken();
+        _repay(safe, debtManager, token, amountInUsd);
+    }
+
+    /**
+     * @dev Internal function to execute the repayment transaction
+     * @param safe Address of the EtherFi Safe
+     * @param debtManager Reference to the debt manager contract
+     * @param token Address of the token to repay
+     * @param amountInUsd Amount to repay in USD
+     * @custom:throws AmountZero if the converted amount is zero
+     */
+    function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
+        uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
+        if (amount == 0) revert AmountZero();
+        _cancelWithdrawalRequestIfNecessary(safe, token, amount);
+
+        address[] memory to = new address[](3);
+        bytes[] memory data = new bytes[](3);
+        uint256[] memory values = new uint256[](3);
+
+        to[0] = token;
+        to[1] = address(debtManager);
+        to[2] = token;
+
+        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
+        data[1] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
+        data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), 0);
+
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
+    }
+
+    // -------------------------------------------------------------------------
+    // PendingHoldsModule integration
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Returns the remaining spendable capacity for a safe based on its spending limits
+     * @dev Returns min(remainingDailyLimit, remainingMonthlyLimit) in USD (1e6).
+     *      When PendingHoldsModule is active, holds are charged to spentToday/spentThisMonth at
+     *      addHold() time, so this value already reflects in-flight hold consumption.
+     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
+     *      Routed transparently via Core's fallback() delegatecall.
+     * @param safe Address of the EtherFi Safe
+     * @return Spendable amount in USD (1e6)
+     */
+    function rawSpendable(address safe) external view returns (uint256) {
+        return _getCashModuleStorage().safeCashConfig[safe].spendingLimit.maxCanSpend();
+    }
+
+    /**
+     * @notice Consumes amountUsd from the safe's daily and monthly spending limits
+     * @dev Called by PendingHoldsModule at addHold() and updateHold() (increase) so that
+     *      the limit reflects the user's authorized spend immediately at auth-ack time.
+     *      Reverts with ExceededDailySpendingLimit or ExceededMonthlySpendingLimit if the
+     *      amount would breach the limit — identical validation to the settlement-time spend().
+     *      Only callable by the registered PendingHoldsModule.
+     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
+     * @param safe Address of the EtherFi Safe
+     * @param amountUsd Amount to consume from limits in USD (1e6)
+     */
+    function consumeSpendingLimit(address safe, uint256 amountUsd) external {
+        if (msg.sender != _getCashModuleStorage().pendingHoldsModule) revert InvalidInput();
+        _getCashModuleStorage().safeCashConfig[safe].spendingLimit.spend(amountUsd);
+    }
+
+    /**
+     * @notice Credits amountUsd back to the safe's daily and monthly spending limits
+     * @dev Called by PendingHoldsModule at releaseHold() and updateHold() (decrease) to
+     *      return limit headroom when an authorized transaction is reversed or downsized.
+     *      Applies a floor at 0 on each counter — safe for day/month-boundary crossings where
+     *      the counter already reset to 0 before the credit arrives.
+     *      Only callable by the registered PendingHoldsModule.
+     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
+     * @param safe Address of the EtherFi Safe
+     * @param amountUsd Amount to release from limits in USD (1e6)
+     */
+    function releaseSpendingLimit(address safe, uint256 amountUsd) external {
+        if (msg.sender != _getCashModuleStorage().pendingHoldsModule) revert InvalidInput();
+        _getCashModuleStorage().safeCashConfig[safe].spendingLimit.release(amountUsd);
+    }
+
+    /**
+     * @notice Sets the PendingHoldsModule address
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE.
+     * @param _pendingHoldsModule Address of the deployed PendingHoldsModule proxy
+     */
+    function setPendingHoldsModule(address _pendingHoldsModule) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (_pendingHoldsModule == address(0)) revert InvalidInput();
+        _getCashModuleStorage().pendingHoldsModule = _pendingHoldsModule;
     }
 }

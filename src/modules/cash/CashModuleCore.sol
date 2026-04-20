@@ -18,6 +18,7 @@ import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
 
 /**
@@ -322,7 +323,26 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Processes a spending transaction with multiple tokens
-     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
+     * @dev Unified settlement path — handles both normal (hold exists) and recovery (no hold) cases.
+     *
+     *      Hold-sync step (before token transfer):
+     *        - Hold exists, non-forced: update hold to settlement amount; charge/release limit delta.
+     *        - Hold exists, forced:     update hold to settlement amount; no limit adjustment.
+     *        - No hold:                 create forced hold; bypass limit ("Settlement is KING").
+     *        - No PHM:                  charge spendingLimit.spend() directly (legacy path).
+     *
+     *      Spend step:
+     *        - Credit mode: borrow full settlement amount; all-or-nothing.
+     *        - Debit mode:  transfer min(required, available) per token; partial spend supported.
+     *
+     *      Finalize step (after token transfer):
+     *        - Fully spent (remaining == 0): removeHold().
+     *        - Partially spent (remaining > 0): settlementSetRemainingHold(remaining) — hold
+     *          tracks outstanding debt; a separate special function handles clearance.
+     *
+     *      Emits Spend with the ACTUALLY spent amount, not the settlement amount if partial.
+     *
+     *      Only callable by EtherFi wallet for valid EtherFi Safe addresses.
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
      * @param binSponsor Bin sponsor used for spending
@@ -331,22 +351,39 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param cashbacks Struct of Cashback to be given
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
      * @custom:throws UnsupportedToken if any token is not supported
-     * @custom:throws AmountZero if any converted amount is zero
+     * @custom:throws AmountZero if total amounts are zero
      * @custom:throws ArrayLengthMismatch if token and amount arrays have different lengths
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
-     * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  Cashback[] calldata cashbacks) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);        
-                
-        if ($.safeCashConfig[safe].mode == Mode.Credit)  _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-        else _spendDebit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-        _cashback($, safe, totalSpendingInUsd, cashbacks);
+        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
+
+        // Sync hold to settlement amount (or create forced hold). Handle limit delta in Core to
+        // avoid a PHM→Core callback re-entering the nonReentrant spend() context.
+        _phmSettleHold($, safe, binSponsor, txId, totalSpendingInUsd);
+
+        uint256 actualSpendInUsd;
+        if ($.safeCashConfig[safe].mode == Mode.Credit) {
+            _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+            actualSpendInUsd = totalSpendingInUsd;
+        } else {
+            actualSpendInUsd = _spendDebitPartial($, safe, txId, binSponsor, tokens, amountsInUsd);
+            // When PHM is unset, partial settlement has nowhere to record the remainder —
+            // transactionCleared[txId] is already set and _phmFinalize is a no-op, so any
+            // untransferred amount would become silent debt. Require full settlement here
+            // to preserve strict debit semantics for legacy / pre-PHM deployments.
+            if ($.pendingHoldsModule == address(0) && actualSpendInUsd != totalSpendingInUsd) {
+                revert InsufficientBalance();
+            }
+        }
+
+        _phmFinalize($, safe, binSponsor, txId, totalSpendingInUsd, actualSpendInUsd);
+        _cashback($, safe, actualSpendInUsd, cashbacks);
     }
 
-    function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens,  uint256[] calldata amountsInUsd) internal returns(uint256) {
+    function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns(uint256) {
         // Input validation
         if (tokens.length == 0) revert InvalidInput();
         if (tokens.length != amountsInUsd.length) revert ArrayLengthMismatch();
@@ -356,7 +393,7 @@ contract CashModuleCore is CashModuleStorageContract {
         // Set current mode and check transaction status
         _setCurrentMode($$);
         if ($$.transactionCleared[txId]) revert TransactionAlreadyCleared();
-        
+
         // In Credit mode, only one token is allowed
         if ($$.mode == Mode.Credit && tokens.length > 1) revert OnlyOneTokenAllowedInCreditMode();
 
@@ -367,12 +404,72 @@ contract CashModuleCore is CashModuleStorageContract {
         }
 
         if (totalSpendingInUsd == 0) revert AmountZero();
-        
-        // Update spending limit
+
         $$.transactionCleared[txId] = true;
-        $$.spendingLimit.spend(totalSpendingInUsd);
+        // NOTE: spendingLimit.spend() is NOT called here. Callers are responsible:
+        //   - spend():      skips if hold was non-forced (limit already consumed at addHold time)
+        //   - forceSpend(): skips if hold was non-forced; always charges otherwise
+        //   - No-PHM path: always calls spendingLimit.spend() at settlement
 
         return totalSpendingInUsd;
+    }
+
+    /**
+     * @dev Syncs/creates a hold via PHM and handles spending-limit accounting for spend().
+     *      Extracted to its own stack frame to avoid stack-too-deep in callers.
+     *
+     *      Limit accounting rules after settlementSyncHold() returns:
+     *        - No hold existed (Settlement is KING): bypass limit — no charge.
+     *        - Non-forced hold, settlement > old:   charge delta to limit.
+     *        - Non-forced hold, settlement < old:   release delta from limit.
+     *        - Non-forced hold, settlement == old:  no-op.
+     *        - Forced hold (forceAddHold path):     charge full settlement to limit now,
+     *                                               since limit was bypassed at forceAddHold.
+     *        - No PHM:                              charge spendingLimit.spend(amount) directly.
+     *
+     *      Limit adjustments are performed in Core — NOT via a PHM→Core callback — to avoid
+     *      re-entering the nonReentrant spend() context through CashModuleSetters.
+     */
+    function _phmSettleHold(CashModuleStorage storage $, address safe, BinSponsor binSponsor, bytes32 txId, uint256 amount) private {
+        address phm = $.pendingHoldsModule;
+        if (phm == address(0)) {
+            $.safeCashConfig[safe].spendingLimit.spend(amount);
+            return;
+        }
+        (bool existed, bool wasForced, uint256 oldAmount) =
+            IPendingHoldsModule(phm).settlementSyncHold(safe, binSponsor, txId, amount);
+        if (!existed) {
+            // Settlement is KING — no prior hold, bypass limit entirely.
+            return;
+        }
+        if (!wasForced) {
+            // Non-forced hold: limit was pre-charged at addHold for oldAmount; adjust for delta.
+            if (amount > oldAmount) {
+                $.safeCashConfig[safe].spendingLimit.spend(amount - oldAmount);
+            } else if (amount < oldAmount) {
+                $.safeCashConfig[safe].spendingLimit.release(oldAmount - amount);
+            }
+        } else {
+            // Forced hold (forceAddHold path): limit was bypassed at creation — charge now.
+            $.safeCashConfig[safe].spendingLimit.spend(amount);
+        }
+    }
+
+    /**
+     * @dev Finalizes the hold state after spend() executes the token transfer.
+     *      - remaining == 0: removeHold() — fully settled.
+     *      - remaining  > 0: settlementSetRemainingHold(remaining) — partial settlement; the
+     *        remaining hold tracks outstanding debt for the special-function clearance path.
+     */
+    function _phmFinalize(CashModuleStorage storage $, address safe, BinSponsor binSponsor, bytes32 txId, uint256 total, uint256 actual) private {
+        address phm = $.pendingHoldsModule;
+        if (phm == address(0)) return;
+        uint256 remaining = total - actual;
+        if (remaining == 0) {
+            IPendingHoldsModule(phm).removeHold(safe, binSponsor, txId);
+        } else {
+            IPendingHoldsModule(phm).settlementSetRemainingHold(safe, binSponsor, txId, remaining);
+        }
     }
 
     /**
@@ -410,31 +507,43 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @dev Internal function to execute debit mode spending transactions (multiple tokens)
-     * @param $ Storage reference to the CashModuleStorage
-     * @param safe Address of the EtherFi Safe
-     * @param txId Transaction identifier
-     * @param tokens Array of addresses of the tokens to spend
-     * @param amountsInUsd Array of amounts to spend in USD
+     * @dev Executes a debit-mode spend, capping each token at the safe's available balance.
+     *      Returns the total USD actually transferred (may be less than the requested total if
+     *      any token balance is insufficient — partial settlement).
+     *
+     *      For each token:
+     *        - Converts amountsInUsd[i] → required token amount via debtManager price oracle.
+     *        - If balance >= required: transfer required; actualUsd[i] = amountsInUsd[i].
+     *        - If balance  < required: transfer available; actualUsd[i] proportionally scaled.
+     *
+     *      Emits Spend with the actually transferred amounts and actualSpendInUsd total.
+     *      Caller (_phmFinalize) updates or removes the hold for any remaining USD.
      */
-    function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
+    function _spendDebitPartial(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256 actualSpendInUsd) {
         uint256[] memory amounts = new uint256[](tokens.length);
-        
-        // Convert USD amounts to token amounts and validate
+        uint256[] memory actualUsd = new uint256[](tokens.length);
+
         for (uint256 i = 0; i < tokens.length; i++) {
             if (!_isBorrowToken($.debtManager, tokens[i])) revert UnsupportedToken();
+            // Use amounts[i] as "required" first, then overwrite if partial.
             amounts[i] = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
-            if (IERC20(tokens[i]).balanceOf(safe) < amounts[i]) revert InsufficientBalance();
-            
+            uint256 available = IERC20(tokens[i]).balanceOf(safe);
+            if (available < amounts[i]) {
+                // Partial: scale USD proportionally; cap token transfer at available.
+                actualUsd[i] = amounts[i] > 0 ? amountsInUsd[i] * available / amounts[i] : 0;
+                amounts[i] = available;
+            } else {
+                actualUsd[i] = amountsInUsd[i];
+            }
+            actualSpendInUsd += actualUsd[i];
             _cancelWithdrawalRequestIfNecessary(safe, tokens[i], amounts[i]);
         }
 
         _spendDebit(safe, binSponsor, tokens, amounts);
 
-        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
-        
-        // Ensuring the account is healthy
-        // If account is unhealthy after spend, cancel withdrawal and try again
+        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, actualUsd, actualSpendInUsd, Mode.Debit);
+
+        // Ensuring the account is healthy; retry once after canceling any pending withdrawal.
         try $.debtManager.ensureHealth(safe) {}
         catch {
             _cancelOldWithdrawal(safe);
@@ -548,49 +657,6 @@ contract CashModuleCore is CashModuleStorageContract {
                 ++i;
             }
         }
-    }
-
-    /**
-     * @notice Repays borrowed tokens
-     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to repay
-     * @param amountInUsd Amount to repay in USD
-     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
-     */
-    function repay(address safe, address token, uint256 amountInUsd) public whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
-        IDebtManager debtManager = getDebtManager();
-        if (!_isBorrowToken(debtManager, token)) revert OnlyBorrowToken();
-        _repay(safe, debtManager, token, amountInUsd);
-    }
-
-    /**
-     * @dev Internal function to execute the repayment transaction
-     * @param safe Address of the EtherFi Safe
-     * @param debtManager Reference to the debt manager contract
-     * @param token Address of the token to repay
-     * @param amountInUsd Amount to repay in USD
-     * @custom:throws AmountZero if the converted amount is zero
-     */
-    function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
-        uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
-        if (amount == 0) revert AmountZero();
-        _cancelWithdrawalRequestIfNecessary(safe, token, amount);
-
-        address[] memory to = new address[](3);
-        bytes[] memory data = new bytes[](3);
-        uint256[] memory values = new uint256[](3);
-
-        to[0] = token;
-        to[1] = address(debtManager);
-        to[2] = token;
-
-        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
-        data[1] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
-        data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), 0);
-
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-        _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
     }
 
     /**

@@ -177,7 +177,7 @@ contract SafeTestSetup is Utils {
         address hookImpl = address(new EtherFiHook(address(dataProvider)));
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
-        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
+        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider), address(0)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
         dataProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), address(cashLens), modules, defaultModules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));

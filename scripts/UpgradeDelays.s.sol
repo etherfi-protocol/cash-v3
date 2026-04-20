@@ -157,7 +157,7 @@ contract UpgradeDelays is Utils {
 
         cashModuleCoreImpl = address(new CashModuleCore(dataProvider));
         cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
-        cashLensImpl = address(new CashLens(cashModule, dataProvider));
+        cashLensImpl = address(new CashLens(cashModule, dataProvider, address(0)));
         cashEventEmitterImpl = address(new CashEventEmitter(cashModule));
         stakeModule = address(new EtherFiStakeModule(dataProvider, syncPool, weth, weETH));
         liquidModule = address(new EtherFiLiquidModule(liquidAssets, liquidTellers, dataProvider, weth));
@@ -277,7 +277,7 @@ contract RollbackDelaysUpgrade is Utils {
 
         cashModuleCoreImpl = address(new CashModuleCore(dataProvider));
         cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
-        cashLensImpl = address(new CashLens(cashModule, dataProvider));
+        cashLensImpl = address(new CashLens(cashModule, dataProvider, address(0)));
         cashEventEmitterImpl = address(new CashEventEmitter(cashModule));
         stakeModule = address(new EtherFiStakeModule(dataProvider, syncPool, weth, weETH));
         liquidModule = address(new EtherFiLiquidModule(liquidAssets, liquidTellers, dataProvider, weth));

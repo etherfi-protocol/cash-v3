@@ -77,7 +77,7 @@ contract DeployCashModule is Utils {
             cashModuleSettersImpl
         );
 
-        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
+        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider), address(0)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, "")));
         cashLens.initialize(address(roleRegistry));
 
