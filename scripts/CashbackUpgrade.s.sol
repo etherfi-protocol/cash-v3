@@ -72,7 +72,7 @@ contract CashbackUpgrade is GnosisHelpers, Utils, Test {
         address cashModuleCoreImpl = address(new CashModuleCore(dataProvider));
         address cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
         address cashEventEmitterImpl = address(new CashEventEmitter(cashModule));
-        address cashLensImpl = address(new CashLens(cashModule, dataProvider));
+        address cashLensImpl = address(new CashLens(cashModule, dataProvider, address(0)));
         address settlementDispatcherReapImpl = payable(address(new SettlementDispatcher(BinSponsor.Reap, dataProvider)));
         address settlementDispatcherRainImpl = payable(address(new SettlementDispatcher(BinSponsor.Rain, dataProvider)));
         address debtManagerCoreImpl = address(new DebtManagerCore(dataProvider));

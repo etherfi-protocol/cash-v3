@@ -167,87 +167,53 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
     }
 
     function test_spend_failsWithInsufficientBalance_oneToken() public {
-        // Setup: Fund the safe with enough of one token but not enough of another
+        // In no-PHM mode, partial settlement has nowhere to track the remainder —
+        // spend() reverts on insufficient balance. Partial settlement is only valid
+        // when PHM is wired (covered by PendingHoldsModuleTest integration tests).
         uint256 usdcAmountInUsd = 50e6;
         uint256 weETHAmountInUsd = 50e6;
-        
+
         uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
-        
-        // Only fund with USDC, not with weETH
+
         deal(address(usdc), address(safe), usdcAmount);
         deal(address(weETH), address(safe), 0); // No weETH
-        
+
         address[] memory spendTokens = new address[](2);
         spendTokens[0] = address(usdc);
         spendTokens[1] = address(weETH);
-        
+
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
         spendAmounts[1] = weETHAmountInUsd;
 
-        Cashback[] memory cashbacks = new Cashback[](1);
-        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+        Cashback[] memory cashbacks = _makeScrCashback();
 
-        CashbackTokens memory scr = CashbackTokens({
-            token: address(cashbackToken),
-            amountInUsd: 1e6,
-            cashbackType: 0
-        });
-
-        cashbackTokens[0] = scr;
-
-        Cashback memory scrCashback = Cashback({
-            to: address(safe),
-            cashbackTokens: cashbackTokens
-        });
-
-        cashbacks[0] = scrCashback;
-        
-        // Should revert due to insufficient weETH balance
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
     function test_spend_failsWithInsufficientBalance_partialAmount() public {
-        // Setup: Fund the safe with enough of one token but only partial amount of another
+        // Same story as above: partial balance on one token → revert in no-PHM mode.
         uint256 usdcAmountInUsd = 50e6;
         uint256 weETHAmountInUsd = 50e6;
-        
+
         uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), usdcAmountInUsd);
         uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), weETHAmountInUsd);
-        
-        // Fund with full USDC amount, but only half of the weETH amount
+
         deal(address(usdc), address(safe), usdcAmount);
         deal(address(weETH), address(safe), weETHAmount / 2);
-        
+
         address[] memory spendTokens = new address[](2);
         spendTokens[0] = address(usdc);
         spendTokens[1] = address(weETH);
-        
+
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = usdcAmountInUsd;
         spendAmounts[1] = weETHAmountInUsd;
 
-        Cashback[] memory cashbacks = new Cashback[](1);
-        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+        Cashback[] memory cashbacks = _makeScrCashback();
 
-        CashbackTokens memory scr = CashbackTokens({
-            token: address(cashbackToken),
-            amountInUsd: 1e6,
-            cashbackType: 0
-        });
-
-        cashbackTokens[0] = scr;
-
-        Cashback memory scrCashback = Cashback({
-            to: address(safe),
-            cashbackTokens: cashbackTokens
-        });
-
-        cashbacks[0] = scrCashback;
-        
-        // Should revert due to insufficient weETH balance
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
@@ -648,7 +614,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
             initialBalances[1] + expectedIncreases[1]
         );
         assertEq(
-            cashbackToken.balanceOf(address(settlementDispatcherReap)),
+            cashbackToken.balanceOf(address(settlementDispatcherReap)), 
             initialBalances[2] + expectedIncreases[2]
         );
     }
@@ -679,5 +645,12 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         tokenAmounts[2] = debtManager.convertUsdToCollateralToken(address(cashbackToken), scrAmountInUsd);
         
         return (spendTokens, spendAmounts, tokenAmounts);
+    }
+
+    function _makeScrCashback() internal view returns (Cashback[] memory cashbacks) {
+        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
+        cashbackTokens[0] = CashbackTokens({ token: address(cashbackToken), amountInUsd: 1e6, cashbackType: 0 });
+        cashbacks = new Cashback[](1);
+        cashbacks[0] = Cashback({ to: address(safe), cashbackTokens: cashbackTokens });
     }
 }

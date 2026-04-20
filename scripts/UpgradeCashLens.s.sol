@@ -29,7 +29,7 @@ contract UpgradeCashLens is Utils {
             string(abi.encodePacked(".", "addresses", ".", "EtherFiDataProvider"))
         );
 
-        address cashLensImpl = address(new CashLens(cashModule, dataProvider));
+        address cashLensImpl = address(new CashLens(cashModule, dataProvider, address(0)));
         cashLens.upgradeToAndCall(address(cashLensImpl), "");
 
         vm.stopBroadcast();

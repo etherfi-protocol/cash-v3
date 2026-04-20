@@ -111,7 +111,7 @@ contract VerifyOptimismProdBytecode is Script, ContractCodeChecker {
 
     function _verifyModules() internal {
         console2.log("7. CashLens");
-        verifyContractByteCodeMatch(_getImpl(_proxy(SALT_CASH_LENS_PROXY)), address(new CashLens(cm, dp)));
+        verifyContractByteCodeMatch(_getImpl(_proxy(SALT_CASH_LENS_PROXY)), address(new CashLens(cm, dp, address(0))));
 
         console2.log("8. EtherFiHook");
         verifyContractByteCodeMatch(_getImpl(_proxy(SALT_HOOK_PROXY)), address(new EtherFiHook(dp)));

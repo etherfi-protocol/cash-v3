@@ -34,7 +34,7 @@ contract UpgradeCashLens is GnosisHelpers, Utils {
             string.concat(".", "addresses", ".", "CashLens")
         );
 
-        CashLens cashLensImpl = new CashLens(cashModule, dataProvider);
+        CashLens cashLensImpl = new CashLens(cashModule, dataProvider, address(0));
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 

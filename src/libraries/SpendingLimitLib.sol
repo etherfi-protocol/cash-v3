@@ -115,6 +115,19 @@ library SpendingLimitLib {
     }
 
     /**
+     * @notice Credits amount back to the daily and monthly spent counters
+     * @dev Applies day/month rollovers before crediting so we never decrement a counter
+     *      that already reset to 0. Floors each counter at 0.
+     * @param limit Storage reference to the SpendingLimit
+     * @param amount Amount to credit back in USD (1e6)
+     */
+    function release(SpendingLimit storage limit, uint256 amount) internal {
+        currentLimit(limit);
+        limit.spentToday = amount <= limit.spentToday ? limit.spentToday - amount : 0;
+        limit.spentThisMonth = amount <= limit.spentThisMonth ? limit.spentThisMonth - amount : 0;
+    }
+
+    /**
      * @notice Updates spending limits with optional delay for decreases
      * @dev Immediate increases, delayed decreases with activation timestamp
      * @param limit Storage reference to the SpendingLimit

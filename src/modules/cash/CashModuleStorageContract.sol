@@ -71,6 +71,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address settlementDispatcherPix;
         /// @notice Address of the SettlementDispatcher for CardOrder
         address settlementDispatcherCardOrder;
+        /// @notice Address of the PendingHoldsModule registry contract
+        address pendingHoldsModule;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -161,6 +163,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
+
+    /// @notice Error thrown when a withdrawal would exceed spendable balance after pending holds are deducted
+    error WithdrawalBlockedByPendingHolds();
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { 
         _disableInitializers();

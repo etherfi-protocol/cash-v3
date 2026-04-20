@@ -81,7 +81,7 @@ contract MultispendUpgrade is GnosisHelpers, Utils, Test {
         address cashModuleCoreImpl = address(new CashModuleCore(dataProvider));
         address cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
         address cashEventEmitterImpl = address(new CashEventEmitter(cashModule));
-        address cashLensImpl = address(new CashLens(cashModule, dataProvider));
+        address cashLensImpl = address(new CashLens(cashModule, dataProvider, address(0)));
         address settlementDispatcherReapImpl = address(new SettlementDispatcher(BinSponsor.Reap));
         address settlementDispatcherRainImpl = address(new SettlementDispatcher(BinSponsor.Rain));
         address debtManagerCoreImpl = address(new DebtManagerCore(dataProvider));

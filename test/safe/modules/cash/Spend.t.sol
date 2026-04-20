@@ -456,23 +456,23 @@ contract CashModuleSpendTest is CashModuleTestSetup {
     function test_spend_withNoCashback() public {
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), amount);
-
-        // Get initial cashback token balances
-        uint256 safeCashbackBalBefore = cashbackToken.balanceOf(address(safe));
-
+        
+        // Get initial token balances
+        uint256 safeTokenBalBefore = cashbackToken.balanceOf(address(safe));
+        
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
         Cashback[] memory cashbacks;
-
+        
         vm.prank(etherFiWallet);
         // Spend with shouldReceiveCashback set to false
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-
+        
         // Verify no cashback was received
-        assertEq(cashbackToken.balanceOf(address(safe)), safeCashbackBalBefore);
+        assertEq(cashbackToken.balanceOf(address(safe)), safeTokenBalBefore);
     }
     
     function test_spend_whenPaused() public {
@@ -540,17 +540,19 @@ contract CashModuleSpendTest is CashModuleTestSetup {
     }
         
     function test_spend_inDebitModeWithInsufficientBalance() public {
+        // In no-PHM mode, partial settlement has nowhere to track the remainder —
+        // spend() must revert on insufficient balance to preserve strict debit semantics.
         uint256 amount = 100e6;
         uint256 availableAmount = 50e6;
         deal(address(usdc), address(safe), availableAmount);
-        
+
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
         Cashback[] memory cashbacks;
-        
+
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
