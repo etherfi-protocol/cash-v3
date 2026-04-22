@@ -1,0 +1,10 @@
+{
+  "_note": "LayerZero v2 mainnet endpoints. Verify each against https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts before broadcast.",
+  "optimism":  { "chainId": 10,    "eid": 30111, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
+  "ethereum":  { "chainId": 1,     "eid": 30101, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
+  "arbitrum":  { "chainId": 42161, "eid": 30110, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
+  "base":      { "chainId": 8453,  "eid": 30184, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
+  "linea":     { "chainId": 59144, "eid": 30183, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
+  "polygon":   { "chainId": 137,   "eid": 30109, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
+  "avalanche": { "chainId": 43114, "eid": 30106, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" }
+}
