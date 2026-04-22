@@ -30,6 +30,7 @@ interface IRecoveryModule {
     error InvalidDestEid();
     error InvalidRecipient();
     error InvalidAmount();
+    error InvalidToken();
     // `InvalidSignature()` is inherited from `ModuleBase` and is exposed in the
     // compiled `RecoveryModule` ABI. Not declared here to avoid a
     // multiple-inheritance collision with `ModuleBase.InvalidSignature`.

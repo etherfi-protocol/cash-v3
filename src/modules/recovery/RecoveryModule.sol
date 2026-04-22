@@ -68,6 +68,7 @@ contract RecoveryModule is IRecoveryModule, ModuleBase, OAppSenderUpgradeable, P
      *      No LayerZero message is sent here — `executeRecovery` (Task 7) performs the send.
      * @custom:throws InvalidAmount if amount is zero
      * @custom:throws InvalidRecipient if recipient is the zero address
+     * @custom:throws InvalidToken if token is the zero address
      * @custom:throws InvalidDestEid if no peer is configured for the destination endpoint
      */
     function requestRecovery(
@@ -81,6 +82,7 @@ contract RecoveryModule is IRecoveryModule, ModuleBase, OAppSenderUpgradeable, P
     ) external whenNotPaused onlyEtherFiSafe(safe) returns (bytes32 id) {
         if (amount == 0) revert InvalidAmount();
         if (recipient == address(0)) revert InvalidRecipient();
+        if (token == address(0)) revert InvalidToken();
         if (peers(destEid) == bytes32(0)) revert InvalidDestEid();
 
         _verifyRequestRecoverySignatures(safe, token, amount, recipient, destEid, signers, signatures);

@@ -264,6 +264,32 @@ contract RecoveryModuleTest is SafeTestSetup {
         module.pause();
     }
 
+    function test_requestRecovery_revertsIfTokenZero() public {
+        uint256 amount = 1e18;
+        address recipient = makeAddr("recipient");
+        uint32 destEid = ARB_EID;
+
+        bytes32 digest = keccak256(abi.encode(
+            block.chainid,
+            address(module),
+            module.getNonce(safeAddr),
+            safeAddr,
+            address(0),
+            amount,
+            recipient,
+            destEid
+        ));
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _signDigest(owner1Pk, digest);
+        sigs[1] = _signDigest(owner2Pk, digest);
+
+        vm.expectRevert(IRecoveryModule.InvalidToken.selector);
+        module.requestRecovery(safeAddr, address(0), amount, recipient, destEid, signers, sigs);
+    }
+
     function test_requestRecovery_revertsIfPeerUnset() public {
         // Unset peer for ARB_EID — `module.owner()` is `owner` (from SafeTestSetup.setUp).
         vm.prank(module.owner());

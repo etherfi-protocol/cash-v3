@@ -16,12 +16,19 @@ import { RecoveryDeployConfig, RecoveryDeployHelper } from "./RecoveryDeployConf
  *         Reverts with `require()` on any mismatch so CI can trust the exit code.
  *
  * Run modes (per chain):
- *   - Optimism: set RECOVERY_MODULE_OP, verifies the OP-side module.
- *   - Dest chain: set DISPATCHER, optionally TOPUP_V2_IMPL + BEACON, verifies that chain.
+ *   - Optimism: set RECOVERY_MODULE_OP, LZ_ENDPOINT, ETHER_FI_DATA_PROVIDER; verifies the OP-side module.
+ *   - Dest chain: set DISPATCHER, LZ_ENDPOINT, ROLE_REGISTRY; optionally TOPUP_V2_IMPL + BEACON; verifies that chain.
+ *
+ * LZ_ENDPOINT, ETHER_FI_DATA_PROVIDER (OP), and ROLE_REGISTRY (dest) are *required* because the
+ * CREATE3 helper is idempotent — without them a prior bad deploy with wrong endpoint/registry
+ * immutables would still pass the owner/timelock checks while breaking `lzReceive`,
+ * `onlyEtherFiSafe`, or pause/unpause in production.
  *
  * Usage (foundry):
- *   RECOVERY_MODULE_OP=0x... forge script scripts/recovery/VerifyRecoveryDeployment.s.sol --rpc-url $OP_RPC
- *   DISPATCHER=0x... TOPUP_V2_IMPL=0x... BEACON=0x... forge script scripts/recovery/VerifyRecoveryDeployment.s.sol --rpc-url $DEST_RPC
+ *   RECOVERY_MODULE_OP=0x... LZ_ENDPOINT=0x... ETHER_FI_DATA_PROVIDER=0x... \
+ *     forge script scripts/recovery/VerifyRecoveryDeployment.s.sol --rpc-url $OP_RPC
+ *   DISPATCHER=0x... LZ_ENDPOINT=0x... ROLE_REGISTRY=0x... TOPUP_V2_IMPL=0x... BEACON=0x... \
+ *     forge script scripts/recovery/VerifyRecoveryDeployment.s.sol --rpc-url $DEST_RPC
  */
 contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
     function run() external view {
@@ -65,16 +72,22 @@ contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
         require(uint256(RecoveryModule(moduleProxy).TIMELOCK()) == 3 days, "timelock != 3 days");
         console.log("  [OK] TIMELOCK == 3 days");
 
-        // 6. Optional: module whitelisted on the data provider (only checkable after 3CP sign-off)
-        try vm.envAddress("ETHER_FI_DATA_PROVIDER") returns (address dp) {
-            // The dataProvider's module-approval accessor name varies across impls; just check
-            // the happy-path view exposed by the provider interface used by ModuleBase.
-            bool approved = EtherFiDataProvider(dp).isWhitelistedModule(moduleProxy);
-            require(approved, "module not whitelisted on data provider");
-            console.log("  [OK] whitelisted on DataProvider");
-        } catch {
-            console.log("  [SKIP] DataProvider whitelist check (no ETHER_FI_DATA_PROVIDER env)");
-        }
+        // 6. LayerZero endpoint immutable matches expected endpoint (required — catches stale CREATE3 reuse)
+        address expectedEndpoint = vm.envAddress("LZ_ENDPOINT");
+        address moduleEndpoint = address(RecoveryModule(moduleProxy).endpoint());
+        require(moduleEndpoint == expectedEndpoint, "RecoveryModule.endpoint != LZ_ENDPOINT - wrong-endpoint risk");
+        console.log("  [OK] endpoint == LZ_ENDPOINT");
+
+        // 7. DataProvider immutable matches expected provider (required — catches wrong onlyEtherFiSafe registry)
+        address expectedDp = vm.envAddress("ETHER_FI_DATA_PROVIDER");
+        address moduleDp = address(RecoveryModule(moduleProxy).etherFiDataProvider());
+        require(moduleDp == expectedDp, "RecoveryModule.etherFiDataProvider != ETHER_FI_DATA_PROVIDER - wrong-registry risk");
+        console.log("  [OK] etherFiDataProvider == ETHER_FI_DATA_PROVIDER");
+
+        // 8. Module whitelisted on the data provider (only true after 3CP sign-off)
+        bool approved = EtherFiDataProvider(expectedDp).isWhitelistedModule(moduleProxy);
+        require(approved, "module not whitelisted on data provider");
+        console.log("  [OK] whitelisted on DataProvider");
     }
 
     function _verifyDestChain() internal view {
@@ -110,7 +123,19 @@ contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
         );
         console.log("  [OK] SOURCE_EID == 30111 (Optimism)");
 
-        // 6. TopUpV2 impl checks (optional — only after beacon upgrade is signed)
+        // 6. LayerZero endpoint immutable matches expected endpoint (required — catches stale CREATE3 reuse)
+        address expectedEndpoint = vm.envAddress("LZ_ENDPOINT");
+        address dispatcherEndpoint = address(TopUpDispatcher(dispatcherProxy).endpoint());
+        require(dispatcherEndpoint == expectedEndpoint, "TopUpDispatcher.endpoint != LZ_ENDPOINT - wrong-endpoint risk");
+        console.log("  [OK] endpoint == LZ_ENDPOINT");
+
+        // 7. ROLE_REGISTRY immutable matches expected registry (required — wrong registry disables pause/unpause)
+        address expectedRoleRegistry = vm.envAddress("ROLE_REGISTRY");
+        address dispatcherRoleRegistry = address(TopUpDispatcher(dispatcherProxy).ROLE_REGISTRY());
+        require(dispatcherRoleRegistry == expectedRoleRegistry, "TopUpDispatcher.ROLE_REGISTRY != ROLE_REGISTRY - pause gate misconfigured");
+        console.log("  [OK] ROLE_REGISTRY == ROLE_REGISTRY env");
+
+        // 8. TopUpV2 impl checks (optional — only after beacon upgrade is signed)
         try vm.envAddress("TOPUP_V2_IMPL") returns (address topUpImpl) {
             require(topUpImpl.code.length > 0, "TopUpV2 impl has no code");
             address topUpDispatcherSeen = TopUpV2(payable(topUpImpl)).DISPATCHER();
