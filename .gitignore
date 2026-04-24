@@ -21,3 +21,5 @@ broadcast
 
 # Certora
 .certora_internal/
+
+.DS_Store

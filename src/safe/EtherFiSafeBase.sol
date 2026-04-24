@@ -146,7 +146,7 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
      * @return bool True if the signatures are valid and meet the threshold requirements
      * @dev Implementation varies based on the inheriting contract
      */
-    function checkSignatures(bytes32 digestHash, address[] calldata signers, bytes[] calldata signatures) public view virtual returns (bool);
+    function checkSignatures(bytes32 digestHash, address[] memory signers, bytes[] memory signatures) public view virtual returns (bool);
 
     /**
      * @dev Consumes a nonce for replay protection

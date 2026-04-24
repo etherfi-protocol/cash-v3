@@ -7,6 +7,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 
+import { IERC1271 } from "../interfaces/IERC1271.sol";
 import { IEtherFiHook } from "../interfaces/IEtherFiHook.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
@@ -23,7 +24,7 @@ import { EtherFiSafeBase } from "./EtherFiSafeBase.sol";
  * @dev Combines ModuleManager and MultiSig functionality with EIP-712 signature verification
  * @author ether.fi
  */
-contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSig{
+contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSig, IERC1271 {
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
@@ -230,6 +231,42 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
     function useNonce() external returns (uint256) {
         if (!isModuleEnabled(msg.sender)) revert OnlyModules();
         return _useNonce();
+    }
+
+    // ══════════════════════════════════════════════
+    //  ERC-1271: Smart Contract Signature Validation
+    // ══════════════════════════════════════════════
+
+    /**
+     * @notice ERC-1271 signature validation via direct multi-owner quorum verification
+     * @dev The `signature` blob is ABI-encoded `(address[] signers, bytes[] sigs)`. The
+     *      hash is considered valid iff `checkSignatures` passes against those inputs.
+     *      Callers that consume this (e.g. 1inch Limit Order Protocol) must provide a
+     *      blob produced by Safe owners signing the given hash. Malformed blobs and
+     *      `checkSignatures` reverts both map to 0xffffffff (no propagation).
+     * @param hash The hash to validate
+     * @param signature ABI-encoded (address[] signers, bytes[] sigs)
+     * @return magicValue 0x1626ba7e if signatures meet quorum, 0xffffffff otherwise
+     */
+    function isValidSignature(bytes32 hash, bytes calldata signature) external view override returns (bytes4) {
+        try this.checkSignatureBlob(hash, signature) returns (bool ok) {
+            return ok ? bytes4(0x1626ba7e) : bytes4(0xffffffff);
+        } catch {
+            return 0xffffffff;
+        }
+    }
+
+    /**
+     * @notice Helper for `isValidSignature` — decodes `(address[], bytes[])` and verifies quorum
+     * @dev Exposed as external so `isValidSignature` can wrap the call in try/catch.
+     *      Safe for external callers: pure view, no state changes.
+     * @param hash The hash being validated
+     * @param signature ABI-encoded (address[] signers, bytes[] sigs)
+     * @return True if signatures meet quorum
+     */
+    function checkSignatureBlob(bytes32 hash, bytes calldata signature) external view returns (bool) {
+        (address[] memory signers, bytes[] memory sigs) = abi.decode(signature, (address[], bytes[]));
+        return checkSignatures(hash, signers, sigs);
     }
 
     /**
