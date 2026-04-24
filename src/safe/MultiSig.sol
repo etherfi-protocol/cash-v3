@@ -223,7 +223,7 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @custom:throws DuplicateElementFound If the signers array contains duplicate addresses
      * @custom:throws InvalidSigner If a signer is the zero address or not an owner of the safe
      */
-    function checkSignatures(bytes32 digestHash, address[] calldata signers, bytes[] calldata signatures) public view override returns (bool) {
+    function checkSignatures(bytes32 digestHash, address[] memory signers, bytes[] memory signatures) public view override returns (bool) {
         MultiSigStorage storage $ = _getMultiSigStorage();
 
         uint256 len = signers.length;

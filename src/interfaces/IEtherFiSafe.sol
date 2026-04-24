@@ -15,7 +15,7 @@ interface IEtherFiSafe {
      * @custom:throws DuplicateElementFound If the signers array contains duplicate addresses
      * @custom:throws InvalidSigner If a signer is the zero address or not an owner of the safe
      */
-    function checkSignatures(bytes32 digestHash, address[] calldata signers, bytes[] calldata signatures) external view returns (bool);
+    function checkSignatures(bytes32 digestHash, address[] memory signers, bytes[] memory signatures) external view returns (bool);
 
     /**
      * @notice Executes a transaction from an authorized module
@@ -53,16 +53,9 @@ interface IEtherFiSafe {
     function isAdmin(address account) external view returns (bool);
 
     /**
-     * @notice Authorizes an order hash for ERC-1271 signature validation
-     * @dev Can only be called by enabled modules
-     * @param hash The order hash to authorize
+     * @notice Returns the EIP-712 domain separator used by the Safe
+     * @dev Modules that verify owner sigs via `checkSignatures` should build digests as
+     *      `keccak256("\x19\x01" || domainSeparator || structHash)` under this domain.
      */
-    function authorizeOrderHash(bytes32 hash) external;
-
-    /**
-     * @notice Revokes a previously authorized order hash
-     * @dev Can only be called by enabled modules
-     * @param hash The order hash to revoke
-     */
-    function revokeOrderHash(bytes32 hash) external;
+    function getDomainSeparator() external view returns (bytes32);
 }

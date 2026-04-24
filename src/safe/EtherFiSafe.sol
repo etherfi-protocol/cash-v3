@@ -7,7 +7,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 
-import { IERC1271 } from "../interfaces/IOneInch.sol";
+import { IERC1271 } from "../interfaces/IERC1271.sol";
 import { IEtherFiHook } from "../interfaces/IEtherFiHook.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
@@ -28,27 +28,6 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
     using SignatureUtils for bytes32;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
-
-    /// @custom:storage-location erc7201:etherfi.storage.ERC1271
-    struct ERC1271Storage {
-        /// @notice Order hashes authorized by modules for ERC-1271 validation
-        mapping(bytes32 orderHash => bool authorized) authorizedOrderHashes;
-    }
-
-    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.ERC1271")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant ERC1271StorageLocation = 0x95f3323d4da52a4232223e5d284728adc716e07261fde28fdddfa1e90df38000;
-
-    function _getERC1271Storage() internal pure returns (ERC1271Storage storage $) {
-        assembly {
-            $.slot := ERC1271StorageLocation
-        }
-    }
-
-    /// @notice Emitted when a module authorizes an order hash
-    event OrderHashAuthorized(address indexed module, bytes32 indexed orderHash);
-
-    /// @notice Emitted when a module revokes an order hash
-    event OrderHashRevoked(address indexed module, bytes32 indexed orderHash);
 
     /**
      * @notice Contract constructor
@@ -259,37 +238,35 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
     // ══════════════════════════════════════════════
 
     /**
-     * @notice Authorizes an order hash for ERC-1271 signature validation
-     * @param hash The order hash to authorize
-     * @custom:throws OnlyModules If the caller is not an enabled module
-     */
-    function authorizeOrderHash(bytes32 hash) external {
-        if (!isModuleEnabled(msg.sender)) revert OnlyModules();
-        _getERC1271Storage().authorizedOrderHashes[hash] = true;
-        emit OrderHashAuthorized(msg.sender, hash);
-    }
-
-    /**
-     * @notice Revokes a previously authorized order hash
-     * @param hash The order hash to revoke
-     * @custom:throws OnlyModules If the caller is not an enabled module
-     */
-    function revokeOrderHash(bytes32 hash) external {
-        if (!isModuleEnabled(msg.sender)) revert OnlyModules();
-        delete _getERC1271Storage().authorizedOrderHashes[hash];
-        emit OrderHashRevoked(msg.sender, hash);
-    }
-
-    /**
-     * @notice ERC-1271 signature validation
+     * @notice ERC-1271 signature validation via direct multi-owner quorum verification
+     * @dev The `signature` blob is ABI-encoded `(address[] signers, bytes[] sigs)`. The
+     *      hash is considered valid iff `checkSignatures` passes against those inputs.
+     *      Callers that consume this (e.g. 1inch Limit Order Protocol) must provide a
+     *      blob produced by Safe owners signing the given hash. Malformed blobs and
+     *      `checkSignatures` reverts both map to 0xffffffff (no propagation).
      * @param hash The hash to validate
-     * @return magicValue 0x1626ba7e if authorized, 0xffffffff otherwise
+     * @param signature ABI-encoded (address[] signers, bytes[] sigs)
+     * @return magicValue 0x1626ba7e if signatures meet quorum, 0xffffffff otherwise
      */
-    function isValidSignature(bytes32 hash, bytes calldata) external view override returns (bytes4) {
-        if (_getERC1271Storage().authorizedOrderHashes[hash]) {
-            return 0x1626ba7e;
+    function isValidSignature(bytes32 hash, bytes calldata signature) external view override returns (bytes4) {
+        try this.checkSignatureBlob(hash, signature) returns (bool ok) {
+            return ok ? bytes4(0x1626ba7e) : bytes4(0xffffffff);
+        } catch {
+            return 0xffffffff;
         }
-        return 0xffffffff;
+    }
+
+    /**
+     * @notice Helper for `isValidSignature` — decodes `(address[], bytes[])` and verifies quorum
+     * @dev Exposed as external so `isValidSignature` can wrap the call in try/catch.
+     *      Safe for external callers: pure view, no state changes.
+     * @param hash The hash being validated
+     * @param signature ABI-encoded (address[] signers, bytes[] sigs)
+     * @return True if signatures meet quorum
+     */
+    function checkSignatureBlob(bytes32 hash, bytes calldata signature) external view returns (bool) {
+        (address[] memory signers, bytes[] memory sigs) = abi.decode(signature, (address[], bytes[]));
+        return checkSignatures(hash, signers, sigs);
     }
 
     /**
