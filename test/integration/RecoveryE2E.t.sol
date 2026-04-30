@@ -60,12 +60,11 @@ contract RecoveryE2ETest is SafeTestSetup {
         dstEndpoint = new LZEndpointMock();
         address dispatcherImpl = address(new RecoveryDispatcher(
             address(dstEndpoint),
-            OP_EID,
-            address(roleRegistry)
+            OP_EID
         ));
         dispatcher = RecoveryDispatcher(address(new UUPSProxy(
             dispatcherImpl,
-            abi.encodeWithSelector(RecoveryDispatcher.initialize.selector, owner)
+            abi.encodeWithSelector(RecoveryDispatcher.initialize.selector, owner, address(roleRegistry))
         )));
 
         // ── Peer both sides ──────────────────────────────────────────────────────────────

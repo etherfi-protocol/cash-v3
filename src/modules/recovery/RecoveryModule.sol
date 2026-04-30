@@ -73,8 +73,10 @@ contract RecoveryModule is IRecoveryModule, ModuleBase, OAppSender, Pausable {
         emit RecoverySent(safe, lzGuid, token, amount, recipient, destEid);
     }
 
-    /// @dev Encodes the recovery payload and ships it via `_lzSend`. Extracted to keep the
-    ///      outer `recover` under the EVM stack-too-deep limit.
+    /// @dev Encodes the recovery payload, fetches the LZ quote on-chain, and ships it via
+    ///      `_lzSend` using that quoted fee. Extracted to keep the outer `recover` under the
+    ///      EVM stack-too-deep limit. Any excess `msg.value` over the quoted fee is refunded
+    ///      to the caller by the overridden `_payNative` below.
     function _dispatchRecovery(
         address safe,
         address token,
@@ -90,15 +92,31 @@ contract RecoveryModule is IRecoveryModule, ModuleBase, OAppSender, Pausable {
             recipient: recipient
         }));
 
+        MessagingFee memory fee = _quote(destEid, message, lzOptions, false);
+
         MessagingReceipt memory receipt = _lzSend(
             destEid,
             message,
             lzOptions,
-            MessagingFee({ nativeFee: msg.value, lzTokenFee: 0 }),
+            fee,
             payable(msg.sender)
         );
 
         return receipt.guid;
+    }
+
+    /// @dev Override `OAppSender._payNative` to refund any `msg.value` excess over the quoted
+    ///      `_nativeFee`. The base implementation requires strict equality; we fetch the
+    ///      quote on-chain inside `_dispatchRecovery` and refund the difference here so a
+    ///      caller who slightly over-funds (to absorb gas-price drift between off-chain
+    ///      `quote()` and submission) doesn't revert.
+    function _payNative(uint256 _nativeFee) internal override returns (uint256 nativeFee) {
+        if (msg.value < _nativeFee) revert NotEnoughNative(msg.value);
+        if (msg.value > _nativeFee) {
+            (bool ok, ) = payable(msg.sender).call{ value: msg.value - _nativeFee }("");
+            if (!ok) revert RefundFailed();
+        }
+        return _nativeFee;
     }
 
     /**

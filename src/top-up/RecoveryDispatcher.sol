@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { OAppReceiverUpgradeable, Origin } from "@layerzerolabs/oapp-evm-upgradeable/contracts/oapp/OAppReceiverUpgradeable.sol";
 import { OAppCoreUpgradeable } from "@layerzerolabs/oapp-evm-upgradeable/contracts/oapp/OAppCoreUpgradeable.sol";
 
-import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { RecoveryMessageLib } from "../libraries/RecoveryMessageLib.sol";
+import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { TopUpV2 } from "./TopUpV2.sol";
 
 /**
@@ -19,16 +17,14 @@ import { TopUpV2 } from "./TopUpV2.sol";
  * @dev CREATE3 parity between `TopUp` and the user's EtherFi Safe is enforced by deployment
  *      tooling, so `payload.safe` is also the TopUp proxy address on this chain — no
  *      factory lookup is required. The TopUp gates the transfer on `msg.sender == DISPATCHER`.
- *      Pause/unpause gated by the shared RoleRegistry's PAUSER/UNPAUSER roles; this single
- *      switch is sufficient to halt all recoveries on this chain because every
- *      `TopUpV2.executeRecovery` call must originate from this dispatcher.
+ *      Pause/unpause and upgrade authorization are inherited from `UpgradeableProxy`, gated
+ *      by the shared RoleRegistry's PAUSER / UNPAUSER / UPGRADER roles. Pausing is sufficient
+ *      to halt all recoveries on this chain because every `TopUpV2.executeRecovery` call must
+ *      originate from this dispatcher.
  */
-contract RecoveryDispatcher is OAppReceiverUpgradeable, UUPSUpgradeable, PausableUpgradeable {
+contract RecoveryDispatcher is OAppReceiverUpgradeable, UpgradeableProxy {
     /// @notice Source EID this dispatcher trusts (Optimism = 30111).
     uint32 public immutable SOURCE_EID;
-
-    /// @notice Role registry used for pause/unpause authorization (shared across chains).
-    IRoleRegistry public immutable ROLE_REGISTRY;
 
     /// @notice Emitted when a recovery message is successfully dispatched to a TopUp on this chain.
     event RecoveryDispatched(bytes32 indexed guid, address indexed safe, address indexed token, uint256 amount, address recipient);
@@ -38,21 +34,20 @@ contract RecoveryDispatcher is OAppReceiverUpgradeable, UUPSUpgradeable, Pausabl
     /// @notice Thrown when the target TopUp proxy has no code on this chain (user hasn't deployed yet).
     error TopUpNotDeployed();
 
-    constructor(address _endpoint, uint32 _sourceEid, address _roleRegistry) OAppCoreUpgradeable(_endpoint) {
+    constructor(address _endpoint, uint32 _sourceEid) OAppCoreUpgradeable(_endpoint) {
         SOURCE_EID = _sourceEid;
-        ROLE_REGISTRY = IRoleRegistry(_roleRegistry);
         _disableInitializers();
     }
 
     /**
      * @notice Initializes the proxy instance
      * @param _delegate Address of the OApp delegate / owner (operating safe on the destination chain)
+     * @param _roleRegistry Address of the shared RoleRegistry (drives pause/unpause and upgrades)
      */
-    function initialize(address _delegate) external initializer {
+    function initialize(address _delegate, address _roleRegistry) external initializer {
         __Ownable_init(_delegate);
         __OAppCore_init(_delegate);
-        __UUPSUpgradeable_init();
-        __Pausable_init();
+        __UpgradeableProxy_init(_roleRegistry);
     }
 
     /**
@@ -83,28 +78,4 @@ contract RecoveryDispatcher is OAppReceiverUpgradeable, UUPSUpgradeable, Pausabl
 
         emit RecoveryDispatched(_guid, p.safe, p.token, p.amount, p.recipient);
     }
-
-    /**
-     * @notice Pauses `_lzReceive`. Already-queued packets remain in the LZ endpoint and
-     *         can be retried after `unpause`.
-     * @dev Only callable by accounts with the PAUSER role on the shared RoleRegistry.
-     */
-    function pause() external {
-        ROLE_REGISTRY.onlyPauser(msg.sender);
-        _pause();
-    }
-
-    /**
-     * @notice Unpauses `_lzReceive`. Any queued LZ packets become retriable.
-     * @dev Only callable by accounts with the UNPAUSER role on the shared RoleRegistry.
-     */
-    function unpause() external {
-        ROLE_REGISTRY.onlyUnpauser(msg.sender);
-        _unpause();
-    }
-
-    /**
-     * @dev Only the owner (operating safe on this chain) can upgrade the dispatcher.
-     */
-    function _authorizeUpgrade(address) internal override onlyOwner {}
 }

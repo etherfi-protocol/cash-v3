@@ -41,7 +41,7 @@ contract DeployRecoveryDispatcher is Utils, RecoveryDeployHelper {
         address impl = _deployCreate3(
             abi.encodePacked(
                 type(RecoveryDispatcher).creationCode,
-                abi.encode(lzEndpoint, RecoveryDeployConfig.OP_EID, roleRegistry)
+                abi.encode(lzEndpoint, RecoveryDeployConfig.OP_EID)
             ),
             RecoveryDeployConfig.SALT_RECOVERY_DISPATCHER_IMPL
         );
@@ -49,7 +49,7 @@ contract DeployRecoveryDispatcher is Utils, RecoveryDeployHelper {
 
         RecoveryDispatcher dispatcher = RecoveryDispatcher(address(new UUPSProxy(
             impl,
-            abi.encodeWithSelector(RecoveryDispatcher.initialize.selector, RecoveryDeployConfig.OPERATING_SAFE)
+            abi.encodeWithSelector(RecoveryDispatcher.initialize.selector, RecoveryDeployConfig.OPERATING_SAFE, roleRegistry)
         )));
 
         vm.stopBroadcast();

@@ -15,6 +15,8 @@ interface IRecoveryModule {
     error InvalidRecipient();
     error InvalidAmount();
     error InvalidToken();
+    /// @notice Thrown when the contract fails to refund unused `msg.value` to the caller.
+    error RefundFailed();
     // `InvalidSignature()` is inherited from `ModuleBase` and is exposed in the
     // compiled `RecoveryModule` ABI. Not declared here to avoid a
     // multiple-inheritance collision with `ModuleBase.InvalidSignature`.

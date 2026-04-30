@@ -129,11 +129,11 @@ contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
         require(dispatcherEndpoint == expectedEndpoint, "RecoveryDispatcher.endpoint != LZ_ENDPOINT - wrong-endpoint risk");
         console.log("  [OK] endpoint == LZ_ENDPOINT");
 
-        // 7. ROLE_REGISTRY immutable matches expected registry (required — wrong registry disables pause/unpause)
+        // 7. roleRegistry (UpgradeableProxy storage) matches expected registry — required, wrong registry disables pause/unpause + upgrades
         address expectedRoleRegistry = vm.envAddress("ROLE_REGISTRY");
-        address dispatcherRoleRegistry = address(RecoveryDispatcher(dispatcherProxy).ROLE_REGISTRY());
-        require(dispatcherRoleRegistry == expectedRoleRegistry, "RecoveryDispatcher.ROLE_REGISTRY != ROLE_REGISTRY - pause gate misconfigured");
-        console.log("  [OK] ROLE_REGISTRY == ROLE_REGISTRY env");
+        address dispatcherRoleRegistry = address(RecoveryDispatcher(dispatcherProxy).roleRegistry());
+        require(dispatcherRoleRegistry == expectedRoleRegistry, "RecoveryDispatcher.roleRegistry != ROLE_REGISTRY - pause/upgrade gate misconfigured");
+        console.log("  [OK] roleRegistry == ROLE_REGISTRY env");
 
         // 8. TopUpV2 impl checks (optional — only after beacon upgrade is signed)
         try vm.envAddress("TOPUP_V2_IMPL") returns (address topUpImpl) {

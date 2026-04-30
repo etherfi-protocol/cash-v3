@@ -31,8 +31,8 @@ contract RecoveryDispatcherTest is Test {
         endpoint = new LZEndpointMock();
         roleRegistry = new RoleRegistryMock(pauser, unpauser);
 
-        address impl = address(new RecoveryDispatcher(address(endpoint), OP_EID, address(roleRegistry)));
-        dispatcher = RecoveryDispatcher(address(new UUPSProxy(impl, abi.encodeWithSelector(RecoveryDispatcher.initialize.selector, owner))));
+        address impl = address(new RecoveryDispatcher(address(endpoint), OP_EID));
+        dispatcher = RecoveryDispatcher(address(new UUPSProxy(impl, abi.encodeWithSelector(RecoveryDispatcher.initialize.selector, owner, address(roleRegistry)))));
 
         vm.prank(owner);
         dispatcher.setPeer(OP_EID, bytes32(uint256(uint160(recoveryModule))));
