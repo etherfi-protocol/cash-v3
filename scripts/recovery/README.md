@@ -1,6 +1,6 @@
 # Fund Recovery Module — 3CP Runbook
 
-Operational guide for deploying, wiring, and sanity-checking the Fund Recovery Module across Optimism (source) and 7 destination chains.
+Operational guide for deploying, wiring, and sanity-checking the Fund Recovery Module across Optimism (source) and 5 destination chains.
 
 ## Roles
 
@@ -11,7 +11,7 @@ Operational guide for deploying, wiring, and sanity-checking the Fund Recovery M
 
 ## Chain Matrix
 
-See `lz-config.json` for the authoritative EIDs + LZ v2 endpoint addresses. Source = Optimism (EID `30111`). Destinations: Ethereum, Arbitrum, Base, Linea, Polygon, Avalanche, BNB.
+See `lz-config.json` for the authoritative EIDs + LZ v2 endpoint addresses. Source = Optimism (EID `30111`). Destinations: Ethereum, Arbitrum, Base, BNB, HyperEVM.
 
 ## Deployment Sequence
 
@@ -31,7 +31,7 @@ Record:
 
 Script prints the `EtherFiDataProvider.configureModules([module],[true])` calldata; this is the FIRST signing bundle for the operating safe on OP (see §5.1).
 
-### 2. Deploy `AssetRecoveryDispatcher` on each of the 7 dest chains
+### 2. Deploy `AssetRecoveryDispatcher` on each of the 5 dest chains
 
 For each chain, with its LZ endpoint and the local `TopUpFactory` proxy address:
 
@@ -71,7 +71,7 @@ DISPATCHER_BNB=$BNB_DISP \
 forge script scripts/recovery/ConfigureLzPeers.s.sol -vvv
 ```
 
-Prints 14 `setPeer` calldatas (7 for OP module + 7 for dispatchers) that the operating safe will 3CP-sign (§5.3).
+Prints 10 `setPeer` calldatas (5 for OP module + 5 for dispatchers) that the operating safe will 3CP-sign (§5.3).
 
 Addresses in `ConfigureLzPeers.s.sol` are `address constant` fields at the top of the contract — fill them in and re-compile before running (`forge build && forge script scripts/recovery/ConfigureLzPeers.s.sol -vvv`). The script `require`s that every address is non-zero.
 
@@ -97,20 +97,14 @@ Per dest chain, the operating safe must call `RoleRegistry.grantRole(role, 0xA6c
 - **Base (8453)** — `RoleRegistry = 0x55963de88267Aa3D1D995c359e8068D0Df34BEBb`
   - `grantRole(PAUSER, 0xA6cf...AAC4)`
   - `grantRole(UNPAUSER, 0xA6cf...AAC4)`
-- **Linea (59144)** — `RoleRegistry = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B`
-  - `grantRole(PAUSER, 0xA6cf...AAC4)`
-  - `grantRole(UNPAUSER, 0xA6cf...AAC4)`
-- **Polygon (137)** — `RoleRegistry = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B`
-  - `grantRole(PAUSER, 0xA6cf...AAC4)`
-  - `grantRole(UNPAUSER, 0xA6cf...AAC4)`
-- **Avalanche (43114)** — `RoleRegistry = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B`
-  - `grantRole(PAUSER, 0xA6cf...AAC4)`
-  - `grantRole(UNPAUSER, 0xA6cf...AAC4)`
 - **BNB (56)** — `RoleRegistry = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B`
   - `grantRole(PAUSER, 0xA6cf...AAC4)`
   - `grantRole(UNPAUSER, 0xA6cf...AAC4)`
+- **HyperEVM (999)** — `RoleRegistry = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B`
+  - `grantRole(PAUSER, 0xA6cf...AAC4)`
+  - `grantRole(UNPAUSER, 0xA6cf...AAC4)`
 
-Total: 14 grants (2 per chain × 7 chains). Bundle each chain's pair into a single Safe transaction.
+Total: 10 grants (2 per chain × 5 chains). Bundle each chain's pair into a single Safe transaction.
 
 ### 5.0 Post-deploy verification (runs before any 3CP signing)
 
@@ -140,7 +134,7 @@ forge script scripts/recovery/VerifyRecoveryDeployment.s.sol --rpc-url $OP_RPC
 
 ## 5. Operating-Safe Signing Bundles
 
-Exactly **16 signatures** total across 8 chains:
+Exactly **12 signatures** total across 6 chains:
 
 ### 5.1 On Optimism — 1 tx
 
@@ -148,18 +142,18 @@ Exactly **16 signatures** total across 8 chains:
 |---|---|---|
 | 1 | `EtherFiDataProvider` | `configureModules([AssetRecoveryModule], [true])` |
 
-### 5.2 On each dest chain (Ethereum, Arbitrum, Base, Linea, Polygon, Avalanche, BNB) — 2 tx per chain (14 total)
+### 5.2 On each dest chain (Ethereum, Arbitrum, Base, BNB, HyperEVM) — 2 tx per chain (10 total)
 
 | # | Target | Call |
 |---|---|---|
 | 1 | `BeaconFactory` | `upgradeBeaconImplementation(TopUpV2 impl)` |
 | 2 | `AssetRecoveryDispatcher` | `setPeer(30111, AssetRecoveryModuleOnOp)` |
 
-### 5.3 Back on Optimism — 1 tx (bundle of 7)
+### 5.3 Back on Optimism — 1 tx (bundle of 5)
 
 | # | Target | Call |
 |---|---|---|
-| 1 | `AssetRecoveryModule` | `setPeer(eid_i, dispatcher_i)` × 7 |
+| 1 | `AssetRecoveryModule` | `setPeer(eid_i, dispatcher_i)` × 5 |
 
 ## 6. Smoke Test
 
@@ -197,4 +191,4 @@ Pick one per-user TopUp on a single dest chain with a small stuck ERC20 balance 
 - [ ] Beacon factory on each dest chain matches the address in `deployments/<env>/<chainId>/deployments.json`
 - [ ] `TopUpV2.DISPATCHER()` (on each chain) == the corresponding `AssetRecoveryDispatcher` proxy
 - [ ] `forge inspect TopUp storage-layout` and `forge inspect TopUpV2 storage-layout` diff is empty (no storage fields added)
-- [ ] All 14 `setPeer` calldatas recomputed independently by the 3CP reviewer
+- [ ] All 10 `setPeer` calldatas recomputed independently by the 3CP reviewer

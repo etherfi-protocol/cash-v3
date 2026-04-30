@@ -11,9 +11,9 @@ import { RecoveryDeployConfig, RecoveryDeployHelper } from "./RecoveryDeployConf
 
 /**
  * @notice Deploys a singleton `AssetRecoveryDispatcher` on one destination chain. Run once
- *         per chain in {Ethereum, Arbitrum, Base, Linea, Polygon, Avalanche, BSC}. Impl is
- *         deployed via Nick's CREATE3 factory with `SALT_RECOVERY_DISPATCHER_IMPL` so it
- *         lands at the same address on every chain.
+ *         per chain in {Ethereum, Arbitrum, Base, BNB, HyperEVM}. Impl is deployed via
+ *         Nick's CREATE3 factory with `SALT_RECOVERY_DISPATCHER_IMPL` so it lands at the
+ *         same address on every chain.
  *
  * Env:
  *   PRIVATE_KEY    — deployer key
