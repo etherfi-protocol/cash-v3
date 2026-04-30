@@ -4,8 +4,8 @@ pragma solidity ^0.8.28;
 import { Script } from "forge-std/Script.sol";
 import { console } from "forge-std/console.sol";
 
-import { RecoveryModule } from "../../src/modules/recovery/RecoveryModule.sol";
-import { RecoveryDispatcher } from "../../src/top-up/RecoveryDispatcher.sol";
+import { AssetRecoveryModule } from "../../src/modules/recovery/AssetRecoveryModule.sol";
+import { AssetRecoveryDispatcher } from "../../src/top-up/AssetRecoveryDispatcher.sol";
 import { TopUpV2 } from "../../src/top-up/TopUpV2.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { RecoveryDeployConfig, RecoveryDeployHelper } from "./RecoveryDeployConfig.sol";
@@ -44,29 +44,29 @@ contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
 
     function _verifyOptimism() internal view {
         address module = vm.envAddress("RECOVERY_MODULE_OP");
-        console.log("RecoveryModule: %s", module);
+        console.log("AssetRecoveryModule: %s", module);
 
         // 1. Module has code at the CREATE3-predicted address
         address expected = _predictImpl(RecoveryDeployConfig.SALT_RECOVERY_MODULE);
-        require(module == expected, "RecoveryModule address mismatch - wrong salt or stale CREATE3");
-        require(module.code.length > 0, "RecoveryModule has no code");
+        require(module == expected, "AssetRecoveryModule address mismatch - wrong salt or stale CREATE3");
+        require(module.code.length > 0, "AssetRecoveryModule has no code");
         console.log("  [OK] at predicted CREATE3 address: %s", module);
 
         // 2. Owner is the operating safe (set by constructor — non-upgradable)
-        address moduleOwner = RecoveryModule(module).owner();
+        address moduleOwner = AssetRecoveryModule(module).owner();
         require(moduleOwner == RecoveryDeployConfig.OPERATING_SAFE, "module owner != OPERATING_SAFE");
         console.log("  [OK] owner == operating safe");
 
         // 3. LayerZero endpoint immutable matches expected endpoint (required — catches stale CREATE3 reuse)
         address expectedEndpoint = vm.envAddress("LZ_ENDPOINT");
-        address moduleEndpoint = address(RecoveryModule(module).endpoint());
-        require(moduleEndpoint == expectedEndpoint, "RecoveryModule.endpoint != LZ_ENDPOINT - wrong-endpoint risk");
+        address moduleEndpoint = address(AssetRecoveryModule(module).endpoint());
+        require(moduleEndpoint == expectedEndpoint, "AssetRecoveryModule.endpoint != LZ_ENDPOINT - wrong-endpoint risk");
         console.log("  [OK] endpoint == LZ_ENDPOINT");
 
         // 4. DataProvider immutable matches expected provider (required — catches wrong onlyEtherFiSafe registry)
         address expectedDp = vm.envAddress("ETHER_FI_DATA_PROVIDER");
-        address moduleDp = address(RecoveryModule(module).etherFiDataProvider());
-        require(moduleDp == expectedDp, "RecoveryModule.etherFiDataProvider != ETHER_FI_DATA_PROVIDER - wrong-registry risk");
+        address moduleDp = address(AssetRecoveryModule(module).etherFiDataProvider());
+        require(moduleDp == expectedDp, "AssetRecoveryModule.etherFiDataProvider != ETHER_FI_DATA_PROVIDER - wrong-registry risk");
         console.log("  [OK] etherFiDataProvider == ETHER_FI_DATA_PROVIDER");
 
         // 5. Module whitelisted on the data provider — only true AFTER the operating safe's
@@ -92,7 +92,7 @@ contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
 
     function _verifyDestChain() internal view {
         address dispatcherProxy = vm.envAddress("DISPATCHER");
-        console.log("RecoveryDispatcher proxy: %s", dispatcherProxy);
+        console.log("AssetRecoveryDispatcher proxy: %s", dispatcherProxy);
 
         // 1. Proxy has code
         require(dispatcherProxy.code.length > 0, "dispatcher proxy has no code");
@@ -102,8 +102,8 @@ contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
         address actualImpl = address(uint160(uint256(
             vm.load(dispatcherProxy, RecoveryDeployConfig.EIP1967_IMPL_SLOT)
         )));
-        require(actualImpl == expectedImpl, "RecoveryDispatcher impl mismatch - possible hijack");
-        require(actualImpl.code.length > 0, "RecoveryDispatcher impl has no code");
+        require(actualImpl == expectedImpl, "AssetRecoveryDispatcher impl mismatch - possible hijack");
+        require(actualImpl.code.length > 0, "AssetRecoveryDispatcher impl has no code");
         console.log("  [OK] impl at predicted address: %s", actualImpl);
 
         // 3. Initialized
@@ -112,27 +112,27 @@ contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
         console.log("  [OK] initialized (v=%s)", initSlot);
 
         // 4. Owner is the operating safe
-        address dispatcherOwner = RecoveryDispatcher(dispatcherProxy).owner();
+        address dispatcherOwner = AssetRecoveryDispatcher(dispatcherProxy).owner();
         require(dispatcherOwner == RecoveryDeployConfig.OPERATING_SAFE, "dispatcher owner != OPERATING_SAFE");
         console.log("  [OK] owner == operating safe");
 
         // 5. SOURCE_EID is OP
         require(
-            uint256(RecoveryDispatcher(dispatcherProxy).SOURCE_EID()) == uint256(RecoveryDeployConfig.OP_EID),
+            uint256(AssetRecoveryDispatcher(dispatcherProxy).SOURCE_EID()) == uint256(RecoveryDeployConfig.OP_EID),
             "dispatcher SOURCE_EID != 30111"
         );
         console.log("  [OK] SOURCE_EID == 30111 (Optimism)");
 
         // 6. LayerZero endpoint immutable matches expected endpoint (required — catches stale CREATE3 reuse)
         address expectedEndpoint = vm.envAddress("LZ_ENDPOINT");
-        address dispatcherEndpoint = address(RecoveryDispatcher(dispatcherProxy).endpoint());
-        require(dispatcherEndpoint == expectedEndpoint, "RecoveryDispatcher.endpoint != LZ_ENDPOINT - wrong-endpoint risk");
+        address dispatcherEndpoint = address(AssetRecoveryDispatcher(dispatcherProxy).endpoint());
+        require(dispatcherEndpoint == expectedEndpoint, "AssetRecoveryDispatcher.endpoint != LZ_ENDPOINT - wrong-endpoint risk");
         console.log("  [OK] endpoint == LZ_ENDPOINT");
 
         // 7. roleRegistry (UpgradeableProxy storage) matches expected registry — required, wrong registry disables pause/unpause + upgrades
         address expectedRoleRegistry = vm.envAddress("ROLE_REGISTRY");
-        address dispatcherRoleRegistry = address(RecoveryDispatcher(dispatcherProxy).roleRegistry());
-        require(dispatcherRoleRegistry == expectedRoleRegistry, "RecoveryDispatcher.roleRegistry != ROLE_REGISTRY - pause/upgrade gate misconfigured");
+        address dispatcherRoleRegistry = address(AssetRecoveryDispatcher(dispatcherProxy).roleRegistry());
+        require(dispatcherRoleRegistry == expectedRoleRegistry, "AssetRecoveryDispatcher.roleRegistry != ROLE_REGISTRY - pause/upgrade gate misconfigured");
         console.log("  [OK] roleRegistry == ROLE_REGISTRY env");
 
         // 8. TopUpV2 impl checks (optional — only after beacon upgrade is signed)

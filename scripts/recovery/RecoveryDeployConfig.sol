@@ -20,8 +20,11 @@ library RecoveryDeployConfig {
         0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
 
     // CREATE3 salts — do not change after first deploy (addresses are load-bearing for verification).
-    // RecoveryModule is non-upgradable (deployed directly), so the salt names the contract, not an impl.
-    // RecoveryDispatcher + TopUpV2 are UUPS singletons, so those salts name the impl.
+    // AssetRecoveryModule is non-upgradable (deployed directly), so the salt names the contract, not an impl.
+    // AssetRecoveryDispatcher + TopUpV2 are UUPS singletons, so those salts name the impl.
+    // NOTE: salt seed strings still read "RecoveryModule" / "RecoveryDispatcherImpl" — preserved
+    //       deliberately. Mutating them would invalidate independent address recomputation by the
+    //       3CP reviewer and break idempotency of the deploy helper.
     bytes32 internal constant SALT_RECOVERY_MODULE          = keccak256("Recovery.RecoveryModule.v1");
     bytes32 internal constant SALT_RECOVERY_DISPATCHER_IMPL = keccak256("Recovery.RecoveryDispatcherImpl.v1");
     bytes32 internal constant SALT_TOPUP_V2_IMPL            = keccak256("Recovery.TopUpV2Impl.v1");

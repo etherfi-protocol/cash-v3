@@ -40,46 +40,45 @@ contract TopUpV2Test is Test {
         emit TopUpV2.RecoveryExecuted(address(token), recipient, 100e18);
 
         vm.prank(dispatcher);
-        topup.executeRecovery(address(token), 100e18, recipient);
+        topup.executeRecovery(address(token), recipient);
 
         assertEq(token.balanceOf(recipient), 100e18, "recipient balance mismatch");
         assertEq(token.balanceOf(address(topup)), 0, "topup should be drained");
     }
 
-    function test_executeRecovery_revertsIfAmountNotEqualToBalance() public {
-        // Partial drain rejected — recovery must transfer the full stuck balance.
+    function test_executeRecovery_sweepsActualBalanceIncludingPostSubmitDust() public {
+        // Previously dust arriving between submit + delivery would brick the call. With the
+        // amount-less payload the contract sweeps whatever is sitting here at receipt time.
+        token.mint(address(topup), 1); // dust arrived after the Safe signed
+        address recipient = makeAddr("recipient");
+
         vm.prank(dispatcher);
-        vm.expectRevert(TopUpV2.AmountMustEqualBalance.selector);
-        topup.executeRecovery(address(token), 40e18, makeAddr("recipient"));
+        topup.executeRecovery(address(token), recipient);
+
+        assertEq(token.balanceOf(recipient), 100e18 + 1, "should sweep original + dust");
+        assertEq(token.balanceOf(address(topup)), 0, "topup should be drained");
     }
 
-    function test_executeRecovery_revertsIfDustArrivedAfterSubmit() public {
-        // Simulates the dust-brick caveat: an inbound transfer between submit on OP and
-        // LZ delivery here changes the balance, so the original payload's `amount`
-        // (which equalled the balance at submit time) no longer matches.
-        token.mint(address(topup), 1); // dust
+    function test_executeRecovery_revertsIfNoBalance() public {
+        // Drain the topup first so balanceOf == 0.
+        vm.prank(dispatcher);
+        topup.executeRecovery(address(token), makeAddr("recipient"));
 
         vm.prank(dispatcher);
-        vm.expectRevert(TopUpV2.AmountMustEqualBalance.selector);
-        topup.executeRecovery(address(token), 100e18, makeAddr("recipient"));
+        vm.expectRevert(TopUpV2.NoBalanceToRecover.selector);
+        topup.executeRecovery(address(token), makeAddr("recipient"));
     }
 
     function test_executeRecovery_revertsIfNotDispatcher() public {
         vm.prank(makeAddr("random"));
         vm.expectRevert(TopUpV2.OnlyDispatcher.selector);
-        topup.executeRecovery(address(token), 100e18, makeAddr("recipient"));
+        topup.executeRecovery(address(token), makeAddr("recipient"));
     }
 
     function test_executeRecovery_revertsOnZeroRecipient() public {
         vm.prank(dispatcher);
         vm.expectRevert(TopUpV2.InvalidRecipient.selector);
-        topup.executeRecovery(address(token), 100e18, address(0));
-    }
-
-    function test_executeRecovery_revertsOnZeroAmount() public {
-        vm.prank(dispatcher);
-        vm.expectRevert(TopUpV2.InvalidAmount.selector);
-        topup.executeRecovery(address(token), 0, makeAddr("recipient"));
+        topup.executeRecovery(address(token), address(0));
     }
 
     function test_executeRecovery_revertsIfTokenSupported() public {
@@ -93,7 +92,7 @@ contract TopUpV2Test is Test {
 
         vm.prank(dispatcher);
         vm.expectRevert(TopUpV2.OnlyUnsupportedTokens.selector);
-        topup.executeRecovery(address(token), 100e18, makeAddr("recipient"));
+        topup.executeRecovery(address(token), makeAddr("recipient"));
     }
 
     function test_dispatcherImmutableSetInConstructor() public view {

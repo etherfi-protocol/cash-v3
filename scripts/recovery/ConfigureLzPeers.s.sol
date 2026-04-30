@@ -6,10 +6,10 @@ import { console } from "forge-std/console.sol";
 
 /**
  * @notice Prints the 14 `setPeer` calldatas that the operating safe will 3CP-sign
- *         after the RecoveryModule + 7 RecoveryDispatchers are deployed.
+ *         after the AssetRecoveryModule + 7 AssetRecoveryDispatchers are deployed.
  *
- *         - On OP `RecoveryModule.setPeer(destEid, dispatcher)` × 7
- *         - On each dest `RecoveryDispatcher.setPeer(30111, moduleOnOp)` × 7
+ *         - On OP `AssetRecoveryModule.setPeer(destEid, dispatcher)` × 7
+ *         - On each dest `AssetRecoveryDispatcher.setPeer(30111, moduleOnOp)` × 7
  *
  * Fill in all eight addresses below post-deployment, then run:
  *   forge script scripts/recovery/ConfigureLzPeers.s.sol -vvv
@@ -54,7 +54,7 @@ contract ConfigureLzPeers is Script {
         string[7] memory names = ["Ethereum", "Arbitrum", "Base", "Linea", "Polygon", "Avalanche", "BNB"];
 
         console.log("=== On Optimism: RecoveryModule.setPeer(destEid, dispatcher) ===");
-        console.log("Target: %s (RecoveryModule)", RECOVERY_MODULE_OP);
+        console.log("Target: %s (AssetRecoveryModule)", RECOVERY_MODULE_OP);
         for (uint256 i = 0; i < 7; i++) {
             bytes memory cd = abi.encodeWithSignature(
                 "setPeer(uint32,bytes32)", eids[i], _toBytes32(dispatchers[i])
@@ -64,7 +64,7 @@ contract ConfigureLzPeers is Script {
         }
 
         console.log("");
-        console.log("=== On each dest chain: RecoveryDispatcher.setPeer(30111, RecoveryModule) ===");
+        console.log("=== On each dest chain: AssetRecoveryDispatcher.setPeer(30111, AssetRecoveryModule) ===");
         bytes memory opPeerCd = abi.encodeWithSignature(
             "setPeer(uint32,bytes32)", OP_EID, _toBytes32(RECOVERY_MODULE_OP)
         );

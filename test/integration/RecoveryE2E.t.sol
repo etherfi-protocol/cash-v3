@@ -5,8 +5,8 @@ import { Origin } from "@layerzerolabs/oapp-evm-upgradeable/contracts/oapp/OAppR
 
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import { RecoveryModule } from "../../src/modules/recovery/RecoveryModule.sol";
-import { RecoveryDispatcher } from "../../src/top-up/RecoveryDispatcher.sol";
+import { AssetRecoveryModule } from "../../src/modules/recovery/AssetRecoveryModule.sol";
+import { AssetRecoveryDispatcher } from "../../src/top-up/AssetRecoveryDispatcher.sol";
 import { TopUpV2 } from "../../src/top-up/TopUpV2.sol";
 import { RecoveryMessageLib } from "../../src/libraries/RecoveryMessageLib.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
@@ -21,13 +21,13 @@ import { LZEndpointMock } from "../mocks/LZEndpointMock.sol";
  *         onto the Safe's CREATE3-parity address) are transferred to the user's recipient.
  * @dev This is not a real dual-fork test — the LZ message bus is simulated via our mock
  *      endpoint's `lastSendArgs`. The parts this covers that the unit tests don't:
- *      (1) the payload encoding produced by `executeRecovery` decodes cleanly on the dispatcher,
+ *      (1) the payload encoding produced by `recover` decodes cleanly on the dispatcher,
  *      (2) the dispatcher's forwarding call lands on a TopUpV2 with matching `DISPATCHER`,
  *      (3) a real Safe multisig signs the request digest end-to-end.
  */
 contract RecoveryE2ETest is SafeTestSetup {
-    RecoveryModule public module;
-    RecoveryDispatcher public dispatcher;
+    AssetRecoveryModule public module;
+    AssetRecoveryDispatcher public dispatcher;
     LZEndpointMock public srcEndpoint; // OP
     LZEndpointMock public dstEndpoint; // destination (e.g. Arbitrum)
     MockERC20 public token;
@@ -44,7 +44,7 @@ contract RecoveryE2ETest is SafeTestSetup {
         srcEndpoint = new LZEndpointMock();
 
         vm.startPrank(owner);
-        module = new RecoveryModule(address(dataProvider), address(srcEndpoint), owner);
+        module = new AssetRecoveryModule(address(dataProvider), address(srcEndpoint), owner);
 
         // whitelist + attach the module to the Safe
         address[] memory modules = new address[](1);
@@ -58,13 +58,13 @@ contract RecoveryE2ETest is SafeTestSetup {
 
         // ── Destination (Arb) wiring ──────────────────────────────────────────────────────
         dstEndpoint = new LZEndpointMock();
-        address dispatcherImpl = address(new RecoveryDispatcher(
+        address dispatcherImpl = address(new AssetRecoveryDispatcher(
             address(dstEndpoint),
             OP_EID
         ));
-        dispatcher = RecoveryDispatcher(address(new UUPSProxy(
+        dispatcher = AssetRecoveryDispatcher(address(new UUPSProxy(
             dispatcherImpl,
-            abi.encodeWithSelector(RecoveryDispatcher.initialize.selector, owner, address(roleRegistry))
+            abi.encodeWithSelector(AssetRecoveryDispatcher.initialize.selector, owner, address(roleRegistry))
         )));
 
         // ── Peer both sides ──────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ contract RecoveryE2ETest is SafeTestSetup {
     }
 
     function test_e2e_opToArb_happyPath() public {
-        // Recovery must drain the full balance — `amount` equals what's stuck on dest.
+        // Recovery sweeps whatever is on the destination at delivery time.
         uint256 amount = 100e18;
 
         // ── Phase 1: source side — single call submits + dispatches LZ ──────────────────
@@ -89,7 +89,6 @@ contract RecoveryE2ETest is SafeTestSetup {
             nonce,
             address(safe),
             address(token),
-            amount,
             recipient,
             ARB_EID,
             keccak256(lzOptions)
@@ -103,7 +102,7 @@ contract RecoveryE2ETest is SafeTestSetup {
 
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
-        module.recover{value: 1e15}(address(safe), address(token), amount, recipient, ARB_EID, lzOptions, signers, sigs);
+        module.recover{value: 1e15}(address(safe), address(token), recipient, ARB_EID, lzOptions, signers, sigs);
 
         (uint32 dstEid, bytes memory message) = srcEndpoint.lastSendArgs();
         assertEq(uint256(dstEid), uint256(ARB_EID), "dstEid mismatch");

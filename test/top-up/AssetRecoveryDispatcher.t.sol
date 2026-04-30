@@ -7,14 +7,14 @@ import { Test } from "forge-std/Test.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { RecoveryMessageLib } from "../../src/libraries/RecoveryMessageLib.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
-import { RecoveryDispatcher } from "../../src/top-up/RecoveryDispatcher.sol";
+import { AssetRecoveryDispatcher } from "../../src/top-up/AssetRecoveryDispatcher.sol";
 import { TopUpV2 } from "../../src/top-up/TopUpV2.sol";
 import { ITopUpFactoryView } from "../../src/top-up/TopUpV2.sol";
 import { LZEndpointMock } from "../mocks/LZEndpointMock.sol";
 import { RoleRegistryMock } from "../mocks/RoleRegistryMock.sol";
 
-contract RecoveryDispatcherTest is Test {
-    RecoveryDispatcher public dispatcher;
+contract AssetRecoveryDispatcherTest is Test {
+    AssetRecoveryDispatcher public dispatcher;
     LZEndpointMock public endpoint;
     RoleRegistryMock public roleRegistry;
     MockERC20 public token;
@@ -31,8 +31,8 @@ contract RecoveryDispatcherTest is Test {
         endpoint = new LZEndpointMock();
         roleRegistry = new RoleRegistryMock(pauser, unpauser);
 
-        address impl = address(new RecoveryDispatcher(address(endpoint), OP_EID));
-        dispatcher = RecoveryDispatcher(address(new UUPSProxy(impl, abi.encodeWithSelector(RecoveryDispatcher.initialize.selector, owner, address(roleRegistry)))));
+        address impl = address(new AssetRecoveryDispatcher(address(endpoint), OP_EID));
+        dispatcher = AssetRecoveryDispatcher(address(new UUPSProxy(impl, abi.encodeWithSelector(AssetRecoveryDispatcher.initialize.selector, owner, address(roleRegistry)))));
 
         vm.prank(owner);
         dispatcher.setPeer(OP_EID, bytes32(uint256(uint160(recoveryModule))));
@@ -49,10 +49,10 @@ contract RecoveryDispatcherTest is Test {
         vm.mockCall(topup.owner(), abi.encodeWithSelector(ITopUpFactoryView.isTokenSupported.selector, address(token)), abi.encode(false));
 
         address recipient = makeAddr("recipient");
-        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), amount: 100e18, recipient: recipient }));
+        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), recipient: recipient }));
 
         vm.expectEmit(true, true, true, true);
-        emit RecoveryDispatcher.RecoveryDispatched(GUID, address(topup), address(token), 100e18, recipient);
+        emit AssetRecoveryDispatcher.RecoveryDispatched(GUID, address(topup), address(token), recipient);
 
         _deliver(message);
 
@@ -62,7 +62,7 @@ contract RecoveryDispatcherTest is Test {
 
     function test_lzReceive_revertsIfNotEndpoint() public {
         TopUpV2 topup = new TopUpV2(weth, address(dispatcher));
-        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), amount: 1e18, recipient: makeAddr("recipient") }));
+        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), recipient: makeAddr("recipient") }));
 
         Origin memory origin = Origin({ srcEid: OP_EID, sender: bytes32(uint256(uint160(recoveryModule))), nonce: 1 });
 
@@ -73,7 +73,7 @@ contract RecoveryDispatcherTest is Test {
 
     function test_lzReceive_revertsIfWrongPeer() public {
         TopUpV2 topup = new TopUpV2(weth, address(dispatcher));
-        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), amount: 1e18, recipient: makeAddr("recipient") }));
+        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), recipient: makeAddr("recipient") }));
 
         Origin memory origin = Origin({ srcEid: OP_EID, sender: bytes32(uint256(uint160(makeAddr("imposter")))), nonce: 1 });
 
@@ -86,7 +86,7 @@ contract RecoveryDispatcherTest is Test {
         TopUpV2 rogueTopup = new TopUpV2(weth, makeAddr("someOtherDispatcher"));
         token.mint(address(rogueTopup), 100e18);
 
-        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(rogueTopup), token: address(token), amount: 1e18, recipient: makeAddr("recipient") }));
+        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(rogueTopup), token: address(token), recipient: makeAddr("recipient") }));
 
         vm.expectRevert(TopUpV2.OnlyDispatcher.selector);
         _deliver(message);
@@ -96,9 +96,9 @@ contract RecoveryDispatcherTest is Test {
         address undeployed = makeAddr("undeployedTopUp"); // has no code
         assertEq(undeployed.code.length, 0, "precondition: no code");
 
-        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: undeployed, token: address(token), amount: 1e18, recipient: makeAddr("recipient") }));
+        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: undeployed, token: address(token), recipient: makeAddr("recipient") }));
 
-        vm.expectRevert(RecoveryDispatcher.TopUpNotDeployed.selector);
+        vm.expectRevert(AssetRecoveryDispatcher.TopUpNotDeployed.selector);
         _deliver(message);
     }
 
@@ -110,12 +110,12 @@ contract RecoveryDispatcherTest is Test {
         dispatcher.setPeer(wrongSrcEid, bytes32(uint256(uint160(recoveryModule))));
 
         TopUpV2 topup = new TopUpV2(weth, address(dispatcher));
-        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), amount: 1e18, recipient: makeAddr("recipient") }));
+        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), recipient: makeAddr("recipient") }));
 
         Origin memory origin = Origin({ srcEid: wrongSrcEid, sender: bytes32(uint256(uint160(recoveryModule))), nonce: 1 });
 
         vm.prank(address(endpoint));
-        vm.expectRevert(RecoveryDispatcher.WrongSrcEid.selector);
+        vm.expectRevert(AssetRecoveryDispatcher.WrongSrcEid.selector);
         dispatcher.lzReceive(origin, GUID, message, address(0), "");
     }
 
@@ -126,9 +126,10 @@ contract RecoveryDispatcherTest is Test {
         TopUpV2 topup = new TopUpV2(weth, address(dispatcher));
         token.mint(address(topup), 100e18);
 
-        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), amount: 1e18, recipient: makeAddr("recipient") }));
+        bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({ safe: address(topup), token: address(token), recipient: makeAddr("recipient") }));
 
-        vm.expectRevert();
+        // Pinned to OZ Pausable's `EnforcedPause()` — `_lzReceive` carries `whenNotPaused`.
+        vm.expectRevert(bytes4(keccak256("EnforcedPause()")));
         _deliver(message);
     }
 

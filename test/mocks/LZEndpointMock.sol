@@ -15,6 +15,10 @@ import { MessagingParams, MessagingFee, MessagingReceipt } from "@layerzerolabs/
 contract LZEndpointMock {
     mapping(address oapp => address delegate) public delegates;
 
+    /// @notice Configurable native fee returned by `quote`. Defaults to 0; tests opt in via
+    ///         `setFee` to exercise OAppSender's `_payNative` path with a non-zero quote.
+    uint256 public fee;
+
     // Recorded send args. Stored as plain fields (not the `MessagingParams` struct) so we can
     // expose `bytes memory` getters without hitting auto-generated struct-return issues.
     uint32 public lastDstEid;
@@ -24,6 +28,11 @@ contract LZEndpointMock {
     bool public lastPayInLzToken;
     address public lastRefundAddress;
     uint64 public sendNonce;
+
+    /// @notice Sets the native fee returned by `quote`. Default is 0 (preserves backwards compat).
+    function setFee(uint256 nativeFee) external {
+        fee = nativeFee;
+    }
 
     /// @notice Returns the dstEid and message from the most recent `send` call.
     /// @dev Tests use this to assert what the OApp dispatched.
@@ -36,9 +45,10 @@ contract LZEndpointMock {
         delegates[msg.sender] = _delegate;
     }
 
-    /// @notice Stub quote — returns (0, 0) so upstream code does not revert
-    function quote(MessagingParams calldata /*_params*/, address /*_sender*/) external pure returns (MessagingFee memory) {
-        return MessagingFee({ nativeFee: 0, lzTokenFee: 0 });
+    /// @notice Stub quote — returns the configurable `fee` so upstream code does not revert.
+    ///         Default is 0; tests opt into a non-zero quote via `setFee`.
+    function quote(MessagingParams calldata /*_params*/, address /*_sender*/) external view returns (MessagingFee memory) {
+        return MessagingFee({ nativeFee: fee, lzTokenFee: 0 });
     }
 
     /// @notice Stub send — records the last send and returns a deterministic receipt

@@ -5,13 +5,13 @@ import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
 
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
-import { RecoveryModule } from "../../src/modules/recovery/RecoveryModule.sol";
+import { AssetRecoveryModule } from "../../src/modules/recovery/AssetRecoveryModule.sol";
 import { Utils } from "../utils/Utils.sol";
 import { RecoveryDeployConfig, RecoveryDeployHelper } from "./RecoveryDeployConfig.sol";
 
 /**
- * @notice Deploys the `RecoveryModule` on Optimism as a plain non-upgradable contract via
- *         Nick's CREATE3 factory with `SALT_RECOVERY_MODULE` so the verifier script can
+ * @notice Deploys the `AssetRecoveryModule` on Optimism as a plain non-upgradable contract
+ *         via Nick's CREATE3 factory with `SALT_RECOVERY_MODULE` so the verifier script can
  *         independently recompute the address. The module is replaced (not upgraded) via
  *         `EtherFiDataProvider.configureModules`, matching the repo precedent for Safe modules.
  *
@@ -22,7 +22,7 @@ import { RecoveryDeployConfig, RecoveryDeployHelper } from "./RecoveryDeployConf
  * Prints the `EtherFiDataProvider.configureModules([module], [true])` calldata
  * that the operating safe will 3CP-sign to whitelist the module.
  */
-contract DeployRecoveryModule is Utils, RecoveryDeployHelper {
+contract DeployAssetRecoveryModule is Utils, RecoveryDeployHelper {
     function run() external {
         require(block.chainid == 10, "must be Optimism");
         require(RecoveryDeployConfig.NICKS_FACTORY.code.length > 0, "Nick's factory not on this chain");
@@ -44,7 +44,7 @@ contract DeployRecoveryModule is Utils, RecoveryDeployHelper {
 
         address module = _deployCreate3(
             abi.encodePacked(
-                type(RecoveryModule).creationCode,
+                type(AssetRecoveryModule).creationCode,
                 abi.encode(dataProvider, lzEndpoint, RecoveryDeployConfig.OPERATING_SAFE)
             ),
             RecoveryDeployConfig.SALT_RECOVERY_MODULE
@@ -53,7 +53,7 @@ contract DeployRecoveryModule is Utils, RecoveryDeployHelper {
 
         vm.stopBroadcast();
 
-        console.log("RecoveryModule      : %s", module);
+        console.log("AssetRecoveryModule : %s", module);
         console.log("DataProvider        : %s", dataProvider);
         console.log("LZ endpoint         : %s", lzEndpoint);
         console.log("Delegate / owner    : %s", RecoveryDeployConfig.OPERATING_SAFE);

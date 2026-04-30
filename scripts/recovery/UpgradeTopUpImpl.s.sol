@@ -17,7 +17,7 @@ import { RecoveryDeployConfig, RecoveryDeployHelper } from "./RecoveryDeployConf
  *
  * Env:
  *   PRIVATE_KEY            — deployer key
- *   RECOVERY_DISPATCHER    — RecoveryDispatcher proxy on this chain (from DeployRecoveryDispatcher)
+ *   RECOVERY_DISPATCHER    — AssetRecoveryDispatcher proxy on this chain (from DeployAssetRecoveryDispatcher)
  *
  * Reads beacon factory + WETH from the repo's deployment JSONs
  * (`deployments/<env>/<chainId>/deployments.json` + `fixtures.json`).

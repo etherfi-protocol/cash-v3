@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 /**
  * @title RoleRegistryMock
  * @notice Minimal stub of `IRoleRegistry` exposing only the `onlyPauser` / `onlyUnpauser`
- *         checks consumed by `RecoveryDispatcher` and `RecoveryModule`. Hard-codes a single
+ *         checks consumed by `AssetRecoveryDispatcher` and `AssetRecoveryModule`. Hard-codes a single
  *         authorized pauser and unpauser set at construction.
  */
 contract RoleRegistryMock {
