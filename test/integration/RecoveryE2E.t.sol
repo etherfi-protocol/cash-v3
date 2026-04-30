@@ -34,8 +34,10 @@ contract RecoveryE2ETest is SafeTestSetup {
 
     uint32 public constant OP_EID = 30_111;
     uint32 public constant ARB_EID = 30_110;
+    bytes32 public constant SAFE_SALT = bytes32(uint256(0xC0DE));
     address public recipient = makeAddr("recipient");
     address public weth = makeAddr("weth"); // unused by executeRecovery, but TopUp needs one
+    address public topUpFactoryStub = makeAddr("topUpFactory");
 
     function setUp() public override {
         super.setUp();
@@ -58,9 +60,14 @@ contract RecoveryE2ETest is SafeTestSetup {
 
         // ── Destination (Arb) wiring ──────────────────────────────────────────────────────
         dstEndpoint = new LZEndpointMock();
+        // E2E happy path: TopUp is already deployed at the Safe address (etched below in
+        // Phase 2), so the dispatcher's lazy-deploy branch is skipped and the factory is
+        // never called. We pass a placeholder address whose immutable would only be touched
+        // if that branch ran. The dispatcher unit test exercises lazy-deploy directly.
         address dispatcherImpl = address(new AssetRecoveryDispatcher(
             address(dstEndpoint),
-            OP_EID
+            OP_EID,
+            topUpFactoryStub
         ));
         dispatcher = AssetRecoveryDispatcher(address(new UUPSProxy(
             dispatcherImpl,
@@ -90,6 +97,7 @@ contract RecoveryE2ETest is SafeTestSetup {
             address(safe),
             address(token),
             recipient,
+            SAFE_SALT,
             ARB_EID,
             keccak256(lzOptions)
         ));
@@ -102,7 +110,7 @@ contract RecoveryE2ETest is SafeTestSetup {
 
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
-        module.recover{value: 1e15}(address(safe), address(token), recipient, ARB_EID, lzOptions, signers, sigs);
+        module.recover{value: 1e15}(address(safe), address(token), recipient, SAFE_SALT, ARB_EID, lzOptions, signers, sigs);
 
         (uint32 dstEid, bytes memory message) = srcEndpoint.lastSendArgs();
         assertEq(uint256(dstEid), uint256(ARB_EID), "dstEid mismatch");

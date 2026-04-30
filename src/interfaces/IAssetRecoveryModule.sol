@@ -20,6 +20,7 @@ interface IAssetRecoveryModule {
         address safe,
         address token,
         address recipient,
+        bytes32 safeSalt,
         uint32 destEid,
         bytes calldata lzOptions,
         address[] calldata signers,

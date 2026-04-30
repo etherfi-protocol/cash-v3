@@ -16,8 +16,9 @@ import { RecoveryDeployConfig, RecoveryDeployHelper } from "./RecoveryDeployConf
  *         lands at the same address on every chain.
  *
  * Env:
- *   PRIVATE_KEY  — deployer key
- *   LZ_ENDPOINT  — LayerZero v2 endpoint on the current chain (see lz-config.json)
+ *   PRIVATE_KEY    — deployer key
+ *   LZ_ENDPOINT    — LayerZero v2 endpoint on the current chain (see lz-config.json)
+ *   TOPUP_FACTORY  — local TopUpFactory proxy address (used for lazy TopUp deploy on recovery)
  */
 contract DeployAssetRecoveryDispatcher is Utils, RecoveryDeployHelper {
     function run() external {
@@ -25,6 +26,8 @@ contract DeployAssetRecoveryDispatcher is Utils, RecoveryDeployHelper {
 
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");
         address lzEndpoint = vm.envAddress("LZ_ENDPOINT");
+        address topUpFactory = vm.envAddress("TOPUP_FACTORY");
+        require(topUpFactory.code.length > 0, "TOPUP_FACTORY has no code on this chain");
 
         string memory deployments = readDeploymentFile();
         address roleRegistry = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "RoleRegistry"));
@@ -35,7 +38,7 @@ contract DeployAssetRecoveryDispatcher is Utils, RecoveryDeployHelper {
 
         vm.startBroadcast(deployerPk);
 
-        address impl = _deployCreate3(abi.encodePacked(type(AssetRecoveryDispatcher).creationCode, abi.encode(lzEndpoint, RecoveryDeployConfig.OP_EID)), RecoveryDeployConfig.SALT_RECOVERY_DISPATCHER_IMPL);
+        address impl = _deployCreate3(abi.encodePacked(type(AssetRecoveryDispatcher).creationCode, abi.encode(lzEndpoint, RecoveryDeployConfig.OP_EID, topUpFactory)), RecoveryDeployConfig.SALT_RECOVERY_DISPATCHER_IMPL);
         require(impl == predictedImpl, "impl address mismatch");
 
         AssetRecoveryDispatcher dispatcher = AssetRecoveryDispatcher(address(new UUPSProxy(impl, abi.encodeWithSelector(AssetRecoveryDispatcher.initialize.selector, RecoveryDeployConfig.OPERATING_SAFE, roleRegistry))));
@@ -46,6 +49,7 @@ contract DeployAssetRecoveryDispatcher is Utils, RecoveryDeployHelper {
         console.log("AssetRecoveryDispatcher impl  : %s", impl);
         console.log("AssetRecoveryDispatcher proxy : %s", address(dispatcher));
         console.log("LZ endpoint                   : %s", lzEndpoint);
+        console.log("TopUpFactory                  : %s", topUpFactory);
         console.log("RoleRegistry                  : %s", roleRegistry);
         console.log("Source EID                    : %s (Optimism)", RecoveryDeployConfig.OP_EID);
         console.log("Delegate / owner              : %s", RecoveryDeployConfig.OPERATING_SAFE);

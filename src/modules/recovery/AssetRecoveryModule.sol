@@ -30,14 +30,20 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
 
     /**
      * @notice Submit and dispatch a cross-chain ERC20 recovery in a single call.
+     * @param safeSalt CREATE3 salt that produced this safe (and the matching TopUp on dest).
+     *                 Bound into the signed digest and forwarded over LZ so the dispatcher
+     *                 can lazily deploy TopUp on the dest chain if it isn't there yet.
      * @param lzOptions LayerZero v2 options (executor/gas). Bound into the signed digest to
-     *                  prevent gas-grief replays with cheaper options.
+     *                  prevent gas-grief replays with cheaper options. Must be sized for the
+     *                  worst case (deploy TopUp + sweep), since the sender doesn't know which
+     *                  branch will run on the dest.
      * @return lzGuid LayerZero v2 message GUID for delivery tracking.
      */
     function recover(
         address safe,
         address token,
         address recipient,
+        bytes32 safeSalt,
         uint32 destEid,
         bytes calldata lzOptions,
         address[] calldata signers,
@@ -47,9 +53,9 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
         if (token == address(0)) revert InvalidToken();
         if (peers[destEid] == bytes32(0)) revert InvalidDestEid();
 
-        _verifyRecoverySignatures(safe, token, recipient, destEid, lzOptions, signers, signatures);
+        _verifyRecoverySignatures(safe, token, recipient, safeSalt, destEid, lzOptions, signers, signatures);
 
-        lzGuid = _dispatchRecovery(safe, token, recipient, destEid, lzOptions);
+        lzGuid = _dispatchRecovery(safe, token, recipient, safeSalt, destEid, lzOptions);
 
         emit RecoverySent(safe, lzGuid, token, recipient, destEid);
     }
@@ -60,13 +66,15 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
         address safe,
         address token,
         address recipient,
+        bytes32 safeSalt,
         uint32 destEid,
         bytes calldata lzOptions
     ) internal returns (bytes32) {
         bytes memory message = RecoveryMessageLib.encode(RecoveryMessageLib.Payload({
             safe: safe,
             token: token,
-            recipient: recipient
+            recipient: recipient,
+            salt: safeSalt
         }));
 
         MessagingFee memory fee = _quote(destEid, message, lzOptions, false);
@@ -98,6 +106,7 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
         address safe,
         address token,
         address recipient,
+        bytes32 safeSalt,
         uint32 destEid,
         bytes calldata lzOptions,
         address[] calldata signers,
@@ -110,6 +119,7 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
             safe,
             token,
             recipient,
+            safeSalt,
             destEid,
             keccak256(lzOptions)
         ));

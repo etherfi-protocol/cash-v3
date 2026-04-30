@@ -33,14 +33,17 @@ Script prints the `EtherFiDataProvider.configureModules([module],[true])` callda
 
 ### 2. Deploy `AssetRecoveryDispatcher` on each of the 7 dest chains
 
-For each chain, with its LZ endpoint:
+For each chain, with its LZ endpoint and the local `TopUpFactory` proxy address:
 
 ```bash
 LZ_ENDPOINT=$(jq -r '.<chain>.endpoint' scripts/recovery/lz-config.json) \
+TOPUP_FACTORY=$<CHAIN>_TOPUP_FACTORY \
 PRIVATE_KEY=$DEPLOYER_PK \
 forge script scripts/recovery/DeployAssetRecoveryDispatcher.s.sol \
     --rpc-url $<CHAIN>_RPC --broadcast -vvv
 ```
+
+`TOPUP_FACTORY` is consumed by the dispatcher's lazy-deploy branch: if the user's TopUp proxy isn't on this chain yet (e.g. they only ever sent an unsupported token here, so the topup batch path never ran), the dispatcher will call `TopUpFactory.deployTopUpContract(salt)` itself before sweeping. Get it from the chain's `cash-v3` deployments file.
 
 Record each proxy address as `DISPATCHER_<CHAIN>`.
 
@@ -164,7 +167,7 @@ Pick one per-user TopUp on a single dest chain with a small stuck ERC20 balance 
 
 ```text
 1. owner quotes the LZ native fee off-chain (LZ SDK / endpoint `quote()`)
-2. owners sign `recover(safe, token, recipient, destEid, lzOptions, signers, sigs)` on OP —
+2. owners sign `recover(safe, token, recipient, safeSalt, destEid, lzOptions, signers, sigs)` on OP —
    the user-signed digest does NOT bind an amount; the destination sweeps the full balance.
 3. submitter calls `recover{value: nativeFee}(...)` — LZ message ships in this same tx
 4. observe `RecoverySent` on OP and `RecoveryDispatched` on the dest-chain AssetRecoveryDispatcher
@@ -190,6 +193,7 @@ Pick one per-user TopUp on a single dest chain with a small stuck ERC20 balance 
 - [ ] `AssetRecoveryModule.owner()` == operating safe on OP
 - [ ] `AssetRecoveryDispatcher.owner()` == operating safe on each dest chain
 - [ ] `AssetRecoveryDispatcher.SOURCE_EID()` == `30111` on each dest chain
+- [ ] `AssetRecoveryDispatcher.TOPUP_FACTORY()` == local TopUpFactory proxy on each dest chain (verifies the lazy-deploy branch is wired to the right factory)
 - [ ] Beacon factory on each dest chain matches the address in `deployments/<env>/<chainId>/deployments.json`
 - [ ] `TopUpV2.DISPATCHER()` (on each chain) == the corresponding `AssetRecoveryDispatcher` proxy
 - [ ] `forge inspect TopUp storage-layout` and `forge inspect TopUpV2 storage-layout` diff is empty (no storage fields added)

@@ -135,6 +135,13 @@ contract VerifyRecoveryDeployment is Script, RecoveryDeployHelper {
         require(dispatcherRoleRegistry == expectedRoleRegistry, "AssetRecoveryDispatcher.roleRegistry != ROLE_REGISTRY - pause/upgrade gate misconfigured");
         console.log("  [OK] roleRegistry == ROLE_REGISTRY env");
 
+        // 7b. TopUpFactory immutable — required so the lazy-deploy branch in `_lzReceive` works
+        address expectedTopUpFactory = vm.envAddress("TOPUP_FACTORY");
+        address dispatcherTopUpFactory = address(AssetRecoveryDispatcher(dispatcherProxy).TOPUP_FACTORY());
+        require(dispatcherTopUpFactory == expectedTopUpFactory, "AssetRecoveryDispatcher.TOPUP_FACTORY != TOPUP_FACTORY env - lazy-deploy will fail");
+        require(dispatcherTopUpFactory.code.length > 0, "TOPUP_FACTORY has no code on this chain");
+        console.log("  [OK] TOPUP_FACTORY == TOPUP_FACTORY env");
+
         // 8. TopUpV2 impl checks (optional — only after beacon upgrade is signed)
         try vm.envAddress("TOPUP_V2_IMPL") returns (address topUpImpl) {
             require(topUpImpl.code.length > 0, "TopUpV2 impl has no code");

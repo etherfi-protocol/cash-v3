@@ -27,12 +27,13 @@ contract NonPayableCaller {
         address safe,
         address token,
         address recipient,
+        bytes32 safeSalt,
         uint32 destEid,
         bytes calldata lzOptions,
         address[] calldata signers,
         bytes[] calldata sigs
     ) external payable returns (bytes32) {
-        return module.recover{value: msg.value}(safe, token, recipient, destEid, lzOptions, signers, sigs);
+        return module.recover{value: msg.value}(safe, token, recipient, safeSalt, destEid, lzOptions, signers, sigs);
     }
 }
 
@@ -44,6 +45,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
 
     address public dispatcher = makeAddr("dispatcher");
     uint32 public constant ARB_EID = 30_110;
+    bytes32 public constant SAFE_SALT = bytes32(uint256(0xC0DE));
 
     function setUp() public override {
         super.setUp();
@@ -86,7 +88,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.recordLogs();
         vm.prank(owner1);
         bytes32 lzGuid = module.recover{value: 1e15}(
-            safeAddr, address(token), recipient, destEid, "", signers, sigs
+            safeAddr, address(token), recipient, SAFE_SALT, destEid, "", signers, sigs
         );
         assertTrue(lzGuid != bytes32(0), "guid should be non-zero");
 
@@ -110,11 +112,12 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
 
         (uint32 dstEid, bytes memory message) = lzEndpoint.lastSendArgs();
         assertEq(uint256(dstEid), uint256(destEid), "destEid mismatch");
-        (address payloadSafe, address payloadToken, address payloadRecipient) =
-            abi.decode(message, (address, address, address));
+        (address payloadSafe, address payloadToken, address payloadRecipient, bytes32 payloadSalt) =
+            abi.decode(message, (address, address, address, bytes32));
         assertEq(payloadSafe, safeAddr, "payload safe mismatch");
         assertEq(payloadToken, address(token), "payload token mismatch");
         assertEq(payloadRecipient, recipient, "payload recipient mismatch");
+        assertEq(payloadSalt, SAFE_SALT, "payload salt mismatch");
     }
 
     function test_recover_revertsIfTokenZero() public {
@@ -122,7 +125,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(IAssetRecoveryModule.InvalidToken.selector);
-        module.recover{value: 1e15}(safeAddr, address(0), makeAddr("recipient"), ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(0), makeAddr("recipient"), SAFE_SALT, ARB_EID, "", signers, sigs);
     }
 
     function test_recover_revertsIfRecipientZero() public {
@@ -130,7 +133,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(IAssetRecoveryModule.InvalidRecipient.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), address(0), ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), address(0), SAFE_SALT, ARB_EID, "", signers, sigs);
     }
 
     function test_recover_revertsIfPeerUnset() public {
@@ -141,7 +144,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(IAssetRecoveryModule.InvalidDestEid.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, "", signers, sigs);
     }
 
     function test_recover_revertsIfBadSignature() public {
@@ -150,7 +153,16 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("differentRecipient"), ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("differentRecipient"), SAFE_SALT, ARB_EID, "", signers, sigs);
+    }
+
+    function test_recover_revertsIfSaltMismatch() public {
+        // Owners sign over SAFE_SALT; submitter swaps in a different salt. Digest must reject.
+        (address[] memory signers, bytes[] memory sigs) = _signRecover(address(token), makeAddr("recipient"), ARB_EID);
+        vm.deal(owner1, 1 ether);
+        vm.prank(owner1);
+        vm.expectRevert(ModuleBase.InvalidSignature.selector);
+        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), bytes32(uint256(0xBADBAD)), ARB_EID, "", signers, sigs);
     }
 
     function test_recover_digestReplayReverts() public {
@@ -159,11 +171,11 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
 
         vm.deal(owner1, 1 ether);
         vm.startPrank(owner1);
-        module.recover{value: 1e15}(safeAddr, address(token), recipient, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, "", signers, sigs);
 
         // Replay with same sigs — nonce has advanced, digest no longer matches.
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.recover{value: 1e15}(safeAddr, address(token), recipient, ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, "", signers, sigs);
         vm.stopPrank();
     }
 
@@ -180,7 +192,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.prank(owner1);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
         module.recover{value: 1e15}(
-            safeAddr, address(token), makeAddr("recipient"), ARB_EID, submittedOptions, signers, sigs
+            safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, submittedOptions, signers, sigs
         );
     }
 
@@ -193,7 +205,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.prank(owner1);
         // Pinned to OZ Pausable's `EnforcedPause()` — `whenNotPaused` is the first guard.
         vm.expectRevert(bytes4(keccak256("EnforcedPause()")));
-        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), ARB_EID, "", signers, sigs);
+        module.recover{value: 1e15}(safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, "", signers, sigs);
     }
 
     function test_pause_onlyPauser() public {
@@ -213,7 +225,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         // Our override pins to the same selector.
         vm.expectRevert(abi.encodeWithSelector(OAppSender.NotEnoughNative.selector, 0.05 ether));
         module.recover{value: 0.05 ether}(
-            safeAddr, address(token), makeAddr("recipient"), ARB_EID, "", signers, sigs
+            safeAddr, address(token), makeAddr("recipient"), SAFE_SALT, ARB_EID, "", signers, sigs
         );
     }
 
@@ -226,7 +238,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         uint256 startBal = owner1.balance;
 
         vm.prank(owner1);
-        module.recover{value: 0.5 ether}(safeAddr, address(token), recipient, ARB_EID, "", signers, sigs);
+        module.recover{value: 0.5 ether}(safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, "", signers, sigs);
 
         // 0.4 ether refunded; net cost = 0.1 ether (the quoted fee).
         assertEq(owner1.balance, startBal - 0.1 ether, "should be charged exactly the fee");
@@ -240,12 +252,12 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
         vm.deal(address(caller), 1 ether);
 
         // Sigs are over the digest with the *non-payable contract* as the nonce-bound caller? No —
-        // the digest in this module does not bind msg.sender, only safe/token/recipient/destEid/options.
+        // the digest in this module does not bind msg.sender, only safe/token/recipient/salt/destEid/options.
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(token), recipient, ARB_EID);
 
         vm.expectRevert(IAssetRecoveryModule.RefundFailed.selector);
         caller.callRecover{value: 0.5 ether}(
-            safeAddr, address(token), recipient, ARB_EID, "", signers, sigs
+            safeAddr, address(token), recipient, SAFE_SALT, ARB_EID, "", signers, sigs
         );
     }
 
@@ -270,6 +282,7 @@ contract AssetRecoveryModuleTest is SafeTestSetup {
             safeAddr,
             token_,
             recipient,
+            SAFE_SALT,
             destEid,
             keccak256(lzOptions)
         ));
