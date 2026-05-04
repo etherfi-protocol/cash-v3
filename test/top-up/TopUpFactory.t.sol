@@ -20,6 +20,8 @@ import { EtherFiLiquidBridgeAdapter } from "../../src/top-up/bridge/EtherFiLiqui
 import {NTTAdapter} from "../../src/top-up/bridge/NTTAdapter.sol";
 import { CCTPAdapter } from "../../src/top-up/bridge/CCTPAdapter.sol";
 import { BaseWithdrawERC20BridgeAdapter } from "../../src/top-up/bridge/BaseWithdrawERC20BridgeAdapter.sol";
+import { OptimismBridgeAdapter } from "../../src/top-up/bridge/OptimismBridgeAdapter.sol";
+import { HopBridgeAdapter } from "../../src/top-up/bridge/HopBridgeAdapter.sol";
 import { Constants } from "../../src/utils/Constants.sol";
 
 contract TopUpFactoryTest is Test, Constants {
@@ -39,6 +41,15 @@ contract TopUpFactoryTest is Test, Constants {
     NTTAdapter nttAdapter;
     address public dataProvider = makeAddr("dataProvider");
     uint96 maxSlippage = 100;
+    uint256 constant DEST_CHAIN_ID = 534352;
+
+    address constant OP_USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+    uint256 constant OP_CHAIN_ID = 10;
+
+    IERC20 constant frxUSD = IERC20(0xCAcd6fd266aF91b8AeD52aCCc382b4e165586E29);
+    address constant HOP_V2_ROUTER = 0x3ad4dC2319394bB4BE99A0e4aE2AbF7bCEbD648E;
+    address constant FRXUSD_OFT = 0x566a6442A5A6e9895B9dCA97cC7879D632c6e4B0;
+    uint32 constant OP_DEST_EID = 30111;
 
     IERC20 weth = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
     IERC20 weETH = IERC20(0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee);
@@ -107,17 +118,54 @@ contract TopUpFactoryTest is Test, Constants {
 
         TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](9);
         tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(scrollErc20Adapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(scrollGatewayRouter, gasLimitForScrollGateway) });
-        tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
-        tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
-        tokenConfigs[3] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidEthTeller) });
-        tokenConfigs[4] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidBtcTeller) });
-        tokenConfigs[5] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidUsdTeller) });
-        tokenConfigs[6] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(eUsdTeller) });
-        tokenConfigs[7] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool) });
+        tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
+        tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool, uint32(30214)) });
+        tokenConfigs[3] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidEthTeller, uint32(30214)) });
+        tokenConfigs[4] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidBtcTeller, uint32(30214)) });
+        tokenConfigs[5] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidUsdTeller, uint32(30214)) });
+        tokenConfigs[6] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(eUsdTeller, uint32(30214)) });
+        tokenConfigs[7] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool, uint32(30214)) });
         tokenConfigs[8] = TopUpFactory.TokenConfig({ bridgeAdapter: address(nttAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(nttManager, 10) });
-        factory.setTokenConfig(tokens, tokenConfigs);
+        factory.setTokenConfig(tokens, _chainIds(9), tokenConfigs);
+
+        // Configure Optimism bridge adapter for USDC → OP
+        OptimismBridgeAdapter opAdapter = new OptimismBridgeAdapter();
+        address[] memory opTokens = new address[](1);
+        opTokens[0] = address(usdc);
+        uint256[] memory opChainIds = new uint256[](1);
+        opChainIds[0] = OP_CHAIN_ID;
+        TopUpFactory.TokenConfig[] memory opConfigs = new TopUpFactory.TokenConfig[](1);
+        opConfigs[0] = TopUpFactory.TokenConfig({
+            bridgeAdapter: address(opAdapter),
+            recipientOnDestChain: alice,
+            maxSlippageInBps: 0,
+            additionalData: abi.encode(OP_USDC, uint32(200_000))
+        });
+        factory.setTokenConfig(opTokens, opChainIds, opConfigs);
+
+        // Configure Hop bridge adapter for frxUSD → Optimism
+        HopBridgeAdapter hopAdapter = new HopBridgeAdapter();
+        address[] memory hopTokens = new address[](1);
+        hopTokens[0] = address(frxUSD);
+        uint256[] memory hopChainIds = new uint256[](1);
+        hopChainIds[0] = OP_CHAIN_ID;
+        TopUpFactory.TokenConfig[] memory hopConfigs = new TopUpFactory.TokenConfig[](1);
+        hopConfigs[0] = TopUpFactory.TokenConfig({
+            bridgeAdapter: address(hopAdapter),
+            recipientOnDestChain: alice,
+            maxSlippageInBps: 0,
+            additionalData: abi.encode(HOP_V2_ROUTER, FRXUSD_OFT, OP_DEST_EID)
+        });
+        factory.setTokenConfig(hopTokens, hopChainIds, hopConfigs);
+
+        roleRegistry.grantRole(factory.TOPUP_FACTORY_BRIDGER_ROLE(), address(this));
 
         vm.stopPrank();
+    }
+
+    function _chainIds(uint256 len) internal pure returns (uint256[] memory ids) {
+        ids = new uint256[](len);
+        for (uint256 i = 0; i < len; i++) ids[i] = DEST_CHAIN_ID;
     }
 
     /// @dev Test deployment of TopUp contract
@@ -376,13 +424,13 @@ contract TopUpFactoryTest is Test, Constants {
         tokens[0] = address(weth); // Using a new token not configured in setup
 
         TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
-        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
+        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
 
         vm.prank(owner);
-        factory.setTokenConfig(tokens, configs);
+        factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
 
         assertTrue(factory.isTokenSupported(address(weth)), "Token should be supported after config");
-        TopUpFactory.TokenConfig memory config = factory.getTokenConfig(address(weth));
+        TopUpFactory.TokenConfig memory config = factory.getTokenConfig(address(weth), DEST_CHAIN_ID);
         assertEq(config.bridgeAdapter, address(oftBridgeAdapter), "Bridge adapter not set correctly");
         assertEq(config.recipientOnDestChain, alice, "Recipient not set correctly");
         assertEq(config.maxSlippageInBps, maxSlippage, "Slippage not set correctly");
@@ -393,11 +441,11 @@ contract TopUpFactoryTest is Test, Constants {
         tokens[0] = address(weETH);
 
         TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
-        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
+        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
 
         vm.prank(user);
         vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
-        factory.setTokenConfig(tokens, configs);
+        factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
     }
 
     function test_setTokenConfig_reverts_whenInvalidSlippage() public {
@@ -409,12 +457,12 @@ contract TopUpFactoryTest is Test, Constants {
             bridgeAdapter: address(oftBridgeAdapter),
             recipientOnDestChain: alice,
             maxSlippageInBps: 201, // MAX_ALLOWED_SLIPPAGE is 200
-            additionalData: abi.encode(weETHOftAddress)
+            additionalData: abi.encode(weETHOftAddress, uint32(30214))
         });
 
         vm.prank(owner);
         vm.expectRevert(TopUpFactory.InvalidConfig.selector);
-        factory.setTokenConfig(tokens, configs);
+        factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
     }
 
     function test_setTokenConfig_reverts_whenZeroBridgeAdapter() public {
@@ -422,11 +470,11 @@ contract TopUpFactoryTest is Test, Constants {
         tokens[0] = address(weETH);
 
         TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
-        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(0), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
+        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(0), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
 
         vm.prank(owner);
         vm.expectRevert(TopUpFactory.InvalidConfig.selector);
-        factory.setTokenConfig(tokens, configs);
+        factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
     }
 
     function test_setTokenConfig_reverts_whenZeroRecipient() public {
@@ -434,34 +482,40 @@ contract TopUpFactoryTest is Test, Constants {
         tokens[0] = address(weETH);
 
         TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
-        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: address(0), maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress) });
+        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: address(0), maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
 
         vm.prank(owner);
         vm.expectRevert(TopUpFactory.InvalidConfig.selector);
-        factory.setTokenConfig(tokens, configs);
+        factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
     }
 
     /// @dev Test bridging functionality
+    function test_bridge_reverts_whenCallerNotBridger() public {
+        vm.prank(user);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        factory.bridge(address(usdc), 1, DEST_CHAIN_ID);
+    }
+
     function test_bridge_reverts_whenZeroBalance() public {
         vm.expectRevert(TopUpFactory.AmountCannotBeZero.selector);
-        factory.bridge(address(weETH), 0);
+        factory.bridge(address(weETH), 0, DEST_CHAIN_ID);
     }
 
     function test_bridge_reverts_whenUnsupportedToken() public {
         MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
-        factory.bridge(address(unsupportedToken), 1);
+        factory.bridge(address(unsupportedToken), 1, DEST_CHAIN_ID);
     }
 
     function test_getBridgeFee_reverts_whenUnsupportedToken() public {
         MockERC20 unsupportedToken = new MockERC20("Unsupported", "UNS", 18);
         vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
-        factory.getBridgeFee(address(unsupportedToken), 1);
+        factory.getBridgeFee(address(unsupportedToken), 1, DEST_CHAIN_ID);
     }
     
     function test_getBridgeFee_reverts_whenAmountIsZero() public {
         vm.expectRevert(TopUpFactory.AmountCannotBeZero.selector);
-        factory.getBridgeFee(address(usdc), 0);
+        factory.getBridgeFee(address(usdc), 0, DEST_CHAIN_ID);
     }
 
     /// @dev Test token support checks
@@ -475,7 +529,7 @@ contract TopUpFactoryTest is Test, Constants {
 
     /// @dev Test token config getters
     function test_getTokenConfig_returnsCorrectConfig() public view {
-        TopUpFactory.TokenConfig memory config = factory.getTokenConfig(address(weETH));
+        TopUpFactory.TokenConfig memory config = factory.getTokenConfig(address(weETH), DEST_CHAIN_ID);
 
         assertEq(config.bridgeAdapter, address(oftBridgeAdapter), "Wrong bridge adapter");
         assertEq(config.recipientOnDestChain, alice, "Wrong recipient");
@@ -487,96 +541,96 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(usdc);
         uint256 amount = 100e6;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token, amount);
+        emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     function test_bridge_succeeds_withWeth() public {
         address token = address(weth);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token, amount);
+        emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     function test_bridge_succeeds_withLiquidEth() public {
         address token = address(liquidEth);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token, amount);
+        emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     function test_bridge_succeeds_withLiquidBtc() public {
         address token = address(liquidBtc);
         uint256 amount = 1e5;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token, amount);
+        emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     function test_bridge_succeeds_withLiquidUsd() public {
         address token = address(liquidUsd);
         uint256 amount = 1e6;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token, amount);
+        emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     function test_bridge_succeeds_withEUsd() public {
         address token = address(eUsd);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token, amount);
+        emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     function test_bridge_succeeds_withEth() public {
         address token = ETH;
         uint256 amount = 1e18;
         deal(address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
         
-        factory.bridge{ value: fee }(token, amount);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     function test_bridge_succeeds_withWeEth() public {
         address token = address(weETH);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount);
-        factory.bridge{ value: fee }(token, amount);
+        emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     // function test_bridge_succeeds_withEthfi() public {
     //     address token = address(ethfi);
     //     uint256 amount = 1 ether;
     //     deal(token, address(factory), amount);
-    //     (, uint256 fee) = factory.getBridgeFee(token, amount);
+    //     (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
     //     vm.expectEmit(true, true, true, true);
-    //     emit TopUpFactory.Bridge(token, amount);
+    //     emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
     //     factory.bridge{value: fee}(token, amount);
     // }
 
@@ -584,10 +638,10 @@ contract TopUpFactoryTest is Test, Constants {
     //     address token = address(ethfi);
     //     uint256 amount = 1111111111111111111;
     //     deal(token, address(factory), amount);
-    //     (, uint256 fee) = factory.getBridgeFee(token, amount);
+    //     (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
     //     vm.expectEmit(true, true, true, true);
-    //     emit TopUpFactory.Bridge(token, amount);
+    //     emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
     //     factory.bridge{value: fee}(token, amount);
     // }
 
@@ -595,10 +649,10 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(usdc);
         uint256 amount = 100e6;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.expectRevert(TopUpFactory.InsufficientFeePassed.selector);
-        factory.bridge{ value: fee - 1 }(token, amount);
+        factory.bridge{ value: fee - 1 }(token, amount, DEST_CHAIN_ID);
     }
 
     /// @dev Test bridging when paused
@@ -606,13 +660,13 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(usdc);
         uint256 amount = 100e6;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
         vm.prank(pauser);
         factory.pause();
 
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        factory.bridge{ value: fee }(token, amount);
+        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
     /// @dev Test pausing functionality
@@ -622,7 +676,7 @@ contract TopUpFactoryTest is Test, Constants {
 
         // Try to bridge tokens while paused
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        factory.bridge(address(usdc), 1);
+        factory.bridge(address(usdc), 1, DEST_CHAIN_ID);
     }
 
     function test_unpause_succeeds() public {
@@ -767,13 +821,16 @@ contract TopUpFactoryTest is Test, Constants {
         baseTokens[0] = address(baseUsdt);
         TopUpFactory.TokenConfig[] memory baseConfigs = new TopUpFactory.TokenConfig[](1);
         baseConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(baseAdapter), recipientOnDestChain: alice, maxSlippageInBps: 0, additionalData: abi.encode(200_000, "") });
-        factory.setTokenConfig(baseTokens, baseConfigs);
+        factory.setTokenConfig(baseTokens, _chainIds(1), baseConfigs);
 
         address[] memory cctpTokens = new address[](1);
         cctpTokens[0] = address(usdcBase);
         TopUpFactory.TokenConfig[] memory cctpConfigs = new TopUpFactory.TokenConfig[](1);
-        cctpConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: cctpAdapter, recipientOnDestChain: alice, maxSlippageInBps: 0, additionalData: abi.encode(cctpTokenMessenger, uint256(0), uint32(2000)) });
-        factory.setTokenConfig(cctpTokens, cctpConfigs);
+        cctpConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: cctpAdapter, recipientOnDestChain: alice, maxSlippageInBps: 0, additionalData: abi.encode(uint32(0), cctpTokenMessenger, uint256(0), uint32(2000)) });
+        factory.setTokenConfig(cctpTokens, _chainIds(1), cctpConfigs);
+
+        roleRegistry.grantRole(factory.TOPUP_FACTORY_BRIDGER_ROLE(), address(this));
+        vm.stopPrank();
     }
 
     function test_baseBaseWithdrawAdapter() public {
@@ -782,11 +839,9 @@ contract TopUpFactoryTest is Test, Constants {
 
         deal(address(baseUsdt), address(factory), balBefore);
 
-        factory.bridge(address(baseUsdt), balBefore);
+        factory.bridge(address(baseUsdt), balBefore, DEST_CHAIN_ID);
 
         assertEq(baseUsdt.balanceOf(address(factory)), 0);
-
-        vm.stopPrank();
     }
 
     function test_baseCCTPAdapter() public {
@@ -796,10 +851,8 @@ contract TopUpFactoryTest is Test, Constants {
         deal(address(usdcBase), address(factory), amount);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(address(usdcBase), amount);
-        factory.bridge(address(usdcBase), amount);
-
-        vm.stopPrank();
+        emit TopUpFactory.Bridge(address(usdcBase), amount, DEST_CHAIN_ID);
+        factory.bridge(address(usdcBase), amount, DEST_CHAIN_ID);
     }
 
     function test_baseCCTPAdapter_dust() public {
@@ -809,8 +862,75 @@ contract TopUpFactoryTest is Test, Constants {
         deal(address(usdcBase), address(factory), amount);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(address(usdcBase), amount);
-        factory.bridge(address(usdcBase), amount);
+        emit TopUpFactory.Bridge(address(usdcBase), amount, DEST_CHAIN_ID);
+        factory.bridge(address(usdcBase), amount, DEST_CHAIN_ID);
 
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //              OPTIMISM BRIDGE ADAPTER TESTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function test_optimismBridgeAdapter() public {
+        uint256 amount = 10_000e6;
+        deal(address(usdc), address(factory), amount);
+
+        vm.expectEmit(true, true, true, true);
+        emit TopUpFactory.Bridge(address(usdc), amount, OP_CHAIN_ID);
+        factory.bridge(address(usdc), amount, OP_CHAIN_ID);
+
+        assertEq(usdc.balanceOf(address(factory)), 0);
+    }
+
+    function test_optimismBridgeAdapter_getBridgeFee() public view {
+        (address feeToken, uint256 fee) = factory.getBridgeFee(address(usdc), 1e6, OP_CHAIN_ID);
+        assertEq(feeToken, 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE);
+        assertEq(fee, 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //              HOP BRIDGE ADAPTER TESTS (frxUSD → Optimism)
+    // ═══════════════════════════════════════════════════════════════
+
+    function test_hopBridgeAdapter_bridgeFrxUsdToOptimism() public {
+        uint256 amount = 50e18;
+        deal(address(frxUSD), address(factory), amount);
+
+        // Get bridge fee
+        (, uint256 fee) = factory.getBridgeFee(address(frxUSD), amount, OP_CHAIN_ID);
+        assertTrue(fee > 0, "Hop fee should be non-zero (LZ messaging fee)");
+
+        // Bridge
+        deal(address(this), fee);
+        vm.expectEmit(true, true, true, true);
+        emit TopUpFactory.Bridge(address(frxUSD), amount, OP_CHAIN_ID);
+        factory.bridge{ value: fee }(address(frxUSD), amount, OP_CHAIN_ID);
+
+        assertEq(frxUSD.balanceOf(address(factory)), 0, "frxUSD should be bridged out");
+    }
+
+    function test_hopBridgeAdapter_getBridgeFee() public view {
+        (address feeToken, uint256 fee) = factory.getBridgeFee(address(frxUSD), 100e18, OP_CHAIN_ID);
+        assertEq(feeToken, 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE);
+        assertTrue(fee > 0, "Hop fee should be non-zero");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+
+    function test_optimismBridgeAdapter_sameTokenDifferentChains() public {
+        // USDC configured for Scroll (DEST_CHAIN_ID) in setUp and Optimism (OP_CHAIN_ID) above
+        assertTrue(factory.isTokenSupportedOnChain(address(usdc), DEST_CHAIN_ID));
+        assertTrue(factory.isTokenSupportedOnChain(address(usdc), OP_CHAIN_ID));
+
+        deal(address(usdc), address(factory), 20_000e6);
+
+        // Bridge to Optimism
+        factory.bridge(address(usdc), 10_000e6, OP_CHAIN_ID);
+
+        // Bridge to Scroll
+        (, uint256 scrollFee) = factory.getBridgeFee(address(usdc), 10_000e6, DEST_CHAIN_ID);
+        factory.bridge{ value: scrollFee }(address(usdc), 10_000e6, DEST_CHAIN_ID);
+
+        assertEq(usdc.balanceOf(address(factory)), 0);
     }
 }

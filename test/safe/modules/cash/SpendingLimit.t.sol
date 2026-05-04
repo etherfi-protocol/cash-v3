@@ -9,7 +9,7 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
     function test_updateSpendingLimit_works() public {
-        deal(address(usdcScroll), address(safe), 1000e6);
+        deal(address(usdc), address(safe), 1000e6);
 
         uint256 dailySpendingLimitInUsd = 100e6;
         uint256 monthlySpendingLimitInUsd = 1000e6;
@@ -22,7 +22,7 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         assertEq(spendingLimitBefore.spentThisMonth, 0);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = transferAmount;
 
@@ -99,10 +99,10 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         uint256 dailyLimit = spendingLimit.dailyLimit;
         uint256 amount = dailyLimit / 2;
 
-        deal(address(usdcScroll), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 1 ether);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -126,9 +126,13 @@ contract CashModuleSpendingLimitTest is CashModuleTestSetup {
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
         cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        vm.warp(cashLens.applicableSpendingLimit(address(safe)).dailyRenewalTimestamp + 1);
+        SpendingLimit memory limitBeforeRenewal = cashLens.applicableSpendingLimit(address(safe));
+        vm.warp(limitBeforeRenewal.dailyRenewalTimestamp + 1);
         // Since the time for renewal is in the past, spentToday should be 0
-        assertEq(cashLens.applicableSpendingLimit(address(safe)).spentToday, 0);
-        assertEq(cashLens.applicableSpendingLimit(address(safe)).spentThisMonth, amount);
+        SpendingLimit memory renewedLimit = cashLens.applicableSpendingLimit(address(safe));
+        assertEq(renewedLimit.spentToday, 0);
+        // spentThisMonth also resets if the monthly renewal coincides with the daily one (last day of month)
+        bool monthAlsoRenewed = limitBeforeRenewal.dailyRenewalTimestamp == limitBeforeRenewal.monthlyRenewalTimestamp;
+        assertEq(renewedLimit.spentThisMonth, monthAlsoRenewed ? 0 : amount);
     }
 }

@@ -76,15 +76,15 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         cashModule.configureWithdrawAssets(withdrawTokens, whitelist);
 
         // Add collateral to safe
-        deal(address(weETHScroll), address(safe), weETHBal);
-        deal(address(usdcScroll), address(safe), usdcBal);
+        deal(address(weETH), address(safe), weETHBal);
+        deal(address(usdc), address(safe), usdcBal);
         deal(address(liquidUsdScroll), address(safe), liquidUsdBal); 
         
         // Ensure debt manager has sufficient liquidity
-        deal(address(usdcScroll), address(debtManager), 100000e6);
+        deal(address(usdc), address(debtManager), 100000e6);
         deal(address(liquidUsdScroll), address(debtManager), 100000e6);
 
-        uint256 weEthInUsd = debtManager.convertCollateralTokenToUsd(address(weETHScroll), weETHBal);
+        uint256 weEthInUsd = debtManager.convertCollateralTokenToUsd(address(weETH), weETHBal);
         liquidAmtInUsd = debtManager.convertCollateralTokenToUsd(address(liquidUsdScroll), liquidUsdBal);     
         weEthBorrowPower = (weEthInUsd * ltv) / HUNDRED_PERCENT;
         usdcBorrowPower = (usdcBal * ltv) / HUNDRED_PERCENT;
@@ -108,12 +108,12 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
 
     function test_getMaxSpendDebit_singleToken_USDC_healthyPosition() public view {
         address[] memory tokenPreference = new address[](1);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
         
         assertEq(result.spendableTokens.length, 1, "Should return one token");
-        assertEq(result.spendableTokens[0], address(usdcScroll), "Token should be USDC");
+        assertEq(result.spendableTokens[0], address(usdc), "Token should be USDC");
         assertEq(result.spendableAmounts[0], usdcBal, "Should be able to spend all USDC");
         assertEq(result.amountsInUsd[0], usdcBal, "USD value should match");
         assertEq(result.totalSpendableInUsd, usdcBal, "Total should match USDC value");
@@ -134,7 +134,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
 
     function test_getMaxSpendDebit_bothTokens_healthyPosition() public view {
         address[] memory tokenPreference = new address[](2);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         tokenPreference[1] = address(liquidUsdScroll);
         
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
@@ -155,7 +155,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         // Borrow large % of collateral value to create underwater position
         uint256 borrowAmount = weEthBorrowPower + usdcBorrowPower - 1e6;
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmount;
 
@@ -163,7 +163,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -186,7 +186,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         
         // Check max spend with USDC first preference
         address[] memory tokenPreference = new address[](2);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         tokenPreference[1] = address(liquidUsdScroll);
         
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
@@ -205,7 +205,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         
         uint256 borrowAmount = weEthBorrowPower + liquidUsdBorrowPower - 1e6;
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmount;
 
@@ -213,7 +213,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -233,7 +233,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         // Check max spend with liquidUSD first preference
         address[] memory tokenPreference = new address[](2);
         tokenPreference[0] = address(liquidUsdScroll);
-        tokenPreference[1] = address(usdcScroll);
+        tokenPreference[1] = address(usdc);
         
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
         
@@ -246,13 +246,13 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     function test_getMaxSpendDebit_withPendingWithdrawals_USDC() public {
         // Create withdrawal request for USDC
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 20000e6;
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         address[] memory tokenPreference = new address[](2);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         tokenPreference[1] = address(liquidUsdScroll);
         
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
@@ -271,7 +271,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         address[] memory tokenPreference = new address[](2);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         tokenPreference[1] = address(liquidUsdScroll);
         
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
@@ -285,8 +285,8 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
 
     function test_getMaxSpendDebit_duplicateTokens() public {
         address[] memory tokenPreference = new address[](2);
-        tokenPreference[0] = address(usdcScroll);
-        tokenPreference[1] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
+        tokenPreference[1] = address(usdc);
         
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
         cashLens.getMaxSpendDebit(address(safe), tokenPreference);
@@ -309,7 +309,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         
         uint256 borrowAmount = 10000e6;
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmount;
 
@@ -317,7 +317,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scr = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -335,13 +335,13 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Remove most collateral
-        deal(address(usdcScroll), address(safe), 500e6);
+        deal(address(usdc), address(safe), 500e6);
         deal(address(liquidUsdScroll), address(safe), 500e6);
-        deal(address(weETHScroll), address(safe), 0);
+        deal(address(weETH), address(safe), 0);
         
         // Try to get max spend - should return empty as deficit cannot be covered
         address[] memory tokenPreference = new address[](2);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         tokenPreference[1] = address(liquidUsdScroll);
         
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
@@ -353,13 +353,13 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     function test_getMaxSpendDebit_zeroEffectiveBalance() public {
         // Create withdrawal request for all USDC
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 50000e6;
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         address[] memory tokenPreference = new address[](1);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
         
@@ -371,14 +371,14 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
 
     function test_getSafeCashData_withTokenPreference_USDC_liquidUSD() public view {
         address[] memory tokenPreference = new address[](2);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         tokenPreference[1] = address(liquidUsdScroll);
         
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), tokenPreference);
         
         // Verify debitMaxSpend uses the preference
         assertEq(data.debitMaxSpend.spendableTokens.length, 2, "Should have two tokens in preference order");
-        assertEq(data.debitMaxSpend.spendableTokens[0], address(usdcScroll), "First token should be USDC");
+        assertEq(data.debitMaxSpend.spendableTokens[0], address(usdc), "First token should be USDC");
         assertEq(data.debitMaxSpend.spendableTokens[1], address(liquidUsdScroll), "Second token should be liquidUSD");
         assertGt(data.debitMaxSpend.totalSpendableInUsd, 0, "Should have spendable amount");
         
@@ -390,13 +390,13 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     function test_getSafeCashData_withTokenPreference_liquidUSD_USDC() public view {
         address[] memory tokenPreference = new address[](2);
         tokenPreference[0] = address(liquidUsdScroll);
-        tokenPreference[1] = address(usdcScroll);
+        tokenPreference[1] = address(usdc);
         
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), tokenPreference);
         
         // Verify debitMaxSpend uses the preference
         assertEq(data.debitMaxSpend.spendableTokens[0], address(liquidUsdScroll), "First token should be liquidUSD");
-        assertEq(data.debitMaxSpend.spendableTokens[1], address(usdcScroll), "Second token should be USDC");
+        assertEq(data.debitMaxSpend.spendableTokens[1], address(usdc), "Second token should be USDC");
     }
 
     function test_getSafeCashData_emptyTokenPreference() public view {
@@ -412,7 +412,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         bool hasUSDC = false;
         bool hasLiquidUSD = false;
         for (uint i = 0; i < data.debitMaxSpend.spendableTokens.length; i++) {
-            if (data.debitMaxSpend.spendableTokens[i] == address(usdcScroll)) hasUSDC = true;
+            if (data.debitMaxSpend.spendableTokens[i] == address(usdc)) hasUSDC = true;
             if (data.debitMaxSpend.spendableTokens[i] == address(liquidUsdScroll)) hasLiquidUSD = true;
         }
         assertTrue(hasUSDC && hasLiquidUSD, "Should include both USDC and liquidUSD");
@@ -431,7 +431,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
 
     function test_getSafeCashData_consistencyWithDirectCall() public view {
         address[] memory tokenPreference = new address[](2);
-        tokenPreference[0] = address(usdcScroll);
+        tokenPreference[0] = address(usdc);
         tokenPreference[1] = address(liquidUsdScroll);
         
         // Get data through getSafeCashData

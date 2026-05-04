@@ -30,7 +30,7 @@ import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
 import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { PriceProvider, IAggregatorV3 } from "../../src/oracle/PriceProvider.sol";
-import { SettlementDispatcher } from "../../src/settlement-dispatcher/SettlementDispatcher.sol";
+import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
 import { Utils, ChainConfig } from "../utils/Utils.sol";
 
 contract SafeTestSetup is Utils {
@@ -43,8 +43,8 @@ contract SafeTestSetup is Utils {
     EtherFiHook public hook;
 
     PriceProvider priceProvider;
-    SettlementDispatcher settlementDispatcherRain;
-    SettlementDispatcher settlementDispatcherReap;
+    SettlementDispatcherV2 settlementDispatcherRain;
+    SettlementDispatcherV2 settlementDispatcherReap;
     IDebtManager debtManager;
     address debtManagerAdminImpl;
     CashbackDispatcher cashbackDispatcher;
@@ -70,21 +70,20 @@ contract SafeTestSetup is Utils {
     CashLens public cashLens;
 
     address public etherFiWallet = makeAddr("etherFiWallet");
-    
+
     uint256 public etherFiRecoverySignerPk;
     address public etherFiRecoverySigner;
     uint256 public thirdPartyRecoverySignerPk;
     address public thirdPartyRecoverySigner;
 
-    IERC20 public usdcScroll = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
-    IERC20 public usdtScroll = IERC20(0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df);
-    IERC20 public weETHScroll = IERC20(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
-    IERC20 public scrToken = IERC20(0xd29687c813D741E2F938F4aC377128810E217b1b);
+    IERC20 public usdc;
+    IERC20 public usdt;
+    IERC20 public weETH;
+    IERC20 public cashbackToken;
 
     address weEthWethOracle;
     address ethUsdcOracle;
     address usdcUsdOracle;
-    address scrUsdOracle;
 
     uint256 dailyLimitInUsd = 10_000e6;
     uint256 monthlyLimitInUsd = 100_000e6;
@@ -96,12 +95,6 @@ contract SafeTestSetup is Utils {
     uint256 supplyCap = 10000 ether;
     int256 timezoneOffset = 4 * 60 * 60; // Dubai timezone
     uint128 minShares;
-
-    // https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
-    uint32 optimismDestEid = 30111;
-    // https://stargateprotocol.gitbook.io/stargate/v/v2-developer-docs/technical-reference/mainnet-contracts#scroll
-    address stargateUsdcPool = 0x3Fc69CC4A842838bCDC9499178740226062b14E4;
-    address stargateEthPool = 0xC2b638Cb5042c1B3c5d5C969361fB50569840583;
 
     bytes32 public DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
 
@@ -119,9 +112,23 @@ contract SafeTestSetup is Utils {
     uint256 overriddenThirdPartySignerPk;
 
     function setUp() public virtual {
-        string memory scrollRpc = vm.envString("SCROLL_RPC");
-        if (bytes(scrollRpc).length == 0) scrollRpc = "https://rpc.scroll.io"; 
-        vm.createSelectFork(scrollRpc);
+        chainConfig = getChainConfig();
+
+        string memory rpc;
+        try vm.envString("TEST_RPC") returns (string memory testRpc) {
+            rpc = bytes(testRpc).length > 0 ? testRpc : chainConfig.rpc;
+        } catch {
+            rpc = chainConfig.rpc;
+        }
+        vm.createSelectFork(rpc);
+
+        usdc = IERC20(chainConfig.usdc);
+        usdt = IERC20(chainConfig.usdt);
+        weETH = IERC20(chainConfig.weETH);
+        cashbackToken = IERC20(chainConfig.weth);
+        weEthWethOracle = chainConfig.weEthWethOracle;
+        ethUsdcOracle = chainConfig.ethUsdcOracle;
+        usdcUsdOracle = chainConfig.usdcUsdOracle;
 
         refundWallet = makeAddr("refundWallet");
         pauser = makeAddr("pauser");
@@ -135,12 +142,6 @@ contract SafeTestSetup is Utils {
         (thirdPartyRecoverySigner, thirdPartyRecoverySignerPk) = makeAddrAndKey("thirdPartyRecoverySigner");
 
         vm.startPrank(owner);
-
-        chainConfig = getChainConfig(vm.toString(block.chainid));
-        weEthWethOracle = chainConfig.weEthWethOracle;
-        ethUsdcOracle = chainConfig.ethUsdcOracle;
-        scrUsdOracle = chainConfig.scrUsdOracle;
-        usdcUsdOracle = chainConfig.usdcUsdOracle;
 
         address dataProviderImpl = address(new EtherFiDataProvider());
         dataProvider = EtherFiDataProvider(address(new UUPSProxy(dataProviderImpl, "")));
@@ -187,12 +188,12 @@ contract SafeTestSetup is Utils {
         _setupCashEventEmitter();
 
         CashModuleCore(address(cashModule)).initialize(
-            address(roleRegistry), 
-            address(debtManager), 
-            address(settlementDispatcherReap), 
-            address(settlementDispatcherRain), 
-            address(cashbackDispatcher), 
-            address(cashEventEmitter), 
+            address(roleRegistry),
+            address(debtManager),
+            address(settlementDispatcherReap),
+            address(settlementDispatcherRain),
+            address(cashbackDispatcher),
+            address(cashEventEmitter),
             cashModuleSettersImpl
         );
 
@@ -219,16 +220,14 @@ contract SafeTestSetup is Utils {
     }
 
     function _setupWithdrawTokenWhitelist() internal {
-        address[] memory tokens = new address[](3);
-        tokens[0] = address(usdcScroll);
-        tokens[1] = address(weETHScroll);
-        tokens[2] = address(scrToken);
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
 
-        bool[] memory whitelist = new bool[](3);
+        bool[] memory whitelist = new bool[](2);
         whitelist[0] = true;
         whitelist[1] = true;
-        whitelist[2] = true;
-    
+
         cashModule.configureWithdrawAssets(tokens, whitelist);
     }
 
@@ -249,7 +248,7 @@ contract SafeTestSetup is Utils {
             isStableToken: false,
             isBaseTokenBtc: false
         });
-        
+
         PriceProvider.Config memory ethConfig = PriceProvider.Config({
             oracle: ethUsdcOracle,
             priceFunctionCalldata: hex"",
@@ -261,7 +260,7 @@ contract SafeTestSetup is Utils {
             isStableToken: false,
             isBaseTokenBtc: false
         });
-        
+
         PriceProvider.Config memory usdcConfig = PriceProvider.Config({
             oracle: usdcUsdOracle,
             priceFunctionCalldata: hex"",
@@ -273,33 +272,19 @@ contract SafeTestSetup is Utils {
             isStableToken: true,
             isBaseTokenBtc: false
         });
-        
-        PriceProvider.Config memory scrollConfig = PriceProvider.Config({
-            oracle: scrUsdOracle,
-            priceFunctionCalldata: hex"",
-            isChainlinkType: true,
-            oraclePriceDecimals: IAggregatorV3(scrUsdOracle).decimals(),
-            maxStaleness: type(uint24).max,
-            dataType: PriceProvider.ReturnType.Int256,
-            isBaseTokenEth: false,
-            isStableToken: false,
-            isBaseTokenBtc: false
-        });
 
-        address[] memory initialTokens = new address[](4);
-        initialTokens[0] = address(weETHScroll);
+        address[] memory initialTokens = new address[](3);
+        initialTokens[0] = address(weETH);
         initialTokens[1] = eth;
-        initialTokens[2] = address(usdcScroll);
-        initialTokens[3] = address(scrToken);
+        initialTokens[2] = address(usdc);
 
-        PriceProvider.Config[] memory initialTokensConfig = new PriceProvider.Config[](4);
+        PriceProvider.Config[] memory initialTokensConfig = new PriceProvider.Config[](3);
         initialTokensConfig[0] = weETHConfig;
         initialTokensConfig[1] = ethConfig;
         initialTokensConfig[2] = usdcConfig;
-        initialTokensConfig[3] = scrollConfig;
 
         priceProvider = PriceProvider(address(new UUPSProxy(
-            address(new PriceProvider()), 
+            address(new PriceProvider()),
             abi.encodeWithSelector(
                 PriceProvider.initialize.selector,
                 address(roleRegistry),
@@ -309,16 +294,16 @@ contract SafeTestSetup is Utils {
         )));
         roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
     }
-    
+
     function _setupCashbackDispatcher() internal {
         address[] memory cashbackTokens = new address[](1);
-        cashbackTokens[0] = address(scrToken);
+        cashbackTokens[0] = chainConfig.weth;
 
         address cashbackDispatcherImpl = address(new CashbackDispatcher(address(dataProvider)));
         cashbackDispatcher = CashbackDispatcher(
             address(
                 new UUPSProxy(
-                    cashbackDispatcherImpl, 
+                    cashbackDispatcherImpl,
                     abi.encodeWithSelector(
                         CashbackDispatcher.initialize.selector,
                         address(roleRegistry),
@@ -330,48 +315,57 @@ contract SafeTestSetup is Utils {
             )
         );
 
-        deal(address(scrToken), address(cashbackDispatcher), 100000 ether);
+        deal(chainConfig.weth, address(cashbackDispatcher), 100000 ether);
 
         roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
     }
 
     function _setupSettlementDispatcher() internal {
         address[] memory tokens = new address[](2);
-        tokens[0] = address(usdcScroll);
-        tokens[1] = address(usdtScroll);
+        tokens[0] = address(usdc);
+        tokens[1] = address(usdt);
 
-        SettlementDispatcher.DestinationData[] memory destDatas = new SettlementDispatcher.DestinationData[](2);
-        destDatas[0] = SettlementDispatcher.DestinationData({
-            destEid: optimismDestEid,
-            destRecipient: owner,
-            stargate: stargateUsdcPool,
-            useCanonicalBridge: false,
-            minGasLimit: 0
-        });
+        SettlementDispatcherV2.DestinationData[] memory destDatas = new SettlementDispatcherV2.DestinationData[](2);
 
-        destDatas[1] = SettlementDispatcher.DestinationData({
+        if (chainConfig.stargateUsdcPool != address(0)) {
+            destDatas[0] = SettlementDispatcherV2.DestinationData({
+                destEid: chainConfig.settlementDestEid,
+                destRecipient: owner,
+                stargate: chainConfig.stargateUsdcPool,
+                useCanonicalBridge: false,
+                minGasLimit: 0,
+                isOFT: false,
+                remoteToken: address(0),
+                useCCTP: false
+            });
+        }
+
+        destDatas[1] = SettlementDispatcherV2.DestinationData({
             destEid: 0,
             destRecipient: owner,
             stargate: address(0),
             useCanonicalBridge: true,
-            minGasLimit: 200_000
+            minGasLimit: 200_000,
+            isOFT: false,
+            remoteToken: 0xdAC17F958D2ee523a2206206994597C13D831ec7, // L1 USDT
+            useCCTP: false
         });
 
-        address settlementDispatcherRainImpl = address(new SettlementDispatcher(BinSponsor.Rain, address(dataProvider)));
-        settlementDispatcherRain = SettlementDispatcher(
+        address settlementDispatcherRainImpl = address(new SettlementDispatcherV2(BinSponsor.Rain, address(dataProvider)));
+        settlementDispatcherRain = SettlementDispatcherV2(
             payable(address(new UUPSProxy(
-                settlementDispatcherRainImpl, 
-                abi.encodeWithSelector(SettlementDispatcher.initialize.selector, address(roleRegistry), tokens, destDatas)
+                settlementDispatcherRainImpl,
+                abi.encodeWithSelector(SettlementDispatcherV2.initialize.selector, address(roleRegistry), tokens, destDatas)
             )))
         );
 
         roleRegistry.grantRole(settlementDispatcherRain.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
 
-        address settlementDispatcherReapImpl = address(new SettlementDispatcher(BinSponsor.Reap, address(dataProvider)));
-        settlementDispatcherReap = SettlementDispatcher(
+        address settlementDispatcherReapImpl = address(new SettlementDispatcherV2(BinSponsor.Reap, address(dataProvider)));
+        settlementDispatcherReap = SettlementDispatcherV2(
             payable(address(new UUPSProxy(
-                settlementDispatcherReapImpl, 
-                abi.encodeWithSelector(SettlementDispatcher.initialize.selector, address(roleRegistry), tokens, destDatas)
+                settlementDispatcherReapImpl,
+                abi.encodeWithSelector(SettlementDispatcherV2.initialize.selector, address(roleRegistry), tokens, destDatas)
             )))
         );
 
@@ -380,17 +374,17 @@ contract SafeTestSetup is Utils {
 
     function _setupDebtManager() internal {
         address[] memory collateralTokens = new address[](2);
-        collateralTokens[0] = address(weETHScroll);
-        collateralTokens[1] = address(usdcScroll);
+        collateralTokens[0] = address(weETH);
+        collateralTokens[1] = address(usdc);
         address[] memory borrowTokens = new address[](1);
-        borrowTokens[0] = address(usdcScroll);
+        borrowTokens[0] = address(usdc);
 
         IDebtManager.CollateralTokenConfig[] memory collateralTokenConfig = new IDebtManager.CollateralTokenConfig[](2);
 
         collateralTokenConfig[0].ltv = ltv;
         collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
         collateralTokenConfig[0].liquidationBonus = liquidationBonus;
-        
+
         collateralTokenConfig[1].ltv = ltv;
         collateralTokenConfig[1].liquidationThreshold = liquidationThreshold;
         collateralTokenConfig[1].liquidationBonus = liquidationBonus;
@@ -406,19 +400,19 @@ contract SafeTestSetup is Utils {
         debtManager = IDebtManager(address(debtManagerProxy));
         debtManager.setAdminImpl(debtManagerAdminImpl);
 
-        debtManager.supportCollateralToken(address(weETHScroll), collateralTokenConfig[0]);
-        debtManager.supportCollateralToken(address(usdcScroll), collateralTokenConfig[1]);
-        
-        minShares = uint128(10 * 10 ** IERC20Metadata(address(usdcScroll)).decimals());
+        debtManager.supportCollateralToken(address(weETH), collateralTokenConfig[0]);
+        debtManager.supportCollateralToken(address(usdc), collateralTokenConfig[1]);
+
+        minShares = uint128(10 * 10 ** IERC20Metadata(address(usdc)).decimals());
         debtManager.supportBorrowToken(
-            address(usdcScroll), 
-            borrowApyPerSecond, 
+            address(usdc),
+            borrowApyPerSecond,
             minShares
         );
 
-        deal(address(usdcScroll), address(owner), 1 ether);
-        usdcScroll.approve(address(debtManager), 100000e6);
-        debtManager.supply(address(owner), address(usdcScroll), 100000e6);
+        deal(address(usdc), address(owner), 1 ether);
+        usdc.approve(address(debtManager), 100000e6);
+        debtManager.supply(address(owner), address(usdc), 100000e6);
     }
 
     function _configureModules(address[] memory modules, bool[] memory shouldWhitelist, bytes[] memory setupData) internal {
@@ -431,7 +425,7 @@ contract SafeTestSetup is Utils {
                 ++i;
             }
         }
-        
+
         // Concatenate the hashes and hash again
         bytes32 setupDataHash = keccak256(abi.encodePacked(dataHashes));
 
@@ -614,12 +608,12 @@ contract SafeTestSetup is Utils {
     function _recoverSafeWithSigners(address newOwner, address[] memory recoverySigners) internal {
         bytes32 structHash = keccak256(abi.encode(safe.RECOVER_SAFE_TYPEHASH(), newOwner, safe.nonce()));
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
-        
+
         bytes[] memory signatures = new bytes[](recoverySigners.length);
-        
+
         for (uint i = 0; i < recoverySigners.length; i++) {
             uint256 signerKey;
-            
+
             if (recoverySigners[i] == etherFiRecoverySigner) signerKey = etherFiRecoverySignerPk;
             else if (recoverySigners[i] == thirdPartyRecoverySigner) signerKey = thirdPartyRecoverySignerPk;
             else if (recoverySigners[i] == userRecoverySigner1) signerKey = userRecoverySigner1Pk;
@@ -627,11 +621,11 @@ contract SafeTestSetup is Utils {
             else if (recoverySigners[i] == overriddenEtherFiSigner) signerKey = overriddenEtherFiSignerPk;
             else if (recoverySigners[i] == overriddenThirdPartySigner) signerKey = overriddenThirdPartySignerPk;
             else revert("Unknown recovery signer in test");
-            
+
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, digestHash);
             signatures[i] = abi.encodePacked(r, s, v);
         }
-        
+
         safe.recoverSafe(newOwner, recoverySigners, signatures);
     }
 

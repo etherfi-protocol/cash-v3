@@ -21,12 +21,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
     function test_spend_works_inDebitMode() public {
         uint256 amount = 100e6;
-        deal(address(usdcScroll), address(safe), amount);
+        deal(address(usdc), address(safe), amount);
 
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -41,28 +41,28 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), txId));
 
         // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), 0);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + amount);
+        assertEq(usdc.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + amount);
     }
 
     function test_spend_worksWithMultipleToken_inDebitMode() public {
         vm.prank(owner);
-        debtManager.supportBorrowToken(address(weETHScroll), borrowApyPerSecond, minShares);
+        debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);
 
         uint256 amountInUsd = 100e6;
         uint256 totalAmountInUsd = amountInUsd * 2; // Pre-calculate total
-        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdcScroll), amountInUsd);
-        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETHScroll), amountInUsd);
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), amountInUsd);
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), amountInUsd);
 
-        deal(address(usdcScroll), address(safe), usdcAmount);
-        deal(address(weETHScroll), address(safe), weETHAmount);
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), weETHAmount);
 
-        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
-        uint256 settlementDispatcherWeETHBalBefore = weETHScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherUsdcBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherWeETHBalBefore = weETH.balanceOf(address(settlementDispatcherReap));
 
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = amountInUsd;
         spendAmounts[1] = amountInUsd;
@@ -82,18 +82,18 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), txId));
 
         // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), 0);
-        assertEq(weETHScroll.balanceOf(address(safe)), 0);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + usdcAmount);
-        assertEq(weETHScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + weETHAmount);
+        assertEq(usdc.balanceOf(address(safe)), 0);
+        assertEq(weETH.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherUsdcBalBefore + usdcAmount);
+        assertEq(weETH.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + weETHAmount);
     }
 
     function test_spend_works_inCreditMode() public {
         uint256 initialBalance = 100e6;
-        deal(address(usdcScroll), address(safe), initialBalance);
+        deal(address(usdc), address(safe), initialBalance);
 
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
-        uint256 debtManagerBalBefore = usdcScroll.balanceOf(address(debtManager));
+        uint256 settlementDispatcherBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
+        uint256 debtManagerBalBefore = usdc.balanceOf(address(debtManager));
 
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -101,7 +101,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 amount = 10e6;
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -116,14 +116,14 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), txId));
 
         // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), initialBalance);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + amount);
-        assertEq(usdcScroll.balanceOf(address(debtManager)), debtManagerBalBefore - amount);
+        assertEq(usdc.balanceOf(address(safe)), initialBalance);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + amount);
+        assertEq(usdc.balanceOf(address(debtManager)), debtManagerBalBefore - amount);
     }
 
     function test_spend_failsWithMultipleTokens_inCreditMode() public {
         uint256 initialBalance = 100e6;
-        deal(address(usdcScroll), address(safe), initialBalance);
+        deal(address(usdc), address(safe), initialBalance);
 
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -131,8 +131,8 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 amount = 10e6;
 
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = amount;
         spendAmounts[1] = amount;
@@ -146,10 +146,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
     function test_spend_reverts_whenTransactionAlreadyCleared() public {
         uint256 amount = 100e6;
-        deal(address(usdcScroll), address(safe), amount);
+        deal(address(usdc), address(safe), amount);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -183,7 +183,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
     function test_spend_reverts_whenAmountIsZero() public {
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 0;
 
@@ -198,7 +198,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         address notEtherFiWallet = makeAddr("notEtherFiWallet");
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 100e6;
 
@@ -213,23 +213,23 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 initialAmount = 200e6;
         uint256 spendAmount = 100e6;
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), initialAmount);
+        deal(address(usdc), address(safe), initialAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
 
@@ -240,11 +240,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify tokens were transferred
-        assertEq(usdcScroll.balanceOf(address(safe)), initialAmount - spendAmount);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + spendAmount);
+        assertEq(usdc.balanceOf(address(safe)), initialAmount - spendAmount);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + spendAmount);
 
         // Verify pending withdrawal still exists
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
     }
 
     function test_spend_cancelsPendingWithdrawalInCreditModeIfBlocked() public {
@@ -254,8 +254,8 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 futureBorrowAmt = 10e6;
         uint256 usdcCollateralAmount = 100e6;
 
-        deal(address(usdcScroll), address(safe), usdcCollateralAmount);
-        deal(address(usdcScroll), address(debtManager), 1 ether);
+        deal(address(usdc), address(safe), usdcCollateralAmount);
+        deal(address(usdc), address(debtManager), 1 ether);
 
         uint256 totalMaxBorrow = debtManager.getMaxBorrowAmount(address(safe), true);
         uint256 borrowAmt = totalMaxBorrow - futureBorrowAmt;
@@ -264,7 +264,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = borrowAmt;
 
@@ -274,11 +274,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         uint256 maxCanWithdraw = 10e6;
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         amounts[0] = maxCanWithdraw;
         _requestWithdrawal(tokens, amounts, recipient);
 
-        uint256 settlementDispatcherUsdcBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherUsdcBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
 
         spendAmounts[0] = futureBorrowAmt;
 
@@ -287,11 +287,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         emit CashEventEmitter.WithdrawalCancelled(address(safe), tokens, amounts, withdrawRecipient);
         cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        uint256 settlementDispatcherUsdcBalAfter = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherUsdcBalAfter = usdc.balanceOf(address(settlementDispatcherReap));
 
         assertEq(settlementDispatcherUsdcBalAfter - settlementDispatcherUsdcBalBefore, futureBorrowAmt);
 
-        uint256 withdrawalAmt = cashLens.getPendingWithdrawalAmount(address(safe), address(usdcScroll));
+        uint256 withdrawalAmt = cashLens.getPendingWithdrawalAmount(address(safe), address(usdc));
         assertEq(withdrawalAmt, 0);
     }
 
@@ -299,20 +299,20 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 initialAmount = 200e6;
         uint256 spendAmount = 150e6;
         uint256 withdrawalAmount = 100e6;
-        deal(address(usdcScroll), address(safe), initialAmount);
+        deal(address(usdc), address(safe), initialAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
-        uint256 settlementDispatcherBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
 
@@ -323,18 +323,18 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         // Verify tokens were transferred
-        assertEq(usdcScroll.balanceOf(address(safe)), initialAmount - spendAmount);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + spendAmount);
+        assertEq(usdc.balanceOf(address(safe)), initialAmount - spendAmount);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + spendAmount);
 
         // Verify pending withdrawal was cancelled
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), 0);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0);
     }
 
     function test_spend_respectsSpendingLimits() public {
-        deal(address(usdcScroll), address(safe), 1e12);
+        deal(address(usdc), address(safe), 1e12);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = dailyLimitInUsd + 1;
 
@@ -360,12 +360,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         uint256 safeBalUsdc = 1000e6;
-        deal(address(usdcScroll), address(safe), safeBalUsdc);
-        deal(address(weETHScroll), address(safe), 0);
-        deal(address(usdcScroll), address(debtManager), 1000e6);
+        deal(address(usdc), address(safe), safeBalUsdc);
+        deal(address(weETH), address(safe), 0);
+        deal(address(usdc), address(debtManager), 1000e6);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 10e6;
 
@@ -390,12 +390,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         uint256 safeBalUsdc = 1000e6;
         uint256 safeBalWeETH = 1 ether;
-        deal(address(usdcScroll), address(safe), safeBalUsdc);
-        deal(address(weETHScroll), address(safe), safeBalWeETH);
-        deal(address(usdcScroll), address(debtManager), 1000e6);
+        deal(address(usdc), address(safe), safeBalUsdc);
+        deal(address(weETH), address(safe), safeBalWeETH);
+        deal(address(usdc), address(debtManager), 1000e6);
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 10e6;
 
@@ -408,7 +408,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory withdrawTokens = new address[](1);
-        withdrawTokens[0] = address(weETHScroll);
+        withdrawTokens[0] = address(weETH);
         uint256[] memory withdrawAmounts = new uint256[](1);
         withdrawAmounts[0] = safeBalWeETH;
         address recipient = makeAddr("alice");
@@ -416,20 +416,20 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         spendAmounts[0] = safeBalUsdc;
 
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETHScroll)), safeBalWeETH);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETH)), safeBalWeETH);
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.WithdrawalCancelled(address(safe), withdrawTokens, withdrawAmounts, recipient);
         cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETHScroll)), 0);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETH)), 0);
     }
 
     function test_spend_reverts_whenArrayLengthMismatch() public {
         // Create mismatched arrays
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(weETHScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
         
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = 100e6;
@@ -455,32 +455,32 @@ contract CashModuleSpendTest is CashModuleTestSetup {
     
     function test_spend_withNoCashback() public {
         uint256 amount = 100e6;
-        deal(address(usdcScroll), address(safe), amount);
-        
-        // Get initial token balances
-        uint256 safeTokenBalBefore = scrToken.balanceOf(address(safe));
-        
+        deal(address(usdc), address(safe), amount);
+
+        // Get initial cashback token balances
+        uint256 safeCashbackBalBefore = cashbackToken.balanceOf(address(safe));
+
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
         Cashback[] memory cashbacks;
-        
+
         vm.prank(etherFiWallet);
         // Spend with shouldReceiveCashback set to false
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        
+
         // Verify no cashback was received
-        assertEq(scrToken.balanceOf(address(safe)), safeTokenBalBefore);
+        assertEq(cashbackToken.balanceOf(address(safe)), safeCashbackBalBefore);
     }
     
     function test_spend_whenPaused() public {
         uint256 amount = 100e6;
-        deal(address(usdcScroll), address(safe), amount);
+        deal(address(usdc), address(safe), amount);
         
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
         
@@ -505,10 +505,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
     
     function test_spend_multiplesWithinLimits() public {
         uint256 smallAmount = dailyLimitInUsd / 5;
-        deal(address(usdcScroll), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 1 ether);
         
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
 
         Cashback[] memory cashbacks;
@@ -542,10 +542,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
     function test_spend_inDebitModeWithInsufficientBalance() public {
         uint256 amount = 100e6;
         uint256 availableAmount = 50e6;
-        deal(address(usdcScroll), address(safe), availableAmount);
+        deal(address(usdc), address(safe), availableAmount);
         
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -563,12 +563,12 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
     function test_spend_FundsGoToBinSponsorSettlementDispatcherAsSpecified_inDebitMode() public {
         uint256 amount = 100e6;
-        deal(address(usdcScroll), address(safe), 2 * amount);
+        deal(address(usdc), address(safe), 2 * amount);
 
-        uint256 settlementDispatcherReapBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
+        uint256 settlementDispatcherReapBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -583,10 +583,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), txId));
 
         // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), amount);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherReapBalBefore + amount);
+        assertEq(usdc.balanceOf(address(safe)), amount);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherReapBalBefore + amount);
 
-        uint256 settlementDispatcherRainBalBefore = usdcScroll.balanceOf(address(settlementDispatcherRain));
+        uint256 settlementDispatcherRainBalBefore = usdc.balanceOf(address(settlementDispatcherRain));
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
@@ -597,16 +597,16 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
 
         // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), 0);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherRain)), settlementDispatcherRainBalBefore + amount);
+        assertEq(usdc.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(address(settlementDispatcherRain)), settlementDispatcherRainBalBefore + amount);
     }
 
     function test_spend_FundsGoToBinSponsorSettlementDispatcherAsSpecified_inCreditMode() public {
         uint256 initialBalance = 100e6;
-        deal(address(usdcScroll), address(safe), initialBalance);
+        deal(address(usdc), address(safe), initialBalance);
 
-        uint256 settlementDispatcherReapBalBefore = usdcScroll.balanceOf(address(settlementDispatcherReap));
-        uint256 debtManagerBalBefore = usdcScroll.balanceOf(address(debtManager));
+        uint256 settlementDispatcherReapBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
+        uint256 debtManagerBalBefore = usdc.balanceOf(address(debtManager));
 
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -614,7 +614,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         uint256 amount = 10e6;
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -629,11 +629,11 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), txId));
 
         // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), initialBalance);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherReap)), settlementDispatcherReapBalBefore + amount);
-        assertEq(usdcScroll.balanceOf(address(debtManager)), debtManagerBalBefore - amount);
+        assertEq(usdc.balanceOf(address(safe)), initialBalance);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherReapBalBefore + amount);
+        assertEq(usdc.balanceOf(address(debtManager)), debtManagerBalBefore - amount);
 
-        uint256 settlementDispatcherRainBalBefore = usdcScroll.balanceOf(address(settlementDispatcherRain));
+        uint256 settlementDispatcherRainBalBefore = usdc.balanceOf(address(settlementDispatcherRain));
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
@@ -644,17 +644,17 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
 
         // Verify tokens were transferred to settlement dispatcher
-        assertEq(usdcScroll.balanceOf(address(safe)), initialBalance);
-        assertEq(usdcScroll.balanceOf(address(settlementDispatcherRain)), settlementDispatcherRainBalBefore + amount);
+        assertEq(usdc.balanceOf(address(safe)), initialBalance);
+        assertEq(usdc.balanceOf(address(settlementDispatcherRain)), settlementDispatcherRainBalBefore + amount);
     }
 
     function test_spend_fails_whenDuplicateTokensArePassed() public {
         uint256 amount = 100e6;
-        deal(address(usdcScroll), address(safe), amount);
+        deal(address(usdc), address(safe), amount);
 
         address[] memory spendTokens = new address[](2);
-        spendTokens[0] = address(usdcScroll);
-        spendTokens[1] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](2);
         spendAmounts[0] = amount;
         spendAmounts[1] = amount;

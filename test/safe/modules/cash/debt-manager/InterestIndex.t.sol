@@ -15,14 +15,14 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
 
     function test_getCurrentIndex_returnsInitialIndex_whenNoTimeElapsed() public view {
         // Test that the index is equal to the initial value when no time has elapsed
-        uint256 initialIndex = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 initialIndex = debtManager.getCurrentIndex(address(usdc));
         assertEq(initialIndex, PRECISION); // PRECISION is the initial index value
     }
 
     function test_getCurrentIndex_accumulatesInterest_overTime() public {
         // Capture initial state
-        uint256 initialIndex = debtManager.getCurrentIndex(address(usdcScroll));
-        uint64 apy = debtManager.borrowApyPerSecond(address(usdcScroll));
+        uint256 initialIndex = debtManager.getCurrentIndex(address(usdc));
+        uint64 apy = debtManager.borrowApyPerSecond(address(usdc));
         
         // Warp forward in time
         uint256 timeElapsed = 10 days;
@@ -33,21 +33,21 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
         uint256 expectedIndex = initialIndex + expectedInterest;
         
         // Get current index and verify
-        uint256 currentIndex = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 currentIndex = debtManager.getCurrentIndex(address(usdc));
         assertEq(currentIndex, expectedIndex);
     }
 
     function test_getCurrentIndex_updatesCorrectly_afterBorrow() public {
-        deal(address(weETHScroll), address(safe), 10 ether);
+        deal(address(weETH), address(safe), 10 ether);
         // Borrow to trigger an index update
         uint256 borrowAmt = 1000e6; // 1000 USDC
         
         vm.startPrank(address(safe));
-        debtManager.borrow(BinSponsor.Reap, address(usdcScroll), borrowAmt);
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
         vm.stopPrank();
         
         // Get the updated index
-        uint256 indexAfterBorrow = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 indexAfterBorrow = debtManager.getCurrentIndex(address(usdc));
         
         // Verify it's equal to PRECISION since no time has passed
         assertEq(indexAfterBorrow, PRECISION);
@@ -57,19 +57,19 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
         vm.warp(block.timestamp + timeElapsed);
         
         // Calculate expected interest
-        uint64 apy = debtManager.borrowApyPerSecond(address(usdcScroll));
+        uint64 apy = debtManager.borrowApyPerSecond(address(usdc));
         uint256 expectedInterest = indexAfterBorrow.mulDiv(apy * timeElapsed, HUNDRED_PERCENT);
         uint256 expectedIndex = indexAfterBorrow + expectedInterest;
         
         // Get current index and verify
-        uint256 currentIndex = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 currentIndex = debtManager.getCurrentIndex(address(usdc));
         assertEq(currentIndex, expectedIndex);
     }
 
     function test_getCurrentIndex_updatesCorrectly_afterApyChange() public {
         // Capture initial state
-        uint256 initialIndex = debtManager.getCurrentIndex(address(usdcScroll));
-        uint64 initialApy = debtManager.borrowApyPerSecond(address(usdcScroll));
+        uint256 initialIndex = debtManager.getCurrentIndex(address(usdc));
+        uint64 initialApy = debtManager.borrowApyPerSecond(address(usdc));
         
         // Warp forward in time
         uint256 firstTimeElapsed = 10 days;
@@ -82,11 +82,11 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
         // Change the APY as admin
         uint64 newApy = initialApy * 2; // Double the APY
         vm.startPrank(owner);
-        debtManager.setBorrowApy(address(usdcScroll), newApy);
+        debtManager.setBorrowApy(address(usdc), newApy);
         vm.stopPrank();
         
         // Get index right after APY change
-        uint256 indexAfterApyChange = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 indexAfterApyChange = debtManager.getCurrentIndex(address(usdc));
         
         // Verify the index was properly updated before the APY change
         assertEq(indexAfterApyChange, expectedIndexAfterFirstPeriod);
@@ -100,7 +100,7 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
         uint256 expectedFinalIndex = indexAfterApyChange + secondExpectedInterest;
         
         // Get the final index and verify
-        uint256 finalIndex = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 finalIndex = debtManager.getCurrentIndex(address(usdc));
         assertEq(finalIndex, expectedFinalIndex);
     }
 
@@ -109,17 +109,17 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
         uint64 highApy = debtManager.MAX_BORROW_APY(); // Use the maximum allowed APY
         
         vm.startPrank(owner);
-        debtManager.setBorrowApy(address(usdcScroll), highApy);
+        debtManager.setBorrowApy(address(usdc), highApy);
         vm.stopPrank();
         
-        uint256 indexBeforeTimeJump = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 indexBeforeTimeJump = debtManager.getCurrentIndex(address(usdc));
         
         // Warp forward a very long time
         uint256 longTimeElapsed = 365 days;
         vm.warp(block.timestamp + longTimeElapsed);
         
         // Get current index with extreme values
-        uint256 indexAfterLongTime = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 indexAfterLongTime = debtManager.getCurrentIndex(address(usdc));
         
         // Calculate expected interest (manually to avoid overflows)
         uint256 expectedInterest = indexBeforeTimeJump.mulDiv(highApy * longTimeElapsed, HUNDRED_PERCENT);
@@ -171,7 +171,7 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
         vm.warp(block.timestamp + timeElapsed);
         
         // Get indices for both tokens
-        uint256 usdcIndex = debtManager.getCurrentIndex(address(usdcScroll));
+        uint256 usdcIndex = debtManager.getCurrentIndex(address(usdc));
         uint256 newTokenIndex = debtManager.getCurrentIndex(newToken);
         
         // Calculate expected indices

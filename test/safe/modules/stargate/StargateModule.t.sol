@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import { Test } from "forge-std/Test.sol";
 
 import { StargateModule, ModuleBase } from "../../../../src/modules/stargate/StargateModule.sol";
 import { ArrayDeDupLib, ICashModule, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
+import { ChainConfig } from "../../../utils/Utils.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 
@@ -15,12 +14,8 @@ contract StargateModuleTest is SafeTestSetup {
 
     StargateModule stargateModule;
 
-    IERC20 weETH = IERC20(0x01f0a31698C4d065659b9bdC21B3610292a1c506);
-    IERC20 usdc = IERC20(0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4);
-    address ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    
-    address usdcStargatePool = 0x3Fc69CC4A842838bCDC9499178740226062b14E4;
-    address ethStargatePool = 0xC2b638Cb5042c1B3c5d5C969361fB50569840583;
+    address usdcStargatePool;
+    address ethStargatePool;
 
     uint32 mainnetDestEid = 30101;
     uint256 maxSlippage = 50; // 0.5%
@@ -28,14 +23,20 @@ contract StargateModuleTest is SafeTestSetup {
     address sender = makeAddr("sender");
 
     function setUp() public override {
+        ChainConfig memory _cc = getChainConfig();
+        vm.skip(_cc.stargateUsdcPool == address(0));
+
         super.setUp();
+
+        usdcStargatePool = chainConfig.stargateUsdcPool;
+        ethStargatePool = chainConfig.stargateEthPool;
 
         deal(sender, 1 ether);
         
         address[] memory assets = new address[](2);
         assets[0] = address(usdc);
         assets[1] = address(weETH);
-        // assets[2] = address(ETH);
+        // assets[2] = eth;
 
         StargateModule.AssetConfig[] memory assetConfigs = new StargateModule.AssetConfig[](2);
         assetConfigs[0] = StargateModule.AssetConfig({
@@ -302,11 +303,11 @@ contract StargateModuleTest is SafeTestSetup {
 
     // function test_requestBridge_worksWithETH() public {
     //     uint256 amount = 1 ether;
-    //     deal(address(safe), amount); 
+    //     deal(address(safe), amount);
 
     //     uint256 ETHBalBefore = address(safe).balance;
 
-    //     _bridge(mainnetDestEid, ETH, amount, destRecipientAddr, maxSlippage);
+    //     _bridge(mainnetDestEid, eth, amount, destRecipientAddr, maxSlippage);
 
     //     uint256 ETHBalAfter = address(safe).balance;
     //     assertEq(ETHBalAfter, ETHBalBefore - amount);
@@ -470,7 +471,7 @@ contract StargateModuleTest is SafeTestSetup {
         assertTrue(fee2 > 0, "Bridge fee should be greater than zero");
 
         // Test getting bridge fee for native ETH
-        // (address feeToken3, uint256 fee3) = stargateModule.getBridgeFee(mainnetDestEid, ETH, 1 ether, destRecipientAddr, maxSlippage);
+        // (address feeToken3, uint256 fee3) = stargateModule.getBridgeFee(mainnetDestEid, eth, 1 ether, destRecipientAddr, maxSlippage);
         // assertEq(feeToken3, stargateModule.ETH());
         // assertTrue(fee3 > 0, "Bridge fee should be greater than zero");
     }

@@ -16,21 +16,18 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
     function test_configureWithdrawAssets_configuresWithdrawAssets() public {
-        address[] memory asset = new address[](3);
-        asset[0] = address(usdcScroll);
-        asset[1] = address(weETHScroll);
-        asset[2] = address(scrToken);
+        address[] memory asset = new address[](2);
+        asset[0] = address(usdc);
+        asset[1] = address(weETH);
 
-        bool[] memory whitelist = new bool[](3);
+        bool[] memory whitelist = new bool[](2);
         whitelist[0] = true;
         whitelist[1] = false;
-        whitelist[2] = false;
 
         address[] memory whitelistedAssets = cashModule.getWhitelistedWithdrawAssets();
-        assertEq(whitelistedAssets.length, 3);
+        assertEq(whitelistedAssets.length, 2);
         assertEq(whitelistedAssets[0], asset[0]);
         assertEq(whitelistedAssets[1], asset[1]);
-        assertEq(whitelistedAssets[2], asset[2]);
 
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
@@ -45,7 +42,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_configureWithdrawAssets_fails_whenCallerIsNotCashController() public {
         address[] memory asset = new address[](2);
         asset[0] = address(1);
-        asset[1] = address(usdcScroll);
+        asset[1] = address(usdc);
 
         bool[] memory whitelist = new bool[](2);
         whitelist[0] = true;
@@ -61,7 +58,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     function test_configureWithdrawAssets_fails_whenArrayLengthMismatch() public {
         address[] memory asset = new address[](2);
         asset[0] = address(1);
-        asset[1] = address(usdcScroll);
+        asset[1] = address(usdc);
 
         bool[] memory whitelist = new bool[](1);
         whitelist[0] = true;
@@ -94,8 +91,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     
     function test_configureWithdrawAssets_fails_whenAssetIsDuplicate() public {
         address[] memory asset = new address[](2);
-        asset[0] = address(usdcScroll);
-        asset[1] = address(usdcScroll);
+        asset[0] = address(usdc);
+        asset[1] = address(usdc);
 
         bool[] memory whitelist = new bool[](2);
         whitelist[0] = true;
@@ -108,18 +105,18 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_requestWithdrawal_works() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
     }
 
     function test_requestWithdrawal_fails_forUnsupportedAsset() public {
@@ -150,21 +147,21 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_processWithdrawals_works() external {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
-        uint256 balBeforeSafe = usdcScroll.balanceOf(address(safe));
-        uint256 balBeforeWithdrawRecipient = usdcScroll.balanceOf(address(withdrawRecipient));
+        uint256 balBeforeSafe = usdc.balanceOf(address(safe));
+        uint256 balBeforeWithdrawRecipient = usdc.balanceOf(address(withdrawRecipient));
 
         (uint64 withdrawalDelay,,) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay); // withdraw delay is 60 secs
@@ -173,8 +170,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         emit CashEventEmitter.WithdrawalProcessed(address(safe), tokens, amounts, withdrawRecipient);
         cashModule.processWithdrawal(address(safe));
 
-        uint256 balAfterSafe = usdcScroll.balanceOf(address(safe));
-        uint256 balAfterWithdrawRecipient = usdcScroll.balanceOf(address(withdrawRecipient));
+        uint256 balAfterSafe = usdc.balanceOf(address(safe));
+        uint256 balAfterWithdrawRecipient = usdc.balanceOf(address(withdrawRecipient));
 
         assertEq(balBeforeSafe, withdrawalAmount);
         assertEq(balAfterSafe, 0);
@@ -182,23 +179,23 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(balAfterWithdrawRecipient, withdrawalAmount);
 
         // Verify pending withdrawal is 0
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), 0);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0);
     }
 
     function test_processWithdrawals_fails_whenAssetIsNotWhitelistedWithdrawAsset() external {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
         (uint64 withdrawalDelay,,) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay); // withdraw delay is 60 secs
@@ -215,8 +212,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_processWithdrawals_fails_ifPositionUnhealthyAfterWithdrawal() external {
         uint256 totalSafeBalance = 100e6;
-        deal(address(usdcScroll), address(safe), totalSafeBalance);
-        deal(address(weETHScroll), address(safe), 0);
+        deal(address(usdc), address(safe), totalSafeBalance);
+        deal(address(weETH), address(safe), 0);
 
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -224,7 +221,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256 amount = 10e6;
 
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = amount;
 
@@ -238,20 +235,20 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         uint256 withdrawalAmount = 50e6;
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
         (uint64 withdrawalDelay,,) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay); // withdraw delay is 60 secs
 
         // change the safe balance to withdraw amount so the position become unhealthy for withdrawal
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
         cashModule.processWithdrawal(address(safe));
@@ -260,18 +257,18 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_processWithdrawals_fails_whenTheDelayIsNotOver() external {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
         vm.expectRevert(ICashModule.CannotWithdrawYet.selector);
         cashModule.processWithdrawal(address(safe));
@@ -279,8 +276,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_requestWithdrawal_fails_whenAccountBecomesUnhealthy() external {
         address[] memory tokens = new address[](2);
-        tokens[0] = address(usdcScroll);
-        tokens[1] = address(weETHScroll);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
 
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = 100e6;
@@ -288,14 +285,14 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         deal(tokens[0], address(safe), amounts[0]);
         deal(tokens[1], address(safe), amounts[1]);
-        deal(address(usdcScroll), address(debtManager), 1 ether);
+        deal(address(usdc), address(debtManager), 1 ether);
 
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
 
         {
             address[] memory spendTokens = new address[](1);
-            spendTokens[0] = address(usdcScroll);
+            spendTokens[0] = address(usdc);
             uint256[] memory spendAmounts = new uint256[](1);
             spendAmounts[0] = 10e6;
 
@@ -328,32 +325,32 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_requestWithdrawal_resetWithdrawalWithNewRequest() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), 1000e6);
+        deal(address(usdc), address(safe), 1000e6);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
         uint256 newWithdrawalAmt = 100e6;
         amounts[0] = newWithdrawalAmt;
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), newWithdrawalAmt);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), newWithdrawalAmt);
     }
     
     function test_requestWithdrawal_fails_whenFundsAreInsufficient() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount - 1);
+        deal(address(usdc), address(safe), withdrawalAmount - 1);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
@@ -378,11 +375,11 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_requestWithdrawal_fails_whenRecipientIsNull() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
@@ -407,11 +404,11 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_requestWithdrawal_fails_whenArrayLengthMismatch() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
 
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = withdrawalAmount;
@@ -437,12 +434,12 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_requestWithdrawal_fails_whenDuplicateTokens() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), 2 * withdrawalAmount);
+        deal(address(usdc), address(safe), 2 * withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](2);
-        tokens[0] = address(usdcScroll);
-        tokens[1] = address(usdcScroll);
+        tokens[0] = address(usdc);
+        tokens[1] = address(usdc);
 
         uint256[] memory amounts = new uint256[](2);
         amounts[0] = withdrawalAmount;
@@ -469,11 +466,11 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_requestWithdrawal_fails_whenInvalidSignature() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
 
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
@@ -511,14 +508,14 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.stopPrank();
 
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         vm.prank(module);
-        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdc), withdrawalAmount);
 
         WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
         assertEq(request.tokens.length, 1);
-        assertEq(request.tokens[0], address(usdcScroll));
+        assertEq(request.tokens[0], address(usdc));
         assertEq(request.amounts[0], withdrawalAmount);
         assertEq(request.recipient, module);
     }
@@ -536,14 +533,14 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.stopPrank();
 
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         vm.prank(module);
-        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdc), withdrawalAmount);
 
         WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
         assertEq(request.tokens.length, 1);
-        assertEq(request.tokens[0], address(usdcScroll));
+        assertEq(request.tokens[0], address(usdc));
         assertEq(request.amounts[0], withdrawalAmount);
         assertEq(request.recipient, module);
 
@@ -575,14 +572,14 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.stopPrank();
 
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         vm.prank(module);
-        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdc), withdrawalAmount);
 
         WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
         assertEq(request.tokens.length, 1);
-        assertEq(request.tokens[0], address(usdcScroll));
+        assertEq(request.tokens[0], address(usdc));
         assertEq(request.amounts[0], withdrawalAmount);
         assertEq(request.recipient, module);
 
@@ -593,18 +590,18 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
     
     function test_cancelWithdrawalByModule_reverts_whenCreatedByNonModule() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
         address module = makeAddr("module");
         address[] memory modules = new address[](1);
@@ -635,14 +632,14 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.stopPrank();
 
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         vm.prank(module);
-        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdc), withdrawalAmount);
 
         WithdrawalRequest memory request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
         assertEq(request.tokens.length, 1);
-        assertEq(request.tokens[0], address(usdcScroll));
+        assertEq(request.tokens[0], address(usdc));
         assertEq(request.amounts[0], withdrawalAmount);
         assertEq(request.recipient, module);
 
@@ -678,11 +675,11 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.stopPrank();
 
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         vm.prank(module);
         vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
-        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), withdrawalAmount);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdc), withdrawalAmount);
     }
 
     function test_requestWithdrawalByModule_revertsIfNotCalledByWhitelistedWithdrawModule() public {
@@ -698,7 +695,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         vm.prank(module);
         vm.expectRevert(ICashModule.OnlyWhitelistedModuleCanRequestWithdraw.selector);
-        cashModule.requestWithdrawalByModule(address(safe), address(usdcScroll), 1e6);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdc), 1e6);
     }
 
     function test_configureModulesCanRequestWithdraw_canOnlyBeCalledByCashController() public {
@@ -797,23 +794,23 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_cancelWithdrawal_works() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
         _cancelWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Verify pending withdrawal is 0
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), 0);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0);
     }
     
     function test_cancelWithdrawal_reverts_whenNoWithdrawalQueued() public {
@@ -836,11 +833,11 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_cancelWithdrawal_reverts_whenQueuedByWhitelistedModule() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
@@ -859,7 +856,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.stopPrank();
 
         // Verify pending withdrawal was set up correctly
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdcScroll)), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
 
         vm.expectRevert(ICashModule.InvalidWithdrawRequest.selector);
         cashModule.cancelWithdrawal(address(safe), new address[](0), new bytes[](0));
@@ -867,11 +864,11 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_cancelWithdraw_reverts_whenInvalidSignature() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 
@@ -895,11 +892,11 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     function test_cancelWithdraw_reverts_whenNoQuorum() public {
         uint256 withdrawalAmount = 50e6;
-        deal(address(usdcScroll), address(safe), withdrawalAmount);
+        deal(address(usdc), address(safe), withdrawalAmount);
 
         // Setup a pending withdrawal
         address[] memory tokens = new address[](1);
-        tokens[0] = address(usdcScroll);
+        tokens[0] = address(usdc);
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = withdrawalAmount;
 

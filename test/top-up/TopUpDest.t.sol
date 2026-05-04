@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 
@@ -12,12 +11,11 @@ import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { UpgradeableProxy, PausableUpgradeable } from "../../src/utils/UpgradeableProxy.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
-import { TopUpDestNativeGateway } from "../../src/top-up/TopUpDestNativeGateway.sol";
 import { Constants } from "../../src/utils/Constants.sol";
+import { Utils, ChainConfig } from "../utils/Utils.sol";
 
-contract TopUpDestTest is Test, Constants {
+contract TopUpDestTest is Utils, Constants {
     TopUpDest public topUpDest;
-    TopUpDestNativeGateway public topUpDestNativeGateway;
     RoleRegistry public roleRegistry;
     address public dataProvider;
     MockERC20 public token1;
@@ -32,7 +30,7 @@ contract TopUpDestTest is Test, Constants {
     address public user2;
     address public nonUser;
 
-    address public weth = 0x5300000000000000000000000000000000000004;
+    address public weth;
     bytes32 public constant TOP_UP_DEPOSITOR_ROLE = keccak256("DEPOSITOR_ROLE");
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
@@ -41,9 +39,17 @@ contract TopUpDestTest is Test, Constants {
     uint256 public constant TOP_UP_AMOUNT = 100 ether;
 
     function setUp() public {
-        string memory scrollRpc = vm.envString("SCROLL_RPC");
-        if (bytes(scrollRpc).length == 0) scrollRpc = "https://rpc.scroll.io"; 
-        vm.createSelectFork(scrollRpc);
+        ChainConfig memory chainConfig = getChainConfig();
+
+        string memory rpc;
+        try vm.envString("TEST_RPC") returns (string memory testRpc) {
+            rpc = bytes(testRpc).length > 0 ? testRpc : chainConfig.rpc;
+        } catch {
+            rpc = chainConfig.rpc;
+        }
+        vm.createSelectFork(rpc);
+
+        weth = chainConfig.weth;
 
         owner = makeAddr("owner");
         depositor = makeAddr("depositor");
@@ -81,11 +87,9 @@ contract TopUpDestTest is Test, Constants {
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
         // Deploy TopUpDest
-        address topUpDestImpl = address(new TopUpDest(address(dataProvider)));
-        topUpDest = TopUpDest(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry)))));
-        
-        topUpDestNativeGateway = new TopUpDestNativeGateway(address(topUpDest));
-        
+        address topUpDestImpl = address(new TopUpDest(address(dataProvider), weth));
+        topUpDest = TopUpDest(payable(address(new UUPSProxy(topUpDestImpl, abi.encodeWithSelector(TopUpDest.initialize.selector, address(roleRegistry))))));
+                
         vm.stopPrank();
 
 
@@ -94,20 +98,6 @@ contract TopUpDestTest is Test, Constants {
         token1.approve(address(topUpDest), INITIAL_AMOUNT);
         token2.approve(address(topUpDest), INITIAL_AMOUNT);
         vm.stopPrank();
-    }
-
-    function test_sendingEthToTopUpDestNativeGateway_sendsWethToTopUpDest() public {        
-        uint256 amount = 1 ether;
-        deal(address(owner), amount);
-
-        uint256 balanceBefore = IERC20(weth).balanceOf(address(topUpDest));
-
-        vm.prank(owner);
-        (bool success, ) = address(topUpDestNativeGateway).call{value: amount}("");
-        assertTrue(success);
-
-        uint256 balanceAfter = IERC20(weth).balanceOf(address(topUpDest));
-        assertEq(balanceAfter - balanceBefore, amount);
     }
 
     function test_deposit_succeeds() public {
@@ -483,5 +473,19 @@ contract TopUpDestTest is Test, Constants {
 
         // Check getEtherFiDataProvider
         assertEq(address(topUpDest.etherFiDataProvider()), address(dataProvider));
+    }
+
+    function test_receive_depositsEthAsWeth() public {
+        uint256 amount = 1 ether;
+        deal(address(owner), amount);
+
+        uint256 balanceBefore = IERC20(weth).balanceOf(address(topUpDest));
+
+        vm.prank(owner);
+        (bool success, ) = address(topUpDest).call{value: amount}("");
+        assertTrue(success);
+
+        uint256 balanceAfter = IERC20(weth).balanceOf(address(topUpDest));
+        assertEq(balanceAfter - balanceBefore, amount);
     }
 }

@@ -28,7 +28,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         user2 = makeAddr("user2");
         user3 = makeAddr("user3");
 
-        tokens.push(address(scrToken));
+        tokens.push(address(cashbackToken));
     }
 
     function test_clearPendingCashback_reverts_whenEmptyArray() public {
@@ -81,21 +81,21 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         // Instead, we'll use spend operations with failed cashback to create pending cashback
         
         uint256 spendAmount = 100e6;
-        deal(address(usdcScroll), address(safe), spendAmount * 3); // Enough for all operations
-        deal(address(scrToken), address(cashbackDispatcher), 0); 
+        deal(address(usdc), address(safe), spendAmount * 3); // Enough for all operations
+        deal(address(cashbackToken), address(cashbackDispatcher), 0);
 
         // Perform spend for each user to create pending cashback
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
-        
+
         for (uint i = 0; i < users.length; i++) {
             Cashback[] memory cashbacks = new Cashback[](1);
             CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
             CashbackTokens memory scrSafe = CashbackTokens({
-                token: address(scrToken),
+                token: address(cashbackToken),
                 amountInUsd: 1e6,
                 cashbackType: 0
             });
@@ -113,17 +113,17 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         
         // Verify pending cashback exists for the users
         for (uint i = 0; i < users.length; i++) {
-            assertGt(cashModule.getPendingCashbackForToken(users[i], address(scrToken)), 0);
+            assertGt(cashModule.getPendingCashbackForToken(users[i], address(cashbackToken)), 0);
         }
 
         uint256[] memory balancesBefore = new uint256[](users.length);
-        for (uint256 i = 0; i < users.length; i++) balancesBefore[i] = scrToken.balanceOf(users[i]);
+        for (uint256 i = 0; i < users.length; i++) balancesBefore[i] = cashbackToken.balanceOf(users[i]);
 
-        deal(address(scrToken), address(cashbackDispatcher), 1000 ether); 
-        
+        deal(address(cashbackToken), address(cashbackDispatcher), 1000 ether);
+
         cashModule.clearPendingCashback(users, tokens);
-        
-        for (uint256 i = 0; i < users.length; i++) assertGt(scrToken.balanceOf(users[i]), balancesBefore[i]);
+
+        for (uint256 i = 0; i < users.length; i++) assertGt(cashbackToken.balanceOf(users[i]), balancesBefore[i]);
     }
     
     function test_clearPendingCashback_DuplicateUsers() public {
@@ -135,12 +135,12 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         
         // Setup pending cashback for user1
         uint256 spendAmount = 100e6;
-        deal(address(usdcScroll), address(safe), spendAmount);
-        deal(address(scrToken), address(cashbackDispatcher), 0);
-        
+        deal(address(usdc), address(safe), spendAmount);
+        deal(address(cashbackToken), address(cashbackDispatcher), 0);
+
         // Create pending cashback
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
 
@@ -148,7 +148,7 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scrSafe = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -159,14 +159,14 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         });
 
         cashbacks[0] = scrCashbackUser;
-        
+
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), keccak256("spend"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        
+
         // Verify pending cashback exists
-        assertGt(cashModule.getPendingCashbackForToken(user1, address(scrToken)), 0);
-        
-        deal(address(scrToken), address(cashbackDispatcher), 1000 ether);
+        assertGt(cashModule.getPendingCashbackForToken(user1, address(cashbackToken)), 0);
+
+        deal(address(cashbackToken), address(cashbackDispatcher), 1000 ether);
         
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
         cashModule.clearPendingCashback(users, tokens);
@@ -184,25 +184,25 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
         //     abi.encode(0, false)
         // );
 
-        uint256 balBefore = scrToken.balanceOf(user1);
-        
+        uint256 balBefore = cashbackToken.balanceOf(user1);
+
         // Should execute without errors and emit no events
         cashModule.clearPendingCashback(users, tokens);
 
-        assertEq(scrToken.balanceOf(user1), balBefore);
+        assertEq(cashbackToken.balanceOf(user1), balBefore);
     }
     
     function test_clearPendingCashback_AfterSpend() public {
         // Test clearing pending cashback immediately after a spend operation
         uint256 spendAmount = 100e6;
-        deal(address(usdcScroll), address(safe), spendAmount);
-        deal(address(scrToken), address(cashbackDispatcher), 0);
+        deal(address(usdc), address(safe), spendAmount);
+        deal(address(cashbackToken), address(cashbackDispatcher), 0);
 
         Cashback[] memory cashbacks = new Cashback[](1);
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
 
         CashbackTokens memory scrSafe = CashbackTokens({
-            token: address(scrToken),
+            token: address(cashbackToken),
             amountInUsd: 1e6,
             cashbackType: 0
         });
@@ -216,26 +216,26 @@ contract CashModuleClearPendingCashbackTest is CashModuleTestSetup {
 
         // Perform spend to create pending cashback
         address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdcScroll);
+        spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
         spendAmounts[0] = spendAmount;
-        
+
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        
+
         // Verify pending cashback was created
-        uint256 pendingCashback = cashModule.getPendingCashbackForToken(user1, address(scrToken));
+        uint256 pendingCashback = cashModule.getPendingCashbackForToken(user1, address(cashbackToken));
         assertGt(pendingCashback, 0);
 
-        deal(address(scrToken), address(cashbackDispatcher), 1000 ether);
-        
+        deal(address(cashbackToken), address(cashbackDispatcher), 1000 ether);
+
         // Clear pending cashback
         address[] memory users = new address[](1);
         users[0] = user1;
-                
+
         cashModule.clearPendingCashback(users, tokens);
-        
+
         // Verify pending cashback was cleared
-        assertEq(cashModule.getPendingCashbackForToken(user1, address(scrToken)), 0);
+        assertEq(cashModule.getPendingCashbackForToken(user1, address(cashbackToken)), 0);
     }
 }

@@ -8,11 +8,20 @@
     "EtherFiDataProvider": "0x4a9c44c97BBf6079db37C4769AebE425bBcDD09a",
     "EtherFiHook": "0xD517Cd9196a4F71Fe80178E96E5faF73B60bD764",
     "EtherFiSafeFactory": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
-    "OpenOceanSwapModule": "0x5c540AC09320FB4f473eBc4936F948953B1AEfC7",
+    "OpenOceanSwapModule": "0xE0E41aD11FD94693036A39bDDF09d520baf3730d",
     "PriceProvider": "0x7d7947D1ace9088048AaB067cF2F54eA1F762a4f",
     "RoleRegistry": "0xa322a04d1e2Cb44672473740F9F35B057FA29CFB",
     "SettlementDispatcherRain": "0x26d90676C6aeF2a09Cf383af499cc67E9D6ad7CA",
     "SettlementDispatcherReap": "0xea6e574886797A65eD22CcF2307e48a83C355771",
-    "TopUpDest": "0x06fe42Cf3C63412f1955758ce2798709476a38fd"
+    "SettlementDispatcherPix": "0xe61c5A65d26fDf27260cf34281a691a227C34bA3",
+    "SettlementDispatcherCardOrder": "0x8e7AB8E9037FBd6C91f3758c6c9E2abf92675Aea",
+    "TopUpDest": "0x06fe42Cf3C63412f1955758ce2798709476a38fd",
+    "EtherFiLiquidModule": "0x7a9294A22A5863942135430e6F736B82C210a787",
+    "EtherFiLiquidModuleWithReferrer": "0x5a38410881153157c9Dbb402C26AE21BC09fc259",
+    "FraxModule": "0x24688672A7deabE6F6495De95B11cC3411407807",
+    "StargateModule": "0xb23450a5238Ee4e1AE082204eC221b49E935A22C",
+    "EtherFiStakeModule": "0xBf3f1A1cEC22eec7F6cE7dDa4Ac9AB808DF46439",
+    "LiquidUSDLiquifierModule": "0x4f740E62011F582570E6d8d3431aad0046B7f74b",
+    "CashLiquidationHelper": "0x731E3B8f012C701FCB74d21380C5C28937830Ab5"
   }
 }

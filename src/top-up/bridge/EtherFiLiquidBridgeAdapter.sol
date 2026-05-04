@@ -17,12 +17,6 @@ contract EtherFiLiquidBridgeAdapter is BridgeAdapterBase {
     using SafeCast for uint256;
 
     /**
-     * @notice Endpoint ID for Scroll network on LayerZero
-     * @dev According to LayerZero documentation: https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
-     */
-    uint32 public constant DEST_EID_SCROLL = 30_214;
-
-    /**
      * @notice Emitted when EtherFi Liquid tokens are successfully bridged
      * @param token Address of the token that was bridged
      * @param destRecipient Address of the recipient on the destination chain
@@ -43,7 +37,7 @@ contract EtherFiLiquidBridgeAdapter is BridgeAdapterBase {
      * @param amount Amount of the token to bridge
      * @param destRecipient Address of the recipient on the destination chain
      * @param maxSlippage Maximum acceptable slippage (not used in this implementation)
-     * @param additionalData ABI encoded address of the LayerZero Teller contract
+     * @param additionalData ABI encoded (address teller, uint32 destEid)
      * @custom:throws InvalidTeller If the teller's vault does not match the token
      * @custom:throws InsufficientNativeFee If not enough ETH is provided for fees
      */
@@ -51,10 +45,11 @@ contract EtherFiLiquidBridgeAdapter is BridgeAdapterBase {
         // Silence compiler warning on unused variables.
         maxSlippage = maxSlippage;
 
-        ILayerZeroTeller teller = ILayerZeroTeller(abi.decode(additionalData, (address)));
+        (address tellerAddr, uint32 destEid) = abi.decode(additionalData, (address, uint32));
+        ILayerZeroTeller teller = ILayerZeroTeller(tellerAddr);
         if (address(teller.vault()) != token) revert InvalidTeller();
-        
-        bytes memory bridgeWildCard = abi.encode(DEST_EID_SCROLL);
+
+        bytes memory bridgeWildCard = abi.encode(destEid);
         uint96 amount_U96 = amount.toUint96();
         uint256 fee = teller.previewFee(amount_U96, destRecipient, bridgeWildCard, ERC20(ETH));
 
@@ -62,7 +57,7 @@ contract EtherFiLiquidBridgeAdapter is BridgeAdapterBase {
 
         teller.bridge{value: fee}(amount_U96, destRecipient, bridgeWildCard, ERC20(ETH), fee);
 
-        emit EtherFiLiquidTokenBridged(token, destRecipient, amount, DEST_EID_SCROLL);
+        emit EtherFiLiquidTokenBridged(token, destRecipient, amount, destEid);
     }
 
     /**
@@ -72,7 +67,7 @@ contract EtherFiLiquidBridgeAdapter is BridgeAdapterBase {
      * @param amount Amount of the token to bridge
      * @param destRecipient Address of the recipient on the destination chain
      * @param maxSlippage Maximum acceptable slippage (not used in this implementation)
-     * @param additionalData ABI encoded address of the LayerZero Teller contract
+     * @param additionalData ABI encoded (address teller, uint32 destEid)
      * @return feeToken Address of the token used for fees (ETH)
      * @return feeAmount Amount of fees required for the bridge transaction
      */
@@ -81,8 +76,8 @@ contract EtherFiLiquidBridgeAdapter is BridgeAdapterBase {
         token = token;
         maxSlippage = maxSlippage;
 
-        ILayerZeroTeller teller = ILayerZeroTeller(abi.decode(additionalData, (address)));
-        bytes memory bridgeWildCard = abi.encode(DEST_EID_SCROLL);
-        return (ETH, teller.previewFee(amount.toUint96(), destRecipient, bridgeWildCard, ERC20(ETH)));
+        (address tellerAddr, uint32 destEid) = abi.decode(additionalData, (address, uint32));
+        bytes memory bridgeWildCard = abi.encode(destEid);
+        return (ETH, ILayerZeroTeller(tellerAddr).previewFee(amount.toUint96(), destRecipient, bridgeWildCard, ERC20(ETH)));
     }
 }

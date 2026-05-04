@@ -25,10 +25,6 @@ contract StargateAdapter is BridgeAdapterBase {
      */
     event BridgeViaStargate(address indexed token, uint256 amount, Ticket ticket);
 
-    /// @notice LayerZero endpoint ID for Scroll network
-    // https://docs.layerzero.network/v2/developers/evm/technical-reference/deployed-contracts
-    uint32 public constant DEST_EID_SCROLL = 30_214;
-
     address public immutable weth;
 
     /// @notice Error thrown when the provided Stargate pool doesn't match the token
@@ -45,16 +41,16 @@ contract StargateAdapter is BridgeAdapterBase {
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
      * @param maxSlippage Maximum allowed slippage in basis points
-     * @param additionalData ABI-encoded Stargate pool address
+     * @param additionalData ABI-encoded (address stargatePool, uint32 destEid)
      * @custom:throws InsufficientNativeFee if msg.value is less than required fee
      * @custom:throws InvalidStargatePool if pool token doesn't match input token
      * @custom:throws InsufficientMinAmount if received amount is less than minimum
      */
     function bridge(address token, uint256 amount, address destRecipient, uint256 maxSlippage, bytes calldata additionalData) external payable override {
-        address stargatePool = abi.decode(additionalData, (address));
+        (address stargatePool, uint32 destEid) = abi.decode(additionalData, (address, uint32));
         uint256 minAmount = deductSlippage(amount, maxSlippage);
 
-        (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) = prepareRideBus(stargatePool, amount, destRecipient, minAmount);
+        (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) = prepareRideBus(stargatePool, destEid, amount, destRecipient, minAmount);
 
         if (token == weth) IWETH(weth).withdraw(amount);
         if (address(this).balance < valueToSend) revert InsufficientNativeFee();
@@ -82,8 +78,8 @@ contract StargateAdapter is BridgeAdapterBase {
      * @return poolToken Address of the token accepted by the Stargate pool
      * @custom:throws InsufficientMinAmount if expected received amount is below minimum
      */
-    function prepareRideBus(address stargate, uint256 amount, address destRecipient, uint256 minAmount) public view returns (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) {
-        sendParam = SendParam({ dstEid: DEST_EID_SCROLL, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: amount, extraOptions: new bytes(0), composeMsg: new bytes(0), oftCmd: new bytes(1) });
+    function prepareRideBus(address stargate, uint32 destEid, uint256 amount, address destRecipient, uint256 minAmount) public view returns (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) {
+        sendParam = SendParam({ dstEid: destEid, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: amount, extraOptions: new bytes(0), composeMsg: new bytes(0), oftCmd: new bytes(1) });
 
         (,, OFTReceipt memory receipt) = IStargate(stargate).quoteOFT(sendParam);
         sendParam.minAmountLD = receipt.amountReceivedLD;
@@ -104,17 +100,17 @@ contract StargateAdapter is BridgeAdapterBase {
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
      * @param maxSlippage Maximum allowed slippage in basis points
-     * @param additionalData ABI-encoded Stargate pool address
+     * @param additionalData ABI-encoded (address stargatePool, uint32 destEid)
      * @return ETH address and the required native token fee amount
      */
     function getBridgeFee(address token, uint256 amount, address destRecipient, uint256 maxSlippage, bytes calldata additionalData) external view override returns (address, uint256) {
         // Silence compiler warning on unused variables.
         token = token;
 
-        address stargatePool = abi.decode(additionalData, (address));
+        (address stargatePool, uint32 destEid) = abi.decode(additionalData, (address, uint32));
         uint256 minAmount = deductSlippage(amount, maxSlippage);
 
-        (,, MessagingFee memory messagingFee,) = prepareRideBus(stargatePool, amount, destRecipient, minAmount);
+        (,, MessagingFee memory messagingFee,) = prepareRideBus(stargatePool, destEid, amount, destRecipient, minAmount);
 
         return (ETH, messagingFee.nativeFee);
     }

@@ -9,9 +9,6 @@ import {Utils, ChainConfig} from "./utils/Utils.sol";
 contract DeployLiquidationHelper is Utils {
     CashLiquidationHelper liquidationHelper;
 
-    address public usdc = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
-    address public usdt = 0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df;
-    address public liquidUsd = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
     address public eUsd = 0x939778D83b46B456224A33Fb59630B11DEC56663;
 
     function run() public {
@@ -27,7 +24,7 @@ contract DeployLiquidationHelper is Utils {
         );
 
         
-        liquidationHelper = new CashLiquidationHelper(debtManager, usdc, usdt, liquidUsd, eUsd);
+        liquidationHelper = new CashLiquidationHelper(debtManager, eUsd);
         vm.stopBroadcast();
     }    
 }

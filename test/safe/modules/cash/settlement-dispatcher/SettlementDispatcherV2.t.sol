@@ -116,7 +116,9 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
             stargate: EURC,
             useCanonicalBridge: false,
             minGasLimit: 0,
-            isOFT: true
+            isOFT: true,
+            remoteToken: address(0),
+            useCCTP: false
         });
 
         vm.prank(owner);
@@ -157,7 +159,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxToUsdc_succeeds() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodian = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodian = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         custodian.setAmountOutToReturn(100e6);
 
         vm.prank(owner);
@@ -165,9 +167,9 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
         uint256 amount = 100e18;
         fraxUsdToken.mint(address(v2), amount);
-        deal(address(usdcScroll), address(custodian), 100e6);
+        deal(address(usdc), address(custodian), 100e6);
 
-        uint256 usdcBefore = IERC20(usdcScroll).balanceOf(address(v2));
+        uint256 usdcBefore = IERC20(usdc).balanceOf(address(v2));
         uint256 fraxBefore = fraxUsdToken.balanceOf(address(v2));
 
         vm.prank(owner);
@@ -176,18 +178,18 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         v2.redeemFraxToUsdc(amount, 100e6);
 
         assertEq(fraxUsdToken.balanceOf(address(v2)), fraxBefore - amount);
-        assertEq(IERC20(usdcScroll).balanceOf(address(v2)), usdcBefore + 100e6);
+        assertEq(IERC20(usdc).balanceOf(address(v2)), usdcBefore + 100e6);
     }
 
     function test_v2_redeemFraxToUsdc_reverts_whenInsufficientReturnAmount() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodian = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodian = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         custodian.setAmountOutToReturn(50e6);
 
         vm.prank(owner);
         v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0), address(0));
         fraxUsdToken.mint(address(v2), 100e18);
-        deal(address(usdcScroll), address(custodian), 100e6);
+        deal(address(usdc), address(custodian), 100e6);
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcherV2.InsufficientReturnAmount.selector);
@@ -196,7 +198,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxToUsdc_reverts_whenNotBridger() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodian = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodian = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         vm.prank(owner);
         v2.setFraxConfig(address(fraxUsdToken), address(custodian), address(0), address(0));
         fraxUsdToken.mint(address(v2), 100e18);
@@ -229,18 +231,18 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
         uint256 amount = 100e6;
         midasToken.mint(address(v2), amount);
-        deal(address(usdcScroll), address(vault), amount);
+        deal(address(usdc), address(vault), amount);
 
-        uint256 usdcBefore = IERC20(usdcScroll).balanceOf(address(v2));
+        uint256 usdcBefore = IERC20(usdc).balanceOf(address(v2));
         uint256 midasBefore = midasToken.balanceOf(address(v2));
 
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
-        emit SettlementDispatcherV2.MidasRedeemed(address(midasToken), address(usdcScroll), amount, amount);
-        v2.redeemMidasToAsset(address(midasToken), address(usdcScroll), amount, amount);
+        emit SettlementDispatcherV2.MidasRedeemed(address(midasToken), address(usdc), amount, amount);
+        v2.redeemMidasToAsset(address(midasToken), address(usdc), amount, amount);
 
         assertEq(midasToken.balanceOf(address(v2)), midasBefore - amount);
-        assertEq(IERC20(usdcScroll).balanceOf(address(v2)), usdcBefore + amount);
+        assertEq(IERC20(usdc).balanceOf(address(v2)), usdcBefore + amount);
     }
 
     function test_v2_redeemMidasToAsset_reverts_whenVaultNotSet() public {
@@ -249,7 +251,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcherV2.MidasRedemptionVaultNotSet.selector);
-        v2.redeemMidasToAsset(address(midasToken), address(usdcScroll), 100e6, 100e6);
+        v2.redeemMidasToAsset(address(midasToken), address(usdc), 100e6, 100e6);
     }
 
     function test_v2_redeemMidasToAsset_reverts_whenNotBridger() public {
@@ -258,18 +260,18 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         vm.prank(owner);
         v2.setMidasRedemptionVault(address(midasToken), address(vault));
         midasToken.mint(address(v2), 100e6);
-        deal(address(usdcScroll), address(vault), 100e6);
+        deal(address(usdc), address(vault), 100e6);
 
         vm.prank(alice);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
-        v2.redeemMidasToAsset(address(midasToken), address(usdcScroll), 100e6, 100e6);
+        v2.redeemMidasToAsset(address(midasToken), address(usdc), 100e6, 100e6);
     }
 
     // --- Frax async redeem tests ---
 
     function test_v2_setFraxConfig_withRemoteHop_succeeds() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
         address recipient = makeAddr("ethRecipient");
 
@@ -287,7 +289,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxAsync_succeeds() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
         remoteHopMock.setNativeFeeToReturn(0.01 ether);
         address recipient = makeAddr("ethRecipient");
@@ -312,7 +314,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxAsync_reverts_whenRemoteHopNotSet() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
 
         vm.prank(owner);
         v2.setFraxConfig(address(fraxUsdToken), address(custodianMock), address(0), makeAddr("recipient"));
@@ -326,7 +328,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxAsync_reverts_whenAmountContainsDust() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
@@ -342,7 +344,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxAsync_reverts_whenInsufficientBalance() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
@@ -357,7 +359,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxAsync_reverts_whenInsufficientNativeFee() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
         remoteHopMock.setNativeFeeToReturn(1 ether);
 
@@ -374,7 +376,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxAsync_reverts_whenNotBridger() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
@@ -388,7 +390,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxAsync_reverts_whenInvalidValue() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
@@ -403,7 +405,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_redeemFraxAsync_reverts_whenRecipientNotSet() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
 
         vm.prank(owner);
@@ -417,7 +419,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_quoteAsyncFraxRedeem_succeeds() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
-        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdcScroll));
+        MockFraxCustodian custodianMock = new MockFraxCustodian(address(fraxUsdToken), address(usdc));
         MockFraxRemoteHop remoteHopMock = new MockFraxRemoteHop();
         remoteHopMock.setNativeFeeToReturn(0.05 ether);
 
@@ -486,6 +488,133 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         vm.prank(owner);
         vm.expectRevert(SettlementDispatcherV2.InsufficientMinReturn.selector);
         v2.bridge{value: 0}(EURC, amount, minReturnFromOft + 1);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //                  SETTLE (SAME-CHAIN TRANSFER)
+    // ═══════════════════════════════════════════════════════════════
+
+    function _setRecipient(address token, address recipient) internal {
+        address[] memory t = new address[](1);
+        t[0] = token;
+        address[] memory r = new address[](1);
+        r[0] = recipient;
+        v2.setSettlementRecipients(t, r);
+    }
+
+    function test_v2_settle_succeeds() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+        address recipient = makeAddr("settleRecipient");
+
+        vm.prank(owner);
+        _setRecipient(address(token), recipient);
+
+        token.mint(address(v2), 1000e6);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcherV2.FundsSettled(address(token), recipient, 500e6);
+        v2.settle(address(token), 500e6);
+
+        assertEq(token.balanceOf(recipient), 500e6);
+        assertEq(token.balanceOf(address(v2)), 500e6);
+    }
+
+    function test_v2_settle_differentRecipientsPerToken() public {
+        MockERC20 tokenA = new MockERC20("USDC", "USDC", 6);
+        MockERC20 tokenB = new MockERC20("USDT", "USDT", 6);
+        address recipientA = makeAddr("recipientA");
+        address recipientB = makeAddr("recipientB");
+
+        vm.startPrank(owner);
+        _setRecipient(address(tokenA), recipientA);
+        _setRecipient(address(tokenB), recipientB);
+        vm.stopPrank();
+
+        tokenA.mint(address(v2), 1000e6);
+        tokenB.mint(address(v2), 500e6);
+
+        vm.startPrank(owner);
+        v2.settle(address(tokenA), 1000e6);
+        v2.settle(address(tokenB), 500e6);
+        vm.stopPrank();
+
+        assertEq(tokenA.balanceOf(recipientA), 1000e6);
+        assertEq(tokenB.balanceOf(recipientB), 500e6);
+    }
+
+    function test_v2_settle_reverts_whenRecipientNotSet() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+        token.mint(address(v2), 100e6);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.SettlementRecipientNotSet.selector);
+        v2.settle(address(token), 100e6);
+    }
+
+    function test_v2_settle_reverts_whenInsufficientBalance() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        _setRecipient(address(token), alice);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InsufficientBalance.selector);
+        v2.settle(address(token), 100e6);
+    }
+
+    function test_v2_settle_reverts_whenNotBridger() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        _setRecipient(address(token), alice);
+        token.mint(address(v2), 100e6);
+
+        vm.prank(alice);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        v2.settle(address(token), 100e6);
+    }
+
+    function test_v2_settle_reverts_whenZeroAmount() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        _setRecipient(address(token), alice);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
+        v2.settle(address(token), 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //                  ADMIN: SETTLEMENT RECIPIENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function test_v2_setSettlementRecipient_succeeds() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit SettlementDispatcherV2.SettlementRecipientSet(address(token), alice);
+        _setRecipient(address(token), alice);
+
+        assertEq(v2.getSettlementRecipient(address(token)), alice);
+    }
+
+    function test_v2_setSettlementRecipient_reverts_whenNotOwner() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(alice);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        _setRecipient(address(token), alice);
+    }
+
+    function test_v2_setSettlementRecipient_reverts_whenZeroAddress() public {
+        MockERC20 token = new MockERC20("USDC", "USDC", 6);
+
+        vm.prank(owner);
+        vm.expectRevert(SettlementDispatcherV2.InvalidValue.selector);
+        _setRecipient(address(token), address(0));
     }
 }
 
