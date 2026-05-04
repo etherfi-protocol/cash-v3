@@ -2,70 +2,76 @@
 pragma solidity ^0.8.28;
 
 import {stdJson} from "forge-std/StdJson.sol";
+import {console} from "forge-std/console.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
 import {PriceProviderV2} from "../../src/oracle/PriceProviderV2.sol";
 import {GnosisHelpers} from "../utils/GnosisHelpers.sol";
 import {Utils} from "../utils/Utils.sol";
 
+// forge script scripts/gnosis-txs/UpgradeToPriceProviderV2.s.sol:UpgradeToPriceProviderV2Gnosis --rpc-url optimism --broadcast --verify -vvvv
 contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
     address constant CASH_CONTROLLER_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     // ---------------------------------------------------------------
-    // Scroll token addresses
+    // OP token addresses
     // ---------------------------------------------------------------
     address constant ETH_SELECTOR = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-    address constant BTC_SELECTOR = 0x3C1BCa5a656e69edCD0D4E36BEbb3FcDAcA60Cf1;
+    address constant BTC_SELECTOR = 0x68f180fcCe6836688e9084f035309E29Bf0A2095;
 
-    address constant USDC   = 0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4;
-    address constant USDT   = 0xf55BEC9cafDbE8730f096Aa55dad6D22d44099Df;
-    address constant FRAX_USD = 0x397F939C3b91A74C321ea7129396492bA9Cdce82;
+    address constant USDC   = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+    address constant USDT   = 0x94b008aA00579c1307B0EF2c499aD98a8ce58e58;
+    address constant FRAX_USD = 0x80Eede496655FB9047dd39d9f418d5483ED600df;
 
-    address constant WETH   = 0x5300000000000000000000000000000000000004;
-    address constant WEETH  = 0x01f0a31698C4d065659b9bdC21B3610292a1c506;
-    address constant SCR    = 0xd29687c813D741E2F938F4aC377128810E217b1b;
+    address constant WETH   = 0x4200000000000000000000000000000000000006;
+    address constant WEETH  = 0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF;
     address constant WHYPE  = 0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E;
     address constant BEHYPE = 0xA519AfBc91986c0e7501d7e34968FEE51CD901aC;
-    address constant ETHFI  = 0x056A5FA5da84ceb7f93d36e545C5905607D8bD81;
+    address constant ETHFI  = 0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f;
     address constant SETHFI = 0x86B5780b606940Eb59A062aA85a07959518c0161;
     address constant EURC   = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
 
     address constant LIQUID_ETH     = 0xf0bb20865277aBd641a307eCe5Ee04E79073416C;
     address constant LIQUID_BTC     = 0x5f46d540b6eD704C3c8789105F30E075AA900726;
     address constant LIQUID_USD     = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
-    address constant LIQUID_RESERVE = 0xb7Fb3768CAAC98354EaDF514b48f28F2fE822bF0;
+    address constant LIQUID_RESERVE = 0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a;
     address constant EUSD           = 0x939778D83b46B456224A33Fb59630B11DEC56663;
     address constant EBTC           = 0x657e8C867D8B37dCC18fA4Caead9C45EB088C642;
-    address constant LIQUID_EURC    = 0xBC43Df01195F5b67243179360189BcA2f86Aa584;
+    address constant LIQUID_EUR    = 0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13;
 
     // ---------------------------------------------------------------
-    // Scroll oracle addresses
+    // OP oracle addresses
     // ---------------------------------------------------------------
-    address constant ETH_USD_ORACLE       = 0x66A8cb6c4230B044378aC3676D47Ed4fE18e3cFB;
-    address constant BTC_USD_ORACLE       = 0x91429ddc50B38bAF3Ba9CB5eB0275507Ac65CBF4;
-    address constant USDC_USD_ORACLE      = 0x9Cf01269e491375DBe3C725927Aa025BAc47bEeB;
-    address constant USDT_USD_ORACLE      = 0xf376A91Ae078927eb3686D6010a6f1482424954E;
-    address constant FRAX_USD_ORACLE      = 0x7be4f8b373853b74CDf48FE817bC2eB2272eBe45;
-    address constant WEETH_ETH_ORACLE     = 0x800Ca870416CDFEf77991036B8e1f2E51623996E;
-    address constant SCR_USD_ORACLE       = 0x145234c9C1f1583E710bdC2926d6E97e4523ef93;
-    address constant WHYPE_USD_ORACLE     = 0x1ef9592F449761C6EdA75c1fCFC45D625F3d5C76;
-    address constant BEHYPE_USD_ORACLE    = 0xB7d02965989FC2E5Af605Ca4EAEe92328589772F;
-    address constant ETHFI_USD_ORACLE     = 0xECA49340544541957eC64B7635418D2159616826;
-    address constant SETHFI_ORACLE        = 0xeA99E12b06C1606FCae968Cc6ceBB1A7A323E0f5;
-    address constant EUR_USD_ORACLE       = 0x8d60a2B5E87ac714F2Bba57140981B79440E5feF;
+
+    // Chainlink type
+    address constant ETH_USD_ORACLE       = 0x13e3Ee699D1909E989722E753853AE30b17e08c5;
+    address constant BTC_USD_ORACLE       = 0xD702DD976Fb76Fffc2D3963D037dfDae5b04E593;
+    address constant USDC_USD_ORACLE      = 0x16a9FA2FDa030272Ce99B29CF780dFA30361E0f3;
+    address constant USDT_USD_ORACLE      = 0xECef79E109e997bCA29c1c0897ec9d7b03647F5E;
+    address constant FRAX_USD_ORACLE      = 0x8BF42811876e1B692d0E70F61b80e1fbc68Ef1bf;
+    address constant WEETH_ETH_ORACLE     = 0xb4479d436DDa5c1A79bD88D282725615202406E3;
+    address constant LIQUID_RESERVE_ORACLE = 0x58dDf77A329CcbE2F4C2114C64ed9E12Ec8a1356;
+    address constant LIQUID_EUR_ORACLE   = 0x01b910C1aa51cdC4a2a84d76CB255C4974Bf8A19; 
+    
+    // Pyth type
+    address constant WHYPE_USD_ORACLE     = 0x1f860581483253B81ECB0E89b2b978A202de553d;
+    address constant BEHYPE_USD_ORACLE    = 0x2ACd77fefED51Fa80FBF1520701c73Ac506D4381;
+    address constant ETHFI_USD_ORACLE     = 0x3E377b4e02bc848Ade3c289477F21441b7e014C2;
+    address constant SETHFI_ORACLE        = 0x8454985aA5bc30162aC258D3CCf89E9BA6604d99;
+    address constant EUR_USD_ORACLE       = 0x62779cdAadd1eB782eb4fF534739B55763A48385;
+    
+    // Accountant type
     address constant LIQUID_ETH_ORACLE    = 0x0d05D94a5F1E76C18fbeB7A13d17C8a314088198;
     address constant LIQUID_BTC_ORACLE    = 0xEa23aC6D7D11f6b181d6B98174D334478ADAe6b0;
-    address constant LIQUID_USD_ORACLE    = 0xc315D6e14DDCDC7407784e2Caf815d131Bc1D3E7;
-    address constant LIQUID_RESERVE_ORACLE = 0xB2a4eC4C9b95D7a87bA3989d0FD38dFfDd944A24;
+    address constant LIQUID_USD_ORACLE    = 0xc315D6e14DDCDC7407784e2Caf815d131Bc1D3E7;    
     address constant EUSD_ORACLE          = 0xEB440B36f61Bf62E0C54C622944545f159C3B790;
     address constant EBTC_ORACLE          = 0x1b293DC39F94157fA0D1D36d7e0090C8B8B8c13F;
-    address constant LIQUID_EURC_ORACLE   = 0x41D14b9E948e70549EDa102e0BC49Be0C245BfEf;
 
     // ---------------------------------------------------------------
     // Custom oracle calldata selectors
     // ---------------------------------------------------------------
     bytes constant GET_RATE_CALLDATA = hex"679aefce"; // AccountantWithRateProviders.getRate()
-    bytes constant SETHFI_CALLDATA  = hex"50d25bcd"; // latestAnswer()
+    bytes constant PYTH_CALLDATA   = hex"a035b1fe"; // price()
 
     function run() public {
         string memory deployments = readDeploymentFile();
@@ -101,15 +107,43 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         executeGnosisTransactionBundle(path);
 
         PriceProviderV2 priceProviderV2 = PriceProviderV2(priceProvider);
+        uint8 priceDecimals = priceProviderV2.decimals();
+
+        console.log("");
+        console.log("=== PriceProviderV2 prices (decimals: %d) ===", priceDecimals);
         for (uint256 i = 0; i < tokens.length; i++) {
             uint256 p = priceProviderV2.price(tokens[i]);
-            require(p > 0, string.concat("Price is 0 for token index ", vm.toString(i)));
+            console.log("%s (%s): %d", _tokenLabel(tokens[i]), vm.toString(tokens[i]), p);
+            require(p > 0, string.concat("Price is 0 for ", _tokenLabel(tokens[i])));
         }
     }
 
+    function _tokenLabel(address token) internal pure returns (string memory) {
+        if (token == ETH_SELECTOR) return "ETH";
+        if (token == BTC_SELECTOR) return "BTC";
+        if (token == USDC) return "USDC";
+        if (token == USDT) return "USDT";
+        if (token == FRAX_USD) return "fraxUSD";
+        if (token == WETH) return "WETH";
+        if (token == WEETH) return "weETH";
+        if (token == WHYPE) return "wHYPE";
+        if (token == BEHYPE) return "beHYPE";
+        if (token == ETHFI) return "ETHFI";
+        if (token == SETHFI) return "sETHFI";
+        if (token == EURC) return "EURC";
+        if (token == LIQUID_ETH) return "liquidETH";
+        if (token == LIQUID_BTC) return "liquidBTC";
+        if (token == LIQUID_USD) return "liquidUSD";
+        if (token == LIQUID_RESERVE) return "liquidReserve";
+        if (token == EUSD) return "eUSD";
+        if (token == EBTC) return "eBTC";
+        if (token == LIQUID_EUR) return "liquidEUR";
+        return "UNKNOWN";
+    }
+
     function _buildConfigs() internal pure returns (address[] memory tokens, PriceProviderV2.Config[] memory configs) {
-        tokens = new address[](20);
-        configs = new PriceProviderV2.Config[](20);
+        tokens = new address[](19);
+        configs = new PriceProviderV2.Config[](19);
 
         uint256 i = 0;
 
@@ -147,11 +181,11 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         tokens[i] = EURC;
         configs[i] = PriceProviderV2.Config({
             oracle: EUR_USD_ORACLE,
-            priceFunctionCalldata: "",
-            isChainlinkType: true,
-            oraclePriceDecimals: 8,
+            priceFunctionCalldata: PYTH_CALLDATA,
+            isChainlinkType: false,
+            oraclePriceDecimals: 16,
             maxStaleness: 2 days,
-            dataType: PriceProviderV2.ReturnType.Int256,
+            dataType: PriceProviderV2.ReturnType.Uint256,
             isStableToken: false,
             baseAsset: address(0)
         });
@@ -179,7 +213,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
             priceFunctionCalldata: "",
             isChainlinkType: true,
             oraclePriceDecimals: 8,
-            maxStaleness: 15 days,
+            maxStaleness: 2 days,
             dataType: PriceProviderV2.ReturnType.Int256,
             isStableToken: true,
             baseAsset: address(0)
@@ -192,7 +226,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
             priceFunctionCalldata: "",
             isChainlinkType: true,
             oraclePriceDecimals: 8,
-            maxStaleness: 10 days,
+            maxStaleness: 2 days,
             dataType: PriceProviderV2.ReturnType.Int256,
             isStableToken: true,
             baseAsset: address(0)
@@ -204,7 +238,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
             oracle: FRAX_USD_ORACLE,
             priceFunctionCalldata: "",
             isChainlinkType: true,
-            oraclePriceDecimals: 8,
+            oraclePriceDecimals: 18,
             maxStaleness: 5 days,
             dataType: PriceProviderV2.ReturnType.Int256,
             isStableToken: true,
@@ -214,27 +248,14 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
 
         // ---- Direct USD Chainlink ----
 
-        tokens[i] = SCR;
-        configs[i] = PriceProviderV2.Config({
-            oracle: SCR_USD_ORACLE,
-            priceFunctionCalldata: "",
-            isChainlinkType: true,
-            oraclePriceDecimals: 8,
-            maxStaleness: 2 days,
-            dataType: PriceProviderV2.ReturnType.Int256,
-            isStableToken: false,
-            baseAsset: address(0)
-        });
-        i++;
-
         tokens[i] = WHYPE;
         configs[i] = PriceProviderV2.Config({
             oracle: WHYPE_USD_ORACLE,
-            priceFunctionCalldata: "",
-            isChainlinkType: true,
-            oraclePriceDecimals: 8,
+            priceFunctionCalldata: PYTH_CALLDATA,
+            isChainlinkType: false,
+            oraclePriceDecimals: 16,
             maxStaleness: 2 days,
-            dataType: PriceProviderV2.ReturnType.Int256,
+            dataType: PriceProviderV2.ReturnType.Uint256,
             isStableToken: false,
             baseAsset: address(0)
         });
@@ -243,11 +264,11 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         tokens[i] = BEHYPE;
         configs[i] = PriceProviderV2.Config({
             oracle: BEHYPE_USD_ORACLE,
-            priceFunctionCalldata: "",
-            isChainlinkType: true,
-            oraclePriceDecimals: 8,
+            priceFunctionCalldata: PYTH_CALLDATA,
+            isChainlinkType: false,
+            oraclePriceDecimals: 16,
             maxStaleness: 2 days,
-            dataType: PriceProviderV2.ReturnType.Int256,
+            dataType: PriceProviderV2.ReturnType.Uint256,
             isStableToken: false,
             baseAsset: address(0)
         });
@@ -256,11 +277,11 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         tokens[i] = ETHFI;
         configs[i] = PriceProviderV2.Config({
             oracle: ETHFI_USD_ORACLE,
-            priceFunctionCalldata: "",
-            isChainlinkType: true,
-            oraclePriceDecimals: 8,
-            maxStaleness: 3 days,
-            dataType: PriceProviderV2.ReturnType.Int256,
+            priceFunctionCalldata: PYTH_CALLDATA,
+            isChainlinkType: false,
+            oraclePriceDecimals: 16,
+            maxStaleness: 2 days,
+            dataType: PriceProviderV2.ReturnType.Uint256,
             isStableToken: false,
             baseAsset: address(0)
         });
@@ -272,7 +293,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
             priceFunctionCalldata: "",
             isChainlinkType: true,
             oraclePriceDecimals: 8,
-            maxStaleness: 6 days,
+            maxStaleness: 7 days,
             dataType: PriceProviderV2.ReturnType.Int256,
             isStableToken: false,
             baseAsset: address(0)
@@ -284,9 +305,9 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         tokens[i] = SETHFI;
         configs[i] = PriceProviderV2.Config({
             oracle: SETHFI_ORACLE,
-            priceFunctionCalldata: SETHFI_CALLDATA,
+            priceFunctionCalldata: PYTH_CALLDATA,
             isChainlinkType: false,
-            oraclePriceDecimals: 8,
+            oraclePriceDecimals: 16,
             maxStaleness: 2 days,
             dataType: PriceProviderV2.ReturnType.Uint256,
             isStableToken: false,
@@ -303,7 +324,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
             maxStaleness: 2 days,
             dataType: PriceProviderV2.ReturnType.Uint256,
             isStableToken: false,
-            baseAsset: address(0)
+            baseAsset: USDC
         });
         i++;
 
@@ -327,7 +348,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
             oracle: WEETH_ETH_ORACLE,
             priceFunctionCalldata: "",
             isChainlinkType: true,
-            oraclePriceDecimals: 8,
+            oraclePriceDecimals: 18,
             maxStaleness: 2 days,
             dataType: PriceProviderV2.ReturnType.Int256,
             isStableToken: false,
@@ -379,9 +400,9 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         // ---- EUR-denominated (baseAsset = EURC) ----
 
         // liquidEURC
-        tokens[i] = LIQUID_EURC;
+        tokens[i] = LIQUID_EUR;
         configs[i] = PriceProviderV2.Config({
-            oracle: LIQUID_EURC_ORACLE,
+            oracle: LIQUID_EUR_ORACLE,
             priceFunctionCalldata: "",
             isChainlinkType: true,
             oraclePriceDecimals: 8,
@@ -392,6 +413,6 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         });
         i++;
 
-        require(i == 20, "Token count mismatch");
+        require(i == 19, "Token count mismatch");
     }
 }

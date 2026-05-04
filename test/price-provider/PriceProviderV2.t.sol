@@ -900,6 +900,182 @@ contract PriceProviderV2Test is Test {
     }
 
     // ---------------------------------------------------------------
+    // I-02: stable token cannot have baseAsset
+    // ---------------------------------------------------------------
+
+    function test_setTokenConfig_reverts_stableTokenCannotHaveBaseAsset() public {
+        address stable = makeAddr("stable");
+        address mockOracle = address(new MockChainlinkOracle(99900000, 8));
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = stable;
+        PriceProviderV2.Config[] memory configs = new PriceProviderV2.Config[](1);
+        configs[0] = PriceProviderV2.Config({
+            oracle: mockOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 1 days,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: true,
+            baseAsset: eth // invalid combination
+        });
+
+        vm.prank(owner);
+        vm.expectRevert(PriceProviderV2.StableTokenCannotHaveBaseAsset.selector);
+        priceProvider.setTokenConfig(tokens, configs);
+    }
+
+    function test_setTokenConfig_succeeds_stableTokenWithoutBaseAsset() public {
+        address stable = makeAddr("stable");
+        address mockOracle = address(new MockChainlinkOracle(99900000, 8));
+
+        _addToken(stable, PriceProviderV2.Config({
+            oracle: mockOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 1 days,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: true,
+            baseAsset: address(0)
+        }));
+
+        assertEq(priceProvider.price(stable), priceProvider.STABLE_PRICE());
+    }
+
+    function test_setTokenConfig_succeeds_nonStableWithBaseAsset() public {
+        // sanity: opposite combination still works
+        address token = makeAddr("token");
+        address mockOracle = address(new MockChainlinkOracle(2_00000000, 8));
+
+        _addToken(token, PriceProviderV2.Config({
+            oracle: mockOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 1 days,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: false,
+            baseAsset: eth
+        }));
+
+        assertEq(priceProvider.tokenConfig(token).baseAsset, eth);
+    }
+
+    function test_isBaseAsset_returnsFalse_forUnconfigured() public {
+        assertFalse(priceProvider.isBaseAsset(makeAddr("nobody")));
+    }
+
+    function test_isBaseAsset_returnsFalse_forStandaloneToken() public view {
+        assertFalse(priceProvider.isBaseAsset(matic));
+    }
+
+    function test_setTokenConfig_marksBaseAsset_whenDependentAdded() public view {
+        // From setUp: weETH points at eth, liquidBtc points at btc
+        assertTrue(priceProvider.isBaseAsset(eth));
+        assertTrue(priceProvider.isBaseAsset(btc));
+    }
+
+    function test_setTokenConfig_marksBaseAsset_idempotently_acrossMultipleDependents() public {
+        address token = makeAddr("anotherEthToken");
+        address mockOracle = address(new MockChainlinkOracle(3_00000000, 8));
+
+        _addToken(token, PriceProviderV2.Config({
+            oracle: mockOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 1 days,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: false,
+            baseAsset: eth
+        }));
+
+        assertTrue(priceProvider.isBaseAsset(eth));
+    }
+
+    function test_removeTokenConfig_reverts_baseAssetCannotBeRemoved() public {
+        vm.prank(owner);
+        vm.expectRevert(PriceProviderV2.BaseAssetCannotBeRemoved.selector);
+        priceProvider.removeTokenConfig(eth);
+    }
+
+    function test_removeTokenConfig_succeeds_afterClearingFlag() public {
+        // Migrate weETH off of eth, then clear eth's base-asset flag, then remove eth
+        // Step 1: replace weETH with a USD-denominated config so eth has no dependents
+        address newWeethOracle = address(new MockChainlinkOracle(3_50000000, 8));
+        _addToken(weETH, PriceProviderV2.Config({
+            oracle: newWeethOracle,
+            priceFunctionCalldata: hex"",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 1 days,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: false,
+            baseAsset: address(0)
+        }));
+
+        // Flag is still set (one-way ratchet under setTokenConfig)
+        assertTrue(priceProvider.isBaseAsset(eth));
+
+        // Removing eth still reverts until admin clears the flag
+        vm.prank(owner);
+        vm.expectRevert(PriceProviderV2.BaseAssetCannotBeRemoved.selector);
+        priceProvider.removeTokenConfig(eth);
+
+        // Admin uses setBaseAsset escape hatch
+        vm.prank(owner);
+        priceProvider.setBaseAsset(eth, false);
+        assertFalse(priceProvider.isBaseAsset(eth));
+
+        // Now removal succeeds
+        vm.prank(owner);
+        priceProvider.removeTokenConfig(eth);
+        assertEq(priceProvider.tokenConfig(eth).oracle, address(0));
+    }
+
+    // ---------------------------------------------------------------
+    // setBaseAsset
+    // ---------------------------------------------------------------
+
+    function test_setBaseAsset_setsFlagTrue() public {
+        address t = makeAddr("t");
+        assertFalse(priceProvider.isBaseAsset(t));
+
+        vm.prank(owner);
+        priceProvider.setBaseAsset(t, true);
+
+        assertTrue(priceProvider.isBaseAsset(t));
+    }
+
+    function test_setBaseAsset_clearsFlag() public {
+        // eth's flag was set automatically in setUp
+        assertTrue(priceProvider.isBaseAsset(eth));
+
+        vm.prank(owner);
+        priceProvider.setBaseAsset(eth, false);
+
+        assertFalse(priceProvider.isBaseAsset(eth));
+    }
+
+    function test_setBaseAsset_emitsEvent() public {
+        address t = makeAddr("t");
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit PriceProviderV2.BaseAssetSet(t, true);
+        priceProvider.setBaseAsset(t, true);
+    }
+
+    function test_setBaseAsset_reverts_unauthorized() public {
+        address notOwner = makeAddr("notOwner");
+        vm.prank(notOwner);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        priceProvider.setBaseAsset(eth, false);
+    }
+
+    // ---------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------
 

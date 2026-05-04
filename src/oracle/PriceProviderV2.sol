@@ -62,6 +62,9 @@ contract PriceProviderV2 is UpgradeableProxy {
     struct PriceProviderV2Storage {
         /// @notice Mapping of token addresses to their price oracle configurations
         mapping(address token => Config tokenConfig) tokenConfig;
+
+        /// @notice Mapping of token addresses to whether they are base assets
+        mapping(address token => bool isBaseAsset) isBaseAsset;
     }
 
     /**
@@ -104,6 +107,13 @@ contract PriceProviderV2 is UpgradeableProxy {
     event TokenConfigRemoved(address token);
 
     /**
+     * @notice Emitted when a base asset is set to true or false
+     * @param baseAsset Address of the base asset
+     * @param isBaseAsset Whether the base asset is set to true or false
+     */
+    event BaseAssetSet(address baseAsset, bool isBaseAsset);
+
+    /**
      * @notice Thrown when trying to get a price for a token with no configured oracle
      */
     error TokenOracleNotSet();
@@ -143,6 +153,14 @@ contract PriceProviderV2 is UpgradeableProxy {
      * @notice Thrown when trying to remove a token config that is not set
      */
     error TokenConfigNotSet();
+    /**
+     * @notice Thrown when a stable token has a base asset configured
+     */
+    error StableTokenCannotHaveBaseAsset();
+    /**
+     * @notice Thrown when a base asset is removed
+     */
+    error BaseAssetCannotBeRemoved();
 
     /**
      * @notice Constructor that disables initializers
@@ -180,6 +198,15 @@ contract PriceProviderV2 is UpgradeableProxy {
     }
 
     /**
+     * @notice Returns whether a token is a base asset
+     * @param token Address of the token
+     * @return Whether the token is a base asset
+     */
+    function isBaseAsset(address token) public view returns (bool) {
+        return _getPriceProviderV2Storage().isBaseAsset[token];
+    }
+
+    /**
      * @notice Updates the price oracle configurations for multiple tokens
      * @dev Only callable by addresses with PRICE_PROVIDER_ADMIN_ROLE
      * @param _tokens Array of token addresses to configure
@@ -196,9 +223,21 @@ contract PriceProviderV2 is UpgradeableProxy {
      */
     function removeTokenConfig(address _token) external onlyRole(PRICE_PROVIDER_ADMIN_ROLE) {
         PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
+        if ($.isBaseAsset[_token]) revert BaseAssetCannotBeRemoved();
         if ($.tokenConfig[_token].oracle == address(0)) revert TokenConfigNotSet();
         delete $.tokenConfig[_token];
         emit TokenConfigRemoved(_token);
+    }
+
+    /**
+     * @notice Sets a base asset to true or false
+     * @dev Only callable by addresses with PRICE_PROVIDER_ADMIN_ROLE
+     * @param _baseAsset Address of the base asset
+     */
+    function setBaseAsset(address _baseAsset, bool _isBaseAsset) external onlyRole(PRICE_PROVIDER_ADMIN_ROLE) {
+        PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
+        $.isBaseAsset[_baseAsset] = _isBaseAsset;
+        emit BaseAssetSet(_baseAsset, _isBaseAsset);
     }
 
     /**
@@ -309,9 +348,13 @@ contract PriceProviderV2 is UpgradeableProxy {
         for (uint256 i = 0; i < len; ) {
             if (_configs[i].isChainlinkType && _configs[i].maxStaleness == 0) revert MaxStalenessCannotBeZero();
 
-            if (_configs[i].baseAsset != address(0)) {
-                if ($.tokenConfig[_configs[i].baseAsset].oracle == address(0)) revert BaseAssetOracleNotSet();
-                if ($.tokenConfig[_configs[i].baseAsset].baseAsset != address(0)) revert InvalidBaseAsset();
+            address baseAsset = _configs[i].baseAsset;
+
+            if (baseAsset != address(0)) {
+                if (_configs[i].isStableToken) revert StableTokenCannotHaveBaseAsset();
+                if ($.tokenConfig[baseAsset].oracle == address(0)) revert BaseAssetOracleNotSet();
+                if ($.tokenConfig[baseAsset].baseAsset != address(0)) revert InvalidBaseAsset();
+                if (!$.isBaseAsset[baseAsset]) $.isBaseAsset[baseAsset] = true;  
             }
             $.tokenConfig[_tokens[i]] = _configs[i];
             unchecked {
