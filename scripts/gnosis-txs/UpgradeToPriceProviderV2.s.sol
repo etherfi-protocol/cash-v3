@@ -9,7 +9,7 @@ import {PriceProviderV2} from "../../src/oracle/PriceProviderV2.sol";
 import {GnosisHelpers} from "../utils/GnosisHelpers.sol";
 import {Utils} from "../utils/Utils.sol";
 
-// forge script scripts/gnosis-txs/UpgradeToPriceProviderV2.s.sol:UpgradeToPriceProviderV2Gnosis --rpc-url optimism --broadcast --verify -vvvv
+// source .env && ENV=mainnet forge script scripts/gnosis-txs/UpgradeToPriceProviderV2.s.sol:UpgradeToPriceProviderV2Gnosis --rpc-url optimism --broadcast --verify -vvvv
 contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
     address constant CASH_CONTROLLER_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
@@ -57,7 +57,6 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
     address constant WHYPE_USD_ORACLE     = 0x1f860581483253B81ECB0E89b2b978A202de553d;
     address constant BEHYPE_USD_ORACLE    = 0x2ACd77fefED51Fa80FBF1520701c73Ac506D4381;
     address constant ETHFI_USD_ORACLE     = 0x3E377b4e02bc848Ade3c289477F21441b7e014C2;
-    address constant SETHFI_ORACLE        = 0x8454985aA5bc30162aC258D3CCf89E9BA6604d99;
     address constant EUR_USD_ORACLE       = 0x62779cdAadd1eB782eb4fF534739B55763A48385;
     
     // Accountant type
@@ -66,6 +65,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
     address constant LIQUID_USD_ORACLE    = 0xc315D6e14DDCDC7407784e2Caf815d131Bc1D3E7;    
     address constant EUSD_ORACLE          = 0xEB440B36f61Bf62E0C54C622944545f159C3B790;
     address constant EBTC_ORACLE          = 0x1b293DC39F94157fA0D1D36d7e0090C8B8B8c13F;
+    address constant SETHFI_ORACLE        = 0x05A1552c5e18F5A0BB9571b5F2D6a4765ebdA32b;
 
     // ---------------------------------------------------------------
     // Custom oracle calldata selectors
@@ -302,19 +302,6 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
 
         // ---- Custom oracle, direct USD ----
 
-        tokens[i] = SETHFI;
-        configs[i] = PriceProviderV2.Config({
-            oracle: SETHFI_ORACLE,
-            priceFunctionCalldata: PYTH_CALLDATA,
-            isChainlinkType: false,
-            oraclePriceDecimals: 16,
-            maxStaleness: 2 days,
-            dataType: PriceProviderV2.ReturnType.Uint256,
-            isStableToken: false,
-            baseAsset: address(0)
-        });
-        i++;
-
         tokens[i] = LIQUID_USD;
         configs[i] = PriceProviderV2.Config({
             oracle: LIQUID_USD_ORACLE,
@@ -412,6 +399,21 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
             baseAsset: EURC
         });
         i++;
+
+        // ---- sETHFI (baseAsset = ETHFI) ----
+        tokens[i] = SETHFI;
+        configs[i] = PriceProviderV2.Config({
+            oracle: SETHFI_ORACLE,
+            priceFunctionCalldata: GET_RATE_CALLDATA,
+            isChainlinkType: false,
+            oraclePriceDecimals: 18,
+            maxStaleness: 2 days,
+            dataType: PriceProviderV2.ReturnType.Uint256,
+            isStableToken: false,
+            baseAsset: ETHFI
+        });
+        i++;
+
 
         require(i == 19, "Token count mismatch");
     }
