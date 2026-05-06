@@ -44,7 +44,7 @@ contract DeployMidasModuleLiquidReserveOPGnosis is GnosisHelpers, Utils, Test {
     uint80 constant LIQUIDATION_THRESHOLD = 90e18;
     uint96 constant LIQUIDATION_BONUS = 1e18;
     bool constant IS_STABLE_TOKEN = false;
-    uint24 constant MAX_STALENESS = 6 days;
+    uint24 constant MAX_STALENESS = 7 days;
 
     function run() public {
         require(block.chainid == 10, "Must run on Optimism (10)");
