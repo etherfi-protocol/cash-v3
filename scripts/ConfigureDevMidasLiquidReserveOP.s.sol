@@ -7,13 +7,30 @@ import { EtherFiDataProvider } from "../src/data-provider/EtherFiDataProvider.so
 import { ICashModule } from "../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 import { MidasModule } from "../src/modules/midas/MidasModule.sol";
-import { IAggregatorV3, PriceProvider } from "../src/oracle/PriceProvider.sol";
+import { IAggregatorV3 } from "../src/interfaces/IAggregatorV3.sol";
 import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
 import { Utils } from "./utils/Utils.sol";
 
+interface IPriceProviderV2 {
+    enum ReturnType { Int256, Uint256 }
+
+    struct Config {
+        address oracle;
+        bytes priceFunctionCalldata;
+        bool isChainlinkType;
+        uint8 oraclePriceDecimals;
+        uint24 maxStaleness;
+        ReturnType dataType;
+        bool isStableToken;
+        address baseAsset;
+    }
+
+    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external;
+}
+
 /// @notice Configures the dev `MidasModule` on Optimism for liquidRESERVE.
 ///         The dev MidasModule (`0x292B...`) is already registered as a default module.
-///         This script completes the remaining config: addMidasVaults, price oracle,
+///         This script completes the remaining config: addMidasVaults, price oracle (V2),
 ///         collateral/borrow, and withdraw whitelist.
 ///
 /// Usage:
@@ -37,7 +54,7 @@ contract ConfigureDevMidasLiquidReserveOP is Utils {
     uint24 constant MAX_STALENESS = 7 days;
 
     IDebtManager debtManager;
-    PriceProvider priceProvider;
+    IPriceProviderV2 priceProvider;
     ICashModule cashModule;
     EtherFiDataProvider dataProvider;
     RoleRegistry roleRegistry;
@@ -47,7 +64,7 @@ contract ConfigureDevMidasLiquidReserveOP is Utils {
 
         string memory deployments = readDeploymentFile();
         dataProvider = EtherFiDataProvider(stdJson.readAddress(deployments, ".addresses.EtherFiDataProvider"));
-        priceProvider = PriceProvider(stdJson.readAddress(deployments, ".addresses.PriceProvider"));
+        priceProvider = IPriceProviderV2(stdJson.readAddress(deployments, ".addresses.PriceProvider"));
         debtManager = IDebtManager(stdJson.readAddress(deployments, ".addresses.DebtManager"));
         cashModule = ICashModule(stdJson.readAddress(deployments, ".addresses.CashModule"));
         roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
@@ -80,17 +97,16 @@ contract ConfigureDevMidasLiquidReserveOP is Utils {
         address[] memory tokens = new address[](1);
         tokens[0] = MIDAS_TOKEN;
 
-        PriceProvider.Config[] memory configs = new PriceProvider.Config[](1);
-        configs[0] = PriceProvider.Config({
+        IPriceProviderV2.Config[] memory configs = new IPriceProviderV2.Config[](1);
+        configs[0] = IPriceProviderV2.Config({
             oracle: PRICE_ORACLE,
             priceFunctionCalldata: "",
             isChainlinkType: true,
             oraclePriceDecimals: IAggregatorV3(PRICE_ORACLE).decimals(),
             maxStaleness: MAX_STALENESS,
-            dataType: PriceProvider.ReturnType.Int256,
-            isBaseTokenEth: false,
+            dataType: IPriceProviderV2.ReturnType.Int256,
             isStableToken: IS_STABLE_TOKEN,
-            isBaseTokenBtc: false
+            baseAsset: address(0)
         });
 
         priceProvider.setTokenConfig(tokens, configs);
