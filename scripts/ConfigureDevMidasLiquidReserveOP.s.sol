@@ -11,24 +11,17 @@ import { IAggregatorV3, PriceProvider } from "../src/oracle/PriceProvider.sol";
 import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
 import { Utils } from "./utils/Utils.sol";
 
-/// @notice Configures the existing `MidasModule` on Optimism (chainId 10) for the liquidRESERVE
-///         Midas product. The MidasModule is already deployed at `MIDAS_MODULE`.
-///
-/// Steps executed (all require the broadcaster to hold the relevant admin roles, or to be the
-/// `cashControllerSafe`):
-///   1. Register MidasModule as a default module on `EtherFiDataProvider`.
-///   2. Grant `MIDAS_MODULE_ADMIN` role to `cashControllerSafe` on `RoleRegistry`.
-///   3. Call `addMidasVaults` on MidasModule with the liquidRESERVE deposit/redemption vaults.
-///   4. Set the price oracle for liquidRESERVE on `PriceProvider`.
-///   5. Support liquidRESERVE as collateral and borrow token on `DebtManager`.
-///   6. Whitelist liquidRESERVE as a withdrawable asset on `CashModule`.
+/// @notice Configures the dev `MidasModule` on Optimism for liquidRESERVE.
+///         The dev MidasModule (`0x292B...`) is already registered as a default module.
+///         This script completes the remaining config: addMidasVaults, price oracle,
+///         collateral/borrow, and withdraw whitelist.
 ///
 /// Usage:
-///   ENV=mainnet forge script scripts/DeployMidasModuleLiquidReserveOP.s.sol:DeployMidasModuleLiquidReserveOP \
+///   ENV=dev PRIVATE_KEY=$DEV_KEY \
+///   forge script scripts/ConfigureDevMidasLiquidReserveOP.s.sol:ConfigureDevMidasLiquidReserveOP \
 ///     --rpc-url $OPTIMISM_RPC --broadcast -vvvv
-contract DeployMidasModuleLiquidReserveOP is Utils {
-    address constant MIDAS_MODULE = 0x2D43400058cE6810916Fd312FB38a7DcdF9708aa;
-    address constant CASH_CONTROLLER_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+contract ConfigureDevMidasLiquidReserveOP is Utils {
+    address constant DEV_MIDAS_MODULE = 0x292B353d262E00a215E096A97596b55F8AFb00Df;
 
     address constant MIDAS_TOKEN = 0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898;
     address constant PRICE_ORACLE = 0x58dDf77A329CcbE2F4C2114C64ed9E12Ec8a1356;
@@ -59,35 +52,15 @@ contract DeployMidasModuleLiquidReserveOP is Utils {
         cashModule = ICashModule(stdJson.readAddress(deployments, ".addresses.CashModule"));
         roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
 
-        address ownerBefore = roleRegistry.owner();
-
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
 
-        _registerDefaultModule();
-        _grantMidasModuleAdmin();
         _addMidasVaults();
         _configurePriceOracle();
         _configureCollateralAndBorrow();
         _configureCashWithdrawable();
 
         vm.stopBroadcast();
-
-        require(roleRegistry.owner() == ownerBefore, "CRITICAL: RoleRegistry owner changed!");
-    }
-
-    function _registerDefaultModule() internal {
-        address[] memory modules = new address[](1);
-        modules[0] = MIDAS_MODULE;
-
-        bool[] memory shouldWhitelist = new bool[](1);
-        shouldWhitelist[0] = true;
-
-        dataProvider.configureDefaultModules(modules, shouldWhitelist);
-    }
-
-    function _grantMidasModuleAdmin() internal {
-        roleRegistry.grantRole(MIDAS_MODULE_ADMIN, CASH_CONTROLLER_SAFE);
     }
 
     function _addMidasVaults() internal {
@@ -100,7 +73,7 @@ contract DeployMidasModuleLiquidReserveOP is Utils {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = REDEMPTION_VAULT;
 
-        MidasModule(MIDAS_MODULE).addMidasVaults(midasTokens, depositVaults, redemptionVaults);
+        MidasModule(DEV_MIDAS_MODULE).addMidasVaults(midasTokens, depositVaults, redemptionVaults);
     }
 
     function _configurePriceOracle() internal {
@@ -130,7 +103,7 @@ contract DeployMidasModuleLiquidReserveOP is Utils {
             liquidationBonus: LIQUIDATION_BONUS
         });
 
-        uint64 borrowApy = 1; // ~0%
+        uint64 borrowApy = 1;
         uint128 minShares = type(uint128).max;
 
         debtManager.supportCollateralToken(MIDAS_TOKEN, collateralConfig);

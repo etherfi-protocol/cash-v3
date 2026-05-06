@@ -35,8 +35,8 @@ contract DeployMidasModuleLiquidReserveOPGnosis is GnosisHelpers, Utils, Test {
 
     address constant MIDAS_TOKEN = 0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898;
     address constant PRICE_ORACLE = 0x58dDf77A329CcbE2F4C2114C64ed9E12Ec8a1356;
-    address constant DEPOSIT_VAULT = 0xcA1C871f8ae2571Cb126A46861fc06cB9E645152;
-    address constant REDEMPTION_VAULT = 0x904EA8d7FcaB7351758fAC82bDbc738E2010BC25;
+    address constant DEPOSIT_VAULT = 0x1561eC30da97108Df46535CBd9bAD8C8d8611B3a;
+    address constant REDEMPTION_VAULT = 0xC87b51735ea5Eeee59D3e12601dC931F77F2837a;
 
     bytes32 constant MIDAS_MODULE_ADMIN = 0x57bb90935cfaf88839f01bfa8de28ad30d80741c4cc93a5d12373ddbb95c68c0;
 
