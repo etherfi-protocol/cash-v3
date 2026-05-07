@@ -13,16 +13,45 @@ import { IRoleRegistry } from "../../src/interfaces/IRoleRegistry.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
+/**
+ * @notice Generates a Gnosis bundle (and simulates execution on the current fork) for the
+ *         cash controller safe to:
+ *           - whitelist the BeHYPEStakeModule as a default module on EtherFiDataProvider
+ *           - configure wHYPE/beHYPE as withdrawable assets on CashModule
+ *           - grant BEHYPE_STAKE_MODULE_ADMIN_ROLE to the cash controller safe
+ *
+ *         Reads `wHYPE` and `beHYPE` from `deployments/{ENV}/fixtures/fixtures.json`
+ *         keyed by `block.chainid`, and module/registry addresses from
+ *         `deployments/{ENV}/{chainId}/deployments.json`.
+ *
+ * Usage:
+ *   ENV=mainnet forge script scripts/gnosis-txs/ConfigureBeHYPEStakeModuleAndWithdraws.s.sol:ConfigureBeHYPEStakeModuleAndWithdraws \
+ *       --rpc-url $RPC
+ */
 contract ConfigureBeHYPEStakeModuleAndWithdraws is GnosisHelpers, Utils, StdCheats {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-    address whypeToken = 0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E;
-    address beHypeToken = 0xA519AfBc91986c0e7501d7e34968FEE51CD901aC;
+    function _readHypeFixtures() internal view returns (address whypeToken, address beHypeToken) {
+        string memory chainId = vm.toString(block.chainid);
+        string memory fixturesFile = string.concat(
+            vm.projectRoot(),
+            string.concat("/deployments/", getEnv(), "/fixtures/fixtures.json")
+        );
+        string memory fixtures = vm.readFile(fixturesFile);
+
+        whypeToken = stdJson.readAddress(fixtures, string.concat(".", chainId, ".wHYPE"));
+        beHypeToken = stdJson.readAddress(fixtures, string.concat(".", chainId, ".beHYPE"));
+
+        require(whypeToken != address(0), "ConfigureBeHYPEStakeModule: wHYPE not set in fixtures");
+        require(beHypeToken != address(0), "ConfigureBeHYPEStakeModule: beHYPE not set in fixtures");
+    }
 
     function run() public {
-  
         string memory chainId = vm.toString(block.chainid);
         string memory deployments = readDeploymentFile();
+
+        (address whypeToken, address beHypeToken) = _readHypeFixtures();
+
         address dataProvider = stdJson.readAddress(
             deployments,
             string.concat(".", "addresses", ".", "EtherFiDataProvider")
