@@ -84,8 +84,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
 
         vm.startBroadcast(privateKey);
 
-        // Deploy new implementation
-        address priceProviderV2Impl = address(new PriceProviderV2());
+        address priceProviderV2Impl = 0x5C37f6A9cE6cb2EE82B8e5c1c38B0fd799350152;
 
         (address[] memory tokens, PriceProviderV2.Config[] memory configs) = _buildConfigs();
 
