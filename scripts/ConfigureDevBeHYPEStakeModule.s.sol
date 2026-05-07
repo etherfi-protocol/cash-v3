@@ -21,61 +21,62 @@ import {Utils} from "./utils/Utils.sol";
 contract ConfigureDevBeHYPEStakeModule is Utils {
     uint32 constant REFUND_GAS_LIMIT = 5_000;
 
-    function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+    struct HypeFixtures {
+        address l2BeHypeStaker;
+        address whypeToken;
+        address beHypeToken;
+    }
 
+    function _readHypeFixtures() internal view returns (HypeFixtures memory f) {
         string memory chainId = vm.toString(block.chainid);
-        string memory deployments = readDeploymentFile();
-
         string memory fixturesFile = string.concat(
             vm.projectRoot(),
             string.concat("/deployments/", getEnv(), "/fixtures/fixtures.json")
         );
         string memory fixtures = vm.readFile(fixturesFile);
 
-        address l2BeHypeStaker = stdJson.readAddress(fixtures, string.concat(".", chainId, ".l2BeHypeStaker"));
-        address whypeToken = stdJson.readAddress(fixtures, string.concat(".", chainId, ".wHYPE"));
-        address beHypeToken = stdJson.readAddress(fixtures, string.concat(".", chainId, ".beHYPE"));
+        f.l2BeHypeStaker = stdJson.readAddress(fixtures, string.concat(".", chainId, ".l2BeHypeStaker"));
+        f.whypeToken = stdJson.readAddress(fixtures, string.concat(".", chainId, ".wHYPE"));
+        f.beHypeToken = stdJson.readAddress(fixtures, string.concat(".", chainId, ".beHYPE"));
 
-        require(l2BeHypeStaker != address(0), "l2BeHypeStaker not set in fixtures");
-        require(whypeToken != address(0), "wHYPE not set in fixtures");
-        require(beHypeToken != address(0), "beHYPE not set in fixtures");
+        require(f.l2BeHypeStaker != address(0), "l2BeHypeStaker not set in fixtures");
+        require(f.whypeToken != address(0), "wHYPE not set in fixtures");
+        require(f.beHypeToken != address(0), "beHYPE not set in fixtures");
+    }
+
+    function run() public {
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address deployer = vm.addr(deployerPrivateKey);
+
+        string memory deployments = readDeploymentFile();
+        HypeFixtures memory f = _readHypeFixtures();
 
         address dataProvider = stdJson.readAddress(deployments, ".addresses.EtherFiDataProvider");
         address roleRegistry = stdJson.readAddress(deployments, ".addresses.RoleRegistry");
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // 1. Deploy BeHYPEStakeModule
-        console.log("Deploying BeHYPEStakeModule...");
         BeHYPEStakeModule beHypeStakeModule = new BeHYPEStakeModule(
             dataProvider,
-            l2BeHypeStaker,
-            whypeToken,
-            beHypeToken,
+            f.l2BeHypeStaker,
+            f.whypeToken,
+            f.beHypeToken,
             REFUND_GAS_LIMIT
         );
-        console.log("  BeHYPEStakeModule:", address(beHypeStakeModule));
+        console.log("BeHYPEStakeModule:", address(beHypeStakeModule));
 
-        // 2. Whitelist as default module
-        console.log("Whitelisting BeHYPEStakeModule as default module...");
         address[] memory modules = new address[](1);
         modules[0] = address(beHypeStakeModule);
-
         bool[] memory enable = new bool[](1);
         enable[0] = true;
-
         EtherFiDataProvider(dataProvider).configureDefaultModules(modules, enable);
 
-        // 3. Grant BEHYPE_STAKE_MODULE_ADMIN_ROLE to deployer
-        console.log("Granting BEHYPE_STAKE_MODULE_ADMIN_ROLE to deployer...");
         bytes32 adminRole = beHypeStakeModule.BEHYPE_STAKE_MODULE_ADMIN_ROLE();
         IRoleRegistry(roleRegistry).grantRole(adminRole, deployer);
 
         vm.stopBroadcast();
 
-        console.log("Done. Add to deployments/dev/%s/deployments.json:", chainId);
+        console.log("Done. Add to deployments/dev/%s/deployments.json:", vm.toString(block.chainid));
         console.log('  "BeHYPEStakeModule": "%s"', address(beHypeStakeModule));
     }
 }
