@@ -38,6 +38,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
     address constant EUSD           = 0x939778D83b46B456224A33Fb59630B11DEC56663;
     address constant EBTC           = 0x657e8C867D8B37dCC18fA4Caead9C45EB088C642;
     address constant LIQUID_EUR    = 0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13;
+    address constant LIQUID_RESERVE_MIDAS = 0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898;
 
     // ---------------------------------------------------------------
     // OP oracle addresses
@@ -77,9 +78,11 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         string memory deployments = readDeploymentFile();
         string memory chainId = vm.toString(block.chainid);
 
+        uint256 privateKey = vm.envUint("PRIVATE_KEY");
+
         address priceProvider = stdJson.readAddress(deployments, ".addresses.PriceProvider");
 
-        vm.startBroadcast();
+        vm.startBroadcast(privateKey);
 
         // Deploy new implementation
         address priceProviderV2Impl = address(new PriceProviderV2());
@@ -135,6 +138,7 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         if (token == LIQUID_BTC) return "liquidBTC";
         if (token == LIQUID_USD) return "liquidUSD";
         if (token == LIQUID_RESERVE) return "liquidReserve";
+        if (token == LIQUID_RESERVE_MIDAS) return "liquidReserveMidas";
         if (token == EUSD) return "eUSD";
         if (token == EBTC) return "eBTC";
         if (token == LIQUID_EUR) return "liquidEUR";
@@ -142,8 +146,8 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
     }
 
     function _buildConfigs() internal pure returns (address[] memory tokens, PriceProviderV2.Config[] memory configs) {
-        tokens = new address[](19);
-        configs = new PriceProviderV2.Config[](19);
+        tokens = new address[](20);
+        configs = new PriceProviderV2.Config[](20);
 
         uint256 i = 0;
 
@@ -300,6 +304,19 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         });
         i++;
 
+        tokens[i] = LIQUID_RESERVE_MIDAS;
+        configs[i] = PriceProviderV2.Config({
+            oracle: LIQUID_RESERVE_ORACLE,
+            priceFunctionCalldata: "",
+            isChainlinkType: true,
+            oraclePriceDecimals: 8,
+            maxStaleness: 7 days,
+            dataType: PriceProviderV2.ReturnType.Int256,
+            isStableToken: false,
+            baseAsset: address(0)
+        });
+        i++;
+
         // ---- Custom oracle, direct USD ----
 
         tokens[i] = LIQUID_USD;
@@ -415,6 +432,6 @@ contract UpgradeToPriceProviderV2Gnosis is GnosisHelpers, Utils {
         i++;
 
 
-        require(i == 19, "Token count mismatch");
+        require(i == 20, "Token count mismatch");
     }
 }
