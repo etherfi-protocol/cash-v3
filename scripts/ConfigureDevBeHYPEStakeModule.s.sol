@@ -6,7 +6,6 @@ import {console} from "forge-std/console.sol";
 
 import {BeHYPEStakeModule} from "../src/modules/hype/BeHYPEStakeModule.sol";
 import {EtherFiDataProvider} from "../src/data-provider/EtherFiDataProvider.sol";
-import {ICashModule} from "../src/interfaces/ICashModule.sol";
 import {IRoleRegistry} from "../src/interfaces/IRoleRegistry.sol";
 import {Utils} from "./utils/Utils.sol";
 
@@ -44,7 +43,6 @@ contract ConfigureDevBeHYPEStakeModule is Utils {
         require(beHypeToken != address(0), "beHYPE not set in fixtures");
 
         address dataProvider = stdJson.readAddress(deployments, ".addresses.EtherFiDataProvider");
-        address cashModule = stdJson.readAddress(deployments, ".addresses.CashModule");
         address roleRegistry = stdJson.readAddress(deployments, ".addresses.RoleRegistry");
 
         vm.startBroadcast(deployerPrivateKey);
@@ -70,19 +68,7 @@ contract ConfigureDevBeHYPEStakeModule is Utils {
 
         EtherFiDataProvider(dataProvider).configureDefaultModules(modules, enable);
 
-        // 3. Configure wHYPE and beHYPE as withdrawable assets
-        console.log("Configuring wHYPE/beHYPE as withdrawable assets...");
-        address[] memory withdrawTokens = new address[](2);
-        withdrawTokens[0] = whypeToken;
-        withdrawTokens[1] = beHypeToken;
-
-        bool[] memory withdrawEnable = new bool[](2);
-        withdrawEnable[0] = true;
-        withdrawEnable[1] = true;
-
-        ICashModule(cashModule).configureWithdrawAssets(withdrawTokens, withdrawEnable);
-
-        // 4. Grant BEHYPE_STAKE_MODULE_ADMIN_ROLE to deployer
+        // 3. Grant BEHYPE_STAKE_MODULE_ADMIN_ROLE to deployer
         console.log("Granting BEHYPE_STAKE_MODULE_ADMIN_ROLE to deployer...");
         bytes32 adminRole = beHypeStakeModule.BEHYPE_STAKE_MODULE_ADMIN_ROLE();
         IRoleRegistry(roleRegistry).grantRole(adminRole, deployer);
