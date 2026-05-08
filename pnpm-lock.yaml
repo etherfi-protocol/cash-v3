@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@1inch/limit-order-protocol-contract':
+        specifier: ^4.3.3
+        version: 4.3.3
       '@safe-global/api-kit':
         specifier: ^3.0.1
         version: 3.0.1
