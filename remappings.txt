@@ -4,3 +4,5 @@ forge-std/=lib/forge-std/src/
 openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/
 openzeppelin-contracts/=lib/openzeppelin-contracts/
 solady/=lib/solady/src/
+@1inch/limit-order-protocol-contract/=node_modules/@1inch/limit-order-protocol-contract/
+@1inch/solidity-utils/=node_modules/@1inch/solidity-utils/

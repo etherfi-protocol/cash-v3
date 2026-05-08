@@ -4,7 +4,11 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
+import { IOrderMixin } from "@1inch/limit-order-protocol-contract/contracts/interfaces/IOrderMixin.sol";
+import { AddressLib, Address } from "@1inch/solidity-utils/contracts/libraries/AddressLib.sol";
+
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
+import { ISwapInteractionInterface } from "../../interfaces/ISwapInteractionInterface.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
@@ -24,13 +28,17 @@ import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
  *      Tokens never leave the Safe — requestSwap() records the intent, registers a pending
  *      withdrawal with CashModule (preempted by card spend via cancelBridgeByCashModule),
  *      and approves the 1inch router. The 1inch Limit Order Protocol validates the order via
- *      EtherFiSafe.isValidSignature (direct multi-owner verification), then the resolver
- *      pulls fromToken via transferFrom. settleSwap() finalizes once the fill lands.
- *      Entry points: requestSwap() -> settleSwap() (or cancelSwap() to abort)
+ *      EtherFiSafe.isValidSignature (direct multi-owner verification), the resolver pulls
+ *      fromToken via transferFrom, and the protocol invokes postInteraction() on this module
+ *      atomically inside the same fill — settling balances, revoking the approval, and
+ *      releasing the CashModule withdrawal.
+ *      Entry points: requestSwap() -> postInteraction() (or cancelSwap() to abort)
  *
  *      Both modes use the same 1inch Aggregation Router.
  */
-contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
+contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule, ISwapInteractionInterface {
+    using AddressLib for Address;
+
     // ──────────────────────────────────────────────
     //  Structs
     // ──────────────────────────────────────────────
@@ -42,8 +50,6 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
         uint256 fromAmount;
         uint256 minToAmount;
         bytes32 orderHash;
-        uint256 fromBalanceBefore;
-        uint256 toBalanceBefore;
     }
 
     // ──────────────────────────────────────────────
@@ -99,8 +105,10 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     error NoPendingSwap();
     error SwapAlreadyPending();
     error InsufficientReceivedAmount();
-    error OrderNotFilled();
-    error UnexpectedFromBalance();
+    error OrderHashMismatch();
+    error OrderTokenMismatch();
+    error UnexpectedMakingAmount();
+    error OnlyAggregationRouter();
     error NativeETHNotSupported();
     error Unauthorized();
 
@@ -188,7 +196,7 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
         // Register a pending withdrawal on CashModule so card spend can preempt via cancelBridgeByCashModule
         cashModule.requestWithdrawalByModule(safe, fromToken, fromAmount);
 
-        pendingSwaps[safe] = PendingSwap({ fromToken: fromToken, toToken: toToken, fromAmount: fromAmount, minToAmount: minToAmount, orderHash: orderHash, fromBalanceBefore: IERC20(fromToken).balanceOf(safe), toBalanceBefore: IERC20(toToken).balanceOf(safe) });
+        pendingSwaps[safe] = PendingSwap({ fromToken: fromToken, toToken: toToken, fromAmount: fromAmount, minToAmount: minToAmount, orderHash: orderHash });
 
         // Safe approves router to pull fromTokens
         address[] memory to = new address[](1);
@@ -202,32 +210,41 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     }
 
     /**
-     * @notice Finalizes the Fusion swap after the 1inch order has been filled
-     * @dev Callable only by Safe admins (single admin suffices — no quorum). The correctness
-     *      gates are post-hoc: fromToken balance must have decreased (OrderNotFilled check)
-     *      and toToken balance must have increased by at least minToAmount (set at request
-     *      time under full owner quorum). No partial fills per design, so a premature settle
-     *      cannot truncate remaining fills.
-     *      Releases the pending withdrawal on CashModule and revokes the router approval.
-     * @param safe Address of the EtherFi Safe
+     * @notice 1inch Limit Order Protocol post-interaction hook — finalizes the Fusion swap atomically with the fill
+     * @dev Invoked by the 1inch Aggregation Router from inside `_fill`, after both `transferFrom`s have settled.
+     *      For the protocol to route the call here (instead of to the Safe / maker), the order's extension
+     *      must encode this module's address as the first 20 bytes of the PostInteractionData field, and
+     *      `MakerTraits` must have the POST_INTERACTION_CALL_FLAG (bit 251) and HAS_EXTENSION_FLAG (bit 249) set.
+     *
+     *      All correctness checks come from the protocol's own arguments — no balance reads needed:
+     *        - orderHash must match the intent registered in requestSwap
+     *        - order.makerAsset / order.takerAsset must match the registered tokens (defense-in-depth
+     *          against an orderHash that doesn't actually commit to the registered token pair)
+     *        - makingAmount must equal the registered fromAmount (no partial fills per design)
+     *        - takingAmount must be at least the registered minToAmount (slippage floor)
+     *
+     *      Then revokes the router approval, deletes local state, and releases the pending CashModule
+     *      withdrawal.
      */
-    function settleSwap(address safe) external nonReentrant onlyEtherFiSafe(safe) {
-        if (!IEtherFiSafe(safe).isAdmin(msg.sender)) revert Unauthorized();
+    function postInteraction(
+        IOrderMixin.Order calldata order,
+        bytes calldata /* extension */,
+        bytes32 orderHash,
+        address /* taker */,
+        uint256 makingAmount,
+        uint256 takingAmount,
+        uint256 /* remainingMakingAmount */,
+        bytes calldata /* extraData */
+    ) external nonReentrant {
+        if (msg.sender != aggregationRouter) revert OnlyAggregationRouter();
 
+        address safe = order.maker.get();
         PendingSwap memory pendingSwap = pendingSwaps[safe];
         if (pendingSwap.fromAmount == 0) revert NoPendingSwap();
-
-        // No partial fills by design — fromToken balance must have dropped by exactly fromAmount.
-        // A strict equality (vs. "any decrease") defends against future modules that also
-        // move fromToken behind our back from silently satisfying this check.
-        uint256 currentFromBalance = IERC20(pendingSwap.fromToken).balanceOf(safe);
-        if (currentFromBalance > pendingSwap.fromBalanceBefore - pendingSwap.fromAmount) revert OrderNotFilled();
-        if (currentFromBalance < pendingSwap.fromBalanceBefore - pendingSwap.fromAmount) revert UnexpectedFromBalance();
-
-        // Verify the Safe received enough toToken since requestSwap
-        uint256 currentToBalance = IERC20(pendingSwap.toToken).balanceOf(safe);
-        uint256 received = currentToBalance - pendingSwap.toBalanceBefore;
-        if (received < pendingSwap.minToAmount) revert InsufficientReceivedAmount();
+        if (orderHash != pendingSwap.orderHash) revert OrderHashMismatch();
+        if (order.makerAsset.get() != pendingSwap.fromToken || order.takerAsset.get() != pendingSwap.toToken) revert OrderTokenMismatch();
+        if (makingAmount != pendingSwap.fromAmount) revert UnexpectedMakingAmount();
+        if (takingAmount < pendingSwap.minToAmount) revert InsufficientReceivedAmount();
 
         _revokeApproval(safe, pendingSwap.fromToken);
 
@@ -238,7 +255,7 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
         delete pendingSwaps[safe];
         cashModule.cancelWithdrawalByModule(safe);
 
-        emit FusionSwapSettled(safe, pendingSwap.fromToken, pendingSwap.toToken, pendingSwap.fromAmount, received);
+        emit FusionSwapSettled(safe, pendingSwap.fromToken, pendingSwap.toToken, pendingSwap.fromAmount, takingAmount);
     }
 
     /**
@@ -258,7 +275,7 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
 
         _revokeApproval(safe, pendingSwap.fromToken);
 
-        // Delete before releasing the CashModule withdrawal (callback short-circuits — see settleSwap)
+        // Delete before releasing the CashModule withdrawal (callback short-circuits — see postInteraction)
         delete pendingSwaps[safe];
         cashModule.cancelWithdrawalByModule(safe);
 

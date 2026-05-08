@@ -4,6 +4,10 @@ pragma solidity ^0.8.28;
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {Test} from "forge-std/Test.sol";
 
+import {IOrderMixin} from "@1inch/limit-order-protocol-contract/contracts/interfaces/IOrderMixin.sol";
+import {Address} from "@1inch/solidity-utils/contracts/libraries/AddressLib.sol";
+import {MakerTraits} from "@1inch/limit-order-protocol-contract/contracts/libraries/MakerTraitsLib.sol";
+
 import {OneInchSwapModule, ModuleBase, ModuleCheckBalance} from "../../../../src/modules/oneinch-swap/OneInchSwapModule.sol";
 import {ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager} from "../../SafeTestSetup.t.sol";
 import {ICashModule} from "../../../../src/interfaces/ICashModule.sol";
@@ -145,8 +149,6 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         assertEq(pendingSwap.fromAmount, SWAP_AMOUNT);
         assertEq(pendingSwap.minToAmount, MIN_TO_AMOUNT);
         assertEq(pendingSwap.orderHash, TEST_ORDER_HASH);
-        assertEq(pendingSwap.fromBalanceBefore, SWAP_AMOUNT);
-        assertEq(pendingSwap.toBalanceBefore, 0);
 
         assertEq(usdc.balanceOf(address(safe)), SWAP_AMOUNT);
         assertEq(usdc.allowance(address(safe), AGGREGATION_ROUTER), SWAP_AMOUNT);
@@ -266,68 +268,92 @@ contract OneInchSwapModuleTest is SafeTestSetup {
     }
 
     // ──────────────────────────────────────────────
-    //  settleSwap tests (admin-only, no signatures)
+    //  postInteraction tests (router-only, args-validated)
     // ──────────────────────────────────────────────
 
-    function test_fusion_settleSwap_works() public {
+    function test_fusion_postInteraction_works() public {
         _setupRequestSwap();
 
-        // Simulate full fill: resolver pulls fromToken from Safe, sends toToken to Safe
-        vm.prank(AGGREGATION_ROUTER);
-        usdc.transferFrom(address(safe), makeAddr("resolver"), SWAP_AMOUNT);
-        deal(address(weETH), address(safe), MIN_TO_AMOUNT);
+        IOrderMixin.Order memory order = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT);
 
-        // Any safe admin can settle (owners are admins by default)
-        vm.prank(owner1);
-        oneInchModule.settleSwap(address(safe));
+        vm.prank(AGGREGATION_ROUTER);
+        oneInchModule.postInteraction(order, "", TEST_ORDER_HASH, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
 
         assertEq(oneInchModule.getPendingSwap(address(safe)).fromAmount, 0);
         assertEq(usdc.allowance(address(safe), AGGREGATION_ROUTER), 0);
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
     }
 
-    function test_fusion_settleSwap_revertsWhenNotAdmin() public {
+    function test_fusion_postInteraction_revertsWhenNotRouter() public {
         _setupRequestSwap();
 
-        vm.prank(AGGREGATION_ROUTER);
-        usdc.transferFrom(address(safe), makeAddr("resolver"), SWAP_AMOUNT);
-        deal(address(weETH), address(safe), MIN_TO_AMOUNT);
+        IOrderMixin.Order memory order = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT);
 
         vm.prank(makeAddr("random"));
-        vm.expectRevert(OneInchSwapModule.Unauthorized.selector);
-        oneInchModule.settleSwap(address(safe));
+        vm.expectRevert(OneInchSwapModule.OnlyAggregationRouter.selector);
+        oneInchModule.postInteraction(order, "", TEST_ORDER_HASH, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
     }
 
-    function test_fusion_settleSwap_revertsWhenNoPendingSwap() public {
-        vm.prank(owner1);
-        vm.expectRevert(OneInchSwapModule.NoPendingSwap.selector);
-        oneInchModule.settleSwap(address(safe));
-    }
-
-    function test_fusion_settleSwap_revertsWhenOrderNotFilled() public {
-        _setupRequestSwap();
-
-        // Don't simulate fill — tokens still on Safe
-        deal(address(weETH), address(safe), MIN_TO_AMOUNT);
-
-        vm.prank(owner1);
-        vm.expectRevert(OneInchSwapModule.OrderNotFilled.selector);
-        oneInchModule.settleSwap(address(safe));
-    }
-
-    function test_fusion_settleSwap_revertsWhenInsufficientReceived() public {
-        _setupRequestSwap();
+    function test_fusion_postInteraction_revertsWhenNoPendingSwap() public {
+        IOrderMixin.Order memory order = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT);
 
         vm.prank(AGGREGATION_ROUTER);
-        usdc.transferFrom(address(safe), makeAddr("resolver"), SWAP_AMOUNT);
-        // Don't deal toToken to safe
-
-        vm.prank(owner1);
-        vm.expectRevert(OneInchSwapModule.InsufficientReceivedAmount.selector);
-        oneInchModule.settleSwap(address(safe));
+        vm.expectRevert(OneInchSwapModule.NoPendingSwap.selector);
+        oneInchModule.postInteraction(order, "", TEST_ORDER_HASH, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
     }
 
-    // NOTE: partial-fill tests removed per design D5 (no partial fills allowed).
+    function test_fusion_postInteraction_revertsWhenOrderHashMismatch() public {
+        _setupRequestSwap();
+
+        IOrderMixin.Order memory order = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT);
+
+        vm.prank(AGGREGATION_ROUTER);
+        vm.expectRevert(OneInchSwapModule.OrderHashMismatch.selector);
+        oneInchModule.postInteraction(order, "", keccak256("other-order"), makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
+    }
+
+    function test_fusion_postInteraction_revertsWhenMakerAssetMismatch() public {
+        _setupRequestSwap();
+
+        // Swap fromToken for a different asset
+        IOrderMixin.Order memory order = _buildOrder(address(weETH), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT);
+
+        vm.prank(AGGREGATION_ROUTER);
+        vm.expectRevert(OneInchSwapModule.OrderTokenMismatch.selector);
+        oneInchModule.postInteraction(order, "", TEST_ORDER_HASH, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
+    }
+
+    function test_fusion_postInteraction_revertsWhenTakerAssetMismatch() public {
+        _setupRequestSwap();
+
+        IOrderMixin.Order memory order = _buildOrder(address(usdc), address(usdc), SWAP_AMOUNT, MIN_TO_AMOUNT);
+
+        vm.prank(AGGREGATION_ROUTER);
+        vm.expectRevert(OneInchSwapModule.OrderTokenMismatch.selector);
+        oneInchModule.postInteraction(order, "", TEST_ORDER_HASH, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
+    }
+
+    function test_fusion_postInteraction_revertsOnPartialFill() public {
+        _setupRequestSwap();
+
+        IOrderMixin.Order memory order = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT);
+
+        vm.prank(AGGREGATION_ROUTER);
+        vm.expectRevert(OneInchSwapModule.UnexpectedMakingAmount.selector);
+        oneInchModule.postInteraction(order, "", TEST_ORDER_HASH, makeAddr("resolver"), SWAP_AMOUNT - 1, MIN_TO_AMOUNT, 0, "");
+    }
+
+    function test_fusion_postInteraction_revertsWhenInsufficientReceived() public {
+        _setupRequestSwap();
+
+        IOrderMixin.Order memory order = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT);
+
+        vm.prank(AGGREGATION_ROUTER);
+        vm.expectRevert(OneInchSwapModule.InsufficientReceivedAmount.selector);
+        oneInchModule.postInteraction(order, "", TEST_ORDER_HASH, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT - 1, 0, "");
+    }
+
+    // NOTE: partial-fill checks (UnexpectedMakingAmount above) match design D5 (no partial fills allowed).
     // A partial fill would leave safe balance < registered pendingWithdrawalAmount, which
     // underflows CashLens.getUserTotalCollateral (balance - pending) during postOpHook →
     // DebtManagerCore.ensureHealth. That's a CashLens edge case, but the design forbids
@@ -433,14 +459,14 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         bytes memory sigBlob = _buildOwnerSignatureBlob(TEST_ORDER_HASH);
         assertEq(safe.isValidSignature(TEST_ORDER_HASH, sigBlob), bytes4(0x1626ba7e));
 
-        // Simulate fill
+        // Simulate fill: resolver pulls fromToken, sends toToken, then protocol calls postInteraction
         vm.prank(AGGREGATION_ROUTER);
         usdc.transferFrom(address(safe), makeAddr("resolver"), SWAP_AMOUNT);
         deal(address(weETH), address(safe), MIN_TO_AMOUNT);
 
-        // Settle (admin-only)
-        vm.prank(owner1);
-        oneInchModule.settleSwap(address(safe));
+        IOrderMixin.Order memory order = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT);
+        vm.prank(AGGREGATION_ROUTER);
+        oneInchModule.postInteraction(order, "", TEST_ORDER_HASH, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
 
         assertEq(oneInchModule.getPendingSwap(address(safe)).fromAmount, 0);
         assertEq(usdc.allowance(address(safe), AGGREGATION_ROUTER), 0);
@@ -527,6 +553,25 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         signatures[1] = abi.encodePacked(r2, s2, v2);
 
         return (signers, signatures);
+    }
+
+    /// @dev Minimal IOrderMixin.Order for postInteraction tests. Only the fields the module
+    ///      actually validates (maker, makerAsset, takerAsset) need to be meaningful.
+    function _buildOrder(address fromToken, address toToken, uint256 fromAmount, uint256 toAmount)
+        internal
+        view
+        returns (IOrderMixin.Order memory)
+    {
+        return IOrderMixin.Order({
+            salt: 0,
+            maker: Address.wrap(uint256(uint160(address(safe)))),
+            receiver: Address.wrap(0),
+            makerAsset: Address.wrap(uint256(uint160(fromToken))),
+            takerAsset: Address.wrap(uint256(uint160(toToken))),
+            makingAmount: fromAmount,
+            takingAmount: toAmount,
+            makerTraits: MakerTraits.wrap(0)
+        });
     }
 
     /// @dev Builds an ERC-1271 sig blob (owners sign `hash` directly — not wrapped, as 1inch
