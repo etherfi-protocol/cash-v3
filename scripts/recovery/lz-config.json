@@ -5,5 +5,5 @@
   "arbitrum": { "chainId": 42161, "eid": 30110, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
   "base":     { "chainId": 8453,  "eid": 30184, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
   "bnb":      { "chainId": 56,    "eid": 30102, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
-  "hyperevm": { "chainId": 999,   "eid": 30367, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" }
+  "hyperevm": { "chainId": 999,   "eid": 30367, "endpoint": "0x3A73033C0b1407574C76BdBAc67f126f6b4a9AA9" }
 }

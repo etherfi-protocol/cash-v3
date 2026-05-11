@@ -25,9 +25,9 @@ library RecoveryDeployConfig {
     // NOTE: salt seed strings still read "RecoveryModule" / "RecoveryDispatcherImpl" — preserved
     //       deliberately. Mutating them would invalidate independent address recomputation by the
     //       3CP reviewer and break idempotency of the deploy helper.
-    bytes32 internal constant SALT_RECOVERY_MODULE          = keccak256("Recovery.RecoveryModule.v1");
-    bytes32 internal constant SALT_RECOVERY_DISPATCHER_IMPL = keccak256("Recovery.RecoveryDispatcherImpl.v1");
-    bytes32 internal constant SALT_TOPUP_V2_IMPL            = keccak256("Recovery.TopUpV2Impl.v1");
+    bytes32 internal constant SALT_RECOVERY_MODULE           = keccak256("Recovery.RecoveryModule.v1");
+    bytes32 internal constant SALT_RECOVERY_DISPATCHER_PROXY = keccak256("Recovery.RecoveryDispatcherProxy.v1");
+    bytes32 internal constant SALT_TOPUP_V2_IMPL             = keccak256("Recovery.TopUpV2Impl.v1");
 
     uint32 internal constant OP_EID = 30_111;
 }
@@ -45,7 +45,7 @@ abstract contract RecoveryDeployHelper {
 
     function _deployCreate3(bytes memory creationCode, bytes32 salt) internal returns (address deployed) {
         deployed = _predictImpl(salt);
-        if (deployed.code.length > 0) return deployed; // idempotent
+        require(deployed.code.length == 0, "ABORT: code already exists at predicted address - possible front-run");
 
         address proxy = address(uint160(uint256(keccak256(abi.encodePacked(
             hex"ff",
@@ -60,10 +60,13 @@ abstract contract RecoveryDeployHelper {
                 abi.encodePacked(salt, hex"67363d3d37363d34f03d5260086018f3")
             );
             require(ok, "CREATE3 proxy deploy failed");
+        } else {
+            require(proxy.code.length == 8, "CREATE3 intermediate proxy has unexpected code length - possible hijack");
         }
 
         (ok,) = proxy.call(creationCode);
         require(ok, "CREATE3 contract deploy failed");
         require(deployed.code.length > 0, "CREATE3 deployment verification failed");
     }
+
 }

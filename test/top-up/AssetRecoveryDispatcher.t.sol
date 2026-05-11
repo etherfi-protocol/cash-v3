@@ -126,11 +126,7 @@ contract AssetRecoveryDispatcherTest is Test {
         // Stub the factory's `isTokenSupported` (which is what the etched TopUp's `owner()`
         // resolves to via the dead-address baked into the impl constructor — the same trick
         // used in the existing forwardsToTopUp test).
-        vm.mockCall(
-            TopUpV2(payable(predictedSafe)).owner(),
-            abi.encodeWithSelector(ITopUpFactoryView.isTokenSupported.selector, address(token)),
-            abi.encode(false)
-        );
+        vm.mockCall(TopUpV2(payable(predictedSafe)).owner(), abi.encodeWithSelector(ITopUpFactoryView.isTokenSupported.selector, address(token)), abi.encode(false));
 
         address recipient = makeAddr("recipient");
         bytes memory message = RecoveryMessageLib.encode(_payload(predictedSafe, address(token), recipient, SALT));

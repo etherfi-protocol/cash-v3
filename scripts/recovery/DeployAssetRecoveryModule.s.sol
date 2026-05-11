@@ -27,7 +27,6 @@ contract DeployAssetRecoveryModule is Utils, RecoveryDeployHelper {
         require(block.chainid == 10, "must be Optimism");
         require(RecoveryDeployConfig.NICKS_FACTORY.code.length > 0, "Nick's factory not on this chain");
 
-        uint256 deployerPk = vm.envUint("PRIVATE_KEY");
         address lzEndpoint = vm.envAddress("LZ_ENDPOINT");
 
         string memory deployments = readDeploymentFile();
@@ -40,7 +39,7 @@ contract DeployAssetRecoveryModule is Utils, RecoveryDeployHelper {
         address predicted = _predictImpl(RecoveryDeployConfig.SALT_RECOVERY_MODULE);
         console.log("Predicted module address: %s", predicted);
 
-        vm.startBroadcast(deployerPk);
+        vm.startBroadcast();
 
         address module = _deployCreate3(
             abi.encodePacked(
@@ -53,10 +52,19 @@ contract DeployAssetRecoveryModule is Utils, RecoveryDeployHelper {
 
         vm.stopBroadcast();
 
+        // --- Post-deploy verification: read back immutables to confirm we deployed OUR code ---
+        AssetRecoveryModule deployed = AssetRecoveryModule(module);
+        require(deployed.owner() == RecoveryDeployConfig.OPERATING_SAFE, "VERIFY FAILED: owner != OPERATING_SAFE");
+        require(address(deployed.endpoint()) == lzEndpoint, "VERIFY FAILED: endpoint mismatch");
+        require(address(deployed.etherFiDataProvider()) == dataProvider, "VERIFY FAILED: dataProvider mismatch");
+
+        bytes32 codeHash = keccak256(module.code);
         console.log("AssetRecoveryModule : %s", module);
         console.log("DataProvider        : %s", dataProvider);
         console.log("LZ endpoint         : %s", lzEndpoint);
         console.log("Delegate / owner    : %s", RecoveryDeployConfig.OPERATING_SAFE);
+        console.log("Runtime bytecode hash (for independent verification):");
+        console.logBytes32(codeHash);
 
         address[] memory modules = new address[](1);
         modules[0] = module;
