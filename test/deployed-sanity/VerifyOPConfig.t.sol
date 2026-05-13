@@ -10,7 +10,7 @@ import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
-import { PriceProvider } from "../../src/oracle/PriceProvider.sol";
+import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 import { EtherFiLiquidModule } from "../../src/modules/etherfi/EtherFiLiquidModule.sol";
@@ -30,7 +30,7 @@ contract VerifyOPConfig is Utils {
     IDebtManager debtManager;
     ICashModule cashModule;
     CashbackDispatcher cashbackDispatcher;
-    PriceProvider priceProvider;
+    PriceProviderV2 priceProvider;
     TopUpDest topUpDest;
 
     string config;
@@ -55,7 +55,7 @@ contract VerifyOPConfig is Utils {
         debtManager = IDebtManager(stdJson.readAddress(deployments, ".addresses.DebtManager"));
         cashModule = ICashModule(stdJson.readAddress(deployments, ".addresses.CashModule"));
         cashbackDispatcher = CashbackDispatcher(stdJson.readAddress(deployments, ".addresses.CashbackDispatcher"));
-        priceProvider = PriceProvider(stdJson.readAddress(deployments, ".addresses.PriceProvider"));
+        priceProvider = PriceProviderV2(stdJson.readAddress(deployments, ".addresses.PriceProvider"));
         topUpDest = TopUpDest(payable(stdJson.readAddress(deployments, ".addresses.TopUpDest")));
     }
 
@@ -190,7 +190,7 @@ contract VerifyOPConfig is Utils {
 
             address expectedOracle = stdJson.readAddress(config, oracleKey);
             address token = _resolveToken(names[i]);
-            PriceProvider.Config memory cfg = priceProvider.tokenConfig(token);
+            PriceProviderV2.Config memory cfg = priceProvider.tokenConfig(token);
             assertEq(cfg.oracle, expectedOracle, string.concat("Oracle mismatch for: ", names[i]));
         }
     }
