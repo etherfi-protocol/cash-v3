@@ -18,6 +18,7 @@ node_modules
 coverage_report
 broadcast
 **/*/.DS_Store
+.vscode/
 
 # Certora
 .certora_internal/
