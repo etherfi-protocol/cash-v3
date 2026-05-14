@@ -288,8 +288,9 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
      * @custom:throws NotEtherFiSafe If `safe` isn't registered with `EtherFiDataProvider`.
      * @custom:throws DestinationNotConfigured If `destEid` is not in the global destinations list.
      */
-    function enable(address safe, uint32 destEid) external onlyEtherFiSafe(safe) {
+    function enable(address safe, uint32 destEid) external {
         if (!_roleRegistry().hasRole(ETHER_FI_WALLET_ROLE, msg.sender)) revert OnlyEtherFiWallet();
+        if (!etherFiDataProvider.isEtherFiSafe(safe)) revert NotEtherFiSafe();
 
         OwnershipBridgeSenderStorage storage $ = _getOwnershipBridgeSenderStorage();
         if (!$.destinations.contains(uint256(destEid))) revert DestinationNotConfigured(destEid);
