@@ -302,6 +302,29 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
     }
 
     /**
+     * @notice Disables ownership bridging for a `(safe, destEid)` pair. Idempotent.
+     * @dev Callable by `ETHER_FI_WALLET_ROLE` holders. Two uses:
+     *      1) Explicit per-safe cleanup — a safe should no longer publish to this destination.
+     *      2) Pruning stale entries — after the admin removes a destination globally via
+     *         `configureDestination(..., false)`, that destination is automatically skipped
+     *         on dispatch/quote, but this lets operators explicitly clear the bookkeeping.
+     *
+     *      Does NOT require `destEid` to still be in the global destinations set — the whole
+     *      point is to be able to clean up stale enablements.
+     * @param safe Safe whose enabled set is being trimmed.
+     * @param destEid Destination LayerZero EID to disable.
+     * @custom:throws OnlyEtherFiWallet If caller lacks `ETHER_FI_WALLET_ROLE`.
+     */
+    function disable(address safe, uint32 destEid) external {
+        if (!_roleRegistry().hasRole(ETHER_FI_WALLET_ROLE, msg.sender)) revert OnlyEtherFiWallet();
+
+        // `remove` returns false when the entry wasn't present, preserving idempotent semantics.
+        if (_getOwnershipBridgeSenderStorage().enabledEids[safe].remove(uint256(destEid))) {
+            emit OwnershipBridgeDisabled(safe, destEid);
+        }
+    }
+
+    /**
      * @notice Returns whether ownership bridging has been enabled for a `(safe, destEid)` pair.
      * @param safe Safe address to query.
      * @param destEid Destination LayerZero EID to query.
@@ -331,13 +354,16 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
     /**
      * @notice Convenience view for the safe wiring: returns true iff a publish for `safe`
      *         would actually result in LZ sends.
-     * @dev Folds in pause state and per-safe enabled-destination configuration so the safe
-     *      can do a single view call to decide whether to bother calling `publish*`.
+     * @dev Folds in pause state, per-safe enabled-destination configuration, AND the global
+     *      destinations set. A safe whose only enabled EID was later removed globally is
+     *      NOT live — dispatch would silently skip it and produce zero sends.
      * @param safe Safe address to query.
-     * @return True iff `getEnabledDestinations(safe).length > 0 && !paused()`.
+     * @return True iff the safe has at least one enabled EID that is also globally
+     *         configured, AND the sender is not paused.
      */
     function isPublishLive(address safe) external view returns (bool) {
-        return _getOwnershipBridgeSenderStorage().enabledEids[safe].length() > 0 && !paused();
+        if (paused()) return false;
+        return _liveEnabledEids(safe).length > 0;
     }
 
     // ------------------------------------------------------------------
@@ -384,15 +410,16 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
     }
 
     /**
-     * @dev Short-circuits a publish when `safe` has no enabled destinations: refunds the
-     *      caller's `msg.value` and emits a skip event. Returns true if it skipped so the
-     *      caller can early-return.
+     * @dev Short-circuits a publish when `safe` has no LIVE enabled destinations (the
+     *      intersection of its enabled set with the global destinations set). Refunds the
+     *      caller's `msg.value` and emits a skip event. Returns true so the caller can
+     *      early-return.
      * @param safe Source-chain safe that attempted to publish.
      * @param kind Op kind that would have been published.
      * @return skipped True when the publish was short-circuited; the caller MUST return.
      */
     function _skipIfNotEnabled(address safe, OwnershipBridgeMessageLib.OpKind kind) internal returns (bool skipped) {
-        if (_getOwnershipBridgeSenderStorage().enabledEids[safe].length() != 0) return false;
+        if (_liveEnabledEids(safe).length != 0) return false;
 
         if (msg.value > 0) {
             (bool ok, ) = payable(msg.sender).call{ value: msg.value }("");
@@ -403,13 +430,15 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
     }
 
     /**
-     * @dev Dispatches the envelope to every destination enabled for the safe. Quotes
-     *      per-destination, tracks `spent` against `msg.value`, sends each, and refunds the
-     *      leftover.
+     * @dev Dispatches the envelope to every LIVE destination enabled for the safe. A safe's
+     *      enabled set may contain stale EIDs after an admin globally removes a destination;
+     *      this loop silently skips those instead of reverting, so a stale entry can never
+     *      brick a safe's owner-mutating calls. Quotes per-destination, tracks `spent`
+     *      against `msg.value`, sends each, and refunds the leftover.
      * @param safe Source safe whose state is changing; embedded in the envelope.
      * @param kind Operation discriminator.
      * @param opData Pre-encoded kind-specific payload.
-     * @return guids LayerZero message GUIDs, one per destination, in iteration order.
+     * @return guids LayerZero message GUIDs, one per LIVE destination, in iteration order.
      * @return destEids Destination LayerZero EIDs, parallel to `guids`.
      */
     function _dispatch(
@@ -418,8 +447,8 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
         bytes memory opData
     ) internal returns (bytes32[] memory guids, uint32[] memory destEids) {
         OwnershipBridgeSenderStorage storage $ = _getOwnershipBridgeSenderStorage();
-        EnumerableSet.UintSet storage enabledSet = $.enabledEids[safe];
-        uint256 destCount = enabledSet.length();
+        uint32[] memory liveEids = _liveEnabledEids(safe);
+        uint256 destCount = liveEids.length;
 
         bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(
             OwnershipBridgeMessageLib.Envelope({ kind: kind, safe: safe, opData: opData })
@@ -430,8 +459,7 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
         uint256 spent = 0;
 
         for (uint256 i = 0; i < destCount;) {
-            uint32 destEid = uint32(enabledSet.at(i));
-            if (!$.destinations.contains(uint256(destEid))) revert DestinationNotConfigured(destEid);
+            uint32 destEid = liveEids[i];
             if (peers[destEid] == bytes32(0)) revert PeerNotConfigured(destEid);
 
             bytes memory opts = $.destOptions[destEid];
@@ -456,16 +484,18 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
     }
 
     /**
-     * @dev Computes the total native LZ fee across destinations enabled for `safe`. View-safe.
-     * @param safe Source safe whose enabled set is iterated.
+     * @dev Computes the total native LZ fee across LIVE destinations enabled for `safe`.
+     *      Stale enabled EIDs (no longer in the global destinations set) are silently
+     *      skipped — they contribute zero, just like they would on dispatch.
+     * @param safe Source safe whose live enabled set is iterated.
      * @param kind Operation discriminator.
      * @param opData Pre-encoded payload.
-     * @return totalFee Sum of per-destination native fees.
+     * @return totalFee Sum of per-destination native fees over live destinations.
      */
     function _quoteTotal(address safe, OwnershipBridgeMessageLib.OpKind kind, bytes memory opData) internal view returns (uint256 totalFee) {
         OwnershipBridgeSenderStorage storage $ = _getOwnershipBridgeSenderStorage();
-        EnumerableSet.UintSet storage enabledSet = $.enabledEids[safe];
-        uint256 destCount = enabledSet.length();
+        uint32[] memory liveEids = _liveEnabledEids(safe);
+        uint256 destCount = liveEids.length;
         if (destCount == 0) return 0;
 
         bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(
@@ -473,12 +503,39 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
         );
 
         for (uint256 i = 0; i < destCount;) {
-            uint32 destEid = uint32(enabledSet.at(i));
+            uint32 destEid = liveEids[i];
             bytes memory opts = $.destOptions[destEid];
             MessagingFee memory fee = _quote(destEid, message, opts, false);
             totalFee += fee.nativeFee;
             unchecked { ++i; }
         }
+    }
+
+    /**
+     * @dev Returns the intersection of `safe`'s enabled EIDs with the globally configured
+     *      destinations set. Stale entries (admin removed the destination but the safe's
+     *      enablement record persists) are filtered out so they're treated as no-ops by
+     *      every downstream consumer (`isPublishLive`, `_quoteTotal`, `_dispatch`,
+     *      `_skipIfNotEnabled`).
+     * @param safe Safe whose live set to compute.
+     * @return live Array of EIDs currently both enabled-for-safe and globally configured.
+     */
+    function _liveEnabledEids(address safe) internal view returns (uint32[] memory live) {
+        OwnershipBridgeSenderStorage storage $ = _getOwnershipBridgeSenderStorage();
+        EnumerableSet.UintSet storage enabled = $.enabledEids[safe];
+        uint256 len = enabled.length();
+        live = new uint32[](len);
+        uint256 count = 0;
+        for (uint256 i = 0; i < len; ) {
+            uint32 eid = uint32(enabled.at(i));
+            if ($.destinations.contains(uint256(eid))) {
+                live[count] = eid;
+                unchecked { ++count; }
+            }
+            unchecked { ++i; }
+        }
+        // Trim to actual live count.
+        assembly { mstore(live, count) }
     }
 
     /**

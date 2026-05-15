@@ -85,6 +85,16 @@ interface IOwnershipBridgeSender {
     event OwnershipBridgeEnabled(address indexed safe, uint32 indexed destEid);
 
     /**
+     * @notice Emitted when ownership bridging is disabled for a `(safe, destEid)` pair.
+     * @dev Idempotent — disabling an already-disabled pair does not re-emit. Used both for
+     *      explicit operator cleanup and for pruning stale enablements after the admin
+     *      removes a destination globally via `configureDestination(..., false)`.
+     * @param safe The safe whose enabled set shrank.
+     * @param destEid Destination LayerZero EID removed from the safe's enabled set.
+     */
+    event OwnershipBridgeDisabled(address indexed safe, uint32 indexed destEid);
+
+    /**
      * @notice Emitted when a publish call is short-circuited because the safe has no enabled destinations.
      * @dev The caller's `msg.value` is refunded; no LZ message is sent.
      * @param safe Source-chain safe.

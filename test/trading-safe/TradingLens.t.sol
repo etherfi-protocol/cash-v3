@@ -25,6 +25,13 @@ contract BrokenDecimalsToken is ERC20 {
     function mint(address to, uint256 amount) external { _mint(to, amount); }
 }
 
+/// @dev ERC20 whose `balanceOf` reverts — used to verify the lens's defensive fallback
+///      doesn't let a single paused / broken token brick the whole batch read.
+contract BrokenBalanceToken is ERC20 {
+    constructor() ERC20("BalanceBroken", "BBT") {}
+    function balanceOf(address) public pure override returns (uint256) { revert("paused"); }
+}
+
 /// @dev Price provider stub: returns 6-decimal prices for configured tokens, reverts for
 ///      unknown ones — matches `IPriceProvider.price` semantics closely enough for the
 ///      lens's try/catch fallback to be exercised.
@@ -220,6 +227,34 @@ contract TradingLensTest is Test {
         assertEq(tokens[1].valueUsd, 0);
 
         assertEq(totalValueUsd, 7e6, "total excludes unpriced token");
+    }
+
+    function test_getSafeData_brokenBalance_doesNotRevert_andContributesZero() public {
+        // A token whose balanceOf reverts (paused / self-destructed / broken) must not
+        // brick the whole batch — its row gets balance=0 and value=0, every other token
+        // still gets snapshotted correctly.
+        BrokenBalanceToken broken = new BrokenBalanceToken();
+        tokenA.mint(safe, 1e18);
+        priceProvider.setPrice(address(tokenA), 5e6);
+        priceProvider.setPrice(address(broken), 10e6);
+
+        vm.startPrank(admin);
+        lens.addSupportedToken(address(broken));
+        lens.addSupportedToken(address(tokenA));
+        vm.stopPrank();
+
+        (TradingLens.TokenInfo[] memory tokens, uint256 totalValueUsd) = lens.getSafeData(safe);
+        assertEq(tokens.length, 2);
+        // Broken token: balanceOf reverted, fallback to zero — value is zero even with a price.
+        assertEq(tokens[0].token, address(broken));
+        assertEq(tokens[0].balance, 0);
+        assertEq(tokens[0].priceUsd, 10e6);
+        assertEq(tokens[0].valueUsd, 0);
+        // Healthy token unaffected.
+        assertEq(tokens[1].token, address(tokenA));
+        assertEq(tokens[1].balance, 1e18);
+        assertEq(tokens[1].valueUsd, 5e6);
+        assertEq(totalValueUsd, 5e6);
     }
 
     function test_getSafeData_brokenDecimals_fallsBackTo18() public {

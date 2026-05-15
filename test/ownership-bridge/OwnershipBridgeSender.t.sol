@@ -160,15 +160,92 @@ contract OwnershipBridgeSenderTest is Test {
 
     // ---- Destination state ----
 
-    function test_publish_revertsWhen_destinationLaterRemoved() public {
-        // safeCaller is enabled for MAINNET_EID in setUp. Admin removes it globally; an
-        // enabled-but-no-longer-configured destination must surface explicitly during publish.
+    function test_publish_silentlySkips_whenDestinationLaterRemoved() public {
+        // safeCaller is enabled for MAINNET_EID in setUp. Admin removes it globally; the
+        // enabled entry is now stale. Owner-mutating calls must NOT revert — instead the
+        // sender should skip the stale EID, refund the caller, and emit OwnershipBridgeSkipped
+        // (since this safe has no other live destinations).
         vm.prank(delegate);
         sender.configureDestination(MAINNET_EID, "", false);
 
+        endpoint.setFee(0.1 ether);
         (address[] memory owners, bool[] memory shouldAdd) = _owners();
-        vm.expectRevert(abi.encodeWithSelector(IOwnershipBridgeSender.DestinationNotConfigured.selector, MAINNET_EID));
+        vm.deal(address(this), 1 ether);
+        uint256 safeBefore = address(safeCaller).balance;
+        uint256 endpointBefore = address(endpoint).balance;
+
+        safeCaller.publishConfigureOwners{ value: 0.3 ether }(owners, shouldAdd, 2);
+
+        // Full refund to the safe; endpoint untouched; isPublishLive flipped.
+        assertEq(address(safeCaller).balance, safeBefore + 0.3 ether, "stale-only safe gets full refund");
+        assertEq(address(endpoint).balance, endpointBefore, "endpoint untouched on skip");
+        assertFalse(sender.isPublishLive(address(safeCaller)), "no live destinations remain");
+    }
+
+    function test_publish_skipsOnlyStale_whenMultiDest_andOneRemoved() public {
+        // Add a second destination and enable safeCaller for it. Then remove the first
+        // destination globally. Publish must still go through for the live destination.
+        uint32 ARB_EID = 30_110;
+        vm.startPrank(delegate);
+        sender.setPeer(ARB_EID, bytes32(uint256(uint160(receiverPeer))));
+        sender.configureDestination(ARB_EID, "", true);
+        vm.stopPrank();
+        vm.prank(etherFiWallet);
+        sender.enable(address(safeCaller), ARB_EID);
+
+        // Now remove MAINNET_EID globally. safeCaller still has it in enabledEids (stale),
+        // but ARB_EID is still live.
+        vm.prank(delegate);
+        sender.configureDestination(MAINNET_EID, "", false);
+
+        assertTrue(sender.isPublishLive(address(safeCaller)), "live via ARB_EID");
+
+        (address[] memory owners, bool[] memory shouldAdd) = _owners();
         safeCaller.publishConfigureOwners(owners, shouldAdd, 2);
+
+        // Last LZ send was to ARB_EID, not MAINNET_EID — stale entry skipped, live one fired.
+        (uint32 dstEid, ) = endpoint.lastSendArgs();
+        assertEq(uint256(dstEid), uint256(ARB_EID));
+    }
+
+    function test_isPublishLive_isFalse_whenOnlyStaleEnablements() public {
+        // safeCaller has MAINNET_EID enabled (from setUp). Remove it globally.
+        vm.prank(delegate);
+        sender.configureDestination(MAINNET_EID, "", false);
+
+        assertFalse(sender.isPublishLive(address(safeCaller)));
+        // The raw enabled set still contains the stale entry — that's the bookkeeping that
+        // `disable` lets an operator clear.
+        uint32[] memory enabled = sender.getEnabledDestinations(address(safeCaller));
+        assertEq(enabled.length, 1);
+        assertEq(uint256(enabled[0]), uint256(MAINNET_EID));
+    }
+
+    function test_disable_removesStaleEnablement() public {
+        vm.prank(delegate);
+        sender.configureDestination(MAINNET_EID, "", false);
+        assertTrue(sender.isEnabled(address(safeCaller), MAINNET_EID), "stale entry persists pre-disable");
+
+        vm.expectEmit(true, true, true, true);
+        emit IOwnershipBridgeSender.OwnershipBridgeDisabled(address(safeCaller), MAINNET_EID);
+        vm.prank(etherFiWallet);
+        sender.disable(address(safeCaller), MAINNET_EID);
+
+        assertFalse(sender.isEnabled(address(safeCaller), MAINNET_EID));
+        assertEq(sender.getEnabledDestinations(address(safeCaller)).length, 0);
+    }
+
+    function test_disable_isIdempotent() public {
+        vm.startPrank(etherFiWallet);
+        sender.disable(address(safeCaller), MAINNET_EID); // present in setUp — actual remove
+        sender.disable(address(safeCaller), MAINNET_EID); // second call: no-op
+        vm.stopPrank();
+        assertFalse(sender.isEnabled(address(safeCaller), MAINNET_EID));
+    }
+
+    function test_disable_revertsWhen_callerLacksRole() public {
+        vm.expectRevert(IOwnershipBridgeSender.OnlyEtherFiWallet.selector);
+        sender.disable(address(safeCaller), MAINNET_EID);
     }
 
     function test_publish_revertsWhen_peerMissing() public {

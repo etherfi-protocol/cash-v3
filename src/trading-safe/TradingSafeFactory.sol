@@ -28,7 +28,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TradingSafeFactory")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant TradingSafeFactoryStorageLocation = 0x6f73a87d34a1d2cb7f9a2bca7e3a4f9e6f81b41c2a1c1e16e8c11f3a5c8b8800;
+    bytes32 private constant TradingSafeFactoryStorageLocation = 0x3c7de012baec722acfa4669d08302c573473ac1dafb576cfe023bafb13cbf900;
 
     /// @notice Role required to deploy a new `TradingSafe` (held by the BE lazy-deploy
     ///         service or 3CP admin for the misroute path).

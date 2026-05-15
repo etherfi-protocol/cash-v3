@@ -49,7 +49,7 @@ contract TradingLens is UpgradeableProxy, Constants {
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TradingLens")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant TradingLensStorageLocation = 0x7a3d2e9b6d3e7a5b4c2f9e1a6b8c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a5b00;
+    bytes32 private constant TradingLensStorageLocation = 0xe36dbb8a75abc1d7608041557d324682e89d9bd8028e199658ff7d4c86799100;
 
     /// @notice Emitted when a token is added to the supported-token set.
     /// @param token The token contract address.
@@ -183,11 +183,14 @@ contract TradingLens is UpgradeableProxy, Constants {
     }
 
     /**
-     * @dev Builds one snapshot row. Catches reverts in both the price call and the decimals
-     *      call so a bad ERC20 or stale oracle on one token doesn't poison the batch.
+     * @dev Builds one snapshot row. Defensive across the board — `balanceOf`, `decimals`,
+     *      and `price` each fall back to a safe default rather than reverting, so a single
+     *      paused / self-destructed / non-standard token (or a stale oracle) can't poison
+     *      the whole batch read.
      * @param safe The safe whose balance is being read.
      * @param token The token to snapshot.
-     * @return info Populated `TokenInfo`; `priceUsd`/`valueUsd` are zero on price failure.
+     * @return info Populated `TokenInfo`; any failed sub-call leaves that field at zero
+     *         (or 18 for decimals).
      */
     function _buildTokenInfo(address safe, address token) internal view returns (TokenInfo memory info) {
         info.token = token;
@@ -195,8 +198,8 @@ contract TradingLens is UpgradeableProxy, Constants {
         if (token == ETH) {
             info.balance = safe.balance;
             info.decimals = 18;
-        } else { 
-            info.balance = IERC20(token).balanceOf(safe);
+        } else {
+            info.balance = _safeTokenBalance(token, safe);
             info.decimals = _safeTokenDecimals(token);
         }
 
@@ -205,6 +208,19 @@ contract TradingLens is UpgradeableProxy, Constants {
             info.valueUsd = info.balance * p / 10 ** info.decimals;
         } catch {
             // Leave priceUsd / valueUsd at zero
+        }
+    }
+
+    /**
+     * @dev Reads `IERC20.balanceOf` defensively. A token that reverts on `balanceOf` (paused,
+     *      self-destructed, or otherwise broken) falls back to zero so it contributes
+     *      nothing instead of bricking the whole batch read.
+     */
+    function _safeTokenBalance(address token, address safe) internal view returns (uint256) {
+        try IERC20(token).balanceOf(safe) returns (uint256 b) {
+            return b;
+        } catch {
+            return 0;
         }
     }
 
