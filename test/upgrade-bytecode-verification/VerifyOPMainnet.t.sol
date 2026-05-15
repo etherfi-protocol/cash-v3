@@ -21,7 +21,7 @@ import { CashLens } from "../../src/modules/cash/CashLens.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
-import { PriceProvider } from "../../src/oracle/PriceProvider.sol";
+import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { BinSponsor } from "../../src/interfaces/ICashModule.sol";
 import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
@@ -222,7 +222,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Oracle ----
 
     function test_verifyBytecode_PriceProvider() public {
-        address local = address(new PriceProvider());
+        address local = address(new PriceProviderV2());
         _verify("PriceProvider", priceProviderImpl, local);
     }
 
