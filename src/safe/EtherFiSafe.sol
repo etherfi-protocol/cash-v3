@@ -6,6 +6,7 @@ import { EtherFiSafeBase } from "./EtherFiSafeBase.sol";
 import { EtherFiSafeCore } from "./EtherFiSafeCore.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 import { OwnerBridgePublisher } from "./OwnerBridgePublisher.sol";
+import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
 
 /**
  * @title EtherFiSafe
