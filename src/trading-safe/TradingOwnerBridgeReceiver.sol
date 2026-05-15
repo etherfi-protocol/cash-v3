@@ -2,19 +2,21 @@
 pragma solidity ^0.8.28;
 
 import { ITradingSafeBridgeReceiver } from "../interfaces/ITradingSafeBridgeReceiver.sol";
-import { EtherFiSafe } from "../safe/EtherFiSafe.sol";
+import { EtherFiSafeCore } from "../safe/EtherFiSafeCore.sol";
 
 /**
  * @title TradingOwnerBridgeReceiver
  * @author ether.fi
- * @notice Bridge-applied owner mutations for a destination-chain safe. Sits between
- *         `EtherFiSafe` and `TradingSafe` and exposes the four `applyBridge*` functions
- *         that the on-chain `OwnershipBridgeReceiver` peer is permitted to invoke.
- * @dev Abstract — deployed only as part of `TradingSafe`. The `applyBridge*` functions skip
- *      signature verification because the source-chain safe has already verified its
- *      owners' intents and `BRIDGE_RECEIVER` is a trusted on-chain peer.
+ * @notice Bridge-applied owner mutations for a destination-chain safe. Sits on top of
+ *         `EtherFiSafeCore` and exposes the four `applyBridge*` functions that the on-chain
+ *         `OwnershipBridgeReceiver` peer is permitted to invoke.
+ * @dev Inherits `EtherFiSafeCore` directly (NOT `EtherFiSafe`) so the cross-chain owner
+ *      bridge publisher is excluded from this contract's bytecode — destination-chain safes
+ *      don't publish. The `applyBridge*` functions skip signature verification because the
+ *      source-chain safe has already verified its owners' intents and `BRIDGE_RECEIVER` is
+ *      a trusted on-chain peer.
  */
-abstract contract TradingOwnerBridgeReceiver is EtherFiSafe, ITradingSafeBridgeReceiver {
+abstract contract TradingOwnerBridgeReceiver is EtherFiSafeCore, ITradingSafeBridgeReceiver {
     /// @notice Address of the `OwnershipBridgeReceiver` which is permitted to call the `applyBridge*` functions on this safe.
     address public immutable BRIDGE_RECEIVER;
 
@@ -34,7 +36,7 @@ abstract contract TradingOwnerBridgeReceiver is EtherFiSafe, ITradingSafeBridgeR
      * @param _bridgeReceiver Address of the `OwnershipBridgeReceiver` permitted to call
      *        `applyBridge*` functions on instances of this safe.
      */
-    constructor(address _dataProvider, address _bridgeReceiver) payable EtherFiSafe(_dataProvider) {
+    constructor(address _dataProvider, address _bridgeReceiver) payable EtherFiSafeCore(_dataProvider) {
         BRIDGE_RECEIVER = _bridgeReceiver;
     }
 

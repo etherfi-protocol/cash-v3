@@ -38,7 +38,7 @@ abstract contract OwnerBridgePublisher {
      *      any leftover (the sender may return unused fee if a per-destination quote
      *      shifted between our quote and dispatch).
      */
-    function _publishConfigureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold) internal {
+    function _publishConfigureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold) internal virtual {
         IOwnershipBridgeSender sender = _resolveLiveBridgeSender();
         if (address(sender) == address(0)) return;
         uint256 fee = sender.quoteConfigureOwners(address(this), owners, shouldAdd, threshold);
@@ -48,7 +48,7 @@ abstract contract OwnerBridgePublisher {
     }
 
     /// @dev See `_publishConfigureOwners`. Refund semantics are identical.
-    function _publishSetThreshold(uint8 threshold) internal {
+    function _publishSetThreshold(uint8 threshold) internal virtual {
         IOwnershipBridgeSender sender = _resolveLiveBridgeSender();
         if (address(sender) == address(0)) return;
         uint256 fee = sender.quoteSetThreshold(address(this), threshold);
@@ -59,7 +59,7 @@ abstract contract OwnerBridgePublisher {
 
     /// @dev Publishes a `recover`. The local timelock target is passed through so the
     ///      destination mirrors the same wall-clock activation moment.
-    function _publishRecover(address newOwner, uint256 incomingOwnerEffectiveAt) internal {
+    function _publishRecover(address newOwner, uint256 incomingOwnerEffectiveAt) internal virtual {
         IOwnershipBridgeSender sender = _resolveLiveBridgeSender();
         if (address(sender) == address(0)) return;
         uint256 fee = sender.quoteRecover(address(this), newOwner, incomingOwnerEffectiveAt);
@@ -69,7 +69,7 @@ abstract contract OwnerBridgePublisher {
     }
 
     /// @dev See `_publishConfigureOwners`. Refund semantics are identical.
-    function _publishCancelRecovery() internal {
+    function _publishCancelRecovery() internal virtual {
         IOwnershipBridgeSender sender = _resolveLiveBridgeSender();
         if (address(sender) == address(0)) return;
         uint256 fee = sender.quoteCancelRecovery(address(this));

@@ -5,7 +5,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { BeaconFactory } from "../beacon-factory/BeaconFactory.sol";
 import { ITradingSafeFactory } from "../interfaces/ITradingSafeFactory.sol";
-import { EtherFiSafe } from "../safe/EtherFiSafe.sol";
+import { EtherFiSafeCore } from "../safe/EtherFiSafeCore.sol";
 import { TradingSafe } from "./TradingSafe.sol";
 
 /**
@@ -107,7 +107,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
         if (!roleRegistry().hasRole(TRADING_SAFE_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
 
         bytes32 salt = _saltFor(sourceSafe);
-        bytes memory initData = abi.encodeWithSelector(EtherFiSafe.initialize.selector, _owners, _modules, _moduleSetupData, _threshold);
+        bytes memory initData = abi.encodeWithSelector(EtherFiSafeCore.initialize.selector, _owners, _modules, _moduleSetupData, _threshold);
 
         address deterministicAddr = BeaconFactory.getDeterministicAddress(salt);
         _getTradingSafeFactoryStorage().deployedAddresses.add(deterministicAddr);
