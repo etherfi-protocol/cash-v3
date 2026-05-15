@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { stdJson } from "forge-std/StdJson.sol";
-import { console } from "forge-std/console.sol";
 
 import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
@@ -81,7 +80,6 @@ contract MidasModuleTest is SafeTestSetup {
         uint8 mTokenDecimals = mTokenOracle.decimals();
 
         uint256 minReturnAmount = amount * 10 ** (12 + mTokenDecimals) / uint256(mTokenAnswer);
-        console.log("minReturnAmount", minReturnAmount);
 
         bytes32 digestHash = keccak256(abi.encodePacked(midasModule.DEPOSIT_SIG(), block.chainid, address(midasModule), midasModule.getNonce(address(safe)), address(safe), abi.encode(address(usdc), address(midasToken), amount, minReturnAmount))).toEthSignedMessageHash();
 
