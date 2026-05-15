@@ -118,4 +118,11 @@ interface IEtherFiDataProvider {
      * @return roleRegistry Reference to the role registry contract
      */
     function roleRegistry() external view returns (IRoleRegistry);
+
+    /**
+     * @notice Returns the OwnershipBridgeSender address configured on this chain
+     * @dev Zero means no cross-chain owner bridging is wired up here. 
+     * @return Address of the bridge sender, or zero if bridging isn't wired up here
+     */
+    function getOwnershipBridgeSender() external view returns (address);
 }

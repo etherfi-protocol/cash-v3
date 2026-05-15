@@ -5,14 +5,17 @@ import { EIP712Upgradeable } from "@openzeppelin/contracts-upgradeable/utils/cry
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
+import { OwnerBridgePublisher } from "./OwnerBridgePublisher.sol";
 
 /**
  * @title EtherFiSafeBase
  * @author ether.fi
  * @notice Base contract for EtherFi safe implementations providing common functionality
- * @dev Implements EIP-712 typed data signing and core safe functionality
+ * @dev Implements EIP-712 typed data signing and core safe functionality. Inherits
+ *      `OwnerBridgePublisher` so owner-mutating safe entrypoints can call the matching
+ *      `publish*` on the chain's `OwnershipBridgeSender` after applying the local change.
  */
-abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
+abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable, OwnerBridgePublisher {
     /**
      * @notice Interface to the data provider contract
      * @dev Used to access protocol configuration and validation services
@@ -211,5 +214,10 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
     function _configureAdmin(address[] memory accounts, bool[] memory shouldAdd) internal {
         dataProvider.roleRegistry().configureSafeAdmins(accounts, shouldAdd);
         emit AdminsConfigured(accounts, shouldAdd);
+    }
+
+    /// @inheritdoc OwnerBridgePublisher
+    function _getDataProvider() internal view override returns (IEtherFiDataProvider) {
+        return dataProvider;
     }
 }

@@ -41,8 +41,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
         uint256 recoveryDelayPeriod;
         /// @notice Default modules
         EnumerableSetLib.AddressSet defaultModules;
-        /// @notice Address of the refund wallet 
+        /// @notice Address of the refund wallet
         address refundWallet;
+        /// @notice Address of the OwnershipBridgeSender on this chain.
+        address ownershipBridgeSender;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
@@ -155,6 +157,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param oldPeriod Old recovery delay period in seconds
     /// @param newPeriod New recovery delay period in seconds
     event RecoveryDelayPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
+
+    /// @notice Emitted when the OwnershipBridgeSender address is updated
+    /// @param oldSender Previous sender address (zero before first configuration)
+    /// @param newSender New sender address (zero disables bridging)
+    event OwnershipBridgeSenderUpdated(address oldSender, address newSender);
 
     /**
      * @dev Internal function to access the contract's storage
@@ -312,6 +319,27 @@ contract EtherFiDataProvider is UpgradeableProxy {
     function setCashModule(address cashModule) external {
         _onlyDataProviderAdmin();
         _setCashModule(cashModule);
+    }
+
+    /**
+     * @notice Updates the OwnershipBridgeSender address used by EtherFiSafes to publish
+     *         owner mutations to destination chains via LayerZero.
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE.
+     * @param sender Address of the OwnershipBridgeSender on this chain (zero to disable).
+     */
+    function setOwnershipBridgeSender(address sender) external {
+        _onlyDataProviderAdmin();
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+        emit OwnershipBridgeSenderUpdated($.ownershipBridgeSender, sender);
+        $.ownershipBridgeSender = sender;
+    }
+
+    /**
+     * @notice Returns the OwnershipBridgeSender address configured on this chain.
+     * @return Address of the bridge sender, or zero if bridging isn't wired up here.
+     */
+    function getOwnershipBridgeSender() public view returns (address) {
+        return _getEtherFiDataProviderStorage().ownershipBridgeSender;
     }
 
     /**

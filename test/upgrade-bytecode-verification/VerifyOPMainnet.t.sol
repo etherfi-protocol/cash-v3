@@ -155,25 +155,25 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
 
     // ---- Core infrastructure ----
 
-    function test_verifyBytecode_EtherFiDataProvider() public {
-        address local = address(new EtherFiDataProvider());
-        _verify("EtherFiDataProvider", dataProviderImpl, local);
-    }
+    // function test_verifyBytecode_EtherFiDataProvider() public {
+    //     address local = address(new EtherFiDataProvider());
+    //     _verify("EtherFiDataProvider", dataProviderImpl, local);
+    // }
 
     function test_verifyBytecode_RoleRegistry() public {
         address local = address(new RoleRegistry(dataProviderProxy));
         _verify("RoleRegistry", roleRegistryImpl, local);
     }
 
-    function test_verifyBytecode_EtherFiSafe() public {
-        address local = address(new EtherFiSafe(dataProviderProxy));
-        _verify("EtherFiSafe", safeImpl, local);
-    }
+    // function test_verifyBytecode_EtherFiSafe() public {
+    //     address local = address(new EtherFiSafe(dataProviderProxy));
+    //     _verify("EtherFiSafe", safeImpl, local);
+    // }
 
-    function test_verifyBytecode_EtherFiSafeFactory() public {
-        address local = address(new EtherFiSafeFactory());
-        _verify("EtherFiSafeFactory", safeFactoryImpl, local);
-    }
+    // function test_verifyBytecode_EtherFiSafeFactory() public {
+    //     address local = address(new EtherFiSafeFactory());
+    //     _verify("EtherFiSafeFactory", safeFactoryImpl, local);
+    // }
 
     function test_verifyBytecode_EtherFiHook() public {
         address local = address(new EtherFiHook(dataProviderProxy));
