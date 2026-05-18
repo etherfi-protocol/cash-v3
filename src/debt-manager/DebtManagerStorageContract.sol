@@ -369,6 +369,11 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @notice Error thrown when insufficient liquidity is available
      */
     error InsufficientLiquidityPleaseTryAgainLater();
+
+    /**
+     * @notice Error thrown when liquidation is attempted while a OneInch swap is in flight for the user
+     */
+    error SwapInProgress();
     
     /**
      * @notice Error thrown when liquid amount is less than required

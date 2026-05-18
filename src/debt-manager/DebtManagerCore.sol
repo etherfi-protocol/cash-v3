@@ -12,6 +12,10 @@ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { DebtManagerStorageContract } from "./DebtManagerStorageContract.sol";
 
+interface IOneInchSwapModuleLock {
+    function swapInProgress(address safe) external view returns (bool);
+}
+
 /**
  * @title DebtManagerCore
  * @author ether.fi
@@ -524,7 +528,14 @@ contract DebtManagerCore is DebtManagerStorageContract {
         uint256 interestIndex = _getDebtManagerStorage().borrowTokenConfig[borrowToken].interestIndexSnapshot;
         if (!isBorrowToken(borrowToken)) revert UnsupportedBorrowToken();
         if (!liquidatable(user)) revert CannotLiquidateYet();
-        
+
+        // Block liquidation while the user has an open 1inch swap. The Safe's balance can be
+        // temporarily reduced during a Fusion fill or a classic swap, and a malicious LOP filler
+        // or maker could otherwise call liquidate() from inside _fill while the Safe appears
+        // undercollateralized.
+        address oneInchModule = etherFiDataProvider.getOneInchSwapModule();
+        if (oneInchModule != address(0) && IOneInchSwapModuleLock(oneInchModule).swapInProgress(user)) revert SwapInProgress();
+
         _liquidateUser(user, borrowToken, collateralTokensPreference, interestIndex);
     }
 

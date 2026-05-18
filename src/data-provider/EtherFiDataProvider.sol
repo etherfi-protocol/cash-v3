@@ -41,8 +41,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
         uint256 recoveryDelayPeriod;
         /// @notice Default modules
         EnumerableSetLib.AddressSet defaultModules;
-        /// @notice Address of the refund wallet 
+        /// @notice Address of the refund wallet
         address refundWallet;
+        /// @notice Address of the OneInch swap module (consulted by EtherFiHook + DebtManager)
+        address oneInchSwapModule;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
@@ -145,6 +147,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /// @param oldHookAddress Previous hook address
     /// @param newHookAddress New hook address
     event HookAddressUpdated(address oldHookAddress, address newHookAddress);
+
+    /// @notice Emitted when the OneInch swap module address is updated
+    /// @param oldModule Previous OneInch swap module address
+    /// @param newModule New OneInch swap module address
+    event OneInchSwapModuleUpdated(address oldModule, address newModule);
 
     /// @notice Emitted when the price provider is updated
     /// @param oldPriceProvider Previous price provider address
@@ -315,6 +322,18 @@ contract EtherFiDataProvider is UpgradeableProxy {
     }
 
     /**
+     * @notice Updates the address of the OneInch swap module
+     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE. May be zero to disable.
+     * @param module New OneInch swap module address (zero address clears it)
+     */
+    function setOneInchSwapModule(address module) external {
+        _onlyDataProviderAdmin();
+        EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+        emit OneInchSwapModuleUpdated($.oneInchSwapModule, module);
+        $.oneInchSwapModule = module;
+    }
+
+    /**
      * @notice Checks if a module address is whitelisted
      * @param module Address to check
      * @return bool True if the module is whitelisted, false otherwise
@@ -410,6 +429,14 @@ contract EtherFiDataProvider is UpgradeableProxy {
      */
     function getHookAddress() public view returns (address) {
         return _getEtherFiDataProviderStorage().hook;
+    }
+
+    /**
+     * @notice Returns the OneInch swap module address (zero if not configured)
+     * @return Address of the OneInch swap module
+     */
+    function getOneInchSwapModule() public view returns (address) {
+        return _getEtherFiDataProviderStorage().oneInchSwapModule;
     }
 
     /**

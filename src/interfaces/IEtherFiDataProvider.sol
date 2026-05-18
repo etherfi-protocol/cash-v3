@@ -99,6 +99,12 @@ interface IEtherFiDataProvider {
      */
     function getHookAddress() external view returns (address);
 
+    /**
+     * @notice Returns the OneInch swap module address (zero if not configured)
+     * @return Address of the OneInch swap module
+     */
+    function getOneInchSwapModule() external view returns (address);
+
     function getEtherFiSafeFactory() external view returns (address);
 
     /**

@@ -1,6 +1,7 @@
 {
 	"dependencies": {
 		"@1inch/limit-order-protocol-contract": "^4.3.3",
+		"@1inch/solidity-utils": "6.6.0",
 		"@safe-global/api-kit": "^3.0.1",
 		"@safe-global/protocol-kit": "^6.0.3",
 		"@safe-global/types-kit": "^2.0.1",
