@@ -18,6 +18,12 @@ interface IOneInchSwapModule {
     /// @notice 1inch Aggregation Router address used by the module
     function aggregationRouter() external view returns (address);
 
+    /// @notice 1inch Fusion `SimpleSettlement` extension address. Authorized caller of
+    ///         `postInteraction` when the BE constructs a Settlement-routed Fusion order
+    ///         (Settlement chains into us via FeeTaker's trailing-target pattern). For plain-LOP
+    ///         orders, LOP calls `postInteraction` directly and `msg.sender == aggregationRouter`.
+    function settlementContract() external view returns (address);
+
     /// @notice Returns the pending Fusion swap for a Safe (zeros when none)
     function getPendingSwap(address safe) external view returns (PendingSwap memory);
 

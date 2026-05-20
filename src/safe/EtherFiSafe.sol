@@ -239,51 +239,30 @@ contract EtherFiSafe is EtherFiSafeBase, ModuleManager, RecoveryManager, MultiSi
     // ══════════════════════════════════════════════
 
     /**
-     * @notice ERC-1271 signature validation
-     * @dev Two paths:
-     *      1. 1inch fill binding. When the caller is the 1inch Aggregation Router (resolved
-     *         via the OneInchSwapModule registered on the data provider), the hash is valid
-     *         iff it matches the Safe's currently registered pending swap orderHash. The
-     *         `signature` blob is ignored — on-chain pending state is the authorization.
-     *      2. Generic ERC-1271. Otherwise the `signature` blob is decoded as
-     *         `(address[] signers, bytes[] sigs)` and validated as a multi-owner quorum.
-     *      Malformed blobs and `checkSignatures` reverts both return 0xffffffff.
+     * @notice ERC-1271 signature validation, scoped to 1inch Fusion fills
+     * @dev The only authorized caller is the 1inch Aggregation Router (resolved via the
+     *      OneInchSwapModule registered on the data provider). When the caller matches, the
+     *      hash is valid iff it equals the Safe's currently registered pending-swap orderHash;
+     *      the `signature` blob is ignored — on-chain pending state is the authorization.
+     *      All other callers receive `0xffffffff`.
      * @param hash The hash to validate
-     * @param signature ABI-encoded (address[] signers, bytes[] sigs); ignored on path 1
      * @return magicValue 0x1626ba7e if valid, 0xffffffff otherwise
      */
-    function isValidSignature(bytes32 hash, bytes calldata signature) external view override returns (bytes4) {
+    function isValidSignature(bytes32 hash, bytes calldata) external view override returns (bytes4) {
         address oneInch = dataProvider.getOneInchSwapModule();
-        if (oneInch != address(0) && msg.sender == IOneInchSwapModule(oneInch).aggregationRouter()) {
-            IOneInchSwapModule.PendingSwap memory p = IOneInchSwapModule(oneInch).getPendingSwap(address(this));
-            // Check every field of the pending swap is populated, not just the hash. Belt-and-
-            // suspenders against a malformed entry where orderHash happens to collide.
-            if (
-                p.fromAmount != 0
-                && p.orderHash == hash
-                && p.fromToken != address(0)
-                && p.toToken != address(0)
-            ) return bytes4(0x1626ba7e);
+        if (oneInch == address(0) || msg.sender != IOneInchSwapModule(oneInch).aggregationRouter()) {
             return bytes4(0xffffffff);
         }
-        try this.checkSignatureBlob(hash, signature) returns (bool ok) {
-            return ok ? bytes4(0x1626ba7e) : bytes4(0xffffffff);
-        } catch {
-            return 0xffffffff;
-        }
-    }
-
-    /**
-     * @notice Helper for `isValidSignature` — decodes `(address[], bytes[])` and verifies quorum
-     * @dev Exposed as external so `isValidSignature` can wrap the call in try/catch.
-     *      Safe for external callers: pure view, no state changes.
-     * @param hash The hash being validated
-     * @param signature ABI-encoded (address[] signers, bytes[] sigs)
-     * @return True if signatures meet quorum
-     */
-    function checkSignatureBlob(bytes32 hash, bytes calldata signature) external view returns (bool) {
-        (address[] memory signers, bytes[] memory sigs) = abi.decode(signature, (address[], bytes[]));
-        return checkSignatures(hash, signers, sigs);
+        IOneInchSwapModule.PendingSwap memory p = IOneInchSwapModule(oneInch).getPendingSwap(address(this));
+        // Check every field of the pending swap is populated, not just the hash. Belt-and-
+        // suspenders against a malformed entry where orderHash happens to collide.
+        if (
+            p.fromAmount != 0
+            && p.orderHash == hash
+            && p.fromToken != address(0)
+            && p.toToken != address(0)
+        ) return bytes4(0x1626ba7e);
+        return bytes4(0xffffffff);
     }
 
     /**

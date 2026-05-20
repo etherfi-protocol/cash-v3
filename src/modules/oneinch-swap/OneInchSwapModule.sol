@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import { IOrderMixin } from "@1inch/limit-order-protocol-contract/contracts/interfaces/IOrderMixin.sol";
 import { IPreInteraction } from "@1inch/limit-order-protocol-contract/contracts/interfaces/IPreInteraction.sol";
@@ -13,37 +12,37 @@ import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ISwapInteractionInterface } from "../../interfaces/ISwapInteractionInterface.sol";
+import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 
 /**
  * @title OneInchSwapModule
  * @author ether.fi
- * @notice Module for executing token swaps through 1inch — supports both Classic (DEX) and Fusion (RFQ) modes.
+ * @notice Module for executing token swaps through 1inch — Classic (DEX) and Fusion (RFQ).
  *
- * @dev Classic (DEX aggregation): single atomic transaction. The Safe approves the router, the
- *      router swaps via DEXes, the module verifies the output, and the approval is revoked.
- *      Tokens never leave the Safe. Entry point: `swap()`.
+ * @dev Classic: atomic single-tx swap via `swap()`. Safe approves router, router swaps via DEXes,
+ *      module verifies output, approval is revoked. Tokens never leave the Safe.
  *
- *      Fusion (intent-based / RFQ): two-step async flow. The Safe is the maker in a 1inch
- *      Limit Order Protocol order. `requestSwap()` records the intent, constructs the LOP
- *      order on-chain with a fixed extension that pins PRE_INTERACTION and POST_INTERACTION
- *      callbacks to this module, registers a pending withdrawal with CashModule, and approves
- *      the 1inch router. Authorization at fill time goes through `EtherFiSafe.isValidSignature`,
- *      which is bound to the on-chain `pendingSwaps` entry — only the exact orderHash
- *      registered by `requestSwap` can be filled. `preInteraction()` validates the live order
- *      against the registered intent; `postInteraction()` settles balances, revokes the
- *      approval, releases the CashModule withdrawal, and asserts solvency. Entry points:
- *      `requestSwap() -> {preInteraction(), postInteraction()}` (or `cancelSwap()` to abort).
+ *      Fusion: async intent-based swap via `requestSwap()` → fill → `{preInteraction(),
+ *      postInteraction()}`, or `cancelSwap()` to abort. The Safe is the maker in a LOP order
+ *      built by the backend (plain-LOP or Settlement-routed). `requestSwap()` verifies the order
+ *      against the user-signed intent, checks MakerTraits + extension hook routing, and binds the
+ *      router-computed orderHash into the EIP-712 signature. At fill time `preInteraction`
+ *      snapshots the Safe's fromToken/toToken balances; `postInteraction` enforces the deltas
+ *      against `fromAmount` / `minToAmount`. `EtherFiSafe.isValidSignature` authorizes the fill by
+ *      comparing the LOP-computed orderHash against `pendingSwaps[safe].orderHash`.
  */
-contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule, ISwapInteractionInterface, IPreInteraction {
+contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, IBridgeModule, ISwapInteractionInterface, IPreInteraction {
     using AddressLib for Address;
 
     // ──────────────────────────────────────────────
     //  Structs
     // ──────────────────────────────────────────────
 
-    /// @notice State of a pending Fusion swap for a Safe
+    /// @notice State of a pending Fusion swap for a Safe. `minToAmount` is the net amount the
+    ///         Safe must receive (post-fee, if any) — enforced at `postInteraction` via the
+    ///         balance-delta check.
     struct PendingSwap {
         address fromToken;
         address toToken;
@@ -52,49 +51,97 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
         bytes32 orderHash;
     }
 
+    /// @notice Intent fields the Safe owners sign over. The full LOP order is constructed by the
+    ///         backend; on-chain we verify the supplied order matches this intent and that its
+    ///         safety hooks (pre + post interaction) route through this module.
+    struct SwapIntent {
+        address safe;
+        address fromToken;
+        address toToken;
+        uint256 fromAmount;
+        uint256 minToAmount;
+        uint40 expiration;
+    }
+
     // ──────────────────────────────────────────────
-    //  Immutables
+    //  Immutables (set in the implementation constructor; baked into bytecode)
     // ──────────────────────────────────────────────
 
-    /// @notice 1inch Aggregation Router address (shared by Classic and Fusion)
+    /// @notice 1inch Aggregation Router address (shared by Classic and Fusion).
     address public immutable aggregationRouter;
 
-    /// @notice Role identifier required to call `recoverStuckMakerTokens`. Shares the same hash
-    ///         as `EtherFiDataProvider.DATA_PROVIDER_ADMIN_ROLE`.
+    /// @notice 1inch Fusion `SimpleSettlement` extension address.
+    address public immutable settlementContract;
+
+    /// @notice Operating safe — destination for `rescueFunds`. Tokens stranded at this module
+    ///         (e.g. mis-sent transfers) are recoverable only here.
+    address public immutable operatingSafe;
+
+    // ──────────────────────────────────────────────
+    //  Roles
+    // ──────────────────────────────────────────────
+
+    /// @notice Required to call `rescueFunds`. Shares the same hash as
+    ///         `EtherFiDataProvider.DATA_PROVIDER_ADMIN_ROLE`.
     bytes32 public constant DATA_PROVIDER_ADMIN_ROLE = keccak256("DATA_PROVIDER_ADMIN_ROLE");
 
+    /// @notice Backend-keeper role authorized to cancel a Safe's pending Fusion swap without an
+    ///         owner-quorum signature (e.g. for expired orders, stuck intents, ops cleanup).
+    bytes32 public constant ONEINCH_SWAP_CANCEL_ROLE = keccak256("ONEINCH_SWAP_CANCEL_ROLE");
+
     // ──────────────────────────────────────────────
-    //  State
+    //  ERC-7201 namespaced storage
     // ──────────────────────────────────────────────
 
-    /// @notice Pending Fusion swap per Safe (only one at a time)
-    mapping(address safe => PendingSwap) public pendingSwaps;
+    /// @custom:storage-location erc7201:etherfi.storage.OneInchSwapModule
+    struct OneInchSwapModuleStorage {
+        /// @notice Pending Fusion swap per Safe (only one at a time)
+        mapping(address safe => PendingSwap) pendingSwaps;
+        /// @notice True for the duration of an in-flight router fill (set in preInteraction,
+        ///         cleared in postInteraction) or a classic `swap()` call. `DebtManager.liquidate`
+        ///         reverts when set, blocking same-tx liquidation during a fill.
+        mapping(address safe => bool) swapInProgress;
+    }
 
-    /// @notice True for the lifetime of an open Fusion intent (set in `requestSwap`, cleared on
-    ///         settle / cancel / preempt) or for the duration of a classic `swap()` call.
-    ///         `DebtManager.liquidate` reverts when this is set, so a third party cannot
-    ///         liquidate a Safe while it has an in-flight order.
-    mapping(address safe => bool) public swapInProgress;
+    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.OneInchSwapModule")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant OneInchSwapModuleStorageLocation = 0xf4914529dfb4f942d30987dd4030d70d0d5360342620a3ce557acbdc08173500;
+
+    function _getStorage() private pure returns (OneInchSwapModuleStorage storage $) {
+        assembly {
+            $.slot := OneInchSwapModuleStorageLocation
+        }
+    }
+
+    // ──────────────────────────────────────────────
+    //  Transient storage slots (per-safe balance snapshots, pre → post)
+    // ──────────────────────────────────────────────
+
+    /// @dev Transient-storage namespace constants. Per-safe slots derived via
+    ///      `keccak256(abi.encode(safe, _FROM_BAL_TSLOT))`. Scoped to a single tx — cleared
+    ///      automatically by the EVM at the end of the call.
+    bytes32 private constant _FROM_BAL_TSLOT = keccak256("etherfi.oneinch.transient.fromBal");
+    bytes32 private constant _TO_BAL_TSLOT = keccak256("etherfi.oneinch.transient.toBal");
 
     // ──────────────────────────────────────────────
     //  EIP-712 type hashes (unified with EtherFiSafe's signing scheme)
     // ──────────────────────────────────────────────
 
-    /// @notice Classic (DEX aggregation) swap typehash. The `module` field binds the signature
-    ///         to this contract so it cannot be replayed against a different module sharing the
-    ///         Safe's domain separator.
+    /// @notice Classic (DEX aggregation) swap typehash. `module` binds the signature to this
+    ///         contract so it cannot be replayed across modules sharing the Safe's domain.
     bytes32 public constant SWAP_TYPEHASH = keccak256("ClassicSwap(address safe,address module,address fromAsset,address toAsset,uint256 fromAssetAmount,uint256 minToAssetAmount,bytes data,uint256 nonce)");
 
-    /// @notice Fusion request typehash — owners sign over the swap intent + expiration. The
-    ///         orderHash is derived from these fields on-chain, so no separate orderHash
-    ///         signature is needed. `module` binds the signature to this contract.
-    bytes32 public constant REQUEST_SWAP_TYPEHASH = keccak256("RequestSwap(address safe,address module,address fromToken,address toToken,uint256 fromAmount,uint256 minToAmount,uint40 expiration,uint256 nonce)");
+    /// @notice Fusion request typehash. Owners sign over the swap intent + the LOP orderHash —
+    ///         binding `orderHash` commits the user to the exact order shape (auction params,
+    ///         resolver whitelist, fee structure, salt, MakerTraits). `module` binds the
+    ///         signature to this contract.
+    bytes32 public constant REQUEST_SWAP_TYPEHASH = keccak256("RequestSwap(address safe,address module,address fromToken,address toToken,uint256 fromAmount,uint256 minToAmount,uint40 expiration,bytes32 orderHash,uint256 nonce)");
 
-    /// @notice Fusion cancel typehash. `module` binds the signature to this contract.
+    /// @notice Fusion cancel typehash for the owner-quorum cancel path. `module` binds the
+    ///         signature to this contract.
     bytes32 public constant CANCEL_SWAP_TYPEHASH = keccak256("CancelSwap(address safe,address module,uint256 nonce)");
 
     // ──────────────────────────────────────────────
-    //  1inch order construction constants
+    //  LOP MakerTraits layout constants
     // ──────────────────────────────────────────────
 
     /// @dev MakerTraits flag bit positions (from MakerTraitsLib).
@@ -105,14 +152,6 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
 
     /// @dev Bit offset of the uint40 expiration field within MakerTraits.
     uint256 private constant _EXPIRATION_OFFSET = 80;
-
-    /// @dev Bit offset of the uint40 nonceOrEpoch field within MakerTraits. With NO_PARTIAL_FILLS,
-    ///      LOP's `useBitInvalidator()` is true and the per-fill bit lives at
-    ///      `_bitInvalidator[maker]._raw[nonceOrEpoch >> 8]` bit `nonceOrEpoch & 0xff`. The safe
-    ///      nonce (lower 40 bits) is packed here so every order from a given Safe targets a
-    ///      distinct invalidator cell — otherwise the second fill from any Safe would revert
-    ///      with `BitInvalidatedOrder()`.
-    uint256 private constant _NONCE_OR_EPOCH_OFFSET = 120;
 
     // ──────────────────────────────────────────────
     //  Events
@@ -127,11 +166,11 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     /// @notice Emitted when a Fusion swap is settled after fill
     event FusionSwapSettled(address indexed safe, address indexed fromToken, address indexed toToken, uint256 fromAmount, uint256 receivedAmount);
 
-    /// @notice Emitted when a Fusion swap is cancelled
+    /// @notice Emitted when a Fusion swap is cancelled (owner sig, role-EOA, or card-spend preemption)
     event FusionSwapCancelled(address indexed safe, address indexed fromToken, bytes32 indexed orderHash);
 
-    /// @notice Emitted when admin recovers maker tokens stuck at the module address after a misconfigured request
-    event FusionSwapRecovered(address indexed safe, address indexed fromToken, uint256 amount, bytes32 orderHash);
+    /// @notice Emitted when admin sweeps stranded tokens out of this module to the operating safe
+    event FundsRescued(address indexed token, uint256 amount);
 
     // ──────────────────────────────────────────────
     //  Errors
@@ -143,25 +182,66 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     error NoPendingSwap();
     error SwapAlreadyPending();
     error InsufficientReceivedAmount();
+    error UnexpectedFromTokenDelta();
     error OrderHashMismatch();
     error OrderTokenMismatch();
+    error OrderMakerMismatch();
     error UnexpectedMakingAmount();
+    error UnexpectedTakingAmount();
     error OnlyAggregationRouter();
+    error OnlyAggregationRouterOrSettlement();
     error NativeETHNotSupported();
-    error Unauthorized();
     error WithdrawalDelayMisconfigured();
+    error MissingMakerTraitsFlag();
+    error ExpirationMismatch();
+    error InvalidExtension();
+    error WrongPreInteractionTarget();
+    error WrongPostInteractionTarget();
+    error SaltExtensionMismatch();
+    error MissingSnapshot();
 
     // ──────────────────────────────────────────────
-    //  Constructor
+    //  Constructor + initializer
     // ──────────────────────────────────────────────
 
     /**
-     * @param _aggregationRouter 1inch Aggregation Router address
+     * @param _aggregationRouter 1inch Aggregation Router address (== LOP address)
+     * @param _settlementContract 1inch `SimpleSettlement` extension address (Fusion settlement layer)
      * @param _dataProvider EtherFi data provider address
+     * @param _operatingSafe Operating safe address — destination for `rescueFunds`
      */
-    constructor(address _aggregationRouter, address _dataProvider) ModuleBase(_dataProvider) ModuleCheckBalance(_dataProvider) {
+    constructor(address _aggregationRouter, address _settlementContract, address _dataProvider, address _operatingSafe) ModuleBase(_dataProvider) ModuleCheckBalance(_dataProvider) {
         if (_aggregationRouter == address(0) || _aggregationRouter.code.length == 0) revert InvalidInput();
+        if (_settlementContract == address(0) || _settlementContract.code.length == 0) revert InvalidInput();
+        if (_operatingSafe == address(0)) revert InvalidInput();
         aggregationRouter = _aggregationRouter;
+        settlementContract = _settlementContract;
+        operatingSafe = _operatingSafe;
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initializes the proxy with the role registry
+     * @param _roleRegistry Address of the RoleRegistry that gates upgrades and pause
+     */
+    function initialize(address _roleRegistry) external initializer {
+        __UpgradeableProxy_init(_roleRegistry);
+    }
+
+    // ══════════════════════════════════════════════
+    //  Public views
+    // ══════════════════════════════════════════════
+
+    /// @notice Returns the pending Fusion swap details for a Safe
+    function getPendingSwap(address safe) external view returns (PendingSwap memory) {
+        return _getStorage().pendingSwaps[safe];
+    }
+
+    /// @notice True for the duration of an in-flight router fill (preInteraction → postInteraction)
+    ///         or a classic `swap()` call. Read by `DebtManager.liquidate` to block liquidation
+    ///         while a Safe's tokens are mid-transfer.
+    function swapInProgress(address safe) external view returns (bool) {
+        return _getStorage().swapInProgress[safe];
     }
 
     // ══════════════════════════════════════════════
@@ -170,36 +250,27 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
 
     /**
      * @notice Executes an atomic token swap through 1inch DEX aggregation
-     * @dev Tokens never leave the Safe. The Safe approves the router, the router executes the
-     *      swap, the module verifies the output, and the approval is revoked.
+     * @dev Tokens never leave the Safe. The Safe approves the router, the router swaps, the
+     *      module verifies the output, the approval is revoked.
      *
-     *      Reverts if the Safe has a pending Fusion swap — the trailing `approve(router, 0)`
-     *      in `_classicSwapERC20` would otherwise clobber the live Fusion allowance and brick
-     *      the Fusion fill.
+     *      Reverts if a Fusion swap is pending on the Safe — the trailing `approve(router, 0)`
+     *      would otherwise wipe the live Fusion allowance.
      *
-     *      Arms `swapInProgress[safe]` for the duration of the router call so that liquidation
-     *      cannot fire mid-swap when the Safe is temporarily mid-transfer (matters when `data`
-     *      is a LOP fillOrder calldata whose maker-side hooks could trigger liquidate()).
+     *      Arms `swapInProgress[safe]` around the router call so liquidation cannot fire while
+     *      a LOP fillOrder calldata moves tokens through the Safe's maker-side hooks.
      *
-     *      Performs an explicit `ensureHealth` at the end — `EtherFiHook.postOpHook` skips its
-     *      automatic LTV check for this module, so we enforce it here instead.
-     * @param safe Address of the EtherFi Safe
-     * @param fromAsset Token to sell (or ETH address for native)
-     * @param toAsset Token to buy (or ETH address for native)
-     * @param fromAssetAmount Amount of fromAsset to sell
-     * @param minToAssetAmount Minimum amount of toAsset to receive
-     * @param data Raw 1inch router calldata (from 1inch Swap API)
-     * @param signers Safe owner addresses authorizing this swap
-     * @param signatures Signatures from the signers
+     *      `_ensureHealth` at the tail because `EtherFiHook.postOpHook` skips its automatic LTV
+     *      check for this module.
      */
-    function swap(address safe, address fromAsset, address toAsset, uint256 fromAssetAmount, uint256 minToAssetAmount, bytes calldata data, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
-        if (pendingSwaps[safe].fromAmount != 0) revert SwapAlreadyPending();
+    function swap(address safe, address fromAsset, address toAsset, uint256 fromAssetAmount, uint256 minToAssetAmount, bytes calldata data, address[] calldata signers, bytes[] calldata signatures) external nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
+        OneInchSwapModuleStorage storage $ = _getStorage();
+        if ($.pendingSwaps[safe].fromAmount != 0) revert SwapAlreadyPending();
 
         _verifyClassicSwap(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data, signers, signatures);
 
-        swapInProgress[safe] = true;
+        $.swapInProgress[safe] = true;
         _classicSwap(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data);
-        swapInProgress[safe] = false;
+        $.swapInProgress[safe] = false;
 
         _ensureHealth(safe);
     }
@@ -217,111 +288,124 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     // ══════════════════════════════════════════════
 
     /**
-     * @notice Opens a Fusion swap: constructs the LOP order, records intent, registers pending withdrawal, approves router
-     * @dev Atomically:
-     *      1. builds a fixed extension that pins PRE + POST interaction callbacks to this module
-     *      2. builds MakerTraits with HAS_EXTENSION | PRE_INTERACTION | POST_INTERACTION | NO_PARTIAL_FILLS
-     *         and the user-supplied expiration
-     *      3. constructs the LOP `Order` struct (maker = safe, receiver = 0, makingAmount = fromAmount,
-     *         takingAmount = minToAmount, salt derived from useNonce + extension hash)
-     *      4. computes the orderHash by calling `aggregationRouter.hashOrder(order)`
-     *      5. verifies Safe-owner quorum over the intent + expiration
-     *      6. registers a pending withdrawal on CashModule (preemptable by card spend) and approves the router
+     * @notice Opens a Fusion swap: validates the BE-constructed LOP order, records intent,
+     *         registers pending withdrawal, approves router
+     * @dev On-chain invariants enforced against the supplied order:
+     *      - intent fields match (maker, makerAsset, takerAsset, makingAmount, takingAmount)
+     *      - MakerTraits carries HAS_EXTENSION | PRE_INTERACTION | POST_INTERACTION | NO_PARTIAL_FILLS
+     *        and the user-intended expiration
+     *      - salt's lower 160 bits commit to `keccak256(extension)` per LOP's `isValidExtension`
+     *      - extension routes both pre-interaction and the trailing chained post-interaction
+     *        target through this module
      *
-     *      Because the entire order is built on-chain, requestSwap cannot register a hash that
-     *      corresponds to an order missing pre/post-interaction callbacks. Combined with
-     *      `EtherFiSafe.isValidSignature` binding to `pendingSwaps[safe].orderHash`, only this
-     *      exact reconstructed order can be filled.
-     *
-     *      With NO_PARTIAL_FILLS_FLAG, the LOP requires the taker to pay exactly `minToAmount`
-     *      for exactly `fromAmount` of maker tokens. The `minToAmount` therefore doubles as the
-     *      fixed taking amount — owners are signing off on this specific price.
-     * @param safe Address of the EtherFi Safe
-     * @param fromToken Token the Safe is selling
-     * @param toToken Token the Safe wants to receive
-     * @param fromAmount Maker amount (exact)
-     * @param minToAmount Taker amount; with NO_PARTIAL_FILLS this is the exact price the order will fill at
-     * @param expiration Unix-timestamp (uint40) after which the order is rejected by LOP. 0 means no expiry.
-     * @param signers Safe owner addresses authorizing this swap
-     * @param signatures Signatures from the signers
+     *      The router-computed orderHash is bound into the EIP-712 signature, so any BE-chosen
+     *      fee / auction / whitelist byte is authorized by the owner-quorum.
+     *      `EtherFiSafe.isValidSignature` later compares fill-time orderHash against
+     *      `pendingSwaps[safe].orderHash` — only this exact order can fill.
      */
-    function requestSwap(address safe, address fromToken, address toToken, uint256 fromAmount, uint256 minToAmount, uint40 expiration, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
-        if (pendingSwaps[safe].fromAmount != 0) revert SwapAlreadyPending();
-        if (fromToken == ETH || toToken == ETH) revert NativeETHNotSupported();
-        if (fromToken == toToken) revert SwappingToSameAsset();
-        if (fromAmount == 0 || minToAmount == 0) revert InvalidInput();
+    function requestSwap(SwapIntent calldata intent, IOrderMixin.Order calldata order, bytes calldata extension, address[] calldata signers, bytes[] calldata signatures) external nonReentrant whenNotPaused onlyEtherFiSafe(intent.safe) {
+        OneInchSwapModuleStorage storage $ = _getStorage();
+        if ($.pendingSwaps[intent.safe].fromAmount != 0) revert SwapAlreadyPending();
+        if (intent.fromToken == ETH || intent.toToken == ETH) revert NativeETHNotSupported();
+        if (intent.fromToken == intent.toToken) revert SwappingToSameAsset();
+        if (intent.fromAmount == 0 || intent.minToAmount == 0) revert InvalidInput();
 
-        // Fail closed if the cash-module's withdrawal delay is zero. The cash-module also
-        // substitutes a non-zero effective delay for this module's withdrawals; this check is
-        // belt-and-suspenders in case the cash-module-side guard ever regresses.
+        // Fail closed if the cash-module's withdrawal delay is zero — otherwise
+        // `requestWithdrawalByModule` would synchronously transfer maker tokens out of the Safe
+        // before the router approval is even set, stranding them at this module.
         _requireNonZeroWithdrawalDelay();
 
-        bytes32 orderHash = _verifyAndComputeOrderHash(safe, fromToken, toToken, fromAmount, minToAmount, expiration, signers, signatures);
+        _validateOrderAgainstIntent(intent, order);
+        _validateMakerTraits(intent.expiration, order.makerTraits);
+        _validateExtension(order.salt, extension);
 
-        // `_checkAmountAvailable` is intentionally skipped here. `requestWithdrawalByModule`
-        // cancels and replaces any existing pending withdrawal before committing, and its
-        // internal `_checkBalance` is the authoritative balance check.
-        cashModule.requestWithdrawalByModule(safe, fromToken, fromAmount);
+        bytes32 orderHash = IOrderMixin(aggregationRouter).hashOrder(order);
+        _verifyRequestSignature(intent, orderHash, signers, signatures);
 
-        PendingSwap storage p = pendingSwaps[safe];
-        p.fromToken = fromToken;
-        p.toToken = toToken;
-        p.fromAmount = fromAmount;
-        p.minToAmount = minToAmount;
+        _registerAndApprove(intent, orderHash);
+    }
+
+    /// @dev Storage writes + router approval + event emit. Extracted to keep `requestSwap`
+    ///      under the stack-depth limit.
+    function _registerAndApprove(SwapIntent calldata intent, bytes32 orderHash) internal {
+        // `requestWithdrawalByModule` replaces any prior pending withdrawal on the Safe and runs
+        // its own `_checkBalance`, so an explicit `_checkAmountAvailable` here would be redundant.
+        cashModule.requestWithdrawalByModule(intent.safe, intent.fromToken, intent.fromAmount);
+
+        PendingSwap storage p = _getStorage().pendingSwaps[intent.safe];
+        p.fromToken = intent.fromToken;
+        p.toToken = intent.toToken;
+        p.fromAmount = intent.fromAmount;
+        p.minToAmount = intent.minToAmount;
         p.orderHash = orderHash;
 
-        // Arm the liquidation lock for the full intent lifetime — set here, cleared on
-        // fill / cancel / preempt. A third party cannot liquidate a Safe with an open Fusion
-        // intent. CashModule-driven preemption (card spend) still clears the flag via
-        // `cancelBridgeByCashModule`.
-        swapInProgress[safe] = true;
+        _approveRouter(intent.safe, intent.fromToken, intent.fromAmount);
 
-        _approveRouter(safe, fromToken, fromAmount);
-
-        emit FusionSwapRequested(safe, fromToken, toToken, fromAmount, minToAmount, orderHash);
+        emit FusionSwapRequested(intent.safe, intent.fromToken, intent.toToken, intent.fromAmount, intent.minToAmount, orderHash);
     }
 
-    /// @dev Consumes the safe nonce, verifies the owner-quorum signature over the request struct,
-    ///      and returns the LOP orderHash for the reconstructed order. Extracted to flatten the
-    ///      stack in `requestSwap()`.
-    function _verifyAndComputeOrderHash(address safe, address fromToken, address toToken, uint256 fromAmount, uint256 minToAmount, uint40 expiration, address[] calldata signers, bytes[] calldata signatures) internal returns (bytes32) {
-        uint256 nonce_ = IEtherFiSafe(safe).useNonce();
-        bytes32 structHash = keccak256(abi.encode(REQUEST_SWAP_TYPEHASH, safe, address(this), fromToken, toToken, fromAmount, minToAmount, expiration, nonce_));
-        _verifyStructHash(safe, structHash, signers, signatures);
-        return _registerOrder(safe, fromToken, toToken, fromAmount, minToAmount, expiration, nonce_);
+    /// @dev Computes the REQUEST_SWAP_TYPEHASH struct hash, consumes a Safe nonce, and verifies
+    ///      the owner-quorum signature.
+    function _verifyRequestSignature(SwapIntent calldata intent, bytes32 orderHash, address[] calldata signers, bytes[] calldata signatures) internal {
+        uint256 nonce_ = IEtherFiSafe(intent.safe).useNonce();
+        bytes32 structHash = keccak256(abi.encode(REQUEST_SWAP_TYPEHASH, intent.safe, address(this), intent.fromToken, intent.toToken, intent.fromAmount, intent.minToAmount, intent.expiration, orderHash, nonce_));
+        _verifyStructHash(intent.safe, structHash, signers, signatures);
     }
 
-    /// @dev Builds the LOP order in-memory from the validated intent, asks the aggregator for its hash.
-    ///      Extracted to break stack pressure in `requestSwap()`.
-    function _registerOrder(address safe, address fromToken, address toToken, uint256 fromAmount, uint256 minToAmount, uint40 expiration, uint256 nonce_) internal view returns (bytes32 orderHash) {
-        bytes memory extension = _buildExtension();
-        uint256 extLower160 = uint256(keccak256(extension)) & type(uint160).max;
-
-        // Upper 96 bits of salt = safe nonce → guarantees orderHash uniqueness per requestSwap call.
-        // Lower 160 bits = keccak256(extension) lower 160 → satisfies LOP's `isValidExtension` rule.
-        uint256 salt = (nonce_ << 160) | extLower160;
-
-        // Pack the safe nonce (lower 40 bits) into MakerTraits.nonceOrEpoch so each order targets
-        // a distinct cell in LOP's per-maker bit invalidator. With NO_PARTIAL_FILLS, LOP's
-        // `useBitInvalidator()` is true; if every order shared `nonceOrEpoch = 0` they would all
-        // land on the same cell and only the first fill from a given Safe would succeed.
-        uint256 makerTraitsBits = _NO_PARTIAL_FILLS_FLAG | _PRE_INTERACTION_CALL_FLAG | _POST_INTERACTION_CALL_FLAG | _HAS_EXTENSION_FLAG | (uint256(expiration) << _EXPIRATION_OFFSET) | ((nonce_ & type(uint40).max) << _NONCE_OR_EPOCH_OFFSET);
-
-        IOrderMixin.Order memory order = IOrderMixin.Order({ salt: salt, maker: Address.wrap(uint256(uint160(safe))), receiver: Address.wrap(0), makerAsset: Address.wrap(uint256(uint160(fromToken))), takerAsset: Address.wrap(uint256(uint160(toToken))), makingAmount: fromAmount, takingAmount: minToAmount, makerTraits: MakerTraits.wrap(makerTraitsBits) });
-
-        orderHash = IOrderMixin(aggregationRouter).hashOrder(order);
+    /// @dev Verifies the order's intent-bearing fields match what the user signed.
+    function _validateOrderAgainstIntent(SwapIntent calldata intent, IOrderMixin.Order calldata order) internal pure {
+        if (order.maker.get() != intent.safe) revert OrderMakerMismatch();
+        if (order.makerAsset.get() != intent.fromToken || order.takerAsset.get() != intent.toToken) revert OrderTokenMismatch();
+        if (order.makingAmount != intent.fromAmount) revert UnexpectedMakingAmount();
+        if (order.takingAmount != intent.minToAmount) revert UnexpectedTakingAmount();
     }
 
-    /// @dev Reverts if the cash-module's withdrawal delay is 0. Extracted from `requestSwap`
-    ///      to keep that function under the stack-depth limit.
+    /// @dev Verifies MakerTraits has the required flags and the user-intended expiration.
+    function _validateMakerTraits(uint40 expiration, MakerTraits mt_) internal pure {
+        uint256 bits = MakerTraits.unwrap(mt_);
+        uint256 required = _NO_PARTIAL_FILLS_FLAG | _PRE_INTERACTION_CALL_FLAG | _POST_INTERACTION_CALL_FLAG | _HAS_EXTENSION_FLAG;
+        if (bits & required != required) revert MissingMakerTraitsFlag();
+        if (uint40(bits >> _EXPIRATION_OFFSET) != expiration) revert ExpirationMismatch();
+    }
+
+    /// @dev Verifies the extension routes pre + post interaction through this module and that the
+    ///      order's salt commits to `keccak256(extension)` per LOP's `OrderLib.isValidExtension`.
+    ///
+    ///      LOP extension layout: `bytes[0:32]` is the offsets bitmap (uint32 cumulative-end per
+    ///      field, field `i`'s end at bits `[i*32 : (i+1)*32]`); `bytes[32:]` is the concatenated
+    ///      field bodies. PreInteractionData is field 6, PostInteractionData is field 7.
+    ///
+    ///      Field 7 last 20 bytes is the chained post-interaction target — used both by plain-LOP
+    ///      (where LOP calls us directly) and Settlement-routed Fusion (where FeeTaker reads the
+    ///      trailing 20 bytes after fee logic and chains into us).
+    function _validateExtension(uint256 salt, bytes calldata extension) internal view {
+        if (extension.length < 32) revert InvalidExtension();
+        if (salt & type(uint160).max != uint256(keccak256(extension)) & type(uint160).max) revert SaltExtensionMismatch();
+
+        uint256 offsets = uint256(bytes32(extension[:32]));
+        uint256 end5 = (offsets >> 160) & type(uint32).max;
+        uint256 end6 = (offsets >> 192) & type(uint32).max;
+        uint256 end7 = (offsets >> 224) & type(uint32).max;
+
+        if (end6 - end5 < 20) revert WrongPreInteractionTarget();
+        if (end7 - end6 < 20) revert WrongPostInteractionTarget();
+        if (extension.length < 32 + end7) revert InvalidExtension();
+
+        address preTarget = address(bytes20(extension[32 + end5:32 + end5 + 20]));
+        if (preTarget != address(this)) revert WrongPreInteractionTarget();
+
+        address postTarget = address(bytes20(extension[32 + end7 - 20:32 + end7]));
+        if (postTarget != address(this)) revert WrongPostInteractionTarget();
+    }
+
+    /// @dev Reverts if the cash-module's withdrawal delay is 0.
     function _requireNonZeroWithdrawalDelay() internal view {
         (uint64 wd,,) = cashModule.getDelays();
         if (wd == 0) revert WithdrawalDelayMisconfigured();
     }
 
     /// @dev Has the Safe approve the 1inch router for the maker amount. Pre-clears any stale
-    ///      router allowance to handle USDT-style "set-nonzero-from-nonzero-reverts" tokens
-    ///      (M-3) — atomic with the new approval, so the final state is exactly `fromAmount`.
+    ///      router allowance to handle USDT-style "set-nonzero-from-nonzero-reverts" tokens.
     function _approveRouter(address safe, address fromToken, uint256 fromAmount) internal {
         address[] memory to = new address[](2);
         uint256[] memory values = new uint256[](2);
@@ -333,30 +417,19 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
 
-    /// @dev Builds the order extension that pins PRE_INTERACTION and POST_INTERACTION targets to
-    ///      `address(this)`. Layout per `ExtensionLib`:
-    ///      - bytes [0:32]   = offsets bitmap (uint32 cumulative-end per dynamic field)
-    ///      - bytes [32:52]  = PreInteractionData  (20 bytes, address(this))
-    ///      - bytes [52:72]  = PostInteractionData (20 bytes, address(this))
-    ///      Fields 0..5 are empty (cumulative end = 0). Field 6 ends at 20, field 7 ends at 40.
-    function _buildExtension() internal view returns (bytes memory) {
-        uint256 offsets = (uint256(20) << 192) | (uint256(40) << 224);
-        return abi.encodePacked(bytes32(offsets), bytes20(uint160(address(this))), bytes20(uint160(address(this))));
-    }
-
     /**
-     * @notice 1inch Limit Order Protocol pre-interaction hook — validates the in-flight order
-     * @dev Invoked by the 1inch Aggregation Router from inside `_fill` BEFORE any token transfers.
-     *      Validates the same intent fields as postInteraction so a malicious order whose
-     *      extension points pre-interaction here but lies about the order shape cannot proceed.
+     * @notice LOP pre-interaction hook — validates the in-flight order and arms the fill window
+     * @dev Called by the Aggregation Router inside `_fill`, before any maker-side transfers.
+     *      Snapshots the Safe's fromToken + toToken balances into transient storage; the
+     *      matching `postInteraction` reads them back and asserts `fromAmount` was spent and
+     *      ≥ `minToAmount` was received.
      *
-     *      `swapInProgress[safe]` is armed in `requestSwap` and covers the entire intent
-     *      lifetime; this hook re-asserts it (idempotent).
+     *      Sets `swapInProgress` here (not in `requestSwap`) so liquidations are only blocked
+     *      for the duration of the actual router fill.
      *
-     *      No `nonReentrant`: cross-safe swaps (one Safe filling another Safe's Fusion order)
-     *      enter the module twice in the same call frame — once for the taker via `swap()`
-     *      and once via the maker pre/postInteraction. A reentrancy guard would brick that.
-     *      The router-only authorization and state validation keep this safe.
+     *      No `nonReentrant`: cross-safe swaps (one Safe filling another's Fusion order) re-enter
+     *      the module in the same call frame; a reentrancy guard would brick them. Router-only
+     *      authorization + pending-state validation keep this safe.
      */
     function preInteraction(
         IOrderMixin.Order calldata order,
@@ -376,33 +449,36 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
         if (msg.sender != aggregationRouter) revert OnlyAggregationRouter();
 
         address safe = order.maker.get();
-        PendingSwap memory pendingSwap = pendingSwaps[safe];
+        OneInchSwapModuleStorage storage $ = _getStorage();
+        PendingSwap memory pendingSwap = $.pendingSwaps[safe];
         if (pendingSwap.fromAmount == 0) revert NoPendingSwap();
         if (orderHash != pendingSwap.orderHash) revert OrderHashMismatch();
         if (order.makerAsset.get() != pendingSwap.fromToken || order.takerAsset.get() != pendingSwap.toToken) revert OrderTokenMismatch();
         if (makingAmount != pendingSwap.fromAmount) revert UnexpectedMakingAmount();
         if (takingAmount < pendingSwap.minToAmount) revert InsufficientReceivedAmount();
 
-        // Already true after requestSwap; re-asserting is idempotent and survives any future
-        // refactor that removes the requestSwap-side write. Cleared in postInteraction /
-        // cancelSwap / cancelBridgeByCashModule.
-        swapInProgress[safe] = true;
+        _snapshotSafeBalances(safe, pendingSwap.fromToken, pendingSwap.toToken);
+
+        $.swapInProgress[safe] = true;
     }
 
     /**
-     * @notice 1inch Limit Order Protocol post-interaction hook — finalizes the Fusion swap atomically with the fill
-     * @dev Invoked by the 1inch Aggregation Router from inside `_fill`, after both `transferFrom`s have settled.
-     *      For the protocol to route the call here (instead of to the Safe / maker), the order's extension
-     *      must encode this module's address as the first 20 bytes of the PostInteractionData field, and
-     *      `MakerTraits` must have the POST_INTERACTION_CALL_FLAG (bit 251) and HAS_EXTENSION_FLAG (bit 249)
-     *      set. `requestSwap()` enforces this at registration time.
+     * @notice LOP post-interaction hook — finalizes the Fusion swap atomically with the fill
+     * @dev Authorized callers:
+     *      - plain-LOP order: `msg.sender == aggregationRouter`, invoked directly from `_fill`.
+     *      - Settlement-routed Fusion: `msg.sender == settlementContract`, invoked after
+     *        Settlement skims its fee and chains here via FeeTaker's trailing-target pattern.
      *
-     *      No `nonReentrant`: see preInteraction. Cross-safe swaps require this. The same call
-     *      frame re-enters us via `cashModule.cancelWithdrawalByModule -> cancelBridgeByCashModule`;
-     *      we tolerate that by clearing local state before the callback.
+     *      Enforces balance deltas against the snapshot taken in `preInteraction`:
+     *      - Safe's fromToken balance must have decreased by exactly `fromAmount`
+     *      - Safe's toToken balance must have increased by at least `minToAmount`
      *
-     *      Performs an explicit `ensureHealth` at the end — `EtherFiHook.postOpHook` skips its
-     *      automatic LTV check for this module, so we enforce it here instead.
+     *      This is the ultimate guard against fee skim, MEV reroute, or token-side hooks that
+     *      could otherwise let the Safe over-pay or under-receive.
+     *
+     *      No `nonReentrant`: cross-safe swaps re-enter in the same call frame, and
+     *      `cashModule.cancelWithdrawalByModule -> cancelBridgeByCashModule` re-enters after
+     *      we've already cleared state. A reentrancy guard would brick both.
      */
     function postInteraction(
         IOrderMixin.Order calldata order,
@@ -419,24 +495,25 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     )
         external
     {
-        if (msg.sender != aggregationRouter) revert OnlyAggregationRouter();
+        if (msg.sender != aggregationRouter && msg.sender != settlementContract) revert OnlyAggregationRouterOrSettlement();
 
         address safe = order.maker.get();
-        PendingSwap memory pendingSwap = pendingSwaps[safe];
+        OneInchSwapModuleStorage storage $ = _getStorage();
+        PendingSwap memory pendingSwap = $.pendingSwaps[safe];
         if (pendingSwap.fromAmount == 0) revert NoPendingSwap();
         if (orderHash != pendingSwap.orderHash) revert OrderHashMismatch();
         if (order.makerAsset.get() != pendingSwap.fromToken || order.takerAsset.get() != pendingSwap.toToken) revert OrderTokenMismatch();
         if (makingAmount != pendingSwap.fromAmount) revert UnexpectedMakingAmount();
         if (takingAmount < pendingSwap.minToAmount) revert InsufficientReceivedAmount();
 
+        _validateBalanceDeltas(safe, pendingSwap.fromToken, pendingSwap.toToken, pendingSwap.fromAmount, pendingSwap.minToAmount);
+
         _revokeApproval(safe, pendingSwap.fromToken);
 
-        // Delete local state BEFORE releasing the CashModule withdrawal. cancelWithdrawalByModule
-        // triggers _cancelOldWithdrawal → IBridgeModule(this).cancelBridgeByCashModule(safe) as a
-        // callback; with fromAmount already zero, the callback short-circuits (no duplicate event,
-        // no redundant approval revoke).
-        delete pendingSwaps[safe];
-        swapInProgress[safe] = false;
+        // Clear local state before releasing the CashModule withdrawal — `cancelWithdrawalByModule`
+        // callbacks into `cancelBridgeByCashModule`, which short-circuits when `fromAmount == 0`.
+        delete $.pendingSwaps[safe];
+        $.swapInProgress[safe] = false;
         cashModule.cancelWithdrawalByModule(safe);
 
         _ensureHealth(safe);
@@ -446,24 +523,30 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
 
     /**
      * @notice Cancels a pending Fusion swap before settlement
-     * @dev Revokes the router approval and releases the pending withdrawal on CashModule.
+     * @dev Two authorization paths:
+     *      - owner-quorum signature path: `signers` non-empty; verified against CANCEL_SWAP_TYPEHASH
+     *      - role-keeper path: `signers` empty; caller must hold `ONEINCH_SWAP_CANCEL_ROLE` on
+     *        the RoleRegistry. Used by the backend to clear expired orders / stuck intents.
+     *
+     *      Revokes the router approval and releases the pending withdrawal on CashModule.
      *      Tokens remain on the Safe throughout — nothing to transfer back.
-     * @param safe Address of the EtherFi Safe
-     * @param signers Safe owner addresses authorizing cancellation
-     * @param signatures Signatures from the signers
      */
     function cancelSwap(address safe, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
-        PendingSwap memory pendingSwap = pendingSwaps[safe];
+        OneInchSwapModuleStorage storage $ = _getStorage();
+        PendingSwap memory pendingSwap = $.pendingSwaps[safe];
         if (pendingSwap.fromAmount == 0) revert NoPendingSwap();
 
-        bytes32 structHash = keccak256(abi.encode(CANCEL_SWAP_TYPEHASH, safe, address(this), IEtherFiSafe(safe).useNonce()));
-        _verifyStructHash(safe, structHash, signers, signatures);
+        if (signers.length == 0) {
+            if (!roleRegistry().hasRole(ONEINCH_SWAP_CANCEL_ROLE, msg.sender)) revert Unauthorized();
+        } else {
+            bytes32 structHash = keccak256(abi.encode(CANCEL_SWAP_TYPEHASH, safe, address(this), IEtherFiSafe(safe).useNonce()));
+            _verifyStructHash(safe, structHash, signers, signatures);
+        }
 
         _revokeApproval(safe, pendingSwap.fromToken);
 
-        // Delete before releasing the CashModule withdrawal (callback short-circuits — see postInteraction)
-        delete pendingSwaps[safe];
-        swapInProgress[safe] = false;
+        delete $.pendingSwaps[safe];
+        $.swapInProgress[safe] = false;
         cashModule.cancelWithdrawalByModule(safe);
 
         emit FusionSwapCancelled(safe, pendingSwap.fromToken, pendingSwap.orderHash);
@@ -474,78 +557,43 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     // ──────────────────────────────────────────────
 
     /**
-     * @notice Called by CashModule to force-cancel a pending swap (e.g. card spend preemption, liquidation)
-     * @dev Revokes router approval and cleans up state. Does NOT call cancelWithdrawalByModule
-     *      since CashModule is already inside _cancelOldWithdrawal when we are invoked.
+     * @notice Called by CashModule to force-cancel a pending swap (card-spend preemption, liquidation)
+     * @dev Revokes router approval and clears state. Does NOT call `cancelWithdrawalByModule` —
+     *      CashModule is already inside `_cancelOldWithdrawal` when this fires.
      *
-     *      The approval revoke uses `execTransactionFromModule` which would normally trigger
-     *      `EtherFiHook.postOpHook -> ensureHealth` and DOS liquidations / spend on an unhealthy
-     *      Safe. The hook skips `ensureHealth` for this module specifically because this path
-     *      is reachable from liquidation and card-spend flows where the Safe is expected to be
-     *      unhealthy.
-     * @param safe Address of the EtherFi Safe
+     *      `EtherFiHook.postOpHook` skips its `ensureHealth` check for this module so the
+     *      approval-revoke cannot DOS liquidation / card-spend paths on an unhealthy Safe.
      */
     function cancelBridgeByCashModule(address safe) external {
         if (msg.sender != etherFiDataProvider.getCashModule()) revert Unauthorized();
 
-        PendingSwap memory pendingSwap = pendingSwaps[safe];
+        OneInchSwapModuleStorage storage $ = _getStorage();
+        PendingSwap memory pendingSwap = $.pendingSwaps[safe];
         if (pendingSwap.fromAmount == 0) return;
 
-        delete pendingSwaps[safe];
-        swapInProgress[safe] = false;
+        delete $.pendingSwaps[safe];
+        $.swapInProgress[safe] = false;
         _revokeApproval(safe, pendingSwap.fromToken);
 
         emit FusionSwapCancelled(safe, pendingSwap.fromToken, pendingSwap.orderHash);
     }
 
     // ──────────────────────────────────────────────
-    //  Admin recovery
+    //  Admin
     // ──────────────────────────────────────────────
 
     /**
-     * @notice Admin-only recovery for maker tokens stuck at this module
-     * @dev If both the cash-module-side and module-side `withdrawalDelay==0` guards are ever
-     *      bypassed (e.g. by a pre-fix on-chain state, or a future regression), this function
-     *      clears the orphaned `pendingSwaps[safe]` entry AND transfers the Safe's registered
-     *      maker amount back to the Safe.
+     * @notice Sweeps a token balance held by this module to the operating safe
+     * @dev Bounded by `amount` — caller specifies how much. Used to recover tokens accidentally
+     *      transferred to this module address (the module itself is not designed to hold funds;
+     *      legitimate Fusion fills route tokens directly Safe ↔ router).
      *
-     *      Operates only on the per-Safe pending entry — does not let admins sweep arbitrary
-     *      stray tokens. If the module address holds excess balance beyond what's in
-     *      `pendingSwaps`, this function does not touch it (use a separate recovery flow).
-     *
-     *      Gated on DATA_PROVIDER_ADMIN_ROLE for symmetry with `setOneInchSwapModule`.
-     *
-     *      No reentrancy concern: token transfer goes to the Safe (a controlled contract),
-     *      and all module state is cleared before the external call.
-     * @param safe Address of the EtherFi Safe whose pending entry should be recovered
+     *      Gated on `DATA_PROVIDER_ADMIN_ROLE`.
      */
-    function recoverStuckMakerTokens(address safe) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(DATA_PROVIDER_ADMIN_ROLE, msg.sender)) revert Unauthorized();
-
-        PendingSwap memory pendingSwap = pendingSwaps[safe];
-        if (pendingSwap.fromAmount == 0) revert NoPendingSwap();
-
-        delete pendingSwaps[safe];
-        swapInProgress[safe] = false;
-
-        uint256 bal = IERC20(pendingSwap.fromToken).balanceOf(address(this));
-        uint256 amount = bal < pendingSwap.fromAmount ? bal : pendingSwap.fromAmount;
-        if (amount > 0) IERC20(pendingSwap.fromToken).transfer(safe, amount);
-
-        emit FusionSwapRecovered(safe, pendingSwap.fromToken, amount, pendingSwap.orderHash);
-    }
-
-    // ──────────────────────────────────────────────
-    //  View Functions
-    // ──────────────────────────────────────────────
-
-    /**
-     * @notice Returns the pending Fusion swap details for a Safe
-     * @param safe Address of the EtherFi Safe
-     * @return The PendingSwap struct
-     */
-    function getPendingSwap(address safe) external view returns (PendingSwap memory) {
-        return pendingSwaps[safe];
+    function rescueFunds(address token, uint256 amount) external {
+        if (amount == 0) revert InvalidInput();
+        IERC20(token).transfer(operatingSafe, amount);
+        emit FundsRescued(token, amount);
     }
 
     // ══════════════════════════════════════════════
@@ -609,9 +657,7 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     //  INTERNAL: Fusion Helpers
     // ══════════════════════════════════════════════
 
-    /**
-     * @dev Revokes the router's fromToken approval on the Safe
-     */
+    /// @dev Revokes the router's fromToken approval on the Safe.
     function _revokeApproval(address safe, address fromToken) internal {
         address[] memory to = new address[](1);
         uint256[] memory values = new uint256[](1);
@@ -621,8 +667,52 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
 
-    /// @dev Reverts if the Safe is unhealthy at LTV. Used at the tail of swap()/postInteraction
-    ///      because EtherFiHook.postOpHook intentionally skips its automatic check for this module.
+    /// @dev Snapshots the Safe's fromToken + toToken balances into per-safe transient slots.
+    function _snapshotSafeBalances(address safe, address fromToken, address toToken) internal {
+        uint256 fromBal = IERC20(fromToken).balanceOf(safe);
+        uint256 toBal = IERC20(toToken).balanceOf(safe);
+        bytes32 fromSlot = keccak256(abi.encode(safe, _FROM_BAL_TSLOT));
+        bytes32 toSlot = keccak256(abi.encode(safe, _TO_BAL_TSLOT));
+        // Tag the high bit so `0` is distinguishable from "never snapshotted" (in case the
+        // pre-hook is skipped). Stored value is `bal | (1 << 255)`; reader strips it.
+        assembly ("memory-safe") {
+            let tag := shl(255, 1)
+            tstore(fromSlot, or(fromBal, tag))
+            tstore(toSlot, or(toBal, tag))
+        }
+    }
+
+    /// @dev Asserts post-fill deltas against the snapshot taken in `preInteraction`. Clears the
+    ///      transient slots so a malicious post-only invocation can't replay against a stale
+    ///      snapshot in the same tx.
+    function _validateBalanceDeltas(address safe, address fromToken, address toToken, uint256 fromAmount, uint256 minToAmount) internal {
+        bytes32 fromSlot = keccak256(abi.encode(safe, _FROM_BAL_TSLOT));
+        bytes32 toSlot = keccak256(abi.encode(safe, _TO_BAL_TSLOT));
+        uint256 raw1;
+        uint256 raw2;
+        assembly ("memory-safe") {
+            raw1 := tload(fromSlot)
+            raw2 := tload(toSlot)
+            tstore(fromSlot, 0)
+            tstore(toSlot, 0)
+        }
+        uint256 tag = 1 << 255;
+        if (raw1 == 0 || raw2 == 0) revert MissingSnapshot();
+        uint256 fromBalBefore = raw1 & ~tag;
+        uint256 toBalBefore = raw2 & ~tag;
+
+        uint256 fromBalAfter = IERC20(fromToken).balanceOf(safe);
+        uint256 toBalAfter = IERC20(toToken).balanceOf(safe);
+
+        // Maker side: Safe must have spent exactly `fromAmount`. Catches fee-on-transfer tokens
+        // and any token-side hook that pulled more (or less) than the order specified.
+        if (fromBalBefore - fromBalAfter != fromAmount) revert UnexpectedFromTokenDelta();
+
+        // Taker side: Safe must have received ≥ `minToAmount` net (after any Settlement fee).
+        if (toBalAfter - toBalBefore < minToAmount) revert InsufficientReceivedAmount();
+    }
+
+    /// @dev Reverts if the Safe is unhealthy at LTV.
     function _ensureHealth(address safe) internal view {
         IDebtManager(cashModule.getDebtManager()).ensureHealth(safe);
     }
@@ -632,10 +722,9 @@ contract OneInchSwapModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTra
     // ══════════════════════════════════════════════
 
     /**
-     * @dev Verifies an EIP-712 structured signature under the Safe's domain. Caller computes
-     *      `structHash` from the appropriate TYPEHASH + fields + fresh nonce. Each TYPEHASH
+     * @dev Verifies an EIP-712 structured signature under the Safe's domain. Each TYPEHASH
      *      includes `address module` (`address(this)`) so signatures cannot be replayed across
-     *      modules that share the Safe's domain separator.
+     *      modules sharing the Safe's domain separator.
      */
     function _verifyStructHash(address safe, bytes32 structHash, address[] calldata signers, bytes[] calldata signatures) internal view {
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", IEtherFiSafe(safe).getDomainSeparator(), structHash));
