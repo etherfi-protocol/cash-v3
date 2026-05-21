@@ -63,6 +63,20 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
         uint40 expiration;
     }
 
+    /// @notice Decoded view of the LOP `extension` bytes the backend must produce. Mirrors the
+    ///         field layout defined by LOP's `OrderLib` / `ExtensionLib` — see
+    ///         `docs/1inch/extension-structure.md` for the byte-level spec.
+    ///
+    ///         The full LOP extension has 8 fields (0..7). For this module only fields 2, 3, 6, 7
+    ///         carry payload; fields 0, 1, 4, 5 must be empty. Adding a new field is a two-place
+    ///         change: extend `ExpectedExtension` *and* update the doc.
+    struct ExpectedExtension {
+        bytes makingAmountData;     // field 2: Fusion auction data (Settlement-aware) or empty for plain-LOP
+        bytes takingAmountData;     // field 3: Fusion auction data (Settlement-aware) or empty for plain-LOP
+        bytes preInteractionData;   // field 6: exactly 20 bytes — must equal address(this)
+        bytes postInteractionData;  // field 7: trailing 20 bytes — must equal address(this)
+    }
+
     // ──────────────────────────────────────────────
     //  Immutables (set in the implementation constructor; baked into bytecode)
     // ──────────────────────────────────────────────
@@ -88,6 +102,11 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
     /// @notice Backend-keeper role authorized to cancel a Safe's pending Fusion swap without an
     ///         owner-quorum signature (e.g. for expired orders, stuck intents, ops cleanup).
     bytes32 public constant ONEINCH_SWAP_CANCEL_ROLE = keccak256("ONEINCH_SWAP_CANCEL_ROLE");
+
+    /// @notice Backend-EOA role authorized to submit `requestSwap` on a Safe's behalf. The
+    ///         owner-quorum signature over REQUEST_SWAP_TYPEHASH is still required — this role
+    ///         only restricts which EOA may relay the on-chain call.
+    bytes32 public constant ONEINCH_SWAP_REQUEST_ROLE = keccak256("ONEINCH_SWAP_REQUEST_ROLE");
 
     // ──────────────────────────────────────────────
     //  ERC-7201 namespaced storage
@@ -288,15 +307,20 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
     // ══════════════════════════════════════════════
 
     /**
-     * @notice Opens a Fusion swap: validates the BE-constructed LOP order, records intent,
-     *         registers pending withdrawal, approves router
-     * @dev On-chain invariants enforced against the supplied order:
+     * @notice Opens a Fusion swap: validates the BE-constructed LOP order and records intent.
+     * @dev Authorization is two-layered:
+     *      - `msg.sender` must hold `ONEINCH_SWAP_REQUEST_ROLE`. The module is only ever called by
+     *        the backend EOA; user multisigs do not call it directly.
+     *      - the owner-quorum signature over REQUEST_SWAP_TYPEHASH is still verified — the role
+     *        only restricts WHICH EOA may relay the call, not WHETHER the user authorized it.
+     *
+     *      On-chain invariants enforced against the supplied order:
      *      - intent fields match (maker, makerAsset, takerAsset, makingAmount, takingAmount)
      *      - MakerTraits carries HAS_EXTENSION | PRE_INTERACTION | POST_INTERACTION | NO_PARTIAL_FILLS
      *        and the user-intended expiration
      *      - salt's lower 160 bits commit to `keccak256(extension)` per LOP's `isValidExtension`
-     *      - extension routes both pre-interaction and the trailing chained post-interaction
-     *        target through this module
+     *      - extension matches `ExpectedExtension` (fields 0/1/4/5 empty, field 6 == module,
+     *        field 7 trailing 20B == module)
      *
      *      The router-computed orderHash is bound into the EIP-712 signature, so any BE-chosen
      *      fee / auction / whitelist byte is authorized by the owner-quorum.
@@ -304,6 +328,8 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
      *      `pendingSwaps[safe].orderHash` — only this exact order can fill.
      */
     function requestSwap(SwapIntent calldata intent, IOrderMixin.Order calldata order, bytes calldata extension, address[] calldata signers, bytes[] calldata signatures) external nonReentrant whenNotPaused onlyEtherFiSafe(intent.safe) {
+        if (!roleRegistry().hasRole(ONEINCH_SWAP_REQUEST_ROLE, msg.sender)) revert Unauthorized();
+
         OneInchSwapModuleStorage storage $ = _getStorage();
         if ($.pendingSwaps[intent.safe].fromAmount != 0) revert SwapAlreadyPending();
         if (intent.fromToken == ETH || intent.toToken == ETH) revert NativeETHNotSupported();
@@ -311,8 +337,7 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
         if (intent.fromAmount == 0 || intent.minToAmount == 0) revert InvalidInput();
 
         // Fail closed if the cash-module's withdrawal delay is zero — otherwise
-        // `requestWithdrawalByModule` would synchronously transfer maker tokens out of the Safe
-        // before the router approval is even set, stranding them at this module.
+        // `requestWithdrawalByModule` would synchronously transfer maker tokens out of the Safe.
         _requireNonZeroWithdrawalDelay();
 
         _validateOrderAgainstIntent(intent, order);
@@ -322,12 +347,12 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
         bytes32 orderHash = IOrderMixin(aggregationRouter).hashOrder(order);
         _verifyRequestSignature(intent, orderHash, signers, signatures);
 
-        _registerAndApprove(intent, orderHash);
+        _register(intent, orderHash);
     }
 
-    /// @dev Storage writes + router approval + event emit. Extracted to keep `requestSwap`
-    ///      under the stack-depth limit.
-    function _registerAndApprove(SwapIntent calldata intent, bytes32 orderHash) internal {
+    /// @dev Storage writes + withdrawal registration + event emit. Extracted to keep
+    ///      `requestSwap` under the stack-depth limit.
+    function _register(SwapIntent calldata intent, bytes32 orderHash) internal {
         // `requestWithdrawalByModule` replaces any prior pending withdrawal on the Safe and runs
         // its own `_checkBalance`, so an explicit `_checkAmountAvailable` here would be redundant.
         cashModule.requestWithdrawalByModule(intent.safe, intent.fromToken, intent.fromAmount);
@@ -338,8 +363,6 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
         p.fromAmount = intent.fromAmount;
         p.minToAmount = intent.minToAmount;
         p.orderHash = orderHash;
-
-        _approveRouter(intent.safe, intent.fromToken, intent.fromAmount);
 
         emit FusionSwapRequested(intent.safe, intent.fromToken, intent.toToken, intent.fromAmount, intent.minToAmount, orderHash);
     }
@@ -368,26 +391,40 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
         if (uint40(bits >> _EXPIRATION_OFFSET) != expiration) revert ExpirationMismatch();
     }
 
-    /// @dev Verifies the extension routes pre + post interaction through this module and that the
-    ///      order's salt commits to `keccak256(extension)` per LOP's `OrderLib.isValidExtension`.
+    /// @dev Decodes the LOP `extension` bytes into the `ExpectedExtension` view and enforces:
+    ///      - salt commits to `keccak256(extension)` per LOP's `OrderLib.isValidExtension`
+    ///      - fields 0, 1, 4, 5 are empty (unused by this module)
+    ///      - field 6 is exactly 20 bytes and equals `address(this)` (preInteraction target)
+    ///      - field 7's trailing 20 bytes equal `address(this)` (postInteraction target — used
+    ///        both by plain-LOP, which calls us directly, and Settlement-routed Fusion, where
+    ///        FeeTaker reads the trailing 20 bytes and chains into us)
     ///
     ///      LOP extension layout: `bytes[0:32]` is the offsets bitmap (uint32 cumulative-end per
     ///      field, field `i`'s end at bits `[i*32 : (i+1)*32]`); `bytes[32:]` is the concatenated
-    ///      field bodies. PreInteractionData is field 6, PostInteractionData is field 7.
-    ///
-    ///      Field 7 last 20 bytes is the chained post-interaction target — used both by plain-LOP
-    ///      (where LOP calls us directly) and Settlement-routed Fusion (where FeeTaker reads the
-    ///      trailing 20 bytes after fee logic and chains into us).
+    ///      field bodies. Adding a new field is a two-place change: extend `ExpectedExtension`
+    ///      and update `docs/1inch/extension-structure.md`.
     function _validateExtension(uint256 salt, bytes calldata extension) internal view {
         if (extension.length < 32) revert InvalidExtension();
         if (salt & type(uint160).max != uint256(keccak256(extension)) & type(uint160).max) revert SaltExtensionMismatch();
 
         uint256 offsets = uint256(bytes32(extension[:32]));
+        uint256 end0 = offsets & type(uint32).max;
+        uint256 end1 = (offsets >> 32) & type(uint32).max;
+        uint256 end3 = (offsets >> 96) & type(uint32).max;
+        uint256 end4 = (offsets >> 128) & type(uint32).max;
         uint256 end5 = (offsets >> 160) & type(uint32).max;
         uint256 end6 = (offsets >> 192) & type(uint32).max;
         uint256 end7 = (offsets >> 224) & type(uint32).max;
 
-        if (end6 - end5 < 20) revert WrongPreInteractionTarget();
+        // Fields 0, 1, 4, 5 must be empty (length = cumulative-end delta).
+        if (end0 != 0) revert InvalidExtension();
+        if (end1 - end0 != 0) revert InvalidExtension();
+        if (end4 - end3 != 0) revert InvalidExtension();
+        if (end5 - end4 != 0) revert InvalidExtension();
+
+        // Field 6 = preInteractionData: exactly 20 bytes = address(this).
+        if (end6 - end5 != 20) revert WrongPreInteractionTarget();
+        // Field 7 = postInteractionData: at least 20 bytes, trailing 20 = address(this).
         if (end7 - end6 < 20) revert WrongPostInteractionTarget();
         if (extension.length < 32 + end7) revert InvalidExtension();
 
@@ -418,14 +455,18 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
     }
 
     /**
-     * @notice LOP pre-interaction hook — validates the in-flight order and arms the fill window
+     * @notice LOP pre-interaction hook — validates the in-flight order, grants the router approval,
+     *         and arms the fill window
      * @dev Called by the Aggregation Router inside `_fill`, before any maker-side transfers.
      *      Snapshots the Safe's fromToken + toToken balances into transient storage; the
      *      matching `postInteraction` reads them back and asserts `fromAmount` was spent and
      *      ≥ `minToAmount` was received.
      *
-     *      Sets `swapInProgress` here (not in `requestSwap`) so liquidations are only blocked
-     *      for the duration of the actual router fill.
+     *      Grants the router allowance for `fromAmount`, scoped to this fill tx — LOP's
+     *      `_transferMakerAssetToTaker` consumes it between pre- and postInteraction.
+     *
+     *      Sets `swapInProgress` for the duration of the router fill so liquidation is blocked
+     *      while the Safe's tokens are mid-transfer.
      *
      *      No `nonReentrant`: cross-safe swaps (one Safe filling another's Fusion order) re-enter
      *      the module in the same call frame; a reentrancy guard would brick them. Router-only
@@ -460,6 +501,8 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
         _snapshotSafeBalances(safe, pendingSwap.fromToken, pendingSwap.toToken);
 
         $.swapInProgress[safe] = true;
+
+        _approveRouter(safe, pendingSwap.fromToken, pendingSwap.fromAmount);
     }
 
     /**
@@ -523,13 +566,14 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
 
     /**
      * @notice Cancels a pending Fusion swap before settlement
-     * @dev Two authorization paths:
+     * @dev Two authorization paths (XOR):
      *      - owner-quorum signature path: `signers` non-empty; verified against CANCEL_SWAP_TYPEHASH
      *      - role-keeper path: `signers` empty; caller must hold `ONEINCH_SWAP_CANCEL_ROLE` on
      *        the RoleRegistry. Used by the backend to clear expired orders / stuck intents.
      *
-     *      Revokes the router approval and releases the pending withdrawal on CashModule.
-     *      Tokens remain on the Safe throughout — nothing to transfer back.
+     *      Releases the pending withdrawal on CashModule. Tokens remain on the Safe throughout.
+     *      Router allowance is granted and consumed inside the fill tx, so none exists at cancel
+     *      time.
      */
     function cancelSwap(address safe, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         OneInchSwapModuleStorage storage $ = _getStorage();
@@ -543,10 +587,7 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
             _verifyStructHash(safe, structHash, signers, signatures);
         }
 
-        _revokeApproval(safe, pendingSwap.fromToken);
-
         delete $.pendingSwaps[safe];
-        $.swapInProgress[safe] = false;
         cashModule.cancelWithdrawalByModule(safe);
 
         emit FusionSwapCancelled(safe, pendingSwap.fromToken, pendingSwap.orderHash);
@@ -558,11 +599,9 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
 
     /**
      * @notice Called by CashModule to force-cancel a pending swap (card-spend preemption, liquidation)
-     * @dev Revokes router approval and clears state. Does NOT call `cancelWithdrawalByModule` —
-     *      CashModule is already inside `_cancelOldWithdrawal` when this fires.
-     *
-     *      `EtherFiHook.postOpHook` skips its `ensureHealth` check for this module so the
-     *      approval-revoke cannot DOS liquidation / card-spend paths on an unhealthy Safe.
+     * @dev Clears state. Does NOT call `cancelWithdrawalByModule` — CashModule is already inside
+     *      `_cancelOldWithdrawal` when this fires. Router allowance is granted and consumed inside
+     *      the fill tx, so none exists when this fires.
      */
     function cancelBridgeByCashModule(address safe) external {
         if (msg.sender != etherFiDataProvider.getCashModule()) revert Unauthorized();
@@ -572,8 +611,6 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
         if (pendingSwap.fromAmount == 0) return;
 
         delete $.pendingSwaps[safe];
-        $.swapInProgress[safe] = false;
-        _revokeApproval(safe, pendingSwap.fromToken);
 
         emit FusionSwapCancelled(safe, pendingSwap.fromToken, pendingSwap.orderHash);
     }

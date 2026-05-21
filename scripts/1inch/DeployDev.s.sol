@@ -40,7 +40,9 @@ contract DeployDevOneInch is Utils {
     /// Operating safe destination for `rescueFunds` on dev.
     address constant DEV_OPERATING_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
     /// ⚠ PLACEHOLDER — replace with the actual dev keeper EOA before running.
-    address constant DEV_CANCEL_KEEPER = 0xCA9cE100Ca9Ce100Ca9ce100cA9CE100ca9Ce100;
+    ///   Holds `ONEINCH_SWAP_CANCEL_ROLE` AND `ONEINCH_SWAP_REQUEST_ROLE` (single BE EOA on dev).
+    ///   `requestSwap` is bricked until a real EOA holds the request role — do not run with the placeholder.
+    address constant DEV_KEEPER = 0xCA9cE100Ca9Ce100Ca9ce100cA9CE100ca9Ce100;
 
     struct Deployed {
         address dataProvider;
@@ -102,8 +104,12 @@ contract DeployDevOneInch is Utils {
         ICashModule(d.cashModule).configureModulesCanRequestWithdraw(modules, yes);
         EtherFiDataProvider(d.dataProvider).setOneInchSwapModule(d.moduleProxy);
 
-        // Grants the cancel-role to the dev keeper. Placeholder address — replace before running.
-        IRoleRegistry(d.roleRegistry).grantRole(OneInchSwapModule(d.moduleProxy).ONEINCH_SWAP_CANCEL_ROLE(), DEV_CANCEL_KEEPER);
+        // Grants both 1inch roles to the dev keeper. `ONEINCH_SWAP_REQUEST_ROLE` is mandatory for
+        // any `requestSwap` call; `ONEINCH_SWAP_CANCEL_ROLE` is the role-keeper cancel path.
+        // Replace the placeholder before running.
+        OneInchSwapModule m = OneInchSwapModule(d.moduleProxy);
+        IRoleRegistry(d.roleRegistry).grantRole(m.ONEINCH_SWAP_REQUEST_ROLE(), DEV_KEEPER);
+        IRoleRegistry(d.roleRegistry).grantRole(m.ONEINCH_SWAP_CANCEL_ROLE(),  DEV_KEEPER);
     }
 
     function run() public {

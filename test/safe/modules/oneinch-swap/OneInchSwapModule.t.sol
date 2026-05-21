@@ -27,6 +27,7 @@ contract OneInchSwapModuleTest is SafeTestSetup {
     address public constant SIMPLE_SETTLEMENT_OP = 0x2Ad5004c60e16E54d5007C80CE329Adde5B51Ef5;
     address public operatingSafe = makeAddr("operatingSafe");
     address public cancelKeeper = makeAddr("cancelKeeper");
+    address public requestKeeper = makeAddr("requestKeeper");
 
     uint256 public constant SWAP_AMOUNT = 100e6;        // 100 USDC
     uint256 public constant MIN_TO_AMOUNT = 1e16;       // 0.01 weETH
@@ -49,6 +50,9 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         dataProvider.setOneInchSwapModule(address(oneInchModule));
         cashModule.configureModulesCanRequestWithdraw(modules, yes);
         roleRegistry.grantRole(oneInchModule.ONEINCH_SWAP_CANCEL_ROLE(), cancelKeeper);
+        roleRegistry.grantRole(oneInchModule.ONEINCH_SWAP_REQUEST_ROLE(), requestKeeper);
+        // Grant the test contract the request role so existing tests can call requestSwap without prank.
+        roleRegistry.grantRole(oneInchModule.ONEINCH_SWAP_REQUEST_ROLE(), address(this));
         vm.stopPrank();
 
         bytes[] memory setupData = new bytes[](1);
@@ -118,7 +122,8 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         assertFalse(oneInchModule.swapInProgress(address(safe)));
 
         assertEq(usdc.balanceOf(address(safe)), SWAP_AMOUNT);
-        assertEq(usdc.allowance(address(safe), AGGREGATION_ROUTER), SWAP_AMOUNT);
+        // Approval is granted in preInteraction (within fill tx), not at request time.
+        assertEq(usdc.allowance(address(safe), AGGREGATION_ROUTER), 0);
     }
 
     function test_fusion_requestSwap_revertsWithNativeETH() public {
@@ -225,13 +230,10 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         bytes32 orderHash = _openSwap();
         (, IOrderMixin.Order memory order, ) = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT, EXPIRATION);
 
-        vm.startPrank(AGGREGATION_ROUTER);
-        usdc.transferFrom(address(safe), makeAddr("resolver"), SWAP_AMOUNT);
-        deal(address(weETH), address(safe), MIN_TO_AMOUNT);
-        // Call post WITHOUT pre — transient slot is empty
+        // Call post WITHOUT pre — transient snapshot slot is empty; reverts before delta check.
+        vm.prank(AGGREGATION_ROUTER);
         vm.expectRevert(OneInchSwapModule.MissingSnapshot.selector);
         oneInchModule.postInteraction(order, "", orderHash, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
-        vm.stopPrank();
     }
 
     function test_fusion_postInteraction_revertsWhenUnderDelivered() public {
@@ -284,9 +286,24 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         (, IOrderMixin.Order memory order, ) = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT, EXPIRATION);
 
         assertFalse(oneInchModule.swapInProgress(address(safe)));
+        assertEq(usdc.allowance(address(safe), AGGREGATION_ROUTER), 0);
+
         vm.prank(AGGREGATION_ROUTER);
         oneInchModule.preInteraction(order, "", orderHash, makeAddr("resolver"), SWAP_AMOUNT, MIN_TO_AMOUNT, 0, "");
+
         assertTrue(oneInchModule.swapInProgress(address(safe)));
+        // Approval is granted in preInteraction so the router's transferFrom can pull `fromAmount`.
+        assertEq(usdc.allowance(address(safe), AGGREGATION_ROUTER), SWAP_AMOUNT);
+    }
+
+    function test_fusion_requestSwap_revertsWhenCallerLacksRole() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, bytes memory ext) = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT, EXPIRATION);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.prank(makeAddr("randomEOA"));
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
     }
 
     // ══════════════════════════════════════════════

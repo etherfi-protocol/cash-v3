@@ -25,12 +25,15 @@ import { Utils } from "../utils/Utils.sol";
  *           4. EtherFiDataProvider.setOneInchSwapModule(oneInchModule)
  *              — binds the module into EtherFiSafe.isValidSignature (CRITICAL: until this lands,
  *                fills will fail at ERC-1271)
- *           5. RoleRegistry.grantRole(ONEINCH_SWAP_CANCEL_ROLE, CANCEL_KEEPER)
- *              — authorises the BE keeper EOA to call `cancelSwap(safe, [], [])`.
- *              ⚠ `CANCEL_KEEPER` is a PLACEHOLDER (0xCA9CE100…). REPLACE before signing.
+ *           5. RoleRegistry.grantRole(ONEINCH_SWAP_REQUEST_ROLE, BE_KEEPER)
+ *              — authorises the BE keeper EOA to call `requestSwap(...)`. Mandatory: every
+ *                `requestSwap` call gates on this role.
+ *           6. RoleRegistry.grantRole(ONEINCH_SWAP_CANCEL_ROLE, BE_KEEPER)
+ *              — authorises the same EOA to call `cancelSwap(safe, [], [])` without an
+ *                owner-quorum sig.
  *
- *         Until the keeper address is finalised, leave the placeholder — the owner-quorum
- *         cancel path still works without the role grant.
+ *         ⚠ `BE_KEEPER` is a PLACEHOLDER (0xCA9CE100…). REPLACE with the real BE EOA before
+ *         signing — without the request-role grant, `requestSwap` is bricked on the live module.
  *
  *         Usage:
  *           ENV=mainnet ONE_INCH_MODULE_PROXY=0x... NEW_SAFE_IMPL=0x... \
@@ -43,10 +46,9 @@ contract BuildSafeCalldata1inch is GnosisHelpers, Utils {
     address constant OPERATING_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     /// ⚠ PLACEHOLDER — replace with the real BE keeper EOA before signing this bundle.
-    /// Until updated, the bundle simulation will still pass (grantRole accepts any address),
-    /// but the resulting on-chain grant authorises the placeholder — which is fine as a no-op
-    /// since 0xCA9CE100… isn't controlled by anyone.
-    address constant CANCEL_KEEPER = 0xCA9cE100Ca9Ce100Ca9ce100cA9CE100ca9Ce100;
+    /// Holds both `ONEINCH_SWAP_REQUEST_ROLE` and `ONEINCH_SWAP_CANCEL_ROLE`. Use separate
+    /// constants if you want different EOAs per role.
+    address constant BE_KEEPER = 0xCA9cE100Ca9Ce100Ca9ce100cA9CE100ca9Ce100;
 
     struct Addrs {
         address oneInchModule;
@@ -73,15 +75,18 @@ contract BuildSafeCalldata1inch is GnosisHelpers, Utils {
         bool[] memory yes = new bool[](1);
         yes[0] = true;
 
-        // keccak256("ONEINCH_SWAP_CANCEL_ROLE") — mirrors OneInchSwapModule.ONEINCH_SWAP_CANCEL_ROLE
-        bytes32 cancelRole = 0xa9ce2bf1c42d4065626ccf229669805407f00ce0f190f535062f67a4e110894c;
+        // keccak256("ONEINCH_SWAP_REQUEST_ROLE") — mirrors OneInchSwapModule.ONEINCH_SWAP_REQUEST_ROLE
+        bytes32 requestRole = 0x601574078c2fa21841ec131b800e87c9cafa29f936d1aeb40ca456efa550d668;
+        // keccak256("ONEINCH_SWAP_CANCEL_ROLE")  — mirrors OneInchSwapModule.ONEINCH_SWAP_CANCEL_ROLE
+        bytes32 cancelRole  = 0xa9ce2bf1c42d4065626ccf229669805407f00ce0f190f535062f67a4e110894c;
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(OPERATING_SAFE));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(a.safeFactory),  iToHex(abi.encodeWithSelector(BeaconFactory.upgradeBeaconImplementation.selector, a.newSafeImpl)),                   "0", false)));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(a.dataProvider), iToHex(abi.encodeWithSelector(EtherFiDataProvider.configureModules.selector, modules, yes)),                       "0", false)));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(a.cashModule),   iToHex(abi.encodeWithSelector(CashModuleSetters.configureModulesCanRequestWithdraw.selector, modules, yes)),       "0", false)));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(a.dataProvider), iToHex(abi.encodeWithSelector(EtherFiDataProvider.setOneInchSwapModule.selector, a.oneInchModule)),                "0", false)));
-        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(a.roleRegistry), iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, cancelRole, CANCEL_KEEPER)),                       "0", true)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(a.roleRegistry), iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, requestRole, BE_KEEPER)),                          "0", false)));
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(a.roleRegistry), iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, cancelRole,  BE_KEEPER)),                          "0", true)));
         return txs;
     }
 
