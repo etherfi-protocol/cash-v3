@@ -39,10 +39,9 @@ contract DeployDevOneInch is Utils {
     address constant SIMPLE_SETTLEMENT_OP = 0x2Ad5004c60e16E54d5007C80CE329Adde5B51Ef5;
     /// Operating safe destination for `rescueFunds` on dev.
     address constant DEV_OPERATING_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-    /// ⚠ PLACEHOLDER — replace with the actual dev keeper EOA before running.
-    ///   Holds `ONEINCH_SWAP_CANCEL_ROLE` AND `ONEINCH_SWAP_REQUEST_ROLE` (single BE EOA on dev).
-    ///   `requestSwap` is bricked until a real EOA holds the request role — do not run with the placeholder.
-    address constant DEV_KEEPER = 0xCA9cE100Ca9Ce100Ca9ce100cA9CE100ca9Ce100;
+    /// Dev BE keeper EOA. Holds both `ONEINCH_SWAP_CANCEL_ROLE` and `ONEINCH_SWAP_REQUEST_ROLE`.
+    /// Same EOA that drives `OpenOceanSwapModule` on dev today.
+    address constant DEV_KEEPER = 0xf7F86fFA53DDe632a815048E4f9B3c1C9dE70671;
 
     struct Deployed {
         address dataProvider;
@@ -123,6 +122,17 @@ contract DeployDevOneInch is Utils {
         _upgradeProxies(d);
         _wireModule(d);
         vm.stopBroadcast();
+
+        string memory deploymentsPath = string.concat(
+            vm.projectRoot(),
+            "/deployments/", getEnv(), "/",
+            vm.toString(block.chainid), "/deployments.json"
+        );
+        vm.writeJson(
+            string.concat('"', vm.toString(d.moduleProxy), '"'),
+            deploymentsPath,
+            ".addresses.OneInchSwapModule"
+        );
 
         console.log("=== Impls ===");
         console.log("DataProvider          :", d.newDataProviderImpl);
