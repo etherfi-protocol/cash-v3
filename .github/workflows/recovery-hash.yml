@@ -11,11 +11,11 @@ on:
         description: 'New Owner Address (e.g., 0x...)'
         required: true
         type: string
-      scroll_rpc:
-        description: 'Scroll RPC URL (optional, defaults to public RPC)'
+      chain_rpc:
+        description: 'Chain RPC URL (optional, defaults to Optimism public RPC)'
         required: false
         type: string
-        default: 'https://rpc.scroll.io'
+        default: 'https://mainnet.optimism.io'
 
 jobs:
   build-message-hash:
@@ -37,7 +37,7 @@ jobs:
           echo "================================================"
           echo "Recovery Safe Address: ${{ github.event.inputs.recovery_safe_address }}"
           echo "New Owner Address: ${{ github.event.inputs.recovery_new_owner }}"
-          echo "Scroll RPC: ${{ github.event.inputs.scroll_rpc }}"
+          echo "Chain RPC: ${{ github.event.inputs.chain_rpc }}"
           echo "================================================"
       
       - name: Run Build Message Hash Test
@@ -47,4 +47,4 @@ jobs:
         env:
           RECOVERY_SAFE_ADDRESS: ${{ github.event.inputs.recovery_safe_address }}
           RECOVERY_NEW_OWNER: ${{ github.event.inputs.recovery_new_owner }}
-          SCROLL_RPC: ${{ github.event.inputs.scroll_rpc }}
+          CHAIN_RPC: ${{ github.event.inputs.chain_rpc }}
