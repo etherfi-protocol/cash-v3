@@ -43,18 +43,12 @@ contract EtherFiHook is UpgradeableProxy {
 
     /**
      * @notice Hook called after module operations
-     * @dev Skips the health check when called from the CashModule (which has its own internal
-     *      solvency rules) or from the OneInchSwapModule. The OneInchSwapModule re-enters the
-     *      Safe via `execTransactionFromModule` from inside `cancelBridgeByCashModule` (to revoke
-     *      the 1inch router approval) on the same paths that legitimately leave the Safe
-     *      unhealthy — liquidation and card spend — so running `ensureHealth` here would DOS
-     *      those flows. The OneInchSwapModule performs its own end-of-swap solvency check.
+     * @dev Currently implemented as a view function with no effects
      * @param module Address of the module being operated on
      */
-    function postOpHook(address module) external view {
+    function postOpHook(address module) external view { 
         ICashModule cashModule = ICashModule(dataProvider.getCashModule());
         if (module == address(cashModule)) return;
-        if (module == dataProvider.getOneInchSwapModule()) return;
 
         IDebtManager debtManager = cashModule.getDebtManager();
         debtManager.ensureHealth(msg.sender);

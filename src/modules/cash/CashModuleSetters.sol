@@ -332,21 +332,11 @@ function _requestWithdrawal(address safe, address[] memory tokens, uint256[] mem
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
         if (tokens.length > 1) tokens.checkDuplicates();
-
+        
         _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 
-        // For withdrawals routed through the OneInch swap module the synchronous
-        // `_processWithdrawal` fork below would transfer maker tokens to the module address
-        // before the order is registered, leaving them irrecoverable via cancelSwap. Force a
-        // non-zero effective delay so OneInch withdrawals always land on the time-locked path
-        // that cancelSwap releases via `cancelWithdrawalByModule`.
-        uint64 effectiveDelay = $.withdrawalDelay;
-        if (effectiveDelay == 0 && recipient == etherFiDataProvider.getOneInchSwapModule()) {
-            effectiveDelay = 1;
-        }
-
-        uint96 finalTime = uint96(block.timestamp) + effectiveDelay;
+        uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
 
         _checkBalance(safe, tokens, amounts);
 
@@ -355,6 +345,6 @@ function _requestWithdrawal(address safe, address[] memory tokens, uint256[] mem
 
         _getDebtManager().ensureHealth(safe);
 
-        if (effectiveDelay == 0) _processWithdrawal(safe);
+        if ($.withdrawalDelay == 0) _processWithdrawal(safe);
     }
 }

@@ -417,6 +417,139 @@ contract OneInchSwapModuleTest is SafeTestSetup {
     }
 
     // ══════════════════════════════════════════════
+    //  FUSION — MakerTraits / extension hardening (Certora I-05, L-05)
+    // ══════════════════════════════════════════════
+
+    /// @dev MakerTraits.UNWRAP_WETH must be off — otherwise the router would deliver ETH instead
+    ///      of WETH to the maker, bypassing the toToken balance-delta check in postInteraction.
+    function test_fusion_requestSwap_revertsWhenUnwrapWethFlagSet() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, bytes memory ext) = _buildOrder(address(usdc), address(weETH), SWAP_AMOUNT, MIN_TO_AMOUNT, EXPIRATION);
+
+        // Flip bit 247 and re-sign — owners would normally never sign such an order, but on-chain
+        // we must still reject it if the BE is compromised.
+        uint256 mt = MakerTraits.unwrap(order.makerTraits) | (uint256(1) << 247);
+        order.makerTraits = MakerTraits.wrap(mt);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.expectRevert(OneInchSwapModule.UnwrapWethNotAllowed.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    /// @dev Fusion-routed shape (leading = settlement, length > 20, trailing = module) is accepted.
+    ///      `padBytes=85` produces a 125-byte field — matches the canonical SimpleSettlement
+    ///      layout and keeps the flags byte (offset 20) + whitelist size byte (offset 71) inside
+    ///      the zero-padded body so they pass the byte-level shape checks.
+    function test_fusion_requestSwap_acceptsSettlementRoutedExtension() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, bytes memory ext) =
+            _buildOrderWithExtension(_buildFusionExtension(SIMPLE_SETTLEMENT_OP, address(oneInchModule), 85));
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+        assertEq(oneInchModule.getPendingSwap(address(safe)).fromAmount, SWAP_AMOUNT);
+    }
+
+    /// @dev Settlement-routed shape with non-zero flags byte (offset 20) must revert — the BE
+    ///      always constructs Fusion orders with `flags == 0` (no customReceiver), and pinning
+    ///      this on-chain prevents a compromised BE from rerouting the maker payout.
+    function test_fusion_requestSwap_revertsOnNonZeroFlagsByte() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        bytes memory pad = new bytes(85);
+        pad[0] = 0x01; // flip flags bit 0 (customReceiver)
+        bytes memory body = abi.encodePacked(bytes20(SIMPLE_SETTLEMENT_OP), pad, bytes20(address(oneInchModule)));
+        bytes memory ext = _buildPostFieldOnly(body);
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.expectRevert(OneInchSwapModule.WrongPostInteractionExtensionShape.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    /// @dev Settlement-routed shape with non-zero whitelist size byte (offset 71) must revert —
+    ///      the BE always submits with an empty resolver whitelist; otherwise a compromised BE
+    ///      could whitelist a malicious resolver.
+    function test_fusion_requestSwap_revertsOnNonZeroWhitelistSize() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        bytes memory pad = new bytes(85);
+        pad[51] = 0x01; // pad index 51 == field byte 71 (whitelist size when flags == 0)
+        bytes memory body = abi.encodePacked(bytes20(SIMPLE_SETTLEMENT_OP), pad, bytes20(address(oneInchModule)));
+        bytes memory ext = _buildPostFieldOnly(body);
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.expectRevert(OneInchSwapModule.WrongPostInteractionExtensionShape.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    /// @dev Settlement-routed shape shorter than 72 bytes must revert — the byte-71 whitelist-
+    ///      size assertion cannot run on an undersized body.
+    function test_fusion_requestSwap_revertsOnShortSettlementBody() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        // field length = 20 (settlement) + 30 (pad) + 20 (module) = 70 (< 72)
+        bytes memory ext = _buildPostFieldOnly(abi.encodePacked(bytes20(SIMPLE_SETTLEMENT_OP), new bytes(30), bytes20(address(oneInchModule))));
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.expectRevert(OneInchSwapModule.WrongPostInteractionExtensionShape.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    /// @dev Settlement-routed shape with no chained target (length == 20) must revert.
+    function test_fusion_requestSwap_revertsWhenSettlementShapeMissingChainedTarget() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        // Length 20 but leading = settlement: not a valid plain-LOP shape (leading != module)
+        // and not a valid Settlement shape (no trailing module).
+        bytes memory ext = _buildPostFieldOnly(abi.encodePacked(bytes20(SIMPLE_SETTLEMENT_OP)));
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.expectRevert(OneInchSwapModule.WrongPostInteractionTarget.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    /// @dev Plain-LOP shape (leading = module) with length > 20 must revert — module-as-leading
+    ///      is the direct-call shape and admits no trailing payload.
+    function test_fusion_requestSwap_revertsWhenModuleLeadingButPaddedField7() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        bytes memory ext = _buildPostFieldOnly(abi.encodePacked(bytes20(address(oneInchModule)), bytes20(address(oneInchModule))));
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.expectRevert(OneInchSwapModule.WrongPostInteractionTarget.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    /// @dev Leading 20 bytes = some unrelated contract must revert (defends against the H-07-style
+    ///      "prepend arbitrary calldata, hide a different target in earlier bytes" attack).
+    function test_fusion_requestSwap_revertsWhenUnknownLeadingTarget() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        address evil = makeAddr("evilTarget");
+        bytes memory ext = _buildPostFieldOnly(abi.encodePacked(bytes20(evil), bytes20(address(oneInchModule))));
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.expectRevert(OneInchSwapModule.WrongPostInteractionTarget.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    /// @dev Settlement-routed shape with the trailing chained-target ≠ module must revert.
+    function test_fusion_requestSwap_revertsWhenSettlementShapeWrongChainedTarget() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        bytes memory body = abi.encodePacked(
+            bytes20(SIMPLE_SETTLEMENT_OP),
+            bytes20(makeAddr("padding")),
+            bytes20(makeAddr("wrongChainedTarget"))
+        );
+        bytes memory ext = _buildPostFieldOnly(body);
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
+        vm.expectRevert(OneInchSwapModule.WrongPostInteractionTarget.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    // ══════════════════════════════════════════════
     //  HELPERS
     // ══════════════════════════════════════════════
 
@@ -472,6 +605,59 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         // offsets bitmap: end5=0, end6=20, end7=40 (also end0..end4=0 implicitly).
         uint256 offsets = (uint256(20) << 192) | (uint256(40) << 224);
         return abi.encodePacked(bytes32(offsets), bytes20(module), bytes20(module));
+    }
+
+    /// @dev Builds a Settlement-routed extension: field 6 = module (20B), field 7 starts with
+    ///      `settlement`, contains `padBytes` of arbitrary middle bytes, ends with `module`.
+    ///      Total field-7 length = 40 + padBytes.
+    function _buildFusionExtension(address settlement, address module, uint32 padBytes) internal pure returns (bytes memory) {
+        bytes memory pad = new bytes(padBytes);
+        bytes memory field7 = abi.encodePacked(bytes20(settlement), pad, bytes20(module));
+        uint32 end7 = uint32(20 + field7.length);
+        uint256 offsets = (uint256(20) << 192) | (uint256(end7) << 224);
+        return abi.encodePacked(bytes32(offsets), bytes20(module), field7);
+    }
+
+    /// @dev Builds an extension with a fixed field-6 (= module address) and a caller-supplied
+    ///      field-7 body. Useful for negative tests targeting `_validateExtension`'s field-7
+    ///      branches without touching the field-6 validation.
+    function _buildPostFieldOnly(bytes memory field7) internal view returns (bytes memory) {
+        uint32 end7 = uint32(20 + field7.length);
+        uint256 offsets = (uint256(20) << 192) | (uint256(end7) << 224);
+        return abi.encodePacked(bytes32(offsets), bytes20(address(oneInchModule)), field7);
+    }
+
+    /// @dev Builds an order + intent matching the default usdc → weETH params, but lets the
+    ///      caller substitute a custom LOP extension. Recomputes salt to commit to the extension.
+    function _buildOrderWithExtension(bytes memory ext)
+        internal
+        view
+        returns (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, bytes memory extOut)
+    {
+        intent = OneInchSwapModule.SwapIntent({
+            safe: address(safe),
+            fromToken: address(usdc),
+            toToken: address(weETH),
+            fromAmount: SWAP_AMOUNT,
+            minToAmount: MIN_TO_AMOUNT,
+            expiration: EXPIRATION
+        });
+        extOut = ext;
+
+        uint256 mt = (uint256(1) << 255) | (uint256(1) << 252) | (uint256(1) << 251) | (uint256(1) << 249) | (uint256(EXPIRATION) << 80);
+        uint256 saltLower = uint256(keccak256(ext)) & type(uint160).max;
+        uint256 saltUpper = uint256(safe.nonce()) << 160;
+
+        order = IOrderMixin.Order({
+            salt: saltUpper | saltLower,
+            maker: Address.wrap(uint256(uint160(address(safe)))),
+            receiver: Address.wrap(0),
+            makerAsset: Address.wrap(uint256(uint160(address(usdc)))),
+            takerAsset: Address.wrap(uint256(uint160(address(weETH)))),
+            makingAmount: SWAP_AMOUNT,
+            takingAmount: MIN_TO_AMOUNT,
+            makerTraits: MakerTraits.wrap(mt)
+        });
     }
 
     function _hashOrder(IOrderMixin.Order memory order) internal view returns (bytes32) {

@@ -71,10 +71,10 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
     ///         carry payload; fields 0, 1, 4, 5 must be empty. Adding a new field is a two-place
     ///         change: extend `ExpectedExtension` *and* update the doc.
     struct ExpectedExtension {
-        bytes makingAmountData;     // field 2: Fusion auction data (Settlement-aware) or empty for plain-LOP
-        bytes takingAmountData;     // field 3: Fusion auction data (Settlement-aware) or empty for plain-LOP
-        bytes preInteractionData;   // field 6: exactly 20 bytes — must equal address(this)
-        bytes postInteractionData;  // field 7: trailing 20 bytes — must equal address(this)
+        bytes makingAmountData; // field 2: Fusion auction data (Settlement-aware) or empty for plain-LOP
+        bytes takingAmountData; // field 3: Fusion auction data (Settlement-aware) or empty for plain-LOP
+        bytes preInteractionData; // field 6: exactly 20 bytes — must equal address(this)
+        bytes postInteractionData; // field 7: trailing 20 bytes — must equal address(this)
     }
 
     // ──────────────────────────────────────────────
@@ -168,6 +168,7 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
     uint256 private constant _PRE_INTERACTION_CALL_FLAG = 1 << 252;
     uint256 private constant _POST_INTERACTION_CALL_FLAG = 1 << 251;
     uint256 private constant _HAS_EXTENSION_FLAG = 1 << 249;
+    uint256 private constant _UNWRAP_WETH_FLAG = 1 << 247;
 
     /// @dev Bit offset of the uint40 expiration field within MakerTraits.
     uint256 private constant _EXPIRATION_OFFSET = 80;
@@ -212,10 +213,12 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
     error NativeETHNotSupported();
     error WithdrawalDelayMisconfigured();
     error MissingMakerTraitsFlag();
+    error UnwrapWethNotAllowed();
     error ExpirationMismatch();
     error InvalidExtension();
     error WrongPreInteractionTarget();
     error WrongPostInteractionTarget();
+    error WrongPostInteractionExtensionShape();
     error SaltExtensionMismatch();
     error MissingSnapshot();
 
@@ -388,6 +391,7 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
         uint256 bits = MakerTraits.unwrap(mt_);
         uint256 required = _NO_PARTIAL_FILLS_FLAG | _PRE_INTERACTION_CALL_FLAG | _POST_INTERACTION_CALL_FLAG | _HAS_EXTENSION_FLAG;
         if (bits & required != required) revert MissingMakerTraitsFlag();
+        if (bits & _UNWRAP_WETH_FLAG != 0) revert UnwrapWethNotAllowed();
         if (uint40(bits >> _EXPIRATION_OFFSET) != expiration) revert ExpirationMismatch();
     }
 
@@ -395,9 +399,12 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
     ///      - salt commits to `keccak256(extension)` per LOP's `OrderLib.isValidExtension`
     ///      - fields 0, 1, 4, 5 are empty (unused by this module)
     ///      - field 6 is exactly 20 bytes and equals `address(this)` (preInteraction target)
-    ///      - field 7's trailing 20 bytes equal `address(this)` (postInteraction target — used
-    ///        both by plain-LOP, which calls us directly, and Settlement-routed Fusion, where
-    ///        FeeTaker reads the trailing 20 bytes and chains into us)
+    ///      - field 7's leading 20 bytes are either `address(this)` (plain-LOP — length must
+    ///        equal 20) or `settlementContract` (Settlement-routed Fusion — length must exceed
+    ///        20 and the trailing 20 bytes must equal `address(this)`, which FeeTaker chains
+    ///        into after its fee-skim). Additionally for the Fusion shape, byte 20 (FeeTaker
+    ///        `flags`, `bit 0 = customReceiver`) and byte 71 (whitelist size, when `flags == 0`)
+    ///        must both be zero
     ///
     ///      LOP extension layout: `bytes[0:32]` is the offsets bitmap (uint32 cumulative-end per
     ///      field, field `i`'s end at bits `[i*32 : (i+1)*32]`); `bytes[32:]` is the concatenated
@@ -424,15 +431,31 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
 
         // Field 6 = preInteractionData: exactly 20 bytes = address(this).
         if (end6 - end5 != 20) revert WrongPreInteractionTarget();
-        // Field 7 = postInteractionData: at least 20 bytes, trailing 20 = address(this).
+        // Field 7 = postInteractionData: at least 20 bytes.
         if (end7 - end6 < 20) revert WrongPostInteractionTarget();
         if (extension.length < 32 + end7) revert InvalidExtension();
 
         address preTarget = address(bytes20(extension[32 + end5:32 + end5 + 20]));
         if (preTarget != address(this)) revert WrongPreInteractionTarget();
 
-        address postTarget = address(bytes20(extension[32 + end7 - 20:32 + end7]));
-        if (postTarget != address(this)) revert WrongPostInteractionTarget();
+        // Constrain the leading 20 bytes (= the contract LOP calls for the post hook). Either
+        // we're called directly (plain-LOP — field length must equal 20) or Settlement is the
+        // first hop and chains into us via FeeTaker's trailing-target pattern (Settlement —
+        // field length must exceed 20 and trailing 20 bytes must equal this module).
+        address postLeading = address(bytes20(extension[32 + end6:32 + end6 + 20]));
+        if (postLeading == address(this)) {
+            if (end7 - end6 != 20) revert WrongPostInteractionTarget();
+        } else if (postLeading == settlementContract) {
+            if (end7 - end6 == 20) revert WrongPostInteractionTarget();
+            address postTrailing = address(bytes20(extension[32 + end7 - 20:32 + end7]));
+            if (postTrailing != address(this)) revert WrongPostInteractionTarget();
+
+            if (end7 - end6 < 72) revert WrongPostInteractionExtensionShape();
+            if (uint8(extension[32 + end6 + 20]) != 0) revert WrongPostInteractionExtensionShape();
+            if (uint8(extension[32 + end6 + 71]) != 0) revert WrongPostInteractionExtensionShape();
+        } else {
+            revert WrongPostInteractionTarget();
+        }
     }
 
     /// @dev Reverts if the cash-module's withdrawal delay is 0.
@@ -551,13 +574,13 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
 
         _validateBalanceDeltas(safe, pendingSwap.fromToken, pendingSwap.toToken, pendingSwap.fromAmount, pendingSwap.minToAmount);
 
-        _revokeApproval(safe, pendingSwap.fromToken);
-
         // Clear local state before releasing the CashModule withdrawal — `cancelWithdrawalByModule`
         // callbacks into `cancelBridgeByCashModule`, which short-circuits when `fromAmount == 0`.
         delete $.pendingSwaps[safe];
         $.swapInProgress[safe] = false;
         cashModule.cancelWithdrawalByModule(safe);
+
+        _revokeApproval(safe, pendingSwap.fromToken);
 
         _ensureHealth(safe);
 
