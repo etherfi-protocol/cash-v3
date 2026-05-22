@@ -15,7 +15,7 @@ contract RecoveryUsingSafeWithGithub is Test {
     address safeAddress;
 
     function setUp() public {
-        string memory chainRpc = vm.envString("CHAIN_RPC");
+        string memory chainRpc = vm.envOr("CHAIN_RPC", string("https://mainnet.optimism.io"));
 
         try vm.envAddress("RECOVERY_SAFE_ADDRESS") returns (address addr) {
             safeAddress = addr;
@@ -35,7 +35,6 @@ contract RecoveryUsingSafeWithGithub is Test {
         }
 
         safe = EtherFiSafe(payable(safeAddress));
-        if (bytes(chainRpc).length == 0) chainRpc = "https://mainnet.optimism.io";
         vm.createSelectFork(chainRpc);
     }
 
@@ -43,11 +42,6 @@ contract RecoveryUsingSafeWithGithub is Test {
         bytes32 structHash = keccak256(abi.encode(safe.RECOVER_SAFE_TYPEHASH(), newOwner, safe.nonce()));
         bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
 
-        emit log_named_address("safe", safeAddress);
-        emit log_named_address("newOwner", newOwner);
-        emit log_named_uint("chainId", block.chainid);
-        emit log_named_uint("nonce", safe.nonce());
-        emit log_named_bytes32("domainSeparator", safe.getDomainSeparator());
         emit log_named_bytes32("structHash", structHash);
         emit log_named_bytes32("digestHash", digestHash);
     }

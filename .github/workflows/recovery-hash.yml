@@ -26,12 +26,12 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
-      
+
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
-      
+
       - name: Display Input Parameters
         run: |
           echo "================================================"
@@ -39,7 +39,7 @@ jobs:
           echo "New Owner Address: ${{ github.event.inputs.recovery_new_owner }}"
           echo "Chain RPC: ${{ github.event.inputs.chain_rpc }}"
           echo "================================================"
-      
+
       - name: Run Build Message Hash Test
         run: |
           echo "Building message hash for recovery..."
