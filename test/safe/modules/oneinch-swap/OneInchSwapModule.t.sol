@@ -462,7 +462,7 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
         (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
 
-        vm.expectRevert(OneInchSwapModule.WrongPostInteractionExtensionShape.selector);
+        vm.expectRevert(OneInchSwapModule.CustomReceiverMustBeDisabled.selector);
         oneInchModule.requestSwap(intent, order, ext, signers, sigs);
     }
 
@@ -478,16 +478,34 @@ contract OneInchSwapModuleTest is SafeTestSetup {
         (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
         (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
 
+        vm.expectRevert(OneInchSwapModule.WhitelistMustBeDisabled.selector);
+        oneInchModule.requestSwap(intent, order, ext, signers, sigs);
+    }
+
+    /// @dev Settlement-routed shape with field length ≠ 125 must revert — the canonical
+    ///      SimpleSettlement+FeeTaker body with flags=0 and whitelistSize=0 is exactly 125
+    ///      bytes. Pinning the length forces the trailing 20 bytes to coincide with the
+    ///      chained-target slot FeeTaker actually invokes after parsing fee data.
+    function test_fusion_requestSwap_revertsOnShortSettlementBody() public {
+        deal(address(usdc), address(safe), SWAP_AMOUNT);
+        // field length = 20 (settlement) + 30 (pad) + 20 (module) = 70 (≠ 125)
+        bytes memory ext = _buildPostFieldOnly(abi.encodePacked(bytes20(SIMPLE_SETTLEMENT_OP), new bytes(30), bytes20(address(oneInchModule))));
+        (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
+
         vm.expectRevert(OneInchSwapModule.WrongPostInteractionExtensionShape.selector);
         oneInchModule.requestSwap(intent, order, ext, signers, sigs);
     }
 
-    /// @dev Settlement-routed shape shorter than 72 bytes must revert — the byte-71 whitelist-
-    ///      size assertion cannot run on an undersized body.
-    function test_fusion_requestSwap_revertsOnShortSettlementBody() public {
+    /// @dev Settlement-routed shape with field length > 125 must revert. With padBytes=86,
+    ///      total length is 126 and the trailing 20 bytes still equal the module — but the
+    ///      chained-target slot FeeTaker reads (deterministic given flags=0, whitelistSize=0)
+    ///      sits 1 byte before. Strict equality `end7 - end6 == 125` blocks this padding
+    ///      attack and forces the trailing-20 check to coincide with the real chained target.
+    function test_fusion_requestSwap_revertsOnOverlongSettlementBody() public {
         deal(address(usdc), address(safe), SWAP_AMOUNT);
-        // field length = 20 (settlement) + 30 (pad) + 20 (module) = 70 (< 72)
-        bytes memory ext = _buildPostFieldOnly(abi.encodePacked(bytes20(SIMPLE_SETTLEMENT_OP), new bytes(30), bytes20(address(oneInchModule))));
+        // field length = 20 + 86 + 20 = 126 (≠ 125)
+        bytes memory ext = _buildPostFieldOnly(abi.encodePacked(bytes20(SIMPLE_SETTLEMENT_OP), new bytes(86), bytes20(address(oneInchModule))));
         (OneInchSwapModule.SwapIntent memory intent, IOrderMixin.Order memory order, ) = _buildOrderWithExtension(ext);
         (address[] memory signers, bytes[] memory sigs) = _signRequest(intent, _hashOrder(order));
 

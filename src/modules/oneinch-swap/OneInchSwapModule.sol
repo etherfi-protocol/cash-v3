@@ -219,6 +219,8 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
     error WrongPreInteractionTarget();
     error WrongPostInteractionTarget();
     error WrongPostInteractionExtensionShape();
+    error CustomReceiverMustBeDisabled();
+    error WhitelistMustBeDisabled();
     error SaltExtensionMismatch();
     error MissingSnapshot();
 
@@ -450,9 +452,9 @@ contract OneInchSwapModule is UpgradeableProxy, ModuleBase, ModuleCheckBalance, 
             address postTrailing = address(bytes20(extension[32 + end7 - 20:32 + end7]));
             if (postTrailing != address(this)) revert WrongPostInteractionTarget();
 
-            if (end7 - end6 < 72) revert WrongPostInteractionExtensionShape();
-            if (uint8(extension[32 + end6 + 20]) != 0) revert WrongPostInteractionExtensionShape();
-            if (uint8(extension[32 + end6 + 71]) != 0) revert WrongPostInteractionExtensionShape();
+            if (end7 - end6 != 125) revert WrongPostInteractionExtensionShape();
+            if (uint8(extension[32 + end6 + 20]) != 0) revert CustomReceiverMustBeDisabled();
+            if (uint8(extension[32 + end6 + 71]) != 0) revert WhitelistMustBeDisabled();
         } else {
             revert WrongPostInteractionTarget();
         }
