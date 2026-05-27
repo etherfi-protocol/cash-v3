@@ -8,17 +8,26 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 
 import { OneInchSwapModule } from "../../src/modules/oneinch-swap/OneInchSwapModule.sol";
 import { EtherFiSafe } from "../../src/safe/EtherFiSafe.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
+import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { Utils } from "../utils/Utils.sol";
 
 /**
  * @title 1inch — Deploy implementations
- * @notice Deploys new impls for the 1inch integration:
+ * @notice Deploys every new impl the 1inch integration needs on prod:
  *           1. OneInchSwapModule implementation (UUPS) + ERC1967 proxy
  *           2. EtherFiSafe implementation (for the tightened ERC-1271 binding)
+ *           3. EtherFiDataProvider implementation (adds get/setOneInchSwapModule)
+ *           4. DebtManagerCore implementation
  *
- *         The proxy is initialised in-line with the RoleRegistry. The proxy admin (RoleRegistry
- *         owner) is responsible for the subsequent on-chain wiring — see
- *         `scripts/1inch/BuildSafeCalldata.s.sol` for the Gnosis tx bundle.
+ *         These are the four contracts the `feat/fusion-swap-module` branch changes relative to
+ *         `dev`. Hook / CashModuleSetters / CashModuleCore are intentionally NOT redeployed — the
+ *         branch leaves them byte-identical to the live impls (the audit reverted the 1inch
+ *         special-cases in Hook + Setters).
+ *
+ *         This script only DEPLOYS impls from a plain EOA. The privileged proxy upgrades + wiring
+ *         are executed by the operating safe (RoleRegistry owner / beacon owner / DataProvider
+ *         admin) via the Gnosis bundle — see `scripts/1inch/BuildSafeCalldata.s.sol`.
  *
  *         Usage:
  *           ENV=mainnet PRIVATE_KEY=0x... \
@@ -45,15 +54,21 @@ contract DeployOneInch is Utils {
         ERC1967Proxy moduleProxy = new ERC1967Proxy(address(moduleImpl), abi.encodeCall(OneInchSwapModule.initialize, (roleRegistry)));
 
         EtherFiSafe safeImpl = new EtherFiSafe(dataProvider);
+        EtherFiDataProvider dataProviderImpl = new EtherFiDataProvider();
+        DebtManagerCore debtManagerImpl = new DebtManagerCore(dataProvider);
 
         vm.stopBroadcast();
 
         console.log("OneInchSwapModule impl  :", address(moduleImpl));
         console.log("OneInchSwapModule proxy :", address(moduleProxy));
         console.log("New EtherFiSafe impl    :", address(safeImpl));
+        console.log("New DataProvider impl   :", address(dataProviderImpl));
+        console.log("New DebtManagerCore impl:", address(debtManagerImpl));
         console.log("");
         console.log("Next step: set the following env vars and run BuildSafeCalldata.s.sol");
-        console.log("  ONE_INCH_MODULE_PROXY=%s", address(moduleProxy));
-        console.log("  NEW_SAFE_IMPL=%s",         address(safeImpl));
+        console.log("  ONE_INCH_MODULE_PROXY=%s",   address(moduleProxy));
+        console.log("  NEW_SAFE_IMPL=%s",           address(safeImpl));
+        console.log("  NEW_DATA_PROVIDER_IMPL=%s",  address(dataProviderImpl));
+        console.log("  NEW_DEBT_MANAGER_IMPL=%s",   address(debtManagerImpl));
     }
 }

@@ -23,10 +23,7 @@
     "EtherFiStakeModule": "0xBf3f1A1cEC22eec7F6cE7dDa4Ac9AB808DF46439",
     "LiquidUSDLiquifierModule": "0x4f740E62011F582570E6d8d3431aad0046B7f74b",
     "CashLiquidationHelper": "0x731E3B8f012C701FCB74d21380C5C28937830Ab5",
-<<<<<<< feat/fusion-swap-module
-    "OneInchSwapModule": "0xD504Bb924534994D777F486C7067186172510597"
-=======
+    "OneInchSwapModule": "0xD504Bb924534994D777F486C7067186172510597",
     "MidasModule": "0x292B353d262E00a215E096A97596b55F8AFb00Df"
->>>>>>> dev
   }
 }
