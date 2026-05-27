@@ -42,13 +42,15 @@ import { Utils } from "../utils/Utils.sol";
  *              — authorises the same EOA to call `cancelSwap(safe, [], [])` without an
  *                owner-quorum sig.
  *
- *         ⚠ `BE_KEEPER` is a PLACEHOLDER (0xCA9CE100…). REPLACE with the real BE EOA before
- *         signing — without the request-role grant, `requestSwap` is bricked on the live module.
+ *         `BE_KEEPER` = prod keeper `etherFiWallet2` (0xB42833…3730), which already holds
+ *         `ETHER_FI_WALLET_ROLE` on the live RoleRegistry. Without the request-role grant,
+ *         `requestSwap` is bricked on the live module.
+ *
+ *         The deployed impl + module-proxy addresses are hardcoded as constants below (from the
+ *         `Deploy.s.sol` run); the rest are read from deployments.json.
  *
  *         Usage:
- *           ENV=mainnet ONE_INCH_MODULE_PROXY=0x... NEW_SAFE_IMPL=0x... \
- *             NEW_DATA_PROVIDER_IMPL=0x... NEW_DEBT_MANAGER_IMPL=0x... \
- *             forge script scripts/1inch/BuildSafeCalldata.s.sol --rpc-url <optimism_rpc>
+ *           ENV=mainnet forge script scripts/1inch/BuildSafeCalldata.s.sol --rpc-url optimism
  *
  *         Output: ./output/BuildSafeCalldata1inch.json (Safe tx builder format)
  */
@@ -56,10 +58,16 @@ contract BuildSafeCalldata1inch is GnosisHelpers, Utils {
     /// Cash operating safe (DATA_PROVIDER_ADMIN_ROLE holder, RoleRegistry owner)
     address constant OPERATING_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-    /// ⚠ PLACEHOLDER — replace with the real BE keeper EOA before signing this bundle.
-    /// Holds both `ONEINCH_SWAP_REQUEST_ROLE` and `ONEINCH_SWAP_CANCEL_ROLE`. Use separate
-    /// constants if you want different EOAs per role.
-    address constant BE_KEEPER = 0xCA9cE100Ca9Ce100Ca9ce100cA9CE100ca9Ce100;
+    /// Prod BE keeper EOA (`etherFiWallet2`) — already holds `ETHER_FI_WALLET_ROLE` on the live
+    /// RoleRegistry. Granted both `ONEINCH_SWAP_REQUEST_ROLE` and `ONEINCH_SWAP_CANCEL_ROLE` here.
+    /// If the BE also drives swaps from the primary wallet 0xdC45DB93…4b46, grant that EOA too.
+    address constant BE_KEEPER = 0xB42833d6edd1241474D33ea99906fD4CBE893730;
+
+    /// Impls + module proxy deployed by `Deploy.s.sol` on OP (tx batch at block 152150753+).
+    address constant ONE_INCH_MODULE_PROXY = 0xE6a499729200Da34655425364bB55D7EfA507318;
+    address constant NEW_SAFE_IMPL         = 0xe33BE40c822ACF71dE7Fd253A19d74678104424c;
+    address constant NEW_DATA_PROVIDER_IMPL= 0x57a8aceB7eBD2bDbce60C7a4F2C5dE8efd650Ba7;
+    address constant NEW_DEBT_MANAGER_IMPL = 0x182Ad6b5855D77Ea87CBad05518573C3a7b4d789;
 
     struct Addrs {
         address oneInchModule;
@@ -75,10 +83,10 @@ contract BuildSafeCalldata1inch is GnosisHelpers, Utils {
 
     function _readAddrs() internal view returns (Addrs memory a) {
         string memory d = readDeploymentFile();
-        a.oneInchModule      = vm.envAddress("ONE_INCH_MODULE_PROXY");
-        a.newSafeImpl        = vm.envAddress("NEW_SAFE_IMPL");
-        a.newDataProviderImpl= vm.envAddress("NEW_DATA_PROVIDER_IMPL");
-        a.newDebtManagerImpl = vm.envAddress("NEW_DEBT_MANAGER_IMPL");
+        a.oneInchModule      = ONE_INCH_MODULE_PROXY;
+        a.newSafeImpl        = NEW_SAFE_IMPL;
+        a.newDataProviderImpl= NEW_DATA_PROVIDER_IMPL;
+        a.newDebtManagerImpl = NEW_DEBT_MANAGER_IMPL;
         a.dataProvider       = stdJson.readAddress(d, ".addresses.EtherFiDataProvider");
         a.safeFactory        = stdJson.readAddress(d, ".addresses.EtherFiSafeFactory");
         a.cashModule         = stdJson.readAddress(d, ".addresses.CashModule");

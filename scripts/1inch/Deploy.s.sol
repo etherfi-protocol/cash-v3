@@ -6,10 +6,10 @@ import { console } from "forge-std/console.sol";
 
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
-import { OneInchSwapModule } from "../../src/modules/oneinch-swap/OneInchSwapModule.sol";
-import { EtherFiSafe } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
+import { OneInchSwapModule } from "../../src/modules/oneinch-swap/OneInchSwapModule.sol";
+import { EtherFiSafe } from "../../src/safe/EtherFiSafe.sol";
 import { Utils } from "../utils/Utils.sol";
 
 /**
@@ -29,9 +29,9 @@ import { Utils } from "../utils/Utils.sol";
  *         are executed by the operating safe (RoleRegistry owner / beacon owner / DataProvider
  *         admin) via the Gnosis bundle — see `scripts/1inch/BuildSafeCalldata.s.sol`.
  *
- *         Usage:
- *           ENV=mainnet PRIVATE_KEY=0x... \
- *             forge script scripts/1inch/Deploy.s.sol --rpc-url <optimism_rpc> --broadcast
+ *         Usage (Ledger):
+ *           ENV=mainnet forge script scripts/1inch/Deploy.s.sol \
+ *             --rpc-url <optimism_rpc> --ledger --sender <ledger_addr> --broadcast --verify
  */
 contract DeployOneInch is Utils {
     /// 1inch v6 Aggregation Router — canonical address on all EVM chains
@@ -42,13 +42,12 @@ contract DeployOneInch is Utils {
     address constant OPERATING_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         string memory deployments = readDeploymentFile();
 
         address dataProvider = stdJson.readAddress(deployments, ".addresses.EtherFiDataProvider");
         address roleRegistry = stdJson.readAddress(deployments, ".addresses.RoleRegistry");
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
 
         OneInchSwapModule moduleImpl = new OneInchSwapModule(AGGREGATION_ROUTER, SIMPLE_SETTLEMENT_OP, dataProvider, OPERATING_SAFE);
         ERC1967Proxy moduleProxy = new ERC1967Proxy(address(moduleImpl), abi.encodeCall(OneInchSwapModule.initialize, (roleRegistry)));
@@ -64,11 +63,5 @@ contract DeployOneInch is Utils {
         console.log("New EtherFiSafe impl    :", address(safeImpl));
         console.log("New DataProvider impl   :", address(dataProviderImpl));
         console.log("New DebtManagerCore impl:", address(debtManagerImpl));
-        console.log("");
-        console.log("Next step: set the following env vars and run BuildSafeCalldata.s.sol");
-        console.log("  ONE_INCH_MODULE_PROXY=%s",   address(moduleProxy));
-        console.log("  NEW_SAFE_IMPL=%s",           address(safeImpl));
-        console.log("  NEW_DATA_PROVIDER_IMPL=%s",  address(dataProviderImpl));
-        console.log("  NEW_DEBT_MANAGER_IMPL=%s",   address(debtManagerImpl));
     }
 }
