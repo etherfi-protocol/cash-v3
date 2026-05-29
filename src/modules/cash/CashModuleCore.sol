@@ -439,20 +439,12 @@ contract CashModuleCore is CashModuleStorageContract {
         }
         (bool existed, bool wasForced, uint256 oldAmount) =
             IPendingHoldsModule(phm).settlementSyncHold(safe, binSponsor, txId, amount);
-        if (!existed || wasForced) {
-            // No prior hold ("Settlement is KING", created as a forced hold inside settlementSyncHold)
-            // OR a forceAddHold hold: in both cases the spending limit was bypassed at creation, so
-            // charge the full settlement amount now. The limit is the primary risk control and must
-            // reflect funds leaving the safe even when settlement arrives without a matching auth hold.
-            $.safeCashConfig[safe].spendingLimit.spend(amount);
-        } else {
-            // Non-forced hold: limit was pre-charged at addHold for oldAmount; adjust for the delta.
-            if (amount > oldAmount) {
-                $.safeCashConfig[safe].spendingLimit.spend(amount - oldAmount);
-            } else if (amount < oldAmount) {
-                $.safeCashConfig[safe].spendingLimit.release(oldAmount - amount);
-            }
-        }
+        // The limit already reflects `oldCharged` for this obligation; make it reflect `amount`.
+        //   - non-forced hold: limit was pre-charged at addHold for oldAmount → reconcile the delta.
+        //   - forced hold / no prior hold ("Settlement is KING"): limit was bypassed at creation
+        //     (oldCharged = 0) → reconcileLimit charges the full settlement amount now.
+        uint256 oldCharged = (existed && !wasForced) ? oldAmount : 0;
+        $.safeCashConfig[safe].spendingLimit.reconcileLimit(oldCharged, amount);
     }
 
     /**

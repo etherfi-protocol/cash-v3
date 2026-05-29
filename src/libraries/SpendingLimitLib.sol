@@ -123,8 +123,31 @@ library SpendingLimitLib {
      */
     function release(SpendingLimit storage limit, uint256 amount) internal {
         currentLimit(limit);
-        limit.spentToday = amount <= limit.spentToday ? limit.spentToday - amount : 0;
-        limit.spentThisMonth = amount <= limit.spentThisMonth ? limit.spentThisMonth - amount : 0;
+        // Floor at 0 is legitimate here: currentLimit() may have reset the counters at a day/month
+        // rollover, after which crediting back a stale charge underflows by design.
+        limit.spentToday = _subFloor(limit.spentToday, amount);
+        limit.spentThisMonth = _subFloor(limit.spentThisMonth, amount);
+    }
+
+    /**
+     * @notice Reconciles the limit when the charged amount for an obligation changes from
+     *         oldCharged to newOwed (e.g. settlement amount differs from the authorized hold).
+     * @dev Single primitive for "the limit currently reflects oldCharged; make it reflect newOwed."
+     *      Charges the positive delta (subject to limit checks) or releases the negative delta.
+     *      Pass oldCharged = 0 to charge the full newOwed (forced / no-prior-hold settlement).
+     * @param limit Storage reference to the SpendingLimit
+     * @param oldCharged Amount already reflected in the limit for this obligation (USD 1e6)
+     * @param newOwed Amount that should now be reflected (USD 1e6)
+     */
+    function reconcileLimit(SpendingLimit storage limit, uint256 oldCharged, uint256 newOwed) internal {
+        if (newOwed > oldCharged) spend(limit, newOwed - oldCharged);
+        else if (newOwed < oldCharged) release(limit, oldCharged - newOwed);
+    }
+
+    /// @dev Saturating subtraction: max(a - b, 0). Use only where underflow is an expected,
+    ///      documented consequence (e.g. day/month limit rollover), never to mask an invariant break.
+    function _subFloor(uint256 a, uint256 b) private pure returns (uint256) {
+        unchecked { return a >= b ? a - b : 0; }
     }
 
     /**

@@ -89,4 +89,64 @@ contract PendingHoldsFindingsTest is PendingHoldsTestSetup {
         vm.expectRevert(abi.encodeWithSignature("WithdrawalBlockedByPendingHolds()"));
         cashModule.processWithdrawal(address(safe));
     }
+
+    // ---------------------------------------------------------------------
+    // Invariant: totalPendingHolds(safe) == Σ getHold(...).amountUsd, preserved across
+    // every mutation path. Validates the checked _replaceTotalHolds helper (Tier 1 #3).
+    // ---------------------------------------------------------------------
+    bytes32 constant INV_T1 = keccak256("inv-reap");
+    bytes32 constant INV_T2 = keccak256("inv-rain");
+
+    function _sumHolds() internal view returns (uint256) {
+        return pendingHoldsModule.getHold(address(safe), PROVIDER_REAP, INV_T1).amountUsd
+             + pendingHoldsModule.getHold(address(safe), PROVIDER_RAIN, INV_T2).amountUsd;
+    }
+
+    function _assertHoldsInvariant() internal view {
+        assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), _sumHolds(), "totalHolds != sum of holds");
+    }
+
+    function test_invariant_totalHoldsEqualsSumOfHolds_acrossLifecycle() public {
+        deal(address(usdc), address(safe), 1_000e6);
+        _assertHoldsInvariant();                                    // empty
+
+        _addHold(BinSponsor.Reap, INV_T1, 300e6);
+        _assertHoldsInvariant();                                    // 300
+        _addHold(BinSponsor.Rain, INV_T2, 200e6);
+        _assertHoldsInvariant();                                    // 500
+
+        vm.prank(etherFiWallet);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, INV_T1, 400e6); // increase
+        _assertHoldsInvariant();                                    // 600
+
+        vm.prank(etherFiWallet);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, INV_T1, 150e6); // decrease
+        _assertHoldsInvariant();                                    // 350
+
+        vm.prank(etherFiWallet);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Rain, INV_T2, ReleaseReason.REVERSAL);
+        _assertHoldsInvariant();                                    // 150
+
+        // Full settlement of the remaining hold → totalHolds returns to 0.
+        _spendWithHold(INV_T1, BinSponsor.Reap, 150e6);
+        _assertHoldsInvariant();                                    // 0
+        assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
+    }
+
+    function test_invariant_totalHoldsConsistent_partialSettleThenCollect() public {
+        // Under-funded settlement leaves a remainder hold; collectRemaining clears it.
+        deal(address(usdc), address(safe), 40e6);
+        _addHold(BinSponsor.Reap, INV_T1, 100e6);
+        _assertHoldsInvariant();                                    // 100
+
+        _spendWithHold(INV_T1, BinSponsor.Reap, 100e6);             // pays 40, 60 remains
+        _assertHoldsInvariant();                                    // 60
+        assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 60e6);
+
+        deal(address(usdc), address(safe), 60e6);
+        vm.prank(etherFiWallet);
+        cashModule.collectRemaining(address(safe), INV_T1, BinSponsor.Reap, address(usdc));
+        _assertHoldsInvariant();                                    // 0
+        assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
+    }
 }

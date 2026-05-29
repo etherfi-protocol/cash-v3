@@ -155,6 +155,11 @@ interface IPendingHoldsModule {
     /// @notice Thrown when address(0) is passed as cashModuleCore
     error ZeroCashModuleCore();
 
+    /// @notice Thrown when a per-hold amount exceeds the running totalHolds sum — i.e. totalHolds has
+    ///         drifted from the sum of individual holds (an invariant break). Surfaced loudly rather
+    ///         than silently floored, because totalHolds drives the withdrawal guard.
+    error TotalHoldsUnderflow();
+
     // -------------------------------------------------------------------------
     // Write functions — EtherFi wallet (backend) only
     // -------------------------------------------------------------------------

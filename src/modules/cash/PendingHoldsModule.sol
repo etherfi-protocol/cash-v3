@@ -136,6 +136,19 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
         return keccak256(abi.encode(safe, providerCode, txId));
     }
 
+    /**
+     * @dev Replaces `oldAmount` with `newAmount` in totalHolds[safe] (pass newAmount = 0 to remove).
+     *      Reverts with TotalHoldsUnderflow if oldAmount exceeds the running sum. oldAmount is always
+     *      read from the very HoldRecord being mutated, and every increment paired its stored amount,
+     *      so oldAmount <= totalHolds is an invariant. A silent floor here would corrupt the running
+     *      sum — and thus the withdrawal guard — so we fail loudly instead.
+     */
+    function _replaceTotalHolds(PendingHoldsModuleStorage storage $, address safe, uint256 oldAmount, uint256 newAmount) private {
+        uint256 current = $.totalHolds[safe];
+        if (oldAmount > current) revert TotalHoldsUnderflow();
+        $.totalHolds[safe] = current - oldAmount + newAmount;
+    }
+
     // -------------------------------------------------------------------------
     // Write functions — EtherFi wallet only
     // -------------------------------------------------------------------------
@@ -216,22 +229,16 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
 
         uint256 oldAmountUsd = record.amountUsd;
 
-        if (newAmountUsd > oldAmountUsd) {
-            // Increasing hold — consume delta from the spending limit immediately.
-            // Non-forced holds were originally charged at addHold; charge only the delta.
-            // Forced holds bypassed the limit at creation; charge the full delta now.
-            uint256 delta = newAmountUsd - oldAmountUsd;
-            if (!record.forced) ICashModuleForHolds($.cashModuleCore).consumeSpendingLimit(safe, delta);
-            $.totalHolds[safe] = $.totalHolds[safe] - oldAmountUsd + newAmountUsd;
-        } else {
-            // Decreasing hold — credit delta back to the spending limit for non-forced holds.
-            // Apply the same defensive floor as releaseHold/removeHold to guard against any
-            // totalHolds drift (e.g., caused by a prior forceAddHold + forceSpend sequence).
-            uint256 delta = oldAmountUsd - newAmountUsd;
-            if (!record.forced) ICashModuleForHolds($.cashModuleCore).releaseSpendingLimit(safe, delta);
-            uint256 current = $.totalHolds[safe];
-            $.totalHolds[safe] = (oldAmountUsd <= current ? current - oldAmountUsd : 0) + newAmountUsd;
+        // Adjust the spending limit for non-forced holds (forced holds bypassed it at creation):
+        // charge the delta on an increase, credit it back on a decrease.
+        if (!record.forced) {
+            if (newAmountUsd > oldAmountUsd) {
+                ICashModuleForHolds($.cashModuleCore).consumeSpendingLimit(safe, newAmountUsd - oldAmountUsd);
+            } else if (newAmountUsd < oldAmountUsd) {
+                ICashModuleForHolds($.cashModuleCore).releaseSpendingLimit(safe, oldAmountUsd - newAmountUsd);
+            }
         }
+        _replaceTotalHolds($, safe, oldAmountUsd, newAmountUsd);
 
         record.amountUsd = newAmountUsd;
 
@@ -254,8 +261,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
 
         uint256 holdAmount = record.amountUsd;
         bool wasForced = record.forced;
-        uint256 current = $.totalHolds[safe];
-        $.totalHolds[safe] = holdAmount <= current ? current - holdAmount : 0;
+        _replaceTotalHolds($, safe, holdAmount, 0);
 
         delete $.holds[key];
 
@@ -291,12 +297,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
             existed = true;
 
             if (settlementAmount != oldAmount) {
-                if (settlementAmount > oldAmount) {
-                    $.totalHolds[safe] = $.totalHolds[safe] - oldAmount + settlementAmount;
-                } else {
-                    uint256 current = $.totalHolds[safe];
-                    $.totalHolds[safe] = (oldAmount <= current ? current - oldAmount : 0) + settlementAmount;
-                }
+                _replaceTotalHolds($, safe, oldAmount, settlementAmount);
                 record.amountUsd = settlementAmount;
                 emit HoldUpdated(safe, providerCode, txId, oldAmount, settlementAmount, block.timestamp);
             }
@@ -330,8 +331,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
         if (record.createdAt == 0) revert HoldNotFound();
 
         uint256 oldAmount = record.amountUsd;
-        uint256 current = $.totalHolds[safe];
-        $.totalHolds[safe] = (oldAmount <= current ? current - oldAmount : 0) + remaining;
+        _replaceTotalHolds($, safe, oldAmount, remaining);
         record.amountUsd = remaining;
         // Mark forced so the special-function path does not double-charge the spending limit.
         // The limit was already fully charged for the settlement amount at settlementSyncHold.
@@ -354,8 +354,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
         if (record.createdAt == 0) revert HoldNotFound();
 
         uint256 holdAmount = record.amountUsd;
-        uint256 current = $.totalHolds[safe];
-        $.totalHolds[safe] = holdAmount <= current ? current - holdAmount : 0;
+        _replaceTotalHolds($, safe, holdAmount, 0);
 
         delete $.holds[key];
 
