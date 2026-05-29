@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { Mode, BinSponsor } from "../../interfaces/ICashModule.sol";
+import { ICashModule, Mode, BinSponsor } from "../../interfaces/ICashModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
@@ -152,10 +152,14 @@ contract CashModuleSettersExt is CashModuleStorageContract {
         uint256 payToken,
         uint256 paidUsd
     ) private {
+        // Single source of truth for the dispatcher mapping: CashModuleCore.getSettlementDispatcher.
+        // Ext runs in Core's storage via delegatecall, so address(this) is the Core proxy.
+        address dispatcher = ICashModule(address(this)).getSettlementDispatcher(binSponsor);
+
         address[] memory to = new address[](1);
         bytes[] memory data = new bytes[](1);
         to[0] = token;
-        data[0] = abi.encodeWithSelector(IERC20.transfer.selector, _settlementDispatcherFor($, binSponsor), payToken);
+        data[0] = abi.encodeWithSelector(IERC20.transfer.selector, dispatcher, payToken);
         IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](1), data);
 
         uint256[] memory tokenAmounts = new uint256[](1);
@@ -163,14 +167,5 @@ contract CashModuleSettersExt is CashModuleStorageContract {
         tokenAmounts[0] = payToken;
         usdAmounts[0] = paidUsd;
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, to, tokenAmounts, usdAmounts, paidUsd, Mode.Debit);
-    }
-
-    /// @dev Resolves the settlement dispatcher for a bin sponsor (mirrors CashModuleCore.getSettlementDispatcher).
-    function _settlementDispatcherFor(CashModuleStorage storage $, BinSponsor binSponsor) private view returns (address dispatcher) {
-        if (binSponsor == BinSponsor.Rain) dispatcher = $.settlementDispatcherRain;
-        else if (binSponsor == BinSponsor.PIX) dispatcher = $.settlementDispatcherPix;
-        else if (binSponsor == BinSponsor.CardOrder) dispatcher = $.settlementDispatcherCardOrder;
-        else dispatcher = $.settlementDispatcherReap;
-        if (dispatcher == address(0)) revert SettlementDispatcherNotSetForBinSponsor();
     }
 }
