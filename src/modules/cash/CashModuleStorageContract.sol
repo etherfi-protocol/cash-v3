@@ -74,6 +74,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address settlementDispatcherCardOrder;
         /// @notice Address of the PendingHoldsModule registry contract
         address pendingHoldsModule;
+        /// @notice Address of the CashModuleSettersExt overflow contract (second fallback hop).
+        ///         Holds functions that no longer fit in Core or Setters under the EIP-170 24KB cap.
+        address cashModuleSettersExt;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))

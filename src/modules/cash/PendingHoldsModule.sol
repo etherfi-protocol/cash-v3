@@ -14,7 +14,11 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  * @dev Architecture:
  *   - Pure registry: stores holds, sums them per safe, emits rich indexed events.
  *   - Zero spend() logic: CashModuleCore owns settlement; it calls removeHold() after spend().
- *   - Spendable invariant: spendable(safe) = rawSpendable(safe) - totalPendingHolds(safe)
+ *   - Spendable accounting: non-forced holds are charged to spentToday/spentThisMonth at addHold()
+ *     time, so rawSpendable(safe) already reflects them. spendable(safe) == rawSpendable(safe);
+ *     do NOT subtract totalPendingHolds again (that double-counts). Forced holds (forceAddHold and
+ *     settlement-created "Settlement is KING" holds) deliberately bypass the limit until settlement,
+ *     so they are NOT reflected in rawSpendable; totalPendingHolds drives only the withdrawal guard.
  *   - Hold keys are provider-namespaced: keccak256(abi.encode(safe, providerCode, txId))
  *     This prevents txId collisions across Rain / Reap / PIX namespaces.
  *

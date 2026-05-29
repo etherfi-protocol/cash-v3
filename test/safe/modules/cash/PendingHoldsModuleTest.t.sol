@@ -848,18 +848,41 @@ contract PendingHoldsLensTest is PendingHoldsTestSetup {
 // =============================================================================
 
 contract CashModuleCoreBytecodeSizeTest is Test {
+    uint256 constant EIP170_LIMIT = 24_576;
+
     function test_cashModuleCore_deployedSize_underLimit() public {
-        // CashModuleCore must not exceed 24,576 bytes (EIP-170 limit)
-        uint256 limit = 24_576;
         uint256 coreSize = address(new _CashModuleCoreForSizeCheck()).code.length;
-        assertLt(coreSize, limit, "CashModuleCore deployed bytecode exceeds 24KB EVM limit");
+        assertLt(coreSize, EIP170_LIMIT, "CashModuleCore deployed bytecode exceeds 24KB EVM limit");
+    }
+
+    // Setters is deployed standalone (delegatecall target) and is also subject to EIP-170. The PR
+    // moved code into Setters to protect Core's ceiling, which previously pushed Setters over the
+    // limit; this gate prevents that regression.
+    function test_cashModuleSetters_deployedSize_underLimit() public {
+        uint256 settersSize = address(new _CashModuleSettersForSizeCheck()).code.length;
+        assertLt(settersSize, EIP170_LIMIT, "CashModuleSetters deployed bytecode exceeds 24KB EVM limit");
+    }
+
+    function test_cashModuleSettersExt_deployedSize_underLimit() public {
+        uint256 extSize = address(new _CashModuleSettersExtForSizeCheck()).code.length;
+        assertLt(extSize, EIP170_LIMIT, "CashModuleSettersExt deployed bytecode exceeds 24KB EVM limit");
     }
 }
 
-// Minimal deployment helper — avoids importing the full constructor chain in this file
+// Minimal deployment helpers — avoid importing the full constructor chain in this file
 import { CashModuleCore } from "../../../../src/modules/cash/CashModuleCore.sol";
+import { CashModuleSetters } from "../../../../src/modules/cash/CashModuleSetters.sol";
+import { CashModuleSettersExt } from "../../../../src/modules/cash/CashModuleSettersExt.sol";
 import { EtherFiDataProvider } from "../../../../src/data-provider/EtherFiDataProvider.sol";
 
 contract _CashModuleCoreForSizeCheck is CashModuleCore {
     constructor() CashModuleCore(address(1)) { }
+}
+
+contract _CashModuleSettersForSizeCheck is CashModuleSetters {
+    constructor() CashModuleSetters(address(1)) { }
+}
+
+contract _CashModuleSettersExtForSizeCheck is CashModuleSettersExt {
+    constructor() CashModuleSettersExt(address(1)) { }
 }

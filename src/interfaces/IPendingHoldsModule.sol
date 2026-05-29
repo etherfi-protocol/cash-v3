@@ -44,8 +44,11 @@ struct HoldRecord {
  *        forceAddHold() — force-capture / recovery path, operator-only, bypasses balance check
  *        updateHold()   — incremental auth adjustment, called by EtherFi wallet (backend)
  *
- *      Spendable invariant enforced at hold-write time:
- *        totalPendingHolds(safe) + newAmount <= rawSpendable(safe)
+ *      Limit accounting at hold-write time:
+ *        addHold()/updateHold()-increase charge the daily/monthly spending limit (via
+ *        CashModuleCore.consumeSpendingLimit) and revert if the limit would be breached. Holds are
+ *        thus bounded by the spending limit, NOT separately re-checked against rawSpendable or token
+ *        balance. forceAddHold() bypasses this charge entirely (operator recovery).
  *
  *      Provider-namespaced keys prevent txId collisions between Rain / Reap / PIX.
  *      Use providerCodeFromBinSponsor() to convert BinSponsor enum values to bytes4.

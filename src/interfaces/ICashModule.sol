@@ -683,4 +683,18 @@ interface ICashModule {
      * @param _pendingHoldsModule Address of the deployed PendingHoldsModule proxy
      */
     function setPendingHoldsModule(address _pendingHoldsModule) external;
+
+    /**
+     * @notice Sets the CashModuleSettersExt address — the second fallback-hop overflow contract.
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE. Functions not present in Core
+     *      or Setters (e.g. repay, collectRemaining) are delegatecalled here. Must be wired before any
+     *      such function is invoked, or the call reverts in CashModuleSetters.fallback().
+     * @param _cashModuleSettersExt Address of the deployed CashModuleSettersExt
+     */
+    function setCashModuleSettersExt(address _cashModuleSettersExt) external;
+
+    /**
+     * @notice Returns the CashModuleSettersExt address.
+     */
+    function getCashModuleSettersExt() external view returns (address);
 }

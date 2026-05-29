@@ -6,6 +6,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 
 import { CashModuleCore } from "../../src/modules/cash/CashModuleCore.sol";
 import { CashModuleSetters } from "../../src/modules/cash/CashModuleSetters.sol";
+import { CashModuleSettersExt } from "../../src/modules/cash/CashModuleSettersExt.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
@@ -50,6 +51,7 @@ contract UpgradeCashModuleWithPendingHolds is GnosisHelpers, Utils {
         // Deploy new implementations (broadcast pays gas; Safe executes the upgrades)
         address newCoreImpl = address(new CashModuleCore(dataProvider));
         address newSettersImpl = address(new CashModuleSetters(dataProvider));
+        address newSettersExtImpl = address(new CashModuleSettersExt(dataProvider));
 
         // --- Build Gnosis Safe transaction batch ---
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
@@ -66,7 +68,14 @@ contract UpgradeCashModuleWithPendingHolds is GnosisHelpers, Utils {
         );
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setSettersCalldata, "0", false)));
 
-        // Tx 3: wire PendingHoldsModule into CashModule (routed via fallback → CashModuleSetters)
+        // Tx 3: wire CashModuleSettersExt (second fallback hop: repay + collectRemaining live here).
+        // Must precede any repay/collectRemaining call, else CashModuleSetters.fallback() reverts.
+        string memory setSettersExtCalldata = iToHex(
+            abi.encodeWithSelector(ICashModule.setCashModuleSettersExt.selector, newSettersExtImpl)
+        );
+        txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(cashModule), setSettersExtCalldata, "0", false)));
+
+        // Tx 4: wire PendingHoldsModule into CashModule (routed via fallback → CashModuleSetters)
         string memory setPhmCalldata = iToHex(
             abi.encodeWithSelector(ICashModule.setPendingHoldsModule.selector, phmProxy)
         );
