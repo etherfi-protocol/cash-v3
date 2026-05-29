@@ -14,7 +14,11 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  * @dev Architecture:
  *   - Pure registry: stores holds, sums them per safe, emits rich indexed events.
  *   - Zero spend() logic: CashModuleCore owns settlement; it calls removeHold() after spend().
- *   - Spendable invariant: spendable(safe) = rawSpendable(safe) - totalPendingHolds(safe)
+ *   - Spendable accounting: non-forced holds are charged to spentToday/spentThisMonth at addHold()
+ *     time, so rawSpendable(safe) already reflects them. spendable(safe) == rawSpendable(safe);
+ *     do NOT subtract totalPendingHolds again (that double-counts). Forced holds (forceAddHold and
+ *     settlement-created "Settlement is KING" holds) deliberately bypass the limit until settlement,
+ *     so they are NOT reflected in rawSpendable; totalPendingHolds drives only the withdrawal guard.
  *   - Hold keys are provider-namespaced: keccak256(abi.encode(safe, providerCode, txId))
  *     This prevents txId collisions across Rain / Reap / PIX namespaces.
  *
@@ -137,7 +141,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     // -------------------------------------------------------------------------
 
     /// @inheritdoc IPendingHoldsModule
-    function addHold(address safe, bytes4 providerCode, bytes32 txId, uint256 amountUsd)
+    function addHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd)
         external
         whenNotPaused
         nonReentrant
@@ -145,6 +149,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     {
         if (amountUsd == 0) revert InvalidAmount();
 
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
         bytes32 key = _holdKey(safe, providerCode, txId);
         PendingHoldsModuleStorage storage $ = _getPendingHoldsModuleStorage();
 
@@ -167,7 +172,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     }
 
     /// @inheritdoc IPendingHoldsModule
-    function forceAddHold(address safe, bytes4 providerCode, bytes32 txId, uint256 amountUsd)
+    function forceAddHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd)
         external
         whenNotPaused
         nonReentrant
@@ -175,6 +180,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     {
         if (amountUsd == 0) revert InvalidAmount();
 
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
         bytes32 key = _holdKey(safe, providerCode, txId);
         PendingHoldsModuleStorage storage $ = _getPendingHoldsModuleStorage();
 
@@ -193,7 +199,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     }
 
     /// @inheritdoc IPendingHoldsModule
-    function updateHold(address safe, bytes4 providerCode, bytes32 txId, uint256 newAmountUsd)
+    function updateHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 newAmountUsd)
         external
         whenNotPaused
         nonReentrant
@@ -201,6 +207,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     {
         if (newAmountUsd == 0) revert InvalidAmount();
 
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
         bytes32 key = _holdKey(safe, providerCode, txId);
         PendingHoldsModuleStorage storage $ = _getPendingHoldsModuleStorage();
 
@@ -232,12 +239,13 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     }
 
     /// @inheritdoc IPendingHoldsModule
-    function releaseHold(address safe, bytes4 providerCode, bytes32 txId, ReleaseReason reason)
+    function releaseHold(address safe, BinSponsor binSponsor, bytes32 txId, ReleaseReason reason)
         external
         whenNotPaused
         nonReentrant
         onlyEtherFiWallet
     {
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
         bytes32 key = _holdKey(safe, providerCode, txId);
         PendingHoldsModuleStorage storage $ = _getPendingHoldsModuleStorage();
 
@@ -387,6 +395,12 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     {
         bytes32 key = _holdKey(safe, providerCode, txId);
         return _getPendingHoldsModuleStorage().holds[key];
+    }
+
+    /// @inheritdoc IPendingHoldsModule
+    function remainingHold(address safe, BinSponsor binSponsor, bytes32 txId) external view returns (uint256) {
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
+        return _getPendingHoldsModuleStorage().holds[_holdKey(safe, providerCode, txId)].amountUsd;
     }
 
     /// @inheritdoc IPendingHoldsModule

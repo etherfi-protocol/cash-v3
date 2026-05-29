@@ -419,12 +419,13 @@ contract CashModuleCore is CashModuleStorageContract {
      *      Extracted to its own stack frame to avoid stack-too-deep in callers.
      *
      *      Limit accounting rules after settlementSyncHold() returns:
-     *        - No hold existed (Settlement is KING): bypass limit — no charge.
+     *        - No hold existed (Settlement is KING): charge full settlement to limit now (the
+     *                                               forced hold created at sync bypassed it).
+     *        - Forced hold (forceAddHold path):     charge full settlement to limit now,
+     *                                               since limit was bypassed at forceAddHold.
      *        - Non-forced hold, settlement > old:   charge delta to limit.
      *        - Non-forced hold, settlement < old:   release delta from limit.
      *        - Non-forced hold, settlement == old:  no-op.
-     *        - Forced hold (forceAddHold path):     charge full settlement to limit now,
-     *                                               since limit was bypassed at forceAddHold.
      *        - No PHM:                              charge spendingLimit.spend(amount) directly.
      *
      *      Limit adjustments are performed in Core — NOT via a PHM→Core callback — to avoid
@@ -438,20 +439,19 @@ contract CashModuleCore is CashModuleStorageContract {
         }
         (bool existed, bool wasForced, uint256 oldAmount) =
             IPendingHoldsModule(phm).settlementSyncHold(safe, binSponsor, txId, amount);
-        if (!existed) {
-            // Settlement is KING — no prior hold, bypass limit entirely.
-            return;
-        }
-        if (!wasForced) {
-            // Non-forced hold: limit was pre-charged at addHold for oldAmount; adjust for delta.
+        if (!existed || wasForced) {
+            // No prior hold ("Settlement is KING", created as a forced hold inside settlementSyncHold)
+            // OR a forceAddHold hold: in both cases the spending limit was bypassed at creation, so
+            // charge the full settlement amount now. The limit is the primary risk control and must
+            // reflect funds leaving the safe even when settlement arrives without a matching auth hold.
+            $.safeCashConfig[safe].spendingLimit.spend(amount);
+        } else {
+            // Non-forced hold: limit was pre-charged at addHold for oldAmount; adjust for the delta.
             if (amount > oldAmount) {
                 $.safeCashConfig[safe].spendingLimit.spend(amount - oldAmount);
             } else if (amount < oldAmount) {
                 $.safeCashConfig[safe].spendingLimit.release(oldAmount - amount);
             }
-        } else {
-            // Forced hold (forceAddHold path): limit was bypassed at creation — charge now.
-            $.safeCashConfig[safe].spendingLimit.spend(amount);
         }
     }
 

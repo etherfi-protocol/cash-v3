@@ -44,8 +44,11 @@ struct HoldRecord {
  *        forceAddHold() — force-capture / recovery path, operator-only, bypasses balance check
  *        updateHold()   — incremental auth adjustment, called by EtherFi wallet (backend)
  *
- *      Spendable invariant enforced at hold-write time:
- *        totalPendingHolds(safe) + newAmount <= rawSpendable(safe)
+ *      Limit accounting at hold-write time:
+ *        addHold()/updateHold()-increase charge the daily/monthly spending limit (via
+ *        CashModuleCore.consumeSpendingLimit) and revert if the limit would be breached. Holds are
+ *        thus bounded by the spending limit, NOT separately re-checked against rawSpendable or token
+ *        balance. forceAddHold() bypasses this charge entirely (operator recovery).
  *
  *      Provider-namespaced keys prevent txId collisions between Rain / Reap / PIX.
  *      Use providerCodeFromBinSponsor() to convert BinSponsor enum values to bytes4.
@@ -164,11 +167,12 @@ interface IPendingHoldsModule {
      *      hold would breach the limit.
      *      Only callable by EtherFi wallet (backend service wallet).
      * @param safe Safe address
-     * @param providerCode 4-byte provider code (use providerCodeFromBinSponsor to convert)
+     * @param binSponsor Bin sponsor; the provider code (hold-key namespace) is derived on-chain so
+     *        the auth-time key provably matches the settlement-time key
      * @param txId Provider transaction identifier
      * @param amountUsd Amount to hold in USD (1e6)
      */
-    function addHold(address safe, bytes4 providerCode, bytes32 txId, uint256 amountUsd) external;
+    function addHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd) external;
 
     /**
      * @notice Adds a hold without checking the spendable balance (operator recovery path)
@@ -176,11 +180,11 @@ interface IPendingHoldsModule {
      *      Emits HoldAdded with forced=true.
      *      Only callable by EtherFi wallet.
      * @param safe Safe address
-     * @param providerCode 4-byte provider code (use providerCodeFromBinSponsor to convert)
+     * @param binSponsor Bin sponsor; provider code derived on-chain
      * @param txId Provider transaction identifier
      * @param amountUsd Amount to hold in USD (1e6)
      */
-    function forceAddHold(address safe, bytes4 providerCode, bytes32 txId, uint256 amountUsd) external;
+    function forceAddHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd) external;
 
     /**
      * @notice Updates an existing hold amount atomically (incremental auth adjustment)
@@ -188,22 +192,22 @@ interface IPendingHoldsModule {
      *      If newAmountUsd < oldAmountUsd, credits the delta back to the spending limit.
      *      Only callable by EtherFi wallet (backend service wallet).
      * @param safe Safe address
-     * @param providerCode 4-byte provider code
+     * @param binSponsor Bin sponsor; provider code derived on-chain
      * @param txId Provider transaction identifier
      * @param newAmountUsd New hold amount in USD (1e6)
      */
-    function updateHold(address safe, bytes4 providerCode, bytes32 txId, uint256 newAmountUsd) external;
+    function updateHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 newAmountUsd) external;
 
     /**
      * @notice Releases a hold without a corresponding spend (network reversal or admin action)
      * @dev Does NOT call spend() — only decrements the hold accumulator.
      *      Only callable by EtherFi wallet.
      * @param safe Safe address
-     * @param providerCode 4-byte provider code
+     * @param binSponsor Bin sponsor; provider code derived on-chain
      * @param txId Provider transaction identifier
      * @param reason Why the hold is being released
      */
-    function releaseHold(address safe, bytes4 providerCode, bytes32 txId, ReleaseReason reason) external;
+    function releaseHold(address safe, BinSponsor binSponsor, bytes32 txId, ReleaseReason reason) external;
 
     // -------------------------------------------------------------------------
     // Write functions — CashModuleCore only
@@ -295,6 +299,17 @@ interface IPendingHoldsModule {
      * @return hold The HoldRecord struct
      */
     function getHold(address safe, bytes4 providerCode, bytes32 txId) external view returns (HoldRecord memory hold);
+
+    /**
+     * @notice Returns the outstanding hold amount for a (safe, binSponsor, txId), in USD (1e6)
+     * @dev Convenience for the settlement / collection path which keys by BinSponsor. Returns 0 if
+     *      no hold exists. Used by collectRemaining() to size the outstanding under-funded debt.
+     * @param safe Safe address
+     * @param binSponsor The bin sponsor enum value
+     * @param txId Provider transaction identifier
+     * @return Outstanding hold amount in USD (1e6)
+     */
+    function remainingHold(address safe, BinSponsor binSponsor, bytes32 txId) external view returns (uint256);
 
     /**
      * @notice Returns the 4-byte provider code for a given BinSponsor

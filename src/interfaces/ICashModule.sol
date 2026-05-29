@@ -574,6 +574,20 @@ interface ICashModule {
     function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external;
 
     /**
+     * @notice Collects the outstanding remainder of an under-funded settlement from the safe's balance.
+     * @dev When a debit spend() could not fully cover the settlement, the unpaid remainder is parked in
+     *      a forced hold that blocks withdrawals. Once the safe is funded, ops calls this to sweep the
+     *      remainder from `token` to the settlement dispatcher and clear the hold. The spending limit is
+     *      NOT charged again (already charged at the original settlement). Only valid for already-settled
+     *      transactions (transactionCleared == true). Routed to CashModuleSetters via Core's fallback().
+     * @param safe Address of the EtherFi Safe
+     * @param txId Transaction identifier
+     * @param binSponsor Bin sponsor the settlement was made under
+     * @param token Borrow token to collect the remainder from
+     */
+    function collectRemaining(address safe, bytes32 txId, BinSponsor binSponsor, address token) external;
+
+    /**
      * @notice Clears pending cashback for users
      * @param users Addresses of users to clear the pending cashback for
      * @param tokens Addresses of cashback tokens
@@ -669,4 +683,18 @@ interface ICashModule {
      * @param _pendingHoldsModule Address of the deployed PendingHoldsModule proxy
      */
     function setPendingHoldsModule(address _pendingHoldsModule) external;
+
+    /**
+     * @notice Sets the CashModuleSettersExt address — the second fallback-hop overflow contract.
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE. Functions not present in Core
+     *      or Setters (e.g. repay, collectRemaining) are delegatecalled here. Must be wired before any
+     *      such function is invoked, or the call reverts in CashModuleSetters.fallback().
+     * @param _cashModuleSettersExt Address of the deployed CashModuleSettersExt
+     */
+    function setCashModuleSettersExt(address _cashModuleSettersExt) external;
+
+    /**
+     * @notice Returns the CashModuleSettersExt address.
+     */
+    function getCashModuleSettersExt() external view returns (address);
 }

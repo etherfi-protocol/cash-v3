@@ -354,54 +354,6 @@ function _requestWithdrawal(address safe, address[] memory tokens, uint256[] mem
     }
 
     // -------------------------------------------------------------------------
-    // Repayment — moved here from CashModuleCore to preserve Core's 24KB ceiling
-    // -------------------------------------------------------------------------
-
-    /**
-     * @notice Repays borrowed tokens
-     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses.
-     *      Routed from Core via fallback() delegatecall.
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to repay
-     * @param amountInUsd Amount to repay in USD
-     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
-     */
-    function repay(address safe, address token, uint256 amountInUsd) public whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
-        IDebtManager debtManager = _getDebtManager();
-        if (!_isBorrowToken(debtManager, token)) revert OnlyBorrowToken();
-        _repay(safe, debtManager, token, amountInUsd);
-    }
-
-    /**
-     * @dev Internal function to execute the repayment transaction
-     * @param safe Address of the EtherFi Safe
-     * @param debtManager Reference to the debt manager contract
-     * @param token Address of the token to repay
-     * @param amountInUsd Amount to repay in USD
-     * @custom:throws AmountZero if the converted amount is zero
-     */
-    function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
-        uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
-        if (amount == 0) revert AmountZero();
-        _cancelWithdrawalRequestIfNecessary(safe, token, amount);
-
-        address[] memory to = new address[](3);
-        bytes[] memory data = new bytes[](3);
-        uint256[] memory values = new uint256[](3);
-
-        to[0] = token;
-        to[1] = address(debtManager);
-        to[2] = token;
-
-        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
-        data[1] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
-        data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), 0);
-
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-        _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
-    }
-
-    // -------------------------------------------------------------------------
     // PendingHoldsModule integration
     // -------------------------------------------------------------------------
 
@@ -460,5 +412,48 @@ function _requestWithdrawal(address safe, address[] memory tokens, uint256[] mem
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
         if (_pendingHoldsModule == address(0)) revert InvalidInput();
         _getCashModuleStorage().pendingHoldsModule = _pendingHoldsModule;
+    }
+
+    // -------------------------------------------------------------------------
+    // CashModuleSettersExt routing (second overflow hop)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Sets the CashModuleSettersExt address — the second fallback-hop overflow contract.
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE. Functions not found in Core
+     *      or Setters are delegatecalled here (e.g. repay, collectRemaining).
+     * @param _cashModuleSettersExt Address of the deployed CashModuleSettersExt
+     */
+    function setCashModuleSettersExt(address _cashModuleSettersExt) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (_cashModuleSettersExt == address(0)) revert InvalidInput();
+        _getCashModuleStorage().cashModuleSettersExt = _cashModuleSettersExt;
+    }
+
+    /**
+     * @notice Returns the CashModuleSettersExt address.
+     */
+    function getCashModuleSettersExt() public view returns (address) {
+        return _getCashModuleStorage().cashModuleSettersExt;
+    }
+
+    /**
+     * @dev Second fallback hop. Core delegatecalls Setters for any selector not in Core; if the
+     *      selector is not in Setters either, this forwards (still by delegatecall, so Core's storage
+     *      and the original msg.sender are preserved) to CashModuleSettersExt.
+     */
+    // solhint-disable-next-line no-complex-fallback
+    fallback() external {
+        address extImpl = _getCashModuleStorage().cashModuleSettersExt;
+        if (extImpl == address(0)) revert InvalidInput();
+        // solhint-disable-next-line no-inline-assembly
+        assembly ("memory-safe") {
+            calldatacopy(0, 0, calldatasize())
+            let result := delegatecall(gas(), extImpl, 0, calldatasize(), 0, 0)
+            returndatacopy(0, 0, returndatasize())
+            switch result
+            case 0 { revert(0, returndatasize()) }
+            default { return(0, returndatasize()) }
+        }
     }
 }
