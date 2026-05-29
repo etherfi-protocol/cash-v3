@@ -43,7 +43,7 @@ contract PendingHoldsFindingsTest is PendingHoldsTestSetup {
 
         uint256 rawBefore = cashModule.rawSpendable(address(safe));
 
-        _addHold(PROVIDER_REAP, txId, authAmount);                 // limit charged $100
+        _addHold(BinSponsor.Reap, txId, authAmount);                 // limit charged $100
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore - authAmount);
 
         // Settlement $100 against a $40 balance → partial: $40 moves, $60 remains as a forced hold.
@@ -82,7 +82,7 @@ contract PendingHoldsFindingsTest is PendingHoldsTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // A card hold appears during the delay window.
-        _addHold(PROVIDER_REAP, txId, 50e6);
+        _addHold(BinSponsor.Reap, txId, 50e6);
 
         // Delay elapses; finalize must be blocked because a hold now exists.
         vm.warp(block.timestamp + 1 days + 1);

@@ -49,9 +49,9 @@ contract PendingHoldsTestSetup is CashModuleTestSetup {
     // Helpers
     // -------------------------------------------------------------------------
 
-    function _addHold(bytes4 providerCode, bytes32 _txId, uint256 amountUsd) internal {
+    function _addHold(BinSponsor binSponsor, bytes32 _txId, uint256 amountUsd) internal {
         vm.prank(etherFiWallet);
-        pendingHoldsModule.addHold(address(safe), providerCode, _txId, amountUsd);
+        pendingHoldsModule.addHold(address(safe), binSponsor, _txId, amountUsd);
     }
 
     function _spendWithHold(bytes32 _txId, BinSponsor binSponsor, uint256 amountUsd) internal {
@@ -127,7 +127,7 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit IPendingHoldsModule.HoldAdded(address(safe), PROVIDER_REAP, txId, amount, block.timestamp, false);
-        pendingHoldsModule.addHold(address(safe), PROVIDER_REAP, txId, amount);
+        pendingHoldsModule.addHold(address(safe), BinSponsor.Reap, txId, amount);
 
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), amount);
 
@@ -140,17 +140,17 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
 
     function test_addHold_revertsOnDuplicate() public {
         uint256 amount = 100e6;
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
 
         vm.prank(etherFiWallet);
         vm.expectRevert(IPendingHoldsModule.DuplicateHold.selector);
-        pendingHoldsModule.addHold(address(safe), PROVIDER_REAP, txId, amount);
+        pendingHoldsModule.addHold(address(safe), BinSponsor.Reap, txId, amount);
     }
 
     function test_addHold_revertsOnZeroAmount() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(IPendingHoldsModule.InvalidAmount.selector);
-        pendingHoldsModule.addHold(address(safe), PROVIDER_REAP, txId, 0);
+        pendingHoldsModule.addHold(address(safe), BinSponsor.Reap, txId, 0);
     }
 
     function test_addHold_revertsWhenExceedsDailyLimit() public {
@@ -159,22 +159,22 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        pendingHoldsModule.addHold(address(safe), PROVIDER_REAP, txId, exceedingAmount);
+        pendingHoldsModule.addHold(address(safe), BinSponsor.Reap, txId, exceedingAmount);
     }
 
     function test_addHold_revertsWhenNotEtherFiWallet() public {
         vm.prank(address(0xdead));
         vm.expectRevert();
-        pendingHoldsModule.addHold(address(safe), PROVIDER_REAP, txId, 100e6);
+        pendingHoldsModule.addHold(address(safe), BinSponsor.Reap, txId, 100e6);
     }
 
     function test_addHold_providerCodeNamespacing_noCollisionBetweenProviders() public {
         uint256 amount = 100e6;
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
 
         // Same txId, different providerCode — should succeed (separate namespace)
         vm.prank(etherFiWallet);
-        pendingHoldsModule.addHold(address(safe), PROVIDER_RAIN, txId, amount);
+        pendingHoldsModule.addHold(address(safe), BinSponsor.Rain, txId, amount);
 
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), amount * 2);
     }
@@ -189,7 +189,7 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit IPendingHoldsModule.HoldAdded(address(safe), PROVIDER_REAP, txId, exceedingAmount, block.timestamp, true);
-        pendingHoldsModule.forceAddHold(address(safe), PROVIDER_REAP, txId, exceedingAmount);
+        pendingHoldsModule.forceAddHold(address(safe), BinSponsor.Reap, txId, exceedingAmount);
 
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), exceedingAmount);
 
@@ -198,11 +198,11 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
     }
 
     function test_forceAddHold_revertsOnDuplicate() public {
-        _addHold(PROVIDER_REAP, txId, 100e6);
+        _addHold(BinSponsor.Reap, txId, 100e6);
 
         vm.prank(etherFiWallet);
         vm.expectRevert(IPendingHoldsModule.DuplicateHold.selector);
-        pendingHoldsModule.forceAddHold(address(safe), PROVIDER_REAP, txId, 100e6);
+        pendingHoldsModule.forceAddHold(address(safe), BinSponsor.Reap, txId, 100e6);
     }
 
     // -------------------------------------------------------------------------
@@ -213,13 +213,13 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
         uint256 initial = 100e6;
         uint256 increased = 200e6;
 
-        _addHold(PROVIDER_REAP, txId, initial);
+        _addHold(BinSponsor.Reap, txId, initial);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), initial);
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit IPendingHoldsModule.HoldUpdated(address(safe), PROVIDER_REAP, txId, initial, increased, block.timestamp);
-        pendingHoldsModule.updateHold(address(safe), PROVIDER_REAP, txId, increased);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, txId, increased);
 
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), increased);
         assertEq(pendingHoldsModule.getHold(address(safe), PROVIDER_REAP, txId).amountUsd, increased);
@@ -229,10 +229,10 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
         uint256 initial = 200e6;
         uint256 decreased = 100e6;
 
-        _addHold(PROVIDER_REAP, txId, initial);
+        _addHold(BinSponsor.Reap, txId, initial);
 
         vm.prank(etherFiWallet);
-        pendingHoldsModule.updateHold(address(safe), PROVIDER_REAP, txId, decreased);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, txId, decreased);
 
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), decreased);
         assertEq(pendingHoldsModule.getHold(address(safe), PROVIDER_REAP, txId).amountUsd, decreased);
@@ -243,17 +243,17 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
         // After addHold(9_900), spentToday=9_900, remaining=100. Delta of 101 breaches limit.
         uint256 exceedingIncrease = 10_001e6;
 
-        _addHold(PROVIDER_REAP, txId, initial);
+        _addHold(BinSponsor.Reap, txId, initial);
 
         vm.prank(etherFiWallet);
         vm.expectRevert(SpendingLimitLib.ExceededDailySpendingLimit.selector);
-        pendingHoldsModule.updateHold(address(safe), PROVIDER_REAP, txId, exceedingIncrease);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, txId, exceedingIncrease);
     }
 
     function test_updateHold_revertsOnHoldNotFound() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(IPendingHoldsModule.HoldNotFound.selector);
-        pendingHoldsModule.updateHold(address(safe), PROVIDER_REAP, txId, 100e6);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, txId, 100e6);
     }
 
     // -------------------------------------------------------------------------
@@ -262,12 +262,12 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
 
     function test_releaseHold_reversal_decrementsAndDeletes() public {
         uint256 amount = 100e6;
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit IPendingHoldsModule.HoldReleased(address(safe), PROVIDER_REAP, txId, amount, ReleaseReason.REVERSAL, block.timestamp);
-        pendingHoldsModule.releaseHold(address(safe), PROVIDER_REAP, txId, ReleaseReason.REVERSAL);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Reap, txId, ReleaseReason.REVERSAL);
 
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
         assertEq(pendingHoldsModule.getHold(address(safe), PROVIDER_REAP, txId).createdAt, 0);
@@ -275,12 +275,12 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
 
     function test_releaseHold_admin_works() public {
         uint256 amount = 100e6;
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
 
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
         emit IPendingHoldsModule.HoldReleased(address(safe), PROVIDER_REAP, txId, amount, ReleaseReason.ADMIN, block.timestamp);
-        pendingHoldsModule.releaseHold(address(safe), PROVIDER_REAP, txId, ReleaseReason.ADMIN);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Reap, txId, ReleaseReason.ADMIN);
 
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
     }
@@ -288,7 +288,7 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
     function test_releaseHold_revertsOnHoldNotFound() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(IPendingHoldsModule.HoldNotFound.selector);
-        pendingHoldsModule.releaseHold(address(safe), PROVIDER_REAP, txId, ReleaseReason.REVERSAL);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Reap, txId, ReleaseReason.REVERSAL);
     }
 
     // -------------------------------------------------------------------------
@@ -296,7 +296,7 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
     // -------------------------------------------------------------------------
 
     function test_removeHold_revertsWhenCalledByNonCore() public {
-        _addHold(PROVIDER_REAP, txId, 100e6);
+        _addHold(BinSponsor.Reap, txId, 100e6);
 
         vm.prank(etherFiWallet);
         vm.expectRevert(IPendingHoldsModule.OnlyCashModuleCore.selector);
@@ -306,7 +306,7 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
     function test_removeHold_succeedsWhenModulePaused() public {
         // removeHold must not be blocked by pause — pausing PHM should halt new hold creation
         // but must not freeze in-flight settlements that CashModuleCore drives via spend().
-        _addHold(PROVIDER_REAP, txId, 100e6);
+        _addHold(BinSponsor.Reap, txId, 100e6);
 
         vm.prank(pauser);
         PendingHoldsModule(address(pendingHoldsModule)).pause();
@@ -326,18 +326,18 @@ contract PendingHoldsModuleUnitTest is PendingHoldsTestSetup {
         uint256 amount = 200e6;
         bytes32 txId2 = keccak256("txId2");
 
-        _addHold(PROVIDER_REAP, txId, amount);
-        _addHold(PROVIDER_RAIN, txId2, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
+        _addHold(BinSponsor.Rain, txId2, amount);
         // totalHolds = 400e6
 
         // Release txId2 via releaseHold — totalHolds drops to 200e6
         vm.prank(etherFiWallet);
-        pendingHoldsModule.releaseHold(address(safe), PROVIDER_RAIN, txId2, ReleaseReason.ADMIN);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Rain, txId2, ReleaseReason.ADMIN);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), amount);
 
         // Decreasing update on txId (200e6 → 50e6) — floor kicks in if drift exists; normal path here
         vm.prank(etherFiWallet);
-        pendingHoldsModule.updateHold(address(safe), PROVIDER_REAP, txId, 50e6);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, txId, 50e6);
 
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 50e6);
         assertEq(pendingHoldsModule.getHold(address(safe), PROVIDER_REAP, txId).amountUsd, 50e6);
@@ -397,7 +397,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), amount);
 
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), amount);
 
         vm.expectEmit(true, true, true, true);
@@ -441,7 +441,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         deal(address(usdc), address(safe), holdAmount);
         uint256 rawBefore = cashModule.rawSpendable(address(safe));
 
-        _addHold(PROVIDER_REAP, txId, holdAmount);
+        _addHold(BinSponsor.Reap, txId, holdAmount);
         // addHold consumed $150 from limit
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore - holdAmount);
 
@@ -461,7 +461,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         deal(address(usdc), address(safe), settleAmount);
         uint256 rawBefore = cashModule.rawSpendable(address(safe));
 
-        _addHold(PROVIDER_REAP, txId, holdAmount);
+        _addHold(BinSponsor.Reap, txId, holdAmount);
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore - holdAmount);
 
         _spendWithHold(txId, BinSponsor.Reap, settleAmount);
@@ -481,7 +481,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
 
         // Force-add: no limit consumption
         vm.prank(etherFiWallet);
-        pendingHoldsModule.forceAddHold(address(safe), PROVIDER_REAP, txId, amount);
+        pendingHoldsModule.forceAddHold(address(safe), BinSponsor.Reap, txId, amount);
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore); // limit unchanged
 
         // Normal spend() clears the forced hold and NOW charges the limit
@@ -499,7 +499,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
     function test_requestWithdrawal_blockedWhenHoldsExist() public {
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), amount);
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
@@ -529,11 +529,11 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
     function test_requestWithdrawal_allowedAfterHoldReleased() public {
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), amount);
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
 
         // Release hold first
         vm.prank(etherFiWallet);
-        pendingHoldsModule.releaseHold(address(safe), PROVIDER_REAP, txId, ReleaseReason.REVERSAL);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Reap, txId, ReleaseReason.REVERSAL);
 
         // Now withdrawal should succeed
         address[] memory tokens = new address[](1);
@@ -595,7 +595,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         uint256 spendAmount = 50e6;
         deal(address(usdc), address(safe), holdAmount + spendAmount);
 
-        _addHold(PROVIDER_REAP, txId, holdAmount);
+        _addHold(BinSponsor.Reap, txId, holdAmount);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), holdAmount);
 
         // spend() on a different txId (no-hold path) — creates and immediately removes a forced hold
@@ -618,7 +618,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
 
         // Force-capture: place a hold without a balance check (no limit consumption)
         vm.prank(etherFiWallet);
-        pendingHoldsModule.forceAddHold(address(safe), PROVIDER_REAP, txId, amount);
+        pendingHoldsModule.forceAddHold(address(safe), BinSponsor.Reap, txId, amount);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), amount);
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore); // limit unchanged
 
@@ -640,11 +640,11 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         deal(address(usdc), address(safe), amount);
 
         uint256 rawBefore = cashModule.rawSpendable(address(safe));
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
 
         // Admin releases the hold (e.g. force-capture recovery where hold is stale)
         vm.prank(etherFiWallet);
-        pendingHoldsModule.releaseHold(address(safe), PROVIDER_REAP, txId, ReleaseReason.ADMIN);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Reap, txId, ReleaseReason.ADMIN);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
         // releaseHold credits back the limit
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore);
@@ -667,7 +667,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         deal(address(usdc), address(safe), amount);
 
         // 1. Auth acknowledged: add hold
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), amount);
 
         // 2. Settlement: spend removes hold
@@ -683,12 +683,12 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         deal(address(usdc), address(safe), amount);
 
         uint256 rawBefore = cashModule.rawSpendable(address(safe));
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), amount);
 
         // Network reversal — hold released, limit credited back
         vm.prank(etherFiWallet);
-        pendingHoldsModule.releaseHold(address(safe), PROVIDER_REAP, txId, ReleaseReason.REVERSAL);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Reap, txId, ReleaseReason.REVERSAL);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore); // limit restored
 
@@ -708,17 +708,17 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         uint256 increased = 150e6;
         uint256 decreased = 120e6;
 
-        _addHold(PROVIDER_REAP, txId, initial);
+        _addHold(BinSponsor.Reap, txId, initial);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), initial);
 
         // Incremental auth: amount goes up
         vm.prank(etherFiWallet);
-        pendingHoldsModule.updateHold(address(safe), PROVIDER_REAP, txId, increased);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, txId, increased);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), increased);
 
         // Incremental auth: amount goes down
         vm.prank(etherFiWallet);
-        pendingHoldsModule.updateHold(address(safe), PROVIDER_REAP, txId, decreased);
+        pendingHoldsModule.updateHold(address(safe), BinSponsor.Reap, txId, decreased);
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), decreased);
     }
 
@@ -730,7 +730,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
 
-        _addHold(PROVIDER_REAP, txId, amount);
+        _addHold(BinSponsor.Reap, txId, amount);
 
         // Pre-compute nonce BEFORE vm.expectRevert — safe.nonce() is an external call that would
         // otherwise consume the expectRevert before requestWithdrawal is reached.
@@ -740,7 +740,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
 
         // Release hold
         vm.prank(etherFiWallet);
-        pendingHoldsModule.releaseHold(address(safe), PROVIDER_REAP, txId, ReleaseReason.REVERSAL);
+        pendingHoldsModule.releaseHold(address(safe), BinSponsor.Reap, txId, ReleaseReason.REVERSAL);
 
         // Withdrawal now allowed — use _requestWithdrawal helper which also checks the emitted event
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
@@ -760,7 +760,7 @@ contract PendingHoldsLensTest is PendingHoldsTestSetup {
 
     function test_spendable_withHolds_reflectsLimitConsumption() public {
         uint256 holdAmount = 100e6;
-        _addHold(PROVIDER_REAP, txId, holdAmount);
+        _addHold(BinSponsor.Reap, txId, holdAmount);
 
         // addHold consumes from spentToday; rawSpendable already reflects the hold.
         // spendable() == rawSpendable() — no separate deduction.
@@ -785,7 +785,7 @@ contract PendingHoldsLensTest is PendingHoldsTestSetup {
 
     function test_canSpend_holdsMakeItExceed_returnsFalse() public {
         // Fill most of the capacity with a hold so the next auth cannot fit
-        _addHold(PROVIDER_REAP, txId, 9_900e6);
+        _addHold(BinSponsor.Reap, txId, 9_900e6);
 
         // 200 USD would push total (holds + amount) past the 10_000 USD daily limit
         uint256 amountUsd = 200e6;
@@ -803,7 +803,7 @@ contract PendingHoldsLensTest is PendingHoldsTestSetup {
 
     function test_canSpend_holdsReduceCapacity_butAmountStillFits() public {
         uint256 existingHold = 500e6;
-        _addHold(PROVIDER_REAP, txId, existingHold);
+        _addHold(BinSponsor.Reap, txId, existingHold);
 
         // 300 USD fits within the remaining 9_500 USD capacity
         uint256 amountUsd = 300e6;
@@ -821,7 +821,7 @@ contract PendingHoldsLensTest is PendingHoldsTestSetup {
 
     function test_holdsSummary_returnsConsistentValues() public {
         uint256 holdAmount = 250e6;
-        _addHold(PROVIDER_REAP, txId, holdAmount);
+        _addHold(BinSponsor.Reap, txId, holdAmount);
 
         (uint256 totalHolds, uint256 spendableAmt, uint256 rawSpendableAmt) = cashLens.holdsSummary(address(safe));
 

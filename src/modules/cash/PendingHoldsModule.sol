@@ -141,7 +141,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     // -------------------------------------------------------------------------
 
     /// @inheritdoc IPendingHoldsModule
-    function addHold(address safe, bytes4 providerCode, bytes32 txId, uint256 amountUsd)
+    function addHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd)
         external
         whenNotPaused
         nonReentrant
@@ -149,6 +149,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     {
         if (amountUsd == 0) revert InvalidAmount();
 
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
         bytes32 key = _holdKey(safe, providerCode, txId);
         PendingHoldsModuleStorage storage $ = _getPendingHoldsModuleStorage();
 
@@ -171,7 +172,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     }
 
     /// @inheritdoc IPendingHoldsModule
-    function forceAddHold(address safe, bytes4 providerCode, bytes32 txId, uint256 amountUsd)
+    function forceAddHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd)
         external
         whenNotPaused
         nonReentrant
@@ -179,6 +180,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     {
         if (amountUsd == 0) revert InvalidAmount();
 
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
         bytes32 key = _holdKey(safe, providerCode, txId);
         PendingHoldsModuleStorage storage $ = _getPendingHoldsModuleStorage();
 
@@ -197,7 +199,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     }
 
     /// @inheritdoc IPendingHoldsModule
-    function updateHold(address safe, bytes4 providerCode, bytes32 txId, uint256 newAmountUsd)
+    function updateHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 newAmountUsd)
         external
         whenNotPaused
         nonReentrant
@@ -205,6 +207,7 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     {
         if (newAmountUsd == 0) revert InvalidAmount();
 
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
         bytes32 key = _holdKey(safe, providerCode, txId);
         PendingHoldsModuleStorage storage $ = _getPendingHoldsModuleStorage();
 
@@ -236,12 +239,13 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     }
 
     /// @inheritdoc IPendingHoldsModule
-    function releaseHold(address safe, bytes4 providerCode, bytes32 txId, ReleaseReason reason)
+    function releaseHold(address safe, BinSponsor binSponsor, bytes32 txId, ReleaseReason reason)
         external
         whenNotPaused
         nonReentrant
         onlyEtherFiWallet
     {
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
         bytes32 key = _holdKey(safe, providerCode, txId);
         PendingHoldsModuleStorage storage $ = _getPendingHoldsModuleStorage();
 
