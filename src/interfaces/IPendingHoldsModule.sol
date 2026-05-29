@@ -297,6 +297,17 @@ interface IPendingHoldsModule {
     function getHold(address safe, bytes4 providerCode, bytes32 txId) external view returns (HoldRecord memory hold);
 
     /**
+     * @notice Returns the outstanding hold amount for a (safe, binSponsor, txId), in USD (1e6)
+     * @dev Convenience for the settlement / collection path which keys by BinSponsor. Returns 0 if
+     *      no hold exists. Used by collectRemaining() to size the outstanding under-funded debt.
+     * @param safe Safe address
+     * @param binSponsor The bin sponsor enum value
+     * @param txId Provider transaction identifier
+     * @return Outstanding hold amount in USD (1e6)
+     */
+    function remainingHold(address safe, BinSponsor binSponsor, bytes32 txId) external view returns (uint256);
+
+    /**
      * @notice Returns the 4-byte provider code for a given BinSponsor
      * @dev Pure utility — callers use this to convert BinSponsor to the bytes4 used in hold keys.
      * @param binSponsor The bin sponsor enum value

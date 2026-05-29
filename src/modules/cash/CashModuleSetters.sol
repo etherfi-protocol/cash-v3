@@ -461,4 +461,106 @@ function _requestWithdrawal(address safe, address[] memory tokens, uint256[] mem
         if (_pendingHoldsModule == address(0)) revert InvalidInput();
         _getCashModuleStorage().pendingHoldsModule = _pendingHoldsModule;
     }
+
+    /**
+     * @notice Collects the outstanding remainder of an under-funded settlement from the safe's balance.
+     * @dev When spend() settled a transaction the safe could not fully cover, the unpaid remainder is
+     *      parked in a forced "remaining" hold (see CashModuleCore._phmFinalize). This lets ops sweep
+     *      that remainder once the safe is funded: it pays up to the outstanding remainder from `token`,
+     *      reduces the hold, and removes it (unblocking withdrawals) once fully paid.
+     *
+     *      The spending limit is NOT charged again — the full settlement amount was already charged at
+     *      the original spend(). Only operates on already-settled transactions (transactionCleared == true),
+     *      which distinguishes a post-settlement debt from a pre-settlement forceAddHold hold.
+     *
+     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling; routed via fallback().
+     * @param safe Address of the EtherFi Safe
+     * @param txId Transaction identifier (the original authorization/settlement id)
+     * @param binSponsor Bin sponsor the settlement was made under
+     * @param token Borrow token to collect the remainder from
+     * @custom:throws InvalidInput if PHM unset, txId not yet settled, or no remainder outstanding
+     * @custom:throws UnsupportedToken if token is not a borrow token
+     * @custom:throws InsufficientBalance if the safe holds nothing collectable in token
+     */
+    function collectRemaining(address safe, bytes32 txId, BinSponsor binSponsor, address token)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyEtherFiWallet
+        onlyEtherFiSafe(safe)
+    {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        address phm = $.pendingHoldsModule;
+        if (phm == address(0)) revert InvalidInput();
+        // Must be a post-settlement debt, not a pre-settlement forceAddHold hold awaiting spend().
+        if (!$.safeCashConfig[safe].transactionCleared[txId]) revert InvalidInput();
+        if (!_isBorrowToken($.debtManager, token)) revert UnsupportedToken();
+
+        uint256 remaining = IPendingHoldsModule(phm).remainingHold(safe, binSponsor, txId);
+        if (remaining == 0) revert InvalidInput();
+
+        (uint256 payToken, uint256 paidUsd) = _collectAmounts($, safe, token, remaining);
+
+        _cancelWithdrawalRequestIfNecessary(safe, token, payToken);
+        _collectTransferAndEmit($, safe, binSponsor, txId, token, payToken, paidUsd);
+
+        // Reduce or clear the hold. No limit charge — already charged at the original settlement.
+        if (remaining - paidUsd == 0) IPendingHoldsModule(phm).removeHold(safe, binSponsor, txId);
+        else IPendingHoldsModule(phm).settlementSetRemainingHold(safe, binSponsor, txId, remaining - paidUsd);
+
+        $.debtManager.ensureHealth(safe);
+    }
+
+    /// @dev Computes how much of `remaining` (USD 1e6) can be collected from the safe's `token` balance.
+    ///      Rounds USD down (favors the safe). Reverts if nothing meaningful is collectable.
+    function _collectAmounts(CashModuleStorage storage $, address safe, address token, uint256 remaining)
+        private
+        view
+        returns (uint256 payToken, uint256 paidUsd)
+    {
+        uint256 required = $.debtManager.convertUsdToCollateralToken(token, remaining);
+        if (required == 0) revert AmountZero();
+        uint256 available = IERC20(token).balanceOf(safe);
+        if (available < required) {
+            payToken = available;
+            paidUsd = remaining * available / required; // round down — never over-credits the debt
+        } else {
+            payToken = required;
+            paidUsd = remaining;
+        }
+        // Refuse a transfer that would move tokens without reducing the recorded debt (dust guard).
+        if (paidUsd == 0) revert InsufficientBalance();
+    }
+
+    /// @dev Transfers the collected tokens to the settlement dispatcher and emits a Spend event.
+    function _collectTransferAndEmit(
+        CashModuleStorage storage $,
+        address safe,
+        BinSponsor binSponsor,
+        bytes32 txId,
+        address token,
+        uint256 payToken,
+        uint256 paidUsd
+    ) private {
+        address[] memory to = new address[](1);
+        bytes[] memory data = new bytes[](1);
+        to[0] = token;
+        data[0] = abi.encodeWithSelector(IERC20.transfer.selector, _settlementDispatcherFor($, binSponsor), payToken);
+        IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](1), data);
+
+        uint256[] memory tokenAmounts = new uint256[](1);
+        uint256[] memory usdAmounts = new uint256[](1);
+        tokenAmounts[0] = payToken;
+        usdAmounts[0] = paidUsd;
+        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, to, tokenAmounts, usdAmounts, paidUsd, Mode.Debit);
+    }
+
+    /// @dev Resolves the settlement dispatcher for a bin sponsor (mirrors CashModuleCore.getSettlementDispatcher).
+    function _settlementDispatcherFor(CashModuleStorage storage $, BinSponsor binSponsor) private view returns (address dispatcher) {
+        if (binSponsor == BinSponsor.Rain) dispatcher = $.settlementDispatcherRain;
+        else if (binSponsor == BinSponsor.PIX) dispatcher = $.settlementDispatcherPix;
+        else if (binSponsor == BinSponsor.CardOrder) dispatcher = $.settlementDispatcherCardOrder;
+        else dispatcher = $.settlementDispatcherReap;
+        if (dispatcher == address(0)) revert SettlementDispatcherNotSetForBinSponsor();
+    }
 }

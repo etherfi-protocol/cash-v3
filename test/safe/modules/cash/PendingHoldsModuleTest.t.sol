@@ -409,9 +409,10 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), txId));
     }
 
-    function test_spend_withNoMatchingHold_settlementIsKing_succeedsAndBypassesLimit() public {
+    function test_spend_withNoMatchingHold_settlementIsKing_succeedsAndChargesLimit() public {
         // "Settlement is KING": spend() with no prior hold creates a forced hold and settles.
-        // The spending limit is NOT charged (bypass), and the transaction is cleared.
+        // The spending limit IS charged (the limit is the primary risk control and must reflect
+        // funds leaving the safe), and the transaction is cleared.
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), amount);
 
@@ -424,8 +425,8 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         emit IPendingHoldsModule.HoldRemoved(address(safe), PROVIDER_REAP, txId, amount, block.timestamp);
         _spendWithoutHold(txId, BinSponsor.Reap, amount);
 
-        // Limit is bypassed (Settlement is KING)
-        assertEq(cashModule.rawSpendable(address(safe)), rawBefore);
+        // Limit is charged the full settled amount (no longer bypassed)
+        assertEq(cashModule.rawSpendable(address(safe)), rawBefore - amount);
         // Hold is gone after settlement
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
         assertTrue(cashModule.transactionCleared(address(safe), txId));
@@ -550,7 +551,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
     // The no-hold path is "Settlement is KING": a forced hold is created and immediately removed,
     // and the spending limit is NOT charged (bypass).
 
-    function test_spend_withNoHold_deductsBalanceAndBypassesLimit() public {
+    function test_spend_withNoHold_deductsBalanceAndChargesLimit() public {
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), amount);
 
@@ -563,8 +564,8 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         assertEq(usdc.balanceOf(address(safe)), safeBalBefore - debtManager.convertUsdToCollateralToken(address(usdc), amount));
         assertGt(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBalBefore);
         assertTrue(cashModule.transactionCleared(address(safe), txId));
-        // Limit is bypassed (Settlement is KING)
-        assertEq(cashModule.rawSpendable(address(safe)), rawBefore);
+        // Limit IS charged the settled amount (no longer bypassed)
+        assertEq(cashModule.rawSpendable(address(safe)), rawBefore - amount);
     }
 
     function test_spend_withNoHold_emitsCorrectSpendEvent() public {
@@ -634,7 +635,7 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
     function test_releaseHoldThenSpend_settlementIsKing_consistentState() public {
         // After a hold is released (e.g. reversal), the settlement might still arrive.
         // spend() with no existing hold (Settlement is KING): creates a forced hold and settles.
-        // Limit is NOT charged since the no-hold path bypasses it.
+        // Limit IS charged for the settled amount (the no-hold path no longer bypasses it).
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), amount);
 
@@ -648,13 +649,13 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         // releaseHold credits back the limit
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore);
 
-        // Settlement arrives — no-hold path (Settlement is KING), limit NOT charged
+        // Settlement arrives — no-hold path (Settlement is KING), limit charged for the settled amount
         _spendWithoutHold(txId, BinSponsor.Reap, amount);
 
         assertTrue(cashModule.transactionCleared(address(safe), txId));
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
-        // Limit unchanged since no-hold path bypasses it
-        assertEq(cashModule.rawSpendable(address(safe)), rawBefore);
+        // Limit charged the settled amount
+        assertEq(cashModule.rawSpendable(address(safe)), rawBefore - amount);
     }
 
     // -------------------------------------------------------------------------
@@ -692,14 +693,14 @@ contract PendingHoldsIntegrationTest is PendingHoldsTestSetup {
         assertEq(cashModule.rawSpendable(address(safe)), rawBefore); // limit restored
 
         // Settlement arrives despite reversal: Settlement is KING — spend() uses no-hold path.
-        // This creates a forced hold internally and settles without charging the limit.
+        // This creates a forced hold internally and settles, charging the limit for the settled amount.
         deal(address(usdc), address(safe), amount);
         _spendWithoutHold(txId, BinSponsor.Reap, amount);
 
         assertTrue(cashModule.transactionCleared(address(safe), txId));
         assertEq(pendingHoldsModule.totalPendingHolds(address(safe)), 0);
-        // No-hold path: limit is NOT charged
-        assertEq(cashModule.rawSpendable(address(safe)), rawBefore);
+        // No-hold path now charges the limit for the settled amount
+        assertEq(cashModule.rawSpendable(address(safe)), rawBefore - amount);
     }
 
     function test_integration_incrementalAuth() public {

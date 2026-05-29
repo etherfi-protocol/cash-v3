@@ -390,6 +390,12 @@ contract PendingHoldsModule is UpgradeableProxy, ModuleBase, IPendingHoldsModule
     }
 
     /// @inheritdoc IPendingHoldsModule
+    function remainingHold(address safe, BinSponsor binSponsor, bytes32 txId) external view returns (uint256) {
+        bytes4 providerCode = providerCodeFromBinSponsor(binSponsor);
+        return _getPendingHoldsModuleStorage().holds[_holdKey(safe, providerCode, txId)].amountUsd;
+    }
+
+    /// @inheritdoc IPendingHoldsModule
     function cashModuleCore() external view returns (address) {
         return _getPendingHoldsModuleStorage().cashModuleCore;
     }

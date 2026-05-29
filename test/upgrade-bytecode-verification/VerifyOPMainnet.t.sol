@@ -193,7 +193,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashLens() public {
-        address local = address(new CashLens(cashModuleProxy, dataProviderProxy));
+        address local = address(new CashLens(cashModuleProxy, dataProviderProxy, address(0)));
         _verify("CashLens", cashLensImpl, local);
     }
 

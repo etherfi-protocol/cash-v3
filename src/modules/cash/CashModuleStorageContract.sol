@@ -12,6 +12,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -308,6 +309,12 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
 
         if ($$.pendingWithdrawalRequest.finalizeTime > block.timestamp) revert CannotWithdrawYet();
+
+        // Re-check pending holds at finalize, not only at request time. A hold may have been added
+        // during the withdrawal delay window; processing anyway would drain funds the hold reserves.
+        address phm = $.pendingHoldsModule;
+        if (phm != address(0) && IPendingHoldsModule(phm).totalPendingHolds(safe) > 0) revert WithdrawalBlockedByPendingHolds();
+
         // Ensure that if the recipient of withdrawal is a whitelisted withdrawal module, only that module can process the withdrawal
         if ($.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) {
             if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanWithdraw();
