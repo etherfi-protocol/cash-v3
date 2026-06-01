@@ -103,24 +103,21 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
 
         assertEq(scr.balanceOf(address(safe)), 0);
         assertEq(scr.balanceOf(collectionWallet), scrBalance);
-        assertTrue(scrModule.hasCollected(address(safe)));
     }
 
-    function test_collect_isIdempotent() public {
+    function test_collect_secondCallOnDrainedSafeIsNoop() public {
         address[] memory safes = new address[](1);
         safes[0] = address(safe);
 
         vm.prank(etherFiWallet);
         scrModule.collect(safes);
 
-        // Mint more SCR to the safe; a second collect should skip (already collected)
-        scr.mint(address(safe), 500 ether);
-
+        // Safe now holds no SCR; a second collect should be a no-op
         vm.prank(etherFiWallet);
         scrModule.collect(safes);
 
         assertEq(scr.balanceOf(collectionWallet), scrBalance);
-        assertEq(scr.balanceOf(address(safe)), 500 ether);
+        assertEq(scr.balanceOf(address(safe)), 0);
     }
 
     function test_collect_skipsZeroBalanceSafe() public {
@@ -139,7 +136,6 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
         vm.prank(etherFiWallet);
         scrModule.collect(freshOnly);
 
-        assertFalse(scrModule.hasCollected(freshSafe));
         assertEq(scr.balanceOf(collectionWallet), scrBalance);
     }
 

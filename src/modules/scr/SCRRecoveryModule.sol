@@ -32,8 +32,6 @@ contract SCRRecoveryModule is UpgradeableProxy {
     struct SCRRecoveryModuleStorage {
         /// @notice Destination that receives all recovered SCR
         address collectionWallet;
-        /// @notice Tracks safes whose SCR has already been collected (idempotency)
-        mapping(address safe => bool collected) collected;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.SCRRecoveryModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -102,14 +100,6 @@ contract SCRRecoveryModule is UpgradeableProxy {
     }
 
     /**
-     * @notice Returns whether a safe's SCR has already been collected
-     * @param safe Address of the safe to query
-     */
-    function hasCollected(address safe) external view returns (bool) {
-        return _getSCRRecoveryModuleStorage().collected[safe];
-    }
-
-    /**
      * @notice Sets the collection wallet that receives recovered SCR
      * @dev Only callable by accounts with SCR_RECOVERY_ADMIN_ROLE
      * @param _collectionWallet New collection wallet address
@@ -125,8 +115,8 @@ contract SCRRecoveryModule is UpgradeableProxy {
      * @notice Recovers SCR from one or more opted-in safes into the collection wallet
      * @dev Only callable by accounts with ETHER_FI_WALLET_ROLE. Opt-in is captured
      *      off-chain; the backend must only pass safes that have accepted the terms.
-     *      Safes with no SCR balance, or whose SCR has already been collected, are
-     *      skipped so a single bad entry never reverts the whole batch.
+     *      Safes with no SCR balance are skipped so a single bad entry never reverts
+     *      the whole batch.
      * @param safes Array of EtherFi Safe addresses to recover SCR from
      * @custom:throws OnlyEtherFiWallet if the caller lacks ETHER_FI_WALLET_ROLE
      * @custom:throws InvalidInput if the safes array is empty
@@ -149,21 +139,15 @@ contract SCRRecoveryModule is UpgradeableProxy {
     }
 
     /**
-     * @dev Recovers SCR from a single safe. Skips safes that have already been
-     *      collected or that hold no SCR.
+     * @dev Recovers SCR from a single safe. Skips safes that hold no SCR.
      * @param safe Address of the EtherFi Safe
      * @param _collectionWallet Destination for the recovered SCR
      */
     function _collect(address safe, address _collectionWallet) internal {
         if (!dataProvider.isEtherFiSafe(safe)) revert NotEtherFiSafe();
 
-        SCRRecoveryModuleStorage storage $ = _getSCRRecoveryModuleStorage();
-        if ($.collected[safe]) return;
-
         uint256 balance = scr.balanceOf(safe);
         if (balance == 0) return;
-
-        $.collected[safe] = true;
 
         address[] memory to = new address[](1);
         uint256[] memory values = new uint256[](1);
