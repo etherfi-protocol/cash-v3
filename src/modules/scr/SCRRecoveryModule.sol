@@ -10,33 +10,9 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 /**
  * @title SCRRecoveryModule
  * @author ether.fi
- * @notice Pulls SCR left behind on Scroll out of user safes and into a single
- *         collection wallet, so affected users can be credited the equivalent
- *         value (USDC) on Optimism off-chain.
- * @dev Background: when users were migrated from Scroll to Optimism, SCR was
- *      configured as `BridgeType.SKIP` in the migration and therefore never
- *      bridged. This module recovers that SCR.
- *
- *      Design (see product brief):
- *      - Opt-in is captured off-chain in the app (the user accepts the terms in a
- *        modal). The backend then calls {collect} only for safes that opted in.
- *      - The USDC credit ($0.045 / SCR) is applied off-chain to the user's cash
- *        account on Optimism. This module is intentionally chain-local and only
- *        moves SCR on Scroll; it does not price or pay out USDC.
- *
- *      Mechanics:
- *      - Registered as a DEFAULT module on EtherFiDataProvider so it is enabled on
- *        every safe and can call {IEtherFiSafe.execTransactionFromModule}.
- *      - {collect} is gated by ETHER_FI_WALLET_ROLE (the backend wallet), mirroring
- *        the migration flow.
- *      - SCR is NOT a registered collateral token in the DebtManager, so removing it
- *        does not change a safe's borrow power. The EtherFiHook health check that runs
- *        after `execTransactionFromModule` therefore still passes and no hook bypass is
- *        required.
- *
- *      This module is temporary: per the brief the flow is sunset after ~3 months,
- *      after which the module can be de-registered as a default module.
- *
+ * @notice Default module that pulls SCR left behind on Scroll out of opted-in user
+ *         safes into a single collection wallet. The equivalent USDC is credited
+ *         off-chain on Optimism; this module only moves SCR on Scroll.
  * @custom:security-contact security@etherfi.io
  */
 contract SCRRecoveryModule is UpgradeableProxy {
