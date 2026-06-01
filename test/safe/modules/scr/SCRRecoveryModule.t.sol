@@ -1,0 +1,252 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+
+import { SafeTestSetup, UUPSProxy } from "../../SafeTestSetup.t.sol";
+import { SCRRecoveryModule } from "../../../../src/modules/scr/SCRRecoveryModule.sol";
+import { MockERC20 } from "../../../../src/mocks/MockERC20.sol";
+
+contract SCRRecoveryModuleTest is SafeTestSetup {
+    SCRRecoveryModule public scrModule;
+    MockERC20 public scr;
+
+    address public collectionWallet = makeAddr("collectionWallet");
+    bytes32 public SCR_RECOVERY_ADMIN_ROLE = keccak256("SCR_RECOVERY_ADMIN_ROLE");
+
+    uint256 public scrBalance = 1000 ether;
+
+    function setUp() public override {
+        super.setUp();
+
+        vm.startPrank(owner);
+
+        scr = new MockERC20("Scroll", "SCR", 18);
+
+        address impl = address(new SCRRecoveryModule(address(dataProvider), address(scr)));
+        scrModule = SCRRecoveryModule(
+            address(
+                new UUPSProxy(
+                    impl,
+                    abi.encodeWithSelector(SCRRecoveryModule.initialize.selector, address(roleRegistry), collectionWallet)
+                )
+            )
+        );
+
+        // Register as a default module so it is enabled on every safe
+        address[] memory modules = new address[](1);
+        modules[0] = address(scrModule);
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        dataProvider.configureDefaultModules(modules, shouldWhitelist);
+
+        roleRegistry.grantRole(SCR_RECOVERY_ADMIN_ROLE, owner);
+
+        vm.stopPrank();
+
+        // Seed the safe with SCR
+        scr.mint(address(safe), scrBalance);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //                         CONFIG
+    // ─────────────────────────────────────────────────────────────
+
+    function test_initialize_setsConfig() public view {
+        assertEq(address(scrModule.dataProvider()), address(dataProvider));
+        assertEq(address(scrModule.scr()), address(scr));
+        assertEq(scrModule.collectionWallet(), collectionWallet);
+    }
+
+    function test_setCollectionWallet_byAdmin() public {
+        address newWallet = makeAddr("newWallet");
+
+        vm.expectEmit(true, true, true, true);
+        emit SCRRecoveryModule.CollectionWalletSet(newWallet);
+
+        vm.prank(owner);
+        scrModule.setCollectionWallet(newWallet);
+
+        assertEq(scrModule.collectionWallet(), newWallet);
+    }
+
+    function test_setCollectionWallet_revertsForNonAdmin() public {
+        vm.prank(notOwner);
+        vm.expectRevert(SCRRecoveryModule.OnlyAdmin.selector);
+        scrModule.setCollectionWallet(makeAddr("x"));
+    }
+
+    function test_setCollectionWallet_revertsForZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(SCRRecoveryModule.InvalidInput.selector);
+        scrModule.setCollectionWallet(address(0));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //                         COLLECT
+    // ─────────────────────────────────────────────────────────────
+
+    function test_collect_movesScrToCollectionWallet() public {
+        address[] memory safes = new address[](1);
+        safes[0] = address(safe);
+
+        vm.expectEmit(true, true, true, true);
+        emit SCRRecoveryModule.SCRCollected(address(safe), scrBalance, collectionWallet);
+
+        vm.prank(etherFiWallet);
+        scrModule.collect(safes);
+
+        assertEq(scr.balanceOf(address(safe)), 0);
+        assertEq(scr.balanceOf(collectionWallet), scrBalance);
+        assertTrue(scrModule.hasCollected(address(safe)));
+    }
+
+    function test_collect_isIdempotent() public {
+        address[] memory safes = new address[](1);
+        safes[0] = address(safe);
+
+        vm.prank(etherFiWallet);
+        scrModule.collect(safes);
+
+        // Mint more SCR to the safe; a second collect should skip (already collected)
+        scr.mint(address(safe), 500 ether);
+
+        vm.prank(etherFiWallet);
+        scrModule.collect(safes);
+
+        assertEq(scr.balanceOf(collectionWallet), scrBalance);
+        assertEq(scr.balanceOf(address(safe)), 500 ether);
+    }
+
+    function test_collect_skipsZeroBalanceSafe() public {
+        // Drain the safe first
+        address[] memory safes = new address[](1);
+        safes[0] = address(safe);
+        vm.prank(etherFiWallet);
+        scrModule.collect(safes);
+
+        // Deploy a fresh safe with no SCR
+        address freshSafe = _deploySafe(keccak256("freshSafe"));
+
+        address[] memory freshOnly = new address[](1);
+        freshOnly[0] = freshSafe;
+
+        vm.prank(etherFiWallet);
+        scrModule.collect(freshOnly);
+
+        assertFalse(scrModule.hasCollected(freshSafe));
+        assertEq(scr.balanceOf(collectionWallet), scrBalance);
+    }
+
+    function test_collect_doesNotRevertWhenSafeHoldsCollateral() public {
+        // weETH is a collateral token; give the safe some, then collect SCR.
+        // Health check in postOpHook must still pass since SCR is not collateral.
+        deal(address(weETH), address(safe), 1 ether);
+
+        address[] memory safes = new address[](1);
+        safes[0] = address(safe);
+
+        vm.prank(etherFiWallet);
+        scrModule.collect(safes);
+
+        assertEq(scr.balanceOf(collectionWallet), scrBalance);
+        assertEq(weETH.balanceOf(address(safe)), 1 ether);
+    }
+
+    function test_collect_batchMultipleSafes() public {
+        address safe2 = _deploySafe(keccak256("safe2"));
+        scr.mint(safe2, 250 ether);
+
+        address[] memory safes = new address[](2);
+        safes[0] = address(safe);
+        safes[1] = safe2;
+
+        vm.prank(etherFiWallet);
+        scrModule.collect(safes);
+
+        assertEq(scr.balanceOf(collectionWallet), scrBalance + 250 ether);
+        assertEq(scr.balanceOf(address(safe)), 0);
+        assertEq(scr.balanceOf(safe2), 0);
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //                         REVERTS
+    // ─────────────────────────────────────────────────────────────
+
+    function test_collect_revertsForNonEtherFiWallet() public {
+        address[] memory safes = new address[](1);
+        safes[0] = address(safe);
+
+        vm.prank(notOwner);
+        vm.expectRevert(SCRRecoveryModule.OnlyEtherFiWallet.selector);
+        scrModule.collect(safes);
+    }
+
+    function test_collect_revertsForEmptyArray() public {
+        address[] memory safes = new address[](0);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(SCRRecoveryModule.InvalidInput.selector);
+        scrModule.collect(safes);
+    }
+
+    function test_collect_revertsForNonSafe() public {
+        address[] memory safes = new address[](1);
+        safes[0] = makeAddr("notASafe");
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(SCRRecoveryModule.NotEtherFiSafe.selector);
+        scrModule.collect(safes);
+    }
+
+    function test_collect_revertsWhenPaused() public {
+        vm.prank(pauser);
+        scrModule.pause();
+
+        address[] memory safes = new address[](1);
+        safes[0] = address(safe);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        scrModule.collect(safes);
+    }
+
+    function test_initialize_revertsForZeroCollectionWallet() public {
+        address impl = address(new SCRRecoveryModule(address(dataProvider), address(scr)));
+
+        vm.expectRevert(SCRRecoveryModule.InvalidInput.selector);
+        new UUPSProxy(
+            impl,
+            abi.encodeWithSelector(SCRRecoveryModule.initialize.selector, address(roleRegistry), address(0))
+        );
+    }
+
+    function test_constructor_revertsForZeroAddress() public {
+        vm.expectRevert(SCRRecoveryModule.InvalidInput.selector);
+        new SCRRecoveryModule(address(0), address(scr));
+
+        vm.expectRevert(SCRRecoveryModule.InvalidInput.selector);
+        new SCRRecoveryModule(address(dataProvider), address(0));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //                         HELPERS
+    // ─────────────────────────────────────────────────────────────
+
+    function _deploySafe(bytes32 salt) internal returns (address) {
+        address[] memory owners = new address[](3);
+        owners[0] = owner1;
+        owners[1] = owner2;
+        owners[2] = owner3;
+
+        address[] memory modules = new address[](2);
+        modules[0] = module1;
+        modules[1] = module2;
+        bytes[] memory moduleSetupData = new bytes[](2);
+
+        vm.prank(owner);
+        safeFactory.deployEtherFiSafe(salt, owners, modules, moduleSetupData, threshold);
+        return safeFactory.getDeterministicAddress(salt);
+    }
+}
