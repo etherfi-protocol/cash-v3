@@ -157,7 +157,7 @@ contract SCRRecoveryModule is UpgradeableProxy {
      * @custom:throws CollectionWalletNotSet if no collection wallet is configured
      * @custom:throws NotEtherFiSafe if any address is not a registered EtherFi Safe
      */
-    function collect(address[] calldata safes) external nonReentrant whenNotPaused {
+    function collect(address[] calldata safes) external nonReentrant {
         if (!dataProvider.roleRegistry().hasRole(ETHER_FI_WALLET_ROLE, msg.sender)) revert OnlyEtherFiWallet();
         if (safes.length == 0) revert InvalidInput();
 

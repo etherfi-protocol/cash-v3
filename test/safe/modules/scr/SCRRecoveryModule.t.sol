@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 import { SafeTestSetup, UUPSProxy } from "../../SafeTestSetup.t.sol";
 import { SCRRecoveryModule } from "../../../../src/modules/scr/SCRRecoveryModule.sol";
@@ -202,18 +201,6 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(SCRRecoveryModule.NotEtherFiSafe.selector);
-        scrModule.collect(safes);
-    }
-
-    function test_collect_revertsWhenPaused() public {
-        vm.prank(pauser);
-        scrModule.pause();
-
-        address[] memory safes = new address[](1);
-        safes[0] = address(safe);
-
-        vm.prank(etherFiWallet);
-        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         scrModule.collect(safes);
     }
 
