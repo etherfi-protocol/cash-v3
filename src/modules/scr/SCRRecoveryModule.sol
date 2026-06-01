@@ -13,6 +13,10 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  * @notice Default module that pulls SCR left behind on Scroll out of opted-in user
  *         safes into a single collection wallet. The equivalent USDC is credited
  *         off-chain on Optimism; this module only moves SCR on Scroll.
+ * @dev SCR is a registered collateral token on Scroll but with LTV = 0 and
+ *      liquidationThreshold = 0, so it contributes no borrow power. Removing it cannot
+ *      make a safe unhealthy, so the EtherFiHook post-op health check passes and no
+ *      hook bypass is required.
  * @custom:security-contact security@etherfi.io
  */
 contract SCRRecoveryModule is UpgradeableProxy {

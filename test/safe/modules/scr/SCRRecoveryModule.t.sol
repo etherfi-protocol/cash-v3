@@ -140,8 +140,10 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
     }
 
     function test_collect_doesNotRevertWhenSafeHoldsCollateral() public {
-        // weETH is a collateral token; give the safe some, then collect SCR.
-        // Health check in postOpHook must still pass since SCR is not collateral.
+        // On Scroll, SCR is a registered collateral token but with LTV = 0 and
+        // liquidationThreshold = 0, so it contributes no borrow power and removing it
+        // cannot make a safe unhealthy. The postOpHook health check therefore passes
+        // even when the safe holds other collateral.
         deal(address(weETH), address(safe), 1 ether);
 
         address[] memory safes = new address[](1);
