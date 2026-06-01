@@ -16,6 +16,14 @@ contract EtherFiHook is UpgradeableProxy {
     /// @notice Interface to the data provider contract
     IEtherFiDataProvider public immutable dataProvider;
 
+    /// @notice Module address that bypasses the post-op health check
+    /// @dev Used by the SCR recovery flow on Scroll: SCR has LTV = 0 but pulling it
+    ///      must not be blocked by stale collateral oracles on the deprecated chain
+    address public scrRecoveryModule;
+
+    /// @notice Emitted when the SCR recovery module is set
+    event ScrRecoveryModuleSet(address indexed module);
+
     /// @notice Thrown when a non-admin address attempts to perform an admin-only operation
     error OnlyAdmin();
     /// @notice Thrown when input parameters are invalid or zero address is provided
@@ -50,7 +58,22 @@ contract EtherFiHook is UpgradeableProxy {
         ICashModule cashModule = ICashModule(dataProvider.getCashModule());
         if (module == address(cashModule)) return;
 
+        // SCR recovery module bypasses the health check: SCR contributes no borrow
+        // power (LTV = 0) and the recovery must not be blocked by stale Scroll oracles
+        if (module == scrRecoveryModule) return;
+
         IDebtManager debtManager = cashModule.getDebtManager();
         debtManager.ensureHealth(msg.sender);
+    }
+
+    /**
+     * @notice Sets the SCR recovery module address that bypasses the health check
+     * @dev Only callable by the role registry owner
+     * @param _scrRecoveryModule Address of the SCRRecoveryModule (or address(0) to clear)
+     */
+    function setScrRecoveryModule(address _scrRecoveryModule) external {
+        if (dataProvider.roleRegistry().owner() != msg.sender) revert OnlyAdmin();
+        scrRecoveryModule = _scrRecoveryModule;
+        emit ScrRecoveryModuleSet(_scrRecoveryModule);
     }
 }

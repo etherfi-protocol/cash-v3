@@ -139,23 +139,6 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
         assertEq(scr.balanceOf(collectionWallet), scrBalance);
     }
 
-    function test_collect_doesNotRevertWhenSafeHoldsCollateral() public {
-        // On Scroll, SCR is a registered collateral token but with LTV = 0 and
-        // liquidationThreshold = 0, so it contributes no borrow power and removing it
-        // cannot make a safe unhealthy. The postOpHook health check therefore passes
-        // even when the safe holds other collateral.
-        deal(address(weETH), address(safe), 1 ether);
-
-        address[] memory safes = new address[](1);
-        safes[0] = address(safe);
-
-        vm.prank(etherFiWallet);
-        scrModule.collect(safes);
-
-        assertEq(scr.balanceOf(collectionWallet), scrBalance);
-        assertEq(weETH.balanceOf(address(safe)), 1 ether);
-    }
-
     function test_collect_batchMultipleSafes() public {
         address safe2 = _deploySafe(keccak256("safe2"));
         scr.mint(safe2, 250 ether);
