@@ -12,6 +12,9 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
     SCRRecoveryModule public scrModule;
     MockERC20 public scr;
 
+    // Hardcoded SCR token address on Scroll (must match the contract constant)
+    address public constant SCR_ADDR = 0xd29687c813D741E2F938F4aC377128810E217b1b;
+
     address public collectionWallet = makeAddr("collectionWallet");
     bytes32 public SCR_RECOVERY_ADMIN_ROLE = keccak256("SCR_RECOVERY_ADMIN_ROLE");
 
@@ -20,11 +23,13 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
     function setUp() public override {
         super.setUp();
 
+        // Place a mock ERC20 at the hardcoded SCR address so we can mint/transfer in tests
+        vm.etch(SCR_ADDR, address(new MockERC20("Scroll", "SCR", 18)).code);
+        scr = MockERC20(SCR_ADDR);
+
         vm.startPrank(owner);
 
-        scr = new MockERC20("Scroll", "SCR", 18);
-
-        address impl = address(new SCRRecoveryModule(address(dataProvider), address(scr)));
+        address impl = address(new SCRRecoveryModule(address(dataProvider)));
         scrModule = SCRRecoveryModule(
             address(
                 new UUPSProxy(
@@ -55,7 +60,7 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
 
     function test_initialize_setsConfig() public view {
         assertEq(address(scrModule.dataProvider()), address(dataProvider));
-        assertEq(address(scrModule.scr()), address(scr));
+        assertEq(address(scrModule.scr()), SCR_ADDR);
         assertEq(scrModule.collectionWallet(), collectionWallet);
     }
 
@@ -213,7 +218,7 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
     }
 
     function test_initialize_revertsForZeroCollectionWallet() public {
-        address impl = address(new SCRRecoveryModule(address(dataProvider), address(scr)));
+        address impl = address(new SCRRecoveryModule(address(dataProvider)));
 
         vm.expectRevert(SCRRecoveryModule.InvalidInput.selector);
         new UUPSProxy(
@@ -224,10 +229,7 @@ contract SCRRecoveryModuleTest is SafeTestSetup {
 
     function test_constructor_revertsForZeroAddress() public {
         vm.expectRevert(SCRRecoveryModule.InvalidInput.selector);
-        new SCRRecoveryModule(address(0), address(scr));
-
-        vm.expectRevert(SCRRecoveryModule.InvalidInput.selector);
-        new SCRRecoveryModule(address(dataProvider), address(0));
+        new SCRRecoveryModule(address(0));
     }
 
     // ─────────────────────────────────────────────────────────────

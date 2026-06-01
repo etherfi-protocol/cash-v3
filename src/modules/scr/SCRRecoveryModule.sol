@@ -44,7 +44,7 @@ contract SCRRecoveryModule is UpgradeableProxy {
     IEtherFiDataProvider public immutable dataProvider;
 
     /// @notice The SCR token on Scroll being recovered
-    IERC20 public immutable scr;
+    IERC20 public constant scr = IERC20(0xd29687c813D741E2F938F4aC377128810E217b1b);
 
     /// @notice Role required to call {collect} (the ether.fi backend wallet)
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
@@ -89,14 +89,12 @@ contract SCRRecoveryModule is UpgradeableProxy {
     error CollectionWalletNotSet();
 
     /**
-     * @dev Sets immutables and disables initializers on the implementation
+     * @dev Sets the immutable data provider and disables initializers on the implementation
      * @param _dataProvider Address of the EtherFiDataProvider contract
-     * @param _scr Address of the SCR token on Scroll
      */
-    constructor(address _dataProvider, address _scr) {
-        if (_dataProvider == address(0) || _scr == address(0)) revert InvalidInput();
+    constructor(address _dataProvider) {
+        if (_dataProvider == address(0)) revert InvalidInput();
         dataProvider = IEtherFiDataProvider(_dataProvider);
-        scr = IERC20(_scr);
         _disableInitializers();
     }
 
