@@ -12,7 +12,7 @@ import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 
 /**
  * @title AddLiquidRWASupportTest
- * @notice Verifies the four on-chain config changes from COR-888 / scripts/AddLiquidRWASupport.sol
+ * @notice Verifies the four on-chain config changes from COR-888 / scripts/AddLiquidRWASupport.s.sol
  *         for the Liquid RWA (Midas) token on Optimism:
  *           1. PriceProvider oracle registration (7D staleness).
  *           2. DebtManager collateral config.
