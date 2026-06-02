@@ -16,8 +16,14 @@ contract EtherFiHook is UpgradeableProxy {
     /// @notice Interface to the data provider contract
     IEtherFiDataProvider public immutable dataProvider;
 
-    /// @notice Module address that bypasses the post-op health check (SCR recovery, Scroll only)
-    address public scrRecoveryModule;
+    /// @custom:storage-location erc7201:etherfi.storage.EtherFiHook
+    struct EtherFiHookStorage {
+        /// @notice Module address that bypasses the post-op health check (SCR recovery, Scroll only)
+        address scrRecoveryModule;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiHook")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant EtherFiHookStorageLocation = 0x074c0c7a4bbcbd9deccd65f607219fc9b22583eb0823daff8392d7f7c9aaa700;
 
     /// @notice Emitted when the SCR recovery module is set
     event ScrRecoveryModuleSet(address indexed module);
@@ -40,6 +46,18 @@ contract EtherFiHook is UpgradeableProxy {
         __UpgradeableProxy_init(_roleRegistry);
     }
 
+    /// @dev Returns the namespaced storage struct
+    function _getEtherFiHookStorage() internal pure returns (EtherFiHookStorage storage $) {
+        assembly {
+            $.slot := EtherFiHookStorageLocation
+        }
+    }
+
+    /// @notice Module address that bypasses the post-op health check (SCR recovery, Scroll only)
+    function scrRecoveryModule() external view returns (address) {
+        return _getEtherFiHookStorage().scrRecoveryModule;
+    }
+
     /**
      * @notice Hook called before module operations
      * @dev Currently implemented as a view function with no effects
@@ -58,7 +76,7 @@ contract EtherFiHook is UpgradeableProxy {
 
         // SCR recovery module bypasses the health check: SCR contributes no borrow
         // power (LTV = 0) and the recovery must not be blocked by stale Scroll oracles
-        if (module == scrRecoveryModule) return;
+        if (module == _getEtherFiHookStorage().scrRecoveryModule) return;
 
         IDebtManager debtManager = cashModule.getDebtManager();
         debtManager.ensureHealth(msg.sender);
@@ -71,7 +89,7 @@ contract EtherFiHook is UpgradeableProxy {
      */
     function setScrRecoveryModule(address _scrRecoveryModule) external {
         if (dataProvider.roleRegistry().owner() != msg.sender) revert OnlyAdmin();
-        scrRecoveryModule = _scrRecoveryModule;
+        _getEtherFiHookStorage().scrRecoveryModule = _scrRecoveryModule;
         emit ScrRecoveryModuleSet(_scrRecoveryModule);
     }
 }
