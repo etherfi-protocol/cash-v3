@@ -17,8 +17,11 @@ contract EtherFiHook is UpgradeableProxy {
     IEtherFiDataProvider public immutable dataProvider;
 
     /// @notice Module address that bypasses the post-op health check
-    /// @dev Used by the SCR recovery flow on Scroll: SCR has LTV = 0 but pulling it
-    ///      must not be blocked by stale collateral oracles on the deprecated chain
+    /// @dev AUDITOR CONTEXT: only set on Scroll, for the SCR recovery flow. SCR has
+    ///      LTV = 0 (no borrow power), but pulling it triggers the post-op health check
+    ///      which reverts on Scroll's now-stale collateral oracles. This lets that one
+    ///      module skip the check. Defaults to address(0), so behaviour is unchanged on
+    ///      every other chain/module.
     address public scrRecoveryModule;
 
     /// @notice Emitted when the SCR recovery module is set
