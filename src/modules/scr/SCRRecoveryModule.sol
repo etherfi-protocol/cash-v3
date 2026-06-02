@@ -13,13 +13,6 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  * @notice Default module that pulls SCR left behind on Scroll out of opted-in user
  *         safes into a single collection wallet. The equivalent USDC is credited
  *         off-chain on Optimism; this module only moves SCR on Scroll.
- * @dev AUDITOR CONTEXT: this module is deployed on Scroll ONLY. Scroll is a deprecated
- *      chain for us, but it still holds the stranded SCR we are recovering, so the
- *      recovery has to run there. It is not deployed on any other chain.
- * @dev SCR has LTV = 0 on Scroll so it contributes no borrow power, but pulling it
- *      still triggers EtherFiHook.postOpHook -> ensureHealth, which can revert on the
- *      deprecated chain due to stale collateral oracles. The EtherFiHook is therefore
- *      configured (via setScrRecoveryModule) to bypass the health check for this module.
  * @custom:security-contact security@etherfi.io
  */
 contract SCRRecoveryModule is UpgradeableProxy {

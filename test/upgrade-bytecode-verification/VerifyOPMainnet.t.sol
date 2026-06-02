@@ -176,6 +176,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiHook() public {
+        // Skipped: EtherFiHook was modified in this PR (SCR recovery health-check bypass),
+        // so local bytecode no longer matches the currently-deployed OP impl. Re-enable
+        // once the new EtherFiHook impl is deployed on OP mainnet.
+        vm.skip(true);
         address local = address(new EtherFiHook(dataProviderProxy));
         _verify("EtherFiHook", hookImpl, local);
     }
