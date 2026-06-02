@@ -632,7 +632,7 @@ contract TopUpFactoryTest is Test, Constants {
         address token = address(weETH);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(tokenå, amount, OP_CHAIN_ID);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, OP_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount, OP_CHAIN_ID);
