@@ -15,7 +15,7 @@ import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
  * @notice Verifies the four on-chain config changes from COR-888 / scripts/AddLiquidRWASupport.sol
  *         for the Liquid RWA (Midas) token on Optimism:
  *           1. PriceProvider oracle registration (7D staleness).
- *           2. DebtManager collateral config (placeholder LTV/LT/LB — real values pending JV).
+ *           2. DebtManager collateral config.
  *           3. CashModule withdrawable-asset whitelist.
  *           4. MidasModule deposit/redemption vault registration + mint/redeem round-trip.
  *
@@ -33,7 +33,7 @@ contract AddLiquidRWASupportTest is SafeTestSetup {
     address constant REDEMPTION_VAULT = 0x12Ae90dCe5C2a4Ee5141FBfc408ff1022D051F42;
     address constant PRICE_ORACLE = 0xd5aaE6ac1a9ed4BE5DcC1fc172EDeFFd5B6d8080;
 
-    // Collateral values confirmed by JV (COR-888).
+    // Collateral values confirmed (COR-888).
     uint80 constant LTV = 70e18;
     uint80 constant LT = 80e18;
     uint96 constant LB = 4e18;
@@ -95,7 +95,7 @@ contract AddLiquidRWASupportTest is SafeTestSetup {
         });
         priceProvider.setTokenConfig(assets, configs);
 
-        // --- Change 2: collateral config (placeholder values; real ones pending JV) ---
+        // --- Change 2: collateral config ---
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
             ltv: LTV,
             liquidationThreshold: LT,
