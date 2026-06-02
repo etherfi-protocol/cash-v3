@@ -85,22 +85,20 @@ contract AddLiquidRWASupport is Utils {
         priceProvider.setTokenConfig(tokens, priceConfigs);
 
         // --- Change 2: Add liquidRWA as collateral on the DebtManager ---
-        // TODO(JV): LTV / LT / LB values are pending input from JV. Confirm before deploying.
-        // Mirrors the Liquid EUR rollout: register as collateral AND as a (non-borrowable)
-        // borrow token with minShares = type(uint128).max for share accounting.
-        // Uncomment and set the real values once JV confirms, then deploy this step separately.
-        //
-        // IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
-        //     ltv: 0,                  // TODO(JV)
-        //     liquidationThreshold: 0, // TODO(JV)
-        //     liquidationBonus: 0      // TODO(JV)
-        // });
-        //
-        // uint64 borrowApy = 1;                    // ~0%
-        // uint128 minShares = type(uint128).max;   // not used in borrow mode
-        //
-        // debtManager.supportCollateralToken(address(liquidRWA), collateralConfig);
-        // debtManager.supportBorrowToken(address(liquidRWA), borrowApy, minShares);
+        // Mirrors the Liquid EUR rollout: register as collateral AND as a
+        // (non-borrowable) borrow token with minShares = type(uint128).max for share accounting.
+        
+        IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
+            ltv: 70e18, // 70%
+            liquidationThreshold: 80e18, // 80%
+            liquidationBonus: 4e18 // 4%
+        });
+
+        uint64 borrowApy = 1; // ~0%
+        uint128 minShares = type(uint128).max; // not used in borrow mode
+
+        debtManager.supportCollateralToken(address(liquidRWA), collateralConfig);
+        debtManager.supportBorrowToken(address(liquidRWA), borrowApy, minShares);
 
         // --- Change 3: Whitelist liquidRWA as a withdrawable asset on Cash ---
         address[] memory withdrawableAssets = new address[](1);

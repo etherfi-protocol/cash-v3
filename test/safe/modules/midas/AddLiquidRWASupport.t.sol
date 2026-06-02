@@ -33,10 +33,10 @@ contract AddLiquidRWASupportTest is SafeTestSetup {
     address constant REDEMPTION_VAULT = 0x12Ae90dCe5C2a4Ee5141FBfc408ff1022D051F42;
     address constant PRICE_ORACLE = 0xd5aaE6ac1a9ed4BE5DcC1fc172EDeFFd5B6d8080;
 
-    // Placeholder collateral values — real LTV/LT/LB are pending JV (mirrors the stubbed script step).
-    uint80 constant PLACEHOLDER_LTV = 80e18;
-    uint80 constant PLACEHOLDER_LT = 90e18;
-    uint96 constant PLACEHOLDER_LB = 2e18;
+    // Collateral values confirmed by JV (COR-888).
+    uint80 constant LTV = 70e18;
+    uint80 constant LT = 80e18;
+    uint96 constant LB = 4e18;
 
     MidasModule midasModule;
     IERC20 liquidRWA = IERC20(LIQUID_RWA);
@@ -97,9 +97,9 @@ contract AddLiquidRWASupportTest is SafeTestSetup {
 
         // --- Change 2: collateral config (placeholder values; real ones pending JV) ---
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
-            ltv: PLACEHOLDER_LTV,
-            liquidationThreshold: PLACEHOLDER_LT,
-            liquidationBonus: PLACEHOLDER_LB
+            ltv: LTV,
+            liquidationThreshold: LT,
+            liquidationBonus: LB
         });
         debtManager.supportCollateralToken(LIQUID_RWA, collateralConfig);
         debtManager.supportBorrowToken(LIQUID_RWA, 1, type(uint128).max);
@@ -142,9 +142,9 @@ contract AddLiquidRWASupportTest is SafeTestSetup {
     function test_collateral_configured() public view {
         assertTrue(debtManager.isCollateralToken(LIQUID_RWA));
         IDebtManager.CollateralTokenConfig memory cfg = debtManager.collateralTokenConfig(LIQUID_RWA);
-        assertEq(cfg.ltv, PLACEHOLDER_LTV);
-        assertEq(cfg.liquidationThreshold, PLACEHOLDER_LT);
-        assertEq(cfg.liquidationBonus, PLACEHOLDER_LB);
+        assertEq(cfg.ltv, LTV);
+        assertEq(cfg.liquidationThreshold, LT);
+        assertEq(cfg.liquidationBonus, LB);
     }
 
     // ---------------------------------------------------------------------
