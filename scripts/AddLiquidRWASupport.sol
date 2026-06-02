@@ -14,16 +14,13 @@ import { ChainConfig, Utils } from "./utils/Utils.sol";
  * @notice Integrates the Liquid RWA (Midas) token into the Cash smart contracts on Optimism (COR-888).
  * @dev Mirrors the Liquid EUR rollout (SupportLiquidEURC.s.sol). Performs four changes:
  *      1. Register the liquidRWA oracle on the PriceProvider (7D staleness).
- *      2. Add liquidRWA as collateral on the DebtManager (LTV/LT/LB pending JV — see TODO, stubbed).
+ *      2. Add liquidRWA as collateral on the DebtManager.
  *      3. Whitelist liquidRWA as a withdrawable asset on the CashModule.
  *      4. Add the liquidRWA Midas vault (deposit + redemption) to the MidasModule.
  *
  *      The token is USD-denominated, so no FX handling is required (isStableToken = false).
  *      Deposit assets (USDC/USDT) and the withdraw asset (USDC) are passed at call-time on the
  *      MidasModule's deposit/withdraw entrypoints, so they need no separate on-chain registration here.
- *
- *      NOTE: The collateral step (Change 2) is intentionally left commented out until JV confirms
- *      LTV/LT/LB. Steps 1, 3 and 4 are independently deployable and run as-is.
  */
 contract AddLiquidRWASupport is Utils {
     // --- Liquid RWA (Midas) token on Optimism, 18 decimals, USD-denominated ---
@@ -95,7 +92,7 @@ contract AddLiquidRWASupport is Utils {
         });
 
         uint64 borrowApy = 1; // ~0%
-        uint128 minShares = type(uint128).max; // not used in borrow mode
+        uint128 minShares = type(uint128).max; // Since we dont want to use it in borrow mode
 
         debtManager.supportCollateralToken(address(liquidRWA), collateralConfig);
         debtManager.supportBorrowToken(address(liquidRWA), borrowApy, minShares);
