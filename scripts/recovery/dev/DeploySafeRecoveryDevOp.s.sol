@@ -46,16 +46,19 @@ contract DeploySafeRecoveryDevOp is Utils {
         modules[0] = address(module);
         bool[] memory whitelist = new bool[](1);
         whitelist[0] = true;
-        EtherFiDataProvider(dataProvider).configureModules(modules, whitelist);
+        // Register as a DEFAULT module (whitelists + marks default in one call), matching how every
+        // other fund-moving module (CashModule, swap, liquid) is registered. It is then enabled on
+        // every safe automatically, so no per-safe enable / extra signature is needed.
+        EtherFiDataProvider(dataProvider).configureDefaultModules(modules, whitelist);
 
         vm.stopBroadcast();
 
-        console.log("=== Dev OP SafeAssetRecoveryModule deployed ===");
+        console.log("=== Dev OP SafeAssetRecoveryModule deployed (default module) ===");
         console.log("SafeAssetRecoveryModule : %s", address(module));
         console.log("DataProvider            : %s", dataProvider);
         console.log("RoleRegistry            : %s", roleRegistry);
         console.log("Deployer                : %s (EOA)", deployer);
         console.log("");
-        console.log("Module is whitelisted. Per-safe enable is an owner-quorum action (EtherFiSafe.configureModules).");
+        console.log("Registered as a default module, enabled on all safes, no per-safe enable needed.");
     }
 }

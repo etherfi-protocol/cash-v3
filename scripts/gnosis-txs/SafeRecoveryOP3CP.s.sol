@@ -11,10 +11,13 @@ import { Utils } from "../utils/Utils.sol";
 import { RecoveryDeployConfig } from "../recovery/RecoveryDeployConfig.sol";
 
 /**
- * @notice Generates the OP 3CP JSON to whitelist the SafeAssetRecoveryModule. Bundle contains a
- *         single tx: EtherFiDataProvider.configureModules([SafeAssetRecoveryModule], [true]),
- *         signed by the operating safe. No role grants (PAUSER/UNPAUSER already held on OP) and no
- *         LayerZero peers — same-chain module.
+ * @notice Generates the OP 3CP JSON to register the SafeAssetRecoveryModule as a DEFAULT module.
+ *         Bundle contains a single tx:
+ *         EtherFiDataProvider.configureDefaultModules([SafeAssetRecoveryModule], [true]),
+ *         signed by the operating safe. configureDefaultModules whitelists AND marks it default in
+ *         one call, so the module is enabled on every safe automatically (no per-safe enable) —
+ *         matching every other fund-moving module. No role grants (PAUSER/UNPAUSER already held on
+ *         OP) and no LayerZero peers — same-chain module.
  *
  * Reads SafeAssetRecoveryModule + EtherFiDataProvider from deployments.json.
  *
@@ -42,7 +45,7 @@ contract SafeRecoveryOP3CP is GnosisHelpers, Utils, Test {
 
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(
             addressToHex(dataProvider),
-            iToHex(abi.encodeWithSelector(EtherFiDataProvider.configureModules.selector, modules, flags)),
+            iToHex(abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, modules, flags)),
             "0", true
         )));
 

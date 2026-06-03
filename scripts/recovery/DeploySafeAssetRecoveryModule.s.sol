@@ -12,14 +12,15 @@ import { RecoveryDeployConfig, RecoveryDeployHelper } from "./RecoveryDeployConf
 /**
  * @notice Deploys the `SafeAssetRecoveryModule` on Optimism as a plain non-upgradable contract via
  *         Nick's CREATE3 factory with `SALT_SAFE_RECOVERY_MODULE`, so the verifier can independently
- *         recompute the address. The module is whitelisted (not upgraded) via
- *         `EtherFiDataProvider.configureModules`, matching the repo precedent for Safe modules.
+ *         recompute the address. The module is registered as a DEFAULT module via
+ *         `EtherFiDataProvider.configureDefaultModules`, matching the repo precedent for fund-moving
+ *         Safe modules (CashModule, swap, liquid) — so it is enabled on every safe automatically.
  *
  * Env:
  *   PRIVATE_KEY — deployer key
  *
- * Prints the `EtherFiDataProvider.configureModules([module], [true])` calldata the operating safe
- * will 3CP-sign to whitelist the module (see SafeRecoveryOP3CP.s.sol).
+ * Prints the `EtherFiDataProvider.configureDefaultModules([module], [true])` calldata the operating
+ * safe will 3CP-sign (see SafeRecoveryOP3CP.s.sol).
  */
 contract DeploySafeAssetRecoveryModule is Utils, RecoveryDeployHelper {
     function run() external {
@@ -67,13 +68,13 @@ contract DeploySafeAssetRecoveryModule is Utils, RecoveryDeployHelper {
         shouldWhitelist[0] = true;
 
         bytes memory whitelistCalldata = abi.encodeCall(
-            EtherFiDataProvider.configureModules,
+            EtherFiDataProvider.configureDefaultModules,
             (modules, shouldWhitelist)
         );
         console.log("");
         console.log("3CP calldata - operating safe signs on OP:");
         console.log("  target  : %s (EtherFiDataProvider)", dataProvider);
-        console.log("  method  : configureModules([%s], [true])", module);
+        console.log("  method  : configureDefaultModules([%s], [true])", module);
         console.log("  calldata:");
         console.logBytes(whitelistCalldata);
     }

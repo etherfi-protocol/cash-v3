@@ -124,7 +124,6 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
 
     function test_recover_revertsIfModuleNotEnabledOnSafe() public {
         // A second module: whitelisted on the data provider but NOT enabled on the safe.
-        vm.prank(owner);
         SafeAssetRecoveryModule module2 = new SafeAssetRecoveryModule(address(dataProvider));
         address[] memory mods = new address[](1);
         mods[0] = address(module2);
