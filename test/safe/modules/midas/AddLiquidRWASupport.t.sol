@@ -95,14 +95,13 @@ contract AddLiquidRWASupportTest is SafeTestSetup {
         });
         priceProvider.setTokenConfig(assets, configs);
 
-        // --- Change 2: collateral config ---
+        // --- Change 2: collateral config (collateral only — liquidRWA is NOT a borrow token) ---
         IDebtManager.CollateralTokenConfig memory collateralConfig = IDebtManager.CollateralTokenConfig({
             ltv: LTV,
             liquidationThreshold: LT,
             liquidationBonus: LB
         });
         debtManager.supportCollateralToken(LIQUID_RWA, collateralConfig);
-        debtManager.supportBorrowToken(LIQUID_RWA, 1, type(uint128).max);
 
         vm.stopPrank();
     }
