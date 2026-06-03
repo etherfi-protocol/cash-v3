@@ -6,7 +6,7 @@ import { stdJson } from "forge-std/StdJson.sol";
 import { ICashModule } from "../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 import { MidasModule } from "../src/modules/midas/MidasModule.sol";
-import { IAggregatorV3, PriceProvider } from "../src/oracle/PriceProvider.sol";
+import { IAggregatorV3, PriceProviderV2 } from "../src/oracle/PriceProviderV2.sol";
 import { ChainConfig, Utils } from "./utils/Utils.sol";
 
 /**
@@ -34,7 +34,7 @@ contract AddLiquidRWASupport is Utils {
     address liquidRWAPriceOracle = 0xd5aaE6ac1a9ed4BE5DcC1fc172EDeFFd5B6d8080;
 
     IDebtManager debtManager;
-    PriceProvider priceProvider;
+    PriceProviderV2 priceProvider;
     ICashModule cashModule;
     MidasModule midasModule;
 
@@ -44,7 +44,7 @@ contract AddLiquidRWASupport is Utils {
         vm.startBroadcast(deployerPrivateKey);
 
         string memory deployments = readDeploymentFile();
-        priceProvider = PriceProvider(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "PriceProvider")));
+        priceProvider = PriceProviderV2(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "PriceProvider")));
         debtManager = IDebtManager(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "DebtManager")));
         cashModule = ICashModule(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "CashModule")));
         midasModule = MidasModule(stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "MidasModule")));
@@ -65,18 +65,17 @@ contract AddLiquidRWASupport is Utils {
         address[] memory tokens = new address[](1);
         tokens[0] = liquidRWA;
 
-        PriceProvider.Config memory liquidRWAConfig = PriceProvider.Config({
+        PriceProviderV2.Config memory liquidRWAConfig = PriceProviderV2.Config({
             oracle: liquidRWAPriceOracle,
             priceFunctionCalldata: "",
             isChainlinkType: true,
             oraclePriceDecimals: IAggregatorV3(liquidRWAPriceOracle).decimals(),
             maxStaleness: 7 days,
-            dataType: PriceProvider.ReturnType.Int256,
-            isBaseTokenEth: false,
+            dataType: PriceProviderV2.ReturnType.Int256,
             isStableToken: false, // USD-denominated RWA token; price accrues, do NOT clamp to $1
-            isBaseTokenBtc: false
+            baseAsset: address(0) // USD-denominated; no base-asset conversion
         });
-        PriceProvider.Config[] memory priceConfigs = new PriceProvider.Config[](1);
+        PriceProviderV2.Config[] memory priceConfigs = new PriceProviderV2.Config[](1);
         priceConfigs[0] = liquidRWAConfig;
 
         priceProvider.setTokenConfig(tokens, priceConfigs);
