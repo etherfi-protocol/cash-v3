@@ -80,7 +80,10 @@ contract TopUpFactoryTest is Test, Constants {
     function setUp() public {
         string memory rpcUrl = vm.envString("MAINNET_RPC");
         if (bytes(rpcUrl).length == 0) rpcUrl = "https://mainnet.gateway.tenderly.co";
-        vm.createSelectFork(rpcUrl);
+        // Pin a mainnet block so fork tests are deterministic. The weETH OFT outbound
+        // rate limit to Scroll (eid 30214) was later set to 0, which breaks bridge tests
+        // when forking at the latest block.
+        vm.createSelectFork(rpcUrl, 25103571);
 
         owner = makeAddr("owner");
         admin = makeAddr("admin");

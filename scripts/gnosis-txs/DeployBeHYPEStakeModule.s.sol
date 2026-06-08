@@ -8,12 +8,21 @@ import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
+/**
+ * @notice Deploys BeHYPEStakeModule for the current chain. Reads `wHYPE`, `beHYPE`,
+ *         and `l2BeHypeStaker` from `deployments/{ENV}/fixtures/fixtures.json` keyed
+ *         by `block.chainid`, and `EtherFiDataProvider` from the chain deployments file.
+ *
+ * Usage:
+ *   ENV=mainnet forge script scripts/gnosis-txs/DeployBeHYPEStakeModule.s.sol:DeployBeHYPEStakeModule \
+ *       --rpc-url $RPC --broadcast
+ *
+ * After deploy, record the address under `addresses.BeHYPEStakeModule` in
+ * `deployments/{ENV}/{chainId}/deployments.json` before running the configure script.
+ */
 contract DeployBeHYPEStakeModule is GnosisHelpers, Utils {
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-    address l2BeHypeStaker = 0x3f1Bdae959cEd680E434Fe201861E97976eA4A8F;
-    address whypeToken = 0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E;
-    address beHypeToken = 0xA519AfBc91986c0e7501d7e34968FEE51CD901aC;
     uint32 refundGasLimit = 5_000;
 
     BeHYPEStakeModule public beHypeStakeModule;
@@ -21,6 +30,29 @@ contract DeployBeHYPEStakeModule is GnosisHelpers, Utils {
     function run() public {
         string memory deployments = readDeploymentFile();
         string memory chainId = vm.toString(block.chainid);
+
+        string memory fixturesFile = string.concat(
+            vm.projectRoot(),
+            string.concat("/deployments/", getEnv(), "/fixtures/fixtures.json")
+        );
+        string memory fixtures = vm.readFile(fixturesFile);
+
+        address l2BeHypeStaker = stdJson.readAddress(
+            fixtures,
+            string.concat(".", chainId, ".l2BeHypeStaker")
+        );
+        address whypeToken = stdJson.readAddress(
+            fixtures,
+            string.concat(".", chainId, ".wHYPE")
+        );
+        address beHypeToken = stdJson.readAddress(
+            fixtures,
+            string.concat(".", chainId, ".beHYPE")
+        );
+
+        require(l2BeHypeStaker != address(0), "DeployBeHYPEStakeModule: l2BeHypeStaker not set in fixtures");
+        require(whypeToken != address(0), "DeployBeHYPEStakeModule: wHYPE not set in fixtures");
+        require(beHypeToken != address(0), "DeployBeHYPEStakeModule: beHYPE not set in fixtures");
 
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
 
@@ -38,7 +70,6 @@ contract DeployBeHYPEStakeModule is GnosisHelpers, Utils {
             beHypeToken,
             refundGasLimit
         );
-
 
         vm.stopBroadcast();
     }

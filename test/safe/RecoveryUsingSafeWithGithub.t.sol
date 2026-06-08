@@ -15,8 +15,8 @@ contract RecoveryUsingSafeWithGithub is Test {
     address safeAddress;
 
     function setUp() public {
-        string memory scrollRpc = vm.envString("SCROLL_RPC");
-        
+        string memory chainRpc = vm.envOr("CHAIN_RPC", string("https://mainnet.optimism.io"));
+
         try vm.envAddress("RECOVERY_SAFE_ADDRESS") returns (address addr) {
             safeAddress = addr;
         } catch {
@@ -35,8 +35,7 @@ contract RecoveryUsingSafeWithGithub is Test {
         }
 
         safe = EtherFiSafe(payable(safeAddress));
-        if (bytes(scrollRpc).length == 0) scrollRpc = "https://rpc.scroll.io"; 
-        vm.createSelectFork(scrollRpc);
+        vm.createSelectFork(chainRpc);
     }
 
     function test_BuildMessageHashAndDigestGithub() external {
