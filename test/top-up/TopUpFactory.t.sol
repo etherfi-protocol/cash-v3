@@ -105,28 +105,27 @@ contract TopUpFactoryTest is Test, Constants {
         address factoryImpl = address(new TopUpFactory());
         factory = TopUpFactory(payable(address(new UUPSProxy(factoryImpl, abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), implementation)))));
 
-        address[] memory tokens = new address[](9);
+        // weETH is not registered for Scroll here as its OFT route is deprecated; it is configured for Optimism only below.
+        address[] memory tokens = new address[](8);
         tokens[0] = address(usdc);
-        tokens[1] = address(weETH);
-        tokens[2] = address(ETH);
-        tokens[3] = address(liquidEth);
-        tokens[4] = address(liquidBtc);
-        tokens[5] = address(liquidUsd);
-        tokens[6] = address(eUsd);
-        tokens[7] = address(weth);
-        tokens[8] = address(ethfi);
+        tokens[1] = address(ETH);
+        tokens[2] = address(liquidEth);
+        tokens[3] = address(liquidBtc);
+        tokens[4] = address(liquidUsd);
+        tokens[5] = address(eUsd);
+        tokens[6] = address(weth);
+        tokens[7] = address(ethfi);
 
-        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](9);
+        TopUpFactory.TokenConfig[] memory tokenConfigs = new TopUpFactory.TokenConfig[](8);
         tokenConfigs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(scrollErc20Adapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(scrollGatewayRouter, gasLimitForScrollGateway) });
-        tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
-        tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool, uint32(30214)) });
-        tokenConfigs[3] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidEthTeller, uint32(30214)) });
-        tokenConfigs[4] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidBtcTeller, uint32(30214)) });
-        tokenConfigs[5] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidUsdTeller, uint32(30214)) });
-        tokenConfigs[6] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(eUsdTeller, uint32(30214)) });
-        tokenConfigs[7] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool, uint32(30214)) });
-        tokenConfigs[8] = TopUpFactory.TokenConfig({ bridgeAdapter: address(nttAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(nttManager, 10) });
-        factory.setTokenConfig(tokens, _chainIds(9), tokenConfigs);
+        tokenConfigs[1] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool, uint32(30214)) });
+        tokenConfigs[2] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidEthTeller, uint32(30214)) });
+        tokenConfigs[3] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidBtcTeller, uint32(30214)) });
+        tokenConfigs[4] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(liquidUsdTeller, uint32(30214)) });
+        tokenConfigs[5] = TopUpFactory.TokenConfig({ bridgeAdapter: address(liquidBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(eUsdTeller, uint32(30214)) });
+        tokenConfigs[6] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool, uint32(30214)) });
+        tokenConfigs[7] = TopUpFactory.TokenConfig({ bridgeAdapter: address(nttAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(nttManager, 10) });
+        factory.setTokenConfig(tokens, _chainIds(8), tokenConfigs);
 
         // Configure Optimism bridge adapter for USDC → OP
         OptimismBridgeAdapter opAdapter = new OptimismBridgeAdapter();
@@ -157,6 +156,21 @@ contract TopUpFactoryTest is Test, Constants {
             additionalData: abi.encode(HOP_V2_ROUTER, FRXUSD_OFT, OP_DEST_EID)
         });
         factory.setTokenConfig(hopTokens, hopChainIds, hopConfigs);
+
+        // weETH OFT bridge test targets Optimism (eid 30111, chainId 10) since Mainnet->Scroll (eid 30214) is deprecated.
+
+        address[] memory weEthOpTokens = new address[](1);
+        weEthOpTokens[0] = address(weETH);
+        uint256[] memory weEthOpChainIds = new uint256[](1);
+        weEthOpChainIds[0] = OP_CHAIN_ID;
+        TopUpFactory.TokenConfig[] memory weEthOpConfigs = new TopUpFactory.TokenConfig[](1);
+        weEthOpConfigs[0] = TopUpFactory.TokenConfig({
+            bridgeAdapter: address(oftBridgeAdapter),
+            recipientOnDestChain: alice,
+            maxSlippageInBps: maxSlippage,
+            additionalData: abi.encode(weETHOftAddress, OP_DEST_EID)
+        });
+        factory.setTokenConfig(weEthOpTokens, weEthOpChainIds, weEthOpConfigs);
 
         roleRegistry.grantRole(factory.TOPUP_FACTORY_BRIDGER_ROLE(), address(this));
 
@@ -529,7 +543,7 @@ contract TopUpFactoryTest is Test, Constants {
 
     /// @dev Test token config getters
     function test_getTokenConfig_returnsCorrectConfig() public view {
-        TopUpFactory.TokenConfig memory config = factory.getTokenConfig(address(weETH), DEST_CHAIN_ID);
+        TopUpFactory.TokenConfig memory config = factory.getTokenConfig(address(weETH), OP_CHAIN_ID);
 
         assertEq(config.bridgeAdapter, address(oftBridgeAdapter), "Wrong bridge adapter");
         assertEq(config.recipientOnDestChain, alice, "Wrong recipient");
@@ -613,14 +627,16 @@ contract TopUpFactoryTest is Test, Constants {
     }
 
     function test_bridge_succeeds_withWeEth() public {
+        // weETH bridges mainnet → OP (eid 30111, live route); Scroll (eid 30214) has 0 outbound rate.
+
         address token = address(weETH);
         uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, OP_CHAIN_ID);
 
         vm.expectEmit(true, true, true, true);
-        emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
-        factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
+        emit TopUpFactory.Bridge(token, amount, OP_CHAIN_ID);
+        factory.bridge{ value: fee }(token, amount, OP_CHAIN_ID);
     }
 
     // function test_bridge_succeeds_withEthfi() public {
