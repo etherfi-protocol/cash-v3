@@ -133,10 +133,10 @@
       "eUSD":           { "oracle": "0xEB440B36f61Bf62E0C54C622944545f159C3B790", "type": "accountant", "decimals": 18 },
       "sethfi":         { "oracle": "0x05A1552c5e18F5A0BB9571b5F2D6a4765ebdA32b", "type": "accountant", "decimals": 18 },
       "liquidReserve":  { "oracle": "0x58dDf77A329CcbE2F4C2114C64ed9E12Ec8a1356", "type": "chainlink", "decimals": 8 },
-      "ethfi":          { "oracle": "0x3E377b4e02bc848Ade3c289477F21441b7e014C2", "type": "pyth", "decimals": 16 },
-      "wHYPE":          { "oracle": "0x1f860581483253B81ECB0E89b2b978A202de553d", "type": "pyth", "decimals": 16 },
-      "beHYPE":         { "oracle": "0x2ACd77fefED51Fa80FBF1520701c73Ac506D4381", "type": "pyth", "decimals": 16 },
-      "eurc":           { "oracle": "0x62779cdAadd1eB782eb4fF534739B55763A48385", "type": "pyth", "decimals": 16 },
+      "ethfi":          { "oracle": "0x8A089Ae05073119C356130c2a7223608ff6737fd", "type": "pyth", "decimals": 16 },
+      "wHYPE":          { "oracle": "0x370F16a9D36CDBe3f364beb3449109242325E941", "type": "pyth", "decimals": 16 },
+      "beHYPE":         { "oracle": "0x666a9807C632fFAA335C58C724bff38278392ec6", "type": "pyth", "decimals": 16 },
+      "eurc":           { "oracle": "0x2B132ce03411Da6d3A73A93aA259d232FE525af9", "type": "pyth", "decimals": 16 },
       "liquidEUR":      { "oracle": "0x01b910C1aa51cdC4a2a84d76CB255C4974Bf8A19", "type": "chainlink", "decimals": 8 }
     }
   },
