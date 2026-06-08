@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable } from "solady/auth/Ownable.sol";
 
+import { ITopUpFactory } from "../interfaces/ITopUpFactory.sol";
 import { IWETH } from "../interfaces/IWETH.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -20,11 +21,19 @@ contract TopUp is Constants, Ownable {
     error OnlyOwner();
     /// @notice Error thrown when ETH transfer fails
     error EthTransferFailed();
+    /// @notice Reverts when `redirectToTradingSafe` is called with zero amount.
+    error InvalidAmount();
 
     /// @notice Emitted when funds are processed
     /// @param token Address of the token processed
     /// @param amount Amount of the token processed
     event ProcessTopUp(address indexed token, uint256 amount);
+
+    /// @notice Emitted when a misrouted token is redirected to the user's TradingSafe.
+    /// @param token ERC20 redirected.
+    /// @param tradingSafe Destination TradingSafe that received the funds.
+    /// @param amount Amount of `token` transferred.
+    event RedirectedToTradingSafe(address indexed token, address indexed tradingSafe, uint256 amount);
 
     address public immutable weth;
 
@@ -87,6 +96,31 @@ contract TopUp is Constants, Ownable {
             // This is done to emit a transfer event so we can just track WETH transfers to this contract
             IWETH(weth).transfer(address(this), amount);
         }
+    }
+
+    /**
+     * @notice Transfers `amount` of `token` from this TopUp to the user's TradingSafe on the
+     *         destination chain. Recovery path for trading-supported, not-topup-supported
+     *         tokens (e.g. Ondo SPY) that landed at the TopUp address by mistake.
+     * @dev Owner-gated (owner = `TopUpFactory`); the factory's public `redirectToTradingSafe`
+     *      entry point is what carries the BE role check. TopUp itself is stateless —
+     *      destination is resolved via `ITopUpFactory.redirectDestinationFor(this)`, which
+     *      derives the TradingSafe address from the per-TopUp `sourceSafe` binding the
+     *      factory holds + the factory's configured `TradingSafeFactory`. A compromised BE
+     *      role can only redirect to *this user's own* TradingSafe.
+     *
+     * @param token ERC20 to redirect.
+     * @param amount Amount to transfer.
+     * @custom:throws OnlyOwner If caller is not the owner.
+     * @custom:throws InvalidAmount If `amount == 0`.
+     */
+    function redirectToTradingSafe(address token, uint256 amount) external {
+        if (owner() != msg.sender) revert OnlyOwner();
+        if (amount == 0) revert InvalidAmount();
+
+        address tradingSafe = ITopUpFactory(owner()).redirectDestinationFor(address(this));
+        IERC20(token).safeTransfer(tradingSafe, amount);
+        emit RedirectedToTradingSafe(token, tradingSafe, amount);
     }
 
     /**

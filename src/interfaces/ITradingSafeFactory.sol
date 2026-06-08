@@ -20,8 +20,8 @@ interface ITradingSafeFactory {
 
     /**
      * @notice Returns whether `safeAddr` is a TradingSafe deployed by this factory.
-     * @dev Used by drain-style contracts (e.g. mainnet Pool) to enforce that funds can only
-     *      be routed to a registered TradingSafe, never to an arbitrary recipient.
+     * @dev Used by drain-style contracts to enforce that funds can only be routed to a
+     *      registered TradingSafe, never to an arbitrary recipient.
      * @param safeAddr The address to check.
      * @return True if the address was deployed by this factory.
      */
