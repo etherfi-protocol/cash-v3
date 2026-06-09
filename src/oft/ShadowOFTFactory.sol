@@ -5,6 +5,8 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { BeaconFactory } from "../beacon-factory/BeaconFactory.sol";
 import { IShadowOFTFactory } from "../interfaces/IShadowOFTFactory.sol";
+import { IConfigurableOFT } from "../interfaces/IConfigurableOFT.sol";
+import { IOFTConfigRegistry } from "../interfaces/IOFTConfigRegistry.sol";
 import { EtherFiShadowOFT } from "./EtherFiShadowOFT.sol";
 
 /**
@@ -12,9 +14,11 @@ import { EtherFiShadowOFT } from "./EtherFiShadowOFT.sol";
  * @author ether.fi
  * @notice Destination-chain (e.g. Optimism) beacon factory that deploys mintable
  *         iTOKEN ERC-20s per listed asset.
- * @dev Mirror of {OFTAdapterFactory}. Reusing the same CREATE3 `salt` from the
- *      mainnet adapter deployment makes the iTOKEN address deterministic and
- *      one-to-one with its mainnet adapter.
+ * @dev Mirror of {OFTAdapterFactory}. A CREATE3 address is deterministic in
+ *      `(factory, salt)`, so the iTOKEN address is predictable on this chain. It
+ *      is NOT guaranteed identical to its mainnet adapter address (matching
+ *      cross-chain addresses is a non-goal); the `salt` is about per-chain
+ *      predictability, not cross-chain mirroring.
  */
 contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
@@ -46,7 +50,7 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
     }
 
     /// @inheritdoc IShadowOFTFactory
-    function deployShadowOFT(bytes32 salt, string calldata name, string calldata symbol, address delegate)
+    function deployShadowOFT(bytes32 salt, string calldata name, string calldata symbol, uint8 decimals, address delegate)
         external
         whenNotPaused
         returns (address shadowOFT)
@@ -57,18 +61,25 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         address predicted = getDeterministicAddress(salt);
         if ($.deployed.contains(predicted)) revert ShadowOFTAlreadyExists();
 
-        bytes memory initData = abi.encodeWithSelector(EtherFiShadowOFT.initialize.selector, name, symbol, delegate);
+        bytes memory initData = abi.encodeWithSelector(EtherFiShadowOFT.initialize.selector, name, symbol, decimals, delegate);
         shadowOFT = _deployBeacon(salt, initData);
 
         $.deployed.add(shadowOFT);
         emit ShadowOFTDeployed(salt, shadowOFT, name, symbol);
+
+        // Auto-register + pull canonical LZ config so the new bridge is live without
+        // manual setup. Reverts if the factory lacks CONFIG_REGISTRAR_ROLE or the
+        // registry is unreachable (fail-hard: never leave a bridge unregistered).
+        address registry = IConfigurableOFT(shadowOFT).configRegistry();
+        IOFTConfigRegistry(registry).registerBridge(shadowOFT);
+        IConfigurableOFT(shadowOFT).syncConfig(IOFTConfigRegistry(registry).activeDstEids());
     }
 
     /// @inheritdoc IShadowOFTFactory
     function getDeployedShadowOFTs(uint256 start, uint256 n) external view returns (address[] memory shadowOFTs) {
         ShadowOFTFactoryStorage storage $ = _getStorage();
         uint256 length = $.deployed.length();
-        if (start >= length) revert InvalidStartIndex();
+        if (start >= length) return new address[](0);
         if (start + n > length) n = length - start;
 
         shadowOFTs = new address[](n);
