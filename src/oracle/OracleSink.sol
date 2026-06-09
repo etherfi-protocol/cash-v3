@@ -85,28 +85,35 @@ contract OracleSink is IOracleSink, UpgradeableProxy, OAppReceiverUpgradeable {
 
     /**
      * @dev LayerZero callback. Decodes the relay payload and stores the
-     *      per-token updates. Skeleton: payload encoding is a TODO.
-     * @param _origin LZ origin metadata (peer + nonce)
-     * @param _guid Globally-unique message id
-     * @param _message Encoded relay payload (schema TBD with {PriceRelay})
+     *      per-token updates. The peer/origin authentication ("only the mainnet
+     *      {PriceRelay} can write here") is already enforced upstream in
+     *      {OAppReceiverUpgradeable.lzReceive} via the `OnlyPeer` check, so this
+     *      function trusts `_message` once invoked.
+     *
+     *      Payload schema (must match {PriceRelay.poke}):
+     *      `abi.encode(address[] tokens, uint256[] prices, uint64 srcTimestamp)`.
+     *      `updatedAt` is stamped with the destination-chain `block.timestamp`
+     *      (the time the price became readable here) so the OP-side
+     *      {PriceProvider} staleness check measures local arrival, not source time.
+     * @param _message Encoded relay payload
      */
-    function _lzReceive(Origin calldata _origin, bytes32 _guid, bytes calldata _message, address, bytes calldata)
+    function _lzReceive(Origin calldata, bytes32, bytes calldata _message, address, bytes calldata)
         internal
         virtual
         override
     {
-        _origin;
-        _guid;
+        (address[] memory tokens, uint256[] memory prices, ) = abi.decode(_message, (address[], uint256[], uint64));
 
-        // TODO: decode payload (tokens[], prices[], srcTimestamp) and
-        // write into `_getStorage().latest[token] = PricePoint(price, uint64(block.timestamp));`
-        // Example placeholder:
-        // (address[] memory tokens, uint256[] memory prices, ) = abi.decode(_message, (address[], uint256[], uint64));
-        // for (uint256 i = 0; i < tokens.length; ++i) {
-        //     _getStorage().latest[tokens[i]] = PricePoint(prices[i], uint64(block.timestamp));
-        //     emit PriceUpdated(tokens[i], prices[i], uint64(block.timestamp));
-        // }
-        _message;
+        OracleSinkStorage storage $ = _getStorage();
+        uint64 nowTs = uint64(block.timestamp);
+        uint256 len = tokens.length;
+        for (uint256 i = 0; i < len;) {
+            $.latest[tokens[i]] = PricePoint(prices[i], nowTs);
+            emit PriceUpdated(tokens[i], prices[i], nowTs);
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     function _getStorage() private pure returns (OracleSinkStorage storage $) {
