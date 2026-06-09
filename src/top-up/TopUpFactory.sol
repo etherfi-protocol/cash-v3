@@ -124,6 +124,21 @@ contract TopUpFactory is BeaconFactory, Constants {
     }
 
     /**
+     * @notice Reinitializes the factory when upgrading from a placeholder deployment
+     * @dev Sets up the beacon that was not created during placeholder initialization.
+     *      Used when the proxy was initially deployed with EtherFiPlaceholder (which
+     *      consumed initializer v1 via EtherFiPlaceholder.initialize) and later upgraded
+     *      to the real TopUpFactory implementation. The role registry is read from the
+     *      existing UpgradeableProxy storage set during placeholder init, so it cannot be
+     *      reassigned here. Always invoke atomically via upgradeToAndCall so msg.sender is
+     *      the authorized upgrader.
+     * @param _topUpImpl Address of the topUp implementation contract
+     */
+    function reinitialize(address _topUpImpl) external reinitializer(2) {
+        __BeaconFactory_initialize(address(roleRegistry()), _topUpImpl);
+    }
+
+    /**
      * @notice Deploys a new TopUp contract instance
      * @param salt The salt value used for deterministic deployment
      */
