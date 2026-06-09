@@ -4,8 +4,8 @@ pragma solidity ^0.8.28;
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { BeaconFactory } from "../beacon-factory/BeaconFactory.sol";
-import { IOFTAdapterFactory } from "../interfaces/IOFTAdapterFactory.sol";
 import { IConfigurableOFT } from "../interfaces/IConfigurableOFT.sol";
+import { IOFTAdapterFactory } from "../interfaces/IOFTAdapterFactory.sol";
 import { IOFTConfigRegistry } from "../interfaces/IOFTConfigRegistry.sol";
 import { EtherFiOFTAdapter } from "./EtherFiOFTAdapter.sol";
 
