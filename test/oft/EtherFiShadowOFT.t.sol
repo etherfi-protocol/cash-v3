@@ -10,9 +10,11 @@ import { OFTTestSetup } from "./OFTTestSetup.t.sol";
 contract EtherFiShadowOFTTest is OFTTestSetup {
     uint8 internal constant SHARED_DECIMALS = 6;
 
-    /* helper: deploy an initialized iTOKEN proxy off the shadow factory's beacon. We build the
-       proxy directly (not via the factory) so an initialize revert surfaces the real error,
-       not the factory's wrapped InitializationFailed. */
+    /**
+     * helper: deploy an initialized iTOKEN proxy off the shadow factory's beacon. We build the
+     * proxy directly (not via the factory) so an initialize revert surfaces the real error,
+     * not the factory's wrapped InitializationFailed.
+     */
     function _deployShadow(string memory name, string memory symbol, uint8 dec, address del) internal returns (EtherFiShadowOFT) {
         bytes memory initData = abi.encodeWithSelector(EtherFiShadowOFT.initialize.selector, name, symbol, dec, del);
         return EtherFiShadowOFT(address(new BeaconProxy(shadowFactory.beacon(), initData)));

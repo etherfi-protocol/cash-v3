@@ -9,9 +9,11 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { EtherFiOFTAdapter } from "../../src/oft/EtherFiOFTAdapter.sol";
 import { MockERC20, MockFeeOnTransferERC20, OFTTestSetup } from "./OFTTestSetup.t.sol";
 
-/* Test-only subclass that exposes the internal lock/unlock hooks (_debit/_credit) as external
-   functions, so the lossless guard + lock/unlock can be tested directly without driving a full
-   cross-chain send() (which our recording mock endpoint can't route). */
+/**
+ * Test-only subclass that exposes the internal lock/unlock hooks (_debit/_credit) as external
+ * functions, so the lossless guard + lock/unlock can be tested directly without driving a full
+ * cross-chain send() (which our recording mock endpoint can't route).
+ */
 contract OFTAdapterHarness is EtherFiOFTAdapter {
     constructor(address ep, address reg) EtherFiOFTAdapter(ep, reg) { }
 
@@ -40,8 +42,10 @@ contract EtherFiOFTAdapterTest is OFTTestSetup {
         return EtherFiOFTAdapter(address(new BeaconProxy(adapterFactory.beacon(), "")));
     }
 
-    /* helper: deploy a harness-backed adapter (its own beacon) initialized for `token`, so we can
-       reach the internal _debit/_credit hooks. */
+    /**
+     * helper: deploy a harness-backed adapter (its own beacon) initialized for `token`, so we can
+     * reach the internal _debit/_credit hooks.
+     */
     function _deployHarness(address token) internal returns (OFTAdapterHarness h) {
         address impl = address(new OFTAdapterHarness(address(endpoint), address(configRegistry)));
         UpgradeableBeacon beacon = new UpgradeableBeacon(impl, owner);
