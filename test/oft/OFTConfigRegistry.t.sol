@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { Vm } from "forge-std/Vm.sol";
+
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 import { IOFTConfigRegistry } from "../../src/interfaces/IOFTConfigRegistry.sol";
@@ -118,13 +120,21 @@ contract OFTConfigRegistryTest is OFTTestSetup {
         configRegistry.registerBridge(address(0));
     }
 
-    // Registering the same bridge twice is a no-op (set semantics), not a double-count.
+    // Registering the same bridge twice is a no-op (set semantics), not a double-count,
+    // and the second call emits no BridgeRegistered event.
     function test_registerBridge_isIdempotent() public {
         address bridge = address(new MockConfigurableOFT(address(configRegistry)));
         vm.startPrank(registrar);
         configRegistry.registerBridge(bridge);
+
+        vm.recordLogs();
         configRegistry.registerBridge(bridge); // second add is ignored by the set
         vm.stopPrank();
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            assertTrue(logs[i].topics[0] != IOFTConfigRegistry.BridgeRegistered.selector, "no event on duplicate register");
+        }
         assertEq(configRegistry.numBridges(), 1);
     }
 
