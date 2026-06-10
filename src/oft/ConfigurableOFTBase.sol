@@ -33,7 +33,7 @@ abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, IConfigurableOFT {
 
     error RegistryNotSet();
 
-    event ConfigSynced(uint32[] dstEids, uint256 version);
+    event ConfigSynced(uint32[] dstEids);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _configRegistry) {
@@ -69,6 +69,6 @@ abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, IConfigurableOFT {
             }
         }
 
-        emit ConfigSynced(dstEids, IOFTConfigRegistry(reg).configVersion());
+        emit ConfigSynced(dstEids);
     }
 }
