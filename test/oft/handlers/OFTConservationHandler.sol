@@ -28,9 +28,10 @@ contract OFTConservationHandler is Test {
     using OptionsBuilder for bytes;
 
     IPacketVerifier internal immutable helper;
-    EtherFiOFTAdapter internal immutable adapter;
-    EtherFiShadowOFT internal immutable shadow;
-    MockERC20 internal immutable underlying;
+    // public so a multi-pair invariant can read this handler's pair and assert conservation per pair
+    EtherFiOFTAdapter public immutable adapter;
+    EtherFiShadowOFT public immutable shadow;
+    MockERC20 public immutable underlying;
     uint32 internal immutable A_EID;
     uint32 internal immutable B_EID;
 
