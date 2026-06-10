@@ -21,9 +21,15 @@ interface IOracleSink {
 
     /// @notice Emitted when a relayed price update is stored
     event PriceUpdated(address indexed token, uint256 price, uint64 updatedAt);
+    /// @notice Emitted when the per-token max staleness window is configured
+    event MaxStalenessSet(address indexed token, uint64 maxStaleness);
 
     /// @notice Thrown when a token has never received a relayed price
     error PriceNotSet();
+    /// @notice Thrown when the last relayed price for a token is older than its max staleness window
+    error PriceStale();
+    /// @notice Thrown when a zero address is supplied where it is not allowed
+    error InvalidToken();
 
     /**
      * @notice Returns the latest relayed price for `token` in {DECIMALS} precision
@@ -32,6 +38,34 @@ interface IOracleSink {
      * @return updatedAt Timestamp at which the price was received on this chain
      */
     function getPrice(address token) external view returns (uint256 price, uint64 updatedAt);
+
+    /**
+     * @notice Returns the latest relayed price for `token` as a single value, reverting if stale.
+     * @dev Designed for direct consumption by {PriceProvider} via its calldata branch:
+     *      configure `isChainlinkType = false`, `dataType = Uint256`, `oraclePriceDecimals = 6`,
+     *      `oracle = address(thisSink)` and
+     *      `priceFunctionCalldata = abi.encodeWithSelector(IOracleSink.price.selector, token)`.
+     *      Freshness is enforced here against the relay-delivery timestamp, so no per-token
+     *      Chainlink adapter is required. A non-zero {maxStaleness} for the token must be set,
+     *      otherwise no staleness check is applied.
+     * @param token Token to query
+     * @return Normalised USD price (6 decimals)
+     */
+    function price(address token) external view returns (uint256);
+
+    /**
+     * @notice Sets the maximum age (in seconds) of a relayed price before {price} reverts.
+     * @dev Admin-gated. A value of 0 disables the staleness check for the token.
+     * @param token Token to configure
+     * @param maxStaleness Max age in seconds; 0 disables the check
+     */
+    function setMaxStaleness(address token, uint64 maxStaleness) external;
+
+    /**
+     * @notice Returns the configured max staleness window (seconds) for `token` (0 = disabled)
+     * @param token Token to query
+     */
+    function maxStaleness(address token) external view returns (uint64);
 
     /**
      * @notice Chainlink AggregatorV3-style accessor consumed by {PriceProvider}

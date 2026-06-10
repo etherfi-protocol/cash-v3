@@ -384,4 +384,94 @@ contract PriceRelayOracleSinkTest is Test {
 
         assertEq(opPriceProvider.price(token), INITIAL_PRICE);
     }
+
+    // --- OP PriceProvider consumes the sink DIRECTLY (no adapter) -----------
+
+    /// @dev Deploys a bare OP PriceProvider with no token configs.
+    function _deployOpPriceProvider() internal returns (PriceProvider opPriceProvider) {
+        address ppImpl = address(new PriceProvider());
+        address[] memory emptyTokens = new address[](0);
+        PriceProvider.Config[] memory emptyConfigs = new PriceProvider.Config[](0);
+        opPriceProvider = PriceProvider(
+            address(
+                new UUPSProxy(
+                    ppImpl,
+                    abi.encodeWithSelector(
+                        PriceProvider.initialize.selector, address(roleRegistry), emptyTokens, emptyConfigs
+                    )
+                )
+            )
+        );
+        roleRegistry.grantRole(opPriceProvider.PRICE_PROVIDER_ADMIN_ROLE(), address(this));
+    }
+
+    /// @dev Wires the OP PriceProvider to read the multi-token sink directly via the
+    ///      calldata branch (token baked into priceFunctionCalldata), no adapter.
+    function _configureSinkDirect(PriceProvider opPriceProvider) internal {
+        address[] memory tokens = _single(token);
+        PriceProvider.Config[] memory configs = new PriceProvider.Config[](1);
+        configs[0] = PriceProvider.Config({
+            oracle: address(oracleSink),
+            priceFunctionCalldata: abi.encodeWithSelector(IOracleSink.price.selector, token),
+            isChainlinkType: false,
+            oraclePriceDecimals: 6,
+            maxStaleness: 0, // unused on the calldata branch; sink enforces freshness
+            dataType: PriceProvider.ReturnType.Uint256,
+            isBaseTokenEth: false,
+            isStableToken: false,
+            isBaseTokenBtc: false
+        });
+        opPriceProvider.setTokenConfig(tokens, configs);
+    }
+
+    function test_DirectIntegration_priceProviderReadsSink() public {
+        priceRelay.poke(_single(token));
+        endpoint.deliver(SRC_EID);
+
+        roleRegistry.grantRole(oracleSink.ORACLE_SINK_ADMIN_ROLE(), address(this));
+        oracleSink.setMaxStaleness(token, 1 days);
+
+        PriceProvider opPriceProvider = _deployOpPriceProvider();
+        _configureSinkDirect(opPriceProvider);
+
+        assertEq(opPriceProvider.price(token), INITIAL_PRICE);
+    }
+
+    function test_DirectIntegration_staleSinkRevertsInPriceProvider() public {
+        priceRelay.poke(_single(token));
+        endpoint.deliver(SRC_EID);
+
+        roleRegistry.grantRole(oracleSink.ORACLE_SINK_ADMIN_ROLE(), address(this));
+        oracleSink.setMaxStaleness(token, 1 hours);
+
+        PriceProvider opPriceProvider = _deployOpPriceProvider();
+        _configureSinkDirect(opPriceProvider);
+
+        // Fresh read works.
+        assertEq(opPriceProvider.price(token), INITIAL_PRICE);
+
+        // Relay goes quiet: once the delivery ages past the sink window, the sink
+        // reverts (PriceStale), which surfaces as PriceOracleFailed in PriceProvider.
+        vm.warp(block.timestamp + 1 hours + 1);
+        vm.expectRevert(PriceProvider.PriceOracleFailed.selector);
+        opPriceProvider.price(token);
+    }
+
+    function test_DirectIntegration_noStalenessConfiguredNeverAgesOut() public {
+        priceRelay.poke(_single(token));
+        endpoint.deliver(SRC_EID);
+
+        // maxStaleness left at 0 (disabled).
+        PriceProvider opPriceProvider = _deployOpPriceProvider();
+        _configureSinkDirect(opPriceProvider);
+
+        vm.warp(block.timestamp + 3650 days);
+        assertEq(opPriceProvider.price(token), INITIAL_PRICE);
+    }
+
+    function test_SetMaxStaleness_onlyAdmin() public {
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert();
+        oracleSink.setMaxStaleness(token, 1 days);
+    }
 }
