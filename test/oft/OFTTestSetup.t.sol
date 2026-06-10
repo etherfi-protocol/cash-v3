@@ -114,7 +114,6 @@ contract MockFeeOnTransferERC20 is ERC20 {
  */
 contract MockConfigurableOFT is IConfigurableOFT {
     address public immutable configRegistry;
-    uint256 public syncedConfigVersion;
     uint256 public syncCallCount;
     uint32[] public lastDstEids;
 
@@ -128,7 +127,6 @@ contract MockConfigurableOFT is IConfigurableOFT {
         for (uint256 i; i < dstEids.length; ++i) {
             lastDstEids.push(dstEids[i]);
         }
-        syncedConfigVersion = IOFTConfigRegistry(configRegistry).configVersion();
     }
 
     function lastDstEidsLength() external view returns (uint256) {

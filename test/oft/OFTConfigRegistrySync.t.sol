@@ -66,14 +66,12 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
     }
 
     // A well-formed pathway with real libs + sorted DVNs is actually applied to the live endpoint —
-    // proven by reading the config back, not just by the local version counter (which syncConfig
-    // would bump even if it never called setConfig).
+    // proven by reading the config back from the endpoint.
     function test_syncConfig_appliesWellFormedConfig() public {
         address[] memory dvns = _sortedDVNs();
         _setPathway(B_EID, _realPathway(15, dvns));
 
-        // BEFORE: not synced; the endpoint serves the harness DEFAULT ULN (1 DVN, conf 100), NOT ours.
-        assertEq(adapter.syncedConfigVersion(), 0, "precondition: already synced");
+        // BEFORE: the endpoint serves the harness DEFAULT ULN (1 DVN, conf 100), NOT ours.
         UlnConfig memory beforeCfg = _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID);
         assertTrue(beforeCfg.requiredDVNs.length != 2 || beforeCfg.confirmations != 15, "precondition: our config already present");
 
@@ -81,10 +79,7 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         eids[0] = B_EID;
         adapter.syncConfig(eids); // permissionless pull; self-authorized on the endpoint
 
-        // local bookkeeping advanced...
-        assertEq(adapter.syncedConfigVersion(), configRegistry.configVersion());
-
-        // ...AND the config genuinely landed on the endpoint's send + receive rows.
+        // the config genuinely landed on the endpoint's send + receive rows.
         UlnConfig memory sendUln = _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID);
         assertEq(sendUln.confirmations, 15, "confirmations not applied on send lib");
         assertEq(sendUln.requiredDVNs.length, 2, "DVN count not applied");
@@ -108,8 +103,7 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         vm.expectRevert(); // LZ_ULN_Unsorted (ULN-internal)
         adapter.syncConfig(eids);
 
-        // atomic rollback: nothing synced and the endpoint config is unchanged from before the attempt
-        assertEq(adapter.syncedConfigVersion(), 0, "synced version advanced despite revert");
+        // atomic rollback: the endpoint config is unchanged from before the attempt
         _assertUlnUnchanged(beforeCfg, _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID));
     }
 
@@ -127,7 +121,6 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         vm.expectRevert();
         adapter.syncConfig(eids);
 
-        assertEq(adapter.syncedConfigVersion(), 0, "synced version advanced despite revert");
         _assertUlnUnchanged(beforeCfg, _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID));
     }
 
@@ -144,8 +137,6 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         eids[0] = UNCONFIGURED_EID;
         vm.expectRevert();
         adapter.syncConfig(eids);
-
-        assertEq(adapter.syncedConfigVersion(), 0, "synced version advanced despite revert");
     }
 
     // configRegistry is immutable and BOTH production impls (adapter + shadow) reject a zero registry

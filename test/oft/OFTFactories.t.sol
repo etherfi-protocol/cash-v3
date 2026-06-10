@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
-import { IConfigurableOFT } from "../../src/interfaces/IConfigurableOFT.sol";
 import { IOFTAdapterFactory } from "../../src/interfaces/IOFTAdapterFactory.sol";
 import { IOFTConfigRegistry } from "../../src/interfaces/IOFTConfigRegistry.sol";
 import { IShadowOFTFactory } from "../../src/interfaces/IShadowOFTFactory.sol";
@@ -43,19 +42,15 @@ contract OFTFactoriesTest is OFTTestSetup {
         (address oapp,, uint32 eid,) = endpoint.configCalls(0);
         assertEq(oapp, adapter); // it configured its own rows (address(this))
         assertEq(eid, DST_EID_OP);
-
-        // recorded the registry version it synced to
-        assertEq(IConfigurableOFT(adapter).syncedConfigVersion(), configRegistry.configVersion());
     }
 
     // With NO pathway configured yet, deploy still registers the bridge, but syncConfig is a
     // harmless no-op (activeDstEids is empty) — a later pushToAll will configure it.
     function test_deployAdapter_autoRegisters_butNoConfigCalls_whenNoPathways() public {
-        address adapter = _deployAdapter(address(token6));
+        _deployAdapter(address(token6));
 
         assertEq(configRegistry.numBridges(), 1); // still registered
         assertEq(endpoint.configCallCount(), 0); // no destinations -> nothing to configure
-        assertEq(IConfigurableOFT(adapter).syncedConfigVersion(), 0);
     }
 
     // Fail-hard: if the factory lacks CONFIG_REGISTRAR_ROLE, the registerBridge call inside deploy
@@ -128,7 +123,6 @@ contract OFTFactoriesTest is OFTTestSetup {
         assertEq(EtherFiShadowOFT(shadow).decimals(), 8); // decimals threaded through to the iTOKEN
         assertEq(configRegistry.numBridges(), 1);
         assertEq(endpoint.configCallCount(), 2); // send + receive lib
-        assertEq(IConfigurableOFT(shadow).syncedConfigVersion(), configRegistry.configVersion());
     }
 
     // Only the factory admin role may deploy a shadow OFT.

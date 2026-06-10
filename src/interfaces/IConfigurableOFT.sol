@@ -18,7 +18,4 @@ interface IConfigurableOFT {
 
     /// @notice The shared config registry this bridge reads from
     function configRegistry() external view returns (address);
-
-    /// @notice The registry config version this bridge last synced to
-    function syncedConfigVersion() external view returns (uint256);
 }
