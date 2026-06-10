@@ -11,21 +11,26 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @title OracleSink
  * @author ether.fi
  * @notice Destination-chain LayerZero receiver. Stores the latest relayed
- *         per-token USD price (6 decimals) and exposes it via a Chainlink
- *         `latestRoundData(token)` shape so the existing OP-side
- *         {PriceProvider} can consume it with no contract changes —
- *         configure each token with `isChainlinkType = true` and
- *         `oracle = address(thisOracleSink)` (or a per-token Chainlink-shaped
- *         adapter view; see {IOracleSink} for the calldata-shape variant).
- * @dev The relay payload format is intentionally unfixed in this skeleton —
- *      {`_lzReceive`} decodes are left as TODOs. The companion {PriceRelay}
- *      MUST encode/decode against the same schema once chosen.
+ *         per-token USD price (6 decimals) and exposes it to the OP-side
+ *         {PriceProvider} in two ways:
+ *           1. Directly (no adapter) via {price}, read through PriceProvider's
+ *              calldata branch. Freshness is enforced here against the
+ *              relay-delivery timestamp using a per-token {maxStaleness}.
+ *           2. Through a per-token Chainlink-shaped adapter over
+ *              {latestRoundData}, read via PriceProvider's `isChainlinkType` branch.
+ * @dev Because the relay only ships a normalised 6-decimal USD price (no source
+ *      timestamp), the relay-delivery time recorded on this chain is the single
+ *      freshness signal: if the relay stops delivering, {price} ages out and
+ *      reverts. This is what lets even no-timestamp source oracles (e.g. a
+ *      rate-provider `getRate()`) be consumed as fresh feeds on L2.
  */
 contract OracleSink is IOracleSink, UpgradeableProxy, OAppReceiverUpgradeable {
     /// @custom:storage-location erc7201:etherfi.storage.OracleSink
     struct OracleSinkStorage {
         /// @notice Latest stored price per token
         mapping(address token => PricePoint) latest;
+        /// @notice Max age (seconds) of a relayed price before {price} reverts (0 = disabled)
+        mapping(address token => uint64) maxStaleness;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.OracleSink")) - 1)) & ~bytes32(uint256(0xff))
@@ -34,6 +39,9 @@ contract OracleSink is IOracleSink, UpgradeableProxy, OAppReceiverUpgradeable {
     /// @notice Matches {PriceProvider}.DECIMALS — kept here for the
     ///         Chainlink-shaped `decimals()` accessor.
     uint8 public constant DECIMALS = 6;
+
+    /// @notice Role required to configure per-token staleness windows
+    bytes32 public constant ORACLE_SINK_ADMIN_ROLE = keccak256("ORACLE_SINK_ADMIN_ROLE");
 
     /// @notice Thrown when constructor or initializer receives a zero address
     error InvalidAddress();
@@ -61,10 +69,34 @@ contract OracleSink is IOracleSink, UpgradeableProxy, OAppReceiverUpgradeable {
     }
 
     /// @inheritdoc IOracleSink
-    function getPrice(address token) external view returns (uint256 price, uint64 updatedAt) {
+    function getPrice(address token) external view returns (uint256, uint64) {
         PricePoint memory p = _getStorage().latest[token];
         if (p.updatedAt == 0) revert PriceNotSet();
         return (p.price, p.updatedAt);
+    }
+
+    /// @inheritdoc IOracleSink
+    function price(address token) external view returns (uint256) {
+        OracleSinkStorage storage $ = _getStorage();
+        PricePoint memory p = $.latest[token];
+        if (p.updatedAt == 0) revert PriceNotSet();
+
+        uint64 maxStaleness_ = $.maxStaleness[token];
+        if (maxStaleness_ != 0 && block.timestamp > uint256(p.updatedAt) + maxStaleness_) revert PriceStale();
+
+        return p.price;
+    }
+
+    /// @inheritdoc IOracleSink
+    function setMaxStaleness(address token, uint64 maxStaleness_) external onlyRole(ORACLE_SINK_ADMIN_ROLE) {
+        if (token == address(0)) revert InvalidToken();
+        _getStorage().maxStaleness[token] = maxStaleness_;
+        emit MaxStalenessSet(token, maxStaleness_);
+    }
+
+    /// @inheritdoc IOracleSink
+    function maxStaleness(address token) external view returns (uint64) {
+        return _getStorage().maxStaleness[token];
     }
 
     /// @inheritdoc IOracleSink
@@ -85,28 +117,35 @@ contract OracleSink is IOracleSink, UpgradeableProxy, OAppReceiverUpgradeable {
 
     /**
      * @dev LayerZero callback. Decodes the relay payload and stores the
-     *      per-token updates. Skeleton: payload encoding is a TODO.
-     * @param _origin LZ origin metadata (peer + nonce)
-     * @param _guid Globally-unique message id
-     * @param _message Encoded relay payload (schema TBD with {PriceRelay})
+     *      per-token updates. The peer/origin authentication ("only the mainnet
+     *      {PriceRelay} can write here") is already enforced upstream in
+     *      {OAppReceiverUpgradeable.lzReceive} via the `OnlyPeer` check, so this
+     *      function trusts `_message` once invoked.
+     *
+     *      Payload schema (must match {PriceRelay.poke}):
+     *      `abi.encode(address[] tokens, uint256[] prices, uint64 srcTimestamp)`.
+     *      `updatedAt` is stamped with the destination-chain `block.timestamp`
+     *      (the time the price became readable here) so the OP-side
+     *      {PriceProvider} staleness check measures local arrival, not source time.
+     * @param _message Encoded relay payload
      */
-    function _lzReceive(Origin calldata _origin, bytes32 _guid, bytes calldata _message, address, bytes calldata)
+    function _lzReceive(Origin calldata, bytes32, bytes calldata _message, address, bytes calldata)
         internal
         virtual
         override
     {
-        _origin;
-        _guid;
+        (address[] memory tokens, uint256[] memory prices, ) = abi.decode(_message, (address[], uint256[], uint64));
 
-        // TODO: decode payload (tokens[], prices[], srcTimestamp) and
-        // write into `_getStorage().latest[token] = PricePoint(price, uint64(block.timestamp));`
-        // Example placeholder:
-        // (address[] memory tokens, uint256[] memory prices, ) = abi.decode(_message, (address[], uint256[], uint64));
-        // for (uint256 i = 0; i < tokens.length; ++i) {
-        //     _getStorage().latest[tokens[i]] = PricePoint(prices[i], uint64(block.timestamp));
-        //     emit PriceUpdated(tokens[i], prices[i], uint64(block.timestamp));
-        // }
-        _message;
+        OracleSinkStorage storage $ = _getStorage();
+        uint64 nowTs = uint64(block.timestamp);
+        uint256 len = tokens.length;
+        for (uint256 i = 0; i < len;) {
+            $.latest[tokens[i]] = PricePoint(prices[i], nowTs);
+            emit PriceUpdated(tokens[i], prices[i], nowTs);
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     function _getStorage() private pure returns (OracleSinkStorage storage $) {
