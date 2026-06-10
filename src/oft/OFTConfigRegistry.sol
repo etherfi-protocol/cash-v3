@@ -107,8 +107,8 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
     function registerBridge(address bridge) external override whenNotPaused {
         if (!roleRegistry().hasRole(CONFIG_REGISTRAR_ROLE, msg.sender)) revert OnlyRegistrar();
         if (bridge == address(0)) revert InvalidInput();
-        _getStorage().bridgeSet.add(bridge);
-        emit BridgeRegistered(bridge);
+        // Gate the event on a genuine insertion so re-registering a known bridge is a silent no-op.
+        if (_getStorage().bridgeSet.add(bridge)) emit BridgeRegistered(bridge);
     }
 
     /**
