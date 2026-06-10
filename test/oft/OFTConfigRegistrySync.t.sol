@@ -3,8 +3,10 @@ pragma solidity ^0.8.28;
 
 import { UlnConfig } from "@layerzerolabs/lz-evm-messagelib-v2/contracts/uln/UlnBase.sol";
 import { ILayerZeroEndpointV2 } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/ILayerZeroEndpointV2.sol";
+import { OFTUpgradeable } from "@layerzerolabs/oft-evm-upgradeable/contracts/oft/OFTUpgradeable.sol";
 
 import { IOFTConfigRegistry } from "../../src/interfaces/IOFTConfigRegistry.sol";
+import { ConfigurableOFTBase } from "../../src/oft/ConfigurableOFTBase.sol";
 import { OFTCrossChainSetup } from "./OFTCrossChainSetup.t.sol";
 
 /**
@@ -144,5 +146,28 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         adapter.syncConfig(eids);
 
         assertEq(adapter.syncedConfigVersion(), 0, "synced version advanced despite revert");
+    }
+
+    // configRegistry is immutable and BOTH production impls (adapter + shadow) reject a zero registry
+    // at construction, so the RegistryNotSet guard is unreachable in prod. This synthetic impl (zero
+    // registry, guard omitted) exercises it directly: syncConfig must revert before touching the
+    // endpoint. No initialize() is needed — the guard reads the immutable before any storage.
+    function test_syncConfig_reverts_whenRegistryUnset() public {
+        NoGuardConfigurableOFT noReg = new NoGuardConfigurableOFT(endpoints[A_EID]);
+        uint32[] memory eids = new uint32[](1);
+        eids[0] = B_EID;
+        vm.expectRevert(ConfigurableOFTBase.RegistryNotSet.selector);
+        noReg.syncConfig(eids);
+    }
+}
+
+/**
+ * @dev Test-only ConfigurableOFT whose constructor does NOT reject a zero registry. The production
+ *      impls (EtherFiOFTAdapter / EtherFiShadowOFT) both revert `InvalidAddress` on a zero registry,
+ *      which makes {ConfigurableOFTBase.RegistryNotSet} otherwise unreachable; this exposes it.
+ */
+contract NoGuardConfigurableOFT is OFTUpgradeable, ConfigurableOFTBase {
+    constructor(address ep) OFTUpgradeable(ep) ConfigurableOFTBase(address(0)) {
+        _disableInitializers();
     }
 }

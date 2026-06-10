@@ -60,6 +60,35 @@ contract OFTWeirdTokensTest is OFTTestSetup {
         h.exposedDebit(alice, amt, 0, DST_EID_OP);
     }
 
+    // Same guard, fuzzed: for ANY amount and fee, an asymmetric-fee token delivers `amt - fee` < amt,
+    // so the lock reverts NonLosslessTransfer(amt, amt - fee). 6-decimal token -> rate 1, no dust.
+    function testFuzz_lock_reverts_onAsymmetricFeeToken(uint256 amt, uint256 feeBps) public {
+        feeBps = bound(feeBps, 1, 1000); // 0.01%..10%
+        amt = bound(amt, 10_000, 1e30); // >= 10_000 so a >=1-bps fee always skims at least 1 wei
+        AsymmetricFeeToken t = new AsymmetricFeeToken(6, feeBps);
+        OFTAdapterHarness h = _harness(address(t));
+        t.mint(alice, amt);
+        vm.prank(alice);
+        t.approve(address(h), amt);
+
+        uint256 fee = (amt * feeBps) / 10_000;
+        vm.expectRevert(abi.encodeWithSelector(EtherFiOFTAdapter.NonLosslessTransfer.selector, amt, amt - fee));
+        h.exposedDebit(alice, amt, 0, DST_EID_OP);
+    }
+
+    // Same guard, fuzzed against a 1-wei negative rebase across magnitudes: received = amt - 1.
+    function testFuzz_lock_reverts_onShrinkingRebaseToken(uint256 amt) public {
+        amt = bound(amt, 1, 1e30);
+        ShrinkOnReceiveToken t = new ShrinkOnReceiveToken();
+        OFTAdapterHarness h = _harness(address(t));
+        t.mint(alice, amt);
+        vm.prank(alice);
+        t.approve(address(h), amt);
+
+        vm.expectRevert(abi.encodeWithSelector(EtherFiOFTAdapter.NonLosslessTransfer.selector, amt, amt - 1));
+        h.exposedDebit(alice, amt, 0, DST_EID_OP);
+    }
+
     // ----------------------------------------------------------------- SafeERC20 tolerance
 
     // USDT-style token whose transferFrom returns no bool: SafeERC20 accepts it, lock succeeds.
