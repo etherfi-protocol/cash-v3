@@ -56,7 +56,15 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
         __BeaconFactory_initialize(_roleRegistry, _adapterImpl);
     }
 
-    /// @inheritdoc IOFTAdapterFactory
+    /**
+     * @notice Deploys a new OFTAdapter beacon proxy for `underlyingToken`
+     * @dev Caller must hold the factory admin role. Address is deterministic via CREATE3
+     *      so the OP-side `ShadowOFTFactory` can mirror it with the same `salt`.
+     * @param salt CREATE3 salt; conventionally `keccak256(abi.encode("EtherFiOFT", underlyingToken))`
+     * @param underlyingToken The mainnet ERC-20 to wrap
+     * @param delegate LayerZero delegate (typically the protocol owner/multisig)
+     * @return adapter Address of the deployed adapter proxy
+     */
     function deployAdapter(bytes32 salt, address underlyingToken, address delegate) external whenNotPaused returns (address adapter) {
         if (!roleRegistry().hasRole(OFT_ADAPTER_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         if (underlyingToken == address(0)) revert InvalidUnderlying();
@@ -82,17 +90,30 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
         IConfigurableOFT(adapter).syncConfig(IOFTConfigRegistry(registry).activeDstEids());
     }
 
-    /// @inheritdoc IOFTAdapterFactory
+    /**
+     * @notice Returns the adapter deployed for an underlying token, or zero if none
+     * @param underlyingToken The mainnet ERC-20
+     * @return adapter The adapter proxy address (0 if not deployed)
+     */
     function adapterOf(address underlyingToken) external view returns (address adapter) {
         return _getStorage().adapterOfUnderlying[underlyingToken];
     }
 
-    /// @inheritdoc IOFTAdapterFactory
+    /**
+     * @notice Returns the underlying token wrapped by a given adapter
+     * @param adapter The adapter proxy
+     * @return underlyingToken The wrapped ERC-20 address
+     */
     function underlyingOf(address adapter) external view returns (address underlyingToken) {
         return _getStorage().underlyingOfAdapter[adapter];
     }
 
-    /// @inheritdoc IOFTAdapterFactory
+    /**
+     * @notice Paginated enumeration of deployed adapter addresses
+     * @param start Starting index in the deployment set
+     * @param n Maximum number of entries to return
+     * @return adapters Array of adapter proxy addresses
+     */
     function getDeployedAdapters(uint256 start, uint256 n) external view returns (address[] memory adapters) {
         OFTAdapterFactoryStorage storage $ = _getStorage();
         uint256 length = $.deployed.length();
@@ -108,7 +129,10 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
         }
     }
 
-    /// @inheritdoc IOFTAdapterFactory
+    /**
+     * @notice Total number of adapters deployed by this factory
+     * @return Number of deployed adapters
+     */
     function numAdaptersDeployed() external view returns (uint256) {
         return _getStorage().deployed.length();
     }

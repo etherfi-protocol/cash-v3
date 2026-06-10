@@ -48,12 +48,21 @@ abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, IConfigurableOFT {
         configRegistry = _configRegistry;
     }
 
-    /// @inheritdoc IConfigurableOFT
+    /**
+     * @notice The registry config version this bridge last synced to
+     * @return The last-synced config version (per-proxy)
+     */
     function syncedConfigVersion() public view override returns (uint256) {
         return _getConfigurableOFTStorage().syncedVersion;
     }
 
-    /// @inheritdoc IConfigurableOFT
+    /**
+     * @notice Pulls the canonical config from the registry and applies it to this
+     *         bridge's own endpoint rows for each destination.
+     * @dev Self-authorized: `msg.sender == oapp` lets this bridge call `setConfig` on the
+     *      endpoint without a delegate. Records the synced version in per-proxy storage.
+     * @param dstEids Destination endpoint IDs to (re)configure
+     */
     function syncConfig(uint32[] calldata dstEids) external override {
         address reg = configRegistry;
         if (reg == address(0)) revert RegistryNotSet();

@@ -100,10 +100,12 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase {
     // instead of the parent's immutable. This is the crux of Option 1.
     // ---------------------------------------------------------------------
 
+    /// @dev SD -> LD: scale up by the per-proxy {conversionRate}.
     function _toLD(uint64 _amountSD) internal view virtual override returns (uint256 amountLD) {
         return _amountSD * _getStorage().decimalConversionRate;
     }
 
+    /// @dev LD -> SD: scale down by the per-proxy {conversionRate}; reverts if the result exceeds uint64.
     function _toSD(uint256 _amountLD) internal view virtual override returns (uint64 amountSD) {
         uint256 sd = _amountLD / _getStorage().decimalConversionRate;
         if (sd > type(uint64).max) revert AmountSDOverflowed(sd);
@@ -112,6 +114,7 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase {
         return uint64(sd);
     }
 
+    /// @dev Floors `_amountLD` to a whole multiple of the per-proxy {conversionRate}, dropping sub-SD dust.
     function _removeDust(uint256 _amountLD) internal view virtual override returns (uint256 amountLD) {
         uint256 rate = _getStorage().decimalConversionRate;
         // Intentional: floors _amountLD to a multiple of `rate`, discarding dust (matches LayerZero OFTCore).

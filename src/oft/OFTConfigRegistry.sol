@@ -47,7 +47,12 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
         __Pausable_init();
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Set/replace the canonical config for a destination (bumps version)
+     * @dev Restricted to CONFIG_ADMIN_ROLE. Reverts on a zero send/receive lib or empty required DVN set.
+     * @param dstEid LayerZero destination endpoint id
+     * @param cfg Full pathway config (libraries, confirmations, DVN stack)
+     */
     function setPathwayConfig(uint32 dstEid, PathwayConfig calldata cfg) external override whenNotPaused {
         if (!roleRegistry().hasRole(CONFIG_ADMIN_ROLE, msg.sender)) revert OnlyConfigAdmin();
         if (cfg.sendLib == address(0) || cfg.receiveLib == address(0) || cfg.requiredDVNs.length == 0) revert InvalidInput();
@@ -61,17 +66,27 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
         emit PathwayConfigSet(dstEid, $.version);
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Returns the canonical config for a destination pathway
+     * @param dstEid LayerZero destination endpoint id
+     * @return The stored pathway config (zero-valued if never set)
+     */
     function getPathwayConfig(uint32 dstEid) external view override returns (PathwayConfig memory) {
         return _getStorage().pathway[dstEid];
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Current config version, bumped on every {setPathwayConfig}
+     * @return The monotonic config version
+     */
     function configVersion() external view override returns (uint256) {
         return _getStorage().version;
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice All destination endpoint ids that have a configured pathway
+     * @return eids The active destination endpoint ids
+     */
     function activeDstEids() external view override returns (uint32[] memory eids) {
         uint256[] memory raw = _getStorage().activeDstEidSet.values();
         eids = new uint32[](raw.length);
@@ -83,7 +98,11 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
         }
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Record a bridge so {pushToAll} can enumerate it (registrar only)
+     * @dev Restricted to CONFIG_REGISTRAR_ROLE (the factories). Reverts on a zero address; idempotent.
+     * @param bridge The OFT bridge to register
+     */
     function registerBridge(address bridge) external override whenNotPaused {
         if (!roleRegistry().hasRole(CONFIG_REGISTRAR_ROLE, msg.sender)) revert OnlyRegistrar();
         if (bridge == address(0)) revert InvalidInput();
@@ -91,7 +110,12 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
         emit BridgeRegistered(bridge);
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Paginated enumeration of registered bridges
+     * @param start Starting index in the bridge set
+     * @param n Maximum number of entries to return
+     * @return bridges Array of registered bridge addresses
+     */
     function getBridges(uint256 start, uint256 n) external view override returns (address[] memory bridges) {
         OFTConfigRegistryStorage storage $ = _getStorage();
         uint256 len = $.bridgeSet.length();
@@ -106,12 +130,20 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
         }
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Total number of registered bridges
+     * @return Number of registered bridges
+     */
     function numBridges() external view override returns (uint256) {
         return _getStorage().bridgeSet.length();
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Make the given bridges re-pull config (admin only)
+     * @dev Restricted to CONFIG_ADMIN_ROLE. Calls {IConfigurableOFT-syncConfig} on each bridge.
+     * @param bridges Bridges to refresh
+     * @param dstEids Destination endpoint ids to (re)configure on each bridge
+     */
     function pushTo(address[] calldata bridges, uint32[] calldata dstEids) external override whenNotPaused {
         if (!roleRegistry().hasRole(CONFIG_ADMIN_ROLE, msg.sender)) revert OnlyConfigAdmin();
         for (uint256 i; i < bridges.length;) {
@@ -123,7 +155,12 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
         }
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Make every registered bridge re-pull config (admin only)
+     * @dev Restricted to CONFIG_ADMIN_ROLE. Iterates the full bridge set; for large sets that
+     *      risk the block gas limit, use {pushToRange} to paginate.
+     * @param dstEids Destination endpoint ids to (re)configure on each bridge
+     */
     function pushToAll(uint32[] calldata dstEids) external override whenNotPaused {
         if (!roleRegistry().hasRole(CONFIG_ADMIN_ROLE, msg.sender)) revert OnlyConfigAdmin();
         OFTConfigRegistryStorage storage $ = _getStorage();
@@ -138,7 +175,13 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
         }
     }
 
-    /// @inheritdoc IOFTConfigRegistry
+    /**
+     * @notice Paginated {pushToAll} for large bridge sets (admin only)
+     * @dev Restricted to CONFIG_ADMIN_ROLE.
+     * @param start Starting index in the bridge set
+     * @param count Maximum number of bridges to refresh
+     * @param dstEids Destination endpoint ids to (re)configure on each bridge
+     */
     function pushToRange(uint256 start, uint256 count, uint32[] calldata dstEids) external override whenNotPaused {
         if (!roleRegistry().hasRole(CONFIG_ADMIN_ROLE, msg.sender)) revert OnlyConfigAdmin();
         OFTConfigRegistryStorage storage $ = _getStorage();
