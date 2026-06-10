@@ -169,7 +169,7 @@ contract OFTConfigRegistryTest is OFTTestSetup {
     }
 
     // pushToAll triggers syncConfig on EVERY registered bridge; each mock records that it was
-    // called once, with which dstEids, and the registry version it synced to.
+    // called once, with which dstEids.
     function test_pushToAll_callsSyncOnEveryBridge() public {
         _setPathway(DST_EID_OP, 15);
         MockConfigurableOFT[] memory mocks = _deployAndRegisterMocks(3);
@@ -184,7 +184,6 @@ contract OFTConfigRegistryTest is OFTTestSetup {
             assertEq(mocks[i].syncCallCount(), 1); // called exactly once
             assertEq(mocks[i].lastDstEidsLength(), 1);
             assertEq(mocks[i].lastDstEids(0), DST_EID_OP); // with the dstEid we pushed
-            assertEq(mocks[i].syncedConfigVersion(), configRegistry.configVersion());
         }
     }
 

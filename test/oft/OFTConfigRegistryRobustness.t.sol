@@ -21,10 +21,6 @@ contract RevertingBridge is IConfigurableOFT {
     function syncConfig(uint32[] calldata) external pure override {
         revert SyncFailed();
     }
-
-    function syncedConfigVersion() external pure override returns (uint256) {
-        return 0;
-    }
 }
 
 /**
@@ -48,10 +44,11 @@ contract OFTConfigRegistryRobustnessTest is OFTTestSetup {
     // ----------------------------------------------------------------- version skew / resync
 
     /**
-     * A bridge synced at v1 can fall behind as the registry advances to v3, then catch up with a
-     * later push — no revert, and syncedConfigVersion lands on the current version.
+     * A bridge synced once can fall behind as the registry advances, then catch up with a later
+     * push — the registry re-invokes syncConfig and the bridge re-pulls, no revert. (The bridge
+     * keeps no version state of its own; sync history is observable via the ConfigSynced event.)
      */
-    function test_versionSkew_resync_advancesToCurrentVersion() public {
+    function test_versionSkew_resync_reinvokesSync() public {
         _setPathway(DST_EID_OP, 15); // v1
         MockConfigurableOFT m = _registerMock();
 
@@ -63,18 +60,19 @@ contract OFTConfigRegistryRobustnessTest is OFTTestSetup {
 
         vm.prank(configAdmin);
         configRegistry.pushTo(targets, eids);
-        assertEq(m.syncedConfigVersion(), 1, "did not sync to v1");
+        assertEq(m.syncCallCount(), 1, "did not sync on first push");
 
-        // registry moves on; the bridge is now stale at v1 while the registry is at v3
+        // registry moves on; the bridge is now stale while the registry is at v3
         _setPathway(DST_EID_OP, 20); // v2
         _setPathway(DST_EID_OP, 25); // v3
         assertEq(configRegistry.configVersion(), 3);
-        assertEq(m.syncedConfigVersion(), 1, "bridge unexpectedly advanced on its own");
+        assertEq(m.syncCallCount(), 1, "bridge re-synced without a push");
 
         // resync catches it up, no revert
         vm.prank(configAdmin);
         configRegistry.pushTo(targets, eids);
-        assertEq(m.syncedConfigVersion(), 3, "resync did not advance to current version");
+        assertEq(m.syncCallCount(), 2, "resync did not re-invoke syncConfig");
+        assertEq(m.lastDstEids(0), DST_EID_OP);
     }
 
     // ----------------------------------------------------------------- pushToAll atomicity
