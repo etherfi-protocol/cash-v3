@@ -5,6 +5,8 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { BeaconFactory } from "../beacon-factory/BeaconFactory.sol";
 import { IShadowOFTFactory } from "../interfaces/IShadowOFTFactory.sol";
+import { IConfigurableOFT } from "../interfaces/IConfigurableOFT.sol";
+import { IOFTConfigRegistry } from "../interfaces/IOFTConfigRegistry.sol";
 import { EtherFiShadowOFT } from "./EtherFiShadowOFT.sol";
 
 /**
@@ -12,9 +14,11 @@ import { EtherFiShadowOFT } from "./EtherFiShadowOFT.sol";
  * @author ether.fi
  * @notice Destination-chain (e.g. Optimism) beacon factory that deploys mintable
  *         iTOKEN ERC-20s per listed asset.
- * @dev Mirror of {OFTAdapterFactory}. Reusing the same CREATE3 `salt` from the
- *      mainnet adapter deployment makes the iTOKEN address deterministic and
- *      one-to-one with its mainnet adapter.
+ * @dev Mirror of {OFTAdapterFactory}. A CREATE3 address is deterministic in
+ *      `(factory, salt)`, so the iTOKEN address is predictable on this chain. It
+ *      is NOT guaranteed identical to its mainnet adapter address (matching
+ *      cross-chain addresses is a non-goal); the `salt` is about per-chain
+ *      predictability, not cross-chain mirroring.
  */
 contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
@@ -45,11 +49,20 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         __BeaconFactory_initialize(_roleRegistry, _shadowOFTImpl);
     }
 
-    /// @inheritdoc IShadowOFTFactory
-    function deployShadowOFT(bytes32 salt, string calldata name, string calldata symbol, address delegate)
+    /**
+     * @notice Deploys a new Shadow OFT (iTOKEN) beacon proxy
+     * @dev Caller must hold the factory admin role.
+     * @param salt CREATE3 salt; must match the mainnet `OFTAdapterFactory.deployAdapter` salt
+     * @param name ERC-20 name of the iTOKEN (convention: "EtherFi <NAME>")
+     * @param symbol ERC-20 symbol of the iTOKEN (convention: "i<SYMBOL>")
+     * @param decimals Decimals to mirror from the mainnet underlying token
+     * @param delegate LayerZero delegate (typically the protocol owner/multisig)
+     * @return shadowOFT Address of the deployed iTOKEN proxy
+     */
+    function deployShadowOFT(bytes32 salt, string calldata name, string calldata symbol, uint8 decimals, address delegate)
         external
         whenNotPaused
-        returns (address shadowOFT)
+        returns (address)
     {
         if (!roleRegistry().hasRole(SHADOW_OFT_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
 
@@ -57,35 +70,56 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         address predicted = getDeterministicAddress(salt);
         if ($.deployed.contains(predicted)) revert ShadowOFTAlreadyExists();
 
-        bytes memory initData = abi.encodeWithSelector(EtherFiShadowOFT.initialize.selector, name, symbol, delegate);
-        shadowOFT = _deployBeacon(salt, initData);
+        bytes memory initData = abi.encodeWithSelector(EtherFiShadowOFT.initialize.selector, name, symbol, decimals, delegate);
+        address shadowOFT = _deployBeacon(salt, initData);
 
         $.deployed.add(shadowOFT);
         emit ShadowOFTDeployed(salt, shadowOFT, name, symbol);
+
+        // Auto-register + pull canonical LZ config so the new bridge is live without
+        // manual setup. Reverts if the factory lacks CONFIG_REGISTRAR_ROLE or the
+        // registry is unreachable (fail-hard: never leave a bridge unregistered).
+        address registry = IConfigurableOFT(shadowOFT).configRegistry();
+        IOFTConfigRegistry(registry).registerBridge(shadowOFT);
+        IConfigurableOFT(shadowOFT).syncConfig(IOFTConfigRegistry(registry).activeDstEids());
+        return shadowOFT;
     }
 
-    /// @inheritdoc IShadowOFTFactory
-    function getDeployedShadowOFTs(uint256 start, uint256 n) external view returns (address[] memory shadowOFTs) {
+    /**
+     * @notice Paginated enumeration of deployed Shadow OFT addresses
+     * @param start Starting index in the deployment set
+     * @param n Maximum number of entries to return
+     * @return shadowOFTs Array of iTOKEN proxy addresses
+     */
+    function getDeployedShadowOFTs(uint256 start, uint256 n) external view returns (address[] memory) {
         ShadowOFTFactoryStorage storage $ = _getStorage();
         uint256 length = $.deployed.length();
-        if (start >= length) revert InvalidStartIndex();
+        if (start >= length) return new address[](0);
         if (start + n > length) n = length - start;
 
-        shadowOFTs = new address[](n);
+        address[] memory shadowOFTs = new address[](n);
         for (uint256 i = 0; i < n;) {
             shadowOFTs[i] = $.deployed.at(start + i);
             unchecked {
                 ++i;
             }
         }
+        return shadowOFTs;
     }
 
-    /// @inheritdoc IShadowOFTFactory
+    /**
+     * @notice Total number of Shadow OFTs deployed by this factory
+     * @return Number of deployed iTOKENs
+     */
     function numShadowOFTsDeployed() external view returns (uint256) {
         return _getStorage().deployed.length();
     }
 
-    /// @inheritdoc IShadowOFTFactory
+    /**
+     * @notice Returns whether `account` is an iTOKEN deployed by this factory
+     * @param account Address to query
+     * @return True if `account` was deployed by this factory
+     */
     function isShadowOFT(address account) external view returns (bool) {
         return _getStorage().deployed.contains(account);
     }

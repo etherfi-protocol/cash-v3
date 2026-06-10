@@ -22,8 +22,6 @@ interface IShadowOFTFactory {
     error OnlyAdmin();
     /// @notice Thrown when a Shadow OFT already exists for the supplied salt
     error ShadowOFTAlreadyExists();
-    /// @notice Thrown when the start index passed to {getDeployedShadowOFTs} is out of bounds
-    error InvalidStartIndex();
 
     /**
      * @notice Deploys a new Shadow OFT (iTOKEN) beacon proxy
@@ -31,10 +29,11 @@ interface IShadowOFTFactory {
      * @param salt CREATE3 salt; must match the mainnet `OFTAdapterFactory.deployAdapter` salt
      * @param name ERC-20 name of the iTOKEN (convention: "EtherFi <NAME>")
      * @param symbol ERC-20 symbol of the iTOKEN (convention: "i<SYMBOL>")
+     * @param decimals Decimals to mirror from the mainnet underlying token
      * @param delegate LayerZero delegate (typically the protocol owner/multisig)
      * @return shadowOFT Address of the deployed iTOKEN proxy
      */
-    function deployShadowOFT(bytes32 salt, string calldata name, string calldata symbol, address delegate) external returns (address shadowOFT);
+    function deployShadowOFT(bytes32 salt, string calldata name, string calldata symbol, uint8 decimals, address delegate) external returns (address shadowOFT);
 
     /**
      * @notice Paginated enumeration of deployed Shadow OFT addresses

@@ -24,8 +24,6 @@ interface IOFTAdapterFactory {
     error InvalidUnderlying();
     /// @notice Thrown when an adapter already exists for the supplied salt/underlying
     error AdapterAlreadyExists();
-    /// @notice Thrown when the start index passed to {getDeployedAdapters} is out of bounds
-    error InvalidStartIndex();
 
     /**
      * @notice Deploys a new OFTAdapter beacon proxy for `underlyingToken`
