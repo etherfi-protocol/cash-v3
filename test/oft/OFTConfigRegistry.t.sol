@@ -183,7 +183,7 @@ contract OFTConfigRegistryTest is OFTTestSetup {
         for (uint256 i; i < 3; ++i) {
             assertEq(mocks[i].syncCallCount(), 1); // called exactly once
             assertEq(mocks[i].lastDstEidsLength(), 1);
-            assertEq(mocks[i].lastDstEids(0), DST_EID_OP); // with the dstEid we pushed
+            assertEq(mocks[i].lastDstEids(0), DST_EID_OP, "synced with wrong dstEid"); // with the dstEid we pushed
         }
     }
 

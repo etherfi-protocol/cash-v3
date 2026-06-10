@@ -72,7 +72,7 @@ contract OFTConfigRegistryRobustnessTest is OFTTestSetup {
         vm.prank(configAdmin);
         configRegistry.pushTo(targets, eids);
         assertEq(m.syncCallCount(), 2, "resync did not re-invoke syncConfig");
-        assertEq(m.lastDstEids(0), DST_EID_OP);
+        assertEq(m.lastDstEids(0), DST_EID_OP, "resync pushed wrong dstEid");
     }
 
     // ----------------------------------------------------------------- pushToAll atomicity
