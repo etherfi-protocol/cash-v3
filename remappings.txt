@@ -12,3 +12,5 @@ lz-address-book/=lib/lz-address-book/src/
 @layerzerolabs/oapp-evm/=lib/lz-address-book/lib/devtools/packages/oapp-evm/
 @layerzerolabs/oft-evm-upgradeable/=lib/lz-address-book/lib/devtools/packages/oft-evm-upgradeable/
 @layerzerolabs/oapp-evm-upgradeable/=lib/lz-address-book/lib/devtools/packages/oapp-evm-upgradeable/
+@layerzerolabs/test-devtools-evm-foundry/=lib/lz-address-book/lib/devtools/packages/test-devtools-evm-foundry/
+@layerzerolabs/lz-evm-v1-0.7/=test/oft/vendor/lz-evm-v1-0.7/
