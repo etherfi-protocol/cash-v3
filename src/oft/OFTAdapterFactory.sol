@@ -65,7 +65,7 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
      * @param delegate LayerZero delegate (typically the protocol owner/multisig)
      * @return adapter Address of the deployed adapter proxy
      */
-    function deployAdapter(bytes32 salt, address underlyingToken, address delegate) external whenNotPaused returns (address adapter) {
+    function deployAdapter(bytes32 salt, address underlyingToken, address delegate) external whenNotPaused returns (address) {
         if (!roleRegistry().hasRole(OFT_ADAPTER_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
         if (underlyingToken == address(0)) revert InvalidUnderlying();
 
@@ -74,7 +74,7 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
 
         bytes memory initData = abi.encodeWithSelector(EtherFiOFTAdapter.initialize.selector, underlyingToken, delegate);
 
-        adapter = _deployBeacon(salt, initData);
+        address adapter = _deployBeacon(salt, initData);
 
         $.deployed.add(adapter);
         $.adapterOfUnderlying[underlyingToken] = adapter;
@@ -88,6 +88,7 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
         address registry = IConfigurableOFT(adapter).configRegistry();
         IOFTConfigRegistry(registry).registerBridge(adapter);
         IConfigurableOFT(adapter).syncConfig(IOFTConfigRegistry(registry).activeDstEids());
+        return adapter;
     }
 
     /**
@@ -95,7 +96,7 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
      * @param underlyingToken The mainnet ERC-20
      * @return adapter The adapter proxy address (0 if not deployed)
      */
-    function adapterOf(address underlyingToken) external view returns (address adapter) {
+    function adapterOf(address underlyingToken) external view returns (address) {
         return _getStorage().adapterOfUnderlying[underlyingToken];
     }
 
@@ -104,7 +105,7 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
      * @param adapter The adapter proxy
      * @return underlyingToken The wrapped ERC-20 address
      */
-    function underlyingOf(address adapter) external view returns (address underlyingToken) {
+    function underlyingOf(address adapter) external view returns (address) {
         return _getStorage().underlyingOfAdapter[adapter];
     }
 
@@ -114,19 +115,20 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
      * @param n Maximum number of entries to return
      * @return adapters Array of adapter proxy addresses
      */
-    function getDeployedAdapters(uint256 start, uint256 n) external view returns (address[] memory adapters) {
+    function getDeployedAdapters(uint256 start, uint256 n) external view returns (address[] memory) {
         OFTAdapterFactoryStorage storage $ = _getStorage();
         uint256 length = $.deployed.length();
         if (start >= length) return new address[](0);
         if (start + n > length) n = length - start;
 
-        adapters = new address[](n);
+        address[] memory adapters = new address[](n);
         for (uint256 i = 0; i < n;) {
             adapters[i] = $.deployed.at(start + i);
             unchecked {
                 ++i;
             }
         }
+        return adapters;
     }
 
     /**

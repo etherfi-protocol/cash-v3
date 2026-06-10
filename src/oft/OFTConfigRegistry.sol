@@ -87,15 +87,16 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
      * @notice All destination endpoint ids that have a configured pathway
      * @return eids The active destination endpoint ids
      */
-    function activeDstEids() external view override returns (uint32[] memory eids) {
+    function activeDstEids() external view override returns (uint32[] memory) {
         uint256[] memory raw = _getStorage().activeDstEidSet.values();
-        eids = new uint32[](raw.length);
+        uint32[] memory eids = new uint32[](raw.length);
         for (uint256 i; i < raw.length;) {
             eids[i] = uint32(raw[i]);
             unchecked {
                 ++i;
             }
         }
+        return eids;
     }
 
     /**
@@ -116,18 +117,19 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
      * @param n Maximum number of entries to return
      * @return bridges Array of registered bridge addresses
      */
-    function getBridges(uint256 start, uint256 n) external view override returns (address[] memory bridges) {
+    function getBridges(uint256 start, uint256 n) external view override returns (address[] memory) {
         OFTConfigRegistryStorage storage $ = _getStorage();
         uint256 len = $.bridgeSet.length();
         if (start >= len) return new address[](0);
         if (start + n > len) n = len - start;
-        bridges = new address[](n);
+        address[] memory bridges = new address[](n);
         for (uint256 i; i < n;) {
             bridges[i] = $.bridgeSet.at(start + i);
             unchecked {
                 ++i;
             }
         }
+        return bridges;
     }
 
     /**

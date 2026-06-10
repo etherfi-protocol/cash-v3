@@ -82,12 +82,12 @@ contract EtherFiShadowOFT is OFTUpgradeable, ConfigurableOFTBase {
     // ---------------------------------------------------------------------
 
     /// @dev SD -> LD: scale up by the per-proxy {conversionRate}.
-    function _toLD(uint64 _amountSD) internal view virtual override returns (uint256 amountLD) {
+    function _toLD(uint64 _amountSD) internal view virtual override returns (uint256) {
         return _amountSD * _getStorage().decimalConversionRate;
     }
 
     /// @dev LD -> SD: scale down by the per-proxy {conversionRate}; reverts if the result exceeds uint64.
-    function _toSD(uint256 _amountLD) internal view virtual override returns (uint64 amountSD) {
+    function _toSD(uint256 _amountLD) internal view virtual override returns (uint64) {
         uint256 sd = _amountLD / _getStorage().decimalConversionRate;
         if (sd > type(uint64).max) revert AmountSDOverflowed(sd);
         // casting to 'uint64' is safe because the line above reverts when sd exceeds type(uint64).max
@@ -96,7 +96,7 @@ contract EtherFiShadowOFT is OFTUpgradeable, ConfigurableOFTBase {
     }
 
     /// @dev Floors `_amountLD` to a whole multiple of the per-proxy {conversionRate}, dropping sub-SD dust.
-    function _removeDust(uint256 _amountLD) internal view virtual override returns (uint256 amountLD) {
+    function _removeDust(uint256 _amountLD) internal view virtual override returns (uint256) {
         uint256 rate = _getStorage().decimalConversionRate;
         // Intentional: floors _amountLD to a multiple of `rate`, discarding dust (matches LayerZero OFTCore).
         // forge-lint: disable-next-line(divide-before-multiply)
