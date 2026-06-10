@@ -154,8 +154,9 @@ contract PriceRelay is IPriceRelay, UpgradeableProxy, OAppSenderUpgradeable {
             uint256 currentPrice = $.priceProvider.price(token);
             TokenSubscription memory sub = $.subscriptions[token];
 
+            bool firstSend = $.lastSentAt[token] == 0;
             bool heartbeatDue = block.timestamp - $.lastSentAt[token] >= sub.heartbeat;
-            if (heartbeatDue || _deviated($.lastSentPrice[token], currentPrice, sub.deviationBps)) {
+            if (firstSend || heartbeatDue || _deviated($.lastSentPrice[token], currentPrice, sub.deviationBps)) {
                 outTokens[count] = token;
                 outPrices[count] = currentPrice;
                 unchecked {
@@ -261,9 +262,17 @@ contract PriceRelay is IPriceRelay, UpgradeableProxy, OAppSenderUpgradeable {
 
     /**
      * @dev Returns true if `current` deviates from `last` by at least `bps` basis points.
-     *      Always true when there is no prior price (`last == 0`), forcing the first send.
+     * @dev Gating rules (the "first send" case is handled by the caller via `lastSentAt == 0`,
+     *      so here `last` is the value of a prior *successful* relay):
+     *      - `bps == 0`: the deviation trigger is disabled; rely solely on the heartbeat.
+     *        (Without this, `diff * BPS >= 0` is always true and every poke would relay.)
+     *      - `last == current`: no movement, so never a deviation. This also prevents a
+     *        previously-relayed price of 0 from making this branch permanently true.
+     *      - `last == 0` with a non-zero `current`: an unbounded move (0 -> non-zero), relay.
      */
     function _deviated(uint256 last, uint256 current, uint32 bps) private pure returns (bool) {
+        if (bps == 0) return false;
+        if (last == current) return false;
         if (last == 0) return true;
         uint256 diff = current > last ? current - last : last - current;
         return diff * BPS_DENOMINATOR >= uint256(bps) * last;

@@ -274,6 +274,75 @@ contract PriceRelayOracleSinkTest is Test {
         priceRelay.poke(_single(token));
     }
 
+    // --- Deviation gate edge cases (Bugbot) --------------------------------
+
+    /// @dev deviationBps == 0 must disable the deviation trigger (heartbeat only),
+    ///      not relay on every poke.
+    function test_Deviation_zeroBpsDisablesTriggerButHeartbeatStillWorks() public {
+        address t = makeAddr("zeroBpsToken");
+        priceRelay.subscribe(
+            t, IPriceRelay.TokenSubscription({ heartbeat: HEARTBEAT, deviationBps: 0, maxStaleness: MAX_STALENESS })
+        );
+
+        priceRelay.poke(_single(t)); // first send
+        endpoint.deliver(SRC_EID);
+
+        // Within heartbeat, even a 100% move must NOT relay (deviation disabled).
+        vm.warp(block.timestamp + 1);
+        mockPriceProvider.setPrice(INITIAL_PRICE * 2);
+        vm.expectRevert(IPriceRelay.NothingToRelay.selector);
+        priceRelay.poke(_single(t));
+
+        // Heartbeat still forces a relay once the interval elapses.
+        vm.warp(block.timestamp + HEARTBEAT);
+        priceRelay.poke(_single(t));
+        (, uint64 lastTs) = priceRelay.lastRelayed(t);
+        assertEq(lastTs, uint64(block.timestamp));
+    }
+
+    /// @dev A previously-relayed price of 0 must not make the deviation branch
+    ///      permanently true (no per-poke fee drain while the price stays 0).
+    function test_Deviation_relayedZeroPriceDoesNotSpam() public {
+        address t = makeAddr("zeroPriceToken");
+        priceRelay.subscribe(
+            t,
+            IPriceRelay.TokenSubscription({ heartbeat: HEARTBEAT, deviationBps: DEVIATION_BPS, maxStaleness: MAX_STALENESS })
+        );
+
+        mockPriceProvider.setPrice(0);
+        priceRelay.poke(_single(t));
+        endpoint.deliver(SRC_EID);
+        (uint256 lastPrice,) = priceRelay.lastRelayed(t);
+        assertEq(lastPrice, 0);
+
+        // Still 0 within the heartbeat window -> no deviation -> nothing to relay.
+        vm.warp(block.timestamp + 1);
+        vm.expectRevert(IPriceRelay.NothingToRelay.selector);
+        priceRelay.poke(_single(t));
+    }
+
+    /// @dev Recovery from 0 to a non-zero price is an unbounded move and must relay.
+    function test_Deviation_zeroToNonZeroRelays() public {
+        address t = makeAddr("recoverToken");
+        priceRelay.subscribe(
+            t,
+            IPriceRelay.TokenSubscription({ heartbeat: HEARTBEAT, deviationBps: DEVIATION_BPS, maxStaleness: MAX_STALENESS })
+        );
+
+        mockPriceProvider.setPrice(0);
+        priceRelay.poke(_single(t));
+        endpoint.deliver(SRC_EID);
+
+        // Price recovers within the heartbeat window -> relays.
+        vm.warp(block.timestamp + 1);
+        mockPriceProvider.setPrice(INITIAL_PRICE);
+        priceRelay.poke(_single(t));
+        endpoint.deliver(SRC_EID);
+
+        (uint256 price,) = oracleSink.getPrice(t);
+        assertEq(price, INITIAL_PRICE);
+    }
+
     // --- Peer authentication ----------------------------------------------
 
     function test_PeerRejection_nonPeerCannotUpdateSink() public {
