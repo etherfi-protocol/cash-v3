@@ -62,7 +62,7 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
     function deployShadowOFT(bytes32 salt, string calldata name, string calldata symbol, uint8 decimals, address delegate)
         external
         whenNotPaused
-        returns (address shadowOFT)
+        returns (address)
     {
         if (!roleRegistry().hasRole(SHADOW_OFT_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
 
@@ -71,7 +71,7 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         if ($.deployed.contains(predicted)) revert ShadowOFTAlreadyExists();
 
         bytes memory initData = abi.encodeWithSelector(EtherFiShadowOFT.initialize.selector, name, symbol, decimals, delegate);
-        shadowOFT = _deployBeacon(salt, initData);
+        address shadowOFT = _deployBeacon(salt, initData);
 
         $.deployed.add(shadowOFT);
         emit ShadowOFTDeployed(salt, shadowOFT, name, symbol);
@@ -82,6 +82,7 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         address registry = IConfigurableOFT(shadowOFT).configRegistry();
         IOFTConfigRegistry(registry).registerBridge(shadowOFT);
         IConfigurableOFT(shadowOFT).syncConfig(IOFTConfigRegistry(registry).activeDstEids());
+        return shadowOFT;
     }
 
     /**
@@ -90,19 +91,20 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
      * @param n Maximum number of entries to return
      * @return shadowOFTs Array of iTOKEN proxy addresses
      */
-    function getDeployedShadowOFTs(uint256 start, uint256 n) external view returns (address[] memory shadowOFTs) {
+    function getDeployedShadowOFTs(uint256 start, uint256 n) external view returns (address[] memory) {
         ShadowOFTFactoryStorage storage $ = _getStorage();
         uint256 length = $.deployed.length();
         if (start >= length) return new address[](0);
         if (start + n > length) n = length - start;
 
-        shadowOFTs = new address[](n);
+        address[] memory shadowOFTs = new address[](n);
         for (uint256 i = 0; i < n;) {
             shadowOFTs[i] = $.deployed.at(start + i);
             unchecked {
                 ++i;
             }
         }
+        return shadowOFTs;
     }
 
     /**

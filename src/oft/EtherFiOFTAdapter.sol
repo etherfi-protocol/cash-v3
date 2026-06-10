@@ -101,12 +101,12 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase {
     // ---------------------------------------------------------------------
 
     /// @dev SD -> LD: scale up by the per-proxy {conversionRate}.
-    function _toLD(uint64 _amountSD) internal view virtual override returns (uint256 amountLD) {
+    function _toLD(uint64 _amountSD) internal view virtual override returns (uint256) {
         return _amountSD * _getStorage().decimalConversionRate;
     }
 
     /// @dev LD -> SD: scale down by the per-proxy {conversionRate}; reverts if the result exceeds uint64.
-    function _toSD(uint256 _amountLD) internal view virtual override returns (uint64 amountSD) {
+    function _toSD(uint256 _amountLD) internal view virtual override returns (uint64) {
         uint256 sd = _amountLD / _getStorage().decimalConversionRate;
         if (sd > type(uint64).max) revert AmountSDOverflowed(sd);
         // casting to 'uint64' is safe because the line above reverts when sd exceeds type(uint64).max
@@ -115,7 +115,7 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase {
     }
 
     /// @dev Floors `_amountLD` to a whole multiple of the per-proxy {conversionRate}, dropping sub-SD dust.
-    function _removeDust(uint256 _amountLD) internal view virtual override returns (uint256 amountLD) {
+    function _removeDust(uint256 _amountLD) internal view virtual override returns (uint256) {
         uint256 rate = _getStorage().decimalConversionRate;
         // Intentional: floors _amountLD to a multiple of `rate`, discarding dust (matches LayerZero OFTCore).
         // forge-lint: disable-next-line(divide-before-multiply)
@@ -133,14 +133,15 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase {
      *      rather than silently under-collateralizing the shadow supply. Supporting
      *      them (bridging the post-fee amount) is a deliberate per-asset follow-up.
      */
-    function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override returns (uint256 amountSentLD, uint256 amountReceivedLD) {
-        (amountSentLD, amountReceivedLD) = _debitView(_amountLD, _minAmountLD, _dstEid);
+    function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override returns (uint256, uint256) {
+        (uint256 amountSentLD, uint256 amountReceivedLD) = _debitView(_amountLD, _minAmountLD, _dstEid);
 
         IERC20 underlying = IERC20(_getStorage().innerToken);
         uint256 balanceBefore = underlying.balanceOf(address(this));
         underlying.safeTransferFrom(_from, address(this), amountSentLD);
         uint256 received = underlying.balanceOf(address(this)) - balanceBefore;
         if (received != amountSentLD) revert NonLosslessTransfer(amountSentLD, received);
+        return (amountSentLD, amountReceivedLD);
     }
 
     /**
@@ -154,7 +155,7 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase {
         internal
         virtual
         override
-        returns (uint256 amountReceivedLD)
+        returns (uint256)
     {
         IERC20(_getStorage().innerToken).safeTransfer(_to, _amountLD);
         return _amountLD;
