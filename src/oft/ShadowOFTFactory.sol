@@ -49,7 +49,16 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         __BeaconFactory_initialize(_roleRegistry, _shadowOFTImpl);
     }
 
-    /// @inheritdoc IShadowOFTFactory
+    /**
+     * @notice Deploys a new Shadow OFT (iTOKEN) beacon proxy
+     * @dev Caller must hold the factory admin role.
+     * @param salt CREATE3 salt; must match the mainnet `OFTAdapterFactory.deployAdapter` salt
+     * @param name ERC-20 name of the iTOKEN (convention: "EtherFi <NAME>")
+     * @param symbol ERC-20 symbol of the iTOKEN (convention: "i<SYMBOL>")
+     * @param decimals Decimals to mirror from the mainnet underlying token
+     * @param delegate LayerZero delegate (typically the protocol owner/multisig)
+     * @return shadowOFT Address of the deployed iTOKEN proxy
+     */
     function deployShadowOFT(bytes32 salt, string calldata name, string calldata symbol, uint8 decimals, address delegate)
         external
         whenNotPaused
@@ -75,7 +84,12 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         IConfigurableOFT(shadowOFT).syncConfig(IOFTConfigRegistry(registry).activeDstEids());
     }
 
-    /// @inheritdoc IShadowOFTFactory
+    /**
+     * @notice Paginated enumeration of deployed Shadow OFT addresses
+     * @param start Starting index in the deployment set
+     * @param n Maximum number of entries to return
+     * @return shadowOFTs Array of iTOKEN proxy addresses
+     */
     function getDeployedShadowOFTs(uint256 start, uint256 n) external view returns (address[] memory shadowOFTs) {
         ShadowOFTFactoryStorage storage $ = _getStorage();
         uint256 length = $.deployed.length();
@@ -91,12 +105,19 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         }
     }
 
-    /// @inheritdoc IShadowOFTFactory
+    /**
+     * @notice Total number of Shadow OFTs deployed by this factory
+     * @return Number of deployed iTOKENs
+     */
     function numShadowOFTsDeployed() external view returns (uint256) {
         return _getStorage().deployed.length();
     }
 
-    /// @inheritdoc IShadowOFTFactory
+    /**
+     * @notice Returns whether `account` is an iTOKEN deployed by this factory
+     * @param account Address to query
+     * @return True if `account` was deployed by this factory
+     */
     function isShadowOFT(address account) external view returns (bool) {
         return _getStorage().deployed.contains(account);
     }
