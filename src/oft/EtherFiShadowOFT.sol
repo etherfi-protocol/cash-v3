@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { OFTCoreUpgradeable } from "@layerzerolabs/oft-evm-upgradeable/contracts/oft/OFTCoreUpgradeable.sol";
 import { OFTUpgradeable } from "@layerzerolabs/oft-evm-upgradeable/contracts/oft/OFTUpgradeable.sol";
 
 import { ConfigurableOFTBase } from "./ConfigurableOFTBase.sol";
+import { PairwiseRateLimiter } from "./PairwiseRateLimiter.sol";
 
 /**
  * @title EtherFiShadowOFT
@@ -22,7 +24,7 @@ import { ConfigurableOFTBase } from "./ConfigurableOFTBase.sol";
  *      from storage; before initialization it returns a safe placeholder so the
  *      parent constructor (which reads `decimals()`) does not revert.
  */
-contract EtherFiShadowOFT is OFTUpgradeable, ConfigurableOFTBase {
+contract EtherFiShadowOFT is OFTUpgradeable, ConfigurableOFTBase, PairwiseRateLimiter {
     /// @custom:storage-location erc7201:etherfi.storage.EtherFiShadowOFT
     struct EtherFiShadowOFTStorage {
         /// @notice Local decimals, mirrors the mainnet underlying
@@ -101,6 +103,23 @@ contract EtherFiShadowOFT is OFTUpgradeable, ConfigurableOFTBase {
         // Intentional: floors _amountLD to a multiple of `rate`, discarding dust (matches LayerZero OFTCore).
         // forge-lint: disable-next-line(divide-before-multiply)
         return (_amountLD / rate) * rate;
+    }
+
+    // ---------------------------------------------------------------------
+    // Rate limiting — meter both directions per peer endpoint id
+    // ---------------------------------------------------------------------
+
+    /// @dev Meter the dust-removed sent amount before burning on the outbound path.
+    function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override(OFTCoreUpgradeable, OFTUpgradeable) returns (uint256 amountSentLD, uint256 amountReceivedLD) {
+        (amountSentLD, amountReceivedLD) = _debitView(_amountLD, _minAmountLD, _dstEid);
+        _checkAndUpdateOutboundRateLimit(_dstEid, amountSentLD);
+        return super._debit(_from, _amountLD, _minAmountLD, _dstEid);
+    }
+
+    /// @dev Meter the credited amount before minting on the inbound path.
+    function _credit(address _to, uint256 _amountLD, uint32 _srcEid) internal virtual override(OFTCoreUpgradeable, OFTUpgradeable) returns (uint256 amountReceivedLD) {
+        _checkAndUpdateInboundRateLimit(_srcEid, _amountLD);
+        return super._credit(_to, _amountLD, _srcEid);
     }
 
     function _getStorage() private pure returns (EtherFiShadowOFTStorage storage $) {

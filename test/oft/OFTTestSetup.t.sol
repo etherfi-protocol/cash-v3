@@ -10,6 +10,7 @@ import { IConfigurableOFT } from "../../src/interfaces/IConfigurableOFT.sol";
 import { IOFTConfigRegistry } from "../../src/interfaces/IOFTConfigRegistry.sol";
 import { EtherFiOFTAdapter } from "../../src/oft/EtherFiOFTAdapter.sol";
 import { EtherFiShadowOFT } from "../../src/oft/EtherFiShadowOFT.sol";
+import { PairwiseRateLimiter } from "../../src/oft/PairwiseRateLimiter.sol";
 import { OFTAdapterFactory } from "../../src/oft/OFTAdapterFactory.sol";
 import { OFTConfigRegistry } from "../../src/oft/OFTConfigRegistry.sol";
 import { ShadowOFTFactory } from "../../src/oft/ShadowOFTFactory.sol";
@@ -209,6 +210,22 @@ contract OFTTestSetup is Test {
         token6 = new MockERC20("USD Coin", "USDC", 6);
         token8 = new MockERC20("Wrapped BTC", "WBTC", 8);
         token18 = new MockERC20("Pax Gold", "PAXG", 18);
+    }
+
+    /**
+     * @dev Lift the fail-closed rate limit on a freshly-deployed bridge for a peer eid so tests that
+     *      are NOT about rate limiting can still exercise the debit/credit (send/receive) hooks. The
+     *      limiter is fail-closed (unset pathway = zero throughput); production listing scripts set a
+     *      real cap, here we set an effectively-unlimited one in both directions. Pranks the delegate
+     *      (the OApp owner). Keep this OUT of dedicated rate-limit tests, which set precise limits.
+     */
+    function _liftRateLimits(address bridge, uint32 eid) internal {
+        PairwiseRateLimiter.RateLimitConfig[] memory cfg = new PairwiseRateLimiter.RateLimitConfig[](1);
+        cfg[0] = PairwiseRateLimiter.RateLimitConfig({ peerEid: eid, limit: type(uint256).max, window: 1 });
+        vm.startPrank(delegate);
+        PairwiseRateLimiter(bridge).setOutboundRateLimits(cfg);
+        PairwiseRateLimiter(bridge).setInboundRateLimits(cfg);
+        vm.stopPrank();
     }
 
     // A valid 2-of-2 required-DVN pathway config (mirrors the weETH DVN stack shape).

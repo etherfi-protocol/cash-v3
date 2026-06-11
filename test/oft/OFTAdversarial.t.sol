@@ -162,6 +162,8 @@ contract OFTAdversarialTest is OFTCrossChainSetup {
         vm.startPrank(delegate);
         evilAdapter.setPeer(B_EID, _b32(address(shadow)));
         vm.stopPrank();
+        // Lift the fail-closed rate limit so the reentrancy path (not the limiter) is what's exercised.
+        _liftRateLimits(address(evilAdapter), B_EID);
 
         uint256 amount = 100e8;
         evil.mint(alice, amount);

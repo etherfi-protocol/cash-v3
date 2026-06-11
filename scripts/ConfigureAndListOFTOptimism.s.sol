@@ -6,6 +6,7 @@ import { stdJson } from "forge-std/StdJson.sol";
 
 import { IOFTConfigRegistry } from "../src/interfaces/IOFTConfigRegistry.sol";
 import { OFTConfigRegistry } from "../src/oft/OFTConfigRegistry.sol";
+import { PairwiseRateLimiter } from "../src/oft/PairwiseRateLimiter.sol";
 import { ShadowOFTFactory } from "../src/oft/ShadowOFTFactory.sol";
 import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
 
@@ -40,6 +41,13 @@ contract ConfigureAndListOFTOptimism is Utils {
     string constant SHADOW_NAME = "EtherFi Pepe";
     string constant SHADOW_SYMBOL = "iPEPE";
     uint8 constant SHADOW_DECIMALS = 18;
+
+    // Default per-bridge throughput cap, in WHOLE tokens (scaled to the iTOKEN's decimals below, so
+    // the cap means the same thing for a 6-, 8-, or 18-decimal asset). Placeholder — the risk team
+    // sets the real cap; re-tune later via SetOFTRateLimits. The limiter is fail-closed, so a freshly
+    // listed asset must be capped here (or by the delegate) before it can bridge.
+    uint256 constant RATE_LIMIT_TOKENS = 1_000_000;
+    uint256 constant RATE_WINDOW = 1 hours;
 
     bytes32 constant CONFIG_REGISTRAR_ROLE = keccak256("OFT_CONFIG_REGISTRAR_ROLE");
     bytes32 constant CONFIG_ADMIN_ROLE = keccak256("OFT_CONFIG_ADMIN_ROLE");
@@ -77,9 +85,20 @@ contract ConfigureAndListOFTOptimism is Utils {
         configRegistry.setPathwayConfig(DST_EID, _pathwayConfig());
         // List iPEPE. Factory auto-registers the bridge and pulls the config just set.
         address shadow = _listShadow(factory, salt, delegate, alreadyListed);
+        // Cap throughput at listing. setRateLimits is owner-gated; in the EOA flow the deployer is
+        // the delegate so it can set them inline. If the delegate is a separate Safe, this is skipped
+        // and the delegate must run SetOFTRateLimits (the bridge stays fail-closed until then).
+        bool setLimitsInline = delegate == deployer;
+        if (setLimitsInline) {
+            // Scale the whole-token cap to the iTOKEN's decimals (mirrors the mainnet underlying).
+            PairwiseRateLimiter.RateLimitConfig[] memory rlCfg = _rateLimitConfig(SHADOW_DECIMALS);
+            PairwiseRateLimiter(shadow).setOutboundRateLimits(rlCfg);
+            PairwiseRateLimiter(shadow).setInboundRateLimits(rlCfg);
+        }
         vm.stopBroadcast();
 
         if (alreadyListed) console.log("iPEPE already listed; skipped deployShadowOFT");
+        console.log(setLimitsInline ? "  rate limits set (delegate == deployer)" : "  rate limits SKIPPED - delegate must run SetOFTRateLimits");
         console.log("Configured + listed iPEPE on Optimism (chainId", block.chainid, ")");
         console.log("  delegate (OApp owner):", delegate);
         console.log("  iPEPE shadow OFT:     ", shadow);
@@ -96,6 +115,12 @@ contract ConfigureAndListOFTOptimism is Utils {
     {
         if (alreadyListed) return factory.getDeterministicAddress(salt);
         return factory.deployShadowOFT(salt, SHADOW_NAME, SHADOW_SYMBOL, SHADOW_DECIMALS, delegate);
+    }
+
+    /// @dev Default outbound/inbound throughput cap for the ETH pathway, scaled to the iTOKEN's decimals.
+    function _rateLimitConfig(uint8 decimals) internal pure returns (PairwiseRateLimiter.RateLimitConfig[] memory c) {
+        c = new PairwiseRateLimiter.RateLimitConfig[](1);
+        c[0] = PairwiseRateLimiter.RateLimitConfig({ peerEid: DST_EID, limit: RATE_LIMIT_TOKENS * (10 ** decimals), window: RATE_WINDOW });
     }
 
     /// @dev The canonical pathway config for DST_EID: 1-of-1 LayerZero DVN, no optional DVNs.

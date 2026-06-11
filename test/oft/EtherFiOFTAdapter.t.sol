@@ -51,6 +51,8 @@ contract EtherFiOFTAdapterTest is OFTTestSetup {
         UpgradeableBeacon beacon = new UpgradeableBeacon(impl, owner);
         bytes memory initData = abi.encodeWithSelector(EtherFiOFTAdapter.initialize.selector, token, delegate);
         h = OFTAdapterHarness(address(new BeaconProxy(address(beacon), initData)));
+        // Lift the fail-closed rate limit so these lock/unlock tests reach the debit/credit hooks.
+        _liftRateLimits(address(h), DST_EID_OP);
     }
 
     // ----------------------------------------------------------------- decimal math
