@@ -78,6 +78,16 @@ contract ConfigureAndListOFTMainnet is Utils {
         configRegistry.setPathwayConfig(DST_EID, _pathwayConfig());
         // List PEPE. Factory auto-registers the bridge and pulls the config just set.
         address adapter = existing == address(0) ? factory.deployAdapter(salt, PEPE, delegate) : existing;
+        // Fresh deploy: the factory already synced the config above. Re-run on an existing adapter:
+        // push the (possibly updated) pathway config so its endpoint DVN/library rows don't drift
+        // from the registry. syncConfig only accepts the registry, so route through pushTo.
+        if (existing != address(0)) {
+            address[] memory bridges = new address[](1);
+            bridges[0] = adapter;
+            uint32[] memory dstEids = new uint32[](1);
+            dstEids[0] = DST_EID;
+            configRegistry.pushTo(bridges, dstEids);
+        }
         // Cap throughput at listing. setRateLimits is owner-gated; in the EOA flow the deployer is
         // the delegate so it can set them inline. If the delegate is a separate Safe, this is skipped
         // and the delegate must run SetOFTRateLimits (the bridge stays fail-closed until then).
