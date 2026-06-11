@@ -71,6 +71,15 @@ contract DeployOFTListingOptimism is Utils {
         // counterpart so we can wire the peer without knowing the Ethereum run's result.
         address predictedPriceRelay = CREATE3.predictDeterministicAddress(_salt("PriceRelay"), NICKS_FACTORY);
 
+        // One-shot deploy guard: the CREATE3 OApp can only be deployed once per (salt, ENV), but the
+        // non-CREATE3 infra (config registry, factory) would redeploy fresh on a re-run and overwrite
+        // deployments.json while OracleSink keeps its original wiring. Abort up front so we never
+        // produce that split state. To redeploy, bump ENV/salt or upgrade in place.
+        require(
+            CREATE3.predictDeterministicAddress(_salt("OracleSink"), NICKS_FACTORY).code.length == 0,
+            "OracleSink already deployed for this ENV; this is a one-shot deploy (bump ENV/salt or upgrade in place)"
+        );
+
         vm.startBroadcast(pk);
         _deployFactoryStack();
         _deployOracleReceiver(deployer, owner, predictedPriceRelay);
