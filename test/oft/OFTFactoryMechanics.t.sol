@@ -8,6 +8,7 @@ import { BeaconFactory } from "../../src/beacon-factory/BeaconFactory.sol";
 import { EtherFiOFTAdapter } from "../../src/oft/EtherFiOFTAdapter.sol";
 import { EtherFiShadowOFT } from "../../src/oft/EtherFiShadowOFT.sol";
 import { OFTAdapterFactory } from "../../src/oft/OFTAdapterFactory.sol";
+import { PairwiseRateLimiter } from "../../src/oft/PairwiseRateLimiter.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { OFTTestSetup } from "./OFTTestSetup.t.sol";
 
@@ -124,6 +125,75 @@ contract OFTFactoryMechanicsTest is OFTTestSetup {
         // ...with storage preserved
         assertEq(EtherFiShadowOFT(shadow).decimals(), 8);
         assertEq(EtherFiShadowOFT(shadow).conversionRate(), 100);
+    }
+
+    // The rate-limit state lives in its own ERC-7201 namespaced region, so a beacon upgrade that
+    // swaps logic must leave it intact (the upgrade must not reset or shift configured caps).
+    function test_beaconUpgrade_preservesRateLimitState() public {
+        skip(10_000); // make the lastUpdated checkpoint unambiguously non-zero
+        address adapter = _deployAdapter(keccak256("rl-wbtc"), address(token8));
+
+        PairwiseRateLimiter.RateLimitConfig[] memory cfg = new PairwiseRateLimiter.RateLimitConfig[](1);
+        cfg[0] = PairwiseRateLimiter.RateLimitConfig({ peerEid: DST_EID_OP, limit: 1234e8, window: 2 hours });
+        vm.prank(delegate); // delegate == OApp owner
+        PairwiseRateLimiter(adapter).setOutboundRateLimits(cfg);
+
+        PairwiseRateLimiter.RateLimit memory before = PairwiseRateLimiter(adapter).outboundRateLimit(DST_EID_OP);
+        assertEq(before.limit, 1234e8);
+        assertEq(before.window, 2 hours);
+        assertGt(before.lastUpdated, 0);
+
+        // BEFORE: V1 has no version(), so the call finds no selector and reverts. This proves the
+        // upgrade (not code that was already there) is what makes version() callable afterwards.
+        (bool okBefore,) = adapter.staticcall(abi.encodeWithSignature("version()"));
+        assertFalse(okBefore, "version() existed before the upgrade - logic did not actually change");
+
+        address implV2 = address(new EtherFiOFTAdapterV2(address(endpoint), address(configRegistry)));
+        vm.prank(owner); // RoleRegistry owner
+        adapterFactory.upgradeBeaconImplementation(implV2);
+
+        // V2 logic is live AND the namespaced rate-limit region is byte-for-byte preserved.
+        (bool okAfter,) = adapter.staticcall(abi.encodeWithSignature("version()"));
+        assertTrue(okAfter, "logic did not change");
+        PairwiseRateLimiter.RateLimit memory afterUpg = PairwiseRateLimiter(adapter).outboundRateLimit(DST_EID_OP);
+        assertEq(afterUpg.limit, before.limit, "limit not preserved across upgrade");
+        assertEq(afterUpg.window, before.window, "window not preserved across upgrade");
+        assertEq(afterUpg.lastUpdated, before.lastUpdated, "lastUpdated not preserved across upgrade");
+    }
+
+    // Same guarantee on the shadow (mint/burn) side: a beacon upgrade swaps logic while the
+    // namespaced rate-limit region on existing iTOKEN proxies is preserved.
+    function test_beaconUpgrade_shadow_preservesRateLimitState() public {
+        skip(10_000); // make the lastUpdated checkpoint unambiguously non-zero
+        vm.prank(factoryAdmin);
+        address shadow = shadowFactory.deployShadowOFT(keccak256("rl-iWBTC"), "EtherFi WBTC", "iWBTC", 8, delegate);
+
+        // Cap the inbound (receive-from-Ethereum) pathway.
+        PairwiseRateLimiter.RateLimitConfig[] memory cfg = new PairwiseRateLimiter.RateLimitConfig[](1);
+        cfg[0] = PairwiseRateLimiter.RateLimitConfig({ peerEid: DST_EID_ETH, limit: 1234e8, window: 2 hours });
+        vm.prank(delegate); // delegate == OApp owner
+        PairwiseRateLimiter(shadow).setInboundRateLimits(cfg);
+
+        PairwiseRateLimiter.RateLimit memory before = PairwiseRateLimiter(shadow).inboundRateLimit(DST_EID_ETH);
+        assertEq(before.limit, 1234e8);
+        assertEq(before.window, 2 hours);
+        assertGt(before.lastUpdated, 0);
+
+        // BEFORE: V1 has no version(), so the call reverts — proving the upgrade is what adds it.
+        (bool okBefore,) = shadow.staticcall(abi.encodeWithSignature("version()"));
+        assertFalse(okBefore, "version() existed before the upgrade - logic did not actually change");
+
+        address implV2 = address(new EtherFiShadowOFTV2(address(endpoint), address(configRegistry)));
+        vm.prank(owner); // RoleRegistry owner
+        shadowFactory.upgradeBeaconImplementation(implV2);
+
+        // V2 logic is live AND the namespaced rate-limit region is byte-for-byte preserved.
+        (bool okAfter,) = shadow.staticcall(abi.encodeWithSignature("version()"));
+        assertTrue(okAfter, "logic did not change");
+        PairwiseRateLimiter.RateLimit memory afterUpg = PairwiseRateLimiter(shadow).inboundRateLimit(DST_EID_ETH);
+        assertEq(afterUpg.limit, before.limit, "limit not preserved across upgrade");
+        assertEq(afterUpg.window, before.window, "window not preserved across upgrade");
+        assertEq(afterUpg.lastUpdated, before.lastUpdated, "lastUpdated not preserved across upgrade");
     }
 
     // Only the RoleRegistry owner may upgrade a beacon impl.
