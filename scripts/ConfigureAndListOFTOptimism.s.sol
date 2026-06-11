@@ -18,7 +18,7 @@ import { Utils } from "./utils/Utils.sol";
  * @notice EOA-driven bring-up of the Optimism OFT side: grants the OFT roles, sets the LayerZero
  *         pathway config for the Ethereum destination, and lists the first asset by deploying its
  *         mintable iTOKEN (iPEPE). Reads the infra addresses from deployments.json.
- * @dev The deployer EOA must own the OFTRoleRegistry (deploy with OFT_OWNER_OPTIMISM unset so it
+ * @dev The deployer EOA must own the reused cash RoleRegistry (true on dev; on mainnet route through the Safe so it
  *      falls back to the deployer). All steps are idempotent: role grants are no-ops if already
  *      held, and the iTOKEN is only deployed if its deterministic address is not already used.
  *      Run on Optimism:
@@ -62,13 +62,13 @@ contract ConfigureAndListOFTOptimism is Utils {
         address delegate = vm.envOr("OFT_DELEGATE", deployer);
 
         string memory deployments = readDeploymentFile();
-        RoleRegistry roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.OFTRoleRegistry"));
+        RoleRegistry roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
         OFTConfigRegistry configRegistry = OFTConfigRegistry(stdJson.readAddress(deployments, ".addresses.OFTConfigRegistry"));
         ShadowOFTFactory factory = ShadowOFTFactory(stdJson.readAddress(deployments, ".addresses.ShadowOFTFactory"));
 
         require(
             roleRegistry.owner() == deployer,
-            "deployer must own OFTRoleRegistry (deploy with OFT_OWNER_OPTIMISM unset for the EOA wiring path)"
+            "deployer must own the RoleRegistry (EOA wiring path; on mainnet route grants/listing through the Safe instead)"
         );
 
         // CREATE3 salt convention: keccak256(abi.encode("EtherFiOFT", underlyingToken)).

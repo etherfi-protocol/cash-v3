@@ -43,7 +43,7 @@ contract UpgradeOFTRateLimiter is Utils {
         address deployer = vm.addr(pk);
 
         string memory deployments = readDeploymentFile();
-        RoleRegistry roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.OFTRoleRegistry"));
+        RoleRegistry roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
         address configRegistry = stdJson.readAddress(deployments, ".addresses.OFTConfigRegistry");
         string memory factoryKey = isMainnet ? ".addresses.OFTAdapterFactory" : ".addresses.ShadowOFTFactory";
         BeaconFactory factory = BeaconFactory(stdJson.readAddress(deployments, factoryKey));

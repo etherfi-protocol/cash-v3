@@ -19,7 +19,7 @@ import { Utils } from "./utils/Utils.sol";
  * @notice EOA-driven bring-up of the mainnet OFT side: grants the OFT roles, sets the LayerZero
  *         pathway config for the Optimism destination, and lists the first asset (PEPE) by
  *         deploying its lock adapter. Reads the infra addresses from deployments.json.
- * @dev The deployer EOA must own the OFTRoleRegistry (deploy with OFT_OWNER_MAINNET unset so it
+ * @dev The deployer EOA must own the reused cash RoleRegistry (true on dev; on mainnet route through the Safe so it
  *      falls back to the deployer). All steps are idempotent: role grants are no-ops if already
  *      held, and the adapter is only deployed if PEPE is not already listed. Run on mainnet:
  *
@@ -57,11 +57,11 @@ contract ConfigureAndListOFTMainnet is Utils {
         address delegate = vm.envOr("OFT_DELEGATE", deployer);
 
         string memory deployments = readDeploymentFile();
-        RoleRegistry roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.OFTRoleRegistry"));
+        RoleRegistry roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
         OFTConfigRegistry configRegistry = OFTConfigRegistry(stdJson.readAddress(deployments, ".addresses.OFTConfigRegistry"));
         OFTAdapterFactory factory = OFTAdapterFactory(stdJson.readAddress(deployments, ".addresses.OFTAdapterFactory"));
 
-        require(roleRegistry.owner() == deployer, "deployer must own OFTRoleRegistry (deploy with OFT_OWNER_MAINNET unset for the EOA wiring path)");
+        require(roleRegistry.owner() == deployer, "deployer must own the RoleRegistry (EOA wiring path; on mainnet route grants/listing through the Safe instead)");
         require(IERC20Metadata(PEPE).decimals() == 18, "unexpected PEPE decimals");
 
         // CREATE3 salt convention: keccak256(abi.encode("EtherFiOFT", underlyingToken)).
