@@ -6,7 +6,7 @@ libs = ["lib"]
 solc = "0.8.28" 
 optimizer = true
 optimizer_runs = 0
-evm_version = "cancun" 
+evm_version = "cancun"
 gas_reports = ["*"]
 bytecode_hash = "none"
 fs_permissions = [{ access = "read-write", path = "./" }]
