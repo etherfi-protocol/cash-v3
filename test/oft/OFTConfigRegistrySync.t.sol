@@ -65,8 +65,20 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         return abi.decode(raw, (UlnConfig));
     }
 
-    // A well-formed pathway with real libs + sorted DVNs is actually applied to the live endpoint —
-    // proven by reading the config back from the endpoint.
+    // helper: push config to the adapter through the registry (the only authorized syncConfig caller)
+    function _push(address[] memory targets, uint32[] memory eids) internal {
+        vm.prank(configAdmin);
+        configRegistry.pushTo(targets, eids);
+    }
+
+    // helper: single-element [adapter] target list
+    function _adapterTarget() internal view returns (address[] memory t) {
+        t = new address[](1);
+        t[0] = address(adapter);
+    }
+
+    // A well-formed pathway with real libs + sorted DVNs is actually applied to the live endpoint
+    // when the registry pushes it — proven by reading the config back from the endpoint.
     function test_syncConfig_appliesWellFormedConfig() public {
         address[] memory dvns = _sortedDVNs();
         _setPathway(B_EID, _realPathway(15, dvns));
@@ -77,7 +89,7 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
 
         uint32[] memory eids = new uint32[](1);
         eids[0] = B_EID;
-        adapter.syncConfig(eids); // permissionless pull; self-authorized on the endpoint
+        _push(_adapterTarget(), eids); // registry directs the bridge to apply config
 
         // the config genuinely landed on the endpoint's send + receive rows.
         UlnConfig memory sendUln = _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID);
@@ -90,44 +102,16 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         assertEq(recvUln.requiredDVNs.length, 2, "DVN config not applied on receive lib");
     }
 
-    // Unsorted requiredDVNs are rejected by the real ULN (LZ requires strict ascending order).
-    function test_syncConfig_reverts_onUnsortedDVNs() public {
-        address[] memory dvns = _sortedDVNs();
-        (dvns[0], dvns[1]) = (dvns[1], dvns[0]); // force descending
-        _setPathway(B_EID, _realPathway(15, dvns));
-
-        UlnConfig memory beforeCfg = _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID);
-
+    // syncConfig is gated to the registry: a third party can't force a re-pull on the bridge directly.
+    // (Malformed DVN configs are rejected even earlier, at setPathwayConfig write time — see
+    // OFTConfigRegistryTest for that coverage, so the live ULN never receives one.)
+    function test_syncConfig_reverts_whenCallerNotRegistry() public {
+        _setPathway(B_EID, _realPathway(15, _sortedDVNs()));
         uint32[] memory eids = new uint32[](1);
         eids[0] = B_EID;
-        vm.expectRevert(); // LZ_ULN_Unsorted (ULN-internal)
+        vm.prank(alice);
+        vm.expectRevert(ConfigurableOFTBase.UnauthorizedSync.selector);
         adapter.syncConfig(eids);
-
-        // atomic rollback: the endpoint config is unchanged from before the attempt
-        _assertUlnUnchanged(beforeCfg, _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID));
-    }
-
-    // Duplicate requiredDVNs are rejected by the real ULN.
-    function test_syncConfig_reverts_onDuplicateDVNs() public {
-        address[] memory dvns = new address[](2);
-        dvns[0] = makeAddr("dup");
-        dvns[1] = dvns[0];
-        _setPathway(B_EID, _realPathway(15, dvns));
-
-        UlnConfig memory beforeCfg = _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID);
-
-        uint32[] memory eids = new uint32[](1);
-        eids[0] = B_EID;
-        vm.expectRevert();
-        adapter.syncConfig(eids);
-
-        _assertUlnUnchanged(beforeCfg, _ulnOnEndpoint(endpointSetup.sendLibs[0], B_EID));
-    }
-
-    /// @dev Confirmations + DVN count unchanged — i.e. the attempted (bad) config was not applied.
-    function _assertUlnUnchanged(UlnConfig memory before, UlnConfig memory got) internal pure {
-        assertEq(got.confirmations, before.confirmations, "confirmations changed despite revert");
-        assertEq(got.requiredDVNs.length, before.requiredDVNs.length, "DVN set changed despite revert");
     }
 
     // Syncing an unconfigured destination resolves to an empty pathway (zero send lib); the real
@@ -136,7 +120,7 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         uint32[] memory eids = new uint32[](1);
         eids[0] = UNCONFIGURED_EID;
         vm.expectRevert();
-        adapter.syncConfig(eids);
+        _push(_adapterTarget(), eids);
     }
 
     // configRegistry is immutable and BOTH production impls (adapter + shadow) reject a zero registry

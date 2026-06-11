@@ -9,6 +9,7 @@ import { TestHelperOz5 } from "@layerzerolabs/test-devtools-evm-foundry/contract
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiOFTAdapter } from "../../src/oft/EtherFiOFTAdapter.sol";
 import { EtherFiShadowOFT } from "../../src/oft/EtherFiShadowOFT.sol";
+import { PairwiseRateLimiter } from "../../src/oft/PairwiseRateLimiter.sol";
 import { OFTAdapterFactory } from "../../src/oft/OFTAdapterFactory.sol";
 import { OFTConfigRegistry } from "../../src/oft/OFTConfigRegistry.sol";
 import { ShadowOFTFactory } from "../../src/oft/ShadowOFTFactory.sol";
@@ -107,6 +108,21 @@ contract OFTCrossChainSetup is TestHelperOz5 {
         vm.startPrank(delegate);
         adapter.setPeer(B_EID, _b32(address(shadow)));
         shadow.setPeer(A_EID, _b32(address(adapter)));
+        vm.stopPrank();
+
+        // The limiter is fail-closed; lift it to effectively-unlimited so the round-trip / conservation
+        // tests exercise the full bridge path. Dedicated rate-limit tests set precise caps instead.
+        _liftRateLimits(address(adapter), B_EID);
+        _liftRateLimits(address(shadow), A_EID);
+    }
+
+    /// @dev Lift the fail-closed rate limit (both directions) for a peer eid on a bridge, as the delegate.
+    function _liftRateLimits(address bridge, uint32 eid) internal {
+        PairwiseRateLimiter.RateLimitConfig[] memory cfg = new PairwiseRateLimiter.RateLimitConfig[](1);
+        cfg[0] = PairwiseRateLimiter.RateLimitConfig({ peerEid: eid, limit: type(uint256).max, window: 1 });
+        vm.startPrank(delegate);
+        PairwiseRateLimiter(bridge).setOutboundRateLimits(cfg);
+        PairwiseRateLimiter(bridge).setInboundRateLimits(cfg);
         vm.stopPrank();
     }
 

@@ -87,7 +87,8 @@ contract OFTAdapterFactory is IOFTAdapterFactory, BeaconFactory {
         // registry is unreachable (fail-hard: never leave a bridge unregistered).
         address registry = IConfigurableOFT(adapter).configRegistry();
         IOFTConfigRegistry(registry).registerBridge(adapter);
-        IConfigurableOFT(adapter).syncConfig(IOFTConfigRegistry(registry).activeDstEids());
+        // syncConfig only accepts calls from the registry, so route the post-deploy sync through it.
+        IOFTConfigRegistry(registry).syncBridge(adapter, IOFTConfigRegistry(registry).activeDstEids());
         return adapter;
     }
 

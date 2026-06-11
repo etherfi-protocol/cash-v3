@@ -29,6 +29,8 @@ contract OFTWeirdTokensTest is OFTTestSetup {
         UpgradeableBeacon beacon = new UpgradeableBeacon(impl, owner);
         bytes memory initData = abi.encodeWithSelector(EtherFiOFTAdapter.initialize.selector, tok, delegate);
         h = OFTAdapterHarness(address(new BeaconProxy(address(beacon), initData)));
+        // Lift the fail-closed rate limit so the lossless/transfer guards are what these tests observe.
+        _liftRateLimits(address(h), DST_EID_OP);
     }
 
     // ----------------------------------------------------------------- lossless guard on lock

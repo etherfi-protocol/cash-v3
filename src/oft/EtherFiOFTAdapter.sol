@@ -7,6 +7,7 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { OFTCoreUpgradeable } from "@layerzerolabs/oft-evm-upgradeable/contracts/oft/OFTCoreUpgradeable.sol";
 
 import { ConfigurableOFTBase } from "./ConfigurableOFTBase.sol";
+import { PairwiseRateLimiter } from "./PairwiseRateLimiter.sol";
 
 /**
  * @title EtherFiOFTAdapter
@@ -29,7 +30,7 @@ import { ConfigurableOFTBase } from "./ConfigurableOFTBase.sol";
  *      an auto-generated getter. Internal math is correct; external readers should
  *      use {conversionRate()}.
  */
-contract EtherFiOFTAdapter is ConfigurableOFTBase {
+contract EtherFiOFTAdapter is ConfigurableOFTBase, PairwiseRateLimiter {
     using SafeERC20 for IERC20;
 
     /// @custom:storage-location erc7201:etherfi.storage.EtherFiOFTAdapter
@@ -136,6 +137,9 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase {
     function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override returns (uint256, uint256) {
         (uint256 amountSentLD, uint256 amountReceivedLD) = _debitView(_amountLD, _minAmountLD, _dstEid);
 
+        // Meter the dust-removed amount that actually leaves (and is credited on the remote).
+        _checkAndUpdateOutboundRateLimit(_dstEid, amountSentLD);
+
         IERC20 underlying = IERC20(_getStorage().innerToken);
         uint256 balanceBefore = underlying.balanceOf(address(this));
         underlying.safeTransferFrom(_from, address(this), amountSentLD);
@@ -150,13 +154,14 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase {
     function _credit(
         address _to,
         uint256 _amountLD,
-        uint32 /*_srcEid*/
+        uint32 _srcEid
     )
         internal
         virtual
         override
         returns (uint256)
     {
+        _checkAndUpdateInboundRateLimit(_srcEid, _amountLD);
         IERC20(_getStorage().innerToken).safeTransfer(_to, _amountLD);
         return _amountLD;
     }

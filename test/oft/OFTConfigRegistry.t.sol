@@ -88,6 +88,107 @@ contract OFTConfigRegistryTest is OFTTestSetup {
         configRegistry.setPathwayConfig(DST_EID_OP, cfg);
     }
 
+    // ------------------------------------------- write-time DVN validation (mirrors LZ UlnBase)
+
+    // n sequential addresses (1, 2, ... n): inherently sorted-ascending and unique.
+    function _seqAddrs(uint256 n) internal pure returns (address[] memory a) {
+        a = new address[](n);
+        for (uint256 i; i < n; ++i) {
+            a[i] = address(uint160(i + 1));
+        }
+    }
+
+    // Unsorted requiredDVNs are rejected at write time (LZ requires strict ascending order).
+    function test_setPathwayConfig_reverts_onUnsortedRequiredDVNs() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15);
+        (cfg.requiredDVNs[0], cfg.requiredDVNs[1]) = (cfg.requiredDVNs[1], cfg.requiredDVNs[0]); // force descending
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.DVNsNotSortedOrUnique.selector);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+    }
+
+    // Duplicate requiredDVNs are rejected (the sorted-strictly-ascending check forbids equals).
+    function test_setPathwayConfig_reverts_onDuplicateRequiredDVNs() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15);
+        cfg.requiredDVNs[1] = cfg.requiredDVNs[0]; // duplicate
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.DVNsNotSortedOrUnique.selector);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+    }
+
+    // A zero DVN address is rejected (address(0) can't exceed the address(0) sort floor).
+    function test_setPathwayConfig_reverts_onZeroDVNAddress() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15);
+        cfg.requiredDVNs[0] = address(0);
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.DVNsNotSortedOrUnique.selector);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+    }
+
+    // More than MAX_DVN_COUNT (127) required DVNs is rejected — would overflow the on-chain uint8 count.
+    function test_setPathwayConfig_reverts_onTooManyRequiredDVNs() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15);
+        cfg.requiredDVNs = _seqAddrs(128);
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.TooManyDVNs.selector);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+    }
+
+    // A non-zero optional threshold with no optional DVNs is rejected (LZ requires threshold == 0 then).
+    function test_setPathwayConfig_reverts_onNonzeroThreshold_whenNoOptionalDVNs() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15); // optionalDVNs empty
+        cfg.optionalDVNThreshold = 1;
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.InvalidOptionalDVNThreshold.selector);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+    }
+
+    // A zero optional threshold WITH optional DVNs present is rejected (must be in (0, count]).
+    function test_setPathwayConfig_reverts_onZeroThreshold_whenOptionalDVNsPresent() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15);
+        cfg.optionalDVNs = _seqAddrs(2);
+        cfg.optionalDVNThreshold = 0;
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.InvalidOptionalDVNThreshold.selector);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+    }
+
+    // An optional threshold exceeding the optional DVN count is rejected.
+    function test_setPathwayConfig_reverts_onThresholdAboveOptionalCount() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15);
+        cfg.optionalDVNs = _seqAddrs(2);
+        cfg.optionalDVNThreshold = 3; // > 2
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.InvalidOptionalDVNThreshold.selector);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+    }
+
+    // Unsorted optional DVNs are rejected too (same invariant as required).
+    function test_setPathwayConfig_reverts_onUnsortedOptionalDVNs() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15);
+        address[] memory opt = _seqAddrs(2);
+        (opt[0], opt[1]) = (opt[1], opt[0]); // descending
+        cfg.optionalDVNs = opt;
+        cfg.optionalDVNThreshold = 1;
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.DVNsNotSortedOrUnique.selector);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+    }
+
+    // A well-formed config with valid optional DVNs + threshold is accepted and stored.
+    function test_setPathwayConfig_acceptsValidOptionalDVNs() public {
+        IOFTConfigRegistry.PathwayConfig memory cfg = _samplePathway(15);
+        cfg.optionalDVNs = _seqAddrs(2);
+        cfg.optionalDVNThreshold = 1; // in (0, 2]
+        vm.prank(configAdmin);
+        configRegistry.setPathwayConfig(DST_EID_OP, cfg);
+
+        IOFTConfigRegistry.PathwayConfig memory got = configRegistry.getPathwayConfig(DST_EID_OP);
+        assertEq(got.optionalDVNs.length, 2);
+        assertEq(got.optionalDVNThreshold, 1);
+        assertEq(configRegistry.configVersion(), 1);
+    }
+
     // ----------------------------------------------------------------- registerBridge / enumeration
 
     // The registrar can add a bridge; it lands in the enumerable set and emits.
@@ -262,5 +363,93 @@ contract OFTConfigRegistryTest is OFTTestSetup {
         vm.prank(registrar);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         configRegistry.registerBridge(makeAddr("bridge"));
+    }
+
+    // ----------------------------------------------------------------- removePathway / deregisterBridge
+
+    // Removing a pathway clears its config, drops it from activeDstEids, bumps the version, and emits.
+    function test_removePathway_removesAndBumpsVersion() public {
+        _setPathway(DST_EID_OP, 15); // v1, active = [OP]
+        assertEq(configRegistry.activeDstEids().length, 1);
+
+        vm.expectEmit(true, false, false, true);
+        emit IOFTConfigRegistry.PathwayRemoved(DST_EID_OP, 2);
+        vm.prank(configAdmin);
+        configRegistry.removePathway(DST_EID_OP);
+
+        assertEq(configRegistry.configVersion(), 2);
+        assertEq(configRegistry.activeDstEids().length, 0);
+        assertEq(configRegistry.getPathwayConfig(DST_EID_OP).sendLib, address(0)); // config cleared
+    }
+
+    // Removing a destination that was never configured reverts (fail loud on a likely typo).
+    function test_removePathway_reverts_whenNotFound() public {
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.PathwayNotFound.selector);
+        configRegistry.removePathway(DST_EID_OP);
+    }
+
+    // Only CONFIG_ADMIN_ROLE may remove a pathway.
+    function test_removePathway_reverts_whenNotConfigAdmin() public {
+        _setPathway(DST_EID_OP, 15);
+        vm.prank(alice);
+        vm.expectRevert(IOFTConfigRegistry.OnlyConfigAdmin.selector);
+        configRegistry.removePathway(DST_EID_OP);
+    }
+
+    // Pathway removal is blocked while the registry is paused.
+    function test_removePathway_reverts_whenPaused() public {
+        _setPathway(DST_EID_OP, 15);
+        vm.prank(pauser);
+        configRegistry.pause();
+        vm.prank(configAdmin);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        configRegistry.removePathway(DST_EID_OP);
+    }
+
+    // A removed destination can be re-listed by setting it again — it lands once in activeDstEids.
+    function test_removePathway_thenReAdd_listsOnce() public {
+        _setPathway(DST_EID_OP, 15);
+        vm.prank(configAdmin);
+        configRegistry.removePathway(DST_EID_OP);
+        _setPathway(DST_EID_OP, 20); // re-add with new confirmations
+
+        assertEq(configRegistry.activeDstEids().length, 1);
+        assertEq(configRegistry.activeDstEids()[0], DST_EID_OP);
+        assertEq(configRegistry.getPathwayConfig(DST_EID_OP).confirmations, 20);
+    }
+
+    // The admin can drop a bridge from the push set; it leaves the enumerable set and emits.
+    function test_deregisterBridge_removesAndEmits() public {
+        address bridge = address(new MockConfigurableOFT(address(configRegistry)));
+        vm.prank(registrar);
+        configRegistry.registerBridge(bridge);
+        assertEq(configRegistry.numBridges(), 1);
+
+        vm.expectEmit(true, false, false, false);
+        emit IOFTConfigRegistry.BridgeDeregistered(bridge);
+        vm.prank(configAdmin);
+        configRegistry.deregisterBridge(bridge);
+
+        assertEq(configRegistry.numBridges(), 0);
+        assertEq(configRegistry.getBridges(0, 10).length, 0);
+    }
+
+    // Deregistering a bridge that was never registered reverts.
+    function test_deregisterBridge_reverts_whenNotFound() public {
+        vm.prank(configAdmin);
+        vm.expectRevert(IOFTConfigRegistry.BridgeNotFound.selector);
+        configRegistry.deregisterBridge(makeAddr("ghost"));
+    }
+
+    // Deregistration is an admin action — a registrar (the factory role) cannot deregister.
+    function test_deregisterBridge_reverts_whenNotConfigAdmin() public {
+        address bridge = address(new MockConfigurableOFT(address(configRegistry)));
+        vm.prank(registrar);
+        configRegistry.registerBridge(bridge);
+
+        vm.prank(registrar); // holds REGISTRAR, not CONFIG_ADMIN
+        vm.expectRevert(IOFTConfigRegistry.OnlyConfigAdmin.selector);
+        configRegistry.deregisterBridge(bridge);
     }
 }
