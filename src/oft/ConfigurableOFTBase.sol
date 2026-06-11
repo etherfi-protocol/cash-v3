@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+
 import { UlnConfig } from "@layerzerolabs/lz-evm-messagelib-v2/contracts/uln/UlnBase.sol";
 import { SetConfigParam } from "@layerzerolabs/lz-evm-protocol-v2/contracts/interfaces/IMessageLibManager.sol";
 import { OFTCoreUpgradeable } from "@layerzerolabs/oft-evm-upgradeable/contracts/oft/OFTCoreUpgradeable.sol";
 
 import { IConfigurableOFT } from "../interfaces/IConfigurableOFT.sol";
 import { IOFTConfigRegistry } from "../interfaces/IOFTConfigRegistry.sol";
+import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
+
+/// @dev Minimal view into the config registry to resolve the shared RoleRegistry that gates pause.
+///      The registry exposes `roleRegistry()` (via UpgradeableProxy); the bridge reads it rather
+///      than carrying its own RoleRegistry reference.
+interface IRoleRegistrySource {
+    function roleRegistry() external view returns (IRoleRegistry);
+}
 
 /**
  * @title ConfigurableOFTBase
@@ -23,8 +33,20 @@ import { IOFTConfigRegistry } from "../interfaces/IOFTConfigRegistry.sol";
  *
  *      Only the DVN/library config (endpoint-side) is synced here. Enforced
  *      options are owner-gated on the OApp and are set separately by the owner.
+ *
+ *      Pause: the bridge inherits {PausableUpgradeable}; children apply
+ *      {whenNotPaused} to `_debit` (send) and `_credit` (receive) so one flag halts
+ *      BOTH directions. {pauseBridge}/{unpauseBridge} live and are gated HERE on the
+ *      bridge (not routed through the registry) so the emergency control has no
+ *      control-path dependency on another mutable contract — matching the weETH OFTs
+ *      and our own {PairwiseRateLimiter}. They are gated by the shared RoleRegistry
+ *      PAUSER/UNPAUSER roles (the same roles the oracle side uses), resolved by reading
+ *      `roleRegistry()` off the immutable {configRegistry}. "Pause everything" is an
+ *      off-chain Safe batch of {pauseBridge} calls. State lives in {PausableUpgradeable}'s
+ *      own ERC-7201 slot, so an existing beacon proxy gains pause without disturbing its
+ *      layout and reads as unpaused by default.
  */
-abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, IConfigurableOFT {
+abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, PausableUpgradeable, IConfigurableOFT {
     /// @notice Shared config registry, fixed at impl deploy (one per chain)
     address public immutable override configRegistry;
 
@@ -39,6 +61,33 @@ abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, IConfigurableOFT {
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _configRegistry) {
         configRegistry = _configRegistry;
+    }
+
+    /**
+     * @notice Pause this bridge — halts both send and receive. Callable by a PAUSER.
+     * @dev Gated by the shared RoleRegistry PAUSER role (resolved off {configRegistry}), not the
+     *      OApp delegate, so an incident responder can halt the bridge without the heavier config
+     *      Safe. Idempotent: a redundant pause is a no-op (OZ {_pause} would otherwise revert).
+     *      Emits {Paused} on a real transition. Inbound messages that arrive while paused revert in
+     *      {_credit} and become retryable on the endpoint — held, not lost — until {unpauseBridge}.
+     */
+    function pauseBridge() external {
+        _roleRegistry().onlyPauser(msg.sender);
+        if (!paused()) _pause();
+    }
+
+    /**
+     * @notice Unpause this bridge. Callable by an UNPAUSER (held more tightly than PAUSER).
+     * @dev Idempotent: a redundant unpause is a no-op. Emits {Unpaused} on a real transition.
+     */
+    function unpauseBridge() external {
+        _roleRegistry().onlyUnpauser(msg.sender);
+        if (paused()) _unpause();
+    }
+
+    /// @dev The shared RoleRegistry that gates pause, read off the immutable config registry.
+    function _roleRegistry() private view returns (IRoleRegistry) {
+        return IRoleRegistrySource(configRegistry).roleRegistry();
     }
 
     /**
