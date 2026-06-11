@@ -85,6 +85,16 @@ contract ConfigureAndListOFTOptimism is Utils {
         configRegistry.setPathwayConfig(DST_EID, _pathwayConfig());
         // List iPEPE. Factory auto-registers the bridge and pulls the config just set.
         address shadow = _listShadow(factory, salt, delegate, alreadyListed);
+        // Fresh deploy: the factory already synced the config above. Re-run on an existing iTOKEN:
+        // push the (possibly updated) pathway config so its endpoint DVN/library rows don't drift
+        // from the registry. syncConfig only accepts the registry, so route through pushTo.
+        if (alreadyListed) {
+            address[] memory bridges = new address[](1);
+            bridges[0] = shadow;
+            uint32[] memory dstEids = new uint32[](1);
+            dstEids[0] = DST_EID;
+            configRegistry.pushTo(bridges, dstEids);
+        }
         // Cap throughput at listing. setRateLimits is owner-gated; in the EOA flow the deployer is
         // the delegate so it can set them inline. If the delegate is a separate Safe, this is skipped
         // and the delegate must run SetOFTRateLimits (the bridge stays fail-closed until then).
