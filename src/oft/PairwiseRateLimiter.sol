@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { OFTCoreUpgradeable } from "@layerzerolabs/oft-evm-upgradeable/contracts/oft/OFTCoreUpgradeable.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
  * @title PairwiseRateLimiter
@@ -31,6 +32,8 @@ import { OFTCoreUpgradeable } from "@layerzerolabs/oft-evm-upgradeable/contracts
  *      inheritance diamond.
  */
 abstract contract PairwiseRateLimiter is OFTCoreUpgradeable {
+    using Math for uint256;
+
     /**
      * @notice Rate limit state for a single pathway.
      * @param amountInFlight The amount counted in the current (decaying) window.
@@ -179,8 +182,10 @@ abstract contract PairwiseRateLimiter is OFTCoreUpgradeable {
             currentAmountInFlight = 0;
             amountCanBeSent = _limit;
         } else {
-            // Linear decay of the in-flight amount over the window.
-            uint256 decay = (_limit * timeSinceLastDeposit) / _window;
+            // Linear decay of the in-flight amount over the window. mulDiv carries the product at
+            // full 512-bit precision, so a very large limit (e.g. an "unlimited" type(uint256).max
+            // sentinel) can't overflow the intermediate before the divide.
+            uint256 decay = _limit.mulDiv(timeSinceLastDeposit, _window);
             currentAmountInFlight = _amountInFlight <= decay ? 0 : _amountInFlight - decay;
             // If the limit was lowered below the current in-flight amount, no further capacity is available.
             amountCanBeSent = _limit <= currentAmountInFlight ? 0 : _limit - currentAmountInFlight;
