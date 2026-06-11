@@ -32,6 +32,7 @@ abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, IConfigurableOFT {
     uint32 private constant CONFIG_TYPE_ULN = 2;
 
     error RegistryNotSet();
+    error UnauthorizedSync();
 
     event ConfigSynced(uint32[] dstEids);
 
@@ -43,14 +44,19 @@ abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, IConfigurableOFT {
     /**
      * @notice Pulls the canonical config from the registry and applies it to this
      *         bridge's own endpoint rows for each destination.
-     * @dev Self-authorized: `msg.sender == oapp` lets this bridge call `setConfig` on the
-     *      endpoint without a delegate. Emits {ConfigSynced}; the bridge keeps no per-proxy
-     *      sync state, so verify applied config by reading the endpoint rows.
+     * @dev Only the {configRegistry} may invoke this — operators push via the registry
+     *      ({pushTo}/{pushToAll}/{pushToRange}) and factories sync via {syncBridge}. Gating to the
+     *      registry stops a third party from forcing a re-pull that would revert an operator's
+     *      out-of-band hardening or bypass an incident pause. Self-authorized on the endpoint:
+     *      `msg.sender == oapp` lets this bridge call `setConfig` without a delegate. Emits
+     *      {ConfigSynced}; the bridge keeps no per-proxy sync state, so verify applied config by
+     *      reading the endpoint rows.
      * @param dstEids Destination endpoint IDs to (re)configure
      */
     function syncConfig(uint32[] calldata dstEids) external override {
         address reg = configRegistry;
         if (reg == address(0)) revert RegistryNotSet();
+        if (msg.sender != reg) revert UnauthorizedSync();
 
         for (uint256 i; i < dstEids.length;) {
             IOFTConfigRegistry.PathwayConfig memory c = IOFTConfigRegistry(reg).getPathwayConfig(dstEids[i]);

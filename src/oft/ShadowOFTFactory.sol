@@ -81,7 +81,8 @@ contract ShadowOFTFactory is IShadowOFTFactory, BeaconFactory {
         // registry is unreachable (fail-hard: never leave a bridge unregistered).
         address registry = IConfigurableOFT(shadowOFT).configRegistry();
         IOFTConfigRegistry(registry).registerBridge(shadowOFT);
-        IConfigurableOFT(shadowOFT).syncConfig(IOFTConfigRegistry(registry).activeDstEids());
+        // syncConfig only accepts calls from the registry, so route the post-deploy sync through it.
+        IOFTConfigRegistry(registry).syncBridge(shadowOFT, IOFTConfigRegistry(registry).activeDstEids());
         return shadowOFT;
     }
 

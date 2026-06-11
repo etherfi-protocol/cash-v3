@@ -37,6 +37,10 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
     /// @notice Role allowed to register new bridges (the factories)
     bytes32 public constant CONFIG_REGISTRAR_ROLE = keccak256("OFT_CONFIG_REGISTRAR_ROLE");
 
+    /// @dev Max DVNs per side. Mirrors LayerZero {UlnBase}'s MAX_COUNT = (type(uint8).max - 1) / 2,
+    ///      which caps total DVNs (required + optional) so the on-chain config stays within uint8.
+    uint256 private constant MAX_DVN_COUNT = 127;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -49,13 +53,17 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
 
     /**
      * @notice Set/replace the canonical config for a destination (bumps version)
-     * @dev Restricted to CONFIG_ADMIN_ROLE. Reverts on a zero send/receive lib or empty required DVN set.
+     * @dev Restricted to CONFIG_ADMIN_ROLE. Reverts on a zero send/receive lib or empty required DVN set,
+     *      and validates the DVN stack against the same invariants LayerZero's {UlnBase} enforces
+     *      ({_assertConfigValid}) so a malformed config fails fast here instead of being stored, listed,
+     *      and then reverting on every {syncConfig}/{pushTo}/factory auto-deploy for this dstEid.
      * @param dstEid LayerZero destination endpoint id
      * @param cfg Full pathway config (libraries, confirmations, DVN stack)
      */
     function setPathwayConfig(uint32 dstEid, PathwayConfig calldata cfg) external override whenNotPaused {
         if (!roleRegistry().hasRole(CONFIG_ADMIN_ROLE, msg.sender)) revert OnlyConfigAdmin();
         if (cfg.sendLib == address(0) || cfg.receiveLib == address(0) || cfg.requiredDVNs.length == 0) revert InvalidInput();
+        _assertConfigValid(cfg);
 
         OFTConfigRegistryStorage storage $ = _getStorage();
         $.pathway[dstEid] = cfg;
@@ -64,6 +72,26 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
             $.version += 1;
         }
         emit PathwayConfigSet(dstEid, $.version);
+    }
+
+    /**
+     * @notice Remove a destination's pathway (admin only, bumps version)
+     * @dev Restricted to CONFIG_ADMIN_ROLE. Deletes the stored config and drops the destination from
+     *      {activeDstEids}, so it stops propagating to bridges deployed/synced afterwards. It does NOT
+     *      rewrite config already applied to a bridge's endpoint rows — to neutralize an in-flight
+     *      pathway (e.g. a compromised DVN), the operator must also unset the peer or push a
+     *      restrictive config directly. Reverts if the destination was never configured.
+     * @param dstEid LayerZero destination endpoint id to remove
+     */
+    function removePathway(uint32 dstEid) external override whenNotPaused {
+        if (!roleRegistry().hasRole(CONFIG_ADMIN_ROLE, msg.sender)) revert OnlyConfigAdmin();
+        OFTConfigRegistryStorage storage $ = _getStorage();
+        if (!$.activeDstEidSet.remove(dstEid)) revert PathwayNotFound();
+        delete $.pathway[dstEid];
+        unchecked {
+            $.version += 1;
+        }
+        emit PathwayRemoved(dstEid, $.version);
     }
 
     /**
@@ -112,6 +140,19 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
     }
 
     /**
+     * @notice Drop a bridge from the push set (admin only)
+     * @dev Restricted to CONFIG_ADMIN_ROLE. After removal the bridge is no longer enumerated by
+     *      {pushToAll}/{pushToRange}, so a deprecated or compromised bridge stops receiving config.
+     *      It does NOT touch config already on the bridge's endpoint rows. Reverts if not registered.
+     * @param bridge The OFT bridge to deregister
+     */
+    function deregisterBridge(address bridge) external override whenNotPaused {
+        if (!roleRegistry().hasRole(CONFIG_ADMIN_ROLE, msg.sender)) revert OnlyConfigAdmin();
+        if (!_getStorage().bridgeSet.remove(bridge)) revert BridgeNotFound();
+        emit BridgeDeregistered(bridge);
+    }
+
+    /**
      * @notice Paginated enumeration of registered bridges
      * @param start Starting index in the bridge set
      * @param n Maximum number of entries to return
@@ -138,6 +179,21 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
      */
     function numBridges() external view override returns (uint256) {
         return _getStorage().bridgeSet.length();
+    }
+
+    /**
+     * @notice Make a single bridge re-pull config (registrar only)
+     * @dev Restricted to CONFIG_REGISTRAR_ROLE. This is the path the factories use to sync a bridge
+     *      right after deploy: a bridge's {IConfigurableOFT-syncConfig} only accepts calls from this
+     *      registry, so the factory routes its post-deploy sync through here rather than calling the
+     *      bridge directly.
+     * @param bridge Bridge to refresh
+     * @param dstEids Destination endpoint ids to (re)configure on the bridge
+     */
+    function syncBridge(address bridge, uint32[] calldata dstEids) external override whenNotPaused {
+        if (!roleRegistry().hasRole(CONFIG_REGISTRAR_ROLE, msg.sender)) revert OnlyRegistrar();
+        IConfigurableOFT(bridge).syncConfig(dstEids);
+        emit ConfigPushed(bridge, dstEids);
     }
 
     /**
@@ -194,6 +250,37 @@ contract OFTConfigRegistry is IOFTConfigRegistry, UpgradeableProxy {
             address b = $.bridgeSet.at(start + i);
             IConfigurableOFT(b).syncConfig(dstEids);
             emit ConfigPushed(b, dstEids);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
+     * @dev Reject any config the LayerZero ULN library would reject at apply time. Mirrors
+     *      {UlnBase}._setConfig for the non-DEFAULT/non-NIL case this registry always produces
+     *      (requiredDVNs is non-empty): both DVN lists sorted ascending + deduped, each within
+     *      MAX_DVN_COUNT, and optionalDVNThreshold == 0 iff there are no optional DVNs, else in
+     *      (0, optionalDVNs.length].
+     */
+    function _assertConfigValid(PathwayConfig calldata cfg) private pure {
+        if (cfg.requiredDVNs.length > MAX_DVN_COUNT || cfg.optionalDVNs.length > MAX_DVN_COUNT) revert TooManyDVNs();
+        _assertSortedAndUnique(cfg.requiredDVNs);
+        _assertSortedAndUnique(cfg.optionalDVNs);
+        if (cfg.optionalDVNs.length == 0) {
+            if (cfg.optionalDVNThreshold != 0) revert InvalidOptionalDVNThreshold();
+        } else if (cfg.optionalDVNThreshold == 0 || cfg.optionalDVNThreshold > cfg.optionalDVNs.length) {
+            revert InvalidOptionalDVNThreshold();
+        }
+    }
+
+    /// @dev Strictly-ascending check: each entry must exceed the previous, which also forbids
+    ///      duplicates and a leading address(0) (a zero DVN). Mirrors {UlnBase}._assertNoDuplicates.
+    function _assertSortedAndUnique(address[] calldata dvns) private pure {
+        address last = address(0);
+        for (uint256 i; i < dvns.length;) {
+            if (dvns[i] <= last) revert DVNsNotSortedOrUnique();
+            last = dvns[i];
             unchecked {
                 ++i;
             }
