@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 
-import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 import {
     MessagingParams,
     MessagingReceipt,
@@ -50,7 +49,12 @@ contract MockLZEndpoint {
         return MessagingFee({ nativeFee: fee, lzTokenFee: 0 });
     }
 
-    function send(MessagingParams calldata _params, address) external payable returns (MessagingReceipt memory r) {
+    function send(MessagingParams calldata _params, address _refundAddress)
+        external
+        payable
+        returns (MessagingReceipt memory r)
+    {
+        require(msg.value >= fee, "insufficient fee");
         bytes32 guid = keccak256(abi.encode(_params, msg.sender, block.timestamp));
         last = Sent({
             dstEid: _params.dstEid,
@@ -61,9 +65,15 @@ contract MockLZEndpoint {
             guid: guid
         });
         hasPending = true;
+        // Mirror the real endpoint: charge `fee`, refund any surplus to the refund address.
+        uint256 refund = msg.value - fee;
+        if (refund > 0) {
+            (bool ok, ) = _refundAddress.call{ value: refund }("");
+            require(ok, "refund failed");
+        }
         r.guid = guid;
         r.nonce = 1;
-        r.fee = MessagingFee({ nativeFee: msg.value, lzTokenFee: 0 });
+        r.fee = MessagingFee({ nativeFee: fee, lzTokenFee: 0 });
     }
 
     /// @notice Replays the last captured packet into `lzReceive` of the receiver.
@@ -113,15 +123,10 @@ contract OracleSinkAggregatorAdapter {
 }
 
 contract PriceRelayOracleSinkTest is Test {
-    using OptionsBuilder for bytes;
-
     uint32 constant SRC_EID = 1; // "mainnet"
     uint32 constant DST_EID = 2; // "optimism"
 
     uint256 constant INITIAL_PRICE = 2000e6; // 6-decimal USD
-    uint32 constant HEARTBEAT = 5 minutes;
-    uint32 constant DEVIATION_BPS = 50; // 0.5%
-    uint32 constant MAX_STALENESS = 2 days;
 
     MockLZEndpoint endpoint;
     RoleRegistry roleRegistry;
@@ -130,7 +135,6 @@ contract PriceRelayOracleSinkTest is Test {
     OracleSink oracleSink;
 
     address token = makeAddr("token");
-    bytes lzOptions;
 
     function setUp() public {
         vm.warp(1_700_000_000);
@@ -180,167 +184,117 @@ contract PriceRelayOracleSinkTest is Test {
 
         // Admin config.
         roleRegistry.grantRole(priceRelay.PRICE_RELAY_ADMIN_ROLE(), address(this));
-        lzOptions = OptionsBuilder.newOptions().addExecutorLzReceiveOption(200_000, 0);
-        priceRelay.setLzOptions(lzOptions);
-        priceRelay.subscribe(
-            token,
-            IPriceRelay.TokenSubscription({ heartbeat: HEARTBEAT, deviationBps: DEVIATION_BPS, maxStaleness: MAX_STALENESS })
-        );
-
-        // Fund the relay so it can pay LZ fees itself.
-        vm.deal(address(priceRelay), 100 ether);
+        priceRelay.setLzReceiveGasLimit(200_000);
+        priceRelay.subscribe(token);
     }
 
     function _b32(address a) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(a)));
     }
 
-    function _single(address t) internal pure returns (address[] memory arr) {
-        arr = new address[](1);
-        arr[0] = t;
-    }
-
-    function _singlePrice(uint256 p) internal pure returns (uint256[] memory arr) {
-        arr = new uint256[](1);
-        arr[0] = p;
-    }
-
     // --- Round trip --------------------------------------------------------
 
     function test_RoundTrip_relaysPriceToSink() public {
-        priceRelay.poke(_single(token));
+        uint256 fee = priceRelay.quote();
+        priceRelay.poke{ value: fee }();
         endpoint.deliver(SRC_EID);
 
         (uint256 price, uint64 updatedAt) = oracleSink.getPrice(token);
         assertEq(price, INITIAL_PRICE);
         assertEq(updatedAt, uint64(block.timestamp));
-
-        (uint256 lastPrice, uint64 lastTs) = priceRelay.lastRelayed(token);
-        assertEq(lastPrice, INITIAL_PRICE);
-        assertEq(lastTs, uint64(block.timestamp));
     }
 
-    function test_RoundTrip_feePaidFromContractBalance() public {
-        uint256 balanceBefore = address(priceRelay).balance;
-        priceRelay.poke(_single(token));
-        assertEq(address(priceRelay).balance, balanceBefore - endpoint.fee());
-    }
+    function test_RoundTrip_relaysAllSubscribedTokens() public {
+        address token2 = makeAddr("token2");
+        priceRelay.subscribe(token2);
 
-    // --- Heartbeat gate ----------------------------------------------------
-
-    function test_Heartbeat_triggersAfterInterval() public {
-        priceRelay.poke(_single(token));
+        uint256 fee = priceRelay.quote();
+        priceRelay.poke{ value: fee }();
         endpoint.deliver(SRC_EID);
 
-        // Within heartbeat, unchanged price -> nothing to relay.
-        vm.warp(block.timestamp + 1);
-        vm.expectRevert(IPriceRelay.NothingToRelay.selector);
-        priceRelay.poke(_single(token));
-
-        // After heartbeat -> relays again even with unchanged price.
-        vm.warp(block.timestamp + HEARTBEAT);
-        priceRelay.poke(_single(token));
-
-        (, uint64 lastTs) = priceRelay.lastRelayed(token);
-        assertEq(lastTs, uint64(block.timestamp));
+        (uint256 p1,) = oracleSink.getPrice(token);
+        (uint256 p2,) = oracleSink.getPrice(token2);
+        assertEq(p1, INITIAL_PRICE);
+        assertEq(p2, INITIAL_PRICE);
     }
 
-    // --- Deviation gate ----------------------------------------------------
+    // --- Caller pays -------------------------------------------------------
 
-    function test_Deviation_triggersOnPriceMove() public {
-        priceRelay.poke(_single(token));
-        endpoint.deliver(SRC_EID);
+    function test_Poke_feeTakenFromMsgValueNotContract() public {
+        uint256 fee = priceRelay.quote();
+        uint256 callerBefore = address(this).balance;
 
-        // Move 1% (>= 0.5% threshold) within the heartbeat window.
-        vm.warp(block.timestamp + 1);
-        mockPriceProvider.setPrice((INITIAL_PRICE * 101) / 100);
+        priceRelay.poke{ value: fee }();
 
-        priceRelay.poke(_single(token));
+        // Exactly the quoted fee left the caller; the relay holds no balance.
+        assertEq(address(this).balance, callerBefore - fee);
+        assertEq(address(priceRelay).balance, 0);
+    }
+
+    function test_Poke_refundsOverpayment() public {
+        uint256 fee = priceRelay.quote();
+        uint256 buffer = 1 ether;
+        uint256 callerBefore = address(this).balance;
+
+        priceRelay.poke{ value: fee + buffer }();
+
+        // Only the fee is consumed; the endpoint refunds the buffer to the caller.
+        assertEq(address(this).balance, callerBefore - fee);
+        assertEq(address(priceRelay).balance, 0);
+    }
+
+    function test_Poke_revertsWhenUnderpaid() public {
+        uint256 fee = priceRelay.quote();
+        vm.expectRevert(IPriceRelay.InsufficientFee.selector);
+        priceRelay.poke{ value: fee - 1 }();
+    }
+
+    function test_Poke_revertsWhenNothingSubscribed() public {
+        priceRelay.unsubscribe(token);
+        vm.expectRevert(IPriceRelay.InvalidInput.selector);
+        priceRelay.quote();
+    }
+
+    function test_Poke_isPermissionless() public {
+        address anyone = makeAddr("anyone");
+        uint256 fee = priceRelay.quote();
+        vm.deal(anyone, fee);
+
+        vm.prank(anyone);
+        priceRelay.poke{ value: fee }();
         endpoint.deliver(SRC_EID);
 
         (uint256 price,) = oracleSink.getPrice(token);
-        assertEq(price, (INITIAL_PRICE * 101) / 100);
-    }
-
-    function test_Deviation_belowThresholdDoesNotTrigger() public {
-        priceRelay.poke(_single(token));
-        endpoint.deliver(SRC_EID);
-
-        // Move 0.1% (< 0.5% threshold) within heartbeat -> no relay.
-        vm.warp(block.timestamp + 1);
-        mockPriceProvider.setPrice((INITIAL_PRICE * 1001) / 1000);
-
-        vm.expectRevert(IPriceRelay.NothingToRelay.selector);
-        priceRelay.poke(_single(token));
-    }
-
-    // --- Deviation gate edge cases (Bugbot) --------------------------------
-
-    /// @dev deviationBps == 0 must disable the deviation trigger (heartbeat only),
-    ///      not relay on every poke.
-    function test_Deviation_zeroBpsDisablesTriggerButHeartbeatStillWorks() public {
-        address t = makeAddr("zeroBpsToken");
-        priceRelay.subscribe(
-            t, IPriceRelay.TokenSubscription({ heartbeat: HEARTBEAT, deviationBps: 0, maxStaleness: MAX_STALENESS })
-        );
-
-        priceRelay.poke(_single(t)); // first send
-        endpoint.deliver(SRC_EID);
-
-        // Within heartbeat, even a 100% move must NOT relay (deviation disabled).
-        vm.warp(block.timestamp + 1);
-        mockPriceProvider.setPrice(INITIAL_PRICE * 2);
-        vm.expectRevert(IPriceRelay.NothingToRelay.selector);
-        priceRelay.poke(_single(t));
-
-        // Heartbeat still forces a relay once the interval elapses.
-        vm.warp(block.timestamp + HEARTBEAT);
-        priceRelay.poke(_single(t));
-        (, uint64 lastTs) = priceRelay.lastRelayed(t);
-        assertEq(lastTs, uint64(block.timestamp));
-    }
-
-    /// @dev A previously-relayed price of 0 must not make the deviation branch
-    ///      permanently true (no per-poke fee drain while the price stays 0).
-    function test_Deviation_relayedZeroPriceDoesNotSpam() public {
-        address t = makeAddr("zeroPriceToken");
-        priceRelay.subscribe(
-            t,
-            IPriceRelay.TokenSubscription({ heartbeat: HEARTBEAT, deviationBps: DEVIATION_BPS, maxStaleness: MAX_STALENESS })
-        );
-
-        mockPriceProvider.setPrice(0);
-        priceRelay.poke(_single(t));
-        endpoint.deliver(SRC_EID);
-        (uint256 lastPrice,) = priceRelay.lastRelayed(t);
-        assertEq(lastPrice, 0);
-
-        // Still 0 within the heartbeat window -> no deviation -> nothing to relay.
-        vm.warp(block.timestamp + 1);
-        vm.expectRevert(IPriceRelay.NothingToRelay.selector);
-        priceRelay.poke(_single(t));
-    }
-
-    /// @dev Recovery from 0 to a non-zero price is an unbounded move and must relay.
-    function test_Deviation_zeroToNonZeroRelays() public {
-        address t = makeAddr("recoverToken");
-        priceRelay.subscribe(
-            t,
-            IPriceRelay.TokenSubscription({ heartbeat: HEARTBEAT, deviationBps: DEVIATION_BPS, maxStaleness: MAX_STALENESS })
-        );
-
-        mockPriceProvider.setPrice(0);
-        priceRelay.poke(_single(t));
-        endpoint.deliver(SRC_EID);
-
-        // Price recovers within the heartbeat window -> relays.
-        vm.warp(block.timestamp + 1);
-        mockPriceProvider.setPrice(INITIAL_PRICE);
-        priceRelay.poke(_single(t));
-        endpoint.deliver(SRC_EID);
-
-        (uint256 price,) = oracleSink.getPrice(t);
         assertEq(price, INITIAL_PRICE);
+    }
+
+    // --- Subscription ------------------------------------------------------
+
+    function test_Subscribe_zeroAddressReverts() public {
+        vm.expectRevert(IPriceRelay.InvalidInput.selector);
+        priceRelay.subscribe(address(0));
+    }
+
+    function test_Unsubscribe_revertsForUnsubscribedToken() public {
+        vm.expectRevert(IPriceRelay.TokenNotSubscribed.selector);
+        priceRelay.unsubscribe(makeAddr("other"));
+    }
+
+    function test_Subscribe_onlyAdmin() public {
+        vm.prank(makeAddr("attacker"));
+        vm.expectRevert();
+        priceRelay.subscribe(makeAddr("other"));
+    }
+
+    function test_SubscribedTokens_reflectsState() public {
+        assertTrue(priceRelay.isSubscribed(token));
+        address[] memory subs = priceRelay.subscribedTokens();
+        assertEq(subs.length, 1);
+        assertEq(subs[0], token);
+
+        priceRelay.unsubscribe(token);
+        assertFalse(priceRelay.isSubscribed(token));
+        assertEq(priceRelay.subscribedTokens().length, 0);
     }
 
     // --- Peer authentication ----------------------------------------------
@@ -366,57 +320,11 @@ contract PriceRelayOracleSinkTest is Test {
         );
     }
 
-    // --- Funding -----------------------------------------------------------
-
-    function test_InsufficientBalance_pokeRevertsWhenUnfunded() public {
-        (uint256 quoted,) = priceRelay.quote(_single(token));
-        assertGt(quoted, 0, "expected non-zero LZ fee");
-
-        address recipient = makeAddr("recipient");
-        priceRelay.withdraw(recipient, address(priceRelay).balance);
-        assertEq(address(priceRelay).balance, 0);
-
-        vm.expectRevert(IPriceRelay.InsufficientBalance.selector);
-        priceRelay.poke(_single(token));
-    }
-
-    function test_Withdraw_movesFunds() public {
-        address recipient = makeAddr("recipient");
-        priceRelay.withdraw(recipient, 1 ether);
-        assertEq(recipient.balance, 1 ether);
-    }
-
-    function test_Withdraw_revertsWhenAmountExceedsBalance() public {
-        vm.expectRevert(IPriceRelay.InsufficientBalance.selector);
-        priceRelay.withdraw(makeAddr("recipient"), 1000 ether);
-    }
-
-    function test_Withdraw_onlyAdmin() public {
-        vm.prank(makeAddr("attacker"));
-        vm.expectRevert();
-        priceRelay.withdraw(makeAddr("recipient"), 1 ether);
-    }
-
-    // --- Subscription gating ----------------------------------------------
-
-    function test_Poke_revertsForUnsubscribedToken() public {
-        vm.expectRevert(IPriceRelay.TokenNotSubscribed.selector);
-        priceRelay.poke(_single(makeAddr("other")));
-    }
-
-    function test_Poke_isPermissionless() public {
-        vm.prank(makeAddr("anyone"));
-        priceRelay.poke(_single(token));
-        endpoint.deliver(SRC_EID);
-
-        (uint256 price,) = oracleSink.getPrice(token);
-        assertEq(price, INITIAL_PRICE);
-    }
-
     // --- OP PriceProvider consumes the sink --------------------------------
 
     function test_OpPriceProvider_readsRelayedPrice() public {
-        priceRelay.poke(_single(token));
+        uint256 fee = priceRelay.quote();
+        priceRelay.poke{ value: fee }();
         endpoint.deliver(SRC_EID);
 
         address ppImpl = address(new PriceProvider());
@@ -494,7 +402,8 @@ contract PriceRelayOracleSinkTest is Test {
     }
 
     function test_DirectIntegration_priceProviderReadsSink() public {
-        priceRelay.poke(_single(token));
+        uint256 fee = priceRelay.quote();
+        priceRelay.poke{ value: fee }();
         endpoint.deliver(SRC_EID);
 
         roleRegistry.grantRole(oracleSink.ORACLE_SINK_ADMIN_ROLE(), address(this));
@@ -507,7 +416,8 @@ contract PriceRelayOracleSinkTest is Test {
     }
 
     function test_DirectIntegration_staleSinkRevertsInPriceProvider() public {
-        priceRelay.poke(_single(token));
+        uint256 fee = priceRelay.quote();
+        priceRelay.poke{ value: fee }();
         endpoint.deliver(SRC_EID);
 
         roleRegistry.grantRole(oracleSink.ORACLE_SINK_ADMIN_ROLE(), address(this));
@@ -527,7 +437,8 @@ contract PriceRelayOracleSinkTest is Test {
     }
 
     function test_DirectIntegration_noStalenessConfiguredNeverAgesOut() public {
-        priceRelay.poke(_single(token));
+        uint256 fee = priceRelay.quote();
+        priceRelay.poke{ value: fee }();
         endpoint.deliver(SRC_EID);
 
         // maxStaleness left at 0 (disabled).
@@ -543,4 +454,16 @@ contract PriceRelayOracleSinkTest is Test {
         vm.expectRevert();
         oracleSink.setMaxStaleness(token, 1 days);
     }
+
+    function _single(address t) internal pure returns (address[] memory arr) {
+        arr = new address[](1);
+        arr[0] = t;
+    }
+
+    function _singlePrice(uint256 p) internal pure returns (uint256[] memory arr) {
+        arr = new uint256[](1);
+        arr[0] = p;
+    }
+
+    receive() external payable {}
 }

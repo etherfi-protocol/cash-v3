@@ -4,7 +4,8 @@ pragma solidity ^0.8.28;
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { OAppCoreUpgradeable } from "@layerzerolabs/oapp-evm-upgradeable/contracts/oapp/OAppCoreUpgradeable.sol";
-import { MessagingFee, MessagingReceipt, OAppSenderUpgradeable } from "@layerzerolabs/oapp-evm-upgradeable/contracts/oapp/OAppSenderUpgradeable.sol";
+import { MessagingFee, OAppSenderUpgradeable } from "@layerzerolabs/oapp-evm-upgradeable/contracts/oapp/OAppSenderUpgradeable.sol";
+import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { IPriceRelay } from "../interfaces/IPriceRelay.sol";
@@ -14,46 +15,38 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @title PriceRelay
  * @author ether.fi
  * @notice Mainnet-side LayerZero sender. Reads the existing {PriceProvider}
- *         (already normalised to 6-decimal USD) and pushes per-token updates
- *         to an {OracleSink} on the destination chain.
- * @dev Combines the cash-v3 access-control stack ({UpgradeableProxy} +
- *      {IRoleRegistry}) with the LZ OApp sender stack. `OwnableUpgradeable`
- *      (required by LZ for `setPeer`/delegate ops) is initialized to the
- *      role-registry owner / configured delegate.
- *
- *      The LayerZero native fee is paid from this contract's own balance (the
- *      {_payNative} override below), so {poke} is permissionless and non-payable.
- *      To stop a spammer from draining that balance with redundant pokes, a send
- *      only happens for a token once its heartbeat elapsed or its price deviated
- *      past the configured threshold — which also implements the spec's
- *      "every N min, deviation X%" oracle update model on-chain.
+ *         (already normalised to 6-decimal USD) and pushes the price of every
+ *         subscribed token to an {OracleSink} on the destination chain in a
+ *         single message.
+ * @dev Caller-pays: {poke} is payable and the LayerZero fee is taken from
+ *      `msg.value` (any excess is refunded to the caller). There is therefore no
+ *      protocol balance to drain, so no on-chain rate-limiting/gating is needed:
+ *      the off-chain keeper decides when to relay (e.g. every N min / on X%
+ *      deviation) and simply pays for the call. {subscribe} is just an allowlist
+ *      of which tokens get relayed.
  */
 contract PriceRelay is IPriceRelay, UpgradeableProxy, OAppSenderUpgradeable {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
+    using OptionsBuilder for bytes;
 
     /// @custom:storage-location erc7201:etherfi.storage.PriceRelay
+    /// @dev Slot order is preserved from the original layout (priceProvider,
+    ///      destinationEid, <3rd slot>, subscribed) so this is an upgrade-safe
+    ///      change; the 3rd slot's `bytes lzOptions` was replaced by a `uint128`
+    ///      gas limit (an unset `bytes` reads as 0, same as an unset uint128).
     struct PriceRelayStorage {
         /// @notice Mainnet PriceProvider singleton (source of truth)
         IPriceProvider priceProvider;
         /// @notice Destination LayerZero endpoint ID (the OracleSink chain)
         uint32 destinationEid;
-        /// @notice LayerZero execution options applied to every relay send
-        bytes lzOptions;
-        /// @notice Tokens currently subscribed for relay
+        /// @notice Executor gas limit for OracleSink.lzReceive on the destination chain
+        uint128 lzReceiveGasLimit;
+        /// @notice Tokens currently allow-listed for relay
         EnumerableSetLib.AddressSet subscribed;
-        /// @notice Per-token subscription parameters
-        mapping(address token => TokenSubscription) subscriptions;
-        /// @notice Last price relayed per token (6-decimal USD)
-        mapping(address token => uint256) lastSentPrice;
-        /// @notice Block timestamp of the last relay per token
-        mapping(address token => uint64) lastSentAt;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.PriceRelay")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant PriceRelayStorageLocation = 0xa5f763f5f22412144904c62075e838be98e71aa6e5b4ffe579f23d0f3e43c800;
-
-    /// @notice Basis-points denominator (100% = 10_000 bps)
-    uint256 private constant BPS_DENOMINATOR = 10_000;
 
     /// @notice Role required to subscribe / unsubscribe tokens and configure the relay
     bytes32 public constant PRICE_RELAY_ADMIN_ROLE = keccak256("PRICE_RELAY_ADMIN_ROLE");
@@ -63,8 +56,6 @@ contract PriceRelay is IPriceRelay, UpgradeableProxy, OAppSenderUpgradeable {
 
     /**
      * @dev Constructor fixes the LZ endpoint for the relay (one per chain).
-     *      Forwards into {OAppCoreUpgradeable}, which holds `endpoint` as
-     *      immutable.
      * @param _lzEndpoint LayerZero endpoint on mainnet
      */
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -98,143 +89,70 @@ contract PriceRelay is IPriceRelay, UpgradeableProxy, OAppSenderUpgradeable {
     }
 
     /// @inheritdoc IPriceRelay
-    function subscribe(address token, TokenSubscription calldata config)
-        external
-        onlyRole(PRICE_RELAY_ADMIN_ROLE)
-    {
+    function subscribe(address token) external onlyRole(PRICE_RELAY_ADMIN_ROLE) {
         if (token == address(0)) revert InvalidInput();
-
-        PriceRelayStorage storage $ = _getStorage();
-        $.subscribed.add(token);
-        $.subscriptions[token] = config;
-
-        emit TokenSubscribed(token, config);
+        _getStorage().subscribed.add(token);
+        emit TokenSubscribed(token);
     }
 
     /// @inheritdoc IPriceRelay
     function unsubscribe(address token) external onlyRole(PRICE_RELAY_ADMIN_ROLE) {
-        PriceRelayStorage storage $ = _getStorage();
-        if (!$.subscribed.remove(token)) revert TokenNotSubscribed();
-        delete $.subscriptions[token];
-        delete $.lastSentPrice[token];
-        delete $.lastSentAt[token];
+        if (!_getStorage().subscribed.remove(token)) revert TokenNotSubscribed();
         emit TokenUnsubscribed(token);
     }
 
     /// @inheritdoc IPriceRelay
-    function setLzOptions(bytes calldata options) external onlyRole(PRICE_RELAY_ADMIN_ROLE) {
-        _getStorage().lzOptions = options;
-        emit LzOptionsSet(options);
+    function setLzReceiveGasLimit(uint128 gasLimit) external onlyRole(PRICE_RELAY_ADMIN_ROLE) {
+        _getStorage().lzReceiveGasLimit = gasLimit;
+        emit LzReceiveGasLimitSet(gasLimit);
     }
 
     /// @inheritdoc IPriceRelay
-    function withdraw(address to, uint256 amount) external onlyRole(PRICE_RELAY_ADMIN_ROLE) {
-        if (to == address(0)) revert InvalidInput();
-        if (address(this).balance < amount) revert InsufficientBalance();
-        (bool ok, ) = to.call{ value: amount }("");
-        if (!ok) revert WithdrawFailed();
-        emit Withdrawn(to, amount);
+    function poke() external payable {
+        PriceRelayStorage storage $ = _getStorage();
+        uint32 dstEid = $.destinationEid;
+        if (dstEid == 0) revert DestinationNotSet();
+
+        (address[] memory tokens, uint256[] memory prices) = _readAll($);
+        bytes memory payload = abi.encode(tokens, prices, uint64(block.timestamp));
+        bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption($.lzReceiveGasLimit, 0);
+
+        MessagingFee memory fee = _quote(dstEid, payload, options, false);
+        if (msg.value < fee.nativeFee) revert InsufficientFee();
+        _lzSend(dstEid, payload, options, MessagingFee(msg.value, 0), msg.sender);
+
+        emit PricesRelayed(dstEid, tokens, prices);
     }
 
     /// @inheritdoc IPriceRelay
-    function poke(address[] calldata tokens) external whenNotPaused nonReentrant {
-        if (tokens.length == 0) revert InvalidInput();
+    function quote() external view returns (uint256 nativeFee) {
         PriceRelayStorage storage $ = _getStorage();
         if ($.destinationEid == 0) revert DestinationNotSet();
-
-        uint256 len = tokens.length;
-        address[] memory outTokens = new address[](len);
-        uint256[] memory outPrices = new uint256[](len);
-        uint256 count;
-
-        for (uint256 i = 0; i < len;) {
-            address token = tokens[i];
-            if (!$.subscribed.contains(token)) revert TokenNotSubscribed();
-
-            uint256 currentPrice = $.priceProvider.price(token);
-            TokenSubscription memory sub = $.subscriptions[token];
-
-            bool firstSend = $.lastSentAt[token] == 0;
-            bool heartbeatDue = block.timestamp - $.lastSentAt[token] >= sub.heartbeat;
-            if (firstSend || heartbeatDue || _deviated($.lastSentPrice[token], currentPrice, sub.deviationBps)) {
-                outTokens[count] = token;
-                outPrices[count] = currentPrice;
-                unchecked {
-                    ++count;
-                }
-            }
-
-            unchecked {
-                ++i;
-            }
-        }
-
-        if (count == 0) revert NothingToRelay();
-
-        // Shrink the in-memory arrays to the number of qualifying tokens.
-        assembly {
-            mstore(outTokens, count)
-            mstore(outPrices, count)
-        }
-
-        bytes memory payload = abi.encode(outTokens, outPrices, uint64(block.timestamp));
-        MessagingFee memory fee = _quote($.destinationEid, payload, $.lzOptions, false);
-        if (address(this).balance < fee.nativeFee) revert InsufficientBalance();
-
-        _lzSend($.destinationEid, payload, $.lzOptions, MessagingFee(fee.nativeFee, 0), address(this));
-
-        for (uint256 i = 0; i < count;) {
-            $.lastSentPrice[outTokens[i]] = outPrices[i];
-            $.lastSentAt[outTokens[i]] = uint64(block.timestamp);
-            unchecked {
-                ++i;
-            }
-        }
-
-        emit PricesRelayed($.destinationEid, outTokens, outPrices);
-    }
-
-    /// @inheritdoc IPriceRelay
-    function quote(address[] calldata tokens)
-        external
-        view
-        returns (uint256 nativeFee, uint256 lzTokenFee)
-    {
-        if (tokens.length == 0) revert InvalidInput();
-        PriceRelayStorage storage $ = _getStorage();
-        if ($.destinationEid == 0) revert DestinationNotSet();
-
-        // Upper-bound quote: price the payload as if every provided token were relayed.
-        uint256[] memory prices = new uint256[](tokens.length);
+        (address[] memory tokens, uint256[] memory prices) = _readAll($);
         bytes memory payload = abi.encode(tokens, prices, uint64(0));
-        MessagingFee memory fee = _quote($.destinationEid, payload, $.lzOptions, false);
-        return (fee.nativeFee, fee.lzTokenFee);
+        bytes memory options = OptionsBuilder.newOptions().addExecutorLzReceiveOption($.lzReceiveGasLimit, 0);
+        MessagingFee memory fee = _quote($.destinationEid, payload, options, false);
+        return fee.nativeFee;
     }
 
     /// @inheritdoc IPriceRelay
-    function subscriptionOf(address token) external view returns (TokenSubscription memory) {
-        return _getStorage().subscriptions[token];
+    function subscribedTokens() external view returns (address[] memory) {
+        return _getStorage().subscribed.values();
     }
 
     /// @inheritdoc IPriceRelay
-    function lastRelayed(address token) external view returns (uint256 price, uint64 timestamp) {
-        PriceRelayStorage storage $ = _getStorage();
-        return ($.lastSentPrice[token], $.lastSentAt[token]);
+    function isSubscribed(address token) external view returns (bool) {
+        return _getStorage().subscribed.contains(token);
     }
 
     /// @inheritdoc IPriceRelay
-    function lzOptions() external view returns (bytes memory) {
-        return _getStorage().lzOptions;
+    function lzReceiveGasLimit() external view returns (uint128) {
+        return _getStorage().lzReceiveGasLimit;
     }
 
     /// @inheritdoc IPriceRelay
     function destinationEid() external view returns (uint32) {
         return _getStorage().destinationEid;
-    }
-
-    /// @notice Accept native currency used to fund LayerZero relay fees
-    receive() external payable {
-        emit Funded(msg.sender, msg.value);
     }
 
     /// @inheritdoc OAppSenderUpgradeable
@@ -247,35 +165,23 @@ contract PriceRelay is IPriceRelay, UpgradeableProxy, OAppSenderUpgradeable {
         return (1, 0);
     }
 
-    /**
-     * @dev Pay the LayerZero native fee from the contract's own balance instead of
-     *      requiring `msg.value`. This is what lets {poke} be permissionless and
-     *      non-payable: the protocol funds the relay (see {receive}/{withdraw}) and
-     *      any third party can trigger a send without supplying ETH.
-     * @param _nativeFee The native fee required by the endpoint
-     * @return nativeFee The amount forwarded to the endpoint (drawn from this balance)
-     */
-    function _payNative(uint256 _nativeFee) internal view override returns (uint256 nativeFee) {
-        if (address(this).balance < _nativeFee) revert InsufficientBalance();
-        return _nativeFee;
-    }
-
-    /**
-     * @dev Returns true if `current` deviates from `last` by at least `bps` basis points.
-     * @dev Gating rules (the "first send" case is handled by the caller via `lastSentAt == 0`,
-     *      so here `last` is the value of a prior *successful* relay):
-     *      - `bps == 0`: the deviation trigger is disabled; rely solely on the heartbeat.
-     *        (Without this, `diff * BPS >= 0` is always true and every poke would relay.)
-     *      - `last == current`: no movement, so never a deviation. This also prevents a
-     *        previously-relayed price of 0 from making this branch permanently true.
-     *      - `last == 0` with a non-zero `current`: an unbounded move (0 -> non-zero), relay.
-     */
-    function _deviated(uint256 last, uint256 current, uint32 bps) private pure returns (bool) {
-        if (bps == 0) return false;
-        if (last == current) return false;
-        if (last == 0) return true;
-        uint256 diff = current > last ? current - last : last - current;
-        return diff * BPS_DENOMINATOR >= uint256(bps) * last;
+    /// @dev Reads the current price of every subscribed token. Reverts if none are subscribed.
+    function _readAll(PriceRelayStorage storage $)
+        private
+        view
+        returns (address[] memory tokens, uint256[] memory prices)
+    {
+        tokens = $.subscribed.values();
+        uint256 len = tokens.length;
+        if (len == 0) revert InvalidInput();
+        IPriceProvider priceProvider = $.priceProvider;
+        prices = new uint256[](len);
+        for (uint256 i = 0; i < len;) {
+            prices[i] = priceProvider.price(tokens[i]);
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     function _getStorage() private pure returns (PriceRelayStorage storage $) {
