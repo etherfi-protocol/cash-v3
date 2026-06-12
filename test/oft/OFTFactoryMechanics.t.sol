@@ -210,4 +210,30 @@ contract OFTFactoryMechanicsTest is OFTTestSetup {
         vm.expectRevert(BeaconFactory.InvalidInput.selector);
         adapterFactory.upgradeBeaconImplementation(address(0));
     }
+
+    // Pause state lives in PausableUpgradeable's own ERC-7201 region, so a beacon upgrade that
+    // swaps logic must leave a paused proxy paused (the upgrade must not reset the pause flag).
+    function test_beaconUpgrade_preservesPauseState() public {
+        address adapter = _deployAdapter(keccak256("pause-wbtc"), address(token8));
+        assertFalse(EtherFiOFTAdapter(adapter).paused());
+
+        // Pause the bridge directly (PAUSER-gated via the shared RoleRegistry).
+        vm.prank(pauser);
+        EtherFiOFTAdapter(adapter).pauseBridge();
+        assertTrue(EtherFiOFTAdapter(adapter).paused());
+
+        address implV2 = address(new EtherFiOFTAdapterV2(address(endpoint), address(configRegistry)));
+        vm.prank(owner); // RoleRegistry owner
+        adapterFactory.upgradeBeaconImplementation(implV2);
+
+        // V2 logic is live AND the pause flag is preserved across the upgrade.
+        (bool okAfter,) = adapter.staticcall(abi.encodeWithSignature("version()"));
+        assertTrue(okAfter, "logic did not change");
+        assertTrue(EtherFiOFTAdapter(adapter).paused(), "pause flag not preserved across upgrade");
+
+        // And it can still be unpaused after the upgrade.
+        vm.prank(unpauser);
+        EtherFiOFTAdapter(adapter).unpauseBridge();
+        assertFalse(EtherFiOFTAdapter(adapter).paused());
+    }
 }

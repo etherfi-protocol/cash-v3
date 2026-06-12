@@ -72,6 +72,7 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase, PairwiseRateLimiter {
         if (_innerToken == address(0) || _delegate == address(0)) revert InvalidAddress();
         __Ownable_init(_delegate);
         __OFTCore_init(_delegate);
+        __Pausable_init();
 
         uint8 localDecimals = IERC20Metadata(_innerToken).decimals();
         if (localDecimals < sharedDecimals()) revert InvalidLocalDecimals();
@@ -134,7 +135,7 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase, PairwiseRateLimiter {
      *      rather than silently under-collateralizing the shadow supply. Supporting
      *      them (bridging the post-fee amount) is a deliberate per-asset follow-up.
      */
-    function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override returns (uint256, uint256) {
+    function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override whenNotPaused returns (uint256, uint256) {
         (uint256 amountSentLD, uint256 amountReceivedLD) = _debitView(_amountLD, _minAmountLD, _dstEid);
 
         // Meter the dust-removed amount that actually leaves (and is credited on the remote).
@@ -150,17 +151,10 @@ contract EtherFiOFTAdapter is ConfigurableOFTBase, PairwiseRateLimiter {
 
     /**
      * @dev Unlock and transfer underlying tokens to the recipient on credit.
+     * @dev {whenNotPaused} halts receives when paused — the `lzReceive` reverts and the
+     *      message becomes retryable on the endpoint, so funds stay locked (not lost) until unpause.
      */
-    function _credit(
-        address _to,
-        uint256 _amountLD,
-        uint32 _srcEid
-    )
-        internal
-        virtual
-        override
-        returns (uint256)
-    {
+    function _credit(address _to, uint256 _amountLD, uint32 _srcEid) internal virtual override whenNotPaused returns (uint256) {
         _checkAndUpdateInboundRateLimit(_srcEid, _amountLD);
         IERC20(_getStorage().innerToken).safeTransfer(_to, _amountLD);
         return _amountLD;

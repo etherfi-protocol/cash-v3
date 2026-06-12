@@ -62,6 +62,7 @@ contract EtherFiShadowOFT is OFTUpgradeable, ConfigurableOFTBase, PairwiseRateLi
 
         __Ownable_init(_delegate);
         __OFT_init(_name, _symbol, _delegate);
+        __Pausable_init();
 
         EtherFiShadowOFTStorage storage $ = _getStorage();
         $.localDecimals = _localDecimals;
@@ -106,18 +107,21 @@ contract EtherFiShadowOFT is OFTUpgradeable, ConfigurableOFTBase, PairwiseRateLi
     }
 
     // ---------------------------------------------------------------------
-    // Rate limiting — meter both directions per peer endpoint id
+    // Pause + rate limiting — meter both directions per peer endpoint id
     // ---------------------------------------------------------------------
 
     /// @dev Meter the dust-removed sent amount before burning on the outbound path.
-    function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override(OFTCoreUpgradeable, OFTUpgradeable) returns (uint256 amountSentLD, uint256 amountReceivedLD) {
-        (amountSentLD, amountReceivedLD) = _debitView(_amountLD, _minAmountLD, _dstEid);
+    ///      {whenNotPaused} halts sends when the bridge is paused (reverts the send tx).
+    function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override(OFTCoreUpgradeable, OFTUpgradeable) whenNotPaused returns (uint256, uint256) {
+        (uint256 amountSentLD,) = _debitView(_amountLD, _minAmountLD, _dstEid);
         _checkAndUpdateOutboundRateLimit(_dstEid, amountSentLD);
         return super._debit(_from, _amountLD, _minAmountLD, _dstEid);
     }
 
     /// @dev Meter the credited amount before minting on the inbound path.
-    function _credit(address _to, uint256 _amountLD, uint32 _srcEid) internal virtual override(OFTCoreUpgradeable, OFTUpgradeable) returns (uint256 amountReceivedLD) {
+    ///      {whenNotPaused} halts receives when paused — the `lzReceive` reverts and the
+    ///      message becomes retryable on the endpoint, so funds are held (not lost) until unpause.
+    function _credit(address _to, uint256 _amountLD, uint32 _srcEid) internal virtual override(OFTCoreUpgradeable, OFTUpgradeable) whenNotPaused returns (uint256) {
         _checkAndUpdateInboundRateLimit(_srcEid, _amountLD);
         return super._credit(_to, _amountLD, _srcEid);
     }
