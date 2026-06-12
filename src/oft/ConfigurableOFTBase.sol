@@ -34,17 +34,13 @@ interface IRoleRegistrySource {
  *      Only the DVN/library config (endpoint-side) is synced here. Enforced
  *      options are owner-gated on the OApp and are set separately by the owner.
  *
- *      Pause: the bridge inherits {PausableUpgradeable}; children apply
- *      {whenNotPaused} to `_debit` (send) and `_credit` (receive) so one flag halts
- *      BOTH directions. {pauseBridge}/{unpauseBridge} live and are gated HERE on the
- *      bridge (not routed through the registry) so the emergency control has no
- *      control-path dependency on another mutable contract — matching the weETH OFTs
- *      and our own {PairwiseRateLimiter}. They are gated by the shared RoleRegistry
- *      PAUSER/UNPAUSER roles (the same roles the oracle side uses), resolved by reading
- *      `roleRegistry()` off the immutable {configRegistry}. "Pause everything" is an
- *      off-chain Safe batch of {pauseBridge} calls. State lives in {PausableUpgradeable}'s
- *      own ERC-7201 slot, so an existing beacon proxy gains pause without disturbing its
- *      layout and reads as unpaused by default.
+ *      Pause: children apply {whenNotPaused} to `_debit`/`_credit`, so one flag halts
+ *      both directions. {pauseBridge}/{unpauseBridge} live on the bridge (no `pauseAll()`
+ *      on the registry), matching the weETH OFTs and {PairwiseRateLimiter}. Callers are
+ *      gated by the RoleRegistry PAUSER/UNPAUSER roles, resolved via `roleRegistry()` off
+ *      the immutable {configRegistry}; both that registry and the RoleRegistry are
+ *      upgradeable, so pause shares cash-v3's usual trust in the RoleRegistry. State lives
+ *      in {PausableUpgradeable}'s ERC-7201 slot (unpaused by default).
  */
 abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, PausableUpgradeable, IConfigurableOFT {
     /// @notice Shared config registry, fixed at impl deploy (one per chain)
@@ -101,6 +97,7 @@ abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, PausableUpgradeable
      *      {ConfigSynced}; the bridge keeps no per-proxy sync state, so verify applied config by
      *      reading the endpoint rows.
      * @param dstEids Destination endpoint IDs to (re)configure
+     * @custom:throws PathwayNotFound if any dstEid is unconfigured (fails fast before {setConfig})
      */
     function syncConfig(uint32[] calldata dstEids) external override {
         address reg = configRegistry;
@@ -109,6 +106,9 @@ abstract contract ConfigurableOFTBase is OFTCoreUpgradeable, PausableUpgradeable
 
         for (uint256 i; i < dstEids.length;) {
             IOFTConfigRegistry.PathwayConfig memory c = IOFTConfigRegistry(reg).getPathwayConfig(dstEids[i]);
+            // setPathwayConfig guarantees a non-zero sendLib, so address(0) means this dstEid
+            // is unconfigured. Fail fast here with a clear error rather than deep in the ULN.
+            if (c.sendLib == address(0)) revert IOFTConfigRegistry.PathwayNotFound();
 
             UlnConfig memory uln = UlnConfig({ confirmations: c.confirmations, requiredDVNCount: uint8(c.requiredDVNs.length), optionalDVNCount: uint8(c.optionalDVNs.length), optionalDVNThreshold: c.optionalDVNThreshold, requiredDVNs: c.requiredDVNs, optionalDVNs: c.optionalDVNs });
 

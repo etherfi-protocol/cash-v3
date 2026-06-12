@@ -114,12 +114,12 @@ contract OFTConfigRegistrySyncTest is OFTCrossChainSetup {
         adapter.syncConfig(eids);
     }
 
-    // Syncing an unconfigured destination resolves to an empty pathway (zero send lib); the real
-    // endpoint rejects setConfig against the zero library, so no insecure no-DVN config is applied.
+    // An unconfigured destination resolves to an empty pathway (zero send lib); syncConfig fails
+    // fast with PathwayNotFound before touching the endpoint, rather than reverting deep in the ULN.
     function test_syncConfig_reverts_onUnconfiguredEid() public {
         uint32[] memory eids = new uint32[](1);
         eids[0] = UNCONFIGURED_EID;
-        vm.expectRevert();
+        vm.expectRevert(IOFTConfigRegistry.PathwayNotFound.selector);
         _push(_adapterTarget(), eids);
     }
 

@@ -110,12 +110,13 @@ contract EtherFiShadowOFT is OFTUpgradeable, ConfigurableOFTBase, PairwiseRateLi
     // Pause + rate limiting — meter both directions per peer endpoint id
     // ---------------------------------------------------------------------
 
-    /// @dev Meter the dust-removed sent amount before burning on the outbound path.
+    /// @dev Meter the dust-removed sent amount, then burn it, on the outbound path.
     ///      {whenNotPaused} halts sends when the bridge is paused (reverts the send tx).
     function _debit(address _from, uint256 _amountLD, uint256 _minAmountLD, uint32 _dstEid) internal virtual override(OFTCoreUpgradeable, OFTUpgradeable) whenNotPaused returns (uint256, uint256) {
-        (uint256 amountSentLD,) = _debitView(_amountLD, _minAmountLD, _dstEid);
+        (uint256 amountSentLD, uint256 amountReceivedLD) = _debitView(_amountLD, _minAmountLD, _dstEid);
         _checkAndUpdateOutboundRateLimit(_dstEid, amountSentLD);
-        return super._debit(_from, _amountLD, _minAmountLD, _dstEid);
+        _burn(_from, amountSentLD);
+        return (amountSentLD, amountReceivedLD);
     }
 
     /// @dev Meter the credited amount before minting on the inbound path.
