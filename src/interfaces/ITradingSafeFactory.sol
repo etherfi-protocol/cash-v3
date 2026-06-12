@@ -26,4 +26,13 @@ interface ITradingSafeFactory {
      * @return True if the address was deployed by this factory.
      */
     function isEtherFiSafe(address safeAddr) external view returns (bool);
+
+    /**
+     * @notice Returns the TopUp address a deployed TradingSafe settles to, recorded at
+     *         deploy time (the identity the safe was derived from).
+     * @dev Reverts for addresses this factory didn't deploy — callers get a guaranteed
+     *      non-zero, deploy-time-bound destination for any registered TradingSafe.
+     * @param tradingSafe The TradingSafe to look up.
+     */
+    function getTopUpAddress(address tradingSafe) external view returns (address);
 }

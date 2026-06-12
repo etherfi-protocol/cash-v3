@@ -5,6 +5,7 @@ import { console } from "forge-std/console.sol";
 import { stdJson } from "forge-std/StdJson.sol";
 
 import { Utils } from "../utils/Utils.sol";
+import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
@@ -77,11 +78,28 @@ contract DeployTradingAccountOptimism is Utils {
         sender.configureDestination(MAINNET_EID, "", true);
         sender.setPeer(MAINNET_EID, bytes32(uint256(uint160(mainnetReceiver))));
 
-        // 2. AcrossSwapModule — Buy direction. Constructor reads getCashModule() from the
-        //    initialised OP data provider, so the CashModule hold path is live here.
-        //    Same salt as the mainnet deploy ⇒ same address on both chains.
+        // 2. AcrossSwapModule — Buy direction, behind a UUPS proxy initialised atomically
+        //    in its deployment tx (full Across config in the initialize calldata). The
+        //    impl constructor reads getCashModule() from the initialised OP data
+        //    provider, so the CashModule hold path is live here. Same proxy salt as the
+        //    mainnet deploy ⇒ same address on both chains.
+        //    topUpFactory: executeSell is unused on OP (selling happens on the trading
+        //    chain). initialize requires non-zero, so we pass a CODE-LESS sentinel — any
+        //    executeSell attempt reverts at the isTokenSupported staticcall, keeping the
+        //    sell path disabled on this chain.
+        address acrossImpl = _deploy(
+            "AcrossSwapModuleImplV2Dev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider))
+        );
         AcrossSwapModule acrossModule = AcrossSwapModule(_deploy(
-            "AcrossSwapModuleDev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider))
+            "AcrossSwapModuleV2Dev",
+            type(UUPSProxy).creationCode,
+            abi.encode(acrossImpl, abi.encodeWithSelector(
+                AcrossSwapModule.initialize.selector,
+                address(roleRegistry),
+                SPOKE_POOL,
+                MULTICALL_HANDLER,
+                address(0xdEaD)
+            ))
         ));
 
         // 3. Whitelist the module + allow it to place withdrawal holds.
@@ -94,11 +112,9 @@ contract DeployTradingAccountOptimism is Utils {
         dataProvider.configureDefaultModules(modules, enable);
         cashModule.configureModulesCanRequestWithdraw(modules, enable);
 
-        // 4. Roles + Across config.
+        // 4. Roles.
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), deployer);
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_KEEPER_ROLE(), keeper);
-        acrossModule.setSpokePool(SPOKE_POOL);
-        acrossModule.setMulticallHandler(MULTICALL_HANDLER);
 
         // 5. Upgrade the DataProvider proxy to the bridge-aware impl — the deployed OP dev
         //    impl predates setOwnershipBridgeSender/getOwnershipBridgeSender. UUPS upgrade,

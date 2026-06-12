@@ -2,7 +2,6 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { ReentrancyGuardTransient } from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { ICashModule } from "../interfaces/ICashModule.sol";
@@ -10,7 +9,10 @@ import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ISpokePool } from "../interfaces/ISpokePool.sol";
+import { ITopUpFactory } from "../interfaces/ITopUpFactory.sol";
+import { ITradingSafeFactory } from "../interfaces/ITradingSafeFactory.sol";
 import { ModuleBase } from "../modules/ModuleBase.sol";
+import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
  * @title AcrossSwapModule
@@ -36,7 +38,7 @@ import { ModuleBase } from "../modules/ModuleBase.sol";
  *      Per-chain config (SpokePool, MulticallHandler) is admin-set; the module is
  *      otherwise stateless across safes apart from the one-active-order-per-safe map.
  */
-contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
+contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     using MessageHashUtils for bytes32;
 
     /// @notice User-signed swap intent. One per safe at a time.
@@ -61,11 +63,22 @@ contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
         address exclusiveRelayer;
     }
 
+    /// @notice BE-supplied execute-time args for a local Sell on the trading chain
+    struct SellArgs {
+        address router;
+        bytes routerCallData;
+    }
+
     /// @custom:storage-location erc7201:etherfi.storage.AcrossSwapModule
     struct AcrossSwapModuleStorage {
+        /// @notice Mapping of safe address to order.
         mapping(address safe => Order order) orders;
+        /// @notice SpokePool address used on this chain.
         address spokePool;
+        /// @notice MulticallHandler address used as the destination recipient on every `depositV3` call.
         address multicallHandler;
+        /// @notice TopUpFactory used by `executeSell` for the settle-or-keep decision.
+        address topUpFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.AcrossSwapModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -81,6 +94,7 @@ contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("AcrossSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("AcrossSwapModule.cancelSwap");
+    bytes32 private constant EXECUTE_SELL_SIG = keccak256("AcrossSwapModule.executeSell");
 
     /// @notice CashModule on the same chain. Zero on mainnet TradingSafe deploys (no card
     ///         spending → no solvency hold needed).
@@ -105,6 +119,18 @@ contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
     event SwapCancelled(address indexed safe);
     event SpokePoolSet(address oldSpokePool, address newSpokePool);
     event MulticallHandlerSet(address oldMulticallHandler, address newMulticallHandler);
+    event TopUpFactorySet(address oldTopUpFactory, address newTopUpFactory);
+
+    /// @notice Emitted on a local Sell execute. `outAmount` is the MEASURED `dstToken`
+    ///         delta the swap delivered to the safe; `settledTo` is the user's TopUp
+    ///         address when the output token is topup-supported, else the safe (held).
+    event SellExecuted(
+        address indexed safe,
+        address indexed srcToken,
+        address indexed dstToken,
+        uint256 outAmount,
+        address settledTo
+    );
 
     /// @notice Reverts when a non-admin tries to set per-chain constants.
     error OnlyAdmin();
@@ -122,11 +148,27 @@ contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
     error InsufficientOutputAmount();
     /// @notice Reverts when admin-set `spokePool` / `multicallHandler` is still zero.
     error MissingConfig();
-    /// @notice Reverts when `cancelBridgeByCashModule` is called by anyone but `cashModule`.
-    error Unauthorized();
 
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's
+    ///      code — every upgrade impl must be constructed with the same data provider.
+    /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         cashModule = ICashModule(IEtherFiDataProvider(_etherFiDataProvider).getCashModule());
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initialises the proxy.
+     * @param _roleRegistry Role registry used for upgrade authority + pause control.
+     */
+    function initialize(address _roleRegistry, address _spokePool, address _multicallHandler, address _topUpFactory) external initializer {
+        __UpgradeableProxy_init(_roleRegistry);
+
+        if (_spokePool == address(0) || _multicallHandler == address(0) || _topUpFactory == address(0)) revert InvalidInput();
+        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
+        $.topUpFactory = _topUpFactory;
+        $.spokePool = _spokePool;
+        $.multicallHandler = _multicallHandler;
     }
 
     // ---- Admin config ----
@@ -150,10 +192,24 @@ contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
         $.multicallHandler = _multicallHandler;
     }
 
+    /// @notice Sets the TopUpFactory used by `executeSell`Do for the settle-or-keep
+    ///         decision. Trading-chain (mainnet) config only.
+    function setTopUpFactory(address _topUpFactory) external {
+        _onlyAdmin();
+        if (_topUpFactory == address(0)) revert InvalidInput();
+        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
+        emit TopUpFactorySet($.topUpFactory, _topUpFactory);
+        $.topUpFactory = _topUpFactory;
+    }
+
     // ---- Views ----
 
     function getOrder(address safe) external view returns (Order memory) {
         return _getAcrossSwapModuleStorage().orders[safe];
+    }
+
+    function getTopUpFactory() external view returns (address) {
+        return _getAcrossSwapModuleStorage().topUpFactory;
     }
 
     function getSpokePool() external view returns (address) {
@@ -176,7 +232,7 @@ contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
         Order calldata order,
         address[] calldata signers,
         bytes[] calldata signatures
-    ) external nonReentrant onlyEtherFiSafe(safe) {
+    ) external nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
         if (
             order.srcToken == address(0) || order.srcAmount == 0 ||
             order.dstToken == address(0) || order.dstChainId == 0 ||
@@ -223,7 +279,7 @@ contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
         address safe,
         DepositArgs calldata depositArgs,
         bytes calldata message
-    ) external nonReentrant onlyEtherFiSafe(safe) {
+    ) external nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
         if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ACROSS_SWAP_MODULE_KEEPER_ROLE, msg.sender)) revert OnlyKeeper();
 
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
@@ -261,6 +317,103 @@ contract AcrossSwapModule is ModuleBase, ReentrancyGuardTransient {
         data[0] = abi.encodeCall(IERC20.approve, (spokePool, order.srcAmount));
         to[1] = spokePool;
         data[1] = depositData;
+
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+    }
+
+    /**
+     * @notice Executes a Sell INSTANTLY in a single call. The user-signed `order`
+     *         authorises the swap; the safe swaps `order.srcToken` -> `order.dstToken`
+     *         via the BE-built router call, then settlement is decided on-chain:
+     *         topup-supported output is pushed to the user's TopUp address (the existing
+     *         topup rails bridge it back to the Cash account); anything else stays in
+     *         the TradingSafe as a holding.
+     */
+    function executeSell(
+        address safe,
+        Order calldata order,
+        SellArgs calldata sellArgs,
+        address[] calldata signers,
+        bytes[] calldata signatures
+    ) external nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
+        if (
+            sellArgs.router == address(0) ||
+            order.srcToken == address(0) || order.srcAmount == 0 ||
+            order.dstToken == address(0) || order.minOut == 0 ||
+            order.srcToken == order.dstToken
+        ) revert InvalidInput();
+        if (order.dstChainId != block.chainid) revert InvalidInput();
+        if (block.timestamp > order.deadline) revert OrderExpired();
+
+        _verifySellSignature(safe, order, signers, signatures);
+
+        // Run the swap leg and measure what actually arrived.
+        uint256 delta = _runSellSwap(safe, order, sellArgs);
+        if (delta < order.minOut) revert InsufficientOutputAmount();
+
+        // Zero = output not topup-supported, keep in the safe.
+        address settleTo = _resolveSellSettlement(safe, order.dstToken);
+        if (settleTo != address(0)) _settleSell(safe, order.dstToken, settleTo, delta);
+
+        emit SellExecuted(safe, order.srcToken, order.dstToken, delta, settleTo == address(0) ? safe : settleTo);
+    }
+
+    /// @dev The user's signature is the authorisation — same digest pattern as
+    ///      requestSwap, consuming a safe nonce so a signed sell can't replay.
+    function _verifySellSignature(
+        address safe,
+        Order calldata order,
+        address[] calldata signers,
+        bytes[] calldata signatures
+    ) internal {
+        bytes32 digest = keccak256(
+            abi.encodePacked(EXECUTE_SELL_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe, abi.encode(order))
+        ).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
+    }
+
+    /// @dev Resolves where the sell output settles: the factory's deploy-time TopUp
+    ///      record when `dstToken` is topup-supported (reverts for safes the factory
+    ///      doesn't know), zero to keep the output in the safe.
+    function _resolveSellSettlement(address safe, address dstToken) internal view returns (address) {
+        address topUpFactory = _getAcrossSwapModuleStorage().topUpFactory;
+        if (topUpFactory == address(0)) revert MissingConfig();
+
+        if (!ITopUpFactory(topUpFactory).isTokenSupported(dstToken)) return address(0);
+        return ITradingSafeFactory(etherFiDataProvider.getEtherFiSafeFactory()).getTopUpAddress(safe);
+    }
+
+    /// @dev Swap leg: approve router for the asset, run the BE-built swap, reset the
+    ///      approval. Returns the safe's measured `dstToken` balance delta — the
+    ///      on-chain proof of what the route actually delivered.
+    function _runSellSwap(address safe, Order calldata order, SellArgs calldata sellArgs) internal returns (uint256) {
+        uint256 balBefore = IERC20(order.dstToken).balanceOf(safe);
+
+        address[] memory to = new address[](3);
+        uint256[] memory values = new uint256[](3);
+        bytes[] memory data = new bytes[](3);
+
+        to[0] = order.srcToken;
+        data[0] = abi.encodeCall(IERC20.approve, (sellArgs.router, order.srcAmount));
+        to[1] = sellArgs.router;
+        data[1] = sellArgs.routerCallData;
+        to[2] = order.srcToken;
+        data[2] = abi.encodeCall(IERC20.approve, (sellArgs.router, 0));
+
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        return IERC20(order.dstToken).balanceOf(safe) - balBefore;
+    }
+
+    /// @dev Settlement leg: push the measured swap output, in full, to the
+    ///      factory-recorded TopUp address.
+    function _settleSell(address safe, address dstToken, address settleTo, uint256 amount) internal {
+        address[] memory to = new address[](1);
+        uint256[] memory values = new uint256[](1);
+        bytes[] memory data = new bytes[](1);
+
+        to[0] = dstToken;
+        data[0] = abi.encodeCall(IERC20.transfer, (settleTo, amount));
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }

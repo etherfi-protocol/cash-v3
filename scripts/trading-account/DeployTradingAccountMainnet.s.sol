@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { console } from "forge-std/console.sol";
+import { stdJson } from "forge-std/StdJson.sol";
 
 import { Utils } from "../utils/Utils.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -181,8 +182,22 @@ contract DeployTradingAccountMainnet is Utils {
         ));
         require(address(dataProvider) == predictedDataProvider, "dataProvider landed off-prediction");
 
-        acrossModule = AcrossSwapModule(_deploy(
-            "AcrossSwapModuleDev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider))
+        // Full Across config rides in the initialize calldata — atomic with the proxy
+        // deploy. Sell settlement consults the EXISTING mainnet TopUpFactory.
+        address topUpFactory = stdJson.readAddress(readDeploymentFile(), ".addresses.TopUpSourceFactory");
+        address acrossImpl = _deploy(
+            "AcrossSwapModuleImplDev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider))
+        );
+        acrossModule = AcrossSwapModule(_deployProxy(
+            "AcrossSwapModuleDev",
+            acrossImpl,
+            abi.encodeWithSelector(
+                AcrossSwapModule.initialize.selector,
+                address(roleRegistry),
+                SPOKE_POOL,
+                MULTICALL_HANDLER,
+                topUpFactory
+            )
         ));
         require(address(acrossModule) == predictedAcrossModule, "across module landed off-prediction");
     }
@@ -192,9 +207,6 @@ contract DeployTradingAccountMainnet is Utils {
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_KEEPER_ROLE(), keeper);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), keeper);
         roleRegistry.grantRole(lens.TRADING_LENS_ADMIN_ROLE(), deployer);
-
-        acrossModule.setSpokePool(SPOKE_POOL);
-        acrossModule.setMulticallHandler(MULTICALL_HANDLER);
     }
 
     /// @dev Persist for BE/FE integration + the wire script.

@@ -25,6 +25,8 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     struct TradingSafeFactoryStorage {
         /// @notice Set containing addresses of all deployed `TradingSafe` instances.
         EnumerableSetLib.AddressSet deployedAddresses;
+        /// @notice Mapping of trading safe address to top up address
+        mapping(address tradingSafe => address topUp) topUpAddress;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TradingSafeFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -38,6 +40,17 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     error OnlyAdmin();
     /// @notice Reverts when `getDeployedAddresses` is called with an out-of-bounds start index.
     error InvalidStartIndex();
+    /// @notice Reverts when `getTopUpAddress` is queried for an address this factory
+    ///         didn't deploy.
+    error InvalidTradingSafe();
+
+    /// @notice Emitted when a new `TradingSafe` is deployed.
+    /// @param tradingSafe The address of the deployed `TradingSafe`.
+    /// @param topUp The address of the `TopUp` associated with the `TradingSafe`.
+    /// @param owners The owners of the `TradingSafe`.
+    /// @param modules The modules enabled on the `TradingSafe`.
+    /// @param threshold The threshold of the `TradingSafe`.
+    event TradingSafeDeployed(address indexed tradingSafe, address indexed topUp, address[] owners, address[] modules, uint8 threshold);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -106,13 +119,19 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     ) external whenNotPaused returns (address) {
         if (!roleRegistry().hasRole(TRADING_SAFE_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
 
+        TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
+
         bytes32 salt = _saltFor(sourceSafe);
         bytes memory initData = abi.encodeWithSelector(EtherFiSafeCore.initialize.selector, _owners, _modules, _moduleSetupData, _threshold);
 
         address deterministicAddr = BeaconFactory.getDeterministicAddress(salt);
-        _getTradingSafeFactoryStorage().deployedAddresses.add(deterministicAddr);
+        $.deployedAddresses.add(deterministicAddr);
 
-        return _deployBeacon(salt, initData);
+        address deployed = _deployBeacon(salt, initData);
+        $.topUpAddress[deployed] = sourceSafe;
+
+        emit TradingSafeDeployed(deployed, sourceSafe, _owners, _modules, _threshold);
+        return deployed;
     }
 
     /**
@@ -136,6 +155,17 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
             }
         }
         return addresses;
+    }
+
+    /**
+     * @notice Returns the `TopUp` address associated with a `TradingSafe`.
+     * @param tradingSafe The address of the `TradingSafe`.
+     * @return The address of the `TopUp` associated with the `TradingSafe`.
+     */
+    function getTopUpAddress(address tradingSafe) external view returns (address) {
+        TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
+        if (!$.deployedAddresses.contains(tradingSafe)) revert InvalidInput();
+        return _getTradingSafeFactoryStorage().topUpAddress[tradingSafe];
     }
 
     /**
