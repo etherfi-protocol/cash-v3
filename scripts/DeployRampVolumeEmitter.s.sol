@@ -7,7 +7,7 @@ import { console2 } from "forge-std/console2.sol";
 import { UUPSProxy } from "../src/UUPSProxy.sol";
 import { RampVolumeEmitter } from "../src/ramp-volume/RampVolumeEmitter.sol";
 import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
-import { Utils, ChainConfig } from "./utils/Utils.sol";
+import { ChainConfig, Utils } from "./utils/Utils.sol";
 
 /**
  * @notice Deploys RampVolumeEmitter behind a UUPS proxy and grants the backend relayer

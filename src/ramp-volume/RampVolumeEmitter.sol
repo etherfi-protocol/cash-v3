@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { IRampVolumeEmitter } from "../interfaces/IRampVolumeEmitter.sol";
+import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
  * @title RampVolumeEmitter

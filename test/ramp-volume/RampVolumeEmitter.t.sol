@@ -4,8 +4,8 @@ pragma solidity ^0.8.28;
 import { Test, Vm } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import { RampVolumeEmitter } from "../../src/ramp-volume/RampVolumeEmitter.sol";
 import { IRampVolumeEmitter } from "../../src/interfaces/IRampVolumeEmitter.sol";
+import { RampVolumeEmitter } from "../../src/ramp-volume/RampVolumeEmitter.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 
 contract RampVolumeEmitterTest is Test {
@@ -22,8 +22,8 @@ contract RampVolumeEmitterTest is Test {
     bytes32 internal constant USDC = bytes32("USDC");
     bytes32 internal constant EURC = bytes32("EURC");
 
-    uint64 internal constant DAY = 1781481600; // 2026-06-15 00:00:00 UTC
-    uint64 internal constant NOW = 1781500000; // some emission time during that day
+    uint64 internal constant DAY = 1_781_481_600; // 2026-06-15 00:00:00 UTC
+    uint64 internal constant NOW = 1_781_500_000; // some emission time during that day
 
     // Mirror of the contract event for vm.expectEmit.
     event RampVolume(bytes32 indexed label, bytes32 indexed token, uint64 indexed dayTimestamp, uint256 value, uint64 asOf);
@@ -48,10 +48,10 @@ contract RampVolumeEmitterTest is Test {
 
     function test_emitRampVolume_byRelayer_emitsEvent() public {
         vm.expectEmit(true, true, true, true, address(emitter));
-        emit RampVolume(ONRAMP, USDC, DAY, 12_345_670000, NOW);
+        emit RampVolume(ONRAMP, USDC, DAY, 12_345_670_000, NOW);
 
         vm.prank(relayer);
-        emitter.emitRampVolume(ONRAMP, USDC, DAY, 12_345_670000);
+        emitter.emitRampVolume(ONRAMP, USDC, DAY, 12_345_670_000);
     }
 
     function test_emitRampVolume_revertsForNonRole() public {
