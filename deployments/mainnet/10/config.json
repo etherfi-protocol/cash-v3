@@ -92,14 +92,16 @@
       "wHYPE":          { "ltvBps": 4500, "liqThresholdBps": 6500, "liqBonusBps": 400 },
       "beHYPE":         { "ltvBps": 4000, "liqThresholdBps": 6000, "liqBonusBps": 500 },
       "liquidReserve":  { "ltvBps": 8000, "liqThresholdBps": 9000, "liqBonusBps": 100 },
-      "liquidEUR":      { "ltvBps": 7000, "liqThresholdBps": 9000, "liqBonusBps": 200 }
+      "liquidEUR":      { "ltvBps": 7000, "liqThresholdBps": 9000, "liqBonusBps": 200 },
+      "liquidRWA":      { "ltvBps": 7000, "liqThresholdBps": 8000, "liqBonusBps": 400 },
+      "op":             { "ltvBps": 2000, "liqThresholdBps": 5000, "liqBonusBps": 500 }
     },
     "borrowTokens": ["usdc", "fraxusd", "liquidUsd", "usdt", "liquidReserve", "eurc", "liquidEUR"]
   },
   "cashModule": {
     "withdrawAssets": [
       "usdc", "weth", "weETH", "usdt", "eurc", "wHYPE", "beHYPE", "liquidReserve",
-      "sethfi", "fraxusd", "liquidUsd", "ebtc", "liquidEth", "liquidBtc", "liquidEUR"
+      "sethfi", "fraxusd", "liquidUsd", "ebtc", "liquidEth", "liquidBtc", "liquidEUR", "liquidRWA", "op"
     ],
     "modulesCanRequestWithdraw": [
       "EtherFiLiquidModuleWithReferrer",
@@ -115,7 +117,7 @@
     "tokensWithPrice": [
       "usdc", "usdt", "weETH", "weth", "eurc", "wHYPE", "beHYPE", "liquidReserve",
       "fraxusd", "liquidEth", "liquidBtc", "liquidUsd", "ebtc", "eUSD",
-      "sethfi", "ethfi", "liquidEUR"
+      "sethfi", "ethfi", "liquidEUR", "liquidRWA", "op"
     ],
     "oracles": {
       "usdc":           { "oracle": "0x16a9FA2FDa030272Ce99B29CF780dFA30361E0f3", "type": "chainlink", "decimals": 8 },
@@ -137,7 +139,9 @@
       "wHYPE":          { "oracle": "0x370F16a9D36CDBe3f364beb3449109242325E941", "type": "pyth", "decimals": 16 },
       "beHYPE":         { "oracle": "0x666a9807C632fFAA335C58C724bff38278392ec6", "type": "pyth", "decimals": 16 },
       "eurc":           { "oracle": "0x2B132ce03411Da6d3A73A93aA259d232FE525af9", "type": "pyth", "decimals": 16 },
-      "liquidEUR":      { "oracle": "0x01b910C1aa51cdC4a2a84d76CB255C4974Bf8A19", "type": "chainlink", "decimals": 8 }
+      "liquidEUR":      { "oracle": "0x01b910C1aa51cdC4a2a84d76CB255C4974Bf8A19", "type": "chainlink", "decimals": 8 },
+      "liquidRWA":      { "oracle": "0xd5aaE6ac1a9ed4BE5DcC1fc172EDeFFd5B6d8080", "type": "chainlink", "decimals": 8 },
+      "op":             { "oracle": "0x0D276FC14719f9292D5C1eA2198673d1f4269246", "type": "chainlink", "decimals": 8 }
     }
   },
   "stargateModule": {
