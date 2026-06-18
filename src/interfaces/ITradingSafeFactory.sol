@@ -35,4 +35,13 @@ interface ITradingSafeFactory {
      * @param tradingSafe The TradingSafe to look up.
      */
     function getTopUpAddress(address tradingSafe) external view returns (address);
+
+    /**
+     * @notice Returns whether `token` is a supported trading asset.
+     * @dev Delegates to the configured TradingLens registry. Used by the TopUp source
+     *      factory to gate `redirectToTradingSafe` to trading-supported tokens only.
+     * @param token The token to check.
+     * @return True if `token` is supported for trading.
+     */
+    function isSupportedToken(address token) external view returns (bool);
 }

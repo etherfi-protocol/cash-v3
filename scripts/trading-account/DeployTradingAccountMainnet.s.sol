@@ -11,6 +11,7 @@ import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider
 import { OwnershipBridgeReceiver } from "../../src/ownership-bridge/OwnershipBridgeReceiver.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { TradingLens } from "../../src/trading-safe/TradingLens.sol";
 import { TradingSafe } from "../../src/trading-safe/TradingSafe.sol";
 import { TradingSafeFactory } from "../../src/trading-safe/TradingSafeFactory.sol";
@@ -66,6 +67,9 @@ contract DeployTradingAccountMainnet is Utils {
     TradingLens internal lens;
     EtherFiDataProvider internal dataProvider;
     AcrossSwapModule internal acrossModule;
+    // Existing TopUp source factory (not deployed here) — the `isTokenSupported` oracle the
+    // factory's `redirectToTopUp` consults. Read from this chain's deployments.json.
+    address internal topUpFactory;
 
     function run() public {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -183,8 +187,7 @@ contract DeployTradingAccountMainnet is Utils {
         require(address(dataProvider) == predictedDataProvider, "dataProvider landed off-prediction");
 
         // Full Across config rides in the initialize calldata — atomic with the proxy
-        // deploy. Sell settlement consults the EXISTING mainnet TopUpFactory.
-        address topUpFactory = stdJson.readAddress(readDeploymentFile(), ".addresses.TopUpSourceFactory");
+        // deploy. The module is Buy-only; there is no sell settlement on-chain anymore.
         address acrossImpl = _deploy(
             "AcrossSwapModuleImplDev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider))
         );
@@ -195,18 +198,41 @@ contract DeployTradingAccountMainnet is Utils {
                 AcrossSwapModule.initialize.selector,
                 address(roleRegistry),
                 SPOKE_POOL,
-                MULTICALL_HANDLER,
-                topUpFactory
+                MULTICALL_HANDLER
             )
         ));
         require(address(acrossModule) == predictedAcrossModule, "across module landed off-prediction");
     }
 
+    /// @dev Wires roles + both redirect directions. Safe → TopUp: `setTopUpFactory` (the
+    ///      topup-supported-asset oracle), `setTradingLens`, and `TRADING_SAFE_REDIRECT_ROLE`.
+    ///      TopUp → Safe (mainnet-only): point the TopUp source factory back at this
+    ///      TradingSafeFactory and grant `TOPUP_FACTORY_REDIRECT_ROLE`. All owner-gated — on
+    ///      dev the deployer owns both the trading and topup stacks.
     function _configureRolesAndAcross() internal {
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), deployer);
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_KEEPER_ROLE(), keeper);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), keeper);
         roleRegistry.grantRole(lens.TRADING_LENS_ADMIN_ROLE(), deployer);
+
+        // Safe → TopUp redirect wiring. The TopUp source factory is deployed separately and
+        // recorded in this chain's deployments.json.
+        string memory topUpDeployments = readTopUpSourceDeployment();
+        topUpFactory = stdJson.readAddress(topUpDeployments, ".addresses.TopUpSourceFactory");
+        factory.setTopUpFactory(topUpFactory);
+        roleRegistry.grantRole(factory.TRADING_SAFE_REDIRECT_ROLE(), keeper);
+
+        // TopUp → Safe redirect now gates on trading-supported tokens; the factory reads that
+        // from the TradingLens registry.
+        factory.setTradingLens(address(lens));
+
+        // TopUp → Safe redirect direction (mainnet-only — it makes synchronous calls into the
+        // co-located TradingSafeFactory). Point the TopUp source factory at THIS chain's
+        // TradingSafeFactory so destinations resolve, and grant the keeper the redirect role.
+        // Both touch the TopUp stack's own RoleRegistry/owner — on dev the same deployer key.
+        RoleRegistry topUpRoleRegistry = RoleRegistry(stdJson.readAddress(topUpDeployments, ".addresses.RoleRegistry"));
+        TopUpFactory(payable(topUpFactory)).setTradingSafeFactory(address(factory));
+        topUpRoleRegistry.grantRole(TopUpFactory(payable(topUpFactory)).TOPUP_FACTORY_REDIRECT_ROLE(), keeper);
     }
 
     /// @dev Persist for BE/FE integration + the wire script.
@@ -219,6 +245,7 @@ contract DeployTradingAccountMainnet is Utils {
         vm.serializeAddress(out, "TradingSafeImpl", tradingSafeImpl);
         vm.serializeAddress(out, "OwnershipBridgeReceiver", address(receiver));
         vm.serializeAddress(out, "AcrossSwapModule", address(acrossModule));
+        vm.serializeAddress(out, "TopUpFactory", topUpFactory);
         string memory json = vm.serializeAddress(out, "TradingLens", address(lens));
         vm.writeJson(json, string.concat(
             vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/trading-account.json"
@@ -232,6 +259,7 @@ contract DeployTradingAccountMainnet is Utils {
         console.log("OwnershipBridgeReceiver:", address(receiver));
         console.log("AcrossSwapModule:       ", address(acrossModule));
         console.log("TradingLens:            ", address(lens));
+        console.log("TopUpFactory (wired):   ", topUpFactory);
     }
 
     /// @dev CREATE3-deploys `creationCode ++ constructorArgs` under a string salt.

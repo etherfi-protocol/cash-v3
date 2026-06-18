@@ -4,6 +4,8 @@ pragma solidity ^0.8.28;
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { BeaconFactory } from "../beacon-factory/BeaconFactory.sol";
+import { ITopUpFactory } from "../interfaces/ITopUpFactory.sol";
+import { ITradingLens } from "../interfaces/ITradingLens.sol";
 import { ITradingSafeFactory } from "../interfaces/ITradingSafeFactory.sol";
 import { EtherFiSafeCore } from "../safe/EtherFiSafeCore.sol";
 import { TradingSafe } from "./TradingSafe.sol";
@@ -15,8 +17,6 @@ import { TradingSafe } from "./TradingSafe.sol";
  *         derived deterministically from their source-chain (OP) safe address via CREATE3 —
  *         so the destination-chain receiver can pre-compute the address before deployment
  *         and the lazy-deploy service can deploy on first need.
- * @dev Mirrors `EtherFiSafeFactory` in shape; differs in the salt-from-source-safe
- *      derivation and in implementing `ITradingSafeFactory.getDeterministicAddress(address)`.
  */
 contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
@@ -27,6 +27,12 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
         EnumerableSetLib.AddressSet deployedAddresses;
         /// @notice Mapping of trading safe address to top up address
         mapping(address tradingSafe => address topUp) topUpAddress;
+        /// @notice Address of the `TopUpFactory` whose `isTokenSupported` is the source of
+        ///         truth for which assets `redirectToTopUp` may move Safe → TopUp.
+        address topUpFactory;
+        /// @notice Address of the `TradingLens` whose supported-trading-token set backs
+        ///         `isSupportedToken`.
+        address tradingLens;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TradingSafeFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -36,6 +42,9 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     ///         service or 3CP admin for the misroute path).
     bytes32 public constant TRADING_SAFE_FACTORY_ADMIN_ROLE = keccak256("TRADING_SAFE_FACTORY_ADMIN_ROLE");
 
+    /// @notice Role allowed to drive `redirectToTopUp` (held by the BE redirect service).
+    bytes32 public constant TRADING_SAFE_REDIRECT_ROLE = keccak256("TRADING_SAFE_REDIRECT_ROLE");
+
     /// @notice Reverts when `deployTradingSafe` is called by an account lacking the admin role.
     error OnlyAdmin();
     /// @notice Reverts when `getDeployedAddresses` is called with an out-of-bounds start index.
@@ -43,6 +52,20 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     /// @notice Reverts when `getTopUpAddress` is queried for an address this factory
     ///         didn't deploy.
     error InvalidTradingSafe();
+    /// @notice Reverts when `redirectToTopUp` is called by an account lacking the redirect role.
+    error OnlyRedirectRole();
+    /// @notice Reverts when `redirectToTopUp` is called with a zero amount.
+    error InvalidAmount();
+    /// @notice Reverts when `redirectToTopUp` targets a token that isn't topup-supported.
+    error UnsupportedTopUpAsset();
+    /// @notice Reverts when `redirectToTopUp` runs before `setTopUpFactory` has been configured.
+    error TopUpFactoryNotSet();
+    /// @notice Reverts when `setTopUpFactory` is called with the zero address.
+    error TopUpFactoryCannotBeZeroAddress();
+    /// @notice Reverts when `isSupportedToken` runs before `setTradingLens` has been configured.
+    error TradingLensNotSet();
+    /// @notice Reverts when `setTradingLens` is called with the zero address.
+    error TradingLensCannotBeZeroAddress();
 
     /// @notice Emitted when a new `TradingSafe` is deployed.
     /// @param tradingSafe The address of the deployed `TradingSafe`.
@@ -51,6 +74,24 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     /// @param modules The modules enabled on the `TradingSafe`.
     /// @param threshold The threshold of the `TradingSafe`.
     event TradingSafeDeployed(address indexed tradingSafe, address indexed topUp, address[] owners, address[] modules, uint8 threshold);
+
+    /// @notice Emitted when the `TopUpFactory` reference is updated.
+    /// @param oldFactory Previous address (zero on first set).
+    /// @param newFactory New address.
+    event TopUpFactorySet(address oldFactory, address newFactory);
+
+    /// @notice Emitted when the `TradingLens` reference is updated.
+    /// @param oldLens Previous address (zero on first set).
+    /// @param newLens New address.
+    event TradingLensSet(address oldLens, address newLens);
+
+    /// @notice Emitted on a successful `redirectToTopUp` invocation. Single canonical event
+    ///         for every TradingSafe → TopUp redirect on this chain.
+    /// @param tradingSafe The TradingSafe the funds were redirected from.
+    /// @param topUp The destination TopUp address.
+    /// @param token ERC20 redirected.
+    /// @param amount Amount transferred.
+    event RedirectFunds(address indexed tradingSafe, address indexed topUp, address indexed token, uint256 amount);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -118,6 +159,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
         uint8 _threshold
     ) external whenNotPaused returns (address) {
         if (!roleRegistry().hasRole(TRADING_SAFE_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (sourceSafe == address(0)) revert InvalidInput();
 
         TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
 
@@ -164,8 +206,99 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
      */
     function getTopUpAddress(address tradingSafe) external view returns (address) {
         TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
-        if (!$.deployedAddresses.contains(tradingSafe)) revert InvalidInput();
+        if (!$.deployedAddresses.contains(tradingSafe)) revert InvalidTradingSafe();
         return _getTradingSafeFactoryStorage().topUpAddress[tradingSafe];
+    }
+
+    /**
+     * @notice Sets the `TopUpFactory` whose `isTokenSupported` gates `redirectToTopUp`.
+     * @dev Admin-only. Mirrors how `TopUpFactory` holds a mutable `tradingSafeFactory`
+     *      reference, so the supported-asset source can change without a beacon upgrade.
+     * @param _topUpFactory Address of the `TopUpFactory` on this chain.
+     * @custom:throws TopUpFactoryCannotBeZeroAddress If `_topUpFactory == address(0)`.
+     */
+    function setTopUpFactory(address _topUpFactory) external onlyRoleRegistryOwner {
+        if (_topUpFactory == address(0)) revert TopUpFactoryCannotBeZeroAddress();
+        TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
+        emit TopUpFactorySet($.topUpFactory, _topUpFactory);
+        $.topUpFactory = _topUpFactory;
+    }
+
+    /**
+     * @notice Returns the configured `TopUpFactory` address.
+     */
+    function topUpFactory() external view returns (address) {
+        return _getTradingSafeFactoryStorage().topUpFactory;
+    }
+
+    /**
+     * @notice Sets the `TradingLens` registry backing `isSupportedToken`.
+     * @dev Admin-only. The lens owns the supported-trading-token set; the factory exposes it
+     *      so cross-chain callers (the TopUp source factory) can gate redirects on it.
+     * @param _tradingLens Address of the `TradingLens` on this chain.
+     * @custom:throws TradingLensCannotBeZeroAddress If `_tradingLens == address(0)`.
+     */
+    function setTradingLens(address _tradingLens) external onlyRoleRegistryOwner {
+        if (_tradingLens == address(0)) revert TradingLensCannotBeZeroAddress();
+        TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
+        emit TradingLensSet($.tradingLens, _tradingLens);
+        $.tradingLens = _tradingLens;
+    }
+
+    /**
+     * @notice Returns the configured `TradingLens` address.
+     */
+    function tradingLens() external view returns (address) {
+        return _getTradingSafeFactoryStorage().tradingLens;
+    }
+
+    /**
+     * @notice Returns whether `token` is a supported trading asset, per the configured
+     *         `TradingLens` registry.
+     * @dev Consumed by the TopUp source factory's `redirectToTradingSafe` to ensure only
+     *      trading-supported tokens can be recovered to a TradingSafe.
+     * @param token The token to check.
+     * @return True if `token` is supported for trading.
+     * @custom:throws TradingLensNotSet If `setTradingLens` has not been called.
+     */
+    function isSupportedToken(address token) external view returns (bool) {
+        address lens = _getTradingSafeFactoryStorage().tradingLens;
+        if (lens == address(0)) revert TradingLensNotSet();
+        return ITradingLens(lens).isSupportedToken(token);
+    }
+
+    /**
+     * @notice Redirects `amount` of `token` from `tradingSafe` to that safe's TopUp address.
+     *         The mirror of `TopUpFactory.redirectToTradingSafe`: moves topup-supported
+     *         assets Safe → TopUp.
+     * @dev Backend-role gated. The destination is always the safe's own deploy-time-bound
+     *      TopUp address, and only topup-supported tokens are allowed — so a compromised
+     *      role can only move supported funds to *that user's own* TopUp, never elsewhere.
+     *      The actual transfer is executed by `TradingSafe.redirectToTopUp` (callable only
+     *      by this factory); this function carries the auth + validation + the single event.
+     * @param tradingSafe TradingSafe to redirect from. Must be deployed by this factory.
+     * @param token ERC20 to redirect. Must be a topup-supported token.
+     * @param amount Amount to transfer.
+     * @custom:throws OnlyRedirectRole If caller lacks `TRADING_SAFE_REDIRECT_ROLE`.
+     * @custom:throws InvalidAmount If `amount == 0`.
+     * @custom:throws InvalidTradingSafe If `tradingSafe` was not deployed by this factory.
+     * @custom:throws TopUpFactoryNotSet If `setTopUpFactory` has not been called.
+     * @custom:throws UnsupportedTopUpAsset If `token` is not topup-supported.
+     */
+    function redirectToTopUp(address tradingSafe, address token, uint256 amount) external nonReentrant whenNotPaused {
+        if (!roleRegistry().hasRole(TRADING_SAFE_REDIRECT_ROLE, msg.sender)) revert OnlyRedirectRole();
+        if (amount == 0) revert InvalidAmount();
+
+        TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
+        if (!$.deployedAddresses.contains(tradingSafe)) revert InvalidTradingSafe();
+
+        address _topUpFactory = $.topUpFactory;
+        if (_topUpFactory == address(0)) revert TopUpFactoryNotSet();
+        if (!ITopUpFactory(_topUpFactory).isTokenSupported(token)) revert UnsupportedTopUpAsset();
+
+        address topUp = $.topUpAddress[tradingSafe];
+        TradingSafe(payable(tradingSafe)).redirectToTopUp(token, topUp, amount);
+        emit RedirectFunds(tradingSafe, topUp, token, amount);
     }
 
     /**

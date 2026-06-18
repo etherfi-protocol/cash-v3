@@ -61,6 +61,9 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /// @notice Role identifier for accounts authorized to bridge tokens
     bytes32 public constant TOPUP_FACTORY_BRIDGER_ROLE = keccak256("TOPUP_FACTORY_BRIDGER_ROLE");
 
+    /// @notice Role allowed to drive `redirectToTradingSafe`
+    bytes32 public constant TOPUP_FACTORY_REDIRECT_ROLE = keccak256("TOPUP_FACTORY_REDIRECT_ROLE");
+
     /// @notice Emitted when tokens are bridged to the destination chain
     /// @param token The address of the token being bridged
     /// @param amount The amount of tokens being bridged
@@ -87,11 +90,13 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /// @param newFactory New address.
     event TradingSafeFactorySet(address oldFactory, address newFactory);
 
-    /// @notice Emitted on a successful `redirectToTradingSafe` invocation.
+    /// @notice Emitted on a successful `redirectToTradingSafe` invocation. Single canonical
+    ///         event for every TopUp → TradingSafe redirect on this chain.
     /// @param topUp The TopUp instance that the funds were redirected from.
+    /// @param tradingSafe The destination TradingSafe that received the funds.
     /// @param token ERC20 redirected.
     /// @param amount Amount transferred.
-    event RedirectToTradingSafe(address indexed topUp, address indexed token, uint256 amount);
+    event RedirectFunds(address indexed topUp, address indexed tradingSafe, address indexed token, uint256 amount);
 
     /// @notice Error thrown when a non-admin tries to deploy a topUp contract
     error OnlyAdmin();
@@ -111,6 +116,12 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     error RecoveryWalletCannotBeZeroAddress();
     /// @notice Error thrown when attempting to recover token which is a supported asset
     error OnlyUnsupportedTokens();
+    /// @notice Error thrown when redirecting a token that isn't supported for trading.
+    error TokenNotTradingSupported();
+    /// @notice Error thrown when `redirectToTradingSafe` is called by an account lacking the redirect role.
+    error OnlyRedirectRole();
+    /// @notice Error thrown when the resolved destination is not a deployed, registered TradingSafe.
+    error TradingSafeNotDeployed();
     /// @notice Error thrown when array lengths mismatch
     error ArrayLengthMismatch();
     /// @notice Error thrown when the start index is invalid
@@ -349,26 +360,40 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @notice Redirects `amount` of `token` from `topUp` to that user's TradingSafe on the
      *         destination chain. Recovery path for trading-supported, not-topup-supported
      *         tokens that landed at the TopUp address by mistake.
-     * @dev Permissionless. Destination derivation runs inside `TopUp.redirectToTradingSafe`
-     *      using the TopUp's own address as the salt seed via the configured
-     *      `tradingSafeFactory` — funds always land at *that user's own* TradingSafe.
-     *      Topup-supported tokens (USDC, WETH, etc.) are rejected so this path can't
-     *      divert funds out of the normal `processTopUp` flow into TradingSafe. Together
-     *      these two invariants mean a malicious caller can only do what BE would have
-     *      done anyway, so no role gating is needed.
+     * @dev Backend-role gated (`TOPUP_FACTORY_REDIRECT_ROLE`). Destination is always the
+     *      user's own deployed TradingSafe (derived from the TopUp address); the token must
+     *      be NOT topup-supported AND trading-supported, and the destination must be an
+     *      already-deployed, registered TradingSafe (never a codeless prediction).
      * @param topUp Address of the TopUp instance to redirect from.
-     * @param token ERC20 to redirect. Must NOT be a topup-supported token.
+     * @param token ERC20 to redirect. Must NOT be topup-supported and MUST be trading-supported.
      * @param amount Amount to transfer.
+     * @custom:throws OnlyRedirectRole If caller lacks `TOPUP_FACTORY_REDIRECT_ROLE`.
      * @custom:throws InvalidTopUpAddress If `topUp` was not deployed by this factory.
      * @custom:throws OnlyUnsupportedTokens If `token` has a topup configuration on this
      *                factory (route it through `processTopUp` instead).
+     * @custom:throws TradingSafeFactoryNotSet If `setTradingSafeFactory` has not been called.
+     * @custom:throws TokenNotTradingSupported If `token` is not a supported trading asset.
+     * @custom:throws TradingSafeNotDeployed If the resolved TradingSafe isn't deployed/registered.
      */
-    function redirectToTradingSafe(address topUp, address token, uint256 amount) external whenNotPaused {
+    function redirectToTradingSafe(address topUp, address token, uint256 amount) external nonReentrant whenNotPaused {
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_REDIRECT_ROLE, msg.sender)) revert OnlyRedirectRole();
+
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         if (!$.deployedAddresses.contains(topUp)) revert InvalidTopUpAddress();
         if ($.supportedTokens.contains(token)) revert OnlyUnsupportedTokens();
-        TopUp(payable(topUp)).redirectToTradingSafe(token, amount);
-        emit RedirectToTradingSafe(topUp, token, amount);
+
+        address tsFactory = $.tradingSafeFactory;
+        if (tsFactory == address(0)) revert TradingSafeFactoryNotSet();
+        if (!ITradingSafeFactory(tsFactory).isSupportedToken(token)) revert TokenNotTradingSupported();
+
+        address tradingSafe = ITradingSafeFactory(tsFactory).getDeterministicAddress(topUp);
+        // Only route to an already-deployed, registered TradingSafe — never to a codeless
+        // CREATE3 prediction. Also closes the co-location invariant: a misconfigured
+        // tradingSafeFactory won't have this safe registered.
+        if (!ITradingSafeFactory(tsFactory).isEtherFiSafe(tradingSafe)) revert TradingSafeNotDeployed();
+
+        TopUp(payable(topUp)).redirectToTradingSafe(token, tradingSafe, amount);
+        emit RedirectFunds(topUp, tradingSafe, token, amount);
     }
 
     /**
@@ -376,31 +401,44 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      *         one redirect operation `(topUps[i], tokens[i], amounts[i])`. Any combination
      *         is allowed — same TopUp multiple times for different tokens, multiple TopUps
      *         for the same token, etc.
-     * @dev Permissionless (same rationale as the single-entry variant). Atomic
+     * @dev Backend-role gated (same rationale as the single-entry variant). Atomic
      *      all-or-nothing: a revert on any entry rolls back the entire batch. Same
-     *      per-entry guards: rejects topup-supported tokens.
+     *      per-entry guards: rejects topup-supported tokens and requires trading-supported.
      * @param topUps Per-entry TopUp instance.
-     * @param tokens Per-entry ERC20 to redirect. Each must NOT be a topup-supported token.
+     * @param tokens Per-entry ERC20 to redirect. Each must NOT be topup-supported and MUST be
+     *               trading-supported.
      * @param amounts Per-entry amount to transfer.
      * @custom:throws ArrayLengthMismatch If the three arrays don't agree on length.
      * @custom:throws InvalidTopUpAddress If any `topUps[i]` was not deployed by this factory.
      * @custom:throws OnlyUnsupportedTokens If any `tokens[i]` has a topup configuration on
      *                this factory.
+     * @custom:throws TradingSafeFactoryNotSet If `setTradingSafeFactory` has not been called.
+     * @custom:throws TokenNotTradingSupported If any `tokens[i]` is not a supported trading asset.
      */
     function batchRedirectToTradingSafe(
         address[] calldata topUps,
         address[] calldata tokens,
         uint256[] calldata amounts
-    ) external whenNotPaused {
+    ) external nonReentrant whenNotPaused {
+        if (!roleRegistry().hasRole(TOPUP_FACTORY_REDIRECT_ROLE, msg.sender)) revert OnlyRedirectRole();
+
         uint256 len = topUps.length;
         if (len != tokens.length || len != amounts.length) revert ArrayLengthMismatch();
 
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
+        address tsFactory = $.tradingSafeFactory;
+        if (tsFactory == address(0)) revert TradingSafeFactoryNotSet();
+
         for (uint256 i = 0; i < len;) {
             if (!$.deployedAddresses.contains(topUps[i])) revert InvalidTopUpAddress();
             if ($.supportedTokens.contains(tokens[i])) revert OnlyUnsupportedTokens();
-            TopUp(payable(topUps[i])).redirectToTradingSafe(tokens[i], amounts[i]);
-            emit RedirectToTradingSafe(topUps[i], tokens[i], amounts[i]);
+            if (!ITradingSafeFactory(tsFactory).isSupportedToken(tokens[i])) revert TokenNotTradingSupported();
+
+            address tradingSafe = ITradingSafeFactory(tsFactory).getDeterministicAddress(topUps[i]);
+            if (!ITradingSafeFactory(tsFactory).isEtherFiSafe(tradingSafe)) revert TradingSafeNotDeployed();
+
+            TopUp(payable(topUps[i])).redirectToTradingSafe(tokens[i], tradingSafe, amounts[i]);
+            emit RedirectFunds(topUps[i], tradingSafe, tokens[i], amounts[i]);
             unchecked { ++i; }
         }
     }

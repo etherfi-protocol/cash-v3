@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import { BeaconFactory } from "../../src/beacon-factory/BeaconFactory.sol";
+import { ITradingLens } from "../../src/interfaces/ITradingLens.sol";
 import { TradingSafe } from "../../src/trading-safe/TradingSafe.sol";
 import { TradingSafeFactory } from "../../src/trading-safe/TradingSafeFactory.sol";
 import { TradingSafeTestBase } from "./TradingSafeTestBase.t.sol";
@@ -150,5 +152,61 @@ contract TradingSafeFactoryTest is TradingSafeTestBase {
         // start == length is also out of range.
         vm.expectRevert(TradingSafeFactory.InvalidStartIndex.selector);
         factory.getDeployedAddresses(1, 1);
+    }
+
+    // ---- input validation ----
+
+    function test_deployTradingSafe_revertsOnZeroSourceSafe() public {
+        address[] memory mods = new address[](0);
+        bytes[] memory setupData = new bytes[](0);
+        vm.prank(owner);
+        vm.expectRevert(BeaconFactory.InvalidInput.selector);
+        factory.deployTradingSafe(address(0), _singleOwner(), mods, setupData, 1);
+    }
+
+    function test_getTopUpAddress_revertsForUnknownSafe() public {
+        vm.expectRevert(TradingSafeFactory.InvalidTradingSafe.selector);
+        factory.getTopUpAddress(makeAddr("notASafe"));
+    }
+
+    // ---- setTradingLens / isSupportedToken ----
+
+    function test_setTradingLens_revertsForNonOwner() public {
+        vm.prank(makeAddr("stranger"));
+        vm.expectRevert();
+        factory.setTradingLens(makeAddr("lens"));
+    }
+
+    function test_setTradingLens_revertsOnZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(TradingSafeFactory.TradingLensCannotBeZeroAddress.selector);
+        factory.setTradingLens(address(0));
+    }
+
+    function test_setTradingLens_emitsEventAndUpdatesView() public {
+        address lens = makeAddr("lens");
+        vm.expectEmit(false, false, false, true, address(factory));
+        emit TradingSafeFactory.TradingLensSet(address(0), lens);
+        vm.prank(owner);
+        factory.setTradingLens(lens);
+        assertEq(factory.tradingLens(), lens);
+    }
+
+    function test_isSupportedToken_revertsWhenLensNotSet() public {
+        vm.expectRevert(TradingSafeFactory.TradingLensNotSet.selector);
+        factory.isSupportedToken(makeAddr("token"));
+    }
+
+    function test_isSupportedToken_delegatesToLens() public {
+        address lens = makeAddr("lens");
+        address token = makeAddr("token");
+        vm.prank(owner);
+        factory.setTradingLens(lens);
+
+        vm.mockCall(lens, abi.encodeWithSelector(ITradingLens.isSupportedToken.selector, token), abi.encode(true));
+        assertTrue(factory.isSupportedToken(token));
+
+        vm.mockCall(lens, abi.encodeWithSelector(ITradingLens.isSupportedToken.selector, token), abi.encode(false));
+        assertFalse(factory.isSupportedToken(token));
     }
 }

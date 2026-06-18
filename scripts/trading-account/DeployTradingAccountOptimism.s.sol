@@ -82,11 +82,8 @@ contract DeployTradingAccountOptimism is Utils {
         //    in its deployment tx (full Across config in the initialize calldata). The
         //    impl constructor reads getCashModule() from the initialised OP data
         //    provider, so the CashModule hold path is live here. Same proxy salt as the
-        //    mainnet deploy ⇒ same address on both chains.
-        //    topUpFactory: executeSell is unused on OP (selling happens on the trading
-        //    chain). initialize requires non-zero, so we pass a CODE-LESS sentinel — any
-        //    executeSell attempt reverts at the isTokenSupported staticcall, keeping the
-        //    sell path disabled on this chain.
+        //    mainnet deploy ⇒ same address on both chains. The module is Buy-only
+        //    (requestSwap stores the deposit args; executeSwap replays after the delay).
         address acrossImpl = _deploy(
             "AcrossSwapModuleImplV2Dev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider))
         );
@@ -97,8 +94,7 @@ contract DeployTradingAccountOptimism is Utils {
                 AcrossSwapModule.initialize.selector,
                 address(roleRegistry),
                 SPOKE_POOL,
-                MULTICALL_HANDLER,
-                address(0xdEaD)
+                MULTICALL_HANDLER
             ))
         ));
 

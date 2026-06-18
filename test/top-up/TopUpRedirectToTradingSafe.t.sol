@@ -56,6 +56,7 @@ contract TopUpRedirectToTradingSafeTest is Test {
         topUp = TopUp(payable(deployed[0]));
 
         factory.setTradingSafeFactory(tradingSafeFactoryAddr);
+        roleRegistry.grantRole(factory.TOPUP_FACTORY_REDIRECT_ROLE(), stranger);
 
         vm.stopPrank();
 
@@ -65,6 +66,22 @@ contract TopUpRedirectToTradingSafeTest is Test {
             tradingSafeFactoryAddr,
             abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(topUp)),
             abi.encode(derivedTradingSafe)
+        );
+
+        // Default every token to trading-supported (4-byte selector match = any args). Tests
+        // that need an unsupported token override this with a token-specific mock.
+        vm.mockCall(
+            tradingSafeFactoryAddr,
+            abi.encodeWithSelector(ITradingSafeFactory.isSupportedToken.selector),
+            abi.encode(true)
+        );
+
+        // Default every resolved TradingSafe to deployed/registered. Tests that need an
+        // undeployed destination override this.
+        vm.mockCall(
+            tradingSafeFactoryAddr,
+            abi.encodeWithSelector(ITradingSafeFactory.isEtherFiSafe.selector),
+            abi.encode(true)
         );
 
         // Fund the TopUp with a misrouted token.
@@ -79,10 +96,8 @@ contract TopUpRedirectToTradingSafeTest is Test {
         uint256 beforeTopUp = token.balanceOf(address(topUp));
         uint256 beforeTradingSafe = token.balanceOf(derivedTradingSafe);
 
-        vm.expectEmit(true, true, false, true, address(topUp));
-        emit TopUp.RedirectedToTradingSafe(address(token), derivedTradingSafe, amount);
-        vm.expectEmit(true, true, false, true, address(factory));
-        emit TopUpFactory.RedirectToTradingSafe(address(topUp), address(token), amount);
+        vm.expectEmit(true, true, true, true, address(factory));
+        emit TopUpFactory.RedirectFunds(address(topUp), derivedTradingSafe, address(token), amount);
 
         vm.prank(stranger);
         factory.redirectToTradingSafe(address(topUp), address(token), amount);
@@ -91,25 +106,25 @@ contract TopUpRedirectToTradingSafeTest is Test {
         assertEq(token.balanceOf(derivedTradingSafe), beforeTradingSafe + amount, "tradingSafe not credited");
     }
 
-    function test_redirectToTradingSafe_transfersEvenWhenTradingSafeNotYetDeployed() public {
-        // The mock returns a deterministic address with no code; the transfer should still
-        // succeed because ERC20 transfers don't require the recipient to exist.
-        assertEq(derivedTradingSafe.code.length, 0, "precondition: no code at derived address");
-
+    function test_redirectToTradingSafe_revertsWhenTradingSafeNotDeployed() public {
+        // Destination resolves but isn't a deployed/registered TradingSafe → reject rather
+        // than send funds to a codeless address.
+        vm.mockCall(
+            tradingSafeFactoryAddr,
+            abi.encodeWithSelector(ITradingSafeFactory.isEtherFiSafe.selector, derivedTradingSafe),
+            abi.encode(false)
+        );
         vm.prank(stranger);
+        vm.expectRevert(TopUpFactory.TradingSafeNotDeployed.selector);
         factory.redirectToTradingSafe(address(topUp), address(token), 100e18);
-
-        assertEq(token.balanceOf(derivedTradingSafe), 100e18);
     }
 
     // ---- Factory entry-point role gating ----
 
-    function test_factoryRedirect_anyCallerCanTrigger() public {
-        // Permissionless: a random address can fire the redirect. Destination is forced to
-        // the user's own TradingSafe by deterministic derivation, so there's no harm.
-        vm.prank(stranger);
+    function test_factoryRedirect_revertsForNonRole() public {
+        vm.prank(makeAddr("nonRole"));
+        vm.expectRevert(TopUpFactory.OnlyRedirectRole.selector);
         factory.redirectToTradingSafe(address(topUp), address(token), 100e18);
-        assertEq(token.balanceOf(derivedTradingSafe), 100e18);
     }
 
     function test_factoryRedirect_revertsForUnknownTopUp() public {
@@ -159,7 +174,19 @@ contract TopUpRedirectToTradingSafeTest is Test {
         // anywhere else must revert OnlyOwner.
         vm.prank(stranger);
         vm.expectRevert(TopUp.OnlyOwner.selector);
-        topUp.redirectToTradingSafe(address(token), 100e18);
+        topUp.redirectToTradingSafe(address(token), derivedTradingSafe, 100e18);
+    }
+
+    function test_redirect_revertsForNonTradingSupportedToken() public {
+        // Not topup-supported (passes OnlyUnsupportedTokens) but not trading-supported.
+        vm.mockCall(
+            tradingSafeFactoryAddr,
+            abi.encodeWithSelector(ITradingSafeFactory.isSupportedToken.selector, address(token)),
+            abi.encode(false)
+        );
+        vm.prank(stranger);
+        vm.expectRevert(TopUpFactory.TokenNotTradingSupported.selector);
+        factory.redirectToTradingSafe(address(topUp), address(token), 100e18);
     }
 
     // ---- batchRedirectToTradingSafe ----
@@ -247,7 +274,7 @@ contract TopUpRedirectToTradingSafeTest is Test {
         factory.batchRedirectToTradingSafe(topUps, tokens, amounts);
     }
 
-    function test_batchRedirect_anyCallerCanTrigger() public {
+    function test_batchRedirect_revertsForNonRole() public {
         address[] memory topUps = new address[](1);
         topUps[0] = address(topUp);
         address[] memory tokens = new address[](1);
@@ -255,9 +282,9 @@ contract TopUpRedirectToTradingSafeTest is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 100e18;
 
-        vm.prank(stranger);
+        vm.prank(makeAddr("nonRole"));
+        vm.expectRevert(TopUpFactory.OnlyRedirectRole.selector);
         factory.batchRedirectToTradingSafe(topUps, tokens, amounts);
-        assertEq(token.balanceOf(derivedTradingSafe), 100e18);
     }
 
     function test_batchRedirect_revertsWhenPaused() public {
