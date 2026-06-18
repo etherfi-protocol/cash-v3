@@ -84,9 +84,6 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     ///         `multicallHandler`).
     bytes32 public constant ACROSS_SWAP_MODULE_ADMIN_ROLE = keccak256("ACROSS_SWAP_MODULE_ADMIN_ROLE");
 
-    /// @notice Role allowed to call `executeSwap` (held by the BE keeper).
-    bytes32 public constant ACROSS_SWAP_MODULE_KEEPER_ROLE = keccak256("ACROSS_SWAP_MODULE_KEEPER_ROLE");
-
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("AcrossSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("AcrossSwapModule.cancelSwap");
@@ -116,8 +113,6 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
 
     /// @notice Reverts when a non-admin tries to set per-chain constants.
     error OnlyAdmin();
-    /// @notice Reverts when `executeSwap` is called by a non-keeper.
-    error OnlyKeeper();
     /// @notice Reverts when `requestSwap` is called on a safe with an active swap.
     error OrderAlreadyActive();
     /// @notice Reverts when `executeSwap` / `cancelSwap` finds no stored swap.
@@ -210,7 +205,7 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         bytes calldata message,
         address[] calldata signers,
         bytes[] calldata signatures
-    ) external nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
+    ) external whenNotPaused onlyEtherFiSafe(safe) {
         if (
             order.srcToken == address(0) || order.srcAmount == 0 ||
             order.dstToken == address(0) || order.dstChainId == 0 ||
@@ -256,12 +251,12 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
      *         the order, deposit args and message captured at `requestSwap`, releases the
      *         solvency hold, and drives the safe to call `SpokePool.depositV3`. Safe is the
      *         depositor → source-chain refunds auto-land at the safe.
-     * @dev `ACROSS_SWAP_MODULE_KEEPER_ROLE`-gated. Meant to be called after the CashModule
-     *      withdrawal delay matures.
+     * @dev Permissionless: it only replays the swap the user already signed at `requestSwap`
+     *      (order + depositArgs + message are all bound into that signature), so any caller
+     *      can do no more than execute exactly what the user authorised. Meant to be called
+     *      after the CashModule withdrawal delay matures.
      */
     function executeSwap(address safe) public nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ACROSS_SWAP_MODULE_KEEPER_ROLE, msg.sender)) revert OnlyKeeper();
-
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         StoredSwap memory swap = $.swaps[safe];
         if (swap.order.srcToken == address(0)) revert NoActiveOrder();

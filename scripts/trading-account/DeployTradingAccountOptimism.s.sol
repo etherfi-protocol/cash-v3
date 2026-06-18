@@ -46,7 +46,6 @@ contract DeployTradingAccountOptimism is Utils {
     function run() public {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(pk);
-        address keeper = deployer;
         address mainnetReceiver = 0x13A84ae8bb2b56728B19c86b573c95B4b5Db6f5c;
 
         string memory deployments = readDeploymentFile();
@@ -110,7 +109,6 @@ contract DeployTradingAccountOptimism is Utils {
 
         // 4. Roles.
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), deployer);
-        roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_KEEPER_ROLE(), keeper);
 
         // 5. Upgrade the DataProvider proxy to the bridge-aware impl — the deployed OP dev
         //    impl predates setOwnershipBridgeSender/getOwnershipBridgeSender. UUPS upgrade,

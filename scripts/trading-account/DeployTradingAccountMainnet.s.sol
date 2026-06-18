@@ -211,7 +211,6 @@ contract DeployTradingAccountMainnet is Utils {
     ///      dev the deployer owns both the trading and topup stacks.
     function _configureRolesAndAcross() internal {
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), deployer);
-        roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_KEEPER_ROLE(), keeper);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), keeper);
         roleRegistry.grantRole(lens.TRADING_LENS_ADMIN_ROLE(), deployer);
 

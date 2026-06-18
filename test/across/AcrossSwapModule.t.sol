@@ -68,7 +68,6 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         cashModule.configureModulesCanRequestWithdraw(mods, shouldWhitelist);
 
         roleRegistry.grantRole(module.ACROSS_SWAP_MODULE_ADMIN_ROLE(), moduleAdmin);
-        roleRegistry.grantRole(module.ACROSS_SWAP_MODULE_KEEPER_ROLE(), keeper);
         vm.stopPrank();
 
         bytes[] memory setupData = new bytes[](1);
@@ -187,10 +186,16 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         _checkDepositV3Args(order);
     }
 
-    function test_executeSwap_revertsForNonKeeper() public {
+    function test_executeSwap_permissionless_anyCallerCanExecute() public {
         _request(_baseOrder());
         _warpPastDelay();
-        _expectExecuteRevert(AcrossSwapModule.OnlyKeeper.selector, address(this));
+
+        // No role required: an arbitrary caller can execute the user-signed stored swap.
+        vm.prank(makeAddr("randomCaller"));
+        module.executeSwap(address(safe));
+
+        assertEq(spokePool.callCount(), 1);
+        assertEq(module.getOrder(address(safe)).srcToken, address(0), "order not cleared");
     }
 
     function test_executeSwap_revertsForNoActiveOrder() public {
