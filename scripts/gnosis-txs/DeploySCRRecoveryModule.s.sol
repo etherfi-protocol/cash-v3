@@ -41,8 +41,7 @@ contract DeploySCRRecoveryModuleGnosis is GnosisHelpers, Utils {
     address constant CASH_CONTROLLER_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     // Destination that receives all recovered SCR.
-    // TODO: confirm the collection wallet. Defaults to the cashControllerSafe.
-    address constant COLLECTION_WALLET = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address constant COLLECTION_WALLET = 0x86fBaEB3D6b5247F420590D303a6ffC9cd523790;
 
     // Deterministic salts (prod) so verification can confirm the impl/proxy addresses.
     bytes32 constant SALT_SCR_MODULE_IMPL  = keccak256("SCRRecoveryModule.Prod.Impl");
