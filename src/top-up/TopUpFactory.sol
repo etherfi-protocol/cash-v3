@@ -387,9 +387,6 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
         if (!ITradingSafeFactory(tsFactory).isSupportedToken(token)) revert TokenNotTradingSupported();
 
         address tradingSafe = ITradingSafeFactory(tsFactory).getDeterministicAddress(topUp);
-        // Only route to an already-deployed, registered TradingSafe — never to a codeless
-        // CREATE3 prediction. Also closes the co-location invariant: a misconfigured
-        // tradingSafeFactory won't have this safe registered.
         if (!ITradingSafeFactory(tsFactory).isEtherFiSafe(tradingSafe)) revert TradingSafeNotDeployed();
 
         TopUp(payable(topUp)).redirectToTradingSafe(token, tradingSafe, amount);

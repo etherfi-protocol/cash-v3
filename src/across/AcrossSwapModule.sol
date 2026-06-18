@@ -229,6 +229,8 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
 
         if (address(cashModule) != address(0)) {
             cashModule.requestWithdrawalByModule(safe, order.srcToken, order.srcAmount);
+        } else {
+            executeSwap(safe);
         }
 
         _emitSwapRequested(safe, order);
@@ -257,7 +259,7 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
      * @dev `ACROSS_SWAP_MODULE_KEEPER_ROLE`-gated. Meant to be called after the CashModule
      *      withdrawal delay matures.
      */
-    function executeSwap(address safe) external nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
+    function executeSwap(address safe) public nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
         if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ACROSS_SWAP_MODULE_KEEPER_ROLE, msg.sender)) revert OnlyKeeper();
 
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
