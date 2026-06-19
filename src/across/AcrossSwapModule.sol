@@ -61,10 +61,14 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
 
     /// @notice Everything `executeSwap` needs, captured at `requestSwap`: the user-signed
     ///         order plus the BE-supplied deposit args and destination multicall message.
+    /// @dev `swapId` is the stable identifier minted at `requestSwap` and re-emitted at
+    ///      execute/cancel so off-chain consumers can link the three lifecycle events of a
+    ///      single swap. Appended last to keep the upgradeable storage layout stable.
     struct StoredSwap {
         Order order;
         DepositArgs depositArgs;
         bytes message;
+        bytes32 swapId;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.AcrossSwapModule
@@ -91,11 +95,15 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     /// @notice CashModule on the same chain. Zero where there is no card spending.
     ICashModule public immutable cashModule;
 
+    /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
+    ///      join a swap's request/execute/cancel by id. `srcToken` / `dstChainId` are no longer
+    ///      indexed to stay within the 3-topic limit; both remain in the event data.
     event SwapRequested(
         address indexed safe,
-        address indexed srcToken,
+        bytes32 indexed swapId,
+        address srcToken,
         uint256 srcAmount,
-        uint256 indexed dstChainId,
+        uint256 dstChainId,
         address dstToken,
         address recipient,
         uint256 minOut,
@@ -103,11 +111,12 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     );
     event SwapExecuted(
         address indexed safe,
-        uint256 indexed dstChainId,
+        bytes32 indexed swapId,
+        uint256 dstChainId,
         address indexed dstToken,
         uint256 outputAmount
     );
-    event SwapCancelled(address indexed safe);
+    event SwapCancelled(address indexed safe, bytes32 indexed swapId);
     event SpokePoolSet(address oldSpokePool, address newSpokePool);
     event MulticallHandlerSet(address oldMulticallHandler, address newMulticallHandler);
 
@@ -218,9 +227,11 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
         if ($.spokePool == address(0) || $.multicallHandler == address(0)) revert MissingConfig();
 
-        _verifyRequestSignature(safe, order, depositArgs, message, signers, signatures);
+        uint256 nonce = IEtherFiSafe(safe).useNonce();
+        _verifyRequestSignature(safe, order, depositArgs, message, nonce, signers, signatures);
 
-        $.swaps[safe] = StoredSwap({ order: order, depositArgs: depositArgs, message: message });
+        bytes32 swapId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
+        $.swaps[safe] = StoredSwap({ order: order, depositArgs: depositArgs, message: message, swapId: swapId });
 
         if (address(cashModule) != address(0)) {
             cashModule.requestWithdrawalByModule(safe, order.srcToken, order.srcAmount);
@@ -228,14 +239,13 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
             executeSwap(safe);
         }
 
-        _emitSwapRequested(safe, order);
+        _emitSwapRequested(safe, swapId, order);
     }
 
-    /// @dev Extracted from `requestSwap` to keep its stack budget under the legacy codegen
-    ///      limit (the 8-field event would otherwise overflow the frame).
-    function _emitSwapRequested(address safe, Order calldata order) internal {
+    function _emitSwapRequested(address safe, bytes32 swapId, Order calldata order) internal {
         emit SwapRequested(
             safe,
+            swapId,
             order.srcToken,
             order.srcAmount,
             order.dstChainId,
@@ -268,7 +278,7 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
 
         _dispatchDeposit(safe, swap.order, swap.depositArgs, swap.message);
 
-        emit SwapExecuted(safe, swap.order.dstChainId, swap.order.dstToken, swap.depositArgs.outputAmount);
+        emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.depositArgs.outputAmount);
     }
 
     /// @dev Extracted to keep `executeSwap`'s stack budget under the legacy codegen
@@ -338,11 +348,12 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         ).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
 
+        bytes32 swapId = $.swaps[safe].swapId;
         if (address(cashModule) != address(0)) {
             cashModule.cancelWithdrawalByModule(safe);
         }
         delete $.swaps[safe];
-        emit SwapCancelled(safe);
+        emit SwapCancelled(safe, swapId);
     }
 
     /**
@@ -355,8 +366,9 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         if (msg.sender != address(cashModule)) revert Unauthorized();
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         if ($.swaps[safe].order.srcToken == address(0)) return;
+        bytes32 swapId = $.swaps[safe].swapId;
         delete $.swaps[safe];
-        emit SwapCancelled(safe);
+        emit SwapCancelled(safe, swapId);
     }
 
     // ---- Internals ----
@@ -374,15 +386,16 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         Order calldata order,
         DepositArgs calldata depositArgs,
         bytes calldata message,
+        uint256 nonce,
         address[] calldata signers,
         bytes[] calldata signatures
-    ) internal {
+    ) internal view {
         bytes32 digest = keccak256(
             abi.encodePacked(
                 REQUEST_SWAP_SIG,
                 block.chainid,
                 address(this),
-                IEtherFiSafe(safe).useNonce(),
+                nonce,
                 safe,
                 abi.encode(order),
                 keccak256(abi.encode(depositArgs)),

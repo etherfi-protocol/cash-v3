@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { Vm } from "forge-std/Vm.sol";
 
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
@@ -215,8 +216,9 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         _request(_baseOrder());
 
         (address[] memory signers, bytes[] memory sigs) = _signCancel();
+        // Match the safe topic only; swapId is asserted in the dedicated linking tests.
         vm.expectEmit(true, false, false, false);
-        emit AcrossSwapModule.SwapCancelled(address(safe));
+        emit AcrossSwapModule.SwapCancelled(address(safe), bytes32(0));
         module.cancelSwap(address(safe), signers, sigs);
 
         assertEq(module.getOrder(address(safe)).srcToken, address(0));
@@ -243,6 +245,82 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         sigs[1] = abi.encodePacked(r2, s2, v2);
 
         vm.expectRevert(AcrossSwapModule.InvalidSignatures.selector);
+        module.cancelSwap(address(safe), signers, sigs);
+    }
+
+    // ---- swapId linking ----
+
+    /// @dev The swapId committed at request time is `keccak256(chainid, module, safe, nonce, order)`.
+    function _expectedSwapId(AcrossSwapModule.Order memory order, uint256 nonce) internal view returns (bytes32) {
+        return keccak256(abi.encode(block.chainid, address(module), address(safe), nonce, order));
+    }
+
+    /// @dev Pull the `swapId` topic (topic[2]) of the first recorded log matching `sig`.
+    ///      Event topic layout is `[sig, safe, swapId]` for all three lifecycle events.
+    function _swapIdFromLogs(bytes32 sig) internal returns (bytes32) {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length >= 3 && logs[i].topics[0] == sig) return logs[i].topics[2];
+        }
+        revert("event not found");
+    }
+
+    function test_requestSwap_storesAndEmitsSwapId() public {
+        AcrossSwapModule.Order memory order = _baseOrder();
+        bytes32 expected = _expectedSwapId(order, safe.nonce());
+
+        vm.recordLogs();
+        _request(order);
+
+        assertEq(module.getSwap(address(safe)).swapId, expected, "stored swapId");
+        assertEq(_swapIdFromLogs(AcrossSwapModule.SwapRequested.selector), expected, "emitted SwapRequested swapId");
+    }
+
+    function test_executeSwap_emitsSameSwapIdAsRequest() public {
+        _request(_baseOrder());
+        bytes32 stored = module.getSwap(address(safe)).swapId;
+        _warpPastDelay();
+
+        vm.recordLogs();
+        _executeAsKeeper();
+
+        assertEq(_swapIdFromLogs(AcrossSwapModule.SwapExecuted.selector), stored, "execute swapId links to request");
+    }
+
+    function test_cancelSwap_emitsSameSwapIdAsRequest() public {
+        _request(_baseOrder());
+        bytes32 stored = module.getSwap(address(safe)).swapId;
+
+        (address[] memory signers, bytes[] memory sigs) = _signCancel();
+        vm.recordLogs();
+        module.cancelSwap(address(safe), signers, sigs);
+
+        assertEq(_swapIdFromLogs(AcrossSwapModule.SwapCancelled.selector), stored, "cancel swapId links to request");
+    }
+
+    function test_cancelBridgeByCashModule_emitsSameSwapIdAsRequest() public {
+        _request(_baseOrder());
+        bytes32 stored = module.getSwap(address(safe)).swapId;
+
+        vm.recordLogs();
+        vm.prank(address(cashModule));
+        module.cancelBridgeByCashModule(address(safe));
+
+        assertEq(_swapIdFromLogs(AcrossSwapModule.SwapCancelled.selector), stored, "cancelBridge swapId links to request");
+    }
+
+    /// @dev Two sequential swaps for the same safe must get distinct ids (the nonce advances).
+    function test_swapId_distinctAcrossSequentialSwaps() public {
+        bytes32 firstId = _firstSwapIdThenCancel();
+        bytes32 secondId = _firstSwapIdThenCancel();
+        assertTrue(firstId != bytes32(0), "first id set");
+        assertTrue(firstId != secondId, "sequential swaps get distinct ids");
+    }
+
+    function _firstSwapIdThenCancel() internal returns (bytes32 id) {
+        _request(_baseOrder());
+        id = module.getSwap(address(safe)).swapId;
+        (address[] memory signers, bytes[] memory sigs) = _signCancel();
         module.cancelSwap(address(safe), signers, sigs);
     }
 
