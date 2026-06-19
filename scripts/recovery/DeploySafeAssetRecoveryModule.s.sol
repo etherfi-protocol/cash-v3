@@ -50,17 +50,31 @@ contract DeploySafeAssetRecoveryModule is Utils, RecoveryDeployHelper {
 
         vm.stopBroadcast();
 
-        // --- Post-deploy verification: read back the immutable to confirm we deployed OUR code ---
+        // --- Post-deploy verification (I-01): prove the CREATE3 address holds exactly OUR compiled
+        // code, not something a front-runner placed there. Read back the immutable, then deploy a
+        // local reference with the same constructor arg (immutables make runtime code arg-dependent)
+        // and require an exact runtime-bytecode match — failing the run on any mismatch. This is the
+        // in-script equivalent of VerifyBytecode.s.sol; the exact standalone command is printed below
+        // so the 3CP reviewer can independently re-validate the deployment (audit recommendation).
         require(
             address(SafeAssetRecoveryModule(module).etherFiDataProvider()) == dataProvider,
             "VERIFY FAILED: dataProvider mismatch"
         );
 
+        address localRef = address(new SafeAssetRecoveryModule(dataProvider));
         bytes32 codeHash = keccak256(module.code);
+        require(codeHash == keccak256(localRef.code), "VERIFY FAILED: runtime bytecode mismatch");
+
         console.log("SafeAssetRecoveryModule : %s", module);
         console.log("DataProvider            : %s", dataProvider);
-        console.log("Runtime bytecode hash (for independent verification):");
+        console.log("Runtime bytecode verified against local reference. Hash:");
         console.logBytes32(codeHash);
+        console.log("");
+        console.log("Independent re-verification (audit I-01) - run VerifyBytecode.s.sol with:");
+        console.log("  ADDRESS=%s", module);
+        console.log("  ARTIFACT=SafeAssetRecoveryModule");
+        console.log("  CONSTRUCTOR_ARGS=%s", vm.toString(abi.encode(dataProvider)));
+        console.log("  forge script scripts/utils/VerifyBytecode.s.sol --rpc-url <OP_RPC>");
 
         address[] memory modules = new address[](1);
         modules[0] = module;
