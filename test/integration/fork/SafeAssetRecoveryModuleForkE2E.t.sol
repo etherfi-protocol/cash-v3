@@ -88,11 +88,12 @@ contract SafeAssetRecoveryModuleForkE2E is Test {
         _enableModuleOnSafe();
         assertTrue(module.getNonce(address(safe)) == 0, "sanity: module nonce unused before recover");
 
-        // 4. Recover: owner signs, anyone submits.
-        (address[] memory signers, bytes[] memory sigs) = _signRecover(address(token), recipient);
+        // 4. Recover: owner signs (with a deadline), anyone submits before it.
+        uint256 deadline = block.timestamp + 1 hours;
+        (address[] memory signers, bytes[] memory sigs) = _signRecover(address(token), recipient, deadline);
         vm.expectEmit(true, true, true, true, address(module));
         emit ISafeAssetRecoveryModule.AssetRecovered(address(safe), address(token), recipient, amount);
-        module.recover(address(safe), address(token), recipient, signers, sigs);
+        module.recover(address(safe), address(token), recipient, deadline, signers, sigs);
 
         // 5. Assert the sweep landed with the recipient and drained the safe.
         assertEq(token.balanceOf(recipient), amount, "recipient did not receive full balance");
@@ -141,7 +142,7 @@ contract SafeAssetRecoveryModuleForkE2E is Test {
         safe.configureModules(mods, wl, setupData, signers, sigs);
     }
 
-    function _signRecover(address token_, address recipient_)
+    function _signRecover(address token_, address recipient_, uint256 deadline_)
         internal
         view
         returns (address[] memory signers, bytes[] memory sigs)
@@ -152,7 +153,8 @@ contract SafeAssetRecoveryModuleForkE2E is Test {
             module.getNonce(address(safe)),
             address(safe),
             token_,
-            recipient_
+            recipient_,
+            deadline_
         ));
         return _sign(digest);
     }

@@ -39,6 +39,9 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
     address public safeAddr;
     address public recipient = makeAddr("recipient");
 
+    /// @dev Never-expiring deadline for the tests that don't exercise expiry.
+    uint256 internal constant DEADLINE = type(uint256).max;
+
     function setUp() public override {
         super.setUp();
         safeAddr = address(safe);
@@ -68,7 +71,7 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
 
         vm.expectEmit(true, true, true, true, address(module));
         emit ISafeAssetRecoveryModule.AssetRecovered(safeAddr, address(token), recipient, amount);
-        module.recover(safeAddr, address(token), recipient, signers, sigs);
+        module.recover(safeAddr, address(token), recipient, DEADLINE, signers, sigs);
 
         assertEq(token.balanceOf(recipient), amount, "recipient balance");
         assertEq(token.balanceOf(safeAddr), 0, "safe drained");
@@ -77,13 +80,25 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
     function test_recover_revertsIfTokenZero() public {
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(0), recipient);
         vm.expectRevert(ISafeAssetRecoveryModule.InvalidToken.selector);
-        module.recover(safeAddr, address(0), recipient, signers, sigs);
+        module.recover(safeAddr, address(0), recipient, DEADLINE, signers, sigs);
     }
 
     function test_recover_revertsIfRecipientZero() public {
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), address(0));
         vm.expectRevert(ISafeAssetRecoveryModule.InvalidRecipient.selector);
-        module.recover(safeAddr, address(token), address(0), signers, sigs);
+        module.recover(safeAddr, address(token), address(0), DEADLINE, signers, sigs);
+    }
+
+    /// @dev I-04 regression: an expired deadline must revert before the signature is honoured, so a
+    ///      relayer cannot stash a signed recovery and replay it against a future deposit.
+    function test_recover_revertsIfExpired() public {
+        token.mint(safeAddr, 1e18);
+        uint256 deadline = block.timestamp + 1 hours;
+        (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), recipient, deadline);
+
+        vm.warp(deadline + 1);
+        vm.expectRevert(ISafeAssetRecoveryModule.RecoveryExpired.selector);
+        module.recover(safeAddr, address(token), recipient, deadline, signers, sigs);
     }
 
     function test_recover_revertsIfSupportedToken() public {
@@ -91,7 +106,7 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         token.mint(safeAddr, 0); // no-op; ensure compiler keeps token ref
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(usdc), recipient);
         vm.expectRevert(ISafeAssetRecoveryModule.OnlySupportedTokensCannotBeRecovered.selector);
-        module.recover(safeAddr, address(usdc), recipient, signers, sigs);
+        module.recover(safeAddr, address(usdc), recipient, DEADLINE, signers, sigs);
     }
 
     /// @dev M-01 regression: a token whitelisted for delayed withdrawals — but neither collateral
@@ -113,14 +128,14 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
 
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(withdrawable), recipient);
         vm.expectRevert(ISafeAssetRecoveryModule.OnlySupportedTokensCannotBeRecovered.selector);
-        module.recover(safeAddr, address(withdrawable), recipient, signers, sigs);
+        module.recover(safeAddr, address(withdrawable), recipient, DEADLINE, signers, sigs);
     }
 
     function test_recover_revertsIfZeroBalance() public {
         // token unsupported but safe holds none.
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), recipient);
         vm.expectRevert(ISafeAssetRecoveryModule.NoBalanceToRecover.selector);
-        module.recover(safeAddr, address(token), recipient, signers, sigs);
+        module.recover(safeAddr, address(token), recipient, DEADLINE, signers, sigs);
     }
 
     function test_recover_revertsIfBadSignature() public {
@@ -128,18 +143,18 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         // sign over `recipient`, submit a different recipient -> digest mismatch.
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), recipient);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.recover(safeAddr, address(token), makeAddr("other"), signers, sigs);
+        module.recover(safeAddr, address(token), makeAddr("other"), DEADLINE, signers, sigs);
     }
 
     function test_recover_digestReplayReverts() public {
         token.mint(safeAddr, 2e18);
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), recipient);
 
-        module.recover(safeAddr, address(token), recipient, signers, sigs);
+        module.recover(safeAddr, address(token), recipient, DEADLINE, signers, sigs);
         // nonce advanced; same sigs no longer match.
         token.mint(safeAddr, 2e18);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.recover(safeAddr, address(token), recipient, signers, sigs);
+        module.recover(safeAddr, address(token), recipient, DEADLINE, signers, sigs);
     }
 
     function test_recover_revertsWhenPaused() public {
@@ -149,7 +164,7 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         token.mint(safeAddr, 1e18);
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), recipient);
         vm.expectRevert(bytes4(keccak256("EnforcedPause()")));
-        module.recover(safeAddr, address(token), recipient, signers, sigs);
+        module.recover(safeAddr, address(token), recipient, DEADLINE, signers, sigs);
     }
 
     function test_pause_onlyPauser() public {
@@ -172,7 +187,7 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module2), address(token), recipient);
         // Signature + support + balance pass; execTransactionFromModule rejects the unenabled module.
         vm.expectRevert(EtherFiSafeErrors.OnlyModules.selector);
-        module2.recover(safeAddr, address(token), recipient, signers, sigs);
+        module2.recover(safeAddr, address(token), recipient, DEADLINE, signers, sigs);
     }
 
     function test_recover_revertsOnFalseReturningToken() public {
@@ -180,7 +195,7 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         bad.mint(safeAddr, 5e18);
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(bad), recipient);
         vm.expectRevert(ISafeAssetRecoveryModule.RecoveryTransferFailed.selector);
-        module.recover(safeAddr, address(bad), recipient, signers, sigs);
+        module.recover(safeAddr, address(bad), recipient, DEADLINE, signers, sigs);
     }
 
     /// @dev L-01 regression: a token that leaves dust on a full-balance sweep (rebasing /
@@ -196,7 +211,7 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
 
         vm.expectEmit(true, true, true, true, address(module));
         emit ISafeAssetRecoveryModule.AssetRecovered(safeAddr, address(dust), recipient, amount - 1);
-        module.recover(safeAddr, address(dust), recipient, signers, sigs);
+        module.recover(safeAddr, address(dust), recipient, DEADLINE, signers, sigs);
 
         assertEq(dust.balanceOf(recipient), amount - 1, "recipient received all but dust");
         assertEq(dust.balanceOf(safeAddr), 1, "1 wei dust remains; token not trapped");
@@ -209,13 +224,22 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         view
         returns (address[] memory signers, bytes[] memory sigs)
     {
+        return _signRecover(module_, token_, recipient_, DEADLINE);
+    }
+
+    function _signRecover(address module_, address token_, address recipient_, uint256 deadline_)
+        internal
+        view
+        returns (address[] memory signers, bytes[] memory sigs)
+    {
         bytes32 digest = keccak256(abi.encode(
             block.chainid,
             module_,
             SafeAssetRecoveryModule(module_).getNonce(safeAddr),
             safeAddr,
             token_,
-            recipient_
+            recipient_,
+            deadline_
         ));
 
         signers = new address[](2);

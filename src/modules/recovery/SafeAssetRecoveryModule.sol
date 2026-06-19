@@ -29,6 +29,9 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
      * @notice Sweep the full balance of one unsupported ERC20 out of `safe` to `recipient`.
      * @dev The caller is untrusted (EtherFi sponsors/submits); the owner signatures authorize.
      *      The per-safe nonce from `ModuleBase` gives replay protection.
+     * @param deadline Unix timestamp after which the owner authorization is void. Bound into the
+     *      signed digest so a relayer cannot stash the signature and replay it against a future
+     *      deposit of the same token (audit I-04 — `recover` sweeps the full balance at execution).
      * @dev Subject to the safe's debt-health check (audit I-03): `execTransactionFromModule` fires
      *      `EtherFiHook.postOpHook`, which runs `debtManager.ensureHealth(safe)` for every module
      *      except CashModule. So `recover()` reverts on an unhealthy safe even though the swept token
@@ -41,13 +44,15 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
         address safe,
         address token,
         address recipient,
+        uint256 deadline,
         address[] calldata signers,
         bytes[] calldata signatures
     ) external whenNotPaused onlyEtherFiSafe(safe) {
         if (recipient == address(0)) revert InvalidRecipient();
         if (token == address(0)) revert InvalidToken();
+        if (block.timestamp > deadline) revert RecoveryExpired();
 
-        _verifyRecoverySignatures(safe, token, recipient, signers, signatures);
+        _verifyRecoverySignatures(safe, token, recipient, deadline, signers, signatures);
         _assertRecoverable(token);
 
         uint256 moved = _sweepFullBalance(safe, token, recipient);
@@ -115,11 +120,13 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
     }
 
     /// @dev Digest mirrors `AssetRecoveryModule` minus the LayerZero fields. Amount is not signed
-    ///      (full-balance sweep). `_useNonce` consumes the per-safe nonce for replay protection.
+    ///      (full-balance sweep); `deadline` is, so a stashed signature expires (audit I-04).
+    ///      `_useNonce` consumes the per-safe nonce for replay protection.
     function _verifyRecoverySignatures(
         address safe,
         address token,
         address recipient,
+        uint256 deadline,
         address[] calldata signers,
         bytes[] calldata signatures
     ) internal {
@@ -129,7 +136,8 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
             _useNonce(safe),
             safe,
             token,
-            recipient
+            recipient,
+            deadline
         ));
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignature();
     }

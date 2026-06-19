@@ -15,12 +15,14 @@ interface ISafeAssetRecoveryModule {
     error OnlySupportedTokensCannotBeRecovered();
     error NoBalanceToRecover();
     error RecoveryTransferFailed();
+    error RecoveryExpired();
     // InvalidSignature() comes from ModuleBase; redeclaring here would collide on inheritance.
 
     function recover(
         address safe,
         address token,
         address recipient,
+        uint256 deadline,
         address[] calldata signers,
         bytes[] calldata signatures
     ) external;
