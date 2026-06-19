@@ -19,6 +19,20 @@ contract FalseTransferToken {
     function transfer(address, uint256) external pure returns (bool) { return false; }
 }
 
+/// @dev ERC20 that retains 1 wei of dust in the sender on a full-balance transfer, mimicking the
+///      share-rounding of rebasing tokens like stETH — exercises the relaxed "balance decreased"
+///      postcondition in `recover` (an `== 0` check would revert and trap the token).
+contract DustLeavingToken {
+    mapping(address => uint256) public balanceOf;
+    function mint(address to, uint256 amt) external { balanceOf[to] += amt; }
+    function transfer(address to, uint256 amt) external returns (bool) {
+        uint256 moved = amt - 1; // leave 1 wei behind (rounding dust)
+        balanceOf[msg.sender] -= moved;
+        balanceOf[to] += moved;
+        return true;
+    }
+}
+
 contract SafeAssetRecoveryModuleTest is SafeTestSetup {
     SafeAssetRecoveryModule public module;
     MockERC20 public token;
@@ -167,6 +181,25 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(bad), recipient);
         vm.expectRevert(ISafeAssetRecoveryModule.RecoveryTransferFailed.selector);
         module.recover(safeAddr, address(bad), recipient, signers, sigs);
+    }
+
+    /// @dev L-01 regression: a token that leaves dust on a full-balance sweep (rebasing /
+    ///      share-rounding, e.g. stETH) must still recover. The old `== 0` postcondition reverted
+    ///      here and trapped the token; the relaxed "balance decreased" check tolerates the dust,
+    ///      and the event reports the amount that actually left the safe.
+    function test_recover_succeedsWhenTokenLeavesDust() public {
+        DustLeavingToken dust = new DustLeavingToken();
+        uint256 amount = 1_000e18;
+        dust.mint(safeAddr, amount);
+
+        (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(dust), recipient);
+
+        vm.expectEmit(true, true, true, true, address(module));
+        emit ISafeAssetRecoveryModule.AssetRecovered(safeAddr, address(dust), recipient, amount - 1);
+        module.recover(safeAddr, address(dust), recipient, signers, sigs);
+
+        assertEq(dust.balanceOf(recipient), amount - 1, "recipient received all but dust");
+        assertEq(dust.balanceOf(safeAddr), 1, "1 wei dust remains; token not trapped");
     }
 
     // --- helpers ---

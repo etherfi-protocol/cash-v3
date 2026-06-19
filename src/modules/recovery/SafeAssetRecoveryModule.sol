@@ -41,12 +41,20 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
         if (token == address(0)) revert InvalidToken();
 
         _verifyRecoverySignatures(safe, token, recipient, signers, signatures);
+        _assertRecoverable(token);
 
-        // Unsupported-only. A module transfer bypasses both the debt-health flow and the
-        // CashModule withdrawal delay, so recovery must never touch a supported token:
-        //   - collateral / borrow tokens back the safe's active debt position;
-        //   - whitelisted withdraw assets are timelocked on the normal withdrawal path, and
-        //     sweeping one here would skip that delay (and could drain a pending withdrawal).
+        uint256 moved = _sweepFullBalance(safe, token, recipient);
+
+        emit AssetRecovered(safe, token, recipient, moved);
+    }
+
+    /// @dev Reverts unless `token` is genuinely unsupported. A module transfer bypasses both the
+    ///      debt-health flow and the CashModule withdrawal delay, so recovery must never touch a
+    ///      supported token:
+    ///        - collateral / borrow tokens back the safe's active debt position;
+    ///        - whitelisted withdraw assets are timelocked on the normal withdrawal path, and
+    ///          sweeping one here would skip that delay (and could drain a pending withdrawal).
+    function _assertRecoverable(address token) internal view {
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
         IDebtManager debtManager = cashModule.getDebtManager();
         if (
@@ -56,7 +64,11 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
         ) {
             revert OnlySupportedTokensCannotBeRecovered();
         }
+    }
 
+    /// @dev Sweeps the full balance of `token` out of `safe` to `recipient`, returning the amount
+    ///      that actually left the safe. Extracted from `recover` to dodge stack-too-deep.
+    function _sweepFullBalance(address safe, address token, address recipient) internal returns (uint256 moved) {
         uint256 amount = IERC20(token).balanceOf(safe);
         if (amount == 0) revert NoBalanceToRecover();
 
@@ -69,12 +81,15 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
 
-        // execTransactionFromModule only checks call success, not the ERC20 return value. The
-        // post-transfer balance check defends against non-reverting `false` returns and
-        // fee-on-transfer behaviour on the arbitrary unsupported tokens this path targets.
-        if (IERC20(token).balanceOf(safe) != 0) revert RecoveryTransferFailed();
+        // execTransactionFromModule only checks call success, not the ERC20 return value, so verify
+        // the sweep actually moved funds. Require the balance to strictly *decrease* rather than hit
+        // exactly zero: share-accounted / rebasing tokens (e.g. stETH) can leave 1-2 wei of dust from
+        // rounding, and an `== 0` check would treat that as a failure and trap the token forever. A
+        // non-reverting `false` return moves nothing, leaving the balance unchanged -> still caught.
+        uint256 remaining = IERC20(token).balanceOf(safe);
+        if (remaining >= amount) revert RecoveryTransferFailed();
 
-        emit AssetRecovered(safe, token, recipient, amount);
+        return amount - remaining;
     }
 
     /// @dev True if `token` is whitelisted for delayed withdrawals on the CashModule. The set is
