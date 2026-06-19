@@ -17,7 +17,8 @@ contract VerifyTopUpConfigHyperEVM is TopUpConfigHelper, Test {
     string deployments;
 
     function setUp() public {
-        vm.createSelectFork("https://rpc.hyperliquid.xyz/evm");
+        // Pinned to a settled block to avoid head-of-chain races on the public RPC's load-balanced nodes.
+        vm.createSelectFork("https://rpc.hyperliquid.xyz/evm", 33_627_000);
 
         deployments = readDeploymentFile();
         topUpFactory = TopUpFactory(payable(stdJson.readAddress(deployments, ".addresses.TopUpSourceFactory")));
