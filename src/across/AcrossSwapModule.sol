@@ -233,13 +233,13 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         bytes32 swapId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
         $.swaps[safe] = StoredSwap({ order: order, depositArgs: depositArgs, message: message, swapId: swapId });
 
+        _emitSwapRequested(safe, swapId, order);
+
         if (address(cashModule) != address(0)) {
             cashModule.requestWithdrawalByModule(safe, order.srcToken, order.srcAmount);
         } else {
             executeSwap(safe);
         }
-
-        _emitSwapRequested(safe, swapId, order);
     }
 
     function _emitSwapRequested(address safe, bytes32 swapId, Order calldata order) internal {
@@ -351,9 +351,12 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         bytes32 swapId = $.swaps[safe].swapId;
         if (address(cashModule) != address(0)) {
             cashModule.cancelWithdrawalByModule(safe);
+        } else {
+            // the if block cancelWithdrawalByModule calls the cancelBridgeByCashModule function 
+            // and cancels the swap already, so we need to delete the swap only in else block
+            delete $.swaps[safe];
+            emit SwapCancelled(safe, swapId);
         }
-        delete $.swaps[safe];
-        emit SwapCancelled(safe, swapId);
     }
 
     /**
