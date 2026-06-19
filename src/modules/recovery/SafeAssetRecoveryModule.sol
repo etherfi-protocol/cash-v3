@@ -29,6 +29,13 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
      * @notice Sweep the full balance of one unsupported ERC20 out of `safe` to `recipient`.
      * @dev The caller is untrusted (EtherFi sponsors/submits); the owner signatures authorize.
      *      The per-safe nonce from `ModuleBase` gives replay protection.
+     * @dev Subject to the safe's debt-health check (audit I-03): `execTransactionFromModule` fires
+     *      `EtherFiHook.postOpHook`, which runs `debtManager.ensureHealth(safe)` for every module
+     *      except CashModule. So `recover()` reverts on an unhealthy safe even though the swept token
+     *      is non-collateral / non-borrow and cannot affect the debt position. This is intentional and
+     *      acknowledged: the module is deliberately NOT excluded from the health check — gating all
+     *      asset-moving operations on health keeps the risk surface minimal and consistent with every
+     *      other module. An unhealthy safe must regain health (repay / add collateral) before recovery.
      */
     function recover(
         address safe,
@@ -79,6 +86,8 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
         bytes[] memory data = new bytes[](1);
         data[0] = abi.encodeCall(IERC20.transfer, (recipient, amount));
 
+        // Fires EtherFiHook.postOpHook -> debtManager.ensureHealth(safe), so this reverts on an
+        // unhealthy safe (audit I-03 — intentional; see recover() docs).
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
 
         // execTransactionFromModule only checks call success, not the ERC20 return value, so verify
