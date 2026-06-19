@@ -47,10 +47,6 @@ BASESCAN_KEY=
 
 ```
 
-## Audits
-
-- Fully audited by Certora & Nethermind
-
 ### Testing
 
 Run the test suite with Forge:
