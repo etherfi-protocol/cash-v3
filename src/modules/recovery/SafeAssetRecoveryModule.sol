@@ -42,10 +42,18 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
 
         _verifyRecoverySignatures(safe, token, recipient, signers, signatures);
 
-        // Unsupported-only: collateral backs active debt and a module transfer bypasses the normal
-        // withdrawal + debt-health flow, so recovery must never touch a collateral or borrow token.
-        IDebtManager debtManager = ICashModule(etherFiDataProvider.getCashModule()).getDebtManager();
-        if (debtManager.isCollateralToken(token) || debtManager.isBorrowToken(token)) {
+        // Unsupported-only. A module transfer bypasses both the debt-health flow and the
+        // CashModule withdrawal delay, so recovery must never touch a supported token:
+        //   - collateral / borrow tokens back the safe's active debt position;
+        //   - whitelisted withdraw assets are timelocked on the normal withdrawal path, and
+        //     sweeping one here would skip that delay (and could drain a pending withdrawal).
+        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+        IDebtManager debtManager = cashModule.getDebtManager();
+        if (
+            debtManager.isCollateralToken(token) ||
+            debtManager.isBorrowToken(token) ||
+            _isWithdrawWhitelisted(cashModule, token)
+        ) {
             revert OnlySupportedTokensCannotBeRecovered();
         }
 
@@ -67,6 +75,19 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
         if (IERC20(token).balanceOf(safe) != 0) revert RecoveryTransferFailed();
 
         emit AssetRecovered(safe, token, recipient, amount);
+    }
+
+    /// @dev True if `token` is whitelisted for delayed withdrawals on the CashModule. The set is
+    ///      configured independently of the collateral/borrow sets, so it must be checked
+    ///      separately. Scanned linearly: the list is tiny and recovery is a rare manual op.
+    function _isWithdrawWhitelisted(ICashModule cashModule, address token) internal view returns (bool) {
+        address[] memory withdrawAssets = cashModule.getWhitelistedWithdrawAssets();
+        uint256 len = withdrawAssets.length;
+        for (uint256 i = 0; i < len;) {
+            if (withdrawAssets[i] == token) return true;
+            unchecked { ++i; }
+        }
+        return false;
     }
 
     /// @dev Digest mirrors `AssetRecoveryModule` minus the LayerZero fields. Amount is not signed

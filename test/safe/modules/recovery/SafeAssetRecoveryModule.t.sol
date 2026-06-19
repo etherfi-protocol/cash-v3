@@ -80,6 +80,28 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         module.recover(safeAddr, address(usdc), recipient, signers, sigs);
     }
 
+    /// @dev M-01 regression: a token whitelisted for delayed withdrawals — but neither collateral
+    ///      nor borrow — must not be sweepable. Sweeping it here would skip the CashModule
+    ///      withdrawal delay (and could drain a pending withdrawal).
+    function test_recover_revertsIfWithdrawWhitelistedToken() public {
+        MockERC20 withdrawable = new MockERC20("Withdrawable", "WDL", 18);
+
+        // Whitelist for withdrawals only; it is registered as neither a collateral nor borrow token,
+        // so the pre-existing collateral/borrow gate would let it through.
+        address[] memory assets = new address[](1);
+        assets[0] = address(withdrawable);
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+        vm.prank(owner);
+        cashModule.configureWithdrawAssets(assets, whitelist);
+
+        withdrawable.mint(safeAddr, 1_000e18);
+
+        (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(withdrawable), recipient);
+        vm.expectRevert(ISafeAssetRecoveryModule.OnlySupportedTokensCannotBeRecovered.selector);
+        module.recover(safeAddr, address(withdrawable), recipient, signers, sigs);
+    }
+
     function test_recover_revertsIfZeroBalance() public {
         // token unsupported but safe holds none.
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), recipient);
