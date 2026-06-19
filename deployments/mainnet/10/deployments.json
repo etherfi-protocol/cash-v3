@@ -25,6 +25,7 @@
     "CashLiquidationHelper": "0x97aC360D9F08f755D59899E4E8A4076D18AE033a",
     "BeHYPEStakeModule": "0xd12efd5067DE109F9D00e1A31a34991d58DbB9F3",
     "AssetRecoveryModule": "0x431d271D544aC67fAfFa8a9FfabAabCB14563102",
-    "MidasModule": "0x2D43400058cE6810916Fd312FB38a7DcdF9708aa"
+    "MidasModule": "0x2D43400058cE6810916Fd312FB38a7DcdF9708aa",
+    "RampVolumeEmitter": "0xabfb1aa2b401248242d98ba8de0be1c81f8b699c"
   }
 }
