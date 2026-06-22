@@ -210,6 +210,11 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         _expectExecuteRevert(AcrossSwapModule.OrderExpired.selector, keeper);
     }
 
+    function test_executeSwap_revertsBeforeWithdrawalDelayMatures() public {
+        _request(_baseOrder());
+        _expectExecuteRevert(AcrossSwapModule.WithdrawalDelayNotElapsed.selector, keeper);
+    }
+
     // ---- cancelSwap ----
 
     function test_cancelSwap_clearsOrderAndHold() public {

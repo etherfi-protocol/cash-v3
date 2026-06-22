@@ -134,6 +134,8 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     error InsufficientOutputAmount();
     /// @notice Reverts when admin-set `spokePool` / `multicallHandler` is still zero.
     error MissingConfig();
+    /// @notice Reverts when `executeSwap` runs before the CashModule withdrawal hold matures.
+    error WithdrawalDelayNotElapsed();
 
     /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's
     ///      code — every upgrade impl must be constructed with the same data provider.
@@ -273,6 +275,12 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         if (block.timestamp > swap.order.deadline) revert OrderExpired();
         if ($.spokePool == address(0) || $.multicallHandler == address(0)) revert MissingConfig();
 
+        if (address(cashModule) != address(0)) {
+            if (block.timestamp < cashModule.getData(safe).pendingWithdrawalRequest.finalizeTime) {
+                revert WithdrawalDelayNotElapsed();
+            }
+        }
+
         delete $.swaps[safe];
         if (address(cashModule) != address(0)) cashModule.cancelWithdrawalByModule(safe);
 
@@ -281,8 +289,6 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.depositArgs.outputAmount);
     }
 
-    /// @dev Extracted to keep `executeSwap`'s stack budget under the legacy codegen
-    ///      limit when the 12-arg `depositV3` is encoded.
     function _dispatchDeposit(
         address safe,
         Order memory order,
