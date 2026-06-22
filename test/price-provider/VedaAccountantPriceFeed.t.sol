@@ -4,28 +4,22 @@ pragma solidity ^0.8.28;
 import { Test } from "forge-std/Test.sol";
 
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
-import { AccountantWithRateProviders, ILayerZeroTeller } from "../../src/interfaces/ILayerZeroTeller.sol";
 import { IVedaAccountant } from "../../src/interfaces/IVedaAccountant.sol";
 import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFeed.sol";
 
-/// @notice Fork tests for the Veda price feed, using the mainnet liquidETH vault and ETH/USD feed.
+/// @notice Fork tests on Optimism, using the live liquidETH accountant and ETH/USD feed.
 contract VedaAccountantPriceFeedTest is Test {
-    // mainnet
-    ILayerZeroTeller liquidEthTeller = ILayerZeroTeller(0x9AA79C84b79816ab920bBcE20f8f74557B514734);
-    address ethUsdOracle = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
+    // optimism
+    IVedaAccountant accountant = IVedaAccountant(0x0d05D94a5F1E76C18fbeB7A13d17C8a314088198); // liquidETH
+    address ethUsdOracle = 0x13e3Ee699D1909E989722E753853AE30b17e08c5; // ETH/USD
 
     uint8 constant FEED_DECIMALS = 8;
     uint256 constant UNDERLYING_MAX_STALENESS = 1 days;
 
-    IVedaAccountant accountant;
     VedaAccountantPriceFeed feed;
 
     function setUp() public {
-        string memory mainnet = vm.envString("MAINNET_RPC");
-        if (bytes(mainnet).length == 0) mainnet = "https://rpc.ankr.com/eth";
-        vm.createSelectFork(mainnet);
-
-        accountant = IVedaAccountant(address(liquidEthTeller.accountant()));
+        vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
         feed = new VedaAccountantPriceFeed(accountant, IAggregatorV3(ethUsdOracle), FEED_DECIMALS, UNDERLYING_MAX_STALENESS, "liquidETH / USD");
     }
 
