@@ -69,6 +69,7 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         DepositArgs depositArgs;
         bytes message;
         bytes32 swapId;
+        bytes swapData;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.AcrossSwapModule
@@ -79,6 +80,8 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         address spokePool;
         /// @notice MulticallHandler address used as the destination recipient on every `depositV3` call.
         address multicallHandler;
+        /// @notice Allowlisted Across SpokePoolPeriphery for origin-swap (anyToBridgeable) routes.
+        address peripheryAddress;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.AcrossSwapModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -119,6 +122,7 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     event SwapCancelled(address indexed safe, bytes32 indexed swapId);
     event SpokePoolSet(address oldSpokePool, address newSpokePool);
     event MulticallHandlerSet(address oldMulticallHandler, address newMulticallHandler);
+    event PeripherySet(address oldPeriphery, address newPeriphery);
 
     /// @notice Reverts when a non-admin tries to set per-chain constants.
     error OnlyAdmin();
@@ -136,6 +140,8 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     error MissingConfig();
     /// @notice Reverts when `executeSwap` runs before the CashModule withdrawal hold matures.
     error WithdrawalDelayNotElapsed();
+    /// @notice Reverts when an origin-swap request is made before the periphery is configured.
+    error PeripheryNotAllowlisted();
 
     /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's
     ///      code — every upgrade impl must be constructed with the same data provider.
@@ -179,7 +185,21 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         $.multicallHandler = _multicallHandler;
     }
 
+    /// @notice Sets the allowlisted Across periphery used for origin-swap (anyToBridgeable)
+    ///         routes on this chain. Zero means origin-swaps are not enabled here.
+    function setPeriphery(address _periphery) external {
+        _onlyAdmin();
+        if (_periphery == address(0)) revert InvalidInput();
+        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
+        emit PeripherySet($.peripheryAddress, _periphery);
+        $.peripheryAddress = _periphery;
+    }
+
     // ---- Views ----
+
+    function getPeriphery() external view returns (address) {
+        return _getAcrossSwapModuleStorage().peripheryAddress;
+    }
 
     function getOrder(address safe) external view returns (Order memory) {
         return _getAcrossSwapModuleStorage().swaps[safe].order;
@@ -214,26 +234,68 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         Order calldata order,
         DepositArgs calldata depositArgs,
         bytes calldata message,
+        bytes calldata swapData,
         address[] calldata signers,
         bytes[] calldata signatures
     ) external whenNotPaused onlyEtherFiSafe(safe) {
-        if (
-            order.srcToken == address(0) || order.srcAmount == 0 ||
-            order.dstToken == address(0) || order.dstChainId == 0 ||
-            order.recipient == address(0) || order.minOut == 0 ||
-            order.deadline <= block.timestamp
-        ) revert InvalidInput();
-        if (depositArgs.outputAmount < order.minOut) revert InsufficientOutputAmount();
-
-        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
-        if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
-        if ($.spokePool == address(0) || $.multicallHandler == address(0)) revert MissingConfig();
+        _validateRequest(safe, order, depositArgs, swapData);
 
         uint256 nonce = IEtherFiSafe(safe).useNonce();
-        _verifyRequestSignature(safe, order, depositArgs, message, nonce, signers, signatures);
+        _verifyRequestSignature(safe, order, depositArgs, message, swapData, nonce, signers, signatures);
+        _storeAndDispatch(safe, order, depositArgs, message, swapData, nonce);
+    }
 
+    /// @dev Branches request validation by route type plus the shared active-swap / config checks,
+    ///      split out to keep `requestSwap` under the legacy stack limit. Empty `swapData` is the
+    ///      classic bridge / destination-swap path; non-empty `swapData` is the origin-swap
+    ///      (anyToBridgeable) path forwarded to the chain-global `peripheryAddress` — there
+    ///      `depositArgs`/`message` are unused and the dst fields on `order` are carried for events.
+    function _validateRequest(
+        address safe,
+        Order calldata order,
+        DepositArgs calldata depositArgs,
+        bytes calldata swapData
+    ) internal view {
+        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
+        if (swapData.length == 0) {
+            if (
+                order.srcToken == address(0) || order.srcAmount == 0 ||
+                order.dstToken == address(0) || order.dstChainId == 0 ||
+                order.recipient == address(0) || order.minOut == 0 ||
+                order.deadline <= block.timestamp
+            ) revert InvalidInput();
+            if (depositArgs.outputAmount < order.minOut) revert InsufficientOutputAmount();
+        } else {
+            if (
+                order.srcToken == address(0) || order.srcAmount == 0 ||
+                order.recipient == address(0) || order.deadline <= block.timestamp
+            ) revert InvalidInput();
+            if ($.peripheryAddress == address(0)) revert PeripheryNotAllowlisted();
+        }
+        if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
+        if ($.spokePool == address(0) || $.multicallHandler == address(0)) revert MissingConfig();
+    }
+
+    /// @dev Stores the verified swap and either places the CashModule hold (OP) or executes
+    ///      immediately (mainnet, where `cashModule == 0`). Split out to keep `requestSwap`'s
+    ///      stack under the legacy limit.
+    function _storeAndDispatch(
+        address safe,
+        Order calldata order,
+        DepositArgs calldata depositArgs,
+        bytes calldata message,
+        bytes calldata swapData,
+        uint256 nonce
+    ) internal {
+        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         bytes32 swapId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
-        $.swaps[safe] = StoredSwap({ order: order, depositArgs: depositArgs, message: message, swapId: swapId });
+        $.swaps[safe] = StoredSwap({
+            order: order,
+            depositArgs: depositArgs,
+            message: message,
+            swapId: swapId,
+            swapData: swapData
+        });
 
         _emitSwapRequested(safe, swapId, order);
 
@@ -284,7 +346,8 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         delete $.swaps[safe];
         if (address(cashModule) != address(0)) cashModule.cancelWithdrawalByModule(safe);
 
-        _dispatchDeposit(safe, swap.order, swap.depositArgs, swap.message);
+        if (swap.swapData.length != 0) _dispatchOriginSwap(safe, swap);
+        else _dispatchDeposit(safe, swap.order, swap.depositArgs, swap.message);
 
         emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.depositArgs.outputAmount);
     }
@@ -307,6 +370,28 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         data[0] = abi.encodeCall(IERC20.approve, (spokePool, order.srcAmount));
         to[1] = spokePool;
         data[1] = depositData;
+
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+    }
+
+    /// @dev Origin-swap (anyToBridgeable): approve the allowlisted periphery for the input token,
+    ///      forward the signed swap-and-bridge calldata verbatim, then reset the approval to zero.
+    ///      The safe is the periphery's caller, so it pulls the input token from the safe and (per
+    ///      the BE-built `swapData`: depositor = safe, recipient = destination safe) swaps on origin
+    ///      and bridges to the destination.
+    function _dispatchOriginSwap(address safe, StoredSwap memory swap) internal {
+        address periphery = _getAcrossSwapModuleStorage().peripheryAddress;
+
+        address[] memory to = new address[](3);
+        uint256[] memory values = new uint256[](3);
+        bytes[] memory data = new bytes[](3);
+
+        to[0] = swap.order.srcToken;
+        data[0] = abi.encodeCall(IERC20.approve, (periphery, swap.order.srcAmount));
+        to[1] = periphery;
+        data[1] = swap.swapData;
+        to[2] = swap.order.srcToken;
+        data[2] = abi.encodeCall(IERC20.approve, (periphery, 0));
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
@@ -395,11 +480,27 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         Order calldata order,
         DepositArgs calldata depositArgs,
         bytes calldata message,
+        bytes calldata swapData,
         uint256 nonce,
         address[] calldata signers,
         bytes[] calldata signatures
     ) internal view {
-        bytes32 digest = keccak256(
+        bytes32 digest = _requestDigest(safe, order, depositArgs, message, swapData, nonce);
+        if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
+    }
+
+    /// @dev Digest the safe owners sign over the FULL request (order + depositArgs + message +
+    ///      swapData), bound to the safe nonce. Split from signature verification to keep both
+    ///      under the legacy stack limit.
+    function _requestDigest(
+        address safe,
+        Order calldata order,
+        DepositArgs calldata depositArgs,
+        bytes calldata message,
+        bytes calldata swapData,
+        uint256 nonce
+    ) internal view returns (bytes32) {
+        return keccak256(
             abi.encodePacked(
                 REQUEST_SWAP_SIG,
                 block.chainid,
@@ -408,10 +509,10 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
                 safe,
                 abi.encode(order),
                 keccak256(abi.encode(depositArgs)),
-                keccak256(message)
+                keccak256(message),
+                keccak256(swapData)
             )
         ).toEthSignedMessageHash();
-        if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
     }
 
     function _onlyAdmin() internal view {

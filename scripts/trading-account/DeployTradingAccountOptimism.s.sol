@@ -41,7 +41,9 @@ contract DeployTradingAccountOptimism is Utils {
 
     // Across V3 on Optimism.
     address constant SPOKE_POOL = 0x6f26Bf09B1C792e3228e5467807a900A503c0281;
-    address constant MULTICALL_HANDLER = 0x924a9f036260DdD5808007E1AA95f08eD08aA569;
+    address constant MULTICALL_HANDLER = 0x0F7Ae28dE1C8532170AD4ee566B5801485c13a0E;
+    // Across SpokePoolPeriphery — origin-swap (anyToBridgeable) routes for the Sell flow.
+    address constant PERIPHERY = 0x10D8b8DaA26d307489803e10477De69C0492B610;
 
     function run() public {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -109,6 +111,8 @@ contract DeployTradingAccountOptimism is Utils {
 
         // 4. Roles.
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), deployer);
+        // Periphery isn't part of initialize() — set it post-grant so origin-swap (Sell) routes work.
+        acrossModule.setPeriphery(PERIPHERY);
 
         // 5. Upgrade the DataProvider proxy to the bridge-aware impl — the deployed OP dev
         //    impl predates setOwnershipBridgeSender/getOwnershipBridgeSender. UUPS upgrade,

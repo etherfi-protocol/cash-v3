@@ -47,7 +47,9 @@ contract DeployTradingAccountMainnet is Utils {
 
     // Across V3 on Ethereum mainnet.
     address constant SPOKE_POOL = 0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5;
-    address constant MULTICALL_HANDLER = 0x924a9f036260DdD5808007E1AA95f08eD08aA569;
+    address constant MULTICALL_HANDLER = 0x0F7Ae28dE1C8532170AD4ee566B5801485c13a0E;
+    // Across SpokePoolPeriphery — origin-swap (anyToBridgeable) routes for the Sell flow.
+    address constant PERIPHERY = 0x10D8b8DaA26d307489803e10477De69C0492B610;
 
     address constant RECOVERY_SIGNER_1 = 0xbfCe61CE31359267605F18dcE65Cb6c3cc9694A7;
     address constant RECOVERY_SIGNER_2 = 0xa265C271adbb0984EFd67310cfe85A77f449e291;
@@ -211,6 +213,8 @@ contract DeployTradingAccountMainnet is Utils {
     ///      dev the deployer owns both the trading and topup stacks.
     function _configureRolesAndAcross() internal {
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), deployer);
+        // Periphery isn't part of initialize() — set it post-grant so origin-swap (Sell) routes work.
+        acrossModule.setPeriphery(PERIPHERY);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), keeper);
         roleRegistry.grantRole(lens.TRADING_LENS_ADMIN_ROLE(), deployer);
 
