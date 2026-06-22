@@ -10,14 +10,10 @@ import { IVedaAccountant } from "../interfaces/IVedaAccountant.sol";
 
 /**
  * @title VedaAccountantPriceFeed
- * @notice Prices a Veda receipt token (e.g. eBTC, the Liquid tokens, eUSD, sETHFI) for the Aave v4
- *         oracle. The price is the vault exchange rate times the underlying asset's USD price. The
- *         rate comes from the vault's Veda accountant and the underlying USD price from a Chainlink
- *         feed. One instance is deployed per receipt token.
- * @dev Implements the Aave v4 price-feed interface. The feed fails closed. latestAnswer reverts if
- *      the accountant is paused (getRateSafe), if the Chainlink price is stale or not positive, or
- *      if the rate is zero. A max-age check on the rate itself is a planned follow-up, once the
- *      deployed accountant's state getter is confirmed on a fork.
+ * @notice Prices a Veda receipt token (eBTC, the Liquid tokens, eUSD, sETHFI) for the Aave v4 oracle
+ *         as the vault rate times the underlying USD price. One instance per token.
+ * @dev Implements the Aave v4 price-feed interface and fails closed: latestAnswer reverts on a paused
+ *      accountant, a stale or non-positive underlying, or a zero rate.
  * @author ether.fi
  */
 contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
@@ -55,33 +51,26 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
         _description = feedDescription;
     }
 
-    /**
-     * @notice The number of decimals used to represent the price
-     * @return The price decimals this feed reports
-     */
+    /// @notice The number of decimals used to represent the price
     function decimals() external view returns (uint8) {
         return feedDecimals;
     }
 
-    /**
-     * @notice A human-readable description of the feed
-     * @return The feed description set at deployment
-     */
+    /// @notice A human-readable description of the feed
     function description() external view returns (string memory) {
         return _description;
     }
 
     /**
-     * @notice The latest price for the token, the vault exchange rate times the underlying USD price
-     * @dev Reverts if the accountant is paused, the underlying price is stale or not positive, or the rate is zero
-     * @return The price expressed with decimals() precision
+     * @notice The token's price, the vault rate times the underlying USD price
+     * @dev Reverts if the accountant is paused, the underlying is stale or not positive, or the rate is zero
      */
     function latestAnswer() external view returns (int256) {
-        // Exchange rate in the base asset. Reverts if the accountant paused itself on a bad or too-frequent update
+        // Vault rate; reverts if the accountant paused itself.
         uint256 rate = accountant.getRateSafe();
         if (rate == 0) revert InvalidPrice();
 
-        // Underlying asset USD price from Chainlink, with validity and staleness checks.
+        // Underlying USD price from Chainlink, checked for validity and staleness.
         (, int256 answer,, uint256 updatedAt,) = underlyingUsdFeed.latestRoundData();
         if (answer <= 0) revert InvalidPrice();
         if (block.timestamp > updatedAt + underlyingMaxStaleness) revert StalePrice();
