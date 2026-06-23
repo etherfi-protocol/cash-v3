@@ -68,17 +68,20 @@ contract ChainlinkCompositePriceFeed is IAaveV4PriceFeed {
      * @dev Reverts if either Chainlink feed is stale or non-positive
      */
     function latestAnswer() external view returns (int256) {
-        (, int256 rate,, uint256 rateUpdatedAt,) = rateFeed.latestRoundData();
-        if (rate <= 0) revert InvalidPrice();
-        if (block.timestamp > rateUpdatedAt + rateMaxStaleness) revert StalePrice();
-
-        (, int256 answer,, uint256 updatedAt,) = underlyingUsdFeed.latestRoundData();
-        if (answer <= 0) revert InvalidPrice();
-        if (block.timestamp > updatedAt + underlyingMaxStaleness) revert StalePrice();
+        uint256 rate = _readFeed(rateFeed, rateMaxStaleness);
+        uint256 underlyingPrice = _readFeed(underlyingUsdFeed, underlyingMaxStaleness);
 
         // price = rate * underlyingPrice, normalized from (rateDecimals + underlyingDecimals) to feedDecimals
-        uint256 price = rate.toUint256().mulDiv(answer.toUint256() * 10 ** feedDecimals, 10 ** (rateDecimals + underlyingDecimals));
+        uint256 price = rate.mulDiv(underlyingPrice * 10 ** feedDecimals, 10 ** (rateDecimals + underlyingDecimals));
 
         return price.toInt256();
+    }
+
+    /// @dev Reads a Chainlink feed, reverting if the price is non-positive or older than maxStaleness
+    function _readFeed(IAggregatorV3 feed, uint256 maxStaleness) private view returns (uint256) {
+        (, int256 answer,, uint256 updatedAt,) = feed.latestRoundData();
+        if (answer <= 0) revert InvalidPrice();
+        if (block.timestamp > updatedAt + maxStaleness) revert StalePrice();
+        return answer.toUint256();
     }
 }
