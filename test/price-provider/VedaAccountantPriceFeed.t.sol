@@ -11,19 +11,21 @@ import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFee
 /// @notice Fork tests on Optimism, using the live liquidETH accountant and ETH/USD feed.
 contract VedaAccountantPriceFeedTest is Test {
     using SafeCast for int256;
+    using SafeCast for uint256;
 
     // optimism
     IVedaAccountant accountant = IVedaAccountant(0x0d05D94a5F1E76C18fbeB7A13d17C8a314088198); // liquidETH
     address ethUsdOracle = 0x13e3Ee699D1909E989722E753853AE30b17e08c5; // ETH/USD
 
     uint8 constant FEED_DECIMALS = 8;
+    uint256 constant RATE_MAX_STALENESS = 2 days;
     uint256 constant UNDERLYING_MAX_STALENESS = 1 days;
 
     VedaAccountantPriceFeed feed;
 
     function setUp() public {
         vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
-        feed = new VedaAccountantPriceFeed(accountant, IAggregatorV3(ethUsdOracle), FEED_DECIMALS, UNDERLYING_MAX_STALENESS, "liquidETH / USD");
+        feed = new VedaAccountantPriceFeed(accountant, IAggregatorV3(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, UNDERLYING_MAX_STALENESS, "liquidETH / USD");
     }
 
     /// @notice The reported price equals rate x underlying, and lands in a sane USD range.
@@ -50,6 +52,22 @@ contract VedaAccountantPriceFeedTest is Test {
     /// @notice Reverts when the underlying Chainlink price is older than the staleness limit.
     function test_reverts_whenUnderlyingStale() public {
         vm.warp(block.timestamp + UNDERLYING_MAX_STALENESS + 1);
+        vm.expectRevert(VedaAccountantPriceFeed.StalePrice.selector);
+        feed.latestAnswer();
+    }
+
+    /// @notice Reverts when the Veda accountant rate is older than the staleness limit.
+    function test_reverts_whenRateStale() public {
+        uint64 staleLastUpdateTimestamp = (block.timestamp - RATE_MAX_STALENESS - 1).toUint64();
+        IVedaAccountant.AccountantState memory state;
+        state.exchangeRate = 1e18;
+        state.allowedExchangeRateChangeUpper = 10_050;
+        state.allowedExchangeRateChangeLower = 9950;
+        state.lastUpdateTimestamp = staleLastUpdateTimestamp;
+        state.minimumUpdateDelayInSeconds = 6 hours;
+
+        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.accountantState.selector), abi.encode(state));
+
         vm.expectRevert(VedaAccountantPriceFeed.StalePrice.selector);
         feed.latestAnswer();
     }

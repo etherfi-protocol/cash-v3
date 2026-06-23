@@ -13,7 +13,7 @@ import { IVedaAccountant } from "../interfaces/IVedaAccountant.sol";
  * @notice Prices a Veda receipt token (eBTC, the Liquid tokens, eUSD, sETHFI) for the Aave v4 oracle
  *         as the vault rate times the underlying USD price. One instance per token.
  * @dev Implements the Aave v4 price-feed interface and fails closed: latestAnswer reverts on a paused
- *      accountant, a stale or non-positive underlying, or a zero rate.
+ *      or stale accountant, a stale or non-positive underlying, or a zero rate.
  * @author ether.fi
  */
 contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
@@ -31,22 +31,25 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
     uint8 public immutable underlyingDecimals;
     /// @notice The decimals of the price this feed reports
     uint8 public immutable feedDecimals;
+    /// @notice The maximum age in seconds for the Veda rate before it is rejected
+    uint256 public immutable rateMaxStaleness;
     /// @notice The maximum age in seconds for the underlying Chainlink price before it is rejected
     uint256 public immutable underlyingMaxStaleness;
 
     string private _description;
 
-    /// @notice Thrown when the underlying Chainlink price is older than underlyingMaxStaleness
+    /// @notice Thrown when either price source is older than its staleness limit
     error StalePrice();
     /// @notice Thrown when the rate or the underlying price is zero or negative
     error InvalidPrice();
 
-    constructor(IVedaAccountant _accountant, IAggregatorV3 _underlyingUsdFeed, uint8 _feedDecimals, uint256 _underlyingMaxStaleness, string memory feedDescription) {
+    constructor(IVedaAccountant _accountant, IAggregatorV3 _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, uint256 _underlyingMaxStaleness, string memory feedDescription) {
         accountant = _accountant;
         underlyingUsdFeed = _underlyingUsdFeed;
         rateDecimals = _accountant.decimals();
         underlyingDecimals = _underlyingUsdFeed.decimals();
         feedDecimals = _feedDecimals;
+        rateMaxStaleness = _rateMaxStaleness;
         underlyingMaxStaleness = _underlyingMaxStaleness;
         _description = feedDescription;
     }
@@ -63,9 +66,12 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
 
     /**
      * @notice The token's price, the vault rate times the underlying USD price
-     * @dev Reverts if the accountant is paused, the underlying is stale or not positive, or the rate is zero
+     * @dev Reverts if the accountant is paused or stale, the underlying is stale or not positive, or the rate is zero
      */
     function latestAnswer() external view returns (int256) {
+        IVedaAccountant.AccountantState memory state = accountant.accountantState();
+        if (block.timestamp > state.lastUpdateTimestamp + rateMaxStaleness) revert StalePrice();
+
         // Vault rate; reverts if the accountant paused itself.
         uint256 rate = accountant.getRateSafe();
         if (rate == 0) revert InvalidPrice();
