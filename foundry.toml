@@ -6,7 +6,7 @@ libs = ["lib"]
 solc = "0.8.28" 
 optimizer = true
 optimizer_runs = 0
-evm_version = "cancun" 
+evm_version = "cancun"
 gas_reports = ["*"]
 bytecode_hash = "none"
 fs_permissions = [{ access = "read-write", path = "./" }]
@@ -22,6 +22,7 @@ mainnet = "${MAINNET_RPC}"
 scroll = "${SCROLL_RPC}"
 base = "${BASE_RPC}"
 optimism = "${OPTIMISM_RPC}"
+hyperevm = "${HYPEREVM_RPC}"
 polygon = "${POLYGON_RPC}"
 linea = "${LINEA_RPC}"
 sonic = "${SONIC_RPC}"

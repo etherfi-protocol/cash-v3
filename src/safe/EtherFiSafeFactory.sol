@@ -5,6 +5,7 @@ import { BeaconFactory, UpgradeableBeacon } from "../beacon-factory/BeaconFactor
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { EtherFiSafe } from "./EtherFiSafe.sol";
+import { EtherFiSafeCore } from "./EtherFiSafeCore.sol";
 
 /**
  * @title EtherFiSafeFactory
@@ -48,17 +49,6 @@ contract EtherFiSafeFactory is BeaconFactory {
     }
 
     /**
-     * @notice Reinitializes the factory when upgrading from a placeholder deployment
-     * @dev Sets up the beacon that was not created during placeholder initialization.
-     *      Used when the proxy was initially deployed with EtherFiPlaceholder and later
-     *      upgraded to the real EtherFiSafeFactory implementation.
-     * @param _etherFiSafeImpl Address of the EtherFiSafe implementation contract
-     */
-    function reinitialize(address _etherFiSafeImpl) external reinitializer(2) {
-        __BeaconFactory_initialize(address(roleRegistry()), _etherFiSafeImpl);
-    }
-
-    /**
      * @dev Returns the storage struct for EtherFiSafeFactory
      * @return $ Reference to the EtherFiSafeFactoryStorage struct
      */
@@ -81,7 +71,7 @@ contract EtherFiSafeFactory is BeaconFactory {
     */
     function deployEtherFiSafe(bytes32 salt, address[] calldata _owners, address[] calldata _modules, bytes[] calldata _moduleSetupData, uint8 _threshold) external whenNotPaused {
         if (!roleRegistry().hasRole(ETHERFI_SAFE_FACTORY_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
-        bytes memory initData = abi.encodeWithSelector(EtherFiSafe.initialize.selector, _owners, _modules, _moduleSetupData, _threshold);
+        bytes memory initData = abi.encodeWithSelector(EtherFiSafeCore.initialize.selector, _owners, _modules, _moduleSetupData, _threshold);
 
         address deterministicAddr = getDeterministicAddress(salt);
         EtherFiSafeFactoryStorage storage $ = _getEtherFiSafeFactoryStorage();

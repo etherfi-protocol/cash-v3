@@ -110,13 +110,14 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @custom:throws InvalidThreshold If threshold is 0 or greater than number of owners
      * @custom:throws InvalidSignatures If signature verification fails
      */
-    function setThreshold(uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external {
+    function setThreshold(uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external payable {
         _currentOwner();
         bytes32 structHash = keccak256(abi.encode(SET_THRESHOLD_TYPEHASH, threshold, _useNonce()));
 
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _setThreshold(threshold);
+        _publishSetThreshold(threshold);
     }
 
     /**
@@ -134,7 +135,7 @@ abstract contract MultiSig is EtherFiSafeBase {
      * @custom:throws OwnersLessThanThreshold If owners would be less than threshold
      * @custom:throws InvalidSignatures If signature verification fails
      */
-    function configureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external {
+    function configureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external payable {
         _currentOwner();
         bytes32 structHash = keccak256(abi.encode(CONFIGURE_OWNERS_TYPEHASH, keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), threshold, _useNonce()));
 
@@ -142,6 +143,7 @@ abstract contract MultiSig is EtherFiSafeBase {
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _configureOwners(owners, shouldAdd, threshold);
         _configureAdmin(owners, shouldAdd);
+        _publishConfigureOwners(owners, shouldAdd, threshold);
     }
 
     /**

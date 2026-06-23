@@ -9,8 +9,13 @@ import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 /**
  * @title EtherFiSafeBase
  * @author ether.fi
- * @notice Base contract for EtherFi safe implementations providing common functionality
- * @dev Implements EIP-712 typed data signing and core safe functionality
+ * @notice Base contract for EtherFi safe implementations providing common functionality.
+ * @dev Implements EIP-712 typed data signing and core safe functionality. Exposes empty
+ *      virtual `_publish*` hooks called from `MultiSig` and `RecoveryManager` after every
+ *      owner-mutating operation; the OP-side `EtherFiSafe` overrides these to drive the
+ *      cross-chain bridge via `OwnerBridgePublisher`, while other-chains safes
+ *      (`TradingSafe`) leave them as no-ops so the publisher bytecode never ships with
+ *      destination-only safes.
  */
 abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
     /**
@@ -212,4 +217,17 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
         dataProvider.roleRegistry().configureSafeAdmins(accounts, shouldAdd);
         emit AdminsConfigured(accounts, shouldAdd);
     }
+
+    // ------------------------------------------------------------------
+    // Bridge publish hooks (default: no-op)
+    //
+    // `MultiSig` and `RecoveryManager` call these after applying owner mutations. The
+    // OP-side `EtherFiSafe` overrides them to invoke the LZ publisher; mainnet-side safes
+    // leave them as no-ops, which keeps the publisher's bytecode out of those builds.
+    // ------------------------------------------------------------------
+
+    function _publishConfigureOwners(address[] calldata, bool[] calldata, uint8) internal virtual {}
+    function _publishSetThreshold(uint8) internal virtual {}
+    function _publishRecover(address, uint256) internal virtual {}
+    function _publishCancelRecovery() internal virtual {}
 }

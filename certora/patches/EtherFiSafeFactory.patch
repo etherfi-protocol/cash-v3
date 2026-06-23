@@ -1,5 +1,5 @@
 diff --git a/src/safe/EtherFiSafeFactory.sol b/src/safe/EtherFiSafeFactory.sol
-index 15acdd2..e84c543 100644
+index 9dcfe7a..46733c0 100644
 --- a/src/safe/EtherFiSafeFactory.sol
 +++ b/src/safe/EtherFiSafeFactory.sol
 @@ -2,7 +2,7 @@
@@ -10,4 +10,4 @@ index 15acdd2..e84c543 100644
 +import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
  
  import { EtherFiSafe } from "./EtherFiSafe.sol";
-
+ import { EtherFiSafeCore } from "./EtherFiSafeCore.sol";

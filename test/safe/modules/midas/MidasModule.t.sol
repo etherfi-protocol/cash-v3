@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { stdJson } from "forge-std/StdJson.sol";
 
 import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
@@ -23,19 +24,20 @@ contract MidasModuleTest is SafeTestSetup {
     address depositVault;
     address redemptionVault;
 
-    IAggregatorV3 usdtOracle = IAggregatorV3(0xf376A91Ae078927eb3686D6010a6f1482424954E);
-    IAggregatorV3 usdcOracle = IAggregatorV3(0x43d12Fb3AfCAd5347fA764EeAB105478337b7200);
-    IAggregatorV3 mTokenOracle = IAggregatorV3(0xB2a4eC4C9b95D7a87bA3989d0FD38dFfDd944A24);
+    IAggregatorV3 mTokenOracle;
 
     function setUp() public override {
         ChainConfig memory _cc = getChainConfig();
-        vm.skip(_cc.midasToken == address(0), "Midas vaults do not exist on this chain");
+        vm.skip(_cc.liquidReserve == address(0), "Liquid Reserve Midas vaults do not exist on this chain");
 
         super.setUp();
 
-        midasToken = IERC20(chainConfig.midasToken);
-        depositVault = chainConfig.midasDepositVault;
-        redemptionVault = chainConfig.midasRedemptionVault;
+        midasToken = IERC20(chainConfig.liquidReserve);
+        depositVault = chainConfig.liquidReserveDepositVault;
+        redemptionVault = chainConfig.liquidReserveRedemptionVault;
+
+        string memory configFile = string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.envString("TEST_CHAIN"), "/config.json");
+        mTokenOracle = IAggregatorV3(stdJson.readAddress(vm.readFile(configFile), ".priceProvider.oracles.liquidReserve.oracle"));
 
         vm.startPrank(owner);
 

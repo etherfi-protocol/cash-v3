@@ -20,6 +20,8 @@ contract TopUp is Constants, Ownable {
     error OnlyOwner();
     /// @notice Error thrown when ETH transfer fails
     error EthTransferFailed();
+    /// @notice Reverts when `redirectToTradingSafe` is called with zero amount.
+    error InvalidAmount();
 
     /// @notice Emitted when funds are processed
     /// @param token Address of the token processed
@@ -87,6 +89,24 @@ contract TopUp is Constants, Ownable {
             // This is done to emit a transfer event so we can just track WETH transfers to this contract
             IWETH(weth).transfer(address(this), amount);
         }
+    }
+
+    /**
+     * @notice Transfers `amount` of `token` from this TopUp to `tradingSafe`. Recovery path
+     *         for trading-supported, not-topup-supported tokens (e.g. Ondo SPY) that landed
+     *         at the TopUp address by mistake.
+     *
+     * @param token ERC20 to redirect.
+     * @param tradingSafe Destination TradingSafe (resolved and supplied by the factory).
+     * @param amount Amount to transfer.
+     * @custom:throws OnlyOwner If caller is not the owner.
+     * @custom:throws InvalidAmount If `amount == 0`.
+     */
+    function redirectToTradingSafe(address token, address tradingSafe, uint256 amount) external {
+        if (owner() != msg.sender) revert OnlyOwner();
+        if (amount == 0) revert InvalidAmount();
+
+        IERC20(token).safeTransfer(tradingSafe, amount);
     }
 
     /**
