@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
@@ -9,6 +10,8 @@ import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFee
 
 /// @notice Fork tests on Optimism, using the live liquidETH accountant and ETH/USD feed.
 contract VedaAccountantPriceFeedTest is Test {
+    using SafeCast for int256;
+
     // optimism
     IVedaAccountant accountant = IVedaAccountant(0x0d05D94a5F1E76C18fbeB7A13d17C8a314088198); // liquidETH
     address ethUsdOracle = 0x13e3Ee699D1909E989722E753853AE30b17e08c5; // ETH/USD
@@ -28,14 +31,15 @@ contract VedaAccountantPriceFeedTest is Test {
         uint256 rate = accountant.getRateSafe();
         (, int256 ethUsd,,,) = IAggregatorV3(ethUsdOracle).latestRoundData();
 
-        uint256 expected = rate * uint256(ethUsd) * (10 ** FEED_DECIMALS) / (10 ** (feed.rateDecimals() + feed.underlyingDecimals()));
+        uint256 expected = rate * ethUsd.toUint256() * (10 ** FEED_DECIMALS) / (10 ** (feed.rateDecimals() + feed.underlyingDecimals()));
 
-        assertEq(uint256(feed.latestAnswer()), expected, "price mismatch");
+        uint256 price = feed.latestAnswer().toUint256();
+        assertEq(price, expected, "price mismatch");
 
         // Sanity on magnitude, which catches a decimals mistake: liquidETH should be a few thousand
         // USD, so well within 100 to 100,000 USD at 8 decimals.
-        assertGt(uint256(feed.latestAnswer()), 100 * (10 ** FEED_DECIMALS), "price too low");
-        assertLt(uint256(feed.latestAnswer()), 100_000 * (10 ** FEED_DECIMALS), "price too high");
+        assertGt(price, 100 * (10 ** FEED_DECIMALS), "price too low");
+        assertLt(price, 100_000 * (10 ** FEED_DECIMALS), "price too high");
     }
 
     function test_decimalsAndDescription() public view {
