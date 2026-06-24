@@ -145,8 +145,9 @@ contract CashLensTest is CashModuleTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         // Get safe cash data
+        _mirrorPositionToGateway(address(safe));
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
-        
+
         // Verify basic data
         assertEq(uint8(data.mode), uint8(Mode.Debit), "Initial mode should be Debit");
         assertEq(data.incomingModeStartTime, 0, "No incoming mode change");
@@ -229,8 +230,9 @@ contract CashLensTest is CashModuleTestSetup {
         // Spend in credit mode to create a borrow
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        
+
         // Get safe cash data
+        _mirrorPositionToGateway(address(safe));
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
         
         // Verify borrows

@@ -84,6 +84,22 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         assertEq(reason, "");
     }
 
+    function test_canSpend_succeeds_inDebitMode_whenSuppliedToAave() public {
+        // Scenario 2: the stable is supplied to Aave, not held raw. Debit still works via the withdrawable amount.
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        deal(address(usdc), address(safe), 0);
+        gateway.setSuppliedOf(address(safe), address(usdc), 100e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, true);
+        assertEq(reason, "");
+    }
+
     function test_canSpend_succeeds_inCreditMode_whenCollateralAvailable() public {
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -95,6 +111,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         deal(address(weETH), address(safe), 1 ether);
         deal(address(usdc), address(debtManager), amounts[0]);
+        _mirrorPositionToGateway(address(safe));
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, true);
         assertEq(reason, "");
@@ -169,6 +186,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         amounts[0] = balToTransfer;
 
+        _mirrorPositionToGateway(address(safe));
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, true);
         assertEq(reason, "");
@@ -210,6 +228,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         // if we want to borrow 82 USDC, it should fail
         amounts[0] = 82e6;
 
+        _mirrorPositionToGateway(address(safe));
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
         assertEq(reason, "Insufficient borrowing power");
@@ -223,6 +242,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 50e6;
 
+        _mirrorPositionToGateway(address(safe));
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
         assertEq(reason, "Insufficient borrowing power");
@@ -717,9 +737,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 500e6; // 500 USD
-        
+
+        _mirrorPositionToGateway(address(safe));
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
-        
+
         assertEq(uint8(mode), uint8(Mode.Credit), "Should return credit mode");
         assertEq(token, address(usdc), "Should return USDC");
         assertTrue(canSpend, "Should be able to spend in credit mode");
@@ -853,9 +874,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 500e6;
-        
+
+        _mirrorPositionToGateway(address(safe));
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
-        
+
         assertEq(uint8(mode), uint8(Mode.Credit), "Should return credit mode");
         assertEq(token, address(usdc), "Should return USDC");
         assertFalse(canSpend, "Should not be able to spend without collateral");

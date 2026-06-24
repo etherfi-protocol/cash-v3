@@ -13,7 +13,7 @@ pragma solidity ^0.8.28;
  * @author ether.fi
  */
 interface IGateway {
-    /// @notice A safe's Aave position summary, denominated in USD with 8 decimals.
+    /// @notice A safe's Aave position summary, denominated in USD with 6 decimals (matching PriceProvider.DECIMALS).
     struct AccountData {
         uint256 collateralUsd;
         uint256 debtUsd;
@@ -71,4 +71,27 @@ interface IGateway {
      * @return The safe's account data
      */
     function getAccountData(address safe) external view returns (AccountData memory);
+
+    /**
+     * @notice Returns the amount of `asset` that `safe` has supplied to Aave
+     * @param safe The safe to query
+     * @param asset The supplied asset
+     * @return The supplied amount, in asset units
+     */
+    function suppliedOf(address safe, address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns the amount of `asset` debt that `safe` owes Aave
+     * @param safe The safe to query
+     * @param asset The borrowed asset
+     * @return The debt amount, in asset units
+     */
+    function debtOf(address safe, address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns the withdrawable and borrowable liquidity of `asset`'s reserve
+     * @param asset The reserve asset
+     * @return The available liquidity, in asset units
+     */
+    function availableCash(address asset) external view returns (uint256);
 }

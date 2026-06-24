@@ -31,6 +31,7 @@ import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
 import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { PriceProvider, IAggregatorV3 } from "../../src/oracle/PriceProvider.sol";
 import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
+import { MockGateway } from "../../src/mocks/MockGateway.sol";
 import { Utils, ChainConfig } from "../utils/Utils.sol";
 
 contract SafeTestSetup is Utils {
@@ -46,6 +47,7 @@ contract SafeTestSetup is Utils {
     SettlementDispatcherV2 settlementDispatcherRain;
     SettlementDispatcherV2 settlementDispatcherReap;
     IDebtManager debtManager;
+    MockGateway gateway;
     address debtManagerAdminImpl;
     CashbackDispatcher cashbackDispatcher;
     ICashEventEmitter cashEventEmitter;
@@ -177,7 +179,8 @@ contract SafeTestSetup is Utils {
         address hookImpl = address(new EtherFiHook(address(dataProvider)));
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
-        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
+        gateway = new MockGateway();
+        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider), address(gateway)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
         dataProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), address(cashLens), modules, defaultModules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));

@@ -13,6 +13,7 @@ import { DebtManagerCore, DebtManagerStorageContract } from "../../../../src/deb
 import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
 import { Mode, SafeTiers, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
+import { IGateway } from "../../../../src/interfaces/IGateway.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 import { SpendingLimit } from "../../../../src/libraries/SpendingLimitLib.sol";
@@ -153,5 +154,33 @@ contract CashModuleTestSetup is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.SpendingLimitChanged(address(safe), oldLimit, newLimit);
         cashModule.updateSpendingLimit(address(safe), dailyLimit, monthlyLimit, owner1, signature);
+    }
+
+    /// @notice Mirrors the safe's DebtManager-derived position into the mock gateway so CashLens (which now reads the gateway) resolves the same position
+    function _mirrorPositionToGateway(address _safe) internal {
+        (IDebtManager.TokenData[] memory collaterals, uint256 totalCollateralUsd, IDebtManager.TokenData[] memory borrows, uint256 totalBorrowUsd) = debtManager.getUserCurrentState(_safe);
+
+        for (uint256 i = 0; i < collaterals.length; i++) {
+            gateway.setSuppliedOf(_safe, collaterals[i].token, collaterals[i].amount);
+        }
+        for (uint256 i = 0; i < borrows.length; i++) {
+            gateway.setDebtOf(_safe, borrows[i].token, borrows[i].amount);
+        }
+
+        address[] memory borrowTokens = debtManager.getBorrowTokens();
+        for (uint256 i = 0; i < borrowTokens.length; i++) {
+            gateway.setAvailableCash(borrowTokens[i], type(uint128).max);
+        }
+
+        uint256 maxBorrowUsd = debtManager.getMaxBorrowAmount(_safe, true);
+        gateway.setAccountData(
+            _safe,
+            IGateway.AccountData({
+                collateralUsd: totalCollateralUsd,
+                debtUsd: totalBorrowUsd,
+                availableBorrowsUsd: maxBorrowUsd > totalBorrowUsd ? maxBorrowUsd - totalBorrowUsd : 0,
+                healthFactor: type(uint256).max
+            })
+        );
     }
 }

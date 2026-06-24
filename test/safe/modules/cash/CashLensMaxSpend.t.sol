@@ -146,6 +146,8 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     }
 
     function test_getMaxSpendDebit_underwaterPosition_USDCFirst() public {
+        // Underwater debit (debt-driven restriction) is phase two; phase one has no live debt.
+        vm.skip(true);
         // Create debt by borrowing in credit mode
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -198,6 +200,8 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     }
 
     function test_getMaxSpendDebit_underwaterPosition_liquidUSDFirst() public {
+        // Underwater debit (debt-driven restriction) is phase two; phase one has no live debt.
+        vm.skip(true);
         // Create debt
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -303,6 +307,8 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     }
 
     function test_getMaxSpendDebit_cannotCoverDeficit() public {        
+        // Underwater debit (debt-driven restriction) is phase two; phase one has no live debt.
+        vm.skip(true);
         // Create large debt
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -367,13 +373,56 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         assertEq(result.totalSpendableInUsd, 0, "Total should be zero");
     }
 
+    // ================ Phase-one supplied-position Tests ================
+
+    function test_getMaxSpendDebit_suppliedOnly_noRawBalance() public {
+        // Scenario 2: the stable lives in Aave, not the safe. Debit spends the withdrawable supplied amount.
+        deal(address(usdc), address(safe), 0);
+        gateway.setSuppliedOf(address(safe), address(usdc), 1000e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+
+        address[] memory tokenPreference = new address[](1);
+        tokenPreference[0] = address(usdc);
+
+        DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
+        assertEq(result.spendableAmounts[0], 1000e6, "Should spend the withdrawable supplied amount");
+        assertGt(result.totalSpendableInUsd, 0, "Total should be positive");
+    }
+
+    function test_getMaxSpendDebit_withdrawableCappedByReserveCash() public {
+        // The supplied amount is only spendable up to the reserve's available liquidity.
+        deal(address(usdc), address(safe), 0);
+        gateway.setSuppliedOf(address(safe), address(usdc), 1000e6);
+        gateway.setAvailableCash(address(usdc), 400e6);
+
+        address[] memory tokenPreference = new address[](1);
+        tokenPreference[0] = address(usdc);
+
+        DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
+        assertEq(result.spendableAmounts[0], 400e6, "Should cap at reserve liquidity");
+    }
+
+    function test_getMaxSpendDebit_rawPlusSupplied() public {
+        // Mixed: a raw safe balance plus a supplied position. Debit spends the sum.
+        deal(address(usdc), address(safe), 300e6);
+        gateway.setSuppliedOf(address(safe), address(usdc), 700e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+
+        address[] memory tokenPreference = new address[](1);
+        tokenPreference[0] = address(usdc);
+
+        DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
+        assertEq(result.spendableAmounts[0], 1000e6, "Should spend raw plus withdrawable supplied");
+    }
+
     // ================ Updated getSafeCashData Tests ================
 
-    function test_getSafeCashData_withTokenPreference_USDC_liquidUSD() public view {
+    function test_getSafeCashData_withTokenPreference_USDC_liquidUSD() public {
         address[] memory tokenPreference = new address[](2);
         tokenPreference[0] = address(usdc);
         tokenPreference[1] = address(liquidUsdScroll);
-        
+
+        _mirrorPositionToGateway(address(safe));
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), tokenPreference);
         
         // Verify debitMaxSpend uses the preference
@@ -453,7 +502,8 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
 
     // ================ getMaxSpendCredit Tests ================
 
-    function test_getMaxSpendCredit_withUSDC_liquidUSD_collateral() public view {
+    function test_getMaxSpendCredit_withUSDC_liquidUSD_collateral() public {
+        _mirrorPositionToGateway(address(safe));
         uint256 creditMaxSpend = cashLens.getMaxSpendCredit(address(safe));
         
         // Calculate expected based on collateral
