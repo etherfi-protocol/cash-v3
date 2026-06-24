@@ -19,10 +19,13 @@ abstract contract ModuleGatewaySandwich {
     /// @notice The lowest post-withdraw health factor a withdraw may leave the safe at
     uint256 public immutable minHealthFactor;
 
+    /// @notice Thrown when the gateway address is zero
+    error InvalidGateway();
     /// @notice Thrown when a withdraw would leave the safe below minHealthFactor
     error WithdrawBreachesHealth();
 
     constructor(address _gateway, uint256 _minHealthFactor) {
+        if (_gateway == address(0)) revert InvalidGateway();
         gateway = IGateway(_gateway);
         minHealthFactor = _minHealthFactor;
     }

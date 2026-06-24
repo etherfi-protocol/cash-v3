@@ -38,6 +38,12 @@ contract ModuleGatewaySandwichTest is Test {
         gateway.setAccountData(safe, IGateway.AccountData({ collateralUsd: 0, debtUsd: 0, availableBorrowsUsd: 0, healthFactor: healthFactor }));
     }
 
+    // A zero gateway address is rejected at deployment.
+    function test_constructor_revertsOnZeroGateway() public {
+        vm.expectRevert(ModuleGatewaySandwich.InvalidGateway.selector);
+        new SandwichHarness(address(0), MIN_HEALTH_FACTOR);
+    }
+
     // Withdraws to the safe and passes the guard at exactly minHealthFactor.
     function test_withdraw_routesToSafeAndPassesAtMinHealthFactor() public {
         _setHealthFactor(MIN_HEALTH_FACTOR);
@@ -50,12 +56,14 @@ contract ModuleGatewaySandwichTest is Test {
         assertEq(to, safe);
     }
 
+    // Reverts when the post-withdraw health factor is below the floor.
     function test_withdraw_revertsBelowMinHealthFactor() public {
         _setHealthFactor(MIN_HEALTH_FACTOR - 1);
         vm.expectRevert(ModuleGatewaySandwich.WithdrawBreachesHealth.selector);
         harness.withdrawFromGateway(safe, asset, AMOUNT);
     }
 
+    // Supplies the asset back to Aave and marks it as collateral.
     function test_resupply_suppliesAndSetsCollateral() public {
         harness.resupplyToGateway(safe, asset, AMOUNT);
 
