@@ -215,12 +215,13 @@ contract CashLens is UpgradeableProxy {
                     return (false, "Insufficient token balance for debit mode spending");
                 }
                 uint256 pending = _getPendingWithdrawalAmount(safeData, token);
-                if (_debitSpendableAmount(raw, withdrawable, pending) < needed) {
+                raw = raw > pending ? raw - pending : 0;
+                if (raw + withdrawable < needed) {
                     return (false, "Insufficient effective balance after withdrawal to spend with debit mode");
                 }
             }
 
-            // Only the supplied portion (raw is spent first) consumes the borrowing headroom for later tokens
+            // Only the supplied portion (effective raw is spent first) consumes the borrowing headroom for later tokens
             if (hasDebt) {
                 uint256 usedSupplied = needed > raw ? needed - raw : 0;
                 uint256 used = _headroomConsumed(token, usedSupplied);

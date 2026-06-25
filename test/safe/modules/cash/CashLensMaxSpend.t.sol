@@ -556,6 +556,49 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         assertEq(reason, "Insufficient effective balance after withdrawal to spend with debit mode", "declines with a reason instead of reverting");
     }
 
+    /// Pending withdrawals reserve raw balance before calculating how much supplied collateral a debit spend consumes.
+    function test_canSpendDebit_pendingRawConsumesSuppliedHeadroomForLaterTokens() public {
+        // $1,200 collateral at 50% LTV gives $600 max borrow; $500 debt leaves $100 headroom,
+        // so only $200 of supplied collateral can be spent across all debit tokens.
+        deal(address(usdc), address(safe), 500e6);
+        deal(address(liquidUsd), address(safe), 0);
+
+        // The Safe has $500 raw USDC, but $400 of it will be reserved by the pending withdrawal below.
+        // That leaves only $100 effective raw USDC for spending.
+        //
+        // The requested USDC spend is $300, so it must use:
+        //   $100 effective raw USDC + $200 supplied USDC withdrawn from Aave.
+        //
+        // With 50% LTV, withdrawing that $200 supplied USDC consumes all $100 of shared headroom.
+        gateway.setSuppliedOf(address(safe), address(usdc), 200e6);
+        gateway.setSuppliedOf(address(safe), address(liquidUsd), 1000e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+        gateway.setAvailableCash(address(liquidUsd), type(uint128).max);
+        gateway.setLtv(address(usdc), 50e18);
+        gateway.setLtv(address(liquidUsd), 50e18);
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 1200e6, debtUsd: 500e6, availableBorrowsUsd: 100e6, healthFactor: 144e16 }));
+
+        address[] memory withdrawTokens = new address[](1);
+        withdrawTokens[0] = address(usdc);
+        uint256[] memory withdrawAmounts = new uint256[](1);
+        withdrawAmounts[0] = 400e6;
+        _requestWithdrawal(withdrawTokens, withdrawAmounts, withdrawRecipient);
+
+        // The second leg asks for $50 liquidUSD. It should fail because the first USDC leg
+        // already consumed the entire shared Aave headroom after accounting for the pending withdrawal.
+        address[] memory spendTokens = new address[](2);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(liquidUsd);
+        uint256[] memory amountsInUsd = new uint256[](2);
+        amountsInUsd[0] = 300e6;
+        amountsInUsd[1] = 50e6;
+
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), keccak256("pending-headroom"), spendTokens, amountsInUsd);
+
+        assertFalse(ok, "USDC should consume the full shared headroom after reserving its pending withdrawal");
+        assertEq(reason, "Insufficient token balance for debit mode spending", "later token should not reuse consumed headroom");
+    }
+
     /// With debt, a zero-LTV reserve cannot back a safe withdrawal, so only the raw balance is spendable.
     function test_getMaxSpendDebit_zeroLtvWithDebt() public {
         deal(address(usdc), address(safe), 300e6);
