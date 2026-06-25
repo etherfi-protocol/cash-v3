@@ -11,7 +11,7 @@ import { CashbackDispatcher } from "../../../../src/cashback-dispatcher/Cashback
 import { DebtManagerAdmin } from "../../../../src/debt-manager/DebtManagerAdmin.sol";
 import { DebtManagerCore, DebtManagerStorageContract } from "../../../../src/debt-manager/DebtManagerCore.sol";
 import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
-import { Mode, SafeTiers, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
+import { Cashback, CashbackTokens, Mode, SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IGateway } from "../../../../src/interfaces/IGateway.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
@@ -46,7 +46,7 @@ contract CashModuleTestSetup is SafeTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        _configureModules(modules, shouldWhitelist, setupData);        
+        _configureModules(modules, shouldWhitelist, setupData);
 
         vm.stopPrank();
     }
@@ -156,14 +156,35 @@ contract CashModuleTestSetup is SafeTestSetup {
         cashModule.updateSpendingLimit(address(safe), dailyLimit, monthlyLimit, owner1, signature);
     }
 
-    /// @notice Mirrors the safe's DebtManager-derived position into the mock gateway so CashLens (which now reads the gateway) resolves the same position
+    /**
+     * @notice Recreates the safe's DebtManager-era position on the mock gateway as an Aave position, so the
+     *         legacy DebtManager-based test setup can drive CashLens's Aave reads.
+     * @dev Mirrors the whole position: supplies all collateral (an Aave borrow needs collateral backing, so
+     *      nothing backing debt can sit loose), carries the DebtManager debt over, and keeps only a pending
+     *      withdrawal loose via supplied = balance - pending, modeling it as withdrawn from Aave at request time.
+     */
     function _mirrorPositionToGateway(address _safe) internal {
-        (IDebtManager.TokenData[] memory collaterals, uint256 totalCollateralUsd, IDebtManager.TokenData[] memory borrows, uint256 totalBorrowUsd) = debtManager.getUserCurrentState(_safe);
+        address[] memory collateralTokens = debtManager.getCollateralTokens();
+        uint256 totalCollateralUsd = 0;
+        uint256 maxBorrowUsd = 0;
 
-        for (uint256 i = 0; i < collaterals.length; i++) {
-            gateway.setSuppliedOf(_safe, collaterals[i].token, collaterals[i].amount);
-            gateway.setLtv(collaterals[i].token, debtManager.collateralTokenConfig(collaterals[i].token).ltv);
+        for (uint256 i = 0; i < collateralTokens.length; i++) {
+            IDebtManager.CollateralTokenConfig memory config = debtManager.collateralTokenConfig(collateralTokens[i]);
+            uint256 balance = IERC20(collateralTokens[i]).balanceOf(_safe);
+            uint256 pending = cashLens.getPendingWithdrawalAmount(_safe, collateralTokens[i]);
+            uint256 supplied = balance > pending ? balance - pending : 0;
+
+            gateway.setSuppliedOf(_safe, collateralTokens[i], supplied);
+            gateway.setLtv(collateralTokens[i], config.ltv);
+
+            if (supplied != 0) {
+                uint256 suppliedUsd = debtManager.convertCollateralTokenToUsd(collateralTokens[i], supplied);
+                totalCollateralUsd += suppliedUsd;
+                maxBorrowUsd += (suppliedUsd * config.ltv) / 100e18;
+            }
         }
+
+        (,, IDebtManager.TokenData[] memory borrows, uint256 totalBorrowUsd) = debtManager.getUserCurrentState(_safe);
         for (uint256 i = 0; i < borrows.length; i++) {
             gateway.setDebtOf(_safe, borrows[i].token, borrows[i].amount);
         }
@@ -173,15 +194,6 @@ contract CashModuleTestSetup is SafeTestSetup {
             gateway.setAvailableCash(borrowTokens[i], type(uint128).max);
         }
 
-        uint256 maxBorrowUsd = debtManager.getMaxBorrowAmount(_safe, true);
-        gateway.setAccountData(
-            _safe,
-            IGateway.AccountData({
-                collateralUsd: totalCollateralUsd,
-                debtUsd: totalBorrowUsd,
-                availableBorrowsUsd: maxBorrowUsd > totalBorrowUsd ? maxBorrowUsd - totalBorrowUsd : 0,
-                healthFactor: type(uint256).max
-            })
-        );
+        gateway.setAccountData(_safe, IGateway.AccountData({ collateralUsd: totalCollateralUsd, debtUsd: totalBorrowUsd, availableBorrowsUsd: maxBorrowUsd > totalBorrowUsd ? maxBorrowUsd - totalBorrowUsd : 0, healthFactor: type(uint256).max }));
     }
 }

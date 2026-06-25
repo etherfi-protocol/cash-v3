@@ -140,6 +140,12 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         assertApproxEqRel(result.totalSpendableInUsd, usdcBal + liquidAmtInUsd, 1, "Total should be sum of both");
     }
 
+    /// @notice Sets the gateway account aggregate, deriving availableBorrowsUsd = collateralUsd x ltv - debtUsd (floored at 0). CashLens does not read healthFactor.
+    function _setGatewayAccount(uint256 collateralUsd, uint256 debtUsd, uint256 ltv) internal {
+        uint256 maxBorrowUsd = (collateralUsd * ltv) / HUNDRED_PERCENT;
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: collateralUsd, debtUsd: debtUsd, availableBorrowsUsd: maxBorrowUsd > debtUsd ? maxBorrowUsd - debtUsd : 0, healthFactor: 1e18 }));
+    }
+
     /// @notice Sets a gateway debt position: both stables supplied with ample reserve cash, a uniform LTV, a debt, and zero raw safe balance. The borrowing headroom is derived as collateral x LTV - debt (stables valued at $1)
     function _setDebtPosition(uint256 suppliedUsdc, uint256 suppliedLiquid, uint256 ltvValue, uint256 debtUsd) internal {
         deal(address(usdc), address(safe), 0);
@@ -151,10 +157,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         gateway.setLtv(address(usdc), ltvValue);
         gateway.setLtv(address(liquidUsd), ltvValue);
 
-        uint256 collateralUsd = suppliedUsdc + suppliedLiquid;
-        uint256 maxBorrowUsd = (collateralUsd * ltvValue) / HUNDRED_PERCENT;
-        uint256 availableBorrowsUsd = maxBorrowUsd > debtUsd ? maxBorrowUsd - debtUsd : 0;
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: collateralUsd, debtUsd: debtUsd, availableBorrowsUsd: availableBorrowsUsd, healthFactor: 1e18 }));
+        _setGatewayAccount(suppliedUsdc + suppliedLiquid, debtUsd, ltvValue);
     }
 
     /// With debt, USDC first takes the whole borrowing headroom and liquidUSD gets none.
@@ -276,7 +279,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         gateway.setSuppliedOf(address(safe), address(usdc), 1000e6);
         gateway.setAvailableCash(address(usdc), type(uint128).max);
         gateway.setLtv(address(usdc), 50e18);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 1000e6, debtUsd: 400e6, availableBorrowsUsd: 100e6, healthFactor: 1e18 }));
+        _setGatewayAccount(1000e6, 400e6, 50e18);
 
         address[] memory tokenPreference = new address[](1);
         tokenPreference[0] = address(usdc);
@@ -464,8 +467,8 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
 
     /// maxBorrow stays gross (collateral x LTV, debt not subtracted) like DebtManager, while creditMaxSpend is the net headroom.
     function test_getSafeCashData_maxBorrowIsGrossWithDebt() public {
-        // $2000 collateral at 50% LTV with $800 debt: gross borrow power $1000, net headroom $200.
-        _setDebtPosition(1000e6, 1000e6, 50e18, 800e6);
+        // $2000 USDC collateral at 50% LTV with $800 debt: gross borrow power $1000, net headroom $200.
+        _setDebtPosition(2000e6, 0, 50e18, 800e6);
 
         address[] memory emptyPreference = new address[](0);
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), emptyPreference);
@@ -477,26 +480,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         assertGt(data.maxBorrow, data.creditMaxSpend, "gross exceeds net once there is debt");
     }
 
-    /// A pending withdrawal lowers credit capacity by the withdrawing collateral's LTV-weighted value.
-    function test_getMaxSpendCredit_reducedByPendingWithdrawal() public {
-        _mirrorPositionToGateway(address(safe));
-        uint256 creditBefore = cashLens.getMaxSpendCredit(address(safe));
-
-        uint256 withdrawAmount = 10_000e6;
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(usdc);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = withdrawAmount;
-        _requestWithdrawal(tokens, amounts, withdrawRecipient);
-
-        uint256 creditAfter = cashLens.getMaxSpendCredit(address(safe));
-
-        // USDC is $1 (6dp), so the headroom freed up by the pending withdrawal is withdrawAmount x LTV.
-        uint256 expectedDrop = (withdrawAmount * ltv) / HUNDRED_PERCENT;
-        assertEq(creditBefore - creditAfter, expectedDrop, "credit drops by the pending withdrawal's LTV-weighted value");
-    }
-
-    /// A pending withdrawal on one token reduces the borrowing headroom available to spend another token under debt.
+    /// A pending withdrawal on one token reduces another token's debit spendable: once it leaves Aave, the gateway reports less shared borrowing power.
     function test_getMaxSpendDebit_pendingWithdrawalReducesOtherTokenHeadroom() public {
         // Debt position: USDC + liquidUSD supplied at 50% LTV with $600 headroom; liquidUSD has raw balance for the request.
         deal(address(usdc), address(safe), 0);
@@ -506,23 +490,49 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         gateway.setAvailableCash(address(usdc), type(uint128).max);
         gateway.setLtv(address(usdc), 50e18);
         gateway.setLtv(address(liquidUsd), 50e18);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 2000e6, debtUsd: 400e6, availableBorrowsUsd: 600e6, healthFactor: 1e18 }));
+        _setGatewayAccount(2000e6, 400e6, 50e18);
 
         address[] memory tokenPreference = new address[](1);
         tokenPreference[0] = address(usdc);
 
         uint256 withoutPending = cashLens.getMaxSpendDebit(address(safe), tokenPreference).spendableAmounts[0];
+        assertEq(withoutPending, 1000e6, "USDC spendable capped by its supply, headroom ample");
 
-        // Queue a liquidUSD withdrawal; it consumes part of the shared borrowing headroom.
+        // Queue a $1000 liquidUSD withdrawal. It is pulled from Aave, so the gateway now holds $1000 less liquidUSD and $500 less borrowing power.
         address[] memory wTokens = new address[](1);
         wTokens[0] = address(liquidUsd);
         uint256[] memory wAmounts = new uint256[](1);
         wAmounts[0] = 1000e6;
         _requestWithdrawal(wTokens, wAmounts, withdrawRecipient);
+        gateway.setSuppliedOf(address(safe), address(liquidUsd), 0);
+        _setGatewayAccount(1000e6, 400e6, 50e18);
 
         uint256 withPending = cashLens.getMaxSpendDebit(address(safe), tokenPreference).spendableAmounts[0];
+        // Headroom is now $100 -> $100 / 50% = $200 of USDC withdrawable.
+        assertEq(withPending, 200e6, "a pending liquidUSD withdrawal lowers USDC's spendable via the shared headroom");
+    }
 
-        assertLt(withPending, withoutPending, "a pending liquidUSD withdrawal lowers USDC's spendable via the shared headroom");
+    /// With debt, a same-token pending withdrawal is reserved from the loose balance only: it zeroes the raw portion, while the supplied side stays capped by the borrowing headroom and is untouched by the pending.
+    function test_getMaxSpendDebit_sameTokenPendingWithDebtChargesHeadroomOnce() public {
+        // $900 is supplied to Aave; the $100 sits loose in the safe as a pending withdrawal, earmarked to leave.
+        deal(address(usdc), address(safe), 100e6);
+        gateway.setSuppliedOf(address(safe), address(usdc), 900e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+        gateway.setLtv(address(usdc), 50e18);
+        _setGatewayAccount(900e6, 200e6, 50e18);
+
+        address[] memory wTokens = new address[](1);
+        wTokens[0] = address(usdc);
+        uint256[] memory wAmounts = new uint256[](1);
+        wAmounts[0] = 100e6;
+        _requestWithdrawal(wTokens, wAmounts, withdrawRecipient);
+
+        address[] memory tokenPreference = new address[](1);
+        tokenPreference[0] = address(usdc);
+
+        DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
+        // Aave allows $250 / 50% = $500 of supplied withdrawal; the raw $100 is fully reserved by the pending, so total is $500.
+        assertEq(result.spendableAmounts[0], 500e6, "pending reserved from raw only; supplied side capped by headroom");
     }
 
     /// Debit canSpend declines (does not revert) when a pending withdrawal exceeds the currently available balance.
@@ -552,7 +562,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         gateway.setSuppliedOf(address(safe), address(usdc), 1000e6);
         gateway.setAvailableCash(address(usdc), type(uint128).max);
         gateway.setLtv(address(usdc), 0);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 1000e6, debtUsd: 200e6, availableBorrowsUsd: 100e6, healthFactor: 1e18 }));
+        _setGatewayAccount(1000e6, 200e6, 30e18);
 
         address[] memory tokenPreference = new address[](1);
         tokenPreference[0] = address(usdc);

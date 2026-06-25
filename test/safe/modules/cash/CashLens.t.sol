@@ -163,10 +163,12 @@ contract CashLensTest is CashModuleTestSetup {
         assertEq(data.withdrawalRequest.tokens[0], address(usdc), "Withdrawal token should be USDC");
         assertEq(data.withdrawalRequest.amounts[0], 5000e6, "Withdrawal amount should be 5000 USDC");
         
-        // Verify total values
-        assertGt(data.totalCollateral, 0, "Total collateral should be positive");
+        // Verify total values stay aligned with the old DebtManager-facing effective state.
+        (, uint256 expectedTotalCollateral,,) = debtManager.getUserCurrentState(address(safe));
+        uint256 expectedMaxBorrow = debtManager.getMaxBorrowAmount(address(safe), true);
+        assertEq(data.totalCollateral, expectedTotalCollateral, "Total collateral should exclude pending withdrawals");
         assertEq(data.totalBorrow, 0, "Total borrow should be zero initially");
-        assertGt(data.maxBorrow, 0, "Max borrow should be positive");
+        assertEq(data.maxBorrow, expectedMaxBorrow, "Max borrow should exclude pending withdrawals");
     }
 
     function test_getSafeCashData_inCreditMode() public {

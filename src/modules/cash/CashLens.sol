@@ -27,6 +27,10 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  *      (ModuleGatewaySandwich.minHealthFactor) only while minHealthFactor <= liqThreshold / LTV for every
  *      collateral. Keep that invariant at deploy time, or CashLens can over-report a debit spend that the
  *      sandwich then reverts on withdraw.
+ *
+ *      A pending withdrawal sits against the loose Safe balance, not the supplied position. CashLens reserves
+ *      it from the loose balance and uses the gateway's figures (collateral, maxBorrow, credit/debit headroom)
+ *      for the supplied position as-is.
  * @author ether.fi
  */
 contract CashLens is UpgradeableProxy {
@@ -167,13 +171,13 @@ contract CashLens is UpgradeableProxy {
         }
 
         if (mode == Mode.Credit) {
-            return _creditCheck(safe, tokens[0], totalSpendingInUsd, safeData);
+            return _creditCheck(safe, tokens[0], totalSpendingInUsd);
         }
         return _debitCheck(safe, tokens, amountsInUsd, safeData);
     }
 
-    /// @notice Credit mode check: the spend must fit the Aave borrowing capacity (net of pending withdrawals) and the reserve's liquidity
-    function _creditCheck(address safe, address token, uint256 totalSpendingInUsd, SafeData memory safeData) internal view returns (bool, string memory) {
+    /// @notice Credit mode check: the spend must fit the Aave borrowing capacity and the reserve's liquidity
+    function _creditCheck(address safe, address token, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
         if (!cashModule.getDebtManager().isBorrowToken(token)) {
             return (false, "Not a supported stable token");
         }
@@ -182,11 +186,8 @@ contract CashLens is UpgradeableProxy {
             return (false, "Insufficient liquidity in debt manager to cover the loan");
         }
 
-        // Pending withdrawals will leave the position, so discount their borrowing power up front
-        uint256 pending = _pendingWithdrawalHeadroom(safeData);
-        uint256 capacityUsd = gateway.getAccountData(safe).availableBorrowsUsd;
-        capacityUsd = capacityUsd > pending ? capacityUsd - pending : 0;
-        if (totalSpendingInUsd > capacityUsd) {
+        // availableBorrowsUsd is the supplied position's capacity; a pending sits against the loose balance, so it is not deducted here
+        if (totalSpendingInUsd > gateway.getAccountData(safe).availableBorrowsUsd) {
             return (false, "Insufficient borrowing power");
         }
 
@@ -198,29 +199,31 @@ contract CashLens is UpgradeableProxy {
         IDebtManager debtManager = cashModule.getDebtManager();
         IGateway.AccountData memory account = gateway.getAccountData(safe);
         bool hasDebt = account.debtUsd != 0;
-        // Net of pending withdrawals, which will leave the position and reduce its borrowing power
-        uint256 borrowHeadroom = _netBorrowHeadroom(account, safeData);
+        uint256 borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
 
         for (uint256 i = 0; i < tokens.length; i++) {
-            if (!debtManager.isBorrowToken(tokens[i])) {
+            address token = tokens[i];
+            if (!debtManager.isBorrowToken(token)) {
                 return (false, "Not a supported stable token");
             }
 
-            uint256 needed = _fromUsd(tokens[i], amountsInUsd[i]);
-            uint256 raw = IERC20(tokens[i]).balanceOf(safe);
-            uint256 available = raw + _withdrawableSupplied(safe, tokens[i], borrowHeadroom, hasDebt);
-            if (available < needed) {
-                return (false, "Insufficient token balance for debit mode spending");
-            }
-            // available - pending < needed, written as an addition so a pending larger than available declines instead of underflowing
-            if (available < _getPendingWithdrawalAmount(safeData, tokens[i]) + needed) {
-                return (false, "Insufficient effective balance after withdrawal to spend with debit mode");
+            uint256 needed = _fromUsd(token, amountsInUsd[i]);
+            uint256 raw = IERC20(token).balanceOf(safe);
+            {
+                uint256 withdrawable = _withdrawableSupplied(safe, token, borrowHeadroom, hasDebt);
+                if (raw + withdrawable < needed) {
+                    return (false, "Insufficient token balance for debit mode spending");
+                }
+                uint256 pending = _getPendingWithdrawalAmount(safeData, token);
+                if (_debitSpendableAmount(raw, withdrawable, pending) < needed) {
+                    return (false, "Insufficient effective balance after withdrawal to spend with debit mode");
+                }
             }
 
             // Only the supplied portion (raw is spent first) consumes the borrowing headroom for later tokens
             if (hasDebt) {
                 uint256 usedSupplied = needed > raw ? needed - raw : 0;
-                uint256 used = _headroomConsumed(tokens[i], usedSupplied);
+                uint256 used = _headroomConsumed(token, usedSupplied);
                 borrowHeadroom = borrowHeadroom > used ? borrowHeadroom - used : 0;
             }
         }
@@ -264,7 +267,7 @@ contract CashLens is UpgradeableProxy {
         data.borrows = _debtBalances(safe, borrowTokens);
         data.totalCollateral = account.collateralUsd;
         data.totalBorrow = account.debtUsd;
-        // Gross borrowing power (collateral weighted by LTV), matching DebtManager's getMaxBorrowAmount: headroom plus current debt
+        // Gross borrowing power (collateral weighted by LTV): the gateway headroom plus current debt
         data.maxBorrow = account.availableBorrowsUsd + account.debtUsd;
 
         uint256 len = collateralTokens.length;
@@ -299,12 +302,11 @@ contract CashLens is UpgradeableProxy {
 
     /**
      * @notice Calculates the maximum amounts that can be spent in debit mode across multiple tokens
-     * @dev Each token's spendable amount is its raw Safe balance plus the withdrawable supplied amount,
-     *      minus any pending withdrawal. When the Safe has debt, the withdrawable supplied amount is capped
-     *      by the borrowing headroom (collateral weighted by LTV, minus debt), threaded across the
-     *      preference order so each token only spends the headroom the earlier ones left. The headroom also
-     *      excludes what pending withdrawals will consume; a token that has both a pending withdrawal and debt
-     *      is treated conservatively, since its pending is netted from both its own amount and the headroom.
+     * @dev Each token's spendable amount is its loose Safe balance (less any pending withdrawal it has
+     *      reserved) plus the withdrawable supplied amount. When the Safe has debt, the withdrawable supplied
+     *      amount is capped by the borrowing headroom (collateral weighted by LTV, minus debt), threaded
+     *      across the preference order so each token only spends the headroom the earlier ones left. Pending
+     *      withdrawals are reserved from the raw Safe balance only; the supplied side is used as-is.
      * @param safe Address of the EtherFi Safe
      * @param debtServiceTokenPreference Ordered array of borrow token addresses (stablecoins). Order is
      *                                   preserved in the result.
@@ -329,8 +331,9 @@ contract CashLens is UpgradeableProxy {
         {
             IGateway.AccountData memory account = gateway.getAccountData(safe);
             hasDebt = account.debtUsd != 0;
-            // Net of pending withdrawals, which will leave the position and reduce its borrowing power
-            borrowHeadroom = _netBorrowHeadroom(account, safeData);
+            if (hasDebt) {
+                borrowHeadroom = account.availableBorrowsUsd;
+            }
         }
 
         uint256[] memory spendableAmounts = new uint256[](len);
@@ -364,9 +367,7 @@ contract CashLens is UpgradeableProxy {
      * @return Maximum amount that can be spent in credit mode (USD, 6 decimals)
      */
     function getMaxSpendCredit(address safe) public view returns (uint256) {
-        uint256 capacity = gateway.getAccountData(safe).availableBorrowsUsd;
-        uint256 pending = _pendingWithdrawalHeadroom(cashModule.getData(safe));
-        return capacity > pending ? capacity - pending : 0;
+        return gateway.getAccountData(safe).availableBorrowsUsd;
     }
 
     /**
@@ -490,40 +491,26 @@ contract CashLens is UpgradeableProxy {
         return (_toUsd(token, amount) * gateway.ltv(token)) / HUNDRED_PERCENT;
     }
 
-    /// @notice Borrowing headroom (USD) available for a new spend: the gateway headroom less what queued withdrawals will consume. Zero without debt, since debit only uses the headroom when there is debt.
-    function _netBorrowHeadroom(IGateway.AccountData memory account, SafeData memory safeData) internal view returns (uint256) {
-        if (account.debtUsd == 0) return 0;
-        uint256 pending = _pendingWithdrawalHeadroom(safeData);
-        return account.availableBorrowsUsd > pending ? account.availableBorrowsUsd - pending : 0;
-    }
-
-    /// @notice Borrowing headroom (USD) tied up by pending withdrawal requests: each pending token's LTV-weighted USD value
-    function _pendingWithdrawalHeadroom(SafeData memory safeData) internal view returns (uint256) {
-        uint256 total = 0;
-        uint256 len = safeData.pendingWithdrawalRequest.tokens.length;
-        for (uint256 i = 0; i < len;) {
-            uint256 amount = safeData.pendingWithdrawalRequest.amounts[i];
-            if (amount != 0) {
-                total += _headroomConsumed(safeData.pendingWithdrawalRequest.tokens[i], amount);
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        return total;
-    }
-
     /// @notice Debit spendable for `token` (token units) given the running borrowing headroom, and the headroom that withdrawal consumes
     function _debitSpendable(address safe, address token, SafeData memory safeData, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256, uint256) {
         uint256 withdrawable = _withdrawableSupplied(safe, token, borrowHeadroomUsd, hasDebt);
         uint256 headroomUsed = hasDebt ? _headroomConsumed(token, withdrawable) : 0;
 
-        uint256 total = IERC20(token).balanceOf(safe) + withdrawable;
+        uint256 raw = IERC20(token).balanceOf(safe);
         uint256 pending = _getPendingWithdrawalAmount(safeData, token);
-        uint256 spendable = total > pending ? total - pending : 0;
+        uint256 spendable = _debitSpendableAmount(raw, withdrawable, pending);
 
         return (spendable, headroomUsed);
+    }
+
+    /**
+     * @notice Spendable amount of one debit token: its loose Safe balance less the pending withdrawal it has reserved, plus the withdrawable supplied amount.
+     * @dev A pending withdrawal sits against the loose Safe balance, so it is reserved from `raw` only;
+     *      `withdrawableSupplied` (the supplied side) is unaffected.
+     */
+    function _debitSpendableAmount(uint256 raw, uint256 withdrawableSupplied, uint256 pending) internal pure returns (uint256) {
+        uint256 rawAfterPending = raw > pending ? raw - pending : 0;
+        return rawAfterPending + withdrawableSupplied;
     }
 
     /// @notice Per-token supplied position in the Safe's Aave account, skipping zero balances
