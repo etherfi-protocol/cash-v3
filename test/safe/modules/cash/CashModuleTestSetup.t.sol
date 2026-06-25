@@ -162,6 +162,7 @@ contract CashModuleTestSetup is SafeTestSetup {
 
         for (uint256 i = 0; i < collaterals.length; i++) {
             gateway.setSuppliedOf(_safe, collaterals[i].token, collaterals[i].amount);
+            gateway.setLtv(collaterals[i].token, debtManager.collateralTokenConfig(collaterals[i].token).ltv);
         }
         for (uint256 i = 0; i < borrows.length; i++) {
             gateway.setDebtOf(_safe, borrows[i].token, borrows[i].amount);

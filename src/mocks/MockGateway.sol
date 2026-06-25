@@ -23,6 +23,7 @@ contract MockGateway is IGateway {
     mapping(address safe => mapping(address asset => uint256)) internal _suppliedOf;
     mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
     mapping(address asset => uint256) internal _availableCash;
+    mapping(address asset => uint256) internal _ltv;
 
     Call public lastSupply;
     Call public lastWithdraw;
@@ -47,6 +48,11 @@ contract MockGateway is IGateway {
     /// @notice Sets the reserve liquidity a subsequent `availableCash(asset)` will return
     function setAvailableCash(address asset, uint256 amount) external {
         _availableCash[asset] = amount;
+    }
+
+    /// @notice Sets the LTV (100e18 = 100%) a subsequent `ltv(asset)` will return
+    function setLtv(address asset, uint256 ltvValue) external {
+        _ltv[asset] = ltvValue;
     }
 
     function supply(address safe, address asset, uint256 amount) external {
@@ -84,5 +90,9 @@ contract MockGateway is IGateway {
 
     function availableCash(address asset) external view returns (uint256) {
         return _availableCash[asset];
+    }
+
+    function ltv(address asset) external view returns (uint256) {
+        return _ltv[asset];
     }
 }

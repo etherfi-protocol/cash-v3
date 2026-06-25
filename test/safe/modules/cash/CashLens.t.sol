@@ -18,7 +18,7 @@ import { ILayerZeroTeller, AccountantWithRateProviders } from "../../../../src/i
 contract CashLensTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
-    IERC20 public liquidUsdScroll = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
+    IERC20 public liquidUsd = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
     ILayerZeroTeller public liquidUsdTeller = ILayerZeroTeller(0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387);
 
     function setUp() public override {
@@ -41,7 +41,7 @@ contract CashLensTest is CashModuleTestSetup {
         });
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(liquidUsdScroll);
+        tokens[0] = address(liquidUsd);
 
         PriceProvider.Config[] memory tokensConfig = new PriceProvider.Config[](1);
         tokensConfig[0] = liquidUsdConfig;
@@ -54,10 +54,10 @@ contract CashLensTest is CashModuleTestSetup {
         collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
         collateralTokenConfig[0].liquidationBonus = liquidationBonus;
 
-        debtManager.supportCollateralToken(address(liquidUsdScroll), collateralTokenConfig[0]);        
+        debtManager.supportCollateralToken(address(liquidUsd), collateralTokenConfig[0]);        
 
-        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsdScroll)).decimals());
-        debtManager.supportBorrowToken(address(liquidUsdScroll), borrowApyPerSecond, minShares);
+        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsd)).decimals());
+        debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
 
         // Add some collateral to safe for tests
         deal(address(weETH), address(safe), 10 ether);

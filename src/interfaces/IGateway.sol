@@ -13,10 +13,11 @@ pragma solidity ^0.8.28;
  * @author ether.fi
  */
 interface IGateway {
-    /// @notice A safe's Aave position summary, denominated in USD with 6 decimals (matching PriceProvider.DECIMALS).
+    /// @notice A safe's Aave position summary. USD fields are 6 decimals (matching PriceProvider.DECIMALS); healthFactor is 1e18.
     struct AccountData {
         uint256 collateralUsd;
         uint256 debtUsd;
+        // borrowing headroom: collateral weighted by each reserve's LTV, minus debt
         uint256 availableBorrowsUsd;
         uint256 healthFactor;
     }
@@ -94,4 +95,11 @@ interface IGateway {
      * @return The available liquidity, in asset units
      */
     function availableCash(address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns the loan-to-value of `asset`'s reserve, in the 100e18 = 100% scale (matching DebtManager's CollateralTokenConfig.ltv)
+     * @param asset The reserve asset
+     * @return The LTV, where 100e18 is 100%
+     */
+    function ltv(address asset) external view returns (uint256);
 }
