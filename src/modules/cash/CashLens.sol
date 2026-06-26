@@ -210,13 +210,13 @@ contract CashLens is UpgradeableProxy {
             uint256 needed = _fromUsd(token, amountsInUsd[i]);
             uint256 raw = IERC20(token).balanceOf(safe);
             {
-                uint256 withdrawable = _withdrawableSupplied(safe, token, borrowHeadroom, hasDebt);
-                if (raw + withdrawable < needed) {
+                uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, borrowHeadroom, hasDebt);
+                if (raw + withdrawableSupplied < needed) {
                     return (false, "Insufficient token balance for debit mode spending");
                 }
                 uint256 pending = _getPendingWithdrawalAmount(safeData, token);
                 raw = raw > pending ? raw - pending : 0;
-                if (raw + withdrawable < needed) {
+                if (raw + withdrawableSupplied < needed) {
                     return (false, "Insufficient effective balance after withdrawal to spend with debit mode");
                 }
             }
@@ -494,12 +494,12 @@ contract CashLens is UpgradeableProxy {
 
     /// @notice Debit spendable for `token` (token units) given the running borrowing headroom, and the headroom that withdrawal consumes
     function _debitSpendable(address safe, address token, SafeData memory safeData, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256, uint256) {
-        uint256 withdrawable = _withdrawableSupplied(safe, token, borrowHeadroomUsd, hasDebt);
-        uint256 headroomUsed = hasDebt ? _headroomConsumed(token, withdrawable) : 0;
+        uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, borrowHeadroomUsd, hasDebt);
+        uint256 headroomUsed = hasDebt ? _headroomConsumed(token, withdrawableSupplied) : 0;
 
         uint256 raw = IERC20(token).balanceOf(safe);
         uint256 pending = _getPendingWithdrawalAmount(safeData, token);
-        uint256 spendable = _debitSpendableAmount(raw, withdrawable, pending);
+        uint256 spendable = _debitSpendableAmount(raw, withdrawableSupplied, pending);
 
         return (spendable, headroomUsed);
     }

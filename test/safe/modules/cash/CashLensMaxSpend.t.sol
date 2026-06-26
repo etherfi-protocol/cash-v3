@@ -613,4 +613,71 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
         assertEq(result.spendableAmounts[0], 300e6, "Only the raw balance is spendable when LTV is zero and there is debt");
     }
+
+    // ================ Mixed-LTV / multi-collateral debt Tests ================
+
+    /// With debt, each token consumes the shared borrowing headroom at its OWN LTV: USDC (80%) bills 80% of what it spends, and the headroom it leaves caps liquidUSD (50%) at liquidUSD's own rate, not USDC's.
+    function test_getMaxSpendDebit_mixedLtv_perTokenThreading() public {
+        // Supplied: 200 USDC @ 80% LTV and 2000 liquidUSD @ 50% LTV, ample reserve cash, nothing loose.
+        // Borrowing headroom is $460. USDC first is face-bound at its 200 supply and bills 200 x 80% = $160,
+        // leaving $300. liquidUSD is then headroom-bound: $300 / 50% = $600 of face (well under its 2000 supply).
+        // A bug that reused one LTV for both tokens would yield $300/0.8 = $375 (USDC's LTV) or, if USDC also
+        // billed at 50%, $360 left -> $720; pinning $600 catches either.
+        deal(address(usdc), address(safe), 0);
+        deal(address(liquidUsd), address(safe), 0);
+        gateway.setSuppliedOf(address(safe), address(usdc), 200e6);
+        gateway.setSuppliedOf(address(safe), address(liquidUsd), 2000e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+        gateway.setAvailableCash(address(liquidUsd), type(uint128).max);
+        gateway.setLtv(address(usdc), 80e18);
+        gateway.setLtv(address(liquidUsd), 50e18);
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 2200e6, debtUsd: 700e6, availableBorrowsUsd: 460e6, healthFactor: 1e18 }));
+
+        address[] memory tokenPreference = new address[](2);
+        tokenPreference[0] = address(usdc);
+        tokenPreference[1] = address(liquidUsd);
+
+        DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
+
+        assertEq(result.spendableAmounts[0], 200e6, "USDC is face-bound at its 200 supply");
+        // $600 of liquidUSD face, converted through liquidUSD's own price exactly as CashLens does.
+        uint256 expectedLiquid = (600e6 * 10 ** IERC20Metadata(address(liquidUsd)).decimals()) / priceProvider.price(address(liquidUsd));
+        assertEq(result.spendableAmounts[1], expectedLiquid, "liquidUSD is headroom-bound at its own 50% LTV, not USDC's 80%");
+    }
+
+    /// Mixed collateral with a non-stable carrying the borrowing power: with debt, both supplied stables stay fully spendable, credit is the un-haircut headroom, and maxBorrow stays gross.
+    function test_getMaxSpendDebit_mixedCollateral_weEthCarriesPower() public {
+        // Integration-doc shape (Alice): weETH + USDC + EURC supplied with $4,000 borrowed. weETH carries most of
+        // the borrowing power, so the headroom never binds and both stables are face-bound. liquidUSD stands in for
+        // EURC. The gateway aggregates are injected to the doc's figures: borrow power $11,406, debt $4,000,
+        // availableBorrows $7,406, collateral $13,340.
+        deal(address(usdc), address(safe), 0);
+        deal(address(liquidUsd), address(safe), 0);
+        gateway.setSuppliedOf(address(safe), address(weETH), weETHBal);
+        gateway.setSuppliedOf(address(safe), address(usdc), 5000e6);
+        gateway.setSuppliedOf(address(safe), address(liquidUsd), 2000e6);
+        gateway.setDebtOf(address(safe), address(usdc), 4000e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+        gateway.setAvailableCash(address(liquidUsd), type(uint128).max);
+        gateway.setLtv(address(usdc), 90e18);
+        gateway.setLtv(address(liquidUsd), 90e18);
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 13_340e6, debtUsd: 4000e6, availableBorrowsUsd: 7406e6, healthFactor: 1e18 }));
+
+        address[] memory tokenPreference = new address[](2);
+        tokenPreference[0] = address(usdc);
+        tokenPreference[1] = address(liquidUsd);
+
+        DebitModeMaxSpend memory debit = cashLens.getMaxSpendDebit(address(safe), tokenPreference);
+        assertEq(debit.spendableAmounts[0], 5000e6, "USDC fully spendable: the headroom never binds");
+        assertEq(debit.spendableAmounts[1], 2000e6, "liquidUSD fully spendable: the headroom never binds");
+
+        // The doc's 10% volatility haircut ($6,665) is applied in cash-be, not on-chain; CashLens returns the raw headroom.
+        assertEq(cashLens.getMaxSpendCredit(address(safe)), 7406e6, "credit max spend is the un-haircut availableBorrowsUsd");
+
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), tokenPreference);
+        assertEq(data.totalBorrow, 4000e6, "totalBorrow is the debt");
+        assertEq(data.maxBorrow, 11_406e6, "maxBorrow is gross power: availableBorrowsUsd + debt");
+        assertEq(data.creditMaxSpend, 7406e6, "creditMaxSpend is the net headroom");
+        assertEq(data.totalCollateral, 13_340e6, "totalCollateral mirrors the gateway aggregate");
+    }
 }
