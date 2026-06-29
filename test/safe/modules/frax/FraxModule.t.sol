@@ -160,16 +160,14 @@ contract FraxModuleTest is SafeTestSetup {
 
         MessagingFee memory fee = fraxModule.quoteAsyncWithdraw(depositAddress, amountToWithdraw);
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-
-        bytes memory signature = abi.encodePacked(r, s, v);
+        (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
         uint256 fraxUsdBalBefore = fraxusd.balanceOf(address(safe));
 
         vm.expectEmit(true, true, true, true);
         emit FraxModule.AsyncWithdrawalRequested(address(safe), amountToWithdraw, fraxModule.ETHEREUM_EID(), depositAddress);
 
-        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amountToWithdraw, owner1, signature);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amountToWithdraw, signers, signatures);
 
         (uint64 withdrawalDelay,,) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay);
@@ -227,8 +225,7 @@ contract FraxModuleTest is SafeTestSetup {
 
         MessagingFee memory fee = fraxModule.quoteAsyncWithdraw(depositAddress, amount);
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
+        (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
         uint256 liquidAssetBalBefore = fraxusd.balanceOf(address(safe));
 
@@ -236,7 +233,7 @@ contract FraxModuleTest is SafeTestSetup {
         emit FraxModule.AsyncWithdrawalRequested(address(safe), amount, fraxModule.ETHEREUM_EID(), depositAddress);
         vm.expectEmit(true, true, true, true);
         emit FraxModule.AsyncWithdrawalExecuted(address(safe), amount, fraxModule.ETHEREUM_EID(), depositAddress);
-        fraxModule.requestAsyncWithdraw{ value: fee.nativeFee }(address(safe), depositAddress, amount, owner1, signature);
+        fraxModule.requestAsyncWithdraw{ value: fee.nativeFee }(address(safe), depositAddress, amount, signers, signatures);
 
         uint256 liquidAssetBalAfter = fraxusd.balanceOf(address(safe));
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amount);
@@ -455,11 +452,10 @@ contract FraxModuleTest is SafeTestSetup {
 
         bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
+        (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
-        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, owner1, signature);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, signers, signatures);
     }
 
     function test_requestAsyncWithdrawal_invalidInput() public {
@@ -468,22 +464,20 @@ contract FraxModuleTest is SafeTestSetup {
 
         bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, address(0), amount))).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
+        (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         //Test with zero address for depositAddress
-        fraxModule.requestAsyncWithdraw(address(safe), address(0), amount, owner1, signature);
+        fraxModule.requestAsyncWithdraw(address(safe), address(0), amount, signers, signatures);
 
         // Test with zero amount
         bytes32 digestHash1 = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, 0))).toEthSignedMessageHash();
 
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash1);
-        bytes memory signature1 = abi.encodePacked(r1, s1, v1);
+        (address[] memory signers1, bytes[] memory signatures1) = _signRequestAsync(digestHash1);
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         //Test with zero address for depositAddress
-        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, 0, owner1, signature1);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, 0, signers1, signatures1);
     }
 
     function test_requestAsyncWithdrawal_revertsWithAmountContainingDust() public {
@@ -492,11 +486,10 @@ contract FraxModuleTest is SafeTestSetup {
 
         bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
+        (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
         vm.expectRevert(FraxModule.AmountContainsDust.selector);
-        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, owner1, signature);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, signers, signatures);
     }
 
     function test_requestAsyncWithdrawal_succeedsWithValidDustAmount() public {
@@ -506,12 +499,11 @@ contract FraxModuleTest is SafeTestSetup {
 
         bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
+        (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
         vm.expectEmit(true, true, true, true);
         emit FraxModule.AsyncWithdrawalRequested(address(safe), amount, fraxModule.ETHEREUM_EID(), depositAddress);
-        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, owner1, signature);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, signers, signatures);
     }
 
     function test_deposit_revertsWithInsufficientCustodianBalance() public {
@@ -598,11 +590,37 @@ contract FraxModuleTest is SafeTestSetup {
     function _requestAsyncWithdrawal(uint256 amount) internal {
         bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
+        (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
         vm.expectEmit(true, true, true, true);
         emit FraxModule.AsyncWithdrawalRequested(address(safe), amount, 30_101, depositAddress);
-        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, owner1, signature);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, signers, signatures);
+    }
+
+    function _signRequestAsync(bytes32 digestHash) internal view returns (address[] memory signers, bytes[] memory signatures) {
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+        signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+        signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+    }
+
+    function test_requestAsyncWithdraw_revertsWithSingleOwnerSignature() public {
+        uint256 amount = 1000 * 10 ** 18;
+        deal(address(fraxusd), address(safe), amount);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
+        address[] memory signers = new address[](1);
+        signers[0] = owner1;
+        bytes[] memory signatures = new bytes[](1);
+        signatures[0] = abi.encodePacked(r, s, v);
+
+        vm.expectRevert();
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, signers, signatures);
     }
 }
