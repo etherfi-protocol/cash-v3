@@ -6,7 +6,7 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashLens } from "../interfaces/ICashLens.sol";
-import { ICashModule, BinSponsor } from "../interfaces/ICashModule.sol";
+import { BinSponsor, ICashModule } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
@@ -27,7 +27,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @dev Constructor that initializes the base DebtManagerStorageContract
      * @param dataProvider Address of the EtherFi data provider
      */
-    constructor(address dataProvider) DebtManagerStorageContract(dataProvider) {}
+    constructor(address dataProvider) DebtManagerStorageContract(dataProvider) { }
 
     /**
      * @notice Returns the configuration for a specified borrow token
@@ -504,84 +504,11 @@ contract DebtManagerCore is DebtManagerStorageContract {
             amount = convertUsdToCollateralToken(token, repayDebtUsdAmt);
         }
 
-        uint256 normalizedAmount = _getNormalizedAmount(repayDebtUsdAmt, interestIndex, Math.Rounding.Floor);        
+        uint256 normalizedAmount = _getNormalizedAmount(repayDebtUsdAmt, interestIndex, Math.Rounding.Floor);
         if (normalizedAmount == 0) revert RepaymentAmountIsZero();
 
         // if (!isBorrowToken(token)) revert UnsupportedRepayToken();
         _repayWithBorrowToken(token, user, amount, repayDebtUsdAmt, normalizedAmount);
-    }
-
-    /**
-     * @notice Liquidates an unhealthy position
-     * @dev Can liquidate up to 50% of the debt in first attempt, and remainder if still unhealthy
-     * @param user Address of the user to liquidate
-     * @param borrowToken Address of the borrow token to repay
-     * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
-     */
-    function liquidate(address user, address borrowToken, address[] memory collateralTokensPreference) external whenNotPaused nonReentrant {
-        if (collateralTokensPreference.length == 0) revert CollateralPreferenceIsEmpty();
-        _updateInterestIndex(borrowToken);
-        uint256 interestIndex = _getDebtManagerStorage().borrowTokenConfig[borrowToken].interestIndexSnapshot;
-        if (!isBorrowToken(borrowToken)) revert UnsupportedBorrowToken();
-        if (!liquidatable(user)) revert CannotLiquidateYet();
-        
-        _liquidateUser(user, borrowToken, collateralTokensPreference, interestIndex);
-    }
-
-    /**
-     * @dev Liquidates a user's position
-     * @param user Address of the user to liquidate
-     * @param borrowToken Address of the borrow token to repay
-     * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
-     */
-    function _liquidateUser(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 interestIndex) internal {
-        DebtManagerStorage storage $ = _getDebtManagerStorage();
-
-        uint256 debtAmountToLiquidateInUsd = _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken].ceilDiv(2), interestIndex);
-        _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
-
-        uint256 remainingNormalizedBorrowAmt = $.userNormalizedBorrowings[user][borrowToken];
-        if (remainingNormalizedBorrowAmt > 0 && liquidatable(user)) {
-            debtAmountToLiquidateInUsd = _getActualBorrowAmount(remainingNormalizedBorrowAmt, interestIndex);
-            _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
-
-            // If there's still 1 wei left due to rounding, force it to zero
-            remainingNormalizedBorrowAmt = $.userNormalizedBorrowings[user][borrowToken];
-            if (remainingNormalizedBorrowAmt == 1) {
-                $.userNormalizedBorrowings[user][borrowToken] = 0;
-                $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= 1;
-            }
-        }
-    }
-
-    /**
-     * @dev Executes the liquidation process
-     * @param user Address of the user to liquidate
-     * @param borrowToken Address of the borrow token to repay
-     * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
-     * @param debtAmountToLiquidateInUsd Amount of debt to liquidate in USD with 6 decimals
-     */
-    function _liquidate(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 debtAmountToLiquidateInUsd, uint256 interestIndex) internal {
-        DebtManagerStorage storage $ = _getDebtManagerStorage();
-        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
-
-        cashModule.preLiquidate(user);
-        if (debtAmountToLiquidateInUsd == 0) revert LiquidatableAmountIsZero();
-
-        uint256 beforeDebtAmount = _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken], interestIndex);
-
-        (IDebtManager.LiquidationTokenData[] memory collateralTokensToSend, uint256 remainingDebt) = _getCollateralTokensForDebtAmount(user, debtAmountToLiquidateInUsd, collateralTokensPreference);
-
-        cashModule.postLiquidate(user, msg.sender, collateralTokensToSend);
-
-        uint256 liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt;
-        uint256 normalizedLiquidatedAmount = _getNormalizedAmount(liquidatedAmt, interestIndex, Math.Rounding.Floor);
-        $.userNormalizedBorrowings[user][borrowToken] -= normalizedLiquidatedAmount;
-        $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= normalizedLiquidatedAmount;
-
-        IERC20(borrowToken).safeTransferFrom(msg.sender, address(this), convertUsdToCollateralToken(borrowToken, liquidatedAmt));
-
-        emit Liquidated(msg.sender, user, borrowToken, collateralTokensToSend, beforeDebtAmount, liquidatedAmt);
     }
 
     /**
@@ -590,71 +517,16 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param user Address of the user whose debt is being repaid
      * @param amount Amount of tokens being repaid
      * @param repayDebtusdAmount USD amount in 6 decimals
-     * @param normalizedAmount Normalized amount 
+     * @param normalizedAmount Normalized amount
      */
     function _repayWithBorrowToken(address token, address user, uint256 amount, uint256 repayDebtusdAmount, uint256 normalizedAmount) internal {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
-        
+
         $.userNormalizedBorrowings[user][token] -= normalizedAmount;
         $.borrowTokenConfig[token].totalNormalizedBorrowingAmount -= normalizedAmount;
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         emit Repaid(user, msg.sender, token, repayDebtusdAmount);
-    }
-
-    /**
-     * @dev Calculates collateral tokens needed to cover a debt amount
-     * @param user Address of the user being liquidated
-     * @param repayDebtUsdAmt Debt amount to cover in USD with 6 decimals
-     * @param collateralTokenPreference Order of preference for collateral tokens
-     * @return Array of liquidation token data
-     * @return remainingDebt Remaining debt that could not be covered
-     */
-    function _getCollateralTokensForDebtAmount(address user, uint256 repayDebtUsdAmt, address[] memory collateralTokenPreference) internal view returns (IDebtManager.LiquidationTokenData[] memory, uint256 remainingDebt) {
-        DebtManagerStorage storage $ = _getDebtManagerStorage();
-        uint256 len = collateralTokenPreference.length;
-        IDebtManager.LiquidationTokenData[] memory collateral = new IDebtManager.LiquidationTokenData[](len);
-
-        for (uint256 i = 0; i < len;) {
-            address collateralToken = collateralTokenPreference[i];
-            if (!isCollateralToken(collateralToken)) revert NotACollateralToken();
-
-            uint256 collateralAmountForDebt = convertUsdToCollateralToken(collateralToken, repayDebtUsdAmt);
-            uint256 totalCollateral = IERC20(collateralToken).balanceOf(user);
-
-            uint256 netCollateralRepayValue = (totalCollateral * HUNDRED_PERCENT) / (HUNDRED_PERCENT + $.collateralTokenConfig[collateralToken].liquidationBonus);
-            uint256 maxBonus = totalCollateral - netCollateralRepayValue;
-
-            if (totalCollateral - maxBonus < collateralAmountForDebt) {
-                uint256 liquidationBonus = maxBonus;
-                collateral[i] = IDebtManager.LiquidationTokenData({ token: collateralToken, amount: totalCollateral, liquidationBonus: liquidationBonus });
-
-                uint256 usdValueOfCollateral = convertCollateralTokenToUsd(collateralToken, totalCollateral - liquidationBonus);
-
-                repayDebtUsdAmt -= usdValueOfCollateral;
-            } else {
-                uint256 liquidationBonus = (collateralAmountForDebt * $.collateralTokenConfig[collateralToken].liquidationBonus) / HUNDRED_PERCENT;
-
-                collateral[i] = IDebtManager.LiquidationTokenData({ token: collateralToken, amount: collateralAmountForDebt + liquidationBonus, liquidationBonus: liquidationBonus });
-
-                repayDebtUsdAmt = 0;
-            }
-
-            if (repayDebtUsdAmt == 0) {
-                uint256 arrLen = i + 1;
-                assembly ("memory-safe") {
-                    mstore(collateral, arrLen)
-                }
-
-                break;
-            }
-
-            unchecked {
-                ++i;
-            }
-        }
-
-        return (collateral, repayDebtUsdAmt);
     }
 
     /**
@@ -706,13 +578,12 @@ contract DebtManagerCore is DebtManagerStorageContract {
         return addr;
     }
 
-
     /**
      * @notice Sets a new DebtManagerAdmin implementation
      * @dev Can only be called by the owner of the role registry contract.
      * @param newImpl Address of the new DebtManagerAdmin contract
      */
-    function setAdminImpl(address newImpl) external onlyRoleRegistryOwner() {
+    function setAdminImpl(address newImpl) external onlyRoleRegistryOwner {
         bytes32 position = ADMIN_IMPL_POSITION;
         // solhint-disable-next-line no-inline-assembly
         assembly ("memory-safe") {

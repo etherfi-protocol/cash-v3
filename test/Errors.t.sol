@@ -77,7 +77,6 @@ contract ErrorsTest is Test {
     error OnlyCashModuleController();
     error CannotWithdrawYet();
     error ModeAlreadySet();
-    error OnlyDebtManager();
     error AlreadyInSameTier();
     error CashbackPercentageGreaterThanMaxAllowed();
     error SplitAlreadyTheSame();
@@ -224,7 +223,6 @@ contract ErrorsTest is Test {
         emit log_named_bytes("OnlyCashModuleController", abi.encodePacked(OnlyCashModuleController.selector));
         emit log_named_bytes("CannotWithdrawYet", abi.encodePacked(CannotWithdrawYet.selector));
         emit log_named_bytes("ModeAlreadySet", abi.encodePacked(ModeAlreadySet.selector));
-        emit log_named_bytes("OnlyDebtManager", abi.encodePacked(OnlyDebtManager.selector));
         emit log_named_bytes("AlreadyInSameTier", abi.encodePacked(AlreadyInSameTier.selector));
         emit log_named_bytes("CashbackPercentageGreaterThanMaxAllowed", abi.encodePacked(CashbackPercentageGreaterThanMaxAllowed.selector));
         emit log_named_bytes("SplitAlreadyTheSame", abi.encodePacked(SplitAlreadyTheSame.selector));
