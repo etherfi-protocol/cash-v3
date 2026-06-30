@@ -180,6 +180,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Cash module ----
 
     function test_verifyBytecode_CashModuleCore() public {
+        // CashModule drops the preLiquidate/postLiquidate callbacks for Lend, so its bytecode no longer
+        // matches the deployed pre-Lend version. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new CashModuleCore(dataProviderProxy));
         _verify("CashModuleCore", cashModuleCoreImpl, local);
     }
@@ -207,6 +210,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Debt manager ----
 
     function test_verifyBytecode_DebtManagerCore() public {
+        // DebtManager's liquidation path is removed for Lend, so its bytecode no longer matches the
+        // deployed pre-Lend version. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new DebtManagerCore(dataProviderProxy));
         _verify("DebtManagerCore", debtManagerCoreImpl, local);
     }
