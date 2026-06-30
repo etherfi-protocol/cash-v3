@@ -18,7 +18,7 @@ import { ILayerZeroTeller, AccountantWithRateProviders } from "../../../../src/i
 contract CashLensTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
-    IERC20 public liquidUsdScroll = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
+    IERC20 public liquidUsd = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
     ILayerZeroTeller public liquidUsdTeller = ILayerZeroTeller(0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387);
 
     function setUp() public override {
@@ -41,7 +41,7 @@ contract CashLensTest is CashModuleTestSetup {
         });
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(liquidUsdScroll);
+        tokens[0] = address(liquidUsd);
 
         PriceProvider.Config[] memory tokensConfig = new PriceProvider.Config[](1);
         tokensConfig[0] = liquidUsdConfig;
@@ -54,10 +54,10 @@ contract CashLensTest is CashModuleTestSetup {
         collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
         collateralTokenConfig[0].liquidationBonus = liquidationBonus;
 
-        debtManager.supportCollateralToken(address(liquidUsdScroll), collateralTokenConfig[0]);        
+        debtManager.supportCollateralToken(address(liquidUsd), collateralTokenConfig[0]);        
 
-        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsdScroll)).decimals());
-        debtManager.supportBorrowToken(address(liquidUsdScroll), borrowApyPerSecond, minShares);
+        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsd)).decimals());
+        debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
 
         // Add some collateral to safe for tests
         deal(address(weETH), address(safe), 10 ether);
@@ -145,8 +145,9 @@ contract CashLensTest is CashModuleTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         
         // Get safe cash data
+        _mirrorPositionToGateway(address(safe));
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
-        
+
         // Verify basic data
         assertEq(uint8(data.mode), uint8(Mode.Debit), "Initial mode should be Debit");
         assertEq(data.incomingModeStartTime, 0, "No incoming mode change");
@@ -162,10 +163,12 @@ contract CashLensTest is CashModuleTestSetup {
         assertEq(data.withdrawalRequest.tokens[0], address(usdc), "Withdrawal token should be USDC");
         assertEq(data.withdrawalRequest.amounts[0], 5000e6, "Withdrawal amount should be 5000 USDC");
         
-        // Verify total values
-        assertGt(data.totalCollateral, 0, "Total collateral should be positive");
+        // Verify total values stay aligned with the old DebtManager-facing effective state.
+        (, uint256 expectedTotalCollateral,,) = debtManager.getUserCurrentState(address(safe));
+        uint256 expectedMaxBorrow = debtManager.getMaxBorrowAmount(address(safe), true);
+        assertEq(data.totalCollateral, expectedTotalCollateral, "Total collateral should exclude pending withdrawals");
         assertEq(data.totalBorrow, 0, "Total borrow should be zero initially");
-        assertGt(data.maxBorrow, 0, "Max borrow should be positive");
+        assertEq(data.maxBorrow, expectedMaxBorrow, "Max borrow should exclude pending withdrawals");
     }
 
     function test_getSafeCashData_inCreditMode() public {
@@ -229,8 +232,9 @@ contract CashLensTest is CashModuleTestSetup {
         // Spend in credit mode to create a borrow
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        
+
         // Get safe cash data
+        _mirrorPositionToGateway(address(safe));
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
         
         // Verify borrows

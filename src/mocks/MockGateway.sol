@@ -20,6 +20,10 @@ contract MockGateway is IGateway {
 
     mapping(address => AccountData) internal _accountData;
     mapping(address => mapping(address => bool)) public usingAsCollateral;
+    mapping(address safe => mapping(address asset => uint256)) internal _suppliedOf;
+    mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
+    mapping(address asset => uint256) internal _availableCash;
+    mapping(address asset => uint256) internal _ltv;
 
     Call public lastSupply;
     Call public lastWithdraw;
@@ -29,6 +33,26 @@ contract MockGateway is IGateway {
     /// @notice Sets the account data a subsequent `getAccountData(safe)` will return
     function setAccountData(address safe, AccountData calldata data) external {
         _accountData[safe] = data;
+    }
+
+    /// @notice Sets the supplied amount a subsequent `suppliedOf(safe, asset)` will return
+    function setSuppliedOf(address safe, address asset, uint256 amount) external {
+        _suppliedOf[safe][asset] = amount;
+    }
+
+    /// @notice Sets the debt a subsequent `debtOf(safe, asset)` will return
+    function setDebtOf(address safe, address asset, uint256 amount) external {
+        _debtOf[safe][asset] = amount;
+    }
+
+    /// @notice Sets the reserve liquidity a subsequent `availableCash(asset)` will return
+    function setAvailableCash(address asset, uint256 amount) external {
+        _availableCash[asset] = amount;
+    }
+
+    /// @notice Sets the LTV (100e18 = 100%) a subsequent `ltv(asset)` will return
+    function setLtv(address asset, uint256 ltvValue) external {
+        _ltv[asset] = ltvValue;
     }
 
     function supply(address safe, address asset, uint256 amount) external {
@@ -54,5 +78,21 @@ contract MockGateway is IGateway {
 
     function getAccountData(address safe) external view returns (AccountData memory) {
         return _accountData[safe];
+    }
+
+    function suppliedOf(address safe, address asset) external view returns (uint256) {
+        return _suppliedOf[safe][asset];
+    }
+
+    function debtOf(address safe, address asset) external view returns (uint256) {
+        return _debtOf[safe][asset];
+    }
+
+    function availableCash(address asset) external view returns (uint256) {
+        return _availableCash[asset];
+    }
+
+    function ltv(address asset) external view returns (uint256) {
+        return _ltv[asset];
     }
 }

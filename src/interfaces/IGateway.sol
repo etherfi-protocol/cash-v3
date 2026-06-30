@@ -13,10 +13,11 @@ pragma solidity ^0.8.28;
  * @author ether.fi
  */
 interface IGateway {
-    /// @notice A safe's Aave position summary, denominated in USD with 8 decimals.
+    /// @notice A safe's Aave position summary. USD fields are 6 decimals (matching PriceProvider.DECIMALS); healthFactor is 1e18.
     struct AccountData {
         uint256 collateralUsd;
         uint256 debtUsd;
+        // borrowing headroom: collateral weighted by each reserve's LTV, minus debt
         uint256 availableBorrowsUsd;
         uint256 healthFactor;
     }
@@ -71,4 +72,34 @@ interface IGateway {
      * @return The safe's account data
      */
     function getAccountData(address safe) external view returns (AccountData memory);
+
+    /**
+     * @notice Returns the amount of `asset` that `safe` has supplied to Aave
+     * @param safe The safe to query
+     * @param asset The supplied asset
+     * @return The supplied amount, in asset units
+     */
+    function suppliedOf(address safe, address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns the amount of `asset` debt that `safe` owes Aave
+     * @param safe The safe to query
+     * @param asset The borrowed asset
+     * @return The debt amount, in asset units
+     */
+    function debtOf(address safe, address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns the withdrawable and borrowable liquidity of `asset`'s reserve
+     * @param asset The reserve asset
+     * @return The available liquidity, in asset units
+     */
+    function availableCash(address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns the loan-to-value of `asset`'s reserve, in the 100e18 = 100% scale (matching DebtManager's CollateralTokenConfig.ltv)
+     * @param asset The reserve asset
+     * @return The LTV, where 100e18 is 100%
+     */
+    function ltv(address asset) external view returns (uint256);
 }
