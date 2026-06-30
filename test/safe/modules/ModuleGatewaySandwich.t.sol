@@ -18,6 +18,12 @@ contract SandwichHarness is ModuleGatewaySandwich {
     function resupplyToGateway(address safe, address asset, uint256 amount) external {
         _resupplyToGateway(safe, asset, amount);
     }
+
+    /// @notice A guarded withdraw-resupply operation, mirroring how a module brackets its action
+    function runSandwich(address safe, address asset, uint256 amount) external guardsHealth(safe) {
+        _withdrawFromGateway(safe, asset, amount);
+        _resupplyToGateway(safe, asset, amount);
+    }
 }
 
 contract ModuleGatewaySandwichTest is Test {
@@ -44,9 +50,8 @@ contract ModuleGatewaySandwichTest is Test {
         new SandwichHarness(address(0), MIN_HEALTH_FACTOR);
     }
 
-    // Withdraws to the safe and passes the guard at exactly minHealthFactor.
-    function test_withdraw_routesToSafeAndPassesAtMinHealthFactor() public {
-        _setHealthFactor(MIN_HEALTH_FACTOR);
+    // The withdraw bookend routes to the safe and does not guard health; Aave guards the withdraw itself.
+    function test_withdraw_routesToSafe() public {
         harness.withdrawFromGateway(safe, asset, AMOUNT);
 
         (address s, address a, uint256 amount, address to) = gateway.lastWithdraw();
@@ -56,14 +61,7 @@ contract ModuleGatewaySandwichTest is Test {
         assertEq(to, safe);
     }
 
-    // Reverts when the post-withdraw health factor is below the floor.
-    function test_withdraw_revertsBelowMinHealthFactor() public {
-        _setHealthFactor(MIN_HEALTH_FACTOR - 1);
-        vm.expectRevert(ModuleGatewaySandwich.WithdrawBreachesHealth.selector);
-        harness.withdrawFromGateway(safe, asset, AMOUNT);
-    }
-
-    // Supplies the asset back to Aave and marks it as collateral.
+    // The resupply bookend supplies the asset back to Aave and marks it as collateral, with no health guard of its own.
     function test_resupply_suppliesAndSetsCollateral() public {
         harness.resupplyToGateway(safe, asset, AMOUNT);
 
@@ -73,5 +71,23 @@ contract ModuleGatewaySandwichTest is Test {
         assertEq(amount, AMOUNT);
         assertEq(to, address(0));
         assertTrue(gateway.usingAsCollateral(safe, asset));
+    }
+
+    // The guarded operation runs both bookends and passes at exactly minHealthFactor.
+    function test_guardedOperation_passesAtMinHealthFactor() public {
+        _setHealthFactor(MIN_HEALTH_FACTOR);
+        harness.runSandwich(safe, asset, AMOUNT);
+
+        (address ws,,, address wto) = gateway.lastWithdraw();
+        assertEq(ws, safe);
+        assertEq(wto, safe);
+        assertTrue(gateway.usingAsCollateral(safe, asset));
+    }
+
+    // The guard reverts when the completed operation leaves the safe's health factor below the floor.
+    function test_guardedOperation_revertsBelowMinHealthFactor() public {
+        _setHealthFactor(MIN_HEALTH_FACTOR - 1);
+        vm.expectRevert(ModuleGatewaySandwich.OperationBreachesHealth.selector);
+        harness.runSandwich(safe, asset, AMOUNT);
     }
 }

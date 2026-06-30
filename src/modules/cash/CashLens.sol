@@ -26,7 +26,7 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  *      The debit cap uses LTV, which is stricter than the sandwich's liquidation-threshold health gate
  *      (ModuleGatewaySandwich.minHealthFactor) only while minHealthFactor <= liqThreshold / LTV for every
  *      collateral. Keep that invariant at deploy time, or CashLens can over-report a debit spend that the
- *      sandwich then reverts on withdraw.
+ *      sandwich then reverts on.
  *
  *      A pending withdrawal sits against the loose Safe balance, not the supplied position. CashLens reserves
  *      it from the loose balance and uses the gateway's figures (collateral, maxBorrow, credit/debit headroom)
@@ -179,7 +179,7 @@ contract CashLens is UpgradeableProxy {
     /// @notice Credit mode check: the spend must fit the Aave borrowing capacity and the reserve's liquidity
     function _creditCheck(address safe, address token, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
         if (!cashModule.getDebtManager().isBorrowToken(token)) {
-            return (false, "Not a supported stable token");
+            return (false, "Not a supported borrow token");
         }
 
         if (gateway.availableCash(token) < _fromUsd(token, totalSpendingInUsd)) {
@@ -204,7 +204,7 @@ contract CashLens is UpgradeableProxy {
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
             if (!debtManager.isBorrowToken(token)) {
-                return (false, "Not a supported stable token");
+                return (false, "Not a supported borrow token");
             }
 
             uint256 needed = _fromUsd(token, amountsInUsd[i]);
@@ -364,11 +364,28 @@ contract CashLens is UpgradeableProxy {
 
     /**
      * @notice Calculates the maximum amount that can be spent in credit mode
+     * @dev Borrowing power (collateral weighted by LTV, minus debt) bounded by pool liquidity: a credit
+     *      spend draws a single borrow token, so the most liquid borrow token sets the achievable ceiling,
+     *      matching the reserve-liquidity decline in _creditCheck.
      * @param safe Address of the EtherFi Safe
      * @return Maximum amount that can be spent in credit mode (USD, 6 decimals)
      */
     function getMaxSpendCredit(address safe) public view returns (uint256) {
-        return gateway.getAccountData(safe).availableBorrowsUsd;
+        uint256 borrowPower = gateway.getAccountData(safe).availableBorrowsUsd;
+
+        address[] memory borrowTokens = cashModule.getDebtManager().getBorrowTokens();
+        uint256 maxLiquidityUsd = 0;
+        for (uint256 i = 0; i < borrowTokens.length;) {
+            uint256 liquidityUsd = _toUsd(borrowTokens[i], gateway.availableCash(borrowTokens[i]));
+            if (liquidityUsd > maxLiquidityUsd) {
+                maxLiquidityUsd = liquidityUsd;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        return borrowPower < maxLiquidityUsd ? borrowPower : maxLiquidityUsd;
     }
 
     /**

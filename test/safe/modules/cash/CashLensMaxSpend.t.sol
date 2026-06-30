@@ -465,6 +465,17 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         assertGt(creditMaxSpend, 0, "Should have positive credit limit with collateral");
     }
 
+    /// Credit max spend is capped by the borrow token's pool liquidity, not just the borrowing power.
+    function test_getMaxSpendCredit_cappedByPoolLiquidity() public {
+        // $2000 collateral at 50% LTV, no debt: borrowing power $1000.
+        _setGatewayAccount(2000e6, 0, 50e18);
+
+        // The reserve only has $400 of USDC to lend, below the $1000 borrowing power.
+        gateway.setAvailableCash(address(usdc), 400e6);
+
+        assertEq(cashLens.getMaxSpendCredit(address(safe)), 400e6, "credit max spend capped by reserve liquidity, not borrowing power");
+    }
+
     /// maxBorrow stays gross (collateral x LTV, debt not subtracted) like DebtManager, while creditMaxSpend is the net headroom.
     function test_getSafeCashData_maxBorrowIsGrossWithDebt() public {
         // $2000 USDC collateral at 50% LTV with $800 debt: gross borrow power $1000, net headroom $200.
