@@ -183,7 +183,7 @@ contract CashLens is UpgradeableProxy {
         }
 
         if (gateway.availableCash(token) < _fromUsd(token, totalSpendingInUsd)) {
-            return (false, "Insufficient liquidity in debt manager to cover the loan");
+            return (false, "Insufficient liquidity to cover the loan");
         }
 
         // availableBorrowsUsd is the supplied position's capacity; a pending sits against the loose balance, so it is not deducted here

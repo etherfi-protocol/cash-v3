@@ -142,7 +142,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         deal(address(usdc), address(debtManager), amounts[0] - 1);
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
-        assertEq(reason, "Insufficient liquidity in debt manager to cover the loan");
+        assertEq(reason, "Insufficient liquidity to cover the loan");
     }
 
     function test_canSpend_succeeds_inDebitMode_whenWithdrawalIsLowerThanAmountRequested() public {
