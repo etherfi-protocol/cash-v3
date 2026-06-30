@@ -422,7 +422,7 @@ contract CashLens is UpgradeableProxy {
         uint256 balance = IERC20(token).balanceOf(safe);
         uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
 
-        return balance - pendingWithdrawalAmount;
+        return balance > pendingWithdrawalAmount ? balance - pendingWithdrawalAmount : 0;
     }
 
     /**
@@ -442,7 +442,7 @@ contract CashLens is UpgradeableProxy {
             uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
             uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
             if (balance != 0) {
-                balance = balance - pendingWithdrawalAmount;
+                balance = balance > pendingWithdrawalAmount ? balance - pendingWithdrawalAmount : 0;
                 if (balance != 0) {
                     tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
                     unchecked {
