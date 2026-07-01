@@ -14,7 +14,7 @@ import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 contract CashLensCanSpendTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
-    IERC20 public liquidUsdScroll = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
+    IERC20 public liquidUsd = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
 
     function setUp() public override {
         super.setUp();
@@ -34,7 +34,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         });
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(liquidUsdScroll);
+        tokens[0] = address(liquidUsd);
 
         PriceProvider.Config[] memory tokensConfig = new PriceProvider.Config[](1);
         tokensConfig[0] = liquidUsdConfig;
@@ -47,10 +47,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
         collateralTokenConfig[0].liquidationBonus = liquidationBonus;
 
-        debtManager.supportCollateralToken(address(liquidUsdScroll), collateralTokenConfig[0]);        
+        debtManager.supportCollateralToken(address(liquidUsd), collateralTokenConfig[0]);        
 
-        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsdScroll)).decimals());
-        debtManager.supportBorrowToken(address(liquidUsdScroll), borrowApyPerSecond, minShares);
+        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsd)).decimals());
+        debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
         
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
         CashbackTokens memory scr = CashbackTokens({
@@ -84,6 +84,22 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         assertEq(reason, "");
     }
 
+    function test_canSpend_succeeds_inDebitMode_whenSuppliedToAave() public {
+        // Scenario 2: the stable is supplied to Aave, not held raw. Debit still works via the withdrawable amount.
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        deal(address(usdc), address(safe), 0);
+        gateway.setSuppliedOf(address(safe), address(usdc), 100e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, true);
+        assertEq(reason, "");
+    }
+
     function test_canSpend_succeeds_inCreditMode_whenCollateralAvailable() public {
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
@@ -95,6 +111,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         deal(address(weETH), address(safe), 1 ether);
         deal(address(usdc), address(debtManager), amounts[0]);
+        _mirrorPositionToGateway(address(safe));
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, true);
         assertEq(reason, "");
@@ -125,7 +142,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         deal(address(usdc), address(debtManager), amounts[0] - 1);
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
-        assertEq(reason, "Insufficient liquidity in debt manager to cover the loan");
+        assertEq(reason, "Insufficient liquidity to cover the loan");
     }
 
     function test_canSpend_succeeds_inDebitMode_whenWithdrawalIsLowerThanAmountRequested() public {
@@ -169,6 +186,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         amounts[0] = balToTransfer;
 
+        _mirrorPositionToGateway(address(safe));
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, true);
         assertEq(reason, "");
@@ -210,6 +228,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         // if we want to borrow 82 USDC, it should fail
         amounts[0] = 82e6;
 
+        _mirrorPositionToGateway(address(safe));
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
         assertEq(reason, "Insufficient borrowing power");
@@ -223,6 +242,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 50e6;
 
+        _mirrorPositionToGateway(address(safe));
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
         assertEq(reason, "Insufficient borrowing power");
@@ -620,7 +640,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (bool canSpend, string memory message) = cashLens.canSpend(address(safe), txId, tokens, amountsInUsd);
         
         assertFalse(canSpend, "Should not allow spending a non-borrow token");
-        assertEq(message, "Not a supported stable token", "Error message should match");
+        assertEq(message, "Not a supported borrow token", "Error message should match");
     }
 
     function test_canSpend_alreadyCleared() public {
@@ -663,14 +683,14 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     
     function test_canSpendSingleToken_debitMode_firstTokenWorks() public {
         deal(address(usdc), address(safe), 1000e6);
-        deal(address(liquidUsdScroll), address(safe), 1000e18);
+        deal(address(liquidUsd), address(safe), 1000e18);
         
         address[] memory creditPrefs = new address[](1);
         creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](2);
         debitPrefs[0] = address(usdc);
-        debitPrefs[1] = address(liquidUsdScroll);
+        debitPrefs[1] = address(liquidUsd);
         
         uint256 amountInUsd = 500e6; // 500 USD
         
@@ -684,21 +704,21 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
     function test_canSpendSingleToken_debitMode_fallbackToSecondToken() public {
         // Setup: safe only has LiquidUSD
-        deal(address(liquidUsdScroll), address(safe), 1000e18);
+        deal(address(liquidUsd), address(safe), 1000e18);
         
         address[] memory creditPrefs = new address[](1);
         creditPrefs[0] = address(usdc);
         
         address[] memory debitPrefs = new address[](2);
         debitPrefs[0] = address(usdc); // No balance
-        debitPrefs[1] = address(liquidUsdScroll); // Has balance
+        debitPrefs[1] = address(liquidUsd); // Has balance
         
         uint256 amountInUsd = 500e6; // 500 USD
         
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
-        assertEq(token, address(liquidUsdScroll), "Should return second preference token");
+        assertEq(token, address(liquidUsd), "Should return second preference token");
         assertTrue(canSpend, "Should be able to spend with second token");
         assertEq(message, "", "Should have no error message");
     }
@@ -717,9 +737,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 500e6; // 500 USD
-        
+
+        _mirrorPositionToGateway(address(safe));
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
-        
+
         assertEq(uint8(mode), uint8(Mode.Credit), "Should return credit mode");
         assertEq(token, address(usdc), "Should return USDC");
         assertTrue(canSpend, "Should be able to spend in credit mode");
@@ -734,7 +755,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         address[] memory debitPrefs = new address[](2);
         debitPrefs[0] = address(usdc);
-        debitPrefs[1] = address(liquidUsdScroll);
+        debitPrefs[1] = address(liquidUsd);
         
         uint256 amountInUsd = 500e6; 
         
@@ -812,7 +833,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     function test_canSpendSingleToken_withPendingWithdrawals() public {
         // Setup balances
         deal(address(usdc), address(safe), 1000e6);
-        deal(address(liquidUsdScroll), address(safe), 1000e18);
+        deal(address(liquidUsd), address(safe), 1000e18);
         
         // Request withdrawal that affects USDC
         address[] memory withdrawTokens = new address[](1);
@@ -826,14 +847,14 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         
         address[] memory debitPrefs = new address[](2);
         debitPrefs[0] = address(usdc); // Will fail due to withdrawal
-        debitPrefs[1] = address(liquidUsdScroll); // Should work
+        debitPrefs[1] = address(liquidUsd); // Should work
         
         uint256 amountInUsd = 500e6; // More than remaining USDC
         
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
         
         assertEq(uint8(mode), uint8(Mode.Debit), "Should return debit mode");
-        assertEq(token, address(liquidUsdScroll), "Should fallback to LiquidUSD");
+        assertEq(token, address(liquidUsd), "Should fallback to LiquidUSD");
         assertTrue(canSpend, "Should be able to spend with second token");
         assertEq(message, "", "Should have no error message");
     }
@@ -853,9 +874,10 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         debitPrefs[0] = address(usdc);
         
         uint256 amountInUsd = 500e6;
-        
+
+        _mirrorPositionToGateway(address(safe));
         (Mode mode, address token, bool canSpend, string memory message) = cashLens.canSpendSingleToken(address(safe), txId, creditPrefs, debitPrefs, amountInUsd);
-        
+
         assertEq(uint8(mode), uint8(Mode.Credit), "Should return credit mode");
         assertEq(token, address(usdc), "Should return USDC");
         assertFalse(canSpend, "Should not be able to spend without collateral");

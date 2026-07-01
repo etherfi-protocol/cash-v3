@@ -3,8 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
 import { Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
@@ -18,6 +16,8 @@ import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 /**
  * @title CashModule
@@ -39,7 +39,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         mapping(address safe => SafeCashConfig cashConfig) safeCashConfig;
         /// @notice Instance of the DebtManager for borrowing and repayment operations
         IDebtManager debtManager;
-        /// @notice Address of the SettlementDispatcher for Reap 
+        /// @notice Address of the SettlementDispatcher for Reap
         address settlementDispatcherReap;
         /// @notice Delay in seconds before a withdrawal request can be finalized
         uint64 withdrawalDelay;
@@ -59,7 +59,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address cashModuleSetters;
         /// @notice Cashback percentage for referrer in bps
         uint64 DEPRECATED_referrerCashbackPercentageInBps;
-        /// @notice Address of the SettlementDispatcher for Rain 
+        /// @notice Address of the SettlementDispatcher for Rain
         address settlementDispatcherRain;
         /// @notice Address of tokens that can be withdrawn from the safe
         EnumerableSetLib.AddressSet whitelistedWithdrawAssets;
@@ -121,9 +121,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when attempting to set a mode that is already active
     error ModeAlreadySet();
 
-    /// @notice Error thrown when a function restricted to the Debt Manager is called by another address
-    error OnlyDebtManager();
-
     /// @notice Error thrown when trying to change a safe's tier to its current tier
     /// @param index The index of the safe for which tier that is the same
     error AlreadyInSameTier(uint256 index);
@@ -162,7 +159,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
 
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { 
+    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         _disableInitializers();
     }
 
@@ -193,7 +190,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
         ICashEventEmitter eventEmitter = $.cashEventEmitter;
         SafeCashConfig storage safeCashConfig = $.safeCashConfig[safe];
-        
+
         address recipient = safeCashConfig.pendingWithdrawalRequest.recipient;
 
         if (safeCashConfig.pendingWithdrawalRequest.tokens.length > 0) {
@@ -275,13 +272,13 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /**
      * @dev Checks if assets are whitelisted withdraw assets
      * @param $ Storage reference to the SafeCashConfig for the safe
-     * @param tokens Array of token addresses to check 
+     * @param tokens Array of token addresses to check
      * @custom:throws InvalidWithdrawAsset if an asset is not whitelisted for withdrawals
      */
     function _areAssetsWithdrawable(CashModuleStorage storage $, address[] memory tokens) internal view {
         uint256 len = tokens.length;
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             if (!$.whitelistedWithdrawAssets.contains(tokens[i])) revert InvalidWithdrawAsset(tokens[i]);
             unchecked {
                 ++i;
@@ -298,7 +295,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     function _processWithdrawal(address safe) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = _getCashModuleStorage().safeCashConfig[safe];
-        
+
         // Ensure that the withdrawal request exists
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
 

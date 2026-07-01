@@ -14,7 +14,7 @@ import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.s
 //  */
 // enum CashbackTypes {
 //     Regular,
-//     Spender, 
+//     Spender,
 //     Promotion,
 //     Referral
 // }
@@ -30,7 +30,7 @@ struct Cashback {
 
 /**
  * @title CashbackTokens
- * @notice Defines the structure of Cashback tokens 
+ * @notice Defines the structure of Cashback tokens
  */
 struct CashbackTokens {
     address token;
@@ -135,7 +135,7 @@ struct SafeCashConfig {
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
     /// @notice Incoming mode that will be applied after the delay
-    Mode incomingMode; 
+    Mode incomingMode;
 }
 
 /**
@@ -168,7 +168,7 @@ struct SafeCashData {
     uint256 totalCashbackEarnedInUsd;
     /// @notice Timestamp when a pending change to incoming mode mode will take effect (0 if no pending change)
     uint256 incomingModeStartTime;
-    /// @notice Maximum spendable amount in Debit mode 
+    /// @notice Maximum spendable amount in Debit mode
     DebitModeMaxSpend debitMaxSpend;
 }
 
@@ -177,7 +177,7 @@ struct SafeCashData {
  * @notice Data structure to return Debit mode max spend result
  */
 struct DebitModeMaxSpend {
-    /// @notice Tokens that can be spent. Order of token matter, Order determines 
+    /// @notice Tokens that can be spent. Order of token matter, Order determines
     /// priority for deficit coverage - earlier tokens are used first
     address[] spendableTokens;
     /// @notice Amounts of respective tokens that can be spent
@@ -224,9 +224,6 @@ interface ICashModule {
 
     /// @notice Error thrown when trying to set a mode that's already active
     error ModeAlreadySet();
-
-    /// @notice Error thrown when a non-DebtManager contract calls restricted functions
-    error OnlyDebtManager();
 
     /// @notice Error thrown when trying to set a tier that's already set
     error AlreadyInSameTier(uint256 index);
@@ -304,7 +301,7 @@ interface ICashModule {
     /**
      * @notice Returns all the assets whitelisted for withdrawals
      * @return Array of whitelisted withdraw assets
-     */    
+     */
     function getWhitelistedWithdrawAssets() external view returns (address[] memory);
 
     /**
@@ -464,7 +461,7 @@ interface ICashModule {
     /**
      * @notice Configures the withdraw assets whitelist
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param assets Array of asset addresses to configure 
+     * @param assets Array of asset addresses to configure
      * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
      * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
      * @custom:throws InvalidInput If the arrays are empty
@@ -549,7 +546,7 @@ interface ICashModule {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  Cashback[] calldata cashbacks) external;
+    function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external;
 
     /**
      * @notice Clears pending cashback for users
@@ -579,7 +576,7 @@ interface ICashModule {
      * @param safe Address of the EtherFi Safe
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
-     * @param recipient Address to receive the withdrawn tokens 
+     * @param recipient Address to receive the withdrawn tokens
      * @param signers Array of safe owner addresses signing the transaction
      * @param signatures Array of signatures from the safe owners
      * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
@@ -598,24 +595,6 @@ interface ICashModule {
      * @custom:throws CannotWithdrawYet if the withdrawal delay period hasn't passed
      */
     function processWithdrawal(address safe) external;
-
-    /**
-     * @notice Prepares a safe for liquidation by canceling any pending withdrawals
-     * @dev Only callable by the DebtManager
-     * @param safe Address of the EtherFi Safe being liquidated
-     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
-     */
-    function preLiquidate(address safe) external;
-
-    /**
-     * @notice Executes post-liquidation logic to transfer tokens to the liquidator
-     * @dev Only callable by the DebtManager after a successful liquidation
-     * @param safe Address of the EtherFi Safe being liquidated
-     * @param liquidator Address that will receive the liquidated tokens
-     * @param tokensToSend Array of token data with amounts to send to the liquidator
-     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
-     */
-    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
 
     /**
      * @notice Returns the current nonce for a Safe

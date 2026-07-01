@@ -7,7 +7,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { Mode, BinSponsor, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest, TokenDataInUsd, Cashback, CashbackTokens } from "../../interfaces/ICashModule.sol";
+import { BinSponsor, Cashback, CashbackTokens, Mode, SafeCashConfig, SafeData, SafeTiers, TokenDataInUsd, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
@@ -31,7 +31,7 @@ contract CashModuleCore is CashModuleStorageContract {
     using MessageHashUtils for bytes32;
     using ArrayDeDupLib for address[];
 
-    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { 
+    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) {
         _disableInitializers();
     }
 
@@ -103,7 +103,7 @@ contract CashModuleCore is CashModuleStorageContract {
     /**
      * @notice Returns all the assets whitelisted for withdrawals
      * @return Array of whitelisted withdraw assets
-     */    
+     */
     function getWhitelistedWithdrawAssets() external view returns (address[] memory) {
         return _getCashModuleStorage().whitelistedWithdrawAssets.values();
     }
@@ -139,19 +139,16 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function getPendingCashback(address account, address[] memory tokens) external view returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd) {
         CashModuleStorage storage $ = _getCashModuleStorage();
-        
+
         uint256 len = tokens.length;
         if (len > 1) tokens.checkDuplicates();
         data = new TokenDataInUsd[](len);
         uint256 m = 0;
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             uint256 pendingCashbackInUsd = $.pendingCashbackForTokenInUsd[account][tokens[i]];
             if (pendingCashbackInUsd > 0) {
-                data[m] = TokenDataInUsd({
-                    token: tokens[i],
-                    amountInUsd: pendingCashbackInUsd
-                });
+                data[m] = TokenDataInUsd({ token: tokens[i], amountInUsd: pendingCashbackInUsd });
 
                 totalCashbackInUsd += pendingCashbackInUsd;
 
@@ -168,7 +165,7 @@ contract CashModuleCore is CashModuleStorageContract {
             mstore(data, m)
         }
     }
- 
+
     /**
      * @notice Gets the pending cashback amount for an account in USD for a specific token
      * @dev Returns the amount of cashback waiting to be claimed
@@ -217,55 +214,6 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function incomingModeStartTime(address safe) external view returns (uint256) {
         return _getCashModuleStorage().safeCashConfig[safe].incomingModeStartTime;
-    }
-
-    /**
-     * @notice Prepares a safe for liquidation by canceling any pending withdrawals
-     * @dev Only callable by the DebtManager
-     * @param safe Address of the EtherFi Safe being liquidated
-     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
-     */
-    function preLiquidate(address safe) external {
-        if (msg.sender != address(getDebtManager())) revert OnlyDebtManager();
-        _cancelOldWithdrawal(safe);
-    }
-
-    /**
-     * @notice Executes post-liquidation logic to transfer tokens to the liquidator
-     * @dev Only callable by the DebtManager after a successful liquidation
-     * @param safe Address of the EtherFi Safe being liquidated
-     * @param liquidator Address that will receive the liquidated tokens
-     * @param tokensToSend Array of token data with amounts to send to the liquidator
-     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
-     */
-    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external {
-        if (msg.sender != address(getDebtManager())) revert OnlyDebtManager();
-
-        uint256 len = tokensToSend.length;
-        address[] memory to = new address[](len);
-        bytes[] memory data = new bytes[](len);
-        uint256 counter = 0;
-
-        for (uint256 i = 0; i < len;) {
-            if (tokensToSend[i].amount > 0) {
-                to[counter] = tokensToSend[i].token;
-                data[counter] = abi.encodeWithSelector(IERC20.transfer.selector, liquidator, tokensToSend[i].amount);
-                unchecked {
-                    ++counter;
-                }
-            }
-
-            unchecked {
-                ++i;
-            }
-        }
-
-        assembly ("memory-safe") {
-            mstore(to, counter)
-            mstore(data, counter)
-        }
-
-        IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](counter), data);
     }
 
     /**
@@ -336,17 +284,17 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  Cashback[] calldata cashbacks) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
+    function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);        
-                
-        if ($.safeCashConfig[safe].mode == Mode.Credit)  _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
+
+        if ($.safeCashConfig[safe].mode == Mode.Credit) _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
         else _spendDebit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
         _cashback($, safe, totalSpendingInUsd, cashbacks);
     }
 
-    function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens,  uint256[] calldata amountsInUsd) internal returns(uint256) {
+    function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256) {
         // Input validation
         if (tokens.length == 0) revert InvalidInput();
         if (tokens.length != amountsInUsd.length) revert ArrayLengthMismatch();
@@ -356,7 +304,7 @@ contract CashModuleCore is CashModuleStorageContract {
         // Set current mode and check transaction status
         _setCurrentMode($$);
         if ($$.transactionCleared[txId]) revert TransactionAlreadyCleared();
-        
+
         // In Credit mode, only one token is allowed
         if ($$.mode == Mode.Credit && tokens.length > 1) revert OnlyOneTokenAllowedInCreditMode();
 
@@ -367,7 +315,7 @@ contract CashModuleCore is CashModuleStorageContract {
         }
 
         if (totalSpendingInUsd == 0) revert AmountZero();
-        
+
         // Update spending limit
         $$.transactionCleared[txId] = true;
         $$.spendingLimit.spend(totalSpendingInUsd);
@@ -388,7 +336,7 @@ contract CashModuleCore is CashModuleStorageContract {
         if (!_isBorrowToken($.debtManager, tokens[0])) revert UnsupportedToken();
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
         if (amount == 0) revert AmountZero();
-        
+
         address[] memory to = new address[](1);
         bytes[] memory data = new bytes[](1);
         uint256[] memory values = new uint256[](1);
@@ -419,37 +367,37 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
         uint256[] memory amounts = new uint256[](tokens.length);
-        
+
         // Convert USD amounts to token amounts and validate
         for (uint256 i = 0; i < tokens.length; i++) {
             if (!_isBorrowToken($.debtManager, tokens[i])) revert UnsupportedToken();
             amounts[i] = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
             if (IERC20(tokens[i]).balanceOf(safe) < amounts[i]) revert InsufficientBalance();
-            
+
             _cancelWithdrawalRequestIfNecessary(safe, tokens[i], amounts[i]);
         }
 
         _spendDebit(safe, binSponsor, tokens, amounts);
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
-        
+
         // Ensuring the account is healthy
         // If account is unhealthy after spend, cancel withdrawal and try again
-        try $.debtManager.ensureHealth(safe) {}
+        try $.debtManager.ensureHealth(safe) { }
         catch {
             _cancelOldWithdrawal(safe);
             $.debtManager.ensureHealth(safe);
         }
     }
 
-    function _spendDebit(address safe, BinSponsor binSponsor,  address[] calldata tokens, uint256[] memory amounts) internal {
+    function _spendDebit(address safe, BinSponsor binSponsor, address[] calldata tokens, uint256[] memory amounts) internal {
         // Execute transfers to settlement dispatcher for all tokens
         address[] memory to = new address[](tokens.length);
         bytes[] memory data = new bytes[](tokens.length);
         uint256[] memory values = new uint256[](tokens.length);
-        
+
         address settlementDispatcher = getSettlementDispatcher(binSponsor);
-        
+
         for (uint256 i = 0; i < tokens.length; i++) {
             to[i] = tokens[i];
             data[i] = abi.encodeWithSelector(IERC20.transfer.selector, settlementDispatcher, amounts[i]);
@@ -457,7 +405,7 @@ contract CashModuleCore is CashModuleStorageContract {
         }
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
-    
+
     /**
      * @notice Clears pending cashback for users
      * @param users Addresses of users to clear the pending cashback for
@@ -468,13 +416,13 @@ contract CashModuleCore is CashModuleStorageContract {
         if (len == 0) revert InvalidInput();
         if (tokens.length > 1) tokens.checkDuplicates();
         if (len > 1) users.checkDuplicates();
-        
-        for (uint256 i = 0; i < len; ) {
+
+        for (uint256 i = 0; i < len;) {
             if (users[i] == address(0)) revert InvalidInput();
-            
-            for(uint256 j = 0; j < tokens.length; ) {
+
+            for (uint256 j = 0; j < tokens.length;) {
                 if (tokens[j] == address(0)) revert InvalidInput();
-                
+
                 _retrievePendingCashback(users[i], tokens[j]);
                 unchecked {
                     ++j;
@@ -504,31 +452,31 @@ contract CashModuleCore is CashModuleStorageContract {
                     $.cashEventEmitter.emitPendingCashbackClearedEvent(user, token, cashbackAmountInToken, amountInUsd);
                     delete $.pendingCashbackForTokenInUsd[user][token];
                 }
-            } catch {}
+            } catch { }
         }
     }
 
     /**
      * @notice Processes cashback for a spending transaction
-     * @dev Calculates and distributes cashback 
+     * @dev Calculates and distributes cashback
      * @param $ Storage reference to the CashModuleStorage
-     * @param cashbacks Array of Cashback struct 
+     * @param cashbacks Array of Cashback struct
      */
     function _cashback(CashModuleStorage storage $, address safe, uint256 spendAmount, Cashback[] calldata cashbacks) internal {
         uint256 len = cashbacks.length;
-        
-        for (uint256 i = 0; i < len; ) {
+
+        for (uint256 i = 0; i < len;) {
             address to = cashbacks[i].to;
             if (to == address(0)) continue;
             CashbackTokens[] memory cashbackTokens = cashbacks[i].cashbackTokens;
 
-            for(uint256 j = 0; j < cashbackTokens.length; ) {
+            for (uint256 j = 0; j < cashbackTokens.length;) {
                 address token = cashbackTokens[j].token;
                 _retrievePendingCashback(to, token);
-                
+
                 uint256 amountInUsd = cashbackTokens[j].amountInUsd;
                 $.safeCashConfig[to].totalCashbackEarnedInUsd += amountInUsd;
-                
+
                 if (amountInUsd != 0) {
                     try $.cashbackDispatcher.cashback(to, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
                         if (!paid) $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
