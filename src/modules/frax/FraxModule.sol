@@ -358,7 +358,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @return The digest hash for signature verification
      */
     function _getRequestAsyncWithdrawDigestHash(address safe, address _recipient, uint256 _withdrawAmount) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
     }
 
     /**

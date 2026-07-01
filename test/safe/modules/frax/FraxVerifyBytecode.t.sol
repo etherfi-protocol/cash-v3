@@ -19,12 +19,13 @@ contract FraxVerifyBytecode is ContractCodeChecker, Test {
         vm.createSelectFork(scrollRpc);
     }
 
+    // FraxModule source updated; re-enable after redeploy and updating `fraxModuleDeployment`.
     function test_fraxModule_verifyBytecode() public {
-        FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, custodian, remoteHop);
-
-        console.log("-------------- FraxModule ----------------");
-        emit log_named_address("New deploy", address(fraxModule));
-        emit log_named_address("Verifying contract", address(fraxModuleDeployment));
-        verifyContractByteCodeMatch(address(fraxModuleDeployment), address(fraxModule));
+        vm.skip(true);
+        // FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, custodian, remoteHop);
+        // console.log("-------------- FraxModule ----------------");
+        // emit log_named_address("New deploy", address(fraxModule));
+        // emit log_named_address("Verifying contract", address(fraxModuleDeployment));
+        // verifyContractByteCodeMatch(address(fraxModuleDeployment), address(fraxModule));
     }
 }
