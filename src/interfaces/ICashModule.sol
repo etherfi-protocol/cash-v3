@@ -207,9 +207,6 @@ interface ICashModule {
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
 
-    /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
-    error BorrowingsExceedMaxBorrowAfterSpending();
-
     /// @notice Error thrown when a recipient address is zero
     error RecipientCannotBeAddressZero();
 

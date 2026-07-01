@@ -72,7 +72,6 @@ contract ErrorsTest is Test {
     error OnlyBorrowToken();
     error AmountZero();
     error InsufficientBalance();
-    error BorrowingsExceedMaxBorrowAfterSpending();
     error RecipientCannotBeAddressZero();
     error OnlyCashModuleController();
     error CannotWithdrawYet();
@@ -218,7 +217,6 @@ contract ErrorsTest is Test {
         emit log_named_bytes("OnlyBorrowToken", abi.encodePacked(OnlyBorrowToken.selector));
         emit log_named_bytes("AmountZero", abi.encodePacked(AmountZero.selector));
         emit log_named_bytes("InsufficientBalance", abi.encodePacked(InsufficientBalance.selector));
-        emit log_named_bytes("BorrowingsExceedMaxBorrowAfterSpending", abi.encodePacked(BorrowingsExceedMaxBorrowAfterSpending.selector));
         emit log_named_bytes("RecipientCannotBeAddressZero", abi.encodePacked(RecipientCannotBeAddressZero.selector));
         emit log_named_bytes("OnlyCashModuleController", abi.encodePacked(OnlyCashModuleController.selector));
         emit log_named_bytes("CannotWithdrawYet", abi.encodePacked(CannotWithdrawYet.selector));

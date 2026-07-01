@@ -331,26 +331,68 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
     }
 
-    function test_spend_inDebitMode_fails_whenBorrowExceedsMaxBorrow() public {
-        uint256 amount = 100e6;
-
-        // No loose balance: the spend must withdraw the whole amount from the Aave-supplied position.
-        gateway.setSuppliedOf(address(safe), address(usdc), amount);
+    function test_spend_inDebitMode_reverts_whenWithdrawalExceedsBorrowHeadroom() public {
+        // 40 USD headroom against an 80% LTV reserve caps the supplied withdrawal at 50 USD of collateral.
+        gateway.setLtv(address(usdc), 80e18);
+        gateway.setSuppliedOf(address(safe), address(usdc), 100e6);
         gateway.setAvailableCash(address(usdc), type(uint128).max);
-
-        // Seed the post-withdrawal position at its borrowing limit (headroom 0 with debt outstanding), so
-        // withdrawing collateral for the spend leaves the safe over its LTV-based max borrow.
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 0, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
 
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = amount;
+        spendAmounts[0] = 60e6; // needs 60 from supplied, but only 50 fits the borrowing headroom
 
         Cashback[] memory cashbacks;
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(ICashModule.BorrowingsExceedMaxBorrowAfterSpending.selector);
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+    }
+
+    function test_spend_inDebitMode_succeeds_whenWithdrawalUsesFullBorrowHeadroom() public {
+        // Spending exactly the borrowing headroom (40 USD at 80% LTV = 50 USD of collateral) lands the position
+        // at its LTV max borrow. canSpend allows this, so the spend must too.
+        gateway.setLtv(address(usdc), 80e18);
+        gateway.setSuppliedOf(address(safe), address(usdc), 50e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 50e6;
+
+        Cashback[] memory cashbacks;
+
+        // The whole spend is withdrawn from the Aave-supplied balance, consuming exactly the borrowing headroom.
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        (address s, address asset, uint256 amt, address to) = gateway.lastWithdraw();
+        assertEq(s, address(safe));
+        assertEq(asset, address(usdc));
+        assertEq(amt, 50e6);
+        assertEq(to, address(settlementDispatcherReap));
+    }
+
+    function test_spend_inDebitMode_reverts_whenWithdrawingZeroLtvCollateralWithDebt() public {
+        // A zero-LTV reserve has no borrow weight, so its supplied balance cannot fund a debit while the safe
+        // carries debt, even though other collateral leaves borrowing headroom.
+        gateway.setLtv(address(usdc), 0);
+        gateway.setSuppliedOf(address(safe), address(usdc), 100e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 50e6;
+
+        Cashback[] memory cashbacks;
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 

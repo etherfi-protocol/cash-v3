@@ -13,8 +13,10 @@ import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IGateway } from "../../interfaces/IGateway.sol";
+import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
+import { DebitHeadroomLib } from "../../libraries/DebitHeadroomLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
@@ -385,50 +387,64 @@ contract CashModuleCore is CashModuleStorageContract {
         address dispatcher = getSettlementDispatcher(binSponsor);
         _transferLoose(safe, dispatcher, tokens, fromLoose);
 
-        bool withdrew;
+        // _sourceDebit caps each supplied withdrawal by the borrowing headroom, so the debit cannot leave a
+        // debt-carrying safe past its LTV max borrow; no post-withdrawal health check is needed here.
         for (uint256 i = 0; i < tokens.length; i++) {
             uint256 fromSupplied = amounts[i] - fromLoose[i];
             if (fromSupplied != 0) {
                 $.gateway.withdraw(safe, tokens[i], fromSupplied, dispatcher);
-                withdrew = true;
             }
         }
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
-
-        // Only an Aave withdrawal can worsen the position; a loose-only spend leaves it untouched. After a
-        // withdrawal, a safe that still carries debt must stay within its LTV-based max borrow.
-        if (withdrew) {
-            IGateway.AccountData memory account = $.gateway.getAccountData(safe);
-            if (account.debtUsd != 0 && account.availableBorrowsUsd == 0) revert BorrowingsExceedMaxBorrowAfterSpending();
-        }
     }
 
-    /// @dev Per token, converts the USD amount, checks loose + withdrawable-supplied covers it, and frees a stale withdrawal against the loose portion. Returns the token amounts and the loose portion of each.
+    /// @dev Per token, converts the USD amount and checks loose + withdrawable-supplied covers it, then frees a
+    ///      stale withdrawal against the loose portion. When the safe carries debt, the supplied portion is capped
+    ///      by the borrowing headroom (zero for a zero-LTV reserve) and the headroom is threaded across tokens, so
+    ///      a debit cannot push debt past its LTV max borrow. Returns the token amounts and the loose portion of each.
     function _sourceDebit(CashModuleStorage storage $, address safe, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256[] memory, uint256[] memory) {
         uint256[] memory amounts = new uint256[](tokens.length);
         uint256[] memory fromLoose = new uint256[](tokens.length);
 
+        IGateway.AccountData memory account = $.gateway.getAccountData(safe);
+        bool hasDebt = account.debtUsd != 0;
+        uint256 borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
+
         for (uint256 i = 0; i < tokens.length; i++) {
-            if (!_isBorrowToken($.debtManager, tokens[i])) revert UnsupportedToken();
-            amounts[i] = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
-
-            uint256 loose = IERC20(tokens[i]).balanceOf(safe);
-            if (loose + _withdrawableSupplied($.gateway, safe, tokens[i]) < amounts[i]) revert InsufficientBalance();
-
-            fromLoose[i] = loose < amounts[i] ? loose : amounts[i];
-            // A pending withdrawal reserves the loose balance; free it if the loose draw needs it.
-            _cancelWithdrawalRequestIfNecessary(safe, tokens[i], fromLoose[i]);
+            (amounts[i], fromLoose[i], borrowHeadroom) = _sourceDebitToken($, safe, tokens[i], amountsInUsd[i], borrowHeadroom, hasDebt);
         }
 
         return (amounts, fromLoose);
     }
 
-    /// @dev Amount of `token` withdrawable from the safe's Aave-supplied balance right now: min(supplied, reserve cash).
-    function _withdrawableSupplied(IGateway gateway, address safe, address token) internal view returns (uint256) {
-        uint256 supplied = gateway.suppliedOf(safe, token);
-        uint256 cash = gateway.availableCash(token);
-        return supplied < cash ? supplied : cash;
+    /// @dev Sources one token of a debit spend: validates it, sizes the loose/supplied split against the borrowing
+    ///      headroom, frees a stale withdrawal against the loose portion, and returns the token amount, the loose
+    ///      portion, and the borrowing headroom left after this token's supplied withdrawal.
+    function _sourceDebitToken(CashModuleStorage storage $, address safe, address token, uint256 amountInUsd, uint256 borrowHeadroom, bool hasDebt) internal returns (uint256, uint256, uint256) {
+        if (!_isBorrowToken($.debtManager, token)) {
+            revert UnsupportedToken();
+        }
+        uint256 amount = $.debtManager.convertUsdToCollateralToken(token, amountInUsd);
+        IPriceProvider priceProvider = IPriceProvider(etherFiDataProvider.getPriceProvider());
+
+        uint256 loose = IERC20(token).balanceOf(safe);
+        uint256 withdrawable = DebitHeadroomLib.withdrawableSupplied($.gateway, priceProvider, safe, token, borrowHeadroom, hasDebt);
+        if (loose + withdrawable < amount) {
+            revert InsufficientBalance();
+        }
+
+        uint256 fromLoose = loose < amount ? loose : amount;
+        // A pending withdrawal reserves the loose balance; free it if the loose draw needs it.
+        _cancelWithdrawalRequestIfNecessary(safe, token, fromLoose);
+
+        // The supplied portion drawn for this token consumes borrowing headroom for later tokens.
+        if (hasDebt) {
+            uint256 usedUsd = DebitHeadroomLib.headroomConsumed($.gateway, priceProvider, token, amount - fromLoose);
+            borrowHeadroom = borrowHeadroom > usedUsd ? borrowHeadroom - usedUsd : 0;
+        }
+
+        return (amount, fromLoose, borrowHeadroom);
     }
 
     function _transferLoose(address safe, address dispatcher, address[] calldata tokens, uint256[] memory amounts) internal {

@@ -10,6 +10,7 @@ import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IGateway } from "../../interfaces/IGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
+import { DebitHeadroomLib } from "../../libraries/DebitHeadroomLib.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
@@ -43,9 +44,6 @@ contract CashLens is UpgradeableProxy {
     IEtherFiDataProvider public immutable dataProvider;
     /// @notice Reference to the Aave gateway that holds the Safe's position
     IGateway public immutable gateway;
-
-    /// @notice Percentage denominator (100e18 = 100%), matching the gateway's ltv scale and DebtManager's CollateralTokenConfig.ltv
-    uint256 internal constant HUNDRED_PERCENT = 100e18;
 
     /// @notice Error thrown when trying to use a token that is not on the collateral whitelist
     error NotACollateralToken();
@@ -485,28 +483,12 @@ contract CashLens is UpgradeableProxy {
      *      of this reserve can be withdrawn before the leftover debt exceeds its borrowing power, via its LTV.
      */
     function _withdrawableSupplied(address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256) {
-        uint256 supplied = gateway.suppliedOf(safe, token);
-        uint256 cash = gateway.availableCash(token);
-        uint256 cap = supplied < cash ? supplied : cash;
-
-        if (hasDebt) {
-            uint256 ltv = gateway.ltv(token);
-            // A zero-LTV reserve has no borrow weight, so a withdrawal against debt cannot be sized safely; stay conservative
-            if (ltv == 0) {
-                return 0;
-            }
-            uint256 headroomCap = _fromUsd(token, (borrowHeadroomUsd * HUNDRED_PERCENT) / ltv);
-            if (headroomCap < cap) {
-                cap = headroomCap;
-            }
-        }
-
-        return cap;
+        return DebitHeadroomLib.withdrawableSupplied(gateway, IPriceProvider(dataProvider.getPriceProvider()), safe, token, borrowHeadroomUsd, hasDebt);
     }
 
     /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
     function _headroomConsumed(address token, uint256 amount) internal view returns (uint256) {
-        return (_toUsd(token, amount) * gateway.ltv(token)) / HUNDRED_PERCENT;
+        return DebitHeadroomLib.headroomConsumed(gateway, IPriceProvider(dataProvider.getPriceProvider()), token, amount);
     }
 
     /// @notice Debit spendable for `token` (token units) given the running borrowing headroom, and the headroom that withdrawal consumes
