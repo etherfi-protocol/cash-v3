@@ -10,6 +10,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -60,7 +61,20 @@ contract CashModuleSetters is CashModuleStorageContract {
             $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherReap, dispatcher);
             $.settlementDispatcherReap = dispatcher;
         }
-    }   
+    }
+
+    /**
+     * @notice Sets the Aave gateway address
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param gateway Address of the gateway contract
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws InvalidInput if gateway = address(0)
+     */
+    function setGateway(address gateway) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (gateway == address(0)) revert InvalidInput();
+        _getCashModuleStorage().gateway = IGateway(gateway);
+    }
 
     /**
      * @notice Configures the withdraw assets whitelist

@@ -96,19 +96,6 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Sets the Aave gateway address
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param gateway Address of the gateway contract
-     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
-     * @custom:throws InvalidInput if gateway = address(0)
-     */
-    function setGateway(address gateway) external {
-        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
-        if (gateway == address(0)) revert InvalidInput();
-        _getCashModuleStorage().gateway = IGateway(gateway);
-    }
-
-    /**
      * @notice Returns the address of CashEventEmitter contract
      * @return CashEventEmitter contract address
      */
