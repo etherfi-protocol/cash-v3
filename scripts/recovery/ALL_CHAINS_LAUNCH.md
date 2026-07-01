@@ -43,15 +43,33 @@ Cut fresh off `master` (NOT off audit). Re-apply each branch's changes, resolvin
 
 ### Phase 0b — Net-new work (not just a merge)
 
-- [ ] **opBNB/X-Layer setConfig** (the "blocked on DVN" item): build the SetConfigParam encoding —
-      receive-ULN on the dest dispatcher (`srcEid 30111`, LZ Labs DVN per chain) → into the dest 3CP;
-      send-ULN on the OP module (`dstEid 30202/30274`, OP-side LZ Labs DVN `0x6A02D83e…` — verify in
-      `test/integration/fork/RecoverySetConfigProbe.t.sol`) → into the OP 3CP.
+- [x] **opBNB/X-Layer setConfig** (was "blocked on DVN") — built in `scripts/recovery/RecoverySetConfigLib.sol`,
+      wired into both 3CPs: OP send-ULN (module) in `RecoveryOPAddChains3CP`, dest receive-ULN (dispatcher)
+      in `RecoveryDestChain3CP`. OP send side **proven on a live fork** (`RecoverySetConfigProbe` passes —
+      OP→opBNB / OP→X-Layer quotable via the lib's calldata). Receive lib+DVN want the Phase 0.5 dev
+      round-trip to confirm delivery. All addresses from LZ metadata, parsed deterministically + checksummed.
 - [ ] **Avalanche**: lz-config entry, deployments block, dest-3CP + OP-3CP entries, fork test, and
       **verify the OP↔Avalanche default DVN pathway** (if no default route, it needs setConfig like opBNB).
 - [ ] Verify EIDs against LZ docs: Polygon 30109, Gnosis 30145, Avalanche 30106, opBNB 30202, X-Layer 30274.
 
 Then: `git add … && git commit -S` (you), push, open PR.
+
+---
+
+## Phase 0.5 — Dev rehearsal (before ANY prod deploy)
+
+Risk-based, not one-size. Fork tests already cover contract logic; dev proves the parts they can't.
+
+- [ ] **opBNB + X-Layer — LZ round-trip (MUST, gates prod).** Deploy the dev stack on each + apply the
+      dev setConfig, then send a real recovery message OP↔chain and confirm delivery. Only proof the
+      custom DVN pathway actually works. Depends on Phase 0b (setConfig) being built.
+- [ ] **Polygon — dev rehearsal** of the placeholder→`reinitialize` upgrade (novel path). See
+      `REHEARSE_POLYGON.md` / `DeployDevPolygon*` scripts.
+- [ ] **Gnosis / Avalanche — one confirmatory dev round-trip** (default DVN; low risk).
+- [ ] **BE/FE** — cross-chain recovery already shipped (base/arb/bnb/eth/hyperevm). Add the 5 chains to
+      the dev config, confirm they list + a dev recovery completes. Config addition, not new wiring.
+
+> Tooling: `deployments/dev/*`, `DeployDevPolygon*` (polygon branch), `REHEARSE_*.md`.
 
 ---
 
@@ -122,6 +140,6 @@ Peers must be set on BOTH sides (here + each dest 3CP's `setPeer(30111, module)`
 
 ## Open blockers (gate go-live)
 
-1. opBNB/X-Layer setConfig leg — **unbuilt** (Phase 0b).
+1. opBNB/X-Layer setConfig — built + OP send-side fork-proven; **receive side unconfirmed** until the Phase 0.5 dev round-trip.
 2. Avalanche — **net-new**, and its DVN pathway unverified.
 3. Polygon — gated on audit #136 landing.

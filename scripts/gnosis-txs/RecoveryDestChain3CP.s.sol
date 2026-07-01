@@ -11,6 +11,7 @@ import { IOAppCore } from "@layerzerolabs/oapp-evm/contracts/oapp/interfaces/IOA
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 import { RecoveryDeployConfig } from "../recovery/RecoveryDeployConfig.sol";
+import { RecoverySetConfigLib } from "../recovery/RecoverySetConfigLib.sol";
 
 /**
  * @notice Generates 3CP JSON for one destination chain. Each bundle contains 4 calls:
@@ -23,9 +24,9 @@ import { RecoveryDeployConfig } from "../recovery/RecoveryDeployConfig.sol";
  *         per chain on that chain's RPC. Addresses come from deployments.json; the per-chain TopUpV2
  *         impl and the OP module are constants below.
  *
- * ponytail: opBNB/X-Layer additionally need a receive-ULN endpoint.setConfig() tx (no LZ default DVN
- *           pathway OP<->opBNB/X-Layer). That leg is NOT wired here yet — see ALL_CHAINS_LAUNCH.md
- *           Phase 0b. Gnosis/Polygon use the default pathway (no setConfig).
+ *         opBNB/X-Layer additionally get a 5th call — a receive-ULN endpoint.setConfig() pinning the
+ *         LZ Labs DVN (no default DVN pathway OP<->opBNB/X-Layer), see RecoverySetConfigLib. Gnosis/
+ *         Polygon use the default pathway (4 calls, no setConfig).
  *
  * Usage:
  *   source .env && forge script scripts/gnosis-txs/RecoveryDestChain3CP.s.sol --rpc-url $<CHAIN>_RPC
@@ -87,12 +88,19 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
             "0", false
         )));
 
-        // 4. dispatcher.setPeer(OP_EID, AssetRecoveryModule)
+        // 4. dispatcher.setPeer(OP_EID, AssetRecoveryModule) — last call unless a setConfig follows.
+        bool needsSetConfig = RecoverySetConfigLib.needsSetConfig(block.chainid);
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(
             addressToHex(dispatcher),
             iToHex(abi.encodeWithSelector(IOAppCore.setPeer.selector, RecoveryDeployConfig.OP_EID, bytes32(uint256(uint160(RECOVERY_MODULE_OP))))),
-            "0", true
+            "0", !needsSetConfig
         )));
+
+        // 5. (opBNB/X-Layer only) receive-ULN setConfig pinning the LZ Labs DVN.
+        if (needsSetConfig) {
+            (address t, bytes memory d) = RecoverySetConfigLib.destReceiveConfig(dispatcher, block.chainid);
+            txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(t), iToHex(d), "0", true)));
+        }
 
         vm.createDir("./output", true);
         string memory path = string.concat("./output/Recovery3CP-dest-", chainId, ".json");
