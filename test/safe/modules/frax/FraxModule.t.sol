@@ -152,7 +152,7 @@ contract FraxModuleTest is SafeTestSetup {
                     fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(),
                     block.chainid,
                     address(fraxModule),
-                    fraxModule.getNonce(address(safe)), //nonce
+                    safe.nonce(), //nonce
                     safe,
                     abi.encode(fraxusd, depositAddress, amountToWithdraw)
                 )
@@ -450,7 +450,7 @@ contract FraxModuleTest is SafeTestSetup {
         // deal less amount than required
         deal(address(fraxusd), address(safe), amount - 1);
 
-        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
         (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
@@ -462,7 +462,7 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 amount = 1000 * 10 ** 18;
         deal(address(fraxusd), address(safe), amount);
 
-        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, address(0), amount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), safe, abi.encode(fraxusd, address(0), amount))).toEthSignedMessageHash();
 
         (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
@@ -471,7 +471,7 @@ contract FraxModuleTest is SafeTestSetup {
         fraxModule.requestAsyncWithdraw(address(safe), address(0), amount, signers, signatures);
 
         // Test with zero amount
-        bytes32 digestHash1 = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, 0))).toEthSignedMessageHash();
+        bytes32 digestHash1 = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), safe, abi.encode(fraxusd, depositAddress, 0))).toEthSignedMessageHash();
 
         (address[] memory signers1, bytes[] memory signatures1) = _signRequestAsync(digestHash1);
 
@@ -484,7 +484,7 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 amount = 1000 * 10 ** 18 + 1; // Not a multiple of DUST_THRESHOLD (1e12)
         deal(address(fraxusd), address(safe), amount);
 
-        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
         (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
@@ -497,7 +497,7 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 amount = 1000 * 10 ** 18; // 1000 * 1e18 = 1000 * 1e6 * 1e12, which is a multiple of 1e12
         deal(address(fraxusd), address(safe), amount);
 
-        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
         (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
@@ -588,7 +588,7 @@ contract FraxModuleTest is SafeTestSetup {
     }
 
     function _requestAsyncWithdrawal(uint256 amount) internal {
-        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
         (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
@@ -612,7 +612,7 @@ contract FraxModuleTest is SafeTestSetup {
         uint256 amount = 1000 * 10 ** 18;
         deal(address(fraxusd), address(safe), amount);
 
-        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), fraxModule.getNonce(address(safe)), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         address[] memory signers = new address[](1);
