@@ -283,12 +283,13 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @param safe Address for user safe
      * @param _recipient Recipient address from Frax api
      * @param _withdrawAmount Amount to withdraw asynchronously
-     * @param signer The address that signed the transaction
-     * @param signature The signature authorizing this transaction
+     * @param signers Array of addresses of safe owners that signed the transaction
+     * @param signatures Array of signatures from the signers
+     * @dev Requires the Safe's owner quorum because funds exit to an arbitrary recipient
      */
-    function requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount, address signer, bytes calldata signature) external payable onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+    function requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
         bytes32 digestHash = _getRequestAsyncWithdrawDigestHash(safe, _recipient, _withdrawAmount);
-        _verifyAdminSig(digestHash, signer, signature);
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _requestAsyncWithdraw(safe, _recipient, _withdrawAmount);
     }
 
@@ -357,7 +358,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @return The digest hash for signature verification
      */
     function _getRequestAsyncWithdrawDigestHash(address safe, address _recipient, uint256 _withdrawAmount) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
     }
 
     /**
