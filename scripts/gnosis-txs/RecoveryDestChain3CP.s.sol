@@ -19,11 +19,16 @@ import { RecoveryDeployConfig } from "../recovery/RecoveryDeployConfig.sol";
  *         3. upgradeBeaconImplementation(TopUpV2 impl)
  *         4. dispatcher.setPeer(30111, AssetRecoveryModule on OP)
  *
- * Run once per dest chain. Reads addresses from deployments.json, TopUpV2 impl
- * addresses and the OP module address are constants below.
+ *         Covers every destination chain in the rollout (Gnosis, Polygon, opBNB, X-Layer). Run once
+ *         per chain on that chain's RPC. Addresses come from deployments.json; the per-chain TopUpV2
+ *         impl and the OP module are constants below.
+ *
+ * ponytail: opBNB/X-Layer additionally need a receive-ULN endpoint.setConfig() tx (no LZ default DVN
+ *           pathway OP<->opBNB/X-Layer). That leg is NOT wired here yet — see ALL_CHAINS_LAUNCH.md
+ *           Phase 0b. Gnosis/Polygon use the default pathway (no setConfig).
  *
  * Usage:
- *   source .env && forge script scripts/gnosis-txs/RecoveryDestChain3CP.s.sol --rpc-url $BASE_RPC
+ *   source .env && forge script scripts/gnosis-txs/RecoveryDestChain3CP.s.sol --rpc-url $<CHAIN>_RPC
  */
 contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
     bytes32 constant PAUSER = keccak256("PAUSER");
@@ -31,12 +36,17 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
 
     address constant RECOVERY_MODULE_OP = 0x431d271D544aC67fAfFa8a9FfabAabCB14563102;
 
-    // TopUpV2 impl addresses per chain (deployed via DeployTopUpV2Impl.s.sol)
+    // TopUpV2 impl addresses per chain (deployed via DeployTopUpV2Impl.s.sol).
     address constant TOPUP_V2_BASE     = 0xE6B694e38BDE2b3A577cCCd1BC9F80b8E1366AA2;
     address constant TOPUP_V2_ETH      = 0x80b1931D101a77a94b288a6Ce4F55A70E942ba28;
     address constant TOPUP_V2_ARB      = 0x35ED43Ffebde566C3c61311aa364858A180eC43A;
     address constant TOPUP_V2_BNB      = 0x25F89874d4831d166325c3d165C96b900bC7AB0D;
     address constant TOPUP_V2_HYPEREVM = 0x1abfE5B356e8D735D3e363b5DF5995A2a1012D0E;
+    // Fill each after DeployTopUpV2Impl.s.sol runs on that chain (asserted non-zero below).
+    address constant TOPUP_V2_GNOSIS   = address(0); // TODO: Gnosis (100)
+    address constant TOPUP_V2_POLYGON  = address(0); // TODO: Polygon (137)
+    address constant TOPUP_V2_OPBNB    = address(0); // TODO: opBNB (204)
+    address constant TOPUP_V2_XLAYER   = address(0); // TODO: X-Layer (196)
 
     function run() public {
         string memory chainId = vm.toString(block.chainid);
@@ -51,6 +61,7 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
         require(dispatcher != address(0), "AssetRecoveryDispatcher not found");
 
         address topUpV2Impl = _getTopUpV2Impl();
+        require(topUpV2Impl != address(0), "TopUpV2 impl not set for this chain (deploy + fill the constant first)");
 
         string memory safe = addressToHex(RecoveryDeployConfig.OPERATING_SAFE);
         string memory txs = _getGnosisHeader(chainId, safe);
@@ -98,6 +109,10 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
         if (block.chainid == 42161) return TOPUP_V2_ARB;
         if (block.chainid == 56)    return TOPUP_V2_BNB;
         if (block.chainid == 999)   return TOPUP_V2_HYPEREVM;
+        if (block.chainid == 100)   return TOPUP_V2_GNOSIS;
+        if (block.chainid == 137)   return TOPUP_V2_POLYGON;
+        if (block.chainid == 204)   return TOPUP_V2_OPBNB;
+        if (block.chainid == 196)   return TOPUP_V2_XLAYER;
         revert("unsupported chain");
     }
 }

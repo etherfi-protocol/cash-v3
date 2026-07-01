@@ -1,0 +1,8 @@
+{
+  "_note": "Gnosis (chainId 100) Asset Recovery deployment. Empty-slot chain (no prior reservation) — TopUpFactory deploys fresh via the audited initialize (no reinitialize). Canonical CREATE3 addresses (TopUpSourceFactory, AssetRecoveryDispatcher) are deterministic and pre-filled — the deploy scripts assert the proxies land here. RoleRegistry is a fresh deploy (owner = operating safe); fill its address after Phase 1. Wrapped native = WXDAI 0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d. LZ v2 EID 30145 — pathway has real DVNs (not blocked).",
+  "addresses": {
+    "RoleRegistry": "0x0000000000000000000000000000000000000000",
+    "TopUpSourceFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
+    "AssetRecoveryDispatcher": "0x418e0af7c750Ba5cbffC5C2a8398591755926A29"
+  }
+}
