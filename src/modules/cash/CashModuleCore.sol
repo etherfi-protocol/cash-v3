@@ -12,6 +12,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -90,6 +91,19 @@ contract CashModuleCore is CashModuleStorageContract {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
         if (newCashModuleSetters == address(0)) revert InvalidInput();
         _getCashModuleStorage().cashModuleSetters = newCashModuleSetters;
+    }
+
+    /**
+     * @notice Sets the Aave gateway address
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param gateway Address of the gateway contract
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws InvalidInput if gateway = address(0)
+     */
+    function setGateway(address gateway) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (gateway == address(0)) revert InvalidInput();
+        _getCashModuleStorage().gateway = IGateway(gateway);
     }
 
     /**
@@ -269,6 +283,14 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Returns the Aave gateway contract
+     * @return Gateway instance
+     */
+    function getGateway() public view returns (IGateway) {
+        return _getCashModuleStorage().gateway;
+    }
+
+    /**
      * @notice Processes a spending transaction with multiple tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
@@ -337,18 +359,14 @@ contract CashModuleCore is CashModuleStorageContract {
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
         if (amount == 0) revert AmountZero();
 
-        address[] memory to = new address[](1);
-        bytes[] memory data = new bytes[](1);
-        uint256[] memory values = new uint256[](1);
+        address dispatcher = getSettlementDispatcher(binSponsor);
 
-        to[0] = address($.debtManager);
-        data[0] = abi.encodeWithSelector(IDebtManager.borrow.selector, binSponsor, tokens[0], amount);
-        values[0] = 0;
-
-        try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) { }
+        // Gateway borrows against the safe's Aave position and forwards the borrowed token to the dispatcher.
+        // Retry once after clearing a stale withdrawal request if the first attempt reverts.
+        try $.gateway.borrow(safe, tokens[0], amount, dispatcher) { }
         catch {
             _cancelOldWithdrawal(safe);
-            IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+            $.gateway.borrow(safe, tokens[0], amount, dispatcher);
         }
 
         uint256[] memory amounts = new uint256[](1);
@@ -525,19 +543,8 @@ contract CashModuleCore is CashModuleStorageContract {
         if (amount == 0) revert AmountZero();
         _cancelWithdrawalRequestIfNecessary(safe, token, amount);
 
-        address[] memory to = new address[](3);
-        bytes[] memory data = new bytes[](3);
-        uint256[] memory values = new uint256[](3);
-
-        to[0] = token;
-        to[1] = address(debtManager);
-        to[2] = token;
-
-        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
-        data[1] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
-        data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), 0);
-
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        // Gateway repays the safe's Aave debt on its behalf, pulling the repay token from the safe.
+        _getCashModuleStorage().gateway.repay(safe, token, amount);
         _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
     }
 
