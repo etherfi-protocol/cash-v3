@@ -30,6 +30,14 @@ contract MockGateway is IGateway {
     Call public lastBorrow;
     Call public lastRepay;
 
+    /// @notice When set, borrow reverts, to model a blocked borrow (e.g. insufficient Aave collateral)
+    bool public borrowReverts;
+
+    /// @notice Toggles the borrow revert
+    function setBorrowReverts(bool value) external {
+        borrowReverts = value;
+    }
+
     /// @notice Sets the account data a subsequent `getAccountData(safe)` will return
     function setAccountData(address safe, AccountData calldata data) external {
         _accountData[safe] = data;
@@ -64,6 +72,7 @@ contract MockGateway is IGateway {
     }
 
     function borrow(address safe, address asset, uint256 amount, address to) external {
+        if (borrowReverts) revert("MockGateway: borrow blocked");
         lastBorrow = Call(safe, asset, amount, to);
     }
 

@@ -362,12 +362,7 @@ contract CashModuleCore is CashModuleStorageContract {
         address dispatcher = getSettlementDispatcher(binSponsor);
 
         // Gateway borrows against the safe's Aave position and forwards the borrowed token to the dispatcher.
-        // Retry once after clearing a stale withdrawal request if the first attempt reverts.
-        try $.gateway.borrow(safe, tokens[0], amount, dispatcher) { }
-        catch {
-            _cancelOldWithdrawal(safe);
-            $.gateway.borrow(safe, tokens[0], amount, dispatcher);
-        }
+        $.gateway.borrow(safe, tokens[0], amount, dispatcher);
 
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
@@ -376,7 +371,8 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @dev Internal function to execute debit mode spending transactions (multiple tokens)
+     * @dev Debit spend across tokens: spend the safe's loose balance first, then withdraw the
+     *      Aave-supplied balance for any shortfall, both routed to the settlement dispatcher.
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
@@ -384,42 +380,65 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param amountsInUsd Array of amounts to spend in USD
      */
     function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
-        uint256[] memory amounts = new uint256[](tokens.length);
+        (uint256[] memory amounts, uint256[] memory fromLoose) = _sourceDebit($, safe, tokens, amountsInUsd);
 
-        // Convert USD amounts to token amounts and validate
+        address dispatcher = getSettlementDispatcher(binSponsor);
+        _transferLoose(safe, dispatcher, tokens, fromLoose);
+
+        bool withdrew;
         for (uint256 i = 0; i < tokens.length; i++) {
-            if (!_isBorrowToken($.debtManager, tokens[i])) revert UnsupportedToken();
-            amounts[i] = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
-            if (IERC20(tokens[i]).balanceOf(safe) < amounts[i]) revert InsufficientBalance();
-
-            _cancelWithdrawalRequestIfNecessary(safe, tokens[i], amounts[i]);
+            uint256 fromSupplied = amounts[i] - fromLoose[i];
+            if (fromSupplied != 0) {
+                $.gateway.withdraw(safe, tokens[i], fromSupplied, dispatcher);
+                withdrew = true;
+            }
         }
-
-        _spendDebit(safe, binSponsor, tokens, amounts);
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
 
-        // Ensuring the account is healthy
-        // If account is unhealthy after spend, cancel withdrawal and try again
-        try $.debtManager.ensureHealth(safe) { }
-        catch {
-            _cancelOldWithdrawal(safe);
-            $.debtManager.ensureHealth(safe);
+        // Only an Aave withdrawal can worsen the position; a loose-only spend leaves it untouched. After a
+        // withdrawal, a safe that still carries debt must stay within its LTV-based max borrow.
+        if (withdrew) {
+            IGateway.AccountData memory account = $.gateway.getAccountData(safe);
+            if (account.debtUsd != 0 && account.availableBorrowsUsd == 0) revert BorrowingsExceedMaxBorrowAfterSpending();
         }
     }
 
-    function _spendDebit(address safe, BinSponsor binSponsor, address[] calldata tokens, uint256[] memory amounts) internal {
-        // Execute transfers to settlement dispatcher for all tokens
+    /// @dev Per token, converts the USD amount, checks loose + withdrawable-supplied covers it, and frees a stale withdrawal against the loose portion. Returns the token amounts and the loose portion of each.
+    function _sourceDebit(CashModuleStorage storage $, address safe, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256[] memory, uint256[] memory) {
+        uint256[] memory amounts = new uint256[](tokens.length);
+        uint256[] memory fromLoose = new uint256[](tokens.length);
+
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (!_isBorrowToken($.debtManager, tokens[i])) revert UnsupportedToken();
+            amounts[i] = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
+
+            uint256 loose = IERC20(tokens[i]).balanceOf(safe);
+            if (loose + _withdrawableSupplied($.gateway, safe, tokens[i]) < amounts[i]) revert InsufficientBalance();
+
+            fromLoose[i] = loose < amounts[i] ? loose : amounts[i];
+            // A pending withdrawal reserves the loose balance; free it if the loose draw needs it.
+            _cancelWithdrawalRequestIfNecessary(safe, tokens[i], fromLoose[i]);
+        }
+
+        return (amounts, fromLoose);
+    }
+
+    /// @dev Amount of `token` withdrawable from the safe's Aave-supplied balance right now: min(supplied, reserve cash).
+    function _withdrawableSupplied(IGateway gateway, address safe, address token) internal view returns (uint256) {
+        uint256 supplied = gateway.suppliedOf(safe, token);
+        uint256 cash = gateway.availableCash(token);
+        return supplied < cash ? supplied : cash;
+    }
+
+    function _transferLoose(address safe, address dispatcher, address[] calldata tokens, uint256[] memory amounts) internal {
         address[] memory to = new address[](tokens.length);
         bytes[] memory data = new bytes[](tokens.length);
         uint256[] memory values = new uint256[](tokens.length);
 
-        address settlementDispatcher = getSettlementDispatcher(binSponsor);
-
         for (uint256 i = 0; i < tokens.length; i++) {
             to[i] = tokens[i];
-            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, settlementDispatcher, amounts[i]);
-            values[i] = 0;
+            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, dispatcher, amounts[i]);
         }
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
