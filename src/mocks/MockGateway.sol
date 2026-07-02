@@ -10,6 +10,9 @@ import { IGateway } from "../interfaces/IGateway.sol";
  *         assertions. Not for production.
  */
 contract MockGateway is IGateway {
+    /// @notice Thrown when the mock is configured to reject borrow calls
+    error BorrowBlocked();
+
     /// @notice Recorded arguments of a mutating gateway call (`to` is zero for supply/repay)
     struct Call {
         address safe;
@@ -72,7 +75,7 @@ contract MockGateway is IGateway {
     }
 
     function borrow(address safe, address asset, uint256 amount, address to) external {
-        if (borrowReverts) revert("MockGateway: borrow blocked");
+        if (borrowReverts) revert BorrowBlocked();
         lastBorrow = Call(safe, asset, amount, to);
     }
 

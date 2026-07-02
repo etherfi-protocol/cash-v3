@@ -401,9 +401,19 @@ contract CashModuleCore is CashModuleStorageContract {
         return amounts;
     }
 
-    /// @dev Sources one token of a debit spend: validates it, sizes the loose/supplied split against the borrowing
-    ///      headroom, frees a stale withdrawal against the loose portion, and returns the token amount, the loose
-    ///      portion, and the borrowing headroom left after this token's supplied withdrawal.
+    /**
+     * @dev Sources one token of a debit spend: validates it, sizes the loose/supplied split against the borrowing
+     *      headroom, and frees a stale withdrawal against the loose portion.
+     * @param $ Storage reference to the CashModuleStorage
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to source
+     * @param amountInUsd Amount to spend for this token in USD
+     * @param borrowHeadroom Borrowing headroom (USD) available to this token's supplied withdrawal
+     * @param hasDebt Whether the safe carries debt; the headroom cap only applies when true
+     * @return The token amount for this spend
+     * @return The loose portion of that amount
+     * @return The borrowing headroom left after this token's supplied withdrawal
+     */
     function _sourceDebitToken(CashModuleStorage storage $, address safe, address token, uint256 amountInUsd, uint256 borrowHeadroom, bool hasDebt) internal returns (uint256, uint256, uint256) {
         if (!_isBorrowToken($.debtManager, token)) {
             revert UnsupportedToken();
@@ -430,6 +440,13 @@ contract CashModuleCore is CashModuleStorageContract {
         return (amount, fromLoose, borrowHeadroom);
     }
 
+    /**
+     * @dev Transfers each token's loose amount from the safe to the dispatcher in one batched module call.
+     * @param safe Address of the EtherFi Safe
+     * @param dispatcher Settlement dispatcher receiving the tokens
+     * @param tokens Addresses of the tokens to transfer
+     * @param amounts Loose amount of each token to transfer
+     */
     function _transferLoose(address safe, address dispatcher, address[] calldata tokens, uint256[] memory amounts) internal {
         address[] memory to = new address[](tokens.length);
         bytes[] memory data = new bytes[](tokens.length);

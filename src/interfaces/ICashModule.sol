@@ -5,6 +5,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IGateway } from "../interfaces/IGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
@@ -333,6 +334,12 @@ interface ICashModule {
     function getSettlementDispatcher(BinSponsor binSponsor) external view returns (address settlementDispatcher);
 
     /**
+     * @notice Returns the Aave gateway contract
+     * @return Gateway instance
+     */
+    function getGateway() external view returns (IGateway);
+
+    /**
      * @notice Returns the EtherFiDataProvider contract reference
      * @dev Used to access global system configuration and services
      * @return The EtherFiDataProvider contract instance
@@ -476,6 +483,15 @@ interface ICashModule {
      * @custom:throws InvalidInput if caller doesn't have the controller role
      */
     function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external;
+
+    /**
+     * @notice Sets the Aave gateway address
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param gateway Address of the gateway contract
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws InvalidInput if gateway = address(0)
+     */
+    function setGateway(address gateway) external;
 
     /**
      * @notice Sets the tier for one or more safes

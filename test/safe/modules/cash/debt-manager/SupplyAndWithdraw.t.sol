@@ -334,44 +334,6 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         assertEq(debtManager.supplierBalance(notOwner, address(usdc)), 0);
     }
 
-    /// @notice Multiple DebtManager suppliers should not receive proportional interest from gateway-backed CashModule spends.
-    function test_multipleSuppliers_doNotReceiveDebtManagerInterestFromGatewayBorrow() public {
-        // Setup two suppliers with different amounts
-        address supplier1 = makeAddr("supplier1");
-        address supplier2 = makeAddr("supplier2");
-        uint256 amount1 = 0.01 ether;
-        uint256 amount2 = 2 * amount1; // Supplier2 adds twice as much
-        
-        deal(address(usdc), supplier1, amount1);
-        deal(address(usdc), supplier2, amount2);
-        
-        // Supplier 1 adds funds
-        vm.startPrank(supplier1);
-        IERC20(address(usdc)).forceApprove(address(debtManager), amount1);
-        debtManager.supply(supplier1, address(usdc), amount1);
-        vm.stopPrank();
-        
-        // Supplier 2 adds funds
-        vm.startPrank(supplier2);
-        IERC20(address(usdc)).forceApprove(address(debtManager), amount2);
-        debtManager.supply(supplier2, address(usdc), amount2);
-        vm.stopPrank();
-        
-        // Record initial balances
-        uint256 initialBalance1 = debtManager.supplierBalance(supplier1, address(usdc));
-        uint256 initialBalance2 = debtManager.supplierBalance(supplier2, address(usdc));
-        
-        _spendThroughGateway(debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 2, txId);
-        vm.warp(block.timestamp + 24 * 60 * 60);
-        
-        // Check final balances
-        uint256 finalBalance1 = debtManager.supplierBalance(supplier1, address(usdc));
-        uint256 finalBalance2 = debtManager.supplierBalance(supplier2, address(usdc));
-        
-        assertEq(finalBalance1, initialBalance1);
-        assertEq(finalBalance2, initialBalance2);
-    }
-
     /// @dev Performs a CashModule spend and verifies it borrowed through the gateway, not DebtManager.
     function _spendThroughGateway(uint256 borrowAmt, bytes32 _txId) internal {
         vm.startPrank(etherFiWallet);

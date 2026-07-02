@@ -12,6 +12,7 @@ import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IGateway } from "../../../../src/interfaces/IGateway.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
+import { MockGateway } from "../../../../src/mocks/MockGateway.sol";
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -267,7 +268,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         gateway.setBorrowReverts(true);
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(bytes("MockGateway: borrow blocked"));
+        vm.expectRevert(MockGateway.BorrowBlocked.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 

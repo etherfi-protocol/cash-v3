@@ -203,7 +203,7 @@ contract SafeTestSetup is Utils {
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
 
-        CashModuleSetters(address(cashModule)).setGateway(address(gateway));
+        cashModule.setGateway(address(gateway));
 
         _setupWithdrawTokenWhitelist();
 

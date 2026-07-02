@@ -253,35 +253,6 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         assertEq(borrowingOfUserAfter, 0);
     }
 
-    /// @notice CashModule gateway borrows should not accrue DebtManager interest over time.
-    function test_gatewayBorrow_doesNotAccrueDebtManagerInterest_overTime() public {
-        uint256 borrowAmt = debtManager.remainingBorrowingCapacityInUSD(
-            address(safe)
-        ) / 2;
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdc);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = borrowAmt;
-
-        Cashback[] memory cashbacks;
-
-        vm.startPrank(etherFiWallet);
-        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        vm.stopPrank();
-
-        _assertLastBorrow(address(safe), address(usdc), borrowAmt, address(settlementDispatcherReap));
-        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
-
-        uint256 timeElapsed = 10;
-
-        vm.warp(block.timestamp + timeElapsed);
-
-        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
-        (, uint256 totalBorrowingAmount) = debtManager.totalBorrowingAmounts();
-        assertEq(totalBorrowingAmount, 0);
-    }
-
     function test_borrow_succeeds_withNonStandardDecimals() public {
         MockERC20 newToken = new MockERC20("mockToken", "MTK", 12);
         deal(address(newToken), address(debtManager), 1 ether);
@@ -364,6 +335,8 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.warp(block.timestamp + timeElapsed);
 
         assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
+        (, uint256 totalBorrowingAmountAfterFirstSpend) = debtManager.totalBorrowingAmounts();
+        assertEq(totalBorrowingAmountAfterFirstSpend, 0);
 
         cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
