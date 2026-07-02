@@ -66,7 +66,7 @@ contract CCTPModuleTest is SafeTestSetup {
         address[] memory assets = new address[](1);
         assets[0] = address(usdc);
         CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: cfgFinality, maxFeeBps: cfgMaxFeeBps });
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: cfgFinality, maxFeeBps: cfgMaxFeeBps, etherFiFeeBps: 0 });
 
         cctpModule = new CCTPModule(assets, cfgs, address(dataProvider));
 
@@ -172,7 +172,7 @@ contract CCTPModuleTest is SafeTestSetup {
         address[] memory assets = new address[](1);
         assets[0] = address(usdc);
         CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 1234, maxFeeBps: 0 });
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 1234, maxFeeBps: 0, etherFiFeeBps: 0 });
         vm.prank(owner);
         vm.expectRevert(CCTPModule.InvalidFinalityThreshold.selector);
         cctpModule.setAssetConfig(assets, cfgs);
@@ -183,7 +183,7 @@ contract CCTPModuleTest is SafeTestSetup {
         assets[0] = address(usdc);
         CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
         // Fast finality so the Standard-fee rule doesn't fire first; isolates the bps cap check.
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 1000, maxFeeBps: 10_000 });
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 1000, maxFeeBps: 10_000, etherFiFeeBps: 0 });
         vm.prank(owner);
         vm.expectRevert(CCTPModule.MaxFeeBpsTooHigh.selector);
         cctpModule.setAssetConfig(assets, cfgs);
@@ -194,7 +194,7 @@ contract CCTPModuleTest is SafeTestSetup {
         assets[0] = address(usdc);
         CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
         // Standard (2000) + non-zero fee is rejected: Standard transfers are free on OP.
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 2000, maxFeeBps: 1 });
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 2000, maxFeeBps: 1, etherFiFeeBps: 0 });
         vm.prank(owner);
         vm.expectRevert(CCTPModule.StandardModeFeeNotAllowed.selector);
         cctpModule.setAssetConfig(assets, cfgs);
@@ -204,7 +204,7 @@ contract CCTPModuleTest is SafeTestSetup {
         address[] memory assets = new address[](1);
         assets[0] = address(usdc);
         CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 2000, maxFeeBps: 0 });
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 2000, maxFeeBps: 0, etherFiFeeBps: 0 });
         vm.prank(owner);
         cctpModule.setAssetConfig(assets, cfgs);
         assertEq(cctpModule.getAssetConfig(address(usdc)).finalityThreshold, 2000);
@@ -212,9 +212,160 @@ contract CCTPModuleTest is SafeTestSetup {
     }
 
     function test_getBridgeFee_returnsConfiguredFee() public view {
-        (address feeToken, uint256 fee) = cctpModule.getBridgeFee(address(usdc), 100e6);
+        (address feeToken, uint256 etherFiFee, uint256 cctpMaxFee) = cctpModule.getBridgeFee(address(usdc), 100e6);
         assertEq(feeToken, address(usdc));
-        assertEq(fee, _expectedMaxFee(100e6));
+        assertEq(etherFiFee, 0);
+        assertEq(cctpMaxFee, _expectedMaxFee(100e6));
+    }
+
+    function _configureEtherFiFee(uint256 bps, address recipient) internal {
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+        CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: cfgFinality, maxFeeBps: cfgMaxFeeBps, etherFiFeeBps: bps });
+        vm.startPrank(owner);
+        cctpModule.setAssetConfig(assets, cfgs);
+        cctpModule.setEtherFiFeeRecipient(recipient);
+        vm.stopPrank();
+    }
+
+    function test_etherFiFee_chargedAndBurnReduced() public {
+        address feeRecipient = makeAddr("etherFiTreasury");
+        _configureEtherFiFee(50, feeRecipient); // 0.5%
+
+        uint256 amount = 100e6;
+        uint256 expectedFee = (amount * 50) / 10_000;
+        uint256 expectedBurn = amount - expectedFee;
+
+        deal(address(usdc), address(safe), amount);
+        CCTPModule.BridgeParams memory p = _params(amount);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        (uint64 delay, , ) = cashModule.getDelays();
+        vm.warp(block.timestamp + delay);
+
+        vm.expectEmit(true, true, false, true, address(cctpModule));
+        emit CCTPModule.EtherFiFeeCharged(address(safe), address(usdc), expectedFee, feeRecipient);
+        cctpModule.executeBridge(address(safe));
+
+        assertEq(usdc.balanceOf(feeRecipient), expectedFee);
+        (uint256 burned,,,,,,) = messenger.last();
+        assertEq(burned, expectedBurn);
+    }
+
+    function test_etherFiFee_requiresRecipientWhenBpsNonZero() public {
+        _configureEtherFiFee(50, address(0)); // fee configured but no recipient
+
+        deal(address(usdc), address(safe), 100e6);
+        CCTPModule.BridgeParams memory p = _params(100e6);
+        // pre-sign; we shouldn't get past the recipient check inside _buildWithdrawal
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        vm.expectRevert(CCTPModule.EtherFiFeeRecipientNotSet.selector);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+    }
+
+    function test_setEtherFiFeeRecipient_nonAdminReverts() public {
+        vm.expectRevert(CCTPModule.Unauthorized.selector);
+        cctpModule.setEtherFiFeeRecipient(address(1));
+    }
+
+    function test_etherFiFee_queuedMaxFeeUsesBurnAmount() public {
+        _configureEtherFiFee(50, makeAddr("t")); // 0.5% service fee
+        uint256 amount = 1_000e6;
+        uint256 fee = (amount * 50) / 10_000;
+        uint256 burn = amount - fee;
+
+        deal(address(usdc), address(safe), amount);
+        CCTPModule.BridgeParams memory p = _params(amount);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        CCTPModule.CrossChainWithdrawal memory w = cctpModule.getPendingBridge(address(safe));
+        assertEq(w.etherFiFee, fee);
+        assertEq(w.maxFee, (burn * cfgMaxFeeBps) / 10_000);
+    }
+
+    function test_etherFiFee_recipientSnapshottedAtRequest() public {
+        address original = makeAddr("originalTreasury");
+        address rotated = makeAddr("rotatedTreasury");
+        _configureEtherFiFee(50, original);
+
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+        CCTPModule.BridgeParams memory p = _params(amount);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        // Admin rotates recipient AFTER queueing; snapshot should still send to original.
+        vm.prank(owner);
+        cctpModule.setEtherFiFeeRecipient(rotated);
+
+        (uint64 delay, , ) = cashModule.getDelays();
+        vm.warp(block.timestamp + delay);
+        cctpModule.executeBridge(address(safe));
+
+        uint256 expectedFee = (amount * 50) / 10_000;
+        assertEq(usdc.balanceOf(original), expectedFee);
+        assertEq(usdc.balanceOf(rotated), 0);
+    }
+
+    function test_requestBridge_nonceReplayReverts() public {
+        deal(address(usdc), address(safe), 200e6);
+        CCTPModule.BridgeParams memory p = _params(100e6);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        // Cancel to clear the pending withdrawal so we can attempt a fresh requestBridge.
+        (address[] memory cs, bytes[] memory csigs) = _signCancel();
+        cctpModule.cancelBridge(address(safe), cs, csigs);
+
+        // Replay the ORIGINAL signatures — safe nonce has advanced twice, digest no longer matches.
+        vm.expectRevert(CCTPModule.InvalidSignatures.selector);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+    }
+
+    function test_storageSlot_notEqualToStargate() public pure {
+        bytes32 stargate = 0xeafa2356b7fab3fae77872025a25cb67884d7667f22b14ae60e3f63732a39c00;
+        bytes32 cctp = 0x8acda1cfca4f5cfd72da8b3438a383a2a5be2d370022c8dfe2b3e8c2690b2e00;
+        assertTrue(stargate != cctp);
+    }
+
+    function test_getBridgeFee_withEtherFiFee() public {
+        _configureEtherFiFee(50, makeAddr("t")); // 0.5% service fee
+        uint256 amount = 1_000e6;
+        (address feeToken, uint256 etherFiFee, uint256 cctpMaxFee) = cctpModule.getBridgeFee(address(usdc), amount);
+        assertEq(feeToken, address(usdc));
+        assertEq(etherFiFee, (amount * 50) / 10_000);
+        // CCTP maxFee should be on burn amount, not gross
+        assertEq(cctpMaxFee, ((amount - etherFiFee) * cfgMaxFeeBps) / 10_000);
+    }
+
+    function test_cancelBridge_badSignatureReverts() public {
+        deal(address(usdc), address(safe), 100e6);
+        CCTPModule.BridgeParams memory p = _params(100e6);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        // Pass the request signatures where cancel signatures are expected.
+        vm.expectRevert(CCTPModule.InvalidSignatures.selector);
+        cctpModule.cancelBridge(address(safe), s, sigs);
+    }
+
+    function test_cancelBridge_noQueueReverts() public {
+        (address[] memory s, bytes[] memory sigs) = _signCancel();
+        vm.expectRevert(CCTPModule.NoWithdrawalQueuedForCCTP.selector);
+        cctpModule.cancelBridge(address(safe), s, sigs);
+    }
+
+    function test_setAssetConfig_etherFiFeeBpsTooHighReverts() public {
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+        CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), finalityThreshold: 1000, maxFeeBps: 0, etherFiFeeBps: 10_000 });
+        vm.prank(owner);
+        vm.expectRevert(CCTPModule.EtherFiFeeBpsTooHigh.selector);
+        cctpModule.setAssetConfig(assets, cfgs);
     }
 
     // ───────────────────────── request validation ─────────────────────────
@@ -378,7 +529,7 @@ contract CCTPModuleTest is SafeTestSetup {
         address[] memory assets = new address[](1);
         assets[0] = address(usdc);
         CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger2), finalityThreshold: 2000, maxFeeBps: 0 });
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger2), finalityThreshold: 2000, maxFeeBps: 0, etherFiFeeBps: 0 });
         vm.prank(owner);
         cctpModule.setAssetConfig(assets, cfgs);
 
@@ -407,7 +558,7 @@ contract CCTPModuleTest is SafeTestSetup {
         address[] memory assets = new address[](1);
         assets[0] = address(usdc);
         CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(0), finalityThreshold: 0, maxFeeBps: 0 });
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(0), finalityThreshold: 0, maxFeeBps: 0, etherFiFeeBps: 0 });
         vm.prank(owner);
         cctpModule.setAssetConfig(assets, cfgs);
 
