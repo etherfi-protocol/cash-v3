@@ -67,12 +67,13 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE while no gateway is configured
      * @param gateway Address of the gateway contract
      * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
-     * @custom:throws InvalidInput if gateway = address(0)
+     * @custom:throws InvalidInput if gateway has no contract code (also rejects address(0))
      * @custom:throws GatewayAlreadySet if the gateway has already been configured
      */
     function setGateway(address gateway) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
-        if (gateway == address(0)) revert InvalidInput();
+        // One-time bootstrap that can't be repointed, so guard against a mistyped EOA or undeployed address.
+        if (gateway.code.length == 0) revert InvalidInput();
 
         CashModuleStorage storage $ = _getCashModuleStorage();
         // CashModule was deployed before Lend existed, so this hook is only for the first gateway bootstrap.

@@ -74,6 +74,11 @@ contract CashModuleSetGatewayTest is CashModuleTestSetup {
         vm.expectRevert(ICashModule.InvalidInput.selector);
         cashModule.setGateway(address(0));
 
+        // An address with no contract code is rejected by the deployed-contract check.
+        vm.prank(owner);
+        vm.expectRevert(ICashModule.InvalidInput.selector);
+        cashModule.setGateway(makeAddr("codelessGateway"));
+
         vm.prank(owner);
         vm.expectRevert(ICashModule.GatewayAlreadySet.selector);
         cashModule.setGateway(address(newGateway));
