@@ -46,7 +46,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @param tokenMessenger CCTP TokenMessenger contract for the burn-token on this chain.
      *                       address(0) = unsupported asset.
      * @param finalityThreshold CCTP finality: 2000 (Standard/free) or 1000 (Fast/fee).
-     * @param maxFeeBps CCTP relay-fee ceiling in bps of the *burn amount* (amount - etherFiFee),
+     * @param maxFeeBps CCTP relay-fee ceiling in bps of the *burn amount* (amount - providerFee),
      *                  paid to Circle on the destination in burn-token. 0 for Standard transfers.
      *                  Must be <= MAX_FEE_BPS.
      */
@@ -54,7 +54,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         address tokenMessenger;
         uint32 finalityThreshold;
         uint256 maxFeeBps;      // CCTP relay-fee ceiling (paid to Circle on destination in burn-token)
-        uint256 etherFiFeeBps;  // ether.fi service fee (paid to feeRecipient on source in burn-token)
+        uint256 providerFeeBps;  // provider service fee (paid to feeRecipient on source in burn-token)
     }
 
     /// @dev Queued bridge; snapshots the resolved config so execution cannot drift from what was signed.
@@ -66,8 +66,8 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         address tokenMessenger;      // snapshot of assetConfig at request time
         uint256 maxFee;              // snapshot: CCTP maxFee computed on burnAmount at request time
         uint32 minFinalityThreshold; // snapshot of assetConfig.finalityThreshold
-        uint256 etherFiFee;          // snapshot: etherFiFeeBps * amount at request time
-        address etherFiFeeRecipient; // snapshot of module feeRecipient at request time
+        uint256 providerFee;          // snapshot: providerFeeBps * amount at request time
+        address providerFeeRecipient; // snapshot of module feeRecipient at request time
     }
 
     /// @dev Signed request params. Fee/finality/messenger are admin-config, NOT included here.
@@ -83,7 +83,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         mapping(address token => AssetConfig assetConfig) assetConfig;
         mapping(uint32 domain => bool) allowedDomain;
         mapping(address safe => CrossChainWithdrawal withdrawal) withdrawals;
-        address etherFiFeeRecipient;
+        address providerFeeRecipient;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CCTPModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -104,20 +104,20 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     error MaxFeeExceedsAmount();
     error InvalidFinalityThreshold();
     error MaxFeeBpsTooHigh();
-    error EtherFiFeeBpsTooHigh();
+    error providerFeeBpsTooHigh();
     error StandardModeFeeNotAllowed();
-    error EtherFiFeeRecipientNotSet();
+    error providerFeeRecipientNotSet();
     error BurnAmountZero();
 
     event AssetConfigSet(address[] assets, AssetConfig[] assetConfigs);
     event AllowedDomainsSet(uint32[] domains, bool[] allowed);
-    event EtherFiFeeRecipientSet(address indexed recipient);
-    event EtherFiFeeCharged(address indexed safe, address indexed asset, uint256 fee, address indexed recipient);
-    event RequestBridgeWithCCTP(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, address destRecipient, uint256 maxFee, uint32 minFinalityThreshold, uint256 etherFiFee);
-    /// @param amount Gross amount signed by the user (before ether.fi fee).
-    /// @param burnAmount Amount actually burned via CCTP (amount - etherFiFee). This is what mints on destination
+    event providerFeeRecipientSet(address indexed recipient);
+    event providerFeeCharged(address indexed safe, address indexed asset, uint256 fee, address indexed recipient);
+    event RequestBridgeWithCCTP(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, address destRecipient, uint256 maxFee, uint32 minFinalityThreshold, uint256 providerFee);
+    /// @param amount Gross amount signed by the user (before provider fee).
+    /// @param burnAmount Amount actually burned via CCTP (amount - providerFee). This is what mints on destination
     ///                    minus Circle's `maxFee`. Indexers should use burnAmount for delivered-USDC accounting.
-    event BridgeWithCCTP(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, uint256 burnAmount, bytes32 mintRecipient, address tokenMessenger, uint256 maxFee, uint32 minFinalityThreshold, uint256 etherFiFee);
+    event BridgeWithCCTP(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, uint256 burnAmount, bytes32 mintRecipient, address tokenMessenger, uint256 maxFee, uint32 minFinalityThreshold, uint256 providerFee);
     event BridgeCancelled(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, address destRecipient);
 
     constructor(address[] memory _assets, AssetConfig[] memory _assetConfigs, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
@@ -160,31 +160,31 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(CCTP_MODULE_ADMIN_ROLE, msg.sender)) revert Unauthorized();
     }
 
-    function getEtherFiFeeRecipient() external view returns (address) {
-        return _getCCTPModuleStorage().etherFiFeeRecipient;
+    function getproviderFeeRecipient() external view returns (address) {
+        return _getCCTPModuleStorage().providerFeeRecipient;
     }
 
-    /// @notice Recipient can be address(0) to disable service fees (any asset with etherFiFeeBps>0 will then revert).
-    function setEtherFiFeeRecipient(address recipient) external {
+    /// @notice Recipient can be address(0) to disable service fees (any asset with providerFeeBps>0 will then revert).
+    function setproviderFeeRecipient(address recipient) external {
         _onlyAdmin();
-        _getCCTPModuleStorage().etherFiFeeRecipient = recipient;
-        emit EtherFiFeeRecipientSet(recipient);
+        _getCCTPModuleStorage().providerFeeRecipient = recipient;
+        emit providerFeeRecipientSet(recipient);
     }
 
-    function getEtherFiFee(address asset, uint256 amount) external view returns (uint256) {
-        return _computeMaxFee(amount, _getCCTPModuleStorage().assetConfig[asset].etherFiFeeBps);
+    function getproviderFee(address asset, uint256 amount) external view returns (uint256) {
+        return _computeMaxFee(amount, _getCCTPModuleStorage().assetConfig[asset].providerFeeBps);
     }
 
-    /// @notice Total fees deducted from `amount`: ether.fi service fee + CCTP relay fee (both in burn-token).
-    /// @dev CCTP maxFee is computed on the burn amount (gross minus ether.fi fee), matching `_buildWithdrawal`.
+    /// @notice Total fees deducted from `amount`: provider service fee + CCTP relay fee (both in burn-token).
+    /// @dev CCTP maxFee is computed on the burn amount (gross minus provider fee), matching `_buildWithdrawal`.
     /// @return feeToken The burn asset, or ETH sentinel for an unsupported asset.
-    /// @return etherFiFee ether.fi service fee (goes to feeRecipient on source).
+    /// @return providerFee provider service fee (goes to feeRecipient on source).
     /// @return cctpMaxFee CCTP relay-fee ceiling (paid to Circle on destination).
-    function getBridgeFee(address asset, uint256 amount) external view returns (address feeToken, uint256 etherFiFee, uint256 cctpMaxFee) {
+    function getBridgeFee(address asset, uint256 amount) external view returns (address feeToken, uint256 providerFee, uint256 cctpMaxFee) {
         AssetConfig memory cfg = _getCCTPModuleStorage().assetConfig[asset];
         if (cfg.tokenMessenger == address(0)) return (ETH, 0, 0);
-        etherFiFee = _computeMaxFee(amount, cfg.etherFiFeeBps);
-        cctpMaxFee = _computeMaxFee(amount - etherFiFee, cfg.maxFeeBps);
+        providerFee = _computeMaxFee(amount, cfg.providerFeeBps);
+        cctpMaxFee = _computeMaxFee(amount - providerFee, cfg.maxFeeBps);
         feeToken = asset;
     }
 
@@ -222,7 +222,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
         cashModule.requestWithdrawalByModule(safe, p.asset, p.amount);
 
-        emit RequestBridgeWithCCTP(safe, w.destDomain, w.asset, w.amount, w.destRecipient, w.maxFee, w.minFinalityThreshold, w.etherFiFee);
+        emit RequestBridgeWithCCTP(safe, w.destDomain, w.asset, w.amount, w.destRecipient, w.maxFee, w.minFinalityThreshold, w.providerFee);
 
         (uint64 withdrawalDelay, , ) = cashModule.getDelays();
         if (withdrawalDelay == 0) _bridge(safe, w);
@@ -230,12 +230,12 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     }
 
     function _buildWithdrawal(BridgeParams calldata p, AssetConfig memory cfg) internal view returns (CrossChainWithdrawal memory w) {
-        uint256 etherFiFee = _computeMaxFee(p.amount, cfg.etherFiFeeBps);
-        address feeRecipient = _getCCTPModuleStorage().etherFiFeeRecipient;
-        if (etherFiFee > 0 && feeRecipient == address(0)) revert EtherFiFeeRecipientNotSet();
+        uint256 providerFee = _computeMaxFee(p.amount, cfg.providerFeeBps);
+        address feeRecipient = _getCCTPModuleStorage().providerFeeRecipient;
+        if (providerFee > 0 && feeRecipient == address(0)) revert providerFeeRecipientNotSet();
 
         // CCTP maxFee is applied on the burn amount (amount minus our service fee), not the gross amount.
-        uint256 burnAmount = p.amount - etherFiFee;
+        uint256 burnAmount = p.amount - providerFee;
         // Unreachable while MAX_FEE_BPS < 10_000 (service fee capped at 5%); kept as defense-in-depth
         // if the cap is ever raised.
         if (burnAmount == 0) revert BurnAmountZero();
@@ -251,8 +251,8 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
             tokenMessenger: cfg.tokenMessenger,
             maxFee: maxFee,
             minFinalityThreshold: cfg.finalityThreshold,
-            etherFiFee: etherFiFee,
-            etherFiFeeRecipient: feeRecipient
+            providerFee: providerFee,
+            providerFeeRecipient: feeRecipient
         });
     }
 
@@ -303,14 +303,14 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         _checkBalance(w.asset, w.amount);
         if (w.tokenMessenger == address(0)) revert UnsupportedAsset();
 
-        if (w.etherFiFee > 0) {
-            // Recipient snapshotted at request-time; a mid-flight setEtherFiFeeRecipient(0) cannot redirect it.
-            if (w.etherFiFeeRecipient == address(0)) revert EtherFiFeeRecipientNotSet();
-            IERC20(w.asset).safeTransfer(w.etherFiFeeRecipient, w.etherFiFee);
-            emit EtherFiFeeCharged(safe, w.asset, w.etherFiFee, w.etherFiFeeRecipient);
+        if (w.providerFee > 0) {
+            // Recipient snapshotted at request-time; a mid-flight setproviderFeeRecipient(0) cannot redirect it.
+            if (w.providerFeeRecipient == address(0)) revert providerFeeRecipientNotSet();
+            IERC20(w.asset).safeTransfer(w.providerFeeRecipient, w.providerFee);
+            emit providerFeeCharged(safe, w.asset, w.providerFee, w.providerFeeRecipient);
         }
 
-        uint256 burnAmount = w.amount - w.etherFiFee;
+        uint256 burnAmount = w.amount - w.providerFee;
         bytes32 mintRecipient = bytes32(uint256(uint160(w.destRecipient)));
 
         IERC20(w.asset).forceApprove(w.tokenMessenger, burnAmount);
@@ -324,7 +324,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
             w.minFinalityThreshold
         );
 
-        emit BridgeWithCCTP(safe, w.destDomain, w.asset, w.amount, burnAmount, mintRecipient, w.tokenMessenger, w.maxFee, w.minFinalityThreshold, w.etherFiFee);
+        emit BridgeWithCCTP(safe, w.destDomain, w.asset, w.amount, burnAmount, mintRecipient, w.tokenMessenger, w.maxFee, w.minFinalityThreshold, w.providerFee);
     }
 
     function _computeMaxFee(uint256 amount, uint256 maxFeeBps) internal pure returns (uint256) {
@@ -349,7 +349,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
                 // fee paired with Standard finality is always meaningless/misleading — reject it.
                 if (cfg.finalityThreshold == FINALITY_FINALIZED && cfg.maxFeeBps != 0) revert StandardModeFeeNotAllowed();
                 if (cfg.maxFeeBps > MAX_FEE_BPS) revert MaxFeeBpsTooHigh();
-                if (cfg.etherFiFeeBps > MAX_FEE_BPS) revert EtherFiFeeBpsTooHigh();
+                if (cfg.providerFeeBps > MAX_FEE_BPS) revert providerFeeBpsTooHigh();
             }
             $.assetConfig[assets[i]] = cfg;
             unchecked { ++i; }
