@@ -1,4 +1,13 @@
 {
+  "lib/LayerZero-v2": {
+    "rev": "9c741e7f9790639537b1710a203bcdfd73b0b9ac"
+  },
+  "lib/aave-v4": {
+    "tag": {
+      "name": "v0.5.11",
+      "rev": "cdacec509e4f848bff1a5556f503afa83eee3b79"
+    }
+  },
   "lib/devtools": {
     "rev": "128b697838f4b0fd53ae748093fd66cc409ae5c4"
   },
