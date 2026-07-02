@@ -208,17 +208,19 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @dev Cancels withdrawal request if necessary based on available balance
+     * @dev The upcoming outflow and a pending withdrawal are competing claims on the safe's balance.
+     *      If the balance cannot honor both, the outflow wins: the whole request is cancelled (requests
+     *      are all-or-nothing across their tokens). No-op if no pending withdrawal holds this token.
      * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to update
-     * @param amount Amount being processed
-     * @custom:throws InsufficientBalance if there is not enough balance for the operation
+     * @param token Address of the token about to leave the safe
+     * @param outflow Amount about to leave the safe
+     * @custom:throws InsufficientBalance if the safe's balance cannot cover the outflow itself
      */
-    function _cancelWithdrawalRequestIfNecessary(address safe, address token, uint256 amount) internal {
+    function _cancelConflictingWithdrawal(address safe, address token, uint256 outflow) internal {
         SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
         uint256 balance = IERC20(token).balanceOf(safe);
 
-        if (amount > balance) revert InsufficientBalance();
+        if (outflow > balance) revert InsufficientBalance();
 
         uint256 len = safeCashConfig.pendingWithdrawalRequest.tokens.length;
         uint256 tokenIndex = len;
@@ -235,7 +237,10 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         // If the token does not exist in withdrawal request, return
         if (tokenIndex == len) return;
 
-        if (amount + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
+        // The pending withdrawal reserves part of the balance; balance - pending is the unreserved rest.
+        // An outflow larger than that dips into the reservation, so the request can no longer be honored
+        // afterwards: cancel it and free the reservation.
+        if (outflow + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
             _cancelOldWithdrawal(safe);
         }
     }

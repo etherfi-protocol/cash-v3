@@ -429,17 +429,19 @@ contract CashModuleCore is CashModuleStorageContract {
 
         // A pending withdrawal reserves loose balance. Prefer the unreserved portion plus the supplied
         // withdrawal so the request survives (matching CashLens); dip into the reserved portion, cancelling
-        // the request, only when the spend cannot be funded otherwise.
+        // the request, only when the spend cannot be funded otherwise. Dipping implies the request holds
+        // this token (unreserved < loose requires pending > 0), so the cancel is unconditional there.
+        uint256 fromLoose;
         {
             uint256 pending = getPendingWithdrawalAmount(safe, token);
             uint256 unreserved = loose > pending ? loose - pending : 0;
             if (unreserved + withdrawable >= amount) {
-                loose = unreserved;
+                fromLoose = unreserved < amount ? unreserved : amount;
+            } else {
+                fromLoose = loose < amount ? loose : amount;
+                _cancelOldWithdrawal(safe);
             }
         }
-
-        uint256 fromLoose = loose < amount ? loose : amount;
-        _cancelWithdrawalRequestIfNecessary(safe, token, fromLoose);
 
         // The supplied portion drawn for this token consumes borrowing headroom for later tokens.
         if (hasDebt) {
@@ -594,7 +596,7 @@ contract CashModuleCore is CashModuleStorageContract {
             amount = debt;
         }
         if (amount == 0) revert AmountZero();
-        _cancelWithdrawalRequestIfNecessary(safe, token, amount);
+        _cancelConflictingWithdrawal(safe, token, amount);
 
         // Gateway repays the safe's Aave debt on its behalf, pulling the repay token from the safe.
         // Full repays pass the max sentinel so no interest dust survives the exact-amount rounding.
