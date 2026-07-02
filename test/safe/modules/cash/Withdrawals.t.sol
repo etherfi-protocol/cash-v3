@@ -11,6 +11,7 @@ import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../../../src/interfaces/IBridgeModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { IGateway } from "../../../../src/interfaces/IGateway.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -210,7 +211,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.processWithdrawal(address(safe));
     }
 
-    function test_processWithdrawals_fails_ifPositionUnhealthyAfterWithdrawal() external {
+    /// @notice Processing a withdrawal only moves loose Safe funds, so gateway/Aave health should not block it.
+    function test_processWithdrawals_succeeds_whenGatewayPositionUnhealthy() external {
         uint256 totalSafeBalance = 100e6;
         deal(address(usdc), address(safe), totalSafeBalance);
         deal(address(weETH), address(safe), 0);
@@ -231,6 +233,13 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, spendAmounts, spendAmounts[0], Mode.Credit);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+        gateway.setDebtOf(address(safe), address(usdc), amount);
+        gateway.setAccountData(address(safe), IGateway.AccountData({
+            collateralUsd: 0,
+            debtUsd: amount,
+            availableBorrowsUsd: 0,
+            healthFactor: 0
+        }));
 
         uint256 withdrawalAmount = 50e6;
         // Setup a pending withdrawal
@@ -250,8 +259,13 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         // change the safe balance to withdraw amount so the position become unhealthy for withdrawal
         deal(address(usdc), address(safe), withdrawalAmount);
 
-        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.WithdrawalProcessed(address(safe), tokens, amounts, withdrawRecipient);
         cashModule.processWithdrawal(address(safe));
+
+        assertEq(usdc.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(withdrawRecipient), withdrawalAmount);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0);
     }
 
 
@@ -274,7 +288,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.processWithdrawal(address(safe));
     }
 
-    function test_requestWithdrawal_fails_whenAccountBecomesUnhealthy() external {
+    /// @notice Requesting a withdrawal only reserves loose Safe funds, so gateway/Aave health should not block it.
+    function test_requestWithdrawal_succeeds_whenGatewayPositionUnhealthy() external {
         address[] memory tokens = new address[](2);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
@@ -301,26 +316,18 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
             vm.prank(etherFiWallet);
             cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
         }
+        gateway.setDebtOf(address(safe), address(usdc), 10e6);
+        gateway.setAccountData(address(safe), IGateway.AccountData({
+            collateralUsd: 0,
+            debtUsd: 10e6,
+            availableBorrowsUsd: 0,
+            healthFactor: 0
+        }));
 
-        {
-            uint256 nonce = safe.nonce();
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
-            bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), nonce, abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
-
-            (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
-            (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
-
-            address[] memory signers = new address[](2);
-            signers[0] = owner1;
-            signers[1] = owner2;
-
-            bytes[] memory signatures = new bytes[](2);
-            signatures[0] = abi.encodePacked(r1, s1, v1);
-            signatures[1] = abi.encodePacked(r2, s2, v2);
-
-            vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
-            cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, signers, signatures);
-        }
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), amounts[0]);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETH)), amounts[1]);
     }
 
     function test_requestWithdrawal_resetWithdrawalWithNewRequest() public {

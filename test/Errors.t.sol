@@ -72,7 +72,6 @@ contract ErrorsTest is Test {
     error OnlyBorrowToken();
     error AmountZero();
     error InsufficientBalance();
-    error BorrowingsExceedMaxBorrowAfterSpending();
     error RecipientCannotBeAddressZero();
     error OnlyCashModuleController();
     error CannotWithdrawYet();
@@ -82,6 +81,7 @@ contract ErrorsTest is Test {
     error SplitAlreadyTheSame();
     error OnlyOneTokenAllowedInCreditMode();
     error SettlementDispatcherNotSetForBinSponsor();
+    error GatewayAlreadySet();
     error UnsupportedLiquidAsset();
     error AssetNotSupportedForDeposit();
     error Unauthorized();
@@ -218,7 +218,6 @@ contract ErrorsTest is Test {
         emit log_named_bytes("OnlyBorrowToken", abi.encodePacked(OnlyBorrowToken.selector));
         emit log_named_bytes("AmountZero", abi.encodePacked(AmountZero.selector));
         emit log_named_bytes("InsufficientBalance", abi.encodePacked(InsufficientBalance.selector));
-        emit log_named_bytes("BorrowingsExceedMaxBorrowAfterSpending", abi.encodePacked(BorrowingsExceedMaxBorrowAfterSpending.selector));
         emit log_named_bytes("RecipientCannotBeAddressZero", abi.encodePacked(RecipientCannotBeAddressZero.selector));
         emit log_named_bytes("OnlyCashModuleController", abi.encodePacked(OnlyCashModuleController.selector));
         emit log_named_bytes("CannotWithdrawYet", abi.encodePacked(CannotWithdrawYet.selector));
@@ -228,6 +227,7 @@ contract ErrorsTest is Test {
         emit log_named_bytes("SplitAlreadyTheSame", abi.encodePacked(SplitAlreadyTheSame.selector));
         emit log_named_bytes("OnlyOneTokenAllowedInCreditMode", abi.encodePacked(OnlyOneTokenAllowedInCreditMode.selector));
         emit log_named_bytes("SettlementDispatcherNotSetForBinSponsor", abi.encodePacked(SettlementDispatcherNotSetForBinSponsor.selector));
+        emit log_named_bytes("GatewayAlreadySet", abi.encodePacked(GatewayAlreadySet.selector));
         emit log_named_bytes("UnsupportedLiquidAsset", abi.encodePacked(UnsupportedLiquidAsset.selector));
         emit log_named_bytes("AssetNotSupportedForDeposit", abi.encodePacked(AssetNotSupportedForDeposit.selector));
         emit log_named_bytes("Unauthorized", abi.encodePacked(Unauthorized.selector));
@@ -294,5 +294,5 @@ contract ErrorsTest is Test {
         emit log_named_bytes("OnlyUnsupportedTokens", abi.encodePacked(OnlyUnsupportedTokens.selector));
         emit log_named_bytes("InvalidConfig", abi.encodePacked(InvalidConfig.selector));
         emit log_named_bytes("OnlyRoleRegistryOwner", abi.encodePacked(OnlyRoleRegistryOwner.selector));
-    } 
+    }
 }

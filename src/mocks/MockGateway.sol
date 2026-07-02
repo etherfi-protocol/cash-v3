@@ -10,6 +10,9 @@ import { IGateway } from "../interfaces/IGateway.sol";
  *         assertions. Not for production.
  */
 contract MockGateway is IGateway {
+    /// @notice Thrown when the mock is configured to reject borrow calls
+    error BorrowBlocked();
+
     /// @notice Recorded arguments of a mutating gateway call (`to` is zero for supply/repay)
     struct Call {
         address safe;
@@ -29,6 +32,14 @@ contract MockGateway is IGateway {
     Call public lastWithdraw;
     Call public lastBorrow;
     Call public lastRepay;
+
+    /// @notice When set, borrow reverts, to model a blocked borrow (e.g. insufficient Aave collateral)
+    bool public borrowReverts;
+
+    /// @notice Toggles the borrow revert
+    function setBorrowReverts(bool value) external {
+        borrowReverts = value;
+    }
 
     /// @notice Sets the account data a subsequent `getAccountData(safe)` will return
     function setAccountData(address safe, AccountData calldata data) external {
@@ -64,12 +75,16 @@ contract MockGateway is IGateway {
     }
 
     function borrow(address safe, address asset, uint256 amount, address to) external {
+        if (borrowReverts) revert BorrowBlocked();
         lastBorrow = Call(safe, asset, amount, to);
     }
 
     function repay(address safe, address asset, uint256 amount) external returns (uint256) {
+        uint256 debt = _debtOf[safe][asset];
+        uint256 repaid = amount < debt ? amount : debt;
+        _debtOf[safe][asset] = debt - repaid;
         lastRepay = Call(safe, asset, amount, address(0));
-        return amount;
+        return repaid;
     }
 
     function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external {

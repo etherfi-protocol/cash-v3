@@ -22,6 +22,14 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     uint256 collateralAmount = 0.01 ether;
     uint256 collateralValueInUsdc;
 
+    function _assertLastBorrow(address expectedSafe, address expectedAsset, uint256 expectedAmount, address expectedRecipient) internal view {
+        (address borrowedSafe, address borrowedAsset, uint256 borrowedAmount, address borrowRecipient) = gateway.lastBorrow();
+        assertEq(borrowedSafe, expectedSafe);
+        assertEq(borrowedAsset, expectedAsset);
+        assertApproxEqAbs(borrowedAmount, expectedAmount, 1);
+        assertEq(borrowRecipient, expectedRecipient);
+    }
+
     function setUp() public override {
         super.setUp();
 
@@ -231,48 +239,18 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
 
         vm.startPrank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+        vm.stopPrank();
 
-        uint256 borrowInUsdc = debtManager.borrowingOf(address(safe), address(usdc));
-        assertApproxEqAbs(borrowInUsdc, borrowAmt, 1);
+        _assertLastBorrow(address(safe), address(usdc), borrowAmt, address(settlementDispatcherReap));
 
         (, uint256 totalBorrowingAmountAfter) = debtManager.totalBorrowingAmounts();
-        assertApproxEqAbs(totalBorrowingAmountAfter, borrowAmt, 1);
+        assertEq(totalBorrowingAmountAfter, 0);
 
         bool isUserLiquidatableAfter = debtManager.liquidatable(address(safe));
         assertEq(isUserLiquidatableAfter, false);
 
         (, uint256 borrowingOfUserAfter) = debtManager.borrowingOf(address(safe));
-        assertApproxEqAbs(borrowingOfUserAfter, borrowAmt, 1);
-    }
-
-    function test_borrow_accumulatesInterest_overTime() public {
-        uint256 borrowAmt = debtManager.remainingBorrowingCapacityInUSD(
-            address(safe)
-        ) / 2;
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdc);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = borrowAmt;
-
-        Cashback[] memory cashbacks;
-
-        vm.startPrank(etherFiWallet);
-        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        vm.stopPrank();
-
-        assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdc)), borrowAmt, 1);
-
-        uint256 timeElapsed = 10;
-
-        vm.warp(block.timestamp + timeElapsed);
-        uint256 expectedInterest = (borrowAmt * borrowApyPerSecond * timeElapsed) / 1e20;
-
-        assertApproxEqAbs(
-            debtManager.borrowingOf(address(safe), address(usdc)),
-            borrowAmt + expectedInterest,
-            1
-        );
+        assertEq(borrowingOfUserAfter, 0);
     }
 
     function test_borrow_succeeds_withNonStandardDecimals() public {
@@ -315,8 +293,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         (, uint256 totalBorrowingsOfAliceSafe) = debtManager.borrowingOf(address(safe));
         assertEq(totalBorrowingsOfAliceSafe, 0);
 
-        uint256 borrowInToken = (remainingBorrowCapacityInUsdc * 1e12) / 1e6;
-        uint256 debtManagerBalBefore = newToken.balanceOf(address(debtManager));
+        uint256 borrowInToken = debtManager.convertUsdToCollateralToken(address(newToken), remainingBorrowCapacityInUsdc);
 
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(newToken);
@@ -329,13 +306,13 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         cashModule.spend(address(safe),  txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         (, totalBorrowingsOfAliceSafe) = debtManager.borrowingOf(address(safe));
-        assertEq(totalBorrowingsOfAliceSafe, remainingBorrowCapacityInUsdc);
-        
-        uint256 debtManagerBalAfter = newToken.balanceOf(address(debtManager));
-        assertEq(debtManagerBalBefore - debtManagerBalAfter, borrowInToken);
+        assertEq(totalBorrowingsOfAliceSafe, 0);
+
+        _assertLastBorrow(address(safe), address(newToken), borrowInToken, address(settlementDispatcherReap));
     }
 
-    function test_borrow_addsInterest_onSubsequentBorrows() public {
+    /// @notice Subsequent CashModule gateway borrows should still leave DebtManager borrowing state empty.
+    function test_gatewayBorrow_doesNotAddDebtManagerInterest_onSubsequentBorrows() public {
         uint256 borrowAmt = debtManager.remainingBorrowingCapacityInUSD(
             address(safe)
         ) / 4;
@@ -350,30 +327,23 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.startPrank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdc)), borrowAmt, 1);
+        _assertLastBorrow(address(safe), address(usdc), borrowAmt, address(settlementDispatcherReap));
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
 
         uint256 timeElapsed = 10;
 
         vm.warp(block.timestamp + timeElapsed);
-        uint256 expectedInterest = (borrowAmt *
-            borrowApyPerSecond *
-            timeElapsed) / 1e20;
 
-        uint256 expectedTotalBorrowWithInterest = borrowAmt + expectedInterest;
-
-        assertApproxEqAbs(
-            debtManager.borrowingOf(address(safe), address(usdc)),
-            expectedTotalBorrowWithInterest,
-            2
-        );
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
+        (, uint256 totalBorrowingAmountAfterFirstSpend) = debtManager.totalBorrowingAmounts();
+        assertEq(totalBorrowingAmountAfterFirstSpend, 0);
 
         cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        assertApproxEqAbs(
-            debtManager.borrowingOf(address(safe), address(usdc)),
-            expectedTotalBorrowWithInterest + borrowAmt,
-            2
-        );
+        _assertLastBorrow(address(safe), address(usdc), borrowAmt, address(settlementDispatcherReap));
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
+        (, uint256 totalBorrowingAmount) = debtManager.totalBorrowingAmounts();
+        assertEq(totalBorrowingAmount, 0);
 
         vm.stopPrank();
     }

@@ -26,6 +26,13 @@ interface ICashEventEmitter {
     function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external;
 
     /**
+     * @notice Emits the GatewayUpdated event
+     * @param oldGateway Address of the previous gateway
+     * @param newGateway Address of the new gateway
+     */
+    function emitGatewayUpdated(address oldGateway, address newGateway) external;
+
+    /**
      * @notice Emits an event when pending cashback is cleared
      * @param recipient Address receiving the cashback
      * @param cashbackToken Address of the cashback token
