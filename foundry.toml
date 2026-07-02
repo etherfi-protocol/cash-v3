@@ -13,6 +13,29 @@ fs_permissions = [{ access = "read-write", path = "./" }]
 extra_output = ["storageLayout"]
 ffi = true
 dynamic_test_linking = true
+# The Aave v4 gateway tests need via_ir (Hub/Spoke instances) + the aave-v4 dependency. Keep them out of
+# the default profile so the default build/bytecode-verification settings are unchanged; run them under
+# FOUNDRY_PROFILE=aave (see [profile.aave] below).
+skip = ["test/gateway/**"]
+
+# Profile for the Aave v4 gateway integration tests: compiles everything (our repo + aave-v4) with via_ir
+# so the Hub/Spoke instances build, and un-skips the gateway tests. Run: FOUNDRY_PROFILE=aave forge test.
+[profile.aave]
+via_ir = true
+skip = []
+# LiquidationLogic is linked via the `libraries` entry below (compile-time), so forge's runtime library
+# auto-linking is unneeded here and would noisily re-resolve aave-v4's `src/`-rooted imports.
+dynamic_test_linking = false
+# Aave's SpokeInstance links the external LiquidationLogic library. forge's dynamic linker can't
+# auto-deploy a library that lives under lib/, so link it to a fixed address; AaveV4Fixture etches the
+# library's runtime code there before deploying the spoke.
+libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x0000000000000000000000000000000000000A01"]
+
+# Modest bounds: each handler call drives real Aave ops on the fork, so keep the campaign small.
+[profile.aave.invariant]
+runs = 12
+depth = 10
+fail_on_revert = false
 
 [fuzz]
 runs = 10000
