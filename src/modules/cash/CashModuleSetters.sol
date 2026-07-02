@@ -376,8 +376,6 @@ contract CashModuleSetters is CashModuleStorageContract {
         $$.pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
         $.cashEventEmitter.emitWithdrawalRequested(safe, tokens, amounts, recipient, finalTime);
 
-        _getDebtManager().ensureHealth(safe);
-
         if ($.withdrawalDelay == 0) _processWithdrawal(safe);
     }
 }

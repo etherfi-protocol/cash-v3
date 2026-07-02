@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, ModuleCheckBalance, IDebtManager, IERC20 } from "./AaveV3TestSetup.t.sol";
+import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, ModuleCheckBalance, EtherFiHook, IERC20 } from "./AaveV3TestSetup.t.sol";
 
 contract AaveV3RepayTest is AaveV3TestSetup {
     using MessageHashUtils for bytes32;
@@ -210,12 +210,8 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         aaveV3Module.repay(address(safe), address(usdc), amountToRepay, owner1, signature);
     }
 
-    function test_repay_reverts_whenUserCashPositionNotHealthy() public {        
-        vm.mockCallRevert(
-            address(debtManager), 
-            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), 
-            abi.encodeWithSelector(IDebtManager.AccountUnhealthy.selector)
-        );
+    function test_repay_reverts_whenUserCashPositionNotHealthy() public {
+        _setUnhealthyGatewayPosition(address(safe));
 
         uint256 amountToRepay = 50e6;
         deal(address(usdc), address(safe), amountToRepay);
@@ -232,7 +228,7 @@ contract AaveV3RepayTest is AaveV3TestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        vm.expectRevert(EtherFiHook.OperationBreachesHealth.selector);
         aaveV3Module.repay(address(safe), address(usdc), amountToRepay, owner1, signature);
     }
 }

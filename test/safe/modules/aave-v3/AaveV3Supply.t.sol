@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, ModuleCheckBalance, IDebtManager } from "./AaveV3TestSetup.t.sol";
+import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, ModuleCheckBalance, EtherFiHook } from "./AaveV3TestSetup.t.sol";
 
 contract AaveV3SupplyTest is AaveV3TestSetup {
     using MessageHashUtils for bytes32;
@@ -135,11 +135,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
     }
 
     function test_supply_reverts_whenUserCashPositionNotHealthy() public {
-        vm.mockCallRevert(
-            address(debtManager), 
-            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), 
-            abi.encodeWithSelector(IDebtManager.AccountUnhealthy.selector)
-        );
+        _setUnhealthyGatewayPosition(address(safe));
 
         uint256 amountToSupply = 100e6;
         deal(address(usdc), address(safe), amountToSupply * 2);
@@ -151,7 +147,7 @@ contract AaveV3SupplyTest is AaveV3TestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         bytes memory signature = abi.encodePacked(r, s, v);
 
-        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        vm.expectRevert(EtherFiHook.OperationBreachesHealth.selector);
         aaveV3Module.supply(address(safe), address(usdc), amountToSupply, owner1, signature);
     }
 }

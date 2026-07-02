@@ -92,7 +92,10 @@ contract MockGateway is IGateway {
     }
 
     function getAccountData(address safe) external view returns (AccountData memory) {
-        return _accountData[safe];
+        AccountData memory data = _accountData[safe];
+        // Match Aave: a safe with no debt has an infinite health factor
+        if (data.debtUsd == 0) data.healthFactor = type(uint256).max;
+        return data;
     }
 
     function suppliedOf(address safe, address asset) external view returns (uint256) {

@@ -6,7 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { Test } from "forge-std/Test.sol";
 
 import { AaveV3Module, ModuleBase, ModuleCheckBalance } from "../../../../src/modules/aave-v3/AaveV3Module.sol";
-import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
+import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, EtherFiHook } from "../../SafeTestSetup.t.sol";
 import { ChainConfig } from "../../../utils/Utils.sol";
 
 contract AaveV3TestSetup is SafeTestSetup {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, IDebtManager, IERC20 } from "./AaveV3TestSetup.t.sol";
+import { AaveV3TestSetup, MessageHashUtils, AaveV3Module, ModuleBase, IERC20 } from "./AaveV3TestSetup.t.sol";
 
 contract AaveV3WithdrawTest is AaveV3TestSetup {
     using MessageHashUtils for bytes32;

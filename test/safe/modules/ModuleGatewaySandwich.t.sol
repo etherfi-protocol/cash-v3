@@ -41,7 +41,8 @@ contract ModuleGatewaySandwichTest is Test {
     }
 
     function _setHealthFactor(uint256 healthFactor) internal {
-        gateway.setAccountData(safe, IGateway.AccountData({ collateralUsd: 0, debtUsd: 0, availableBorrowsUsd: 0, healthFactor: healthFactor }));
+        // Nonzero debt so the mock honors the explicit health factor (no-debt positions report uint256.max)
+        gateway.setAccountData(safe, IGateway.AccountData({ collateralUsd: 0, debtUsd: 1, availableBorrowsUsd: 0, healthFactor: healthFactor }));
     }
 
     // A zero gateway address is rejected at deployment.

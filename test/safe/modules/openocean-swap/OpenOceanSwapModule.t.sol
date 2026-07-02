@@ -6,7 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { Test } from "forge-std/Test.sol";
 
 import { OpenOceanSwapModule, ModuleBase, ModuleCheckBalance } from "../../../../src/modules/openocean-swap/OpenOceanSwapModule.sol";
-import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
+import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, EtherFiHook } from "../../SafeTestSetup.t.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 
@@ -365,11 +365,7 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
     }
 
     function test_swap_reverts_whenUserCashPositionNotHealthy() public {
-        vm.mockCallRevert(
-            address(debtManager), 
-            abi.encodeWithSelector(IDebtManager.ensureHealth.selector, address(safe)), 
-            abi.encodeWithSelector(IDebtManager.AccountUnhealthy.selector)
-        );
+        _setUnhealthyGatewayPosition(address(safe));
 
         address fromAsset = address(usdc);
         uint256 fromAssetAmount = 100e6;
@@ -391,7 +387,7 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         (address[] memory owners, bytes[] memory signatures) = _createSwapSignatures(nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData);
 
-        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        vm.expectRevert(EtherFiHook.OperationBreachesHealth.selector);
         openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData, owners, signatures);
     }
 

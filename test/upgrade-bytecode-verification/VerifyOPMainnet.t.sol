@@ -173,7 +173,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiHook() public {
-        address local = address(new EtherFiHook(dataProviderProxy));
+        // EtherFiHook now health-checks against the Aave gateway with a minHealthFactor, so it no longer
+        // matches the deployed pre-Lend version. Re-enable after the Lend deployment.
+        vm.skip(true);
+        address local = address(new EtherFiHook(dataProviderProxy, 1e18));
         _verify("EtherFiHook", hookImpl, local);
     }
 

@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { ICashModule } from "../interfaces/ICashModule.sol";
-import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
@@ -15,14 +14,19 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 contract EtherFiHook is UpgradeableProxy {
     /// @notice Interface to the data provider contract
     IEtherFiDataProvider public immutable dataProvider;
+    /// @notice The lowest Aave health factor (1e18 scale) a non-cash module operation may leave a safe at
+    uint256 public immutable minHealthFactor;
 
     /// @notice Thrown when a non-admin address attempts to perform an admin-only operation
     error OnlyAdmin();
     /// @notice Thrown when input parameters are invalid or zero address is provided
     error InvalidInput();
+    /// @notice Thrown when the completed operation would leave the safe below minHealthFactor
+    error OperationBreachesHealth();
 
-    constructor(address _dataProvider) payable {
+    constructor(address _dataProvider, uint256 _minHealthFactor) payable {
         dataProvider = IEtherFiDataProvider(_dataProvider);
+        minHealthFactor = _minHealthFactor;
         _disableInitializers();
     }
 
@@ -43,14 +47,14 @@ contract EtherFiHook is UpgradeableProxy {
 
     /**
      * @notice Hook called after module operations
-     * @dev Currently implemented as a view function with no effects
+     * @dev Reverts if the safe's Aave health factor is below minHealthFactor. CashModule operations are
+     *      skipped: they guard themselves via the gateway, and repay from an unhealthy state must not revert.
      * @param module Address of the module being operated on
      */
-    function postOpHook(address module) external view { 
+    function postOpHook(address module) external view {
         ICashModule cashModule = ICashModule(dataProvider.getCashModule());
         if (module == address(cashModule)) return;
 
-        IDebtManager debtManager = cashModule.getDebtManager();
-        debtManager.ensureHealth(msg.sender);
+        if (cashModule.getGateway().getAccountData(msg.sender).healthFactor < minHealthFactor) revert OperationBreachesHealth();
     }
 }

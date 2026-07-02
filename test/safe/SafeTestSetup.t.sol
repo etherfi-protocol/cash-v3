@@ -31,6 +31,7 @@ import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
 import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { PriceProvider, IAggregatorV3 } from "../../src/oracle/PriceProvider.sol";
 import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
+import { IGateway } from "../../src/interfaces/IGateway.sol";
 import { MockGateway } from "../../src/mocks/MockGateway.sol";
 import { Utils, ChainConfig } from "../utils/Utils.sol";
 
@@ -176,7 +177,7 @@ contract SafeTestSetup is Utils {
         address safeFactoryImpl = address(new EtherFiSafeFactory());
         safeFactory = EtherFiSafeFactory(address(new UUPSProxy(safeFactoryImpl, abi.encodeWithSelector(EtherFiSafeFactory.initialize.selector, address(roleRegistry), safeImpl))));
 
-        address hookImpl = address(new EtherFiHook(address(dataProvider)));
+        address hookImpl = address(new EtherFiHook(address(dataProvider), 1e18));
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
         gateway = new MockGateway();
@@ -222,6 +223,11 @@ contract SafeTestSetup is Utils {
         safe = EtherFiSafe(payable(safeFactory.getDeterministicAddress(keccak256("safe"))));
 
         vm.stopPrank();
+    }
+
+    /// @dev Puts the safe's Aave position just below the hook's minHealthFactor of 1e18
+    function _setUnhealthyGatewayPosition(address safeAddr) internal {
+        gateway.setAccountData(safeAddr, IGateway.AccountData({ collateralUsd: 1000e6, debtUsd: 900e6, availableBorrowsUsd: 0, healthFactor: 1e18 - 1 }));
     }
 
     function _setupWithdrawTokenWhitelist() internal {
