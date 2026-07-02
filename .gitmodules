@@ -16,3 +16,6 @@
 [submodule "lib/LayerZero-v2"]
 	path = lib/LayerZero-v2
 	url = https://github.com/LayerZero-Labs/LayerZero-v2
+[submodule "lib/aave-v4"]
+	path = lib/aave-v4
+	url = https://github.com/aave/aave-v4
