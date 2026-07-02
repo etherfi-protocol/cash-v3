@@ -77,8 +77,11 @@ contract MockGateway is IGateway {
     }
 
     function repay(address safe, address asset, uint256 amount) external returns (uint256) {
-        lastRepay = Call(safe, asset, amount, address(0));
-        return amount;
+        uint256 debt = _debtOf[safe][asset];
+        uint256 repaid = amount < debt ? amount : debt;
+        _debtOf[safe][asset] = debt - repaid;
+        lastRepay = Call(safe, asset, repaid, address(0));
+        return repaid;
     }
 
     function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external {

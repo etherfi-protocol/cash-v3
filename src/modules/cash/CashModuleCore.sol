@@ -563,11 +563,20 @@ contract CashModuleCore is CashModuleStorageContract {
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
         uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        IGateway gateway = $.gateway;
+
+        uint256 debt = gateway.debtOf(safe, token);
+        if (debt < amount) {
+            amount = debt;
+        }
+        if (amount == 0) revert AmountZero();
         _cancelWithdrawalRequestIfNecessary(safe, token, amount);
 
         // Gateway repays the safe's Aave debt on its behalf, pulling the repay token from the safe.
-        _getCashModuleStorage().gateway.repay(safe, token, amount);
-        _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
+        uint256 repaid = gateway.repay(safe, token, amount);
+        uint256 repaidInUsd = debtManager.convertCollateralTokenToUsd(token, repaid);
+        $.cashEventEmitter.emitRepayDebtManager(safe, token, repaid, repaidInUsd);
     }
 
     /**
