@@ -5,9 +5,9 @@ import { IMessageLibManager, SetConfigParam } from "@layerzerolabs/lz-evm-protoc
 
 /**
  * @title RecoverySetConfigLib
- * @notice ULN `setConfig` calldata for the opBNB (204) and X-Layer (196) recovery routes, which have
- *         no default LZ DVN pathway to/from OP — so the OApp must pin the LayerZero Labs DVN explicitly
- *         on both the OP send side and the destination receive side.
+ * @notice ULN `setConfig` calldata for the opBNB (204) recovery route, which has no default LZ DVN
+ *         pathway to/from OP — so the OApp must pin the LayerZero Labs DVN explicitly on both the OP
+ *         send side and the destination receive side.
  *
  *         Addresses are from LayerZero metadata (metadata.layerzero-api.com/v1/metadata), parsed
  *         deterministically. The OP send lib + OP DVN are additionally proven on a live OP fork by
@@ -33,8 +33,6 @@ library RecoverySetConfigLib {
     // Destination (receive), keyed off srcEid = OP.
     address internal constant OPBNB_RECEIVE_ULN  = 0x9c9e25F9fC4e8134313C2a9f5c719f5c9F4fbD95;
     address internal constant OPBNB_LZLABS_DVN   = 0x3eBb618B5c9d09DE770979D552b27D6357Aff73B;
-    address internal constant XLAYER_RECEIVE_ULN = 0x2367325334447C5E1E0f1b3a6fB947b262F58312;
-    address internal constant XLAYER_LZLABS_DVN  = 0x9C061c9A4782294eeF65ef28Cb88233A987F4bdD;
 
     /// Mirror of `UlnBase.UlnConfig` (same field order/types) for abi.encode.
     struct UlnConfig {
@@ -48,7 +46,7 @@ library RecoverySetConfigLib {
 
     /// True for the chains whose recovery route needs an explicit DVN setConfig.
     function needsSetConfig(uint256 chainId) internal pure returns (bool) {
-        return chainId == 204 || chainId == 196;
+        return chainId == 204;
     }
 
     /// endpoint.setConfig calldata for the OP module's SEND ULN toward one dest route (`dstEid`).
@@ -82,7 +80,6 @@ library RecoverySetConfigLib {
 
     function _destLibDvn(uint256 chainId) private pure returns (address lib, address dvn) {
         if (chainId == 204) return (OPBNB_RECEIVE_ULN, OPBNB_LZLABS_DVN);
-        if (chainId == 196) return (XLAYER_RECEIVE_ULN, XLAYER_LZLABS_DVN);
         revert("no custom receive DVN pathway for this chain");
     }
 }

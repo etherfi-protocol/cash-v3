@@ -8,6 +8,5 @@
   "hyperevm": { "chainId": 999,   "eid": 30367, "endpoint": "0x3A73033C0b1407574C76BdBAc67f126f6b4a9AA9" },
   "gnosis":   { "chainId": 100,   "eid": 30145, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
   "polygon":  { "chainId": 137,   "eid": 30109, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
-  "opbnb":    { "chainId": 204,   "eid": 30202, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" },
-  "xlayer":   { "chainId": 196,   "eid": 30274, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" }
+  "opbnb":    { "chainId": 204,   "eid": 30202, "endpoint": "0x1a44076050125825900e736c501f859c50fE728c" }
 }

@@ -47,7 +47,6 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
     address constant TOPUP_V2_GNOSIS   = address(0); // TODO: Gnosis (100)
     address constant TOPUP_V2_POLYGON  = address(0); // TODO: Polygon (137)
     address constant TOPUP_V2_OPBNB    = address(0); // TODO: opBNB (204)
-    address constant TOPUP_V2_XLAYER   = address(0); // TODO: X-Layer (196)
 
     function run() public {
         string memory chainId = vm.toString(block.chainid);
@@ -120,7 +119,6 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
         if (block.chainid == 100)   return TOPUP_V2_GNOSIS;
         if (block.chainid == 137)   return TOPUP_V2_POLYGON;
         if (block.chainid == 204)   return TOPUP_V2_OPBNB;
-        if (block.chainid == 196)   return TOPUP_V2_XLAYER;
         revert("unsupported chain");
     }
 }

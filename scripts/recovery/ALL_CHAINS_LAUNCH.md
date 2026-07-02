@@ -1,6 +1,6 @@
 # All-Chains Asset Recovery — Launch Checklist
 
-Single rollout for the 5 remaining destination chains. You sign all commits (`git commit -S`).
+Single rollout for the 4 remaining destination chains. You sign all commits (`git commit -S`).
 **`audit/topup-factory-reinitializer` is OFF-LIMITS** — it owns the Polygon reinitializer and merges
 after its own 3CP. Everything below goes on a new integration branch.
 
@@ -10,9 +10,10 @@ after its own 3CP. Everything below goes on a new integration branch.
 |-----------|---------|--------|------------------------|------------------------|----------------------------|-----------|
 | Gnosis    | 100     | 30145  | fresh (initialize)     | default — none         | `feat/gnosis-recovery`     | ready |
 | Polygon   | 137     | 30109  | **placeholder (reinit)** | default — none       | `feat/polygon-recovery` + **audit** | reinit in audit |
-| opBNB     | 204     | 30202  | fresh (initialize)     | **YES** LZ Labs `0x3ebb618b…` | `feat/opbnb-xlayer-recovery` | setConfig unbuilt |
-| X-Layer   | 196     | 30274  | fresh (initialize)     | **YES** LZ Labs `0x9c061c9a…` | `feat/opbnb-xlayer-recovery` | setConfig unbuilt |
+| opBNB     | 204     | 30202  | fresh (initialize)     | **YES** LZ Labs `0x3ebb618b…` | `feat/opbnb-xlayer-recovery` | setConfig built |
 | Avalanche | 43114   | 30106  | fresh (initialize)     | verify (likely default)| **none**                   | net-new |
+
+> X-Layer (196 / 30274) removed from this rollout — re-add later; tooling preserved in git history.
 
 ## Common constants (same on every chain)
 
@@ -34,23 +35,23 @@ Cut fresh off `master` (NOT off audit). Re-apply each branch's changes, resolvin
 | `scripts/recovery/DeployRecoveryRoleRegistry.s.sol` | take **gnosis** (Ledger `vm.startBroadcast()`); drop opbnb's `PRIVATE_KEY` copy |
 | `scripts/recovery/DeployRecoveryTopUpFactory.s.sol` | take **gnosis** (Ledger); drop opbnb's `PRIVATE_KEY` copy |
 | `scripts/recovery/DeployAssetRecoveryDispatcher.s.sol`, `DeployTopUpV2Impl.s.sol` | from gnosis; **confirm both are Ledger-compat** (bare `startBroadcast`) |
-| `scripts/gnosis-txs/RecoveryDestChain3CP.s.sol` | **union**: TopUpV2 constants + chainid switch for 100/137/204/196/43114. Body identical across branches. For 204/196 add 5th tx = receive setConfig (see Phase 0b) |
-| OP-side 3CP | **collapse** `RecoveryOPAddGnosis3CP` + `RecoveryOPAddPolygon3CP` + `RecoveryOPAddChains3CP` into ONE `RecoveryOPAddChains3CP.s.sol`: `setPeer` for 30109/30145/30106/30202/30274 + send setConfig for opBNB/X-Layer. Read module from `deployments.json` (polygon version's pattern) |
+| `scripts/gnosis-txs/RecoveryDestChain3CP.s.sol` | **union**: TopUpV2 constants + chainid switch for 100/137/204/43114. Body identical across branches. For 204 add 5th tx = receive setConfig (see Phase 0b) |
+| OP-side 3CP | **collapse** `RecoveryOPAddGnosis3CP` + `RecoveryOPAddPolygon3CP` + `RecoveryOPAddChains3CP` into ONE `RecoveryOPAddChains3CP.s.sol`: `setPeer` for 30109/30145/30106/30202 + send setConfig for opBNB. Read module from `deployments.json` (polygon version's pattern) |
 | `scripts/recovery/lz-config.json` | union all entries + add `avalanche {43114, 30106, 0x1a44…728c}` |
-| `deployments/mainnet/{100,204,196,43114}/deployments.json` | per-chain recovery address blocks (filled in Phase 1) |
-| fork tests | `RecoverySourceForkGnosis.t.sol`, `RecoverySourceForkOpBnbXLayer.t.sol`, + new avax fork test |
+| `deployments/mainnet/{100,204,43114}/deployments.json` | per-chain recovery address blocks (filled in Phase 1) |
+| fork tests | `RecoverySourceForkGnosis.t.sol`, `RecoverySourceForkOpBnb.t.sol`, + new avax fork test |
 | **Polygon, do NOT copy** | `src/top-up/TopUpFactory.sol`, `DeployPolygonTopUpFactory.s.sol`, `PolygonPlaceholderUpgradeFork.t.sol` — these stay in `audit`. Polygon enters this branch only as the 137 entry in the two 3CP scripts |
 
 ### Phase 0b — Net-new work (not just a merge)
 
-- [x] **opBNB/X-Layer setConfig** (was "blocked on DVN") — built in `scripts/recovery/RecoverySetConfigLib.sol`,
+- [x] **opBNB setConfig** (was "blocked on DVN") — built in `scripts/recovery/RecoverySetConfigLib.sol`,
       wired into both 3CPs: OP send-ULN (module) in `RecoveryOPAddChains3CP`, dest receive-ULN (dispatcher)
       in `RecoveryDestChain3CP`. OP send side **proven on a live fork** (`RecoverySetConfigProbe` passes —
-      OP→opBNB / OP→X-Layer quotable via the lib's calldata). Receive lib+DVN want the Phase 0.5 dev
-      round-trip to confirm delivery. All addresses from LZ metadata, parsed deterministically + checksummed.
+      OP→opBNB quotable via the lib's calldata). Receive lib+DVN want the Phase 0.5 dev round-trip to
+      confirm delivery. All addresses from LZ metadata, parsed deterministically + checksummed.
 - [ ] **Avalanche**: lz-config entry, deployments block, dest-3CP + OP-3CP entries, fork test, and
       **verify the OP↔Avalanche default DVN pathway** (if no default route, it needs setConfig like opBNB).
-- [ ] Verify EIDs against LZ docs: Polygon 30109, Gnosis 30145, Avalanche 30106, opBNB 30202, X-Layer 30274.
+- [ ] Verify EIDs against LZ docs: Polygon 30109, Gnosis 30145, Avalanche 30106, opBNB 30202.
 
 Then: `git add … && git commit -S` (you), push, open PR.
 
@@ -60,20 +61,20 @@ Then: `git add … && git commit -S` (you), push, open PR.
 
 Risk-based, not one-size. Fork tests already cover contract logic; dev proves the parts they can't.
 
-- [ ] **opBNB + X-Layer — LZ round-trip (MUST, gates prod).** Deploy the dev stack on each + apply the
-      dev setConfig, then send a real recovery message OP↔chain and confirm delivery. Only proof the
-      custom DVN pathway actually works. Depends on Phase 0b (setConfig) being built.
+- [ ] **opBNB — LZ round-trip (MUST, gates prod).** Deploy the dev stack + apply the dev setConfig,
+      then send a real recovery message OP↔opBNB and confirm delivery. Only proof the custom DVN
+      pathway actually works. Depends on Phase 0b (setConfig) being built.
 - [ ] **Polygon — dev rehearsal** of the placeholder→`reinitialize` upgrade (novel path). See
       `REHEARSE_POLYGON.md` / `DeployDevPolygon*` scripts.
 - [ ] **Gnosis / Avalanche — one confirmatory dev round-trip** (default DVN; low risk).
-- [ ] **BE/FE** — cross-chain recovery already shipped (base/arb/bnb/eth/hyperevm). Add the 5 chains to
+- [ ] **BE/FE** — cross-chain recovery already shipped (base/arb/bnb/eth/hyperevm). Add the 4 chains to
       the dev config, confirm they list + a dev recovery completes. Config addition, not new wiring.
 
 > Tooling: `deployments/dev/*`, `DeployDevPolygon*` (polygon branch), `REHEARSE_*.md`.
 
 ---
 
-## Phase 1 — Deploy infra (deployer Ledger), per FRESH chain (Gnosis, opBNB, X-Layer, Avalanche)
+## Phase 1 — Deploy infra (deployer Ledger), per FRESH chain (Gnosis, opBNB, Avalanche)
 
 Run in order; each records into `deployments/mainnet/<id>/deployments.json`. Ledger pattern:
 ```
@@ -109,9 +110,9 @@ steps 3 + 4 (TopUpV2 impl + dispatcher); RR already on-chain.
 2. `RoleRegistry.grantRole(UNPAUSER, operatingSafe)`
 3. `TopUpSourceFactory.upgradeBeaconImplementation(TopUpV2 impl)`
 4. `dispatcher.setPeer(30111, OP module)`
-5. *(opBNB/X-Layer only)* receive-ULN `endpoint.setConfig(...)`
+5. *(opBNB only)* receive-ULN `endpoint.setConfig(...)`
 
-- [ ] Gnosis  - [ ] Polygon (+ the reinit `upgradeToAndCall` from audit) - [ ] opBNB - [ ] X-Layer - [ ] Avalanche
+- [ ] Gnosis  - [ ] Polygon (+ the reinit `upgradeToAndCall` from audit) - [ ] opBNB - [ ] Avalanche
 
 > One safeTxHash + one signature per signer **per chain** (MultiSend bundles into a single sig).
 
@@ -124,8 +125,7 @@ steps 3 + 4 (TopUpV2 impl + dispatcher); RR already on-chain.
 - [ ] `module.setPeer(30145, dispatcher)`  (Gnosis)
 - [ ] `module.setPeer(30106, dispatcher)`  (Avalanche)
 - [ ] `module.setPeer(30202, dispatcher)`  (opBNB)
-- [ ] `module.setPeer(30274, dispatcher)`  (X-Layer)
-- [ ] send-ULN `endpoint.setConfig(...)` for opBNB + X-Layer
+- [ ] send-ULN `endpoint.setConfig(...)` for opBNB
 
 Peers must be set on BOTH sides (here + each dest 3CP's `setPeer(30111, module)`) before recovery works.
 
@@ -140,6 +140,6 @@ Peers must be set on BOTH sides (here + each dest 3CP's `setPeer(30111, module)`
 
 ## Open blockers (gate go-live)
 
-1. opBNB/X-Layer setConfig — built + OP send-side fork-proven; **receive side unconfirmed** until the Phase 0.5 dev round-trip.
+1. opBNB setConfig — built + OP send-side fork-proven; **receive side unconfirmed** until the Phase 0.5 dev round-trip.
 2. Avalanche — **net-new**, and its DVN pathway unverified.
 3. Polygon — gated on audit #136 landing.

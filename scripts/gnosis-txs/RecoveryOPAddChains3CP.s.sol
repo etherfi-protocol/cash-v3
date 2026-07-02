@@ -18,14 +18,13 @@ import { RecoverySetConfigLib } from "../recovery/RecoverySetConfigLib.sol";
  *           - setPeer(30109, dispatcher)   // Polygon
  *           - setPeer(30145, dispatcher)   // Gnosis
  *           - setPeer(30202, dispatcher)   // opBNB
- *           - setPeer(30274, dispatcher)   // X-Layer
  *
  *         The dispatcher is the canonical CREATE3 singleton (same address on every dest chain), so
  *         the peer value is identical for all. Peers must be set on BOTH sides (this + each dest
  *         3CP's dispatcher.setPeer(30111, module)) before recovery to a chain works.
  *
- *         opBNB/X-Layer additionally get a send-ULN endpoint.setConfig() (no default DVN pathway
- *         OP->opBNB/X-Layer) pinning the LZ Labs DVN — see RecoverySetConfigLib.
+ *         opBNB additionally gets a send-ULN endpoint.setConfig() (no default DVN pathway
+ *         OP->opBNB) pinning the LZ Labs DVN — see RecoverySetConfigLib.
  *
  * ponytail TODO (ALL_CHAINS_LAUNCH.md), before go-live:
  *   - Avalanche: add setPeer(30106, dispatcher).
@@ -40,7 +39,6 @@ contract RecoveryOPAddChains3CP is GnosisHelpers, Utils, Test {
     uint32 constant POLYGON_EID = 30109;
     uint32 constant GNOSIS_EID  = 30145;
     uint32 constant OPBNB_EID   = 30202;
-    uint32 constant XLAYER_EID  = 30274;
 
     function run() public {
         require(block.chainid == 10, "must run on Optimism (source)");
@@ -56,13 +54,10 @@ contract RecoveryOPAddChains3CP is GnosisHelpers, Utils, Test {
         txs = _appendSetPeer(txs, module, POLYGON_EID, peer, false);
         txs = _appendSetPeer(txs, module, GNOSIS_EID,  peer, false);
         txs = _appendSetPeer(txs, module, OPBNB_EID,   peer, false);
-        txs = _appendSetPeer(txs, module, XLAYER_EID,  peer, false);
 
-        // opBNB + X-Layer: pin the LZ Labs DVN on the module's SEND config (no default DVN pathway).
+        // opBNB: pin the LZ Labs DVN on the module's SEND config (no default DVN pathway).
         (address t1, bytes memory d1) = RecoverySetConfigLib.opSendConfig(module, OPBNB_EID);
-        txs = _appendCall(txs, t1, d1, false);
-        (address t2, bytes memory d2) = RecoverySetConfigLib.opSendConfig(module, XLAYER_EID);
-        txs = _appendCall(txs, t2, d2, true); // last call in the bundle
+        txs = _appendCall(txs, t1, d1, true); // last call in the bundle
 
         vm.createDir("./output", true);
         string memory path = "./output/Recovery3CP-op-add-chains.json";

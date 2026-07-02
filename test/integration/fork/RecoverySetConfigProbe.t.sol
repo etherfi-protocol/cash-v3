@@ -24,7 +24,7 @@ struct UlnConfig {
 /**
  * @title RecoverySetConfigProbe
  * @notice Answers definitively: if we `setConfig` the OP AssetRecoveryModule's SEND ULN config with
- *         the LZ Labs OP DVN, does `quote()` for OP→opBNB (30202) / OP→X-Layer (30274) succeed?
+ *         the LZ Labs OP DVN, does `quote()` for OP→opBNB (30202) succeed?
  *
  *         This is the real test of whether `setConfig` unblocks these routes — i.e. whether the
  *         LZ Labs OP-side DVN actually covers the destination (can price the route). A passing
@@ -59,11 +59,6 @@ contract RecoverySetConfigProbe is Test {
     function test_opToOpBnb_quotableAfterSetConfig() public {
         _setSendDvn(30202);
         _assertQuotable(30202, "OP->opBNB");
-    }
-
-    function test_opToXLayer_quotableAfterSetConfig() public {
-        _setSendDvn(30274);
-        _assertQuotable(30274, "OP->X-Layer");
     }
 
     /// setConfig the module's SEND ULN config for `dstEid` via RecoverySetConfigLib — this proves the
