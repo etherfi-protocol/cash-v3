@@ -403,7 +403,7 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @dev Sources one token of a debit spend: validates it, sizes the loose/supplied split against the borrowing
-     *      headroom, and frees a stale withdrawal against the loose portion.
+     *      headroom, and cancels a pending withdrawal only when the spend must dip into its reserved balance.
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to source
@@ -427,8 +427,18 @@ contract CashModuleCore is CashModuleStorageContract {
             revert InsufficientBalance();
         }
 
+        // A pending withdrawal reserves loose balance. Prefer the unreserved portion plus the supplied
+        // withdrawal so the request survives (matching CashLens); dip into the reserved portion, cancelling
+        // the request, only when the spend cannot be funded otherwise.
+        {
+            uint256 pending = getPendingWithdrawalAmount(safe, token);
+            uint256 unreserved = loose > pending ? loose - pending : 0;
+            if (unreserved + withdrawable >= amount) {
+                loose = unreserved;
+            }
+        }
+
         uint256 fromLoose = loose < amount ? loose : amount;
-        // A pending withdrawal reserves the loose balance; free it if the loose draw needs it.
         _cancelWithdrawalRequestIfNecessary(safe, token, fromLoose);
 
         // The supplied portion drawn for this token consumes borrowing headroom for later tokens.

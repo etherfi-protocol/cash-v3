@@ -457,6 +457,44 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(to, address(settlementDispatcherReap));
     }
 
+    /// @notice Debit spends preserve pending withdrawals when supplied balance covers the loose shortfall.
+    function test_spend_inDebitMode_preservesPendingWithdrawal_whenSuppliedCoversShortfall() public {
+        // 100 loose with 40 reserved by a pending withdrawal leaves 60 unreserved; the 80 spend takes
+        // the 60 and withdraws the remaining 20 from the Aave-supplied balance, so the request survives.
+        uint256 withdrawalAmount = 40e6;
+        uint256 spendAmount = 80e6;
+        deal(address(usdc), address(safe), 100e6);
+        gateway.setSuppliedOf(address(safe), address(usdc), 200e6);
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        uint256 dispatcherBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
+
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = spendAmount;
+        Cashback[] memory cashbacks;
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, tokens, spendAmounts, cashbacks);
+
+        // Only the unreserved loose balance is spent; the reserved 40 stays for the withdrawal.
+        assertEq(usdc.balanceOf(address(safe)), withdrawalAmount);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBalBefore + 60e6);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
+
+        // The 20 shortfall comes from the Aave-supplied balance.
+        (address s, address asset, uint256 amt, address to) = gateway.lastWithdraw();
+        assertEq(s, address(safe));
+        assertEq(asset, address(usdc));
+        assertEq(amt, spendAmount - 60e6);
+        assertEq(to, address(settlementDispatcherReap));
+    }
+
     function test_spend_reverts_whenArrayLengthMismatch() public {
         // Create mismatched arrays
         address[] memory spendTokens = new address[](2);
