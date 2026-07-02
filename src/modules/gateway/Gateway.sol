@@ -273,7 +273,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     }
 
     /// @inheritdoc IGateway
-    function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused ensuresApproval(safe) {
+    function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
         spoke.setUsingAsCollateral(_reserveIdOf(asset), useAsCollateral, safe);
         emit CollateralUsageSet(safe, asset, useAsCollateral);
     }
