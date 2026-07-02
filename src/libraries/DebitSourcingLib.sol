@@ -7,13 +7,13 @@ import { IGateway } from "../interfaces/IGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 
 /**
- * @title DebitHeadroomLib
+ * @title DebitSourcingLib
  * @notice Shared debit-sizing math for the Cash contracts: how much of a token's Aave-supplied balance can fund
  *         a debit without pushing the safe past its LTV max borrow, and how much borrowing headroom a supplied
  *         withdrawal consumes. CashModuleCore (execution) and CashLens (canSpend) both call it so the two agree.
  * @author ether.fi
  */
-library DebitHeadroomLib {
+library DebitSourcingLib {
     /// @dev The gateway reports LTV on the 100e18 = 100% scale (see IGateway.ltv)
     uint256 internal constant LTV_SCALE = 100e18;
 
@@ -46,10 +46,12 @@ library DebitHeadroomLib {
         return (_toUsd(priceProvider, token, amount) * gateway.ltv(token)) / LTV_SCALE;
     }
 
+    /// @dev USD value of `amount` of `token` at its current price, on PriceProvider's USD scale
     function _toUsd(IPriceProvider priceProvider, address token, uint256 amount) private view returns (uint256) {
         return (amount * priceProvider.price(token)) / (10 ** IERC20Metadata(token).decimals());
     }
 
+    /// @dev Amount of `token` worth `usd` at its current price, inverting _toUsd
     function _fromUsd(IPriceProvider priceProvider, address token, uint256 usd) private view returns (uint256) {
         return (usd * (10 ** IERC20Metadata(token).decimals())) / priceProvider.price(token);
     }

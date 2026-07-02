@@ -10,7 +10,7 @@ import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IGateway } from "../../interfaces/IGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
-import { DebitHeadroomLib } from "../../libraries/DebitHeadroomLib.sol";
+import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
@@ -483,12 +483,12 @@ contract CashLens is UpgradeableProxy {
      *      of this reserve can be withdrawn before the leftover debt exceeds its borrowing power, via its LTV.
      */
     function _withdrawableSupplied(address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256) {
-        return DebitHeadroomLib.withdrawableSupplied(gateway, IPriceProvider(dataProvider.getPriceProvider()), safe, token, borrowHeadroomUsd, hasDebt);
+        return DebitSourcingLib.withdrawableSupplied(gateway, IPriceProvider(dataProvider.getPriceProvider()), safe, token, borrowHeadroomUsd, hasDebt);
     }
 
     /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
     function _headroomConsumed(address token, uint256 amount) internal view returns (uint256) {
-        return DebitHeadroomLib.headroomConsumed(gateway, IPriceProvider(dataProvider.getPriceProvider()), token, amount);
+        return DebitSourcingLib.headroomConsumed(gateway, IPriceProvider(dataProvider.getPriceProvider()), token, amount);
     }
 
     /// @notice Debit spendable for `token` (token units) given the running borrowing headroom, and the headroom that withdrawal consumes

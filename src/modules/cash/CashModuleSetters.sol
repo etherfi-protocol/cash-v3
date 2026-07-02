@@ -77,6 +77,14 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
+     * @notice Returns the Aave gateway contract
+     * @return Gateway instance
+     */
+    function getGateway() public view returns (IGateway) {
+        return _getCashModuleStorage().gateway;
+    }
+
+    /**
      * @notice Configures the withdraw assets whitelist
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
      * @param assets Array of asset addresses to configure 

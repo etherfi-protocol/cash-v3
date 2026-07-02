@@ -16,7 +16,7 @@ import { IGateway } from "../../interfaces/IGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
-import { DebitHeadroomLib } from "../../libraries/DebitHeadroomLib.sol";
+import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
@@ -272,14 +272,6 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Returns the Aave gateway contract
-     * @return Gateway instance
-     */
-    function getGateway() public view returns (IGateway) {
-        return _getCashModuleStorage().gateway;
-    }
-
-    /**
      * @notice Processes a spending transaction with multiple tokens
      * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
@@ -300,9 +292,19 @@ contract CashModuleCore is CashModuleStorageContract {
 
         uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
 
-        if ($.safeCashConfig[safe].mode == Mode.Credit) _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-        else _spendDebit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        _executeSpend($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
         _cashback($, safe, totalSpendingInUsd, cashbacks);
+    }
+
+    /// @dev Runs the mode-specific spend and emits the shared Spend event with the resulting token amounts.
+    function _executeSpend(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
+        Mode mode = $.safeCashConfig[safe].mode;
+
+        uint256[] memory amounts;
+        if (mode == Mode.Credit) amounts = _spendCredit($, safe, binSponsor, tokens, amountsInUsd);
+        else amounts = _spendDebit($, safe, binSponsor, tokens, amountsInUsd);
+
+        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, mode);
     }
 
     function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256) {
@@ -338,11 +340,12 @@ contract CashModuleCore is CashModuleStorageContract {
      * @dev Internal function to execute credit mode spending transaction (single token)
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
-     * @param txId Transaction identifier
+     * @param binSponsor Bin sponsor used for spending
      * @param tokens Addresses of the tokens to spend
      * @param amountsInUsd Amounts to spend in USD
+     * @return Token amounts spent
      */
-    function _spendCredit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd) internal {
+    function _spendCredit(CashModuleStorage storage $, address safe, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd) internal returns (uint256[] memory) {
         // Credit mode validation
         if (!_isBorrowToken($.debtManager, tokens[0])) revert UnsupportedToken();
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
@@ -355,8 +358,7 @@ contract CashModuleCore is CashModuleStorageContract {
 
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
-
-        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
+        return amounts;
     }
 
     /**
@@ -364,18 +366,31 @@ contract CashModuleCore is CashModuleStorageContract {
      *      Aave-supplied balance for any shortfall, both routed to the settlement dispatcher.
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
-     * @param txId Transaction identifier
+     * @param binSponsor Bin sponsor used for spending
      * @param tokens Array of addresses of the tokens to spend
      * @param amountsInUsd Array of amounts to spend in USD
+     * @return Token amounts spent
      */
-    function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
-        (uint256[] memory amounts, uint256[] memory fromLoose) = _sourceDebit($, safe, tokens, amountsInUsd);
+    function _spendDebit(CashModuleStorage storage $, address safe, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256[] memory) {
+        uint256[] memory amounts = new uint256[](tokens.length);
+        uint256[] memory fromLoose = new uint256[](tokens.length);
+
+        // Per token, _sourceDebitToken sizes the loose/supplied split and threads the borrowing headroom across
+        // tokens, so a debit cannot push a debt-carrying safe past its LTV max borrow.
+        {
+            IGateway.AccountData memory account = $.gateway.getAccountData(safe);
+            bool hasDebt = account.debtUsd != 0;
+            uint256 borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
+
+            for (uint256 i = 0; i < tokens.length; i++) {
+                (amounts[i], fromLoose[i], borrowHeadroom) = _sourceDebitToken($, safe, tokens[i], amountsInUsd[i], borrowHeadroom, hasDebt);
+            }
+        }
 
         address dispatcher = getSettlementDispatcher(binSponsor);
         _transferLoose(safe, dispatcher, tokens, fromLoose);
 
-        // _sourceDebit caps each supplied withdrawal by the borrowing headroom, so the debit cannot leave a
-        // debt-carrying safe past its LTV max borrow; no post-withdrawal health check is needed here.
+        // The headroom cap above already bounds the supplied withdrawals; no post-withdrawal health check is needed.
         for (uint256 i = 0; i < tokens.length; i++) {
             uint256 fromSupplied = amounts[i] - fromLoose[i];
             if (fromSupplied != 0) {
@@ -383,26 +398,7 @@ contract CashModuleCore is CashModuleStorageContract {
             }
         }
 
-        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
-    }
-
-    /// @dev Per token, converts the USD amount and checks loose + withdrawable-supplied covers it, then frees a
-    ///      stale withdrawal against the loose portion. When the safe carries debt, the supplied portion is capped
-    ///      by the borrowing headroom (zero for a zero-LTV reserve) and the headroom is threaded across tokens, so
-    ///      a debit cannot push debt past its LTV max borrow. Returns the token amounts and the loose portion of each.
-    function _sourceDebit(CashModuleStorage storage $, address safe, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256[] memory, uint256[] memory) {
-        uint256[] memory amounts = new uint256[](tokens.length);
-        uint256[] memory fromLoose = new uint256[](tokens.length);
-
-        IGateway.AccountData memory account = $.gateway.getAccountData(safe);
-        bool hasDebt = account.debtUsd != 0;
-        uint256 borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
-
-        for (uint256 i = 0; i < tokens.length; i++) {
-            (amounts[i], fromLoose[i], borrowHeadroom) = _sourceDebitToken($, safe, tokens[i], amountsInUsd[i], borrowHeadroom, hasDebt);
-        }
-
-        return (amounts, fromLoose);
+        return amounts;
     }
 
     /// @dev Sources one token of a debit spend: validates it, sizes the loose/supplied split against the borrowing
@@ -416,7 +412,7 @@ contract CashModuleCore is CashModuleStorageContract {
         IPriceProvider priceProvider = IPriceProvider(etherFiDataProvider.getPriceProvider());
 
         uint256 loose = IERC20(token).balanceOf(safe);
-        uint256 withdrawable = DebitHeadroomLib.withdrawableSupplied($.gateway, priceProvider, safe, token, borrowHeadroom, hasDebt);
+        uint256 withdrawable = DebitSourcingLib.withdrawableSupplied($.gateway, priceProvider, safe, token, borrowHeadroom, hasDebt);
         if (loose + withdrawable < amount) {
             revert InsufficientBalance();
         }
@@ -427,7 +423,7 @@ contract CashModuleCore is CashModuleStorageContract {
 
         // The supplied portion drawn for this token consumes borrowing headroom for later tokens.
         if (hasDebt) {
-            uint256 usedUsd = DebitHeadroomLib.headroomConsumed($.gateway, priceProvider, token, amount - fromLoose);
+            uint256 usedUsd = DebitSourcingLib.headroomConsumed($.gateway, priceProvider, token, amount - fromLoose);
             borrowHeadroom = borrowHeadroom > usedUsd ? borrowHeadroom - usedUsd : 0;
         }
 
@@ -562,7 +558,6 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
         uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
-        if (amount == 0) revert AmountZero();
         CashModuleStorage storage $ = _getCashModuleStorage();
         IGateway gateway = $.gateway;
 
