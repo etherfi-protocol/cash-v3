@@ -16,8 +16,8 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         expectedAmount = debtManager.convertUsdToCollateralToken(address(usdc), amountInUsd);
     }
 
-    function test_repay_callsGatewayRepay() public {
-        gateway.setDebtOf(address(safe), address(usdc), expectedAmount);
+    function test_repay_partial_callsGatewayRepayWithExactAmount() public {
+        gateway.setDebtOf(address(safe), address(usdc), expectedAmount * 2);
         deal(address(usdc), address(safe), expectedAmount);
 
         vm.startPrank(etherFiWallet);
@@ -31,9 +31,10 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         assertEq(asset, address(usdc));
         assertEq(amt, expectedAmount);
         assertEq(to, address(0));
+        assertEq(gateway.debtOf(address(safe), address(usdc)), expectedAmount);
     }
 
-    function test_repay_capsAtOutstandingGatewayDebt() public {
+    function test_repay_full_passesMaxSentinelAndEmitsActualRepaid() public {
         uint256 outstandingDebt = expectedAmount / 2;
         uint256 outstandingDebtInUsd = debtManager.convertCollateralTokenToUsd(address(usdc), outstandingDebt);
 
@@ -49,7 +50,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         (address s, address asset, uint256 amt, address to) = gateway.lastRepay();
         assertEq(s, address(safe));
         assertEq(asset, address(usdc));
-        assertEq(amt, outstandingDebt);
+        assertEq(amt, type(uint256).max);
         assertEq(to, address(0));
         assertEq(gateway.debtOf(address(safe), address(usdc)), 0);
     }

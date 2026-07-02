@@ -159,6 +159,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
 
+    /// @notice Error thrown when attempting to configure the Aave gateway after the initial bootstrap
+    error GatewayAlreadySet();
+
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         _disableInitializers();
     }

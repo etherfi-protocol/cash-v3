@@ -272,6 +272,9 @@ interface ICashModule {
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
 
+    /// @notice Error thrown when attempting to configure the Aave gateway after the initial bootstrap
+    error GatewayAlreadySet();
+
     /**
      * @notice Role identifier for EtherFi wallet access control
      * @return The role identifier as bytes32
@@ -485,11 +488,12 @@ interface ICashModule {
     function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external;
 
     /**
-     * @notice Sets the Aave gateway address
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @notice Sets the Aave gateway address for the initial Lend deployment
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE while no gateway is configured
      * @param gateway Address of the gateway contract
      * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
      * @custom:throws InvalidInput if gateway = address(0)
+     * @custom:throws GatewayAlreadySet if the gateway has already been configured
      */
     function setGateway(address gateway) external;
 

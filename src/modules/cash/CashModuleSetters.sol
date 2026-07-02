@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { Mode, BinSponsor, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { BinSponsor, Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
@@ -13,13 +13,12 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
+import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
-import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
-
 
 /**
  * @title CashModule
@@ -31,7 +30,7 @@ contract CashModuleSetters is CashModuleStorageContract {
     using SpendingLimitLib for SpendingLimit;
     using ArrayDeDupLib for address[];
 
-    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { 
+    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) {
         _disableInitializers();
     }
 
@@ -48,7 +47,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        if (binSponsor == BinSponsor.Rain) { 
+        if (binSponsor == BinSponsor.Rain) {
             $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherRain, dispatcher);
             $.settlementDispatcherRain = dispatcher;
         } else if (binSponsor == BinSponsor.PIX) {
@@ -64,17 +63,22 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
-     * @notice Sets the Aave gateway address
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @notice Sets the Aave gateway address for the initial Lend deployment
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE while no gateway is configured
      * @param gateway Address of the gateway contract
      * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
      * @custom:throws InvalidInput if gateway = address(0)
+     * @custom:throws GatewayAlreadySet if the gateway has already been configured
      */
     function setGateway(address gateway) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
         if (gateway == address(0)) revert InvalidInput();
 
         CashModuleStorage storage $ = _getCashModuleStorage();
+        // CashModule was deployed before Lend existed, so this hook is only for the first gateway bootstrap.
+        // Repointing after positions exist can strand accounting and must use a dedicated migration flow.
+        if (address($.gateway) != address(0)) revert GatewayAlreadySet();
+
         $.cashEventEmitter.emitGatewayUpdated(address($.gateway), gateway);
         $.gateway = IGateway(gateway);
     }
@@ -90,7 +94,7 @@ contract CashModuleSetters is CashModuleStorageContract {
     /**
      * @notice Configures the withdraw assets whitelist
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param assets Array of asset addresses to configure 
+     * @param assets Array of asset addresses to configure
      * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
      * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
      * @custom:throws InvalidInput If the arrays are empty
@@ -156,7 +160,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Sets the operating mode for a safe
-     * @dev Switches between Debit and Credit modes with delay 
+     * @dev Switches between Debit and Credit modes with delay
      * @param safe Address of the EtherFi Safe
      * @param mode The target mode (Debit or Credit)
      * @param signer Address of the safe admin signing the transaction
@@ -190,7 +194,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param safe Address of the EtherFi Safe
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
-     * @param recipient Address to receive the withdrawn tokens 
+     * @param recipient Address to receive the withdrawn tokens
      * @param signers Array of safe owner addresses signing the transaction
      * @param signatures Array of signatures from the safe owners
      * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
@@ -202,7 +206,10 @@ contract CashModuleSetters is CashModuleStorageContract {
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
 
-        if (_getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(msg.sender) || _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(recipient))  revert InvalidWithdrawRequest();
+        if (_getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(msg.sender) || _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(recipient)) {
+            revert InvalidWithdrawRequest();
+        }
+
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
 
@@ -227,7 +234,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         amounts[0] = amount;
 
         address recipient = msg.sender; // The module itself is the recipient
-        
+
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
 
@@ -245,7 +252,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         uint256 len = modules.length;
         if (len == 0 || len != shouldWhitelist.length) revert ArrayLengthMismatch();
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             if (shouldWhitelist[i] && !etherFiDataProvider.isWhitelistedModule(modules[i])) revert ModuleNotWhitelistedOnDataProvider();
             unchecked {
                 ++i;
@@ -286,10 +293,10 @@ contract CashModuleSetters is CashModuleStorageContract {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
-        if (!$.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) revert InvalidWithdrawRequest(); 
+        if (!$.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) revert InvalidWithdrawRequest();
         if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanCancel();
         if (!etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
-        
+
         _cancelOldWithdrawal(safe);
     }
 
@@ -351,13 +358,13 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param recipient Address to receive the withdrawn tokens
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
      */
-function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient) internal {
+    function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
         if (tokens.length > 1) tokens.checkDuplicates();
-        
+
         _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 

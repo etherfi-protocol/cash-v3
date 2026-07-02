@@ -83,7 +83,7 @@ contract MockGateway is IGateway {
         uint256 debt = _debtOf[safe][asset];
         uint256 repaid = amount < debt ? amount : debt;
         _debtOf[safe][asset] = debt - repaid;
-        lastRepay = Call(safe, asset, repaid, address(0));
+        lastRepay = Call(safe, asset, amount, address(0));
         return repaid;
     }
 

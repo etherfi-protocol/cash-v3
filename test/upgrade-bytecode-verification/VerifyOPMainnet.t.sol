@@ -196,10 +196,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashLens() public {
-        // CashLens is rewritten for Lend (reads the Aave gateway, takes a gateway constructor arg), so its
+        // CashLens is rewritten for Lend (reads the Aave gateway through CashModule), so its
         // bytecode no longer matches the deployed pre-Lend version. Re-enable after the Lend deployment.
         vm.skip(true);
-        address local = address(new CashLens(cashModuleProxy, dataProviderProxy, address(0)));
+        address local = address(new CashLens(cashModuleProxy, dataProviderProxy));
         _verify("CashLens", cashLensImpl, local);
     }
 

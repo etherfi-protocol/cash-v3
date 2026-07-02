@@ -579,14 +579,16 @@ contract CashModuleCore is CashModuleStorageContract {
         IGateway gateway = $.gateway;
 
         uint256 debt = gateway.debtOf(safe, token);
-        if (debt < amount) {
+        bool fullRepay = amount >= debt;
+        if (fullRepay) {
             amount = debt;
         }
         if (amount == 0) revert AmountZero();
         _cancelWithdrawalRequestIfNecessary(safe, token, amount);
 
         // Gateway repays the safe's Aave debt on its behalf, pulling the repay token from the safe.
-        uint256 repaid = gateway.repay(safe, token, amount);
+        // Full repays pass the max sentinel so no interest dust survives the exact-amount rounding.
+        uint256 repaid = gateway.repay(safe, token, fullRepay ? type(uint256).max : amount);
         uint256 repaidInUsd = debtManager.convertCollateralTokenToUsd(token, repaid);
         $.cashEventEmitter.emitRepayDebtManager(safe, token, repaid, repaidInUsd);
     }
