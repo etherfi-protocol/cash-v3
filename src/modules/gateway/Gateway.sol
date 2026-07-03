@@ -143,6 +143,9 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * @dev Reverts unless the Spoke's reserve `reserveId` has `underlying == asset`
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId for the asset
+     * @dev Warning: do not re-point an asset safes already hold positions under; 
+     * the USD views then read the new reserve and miss the old, understating debt and 
+     * inflating borrow headroom.
      */
     function setReserveId(address asset, uint256 reserveId) external onlyRole(GATEWAY_ADMIN_ROLE) {
         if (asset == address(0)) revert ZeroAddress();
@@ -158,6 +161,8 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     /**
      * @notice De-registers an asset
      * @param asset The asset to remove from the registry
+     * @dev Warning: do not remove an asset any safe still holds a position in; 
+     * it drops from the USD views (debt reads 0), understating debt and inflating borrow headroom.
      */
     function removeReserve(address asset) external onlyRole(GATEWAY_ADMIN_ROLE) {
         GatewayStorage storage $ = _getGatewayStorage();

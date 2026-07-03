@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { Test } from "forge-std/Test.sol";
 
+import { AccessManagerEnumerable } from "aave-v4/access/AccessManagerEnumerable.sol";
 import { IAccessManager } from "aave-v4/dependencies/openzeppelin/IAccessManager.sol";
 import { TransparentUpgradeableProxy } from "aave-v4/dependencies/openzeppelin/TransparentUpgradeableProxy.sol";
-import { AccessManagerEnumerable } from "aave-v4/access/AccessManagerEnumerable.sol";
 import { AssetInterestRateStrategy } from "aave-v4/hub/AssetInterestRateStrategy.sol";
+import { HubInstance } from "aave-v4/hub/instances/HubInstance.sol";
 import { IAssetInterestRateStrategy } from "aave-v4/hub/interfaces/IAssetInterestRateStrategy.sol";
 import { IHub } from "aave-v4/hub/interfaces/IHub.sol";
-import { HubInstance } from "aave-v4/hub/instances/HubInstance.sol";
+import { Roles } from "aave-v4/libraries/types/Roles.sol";
 import { AaveOracle } from "aave-v4/spoke/AaveOracle.sol";
+import { SpokeInstance } from "aave-v4/spoke/instances/SpokeInstance.sol";
+import { TreasurySpokeInstance } from "aave-v4/spoke/instances/TreasurySpokeInstance.sol";
 import { IAaveOracle } from "aave-v4/spoke/interfaces/IAaveOracle.sol";
 import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 import { ITreasurySpoke } from "aave-v4/spoke/interfaces/ITreasurySpoke.sol";
-import { SpokeInstance } from "aave-v4/spoke/instances/SpokeInstance.sol";
-import { TreasurySpokeInstance } from "aave-v4/spoke/instances/TreasurySpokeInstance.sol";
-import { Roles } from "aave-v4/libraries/types/Roles.sol";
 
 /// @dev Minimal init interface shared by the hub/spoke/treasury proxy implementations
 interface IProxyInit {
@@ -100,7 +100,7 @@ abstract contract AaveV4Fixture is Test {
         accessManager.setTargetFunctionRole(address(hub), hubSelectors, Roles.HUB_ADMIN_ROLE);
 
         // A permissive liquidation config, so borrows/withdrawals are governed by collateral factors alone
-        spoke.updateLiquidationConfig(ISpoke.LiquidationConfig({ targetHealthFactor: 1.05e18, healthFactorForMaxBonus: 0.7e18, liquidationBonusFactor: 20_00 }));
+        spoke.updateLiquidationConfig(ISpoke.LiquidationConfig({ targetHealthFactor: 1.05e18, healthFactorForMaxBonus: 0.7e18, liquidationBonusFactor: 2000 }));
 
         vm.stopPrank();
     }
@@ -115,20 +115,14 @@ abstract contract AaveV4Fixture is Test {
     function _addAaveReserve(address token, address priceSource, uint16 collateralFactorBps, bool borrowable) internal returns (uint256 reserveId) {
         vm.startPrank(aaveAdmin);
 
-        bytes memory irData = abi.encode(IAssetInterestRateStrategy.InterestRateData({ optimalUsageRatio: 90_00, baseDrawnRate: 5_00, rateGrowthBeforeOptimal: 5_00, rateGrowthAfterOptimal: 5_00 }));
+        bytes memory irData = abi.encode(IAssetInterestRateStrategy.InterestRateData({ optimalUsageRatio: 9000, baseDrawnRate: 500, rateGrowthBeforeOptimal: 500, rateGrowthAfterOptimal: 500 }));
 
         uint256 assetId = hub.addAsset(token, IERC20Metadata(token).decimals(), address(treasurySpoke), address(irStrategy), irData);
-        hub.updateAssetConfig(assetId, IHub.AssetConfig({ feeReceiver: address(treasurySpoke), liquidityFee: 10_00, irStrategy: address(irStrategy), reinvestmentController: address(0) }), new bytes(0));
+        hub.updateAssetConfig(assetId, IHub.AssetConfig({ feeReceiver: address(treasurySpoke), liquidityFee: 1000, irStrategy: address(irStrategy), reinvestmentController: address(0) }), new bytes(0));
 
-        reserveId = spoke.addReserve(
-            address(hub),
-            assetId,
-            priceSource,
-            ISpoke.ReserveConfig({ paused: false, frozen: false, borrowable: borrowable, receiveSharesEnabled: true, collateralRisk: 0 }),
-            ISpoke.DynamicReserveConfig({ collateralFactor: collateralFactorBps, maxLiquidationBonus: 105_00, liquidationFee: 10_00 })
-        );
+        reserveId = spoke.addReserve(address(hub), assetId, priceSource, ISpoke.ReserveConfig({ paused: false, frozen: false, borrowable: borrowable, receiveSharesEnabled: true, collateralRisk: 0 }), ISpoke.DynamicReserveConfig({ collateralFactor: collateralFactorBps, maxLiquidationBonus: 10_500, liquidationFee: 1000 }));
 
-        hub.addSpoke(assetId, address(spoke), IHub.SpokeConfig({ addCap: type(uint40).max, drawCap: type(uint40).max, riskPremiumThreshold: 1000_00, active: true, halted: false }));
+        hub.addSpoke(assetId, address(spoke), IHub.SpokeConfig({ addCap: type(uint40).max, drawCap: type(uint40).max, riskPremiumThreshold: 100_000, active: true, halted: false }));
 
         vm.stopPrank();
     }

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { Test } from "forge-std/Test.sol";
 
+import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { Gateway } from "../../src/modules/gateway/Gateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
 import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 
@@ -89,8 +89,8 @@ contract GatewayInvariantTest is CashModuleTestSetup, AaveV4Fixture {
         _deployAaveV4();
 
         address weethSource = address(new ChainlinkCompositePriceFeed(IAggregatorV3(weEthWethOracle), IAggregatorV3(ethUsdcOracle), 8, 30 days, 30 days, "weETH / USD"));
-        weethReserveId = _addAaveReserve(address(weETH), weethSource, 80_00, false);
-        usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 80_00, true);
+        weethReserveId = _addAaveReserve(address(weETH), weethSource, 8000, false);
+        usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 8000, true);
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
         address gwImpl = address(new Gateway(address(dataProvider), address(spoke)));
