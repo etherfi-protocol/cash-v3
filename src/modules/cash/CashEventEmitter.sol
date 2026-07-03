@@ -175,6 +175,13 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param newDispatcher Address of the new dispatcher for the bin sponsor
      */
     event SettlementDispatcheUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher);
+
+    /**
+     * @notice Emitted when the gateway is updated
+     * @param oldGateway Address of the previous gateway
+     * @param newGateway Address of the new gateway
+     */
+    event GatewayUpdated(address oldGateway, address newGateway);
     
     /**
      * @notice Emitted when the withdrawal tokens are updated
@@ -217,6 +224,15 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external onlyCashModule {
         emit SettlementDispatcheUpdated(binSponsor, oldDispatcher, newDispatcher);
+    }
+
+    /**
+     * @notice Emits the GatewayUpdated event
+     * @param oldGateway Address of the previous gateway
+     * @param newGateway Address of the new gateway
+     */
+    function emitGatewayUpdated(address oldGateway, address newGateway) external onlyCashModule {
+        emit GatewayUpdated(oldGateway, newGateway);
     }
 
     /**

@@ -180,7 +180,7 @@ contract SafeTestSetup is Utils {
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
         gateway = new MockGateway();
-        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider), address(gateway)));
+        address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
         dataProvider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), address(cashLens), modules, defaultModules, address(hook), address(safeFactory), address(priceProvider), etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
@@ -202,6 +202,8 @@ contract SafeTestSetup is Utils {
 
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
+
+        cashModule.setGateway(address(gateway));
 
         _setupWithdrawTokenWhitelist();
 

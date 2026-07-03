@@ -5,6 +5,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IGateway } from "../interfaces/IGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
@@ -207,9 +208,6 @@ interface ICashModule {
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
 
-    /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
-    error BorrowingsExceedMaxBorrowAfterSpending();
-
     /// @notice Error thrown when a recipient address is zero
     error RecipientCannotBeAddressZero();
 
@@ -274,6 +272,9 @@ interface ICashModule {
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
 
+    /// @notice Error thrown when attempting to configure the Aave gateway after the initial bootstrap
+    error GatewayAlreadySet();
+
     /**
      * @notice Role identifier for EtherFi wallet access control
      * @return The role identifier as bytes32
@@ -334,6 +335,12 @@ interface ICashModule {
      * @return settlementDispatcher The address of the settlement dispatcher
      */
     function getSettlementDispatcher(BinSponsor binSponsor) external view returns (address settlementDispatcher);
+
+    /**
+     * @notice Returns the Aave gateway contract
+     * @return Gateway instance
+     */
+    function getGateway() external view returns (IGateway);
 
     /**
      * @notice Returns the EtherFiDataProvider contract reference
@@ -479,6 +486,16 @@ interface ICashModule {
      * @custom:throws InvalidInput if caller doesn't have the controller role
      */
     function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external;
+
+    /**
+     * @notice Sets the Aave gateway address for the initial Lend deployment
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE while no gateway is configured
+     * @param gateway Address of the gateway contract
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws InvalidInput if gateway = address(0)
+     * @custom:throws GatewayAlreadySet if the gateway has already been configured
+     */
+    function setGateway(address gateway) external;
 
     /**
      * @notice Sets the tier for one or more safes

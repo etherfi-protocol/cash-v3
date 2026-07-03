@@ -10,6 +10,7 @@ import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IGateway } from "../../interfaces/IGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
+import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
@@ -41,11 +42,6 @@ contract CashLens is UpgradeableProxy {
     ICashModule public immutable cashModule;
     /// @notice Reference to the deployed EtherFiDataProvider contract
     IEtherFiDataProvider public immutable dataProvider;
-    /// @notice Reference to the Aave gateway that holds the Safe's position
-    IGateway public immutable gateway;
-
-    /// @notice Percentage denominator (100e18 = 100%), matching the gateway's ltv scale and DebtManager's CollateralTokenConfig.ltv
-    uint256 internal constant HUNDRED_PERCENT = 100e18;
 
     /// @notice Error thrown when trying to use a token that is not on the collateral whitelist
     error NotACollateralToken();
@@ -56,12 +52,10 @@ contract CashLens is UpgradeableProxy {
      * @notice Initializes the CashLens contract with its dependencies
      * @param _cashModule Address of the deployed CashModule contract
      * @param _dataProvider Address of the deployed EtherFiDataProvider contract
-     * @param _gateway Address of the Aave gateway
      */
-    constructor(address _cashModule, address _dataProvider, address _gateway) {
+    constructor(address _cashModule, address _dataProvider) {
         cashModule = ICashModule(_cashModule);
         dataProvider = IEtherFiDataProvider(_dataProvider);
-        gateway = IGateway(_gateway);
 
         _disableInitializers();
     }
@@ -73,6 +67,11 @@ contract CashLens is UpgradeableProxy {
      */
     function initialize(address _roleRegistry) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
+    }
+
+    /// @notice Returns the Aave gateway currently configured on CashModule
+    function gateway() public view returns (IGateway) {
+        return cashModule.getGateway();
     }
 
     /**
@@ -182,12 +181,13 @@ contract CashLens is UpgradeableProxy {
             return (false, "Not a supported borrow token");
         }
 
-        if (gateway.availableCash(token) < _fromUsd(token, totalSpendingInUsd)) {
+        IGateway lendGateway = cashModule.getGateway();
+        if (lendGateway.availableCash(token) < _fromUsd(token, totalSpendingInUsd)) {
             return (false, "Insufficient liquidity to cover the loan");
         }
 
         // availableBorrowsUsd is the supplied position's capacity; a pending sits against the loose balance, so it is not deducted here
-        if (totalSpendingInUsd > gateway.getAccountData(safe).availableBorrowsUsd) {
+        if (totalSpendingInUsd > lendGateway.getAccountData(safe).availableBorrowsUsd) {
             return (false, "Insufficient borrowing power");
         }
 
@@ -197,9 +197,13 @@ contract CashLens is UpgradeableProxy {
     /// @notice Debit mode check: each token's spendable amount must cover its share of the spend, threading the borrowing headroom across tokens
     function _debitCheck(address safe, address[] memory tokens, uint256[] memory amountsInUsd, SafeData memory safeData) internal view returns (bool, string memory) {
         IDebtManager debtManager = cashModule.getDebtManager();
-        IGateway.AccountData memory account = gateway.getAccountData(safe);
-        bool hasDebt = account.debtUsd != 0;
-        uint256 borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
+        bool hasDebt;
+        uint256 borrowHeadroom;
+        {
+            IGateway.AccountData memory account = gateway().getAccountData(safe);
+            hasDebt = account.debtUsd != 0;
+            borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
+        }
 
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
@@ -257,7 +261,7 @@ contract CashLens is UpgradeableProxy {
         IDebtManager debtManager = cashModule.getDebtManager();
         IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
         SafeData memory safeData = cashModule.getData(safe);
-        IGateway.AccountData memory account = gateway.getAccountData(safe);
+        IGateway.AccountData memory account = gateway().getAccountData(safe);
 
         SafeCashData memory data;
 
@@ -330,7 +334,7 @@ contract CashLens is UpgradeableProxy {
         bool hasDebt;
         uint256 borrowHeadroom;
         {
-            IGateway.AccountData memory account = gateway.getAccountData(safe);
+            IGateway.AccountData memory account = gateway().getAccountData(safe);
             hasDebt = account.debtUsd != 0;
             if (hasDebt) {
                 borrowHeadroom = account.availableBorrowsUsd;
@@ -371,12 +375,13 @@ contract CashLens is UpgradeableProxy {
      * @return Maximum amount that can be spent in credit mode (USD, 6 decimals)
      */
     function getMaxSpendCredit(address safe) public view returns (uint256) {
-        uint256 borrowPower = gateway.getAccountData(safe).availableBorrowsUsd;
+        IGateway lendGateway = cashModule.getGateway();
+        uint256 borrowPower = lendGateway.getAccountData(safe).availableBorrowsUsd;
 
         address[] memory borrowTokens = cashModule.getDebtManager().getBorrowTokens();
         uint256 maxLiquidityUsd = 0;
         for (uint256 i = 0; i < borrowTokens.length;) {
-            uint256 liquidityUsd = _toUsd(borrowTokens[i], gateway.availableCash(borrowTokens[i]));
+            uint256 liquidityUsd = _toUsd(borrowTokens[i], lendGateway.availableCash(borrowTokens[i]));
             if (liquidityUsd > maxLiquidityUsd) {
                 maxLiquidityUsd = liquidityUsd;
             }
@@ -485,28 +490,12 @@ contract CashLens is UpgradeableProxy {
      *      of this reserve can be withdrawn before the leftover debt exceeds its borrowing power, via its LTV.
      */
     function _withdrawableSupplied(address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256) {
-        uint256 supplied = gateway.suppliedOf(safe, token);
-        uint256 cash = gateway.availableCash(token);
-        uint256 cap = supplied < cash ? supplied : cash;
-
-        if (hasDebt) {
-            uint256 ltv = gateway.ltv(token);
-            // A zero-LTV reserve has no borrow weight, so a withdrawal against debt cannot be sized safely; stay conservative
-            if (ltv == 0) {
-                return 0;
-            }
-            uint256 headroomCap = _fromUsd(token, (borrowHeadroomUsd * HUNDRED_PERCENT) / ltv);
-            if (headroomCap < cap) {
-                cap = headroomCap;
-            }
-        }
-
-        return cap;
+        return DebitSourcingLib.withdrawableSupplied(gateway(), IPriceProvider(dataProvider.getPriceProvider()), safe, token, borrowHeadroomUsd, hasDebt);
     }
 
     /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
     function _headroomConsumed(address token, uint256 amount) internal view returns (uint256) {
-        return (_toUsd(token, amount) * gateway.ltv(token)) / HUNDRED_PERCENT;
+        return DebitSourcingLib.headroomConsumed(gateway(), IPriceProvider(dataProvider.getPriceProvider()), token, amount);
     }
 
     /// @notice Debit spendable for `token` (token units) given the running borrowing headroom, and the headroom that withdrawal consumes
@@ -533,10 +522,11 @@ contract CashLens is UpgradeableProxy {
 
     /// @notice Per-token supplied position in the Safe's Aave account, skipping zero balances
     function _suppliedBalances(address safe, address[] memory tokens) internal view returns (IDebtManager.TokenData[] memory) {
+        IGateway lendGateway = cashModule.getGateway();
         IDebtManager.TokenData[] memory out = new IDebtManager.TokenData[](tokens.length);
         uint256 m = 0;
         for (uint256 i = 0; i < tokens.length;) {
-            uint256 amount = gateway.suppliedOf(safe, tokens[i]);
+            uint256 amount = lendGateway.suppliedOf(safe, tokens[i]);
             if (amount != 0) {
                 out[m] = IDebtManager.TokenData({ token: tokens[i], amount: amount });
                 unchecked {
@@ -557,10 +547,11 @@ contract CashLens is UpgradeableProxy {
 
     /// @notice Per-token debt in the Safe's Aave account, skipping zero balances
     function _debtBalances(address safe, address[] memory tokens) internal view returns (IDebtManager.TokenData[] memory) {
+        IGateway lendGateway = cashModule.getGateway();
         IDebtManager.TokenData[] memory out = new IDebtManager.TokenData[](tokens.length);
         uint256 m = 0;
         for (uint256 i = 0; i < tokens.length;) {
-            uint256 amount = gateway.debtOf(safe, tokens[i]);
+            uint256 amount = lendGateway.debtOf(safe, tokens[i]);
             if (amount != 0) {
                 out[m] = IDebtManager.TokenData({ token: tokens[i], amount: amount });
                 unchecked {

@@ -75,6 +75,12 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         // Borrow some tokens first to have both collateral and borrows
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        (address borrowedSafe, address borrowedAsset, uint256 borrowedAmount, address borrowRecipient) = gateway.lastBorrow();
+        assertEq(borrowedSafe, address(safe));
+        assertEq(borrowedAsset, address(usdc));
+        assertApproxEqAbs(borrowedAmount, borrowAmt, 1);
+        assertEq(borrowRecipient, address(settlementDispatcherReap));
         
         // Get user state
         (
@@ -92,11 +98,9 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         uint256 expectedCollateralInUsd = debtManager.convertCollateralTokenToUsd(address(weETH), collateralAmount);
         assertEq(totalCollateralInUsd, expectedCollateralInUsd, "Total collateral in USD should match");
         
-        // Verify borrowing data
-        assertEq(borrowings.length, 1, "Should have one borrowed token");
-        assertEq(borrowings[0].token, address(usdc), "Borrowed token should be USDC");
-        assertApproxEqAbs(borrowings[0].amount, borrowAmt, 1, "Borrowed amount should match");
-        assertApproxEqAbs(totalBorrowings, borrowAmt, 1, "Total borrowings should match");
+        // CashModule borrows are now gateway/Aave debt, so DebtManager's own borrowing view stays empty.
+        assertEq(borrowings.length, 0, "DebtManager should not include gateway borrows");
+        assertEq(totalBorrowings, 0, "DebtManager total borrowings should not include gateway borrows");
     }
 
     // Test getCollateralValueInUsd

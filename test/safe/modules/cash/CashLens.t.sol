@@ -7,6 +7,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 
 import { Mode, SafeCashData, BinSponsor, SafeData, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
+import { IGateway } from "../../../../src/interfaces/IGateway.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -206,35 +207,19 @@ contract CashLensTest is CashModuleTestSetup {
 
         uint256 spendAmount = 1000e6;
 
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdc);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmount;
-
-        Cashback[] memory cashbacks = new Cashback[](1);
-        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
-
-        CashbackTokens memory scr = CashbackTokens({
-            token: address(cashbackToken),
-            amountInUsd: 1e6,
-            cashbackType: 0
-        });
-
-        cashbackTokens[0] = scr;
-
-        Cashback memory scrCashback = Cashback({
-            to: address(safe),
-            cashbackTokens: cashbackTokens
-        });
-
-        cashbacks[0] = scrCashback;
-        
-        // Spend in credit mode to create a borrow
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+        // Mirror the current position (collateral only; no real borrow was executed, so debt is 0).
+        _mirrorPositionToGateway(address(safe));
+        // Layer a fabricated borrow on top for CashLens to read.
+        IGateway.AccountData memory account = gateway.getAccountData(address(safe));
+        gateway.setDebtOf(address(safe), address(usdc), spendAmount);
+        gateway.setAccountData(address(safe), IGateway.AccountData({
+            collateralUsd: account.collateralUsd,
+            debtUsd: spendAmount,
+            availableBorrowsUsd: account.availableBorrowsUsd > spendAmount ? account.availableBorrowsUsd - spendAmount : 0,
+            healthFactor: account.healthFactor
+        }));
 
         // Get safe cash data
-        _mirrorPositionToGateway(address(safe));
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
         
         // Verify borrows

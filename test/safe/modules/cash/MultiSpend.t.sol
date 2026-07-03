@@ -9,6 +9,7 @@ import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 import { ICashModule, Mode, BinSponsor, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
+import { IGateway } from "../../../../src/interfaces/IGateway.sol";
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { UpgradeableProxy } from "../../../../src/utils/UpgradeableProxy.sol";
@@ -617,6 +618,90 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         expectedIncreases[2] = debtManager.convertUsdToCollateralToken(address(cashbackToken), scrAmountInUsd);
         
         _verifySettlementDispatcherBalances(initialBalances, expectedIncreases);
+    }
+
+    // Debit spend across two tokens while the safe carries Aave debt: usdc is fully sourced from the loose
+    // balance, weETH from a mix of loose and Aave-supplied balance, and the supplied withdrawal is sized
+    // against the borrowing headroom.
+    function test_spend_multiToken_mixedLooseAndSupplied_withDebt() public {
+        uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), 50e6); // fully from the loose balance
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), 40e6); // part loose, part from Aave
+        uint256 weETHLoose = debtManager.convertUsdToCollateralToken(address(weETH), 10e6); // $10 of the weETH sits loose
+
+        // Fund loose balances; weETH's remaining spend is backed by its Aave-supplied balance.
+        deal(address(usdc), address(safe), usdcAmount);
+        deal(address(weETH), address(safe), weETHLoose);
+        gateway.setLtv(address(usdc), 80e18);
+        gateway.setLtv(address(weETH), 80e18);
+        gateway.setSuppliedOf(address(safe), address(weETH), weETHAmount);
+        gateway.setAvailableCash(address(weETH), type(uint128).max);
+
+        // Safe carries debt with ample borrowing headroom, so the weETH withdrawal is allowed.
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 500e6, debtUsd: 100e6, availableBorrowsUsd: 100e6, healthFactor: 1e18 }));
+
+        uint256 dispatcherUsdcBefore = usdc.balanceOf(address(settlementDispatcherReap));
+        uint256 dispatcherWeETHBefore = weETH.balanceOf(address(settlementDispatcherReap));
+
+        {
+            address[] memory spendTokens = new address[](2);
+            spendTokens[0] = address(usdc);
+            spendTokens[1] = address(weETH);
+            uint256[] memory spendAmounts = new uint256[](2);
+            spendAmounts[0] = 50e6;
+            spendAmounts[1] = 40e6;
+            uint256[] memory tokenAmounts = new uint256[](2);
+            tokenAmounts[0] = usdcAmount;
+            tokenAmounts[1] = weETHAmount;
+
+            Cashback[] memory cashbacks;
+
+            vm.prank(etherFiWallet);
+            vm.expectEmit(true, true, true, true);
+            emit CashEventEmitter.Spend(address(safe), txId, BinSponsor.Reap, spendTokens, tokenAmounts, spendAmounts, 90e6, Mode.Debit);
+            cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+        }
+
+        // Loose balances of both tokens are drained to the dispatcher.
+        assertEq(usdc.balanceOf(address(safe)), 0);
+        assertEq(weETH.balanceOf(address(safe)), 0);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherUsdcBefore + usdcAmount);
+        assertEq(weETH.balanceOf(address(settlementDispatcherReap)), dispatcherWeETHBefore + weETHLoose);
+
+        // The weETH shortfall is withdrawn from the Aave-supplied balance via the gateway (usdc needed no withdrawal).
+        (address s, address asset, uint256 amt, address to) = gateway.lastWithdraw();
+        assertEq(s, address(safe));
+        assertEq(asset, address(weETH));
+        assertEq(amt, weETHAmount - weETHLoose);
+        assertEq(to, address(settlementDispatcherReap));
+    }
+
+    // With debt, the borrowing headroom is shared across every token in one debit: usdc's Aave withdrawal
+    // consumes it first, leaving too little for weETH's, so the spend reverts. Either token alone would fit.
+    function test_spend_multiToken_revertsWhenSuppliedDrawsExceedSharedHeadroom_withDebt() public {
+        // Both tokens are sourced from their Aave-supplied balances (no loose funding).
+        gateway.setLtv(address(usdc), 80e18);
+        gateway.setLtv(address(weETH), 80e18);
+        gateway.setSuppliedOf(address(safe), address(usdc), debtManager.convertUsdToCollateralToken(address(usdc), 100e6));
+        gateway.setSuppliedOf(address(safe), address(weETH), debtManager.convertUsdToCollateralToken(address(weETH), 100e6));
+        gateway.setAvailableCash(address(usdc), type(uint128).max);
+        gateway.setAvailableCash(address(weETH), type(uint128).max);
+
+        // $40 headroom at 80% LTV funds $50 of withdrawals in total. usdc's $30 draw spends $24 of it, leaving
+        // room for only $20 of weETH, short of its $30 draw.
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 500e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
+
+        address[] memory spendTokens = new address[](2);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
+        uint256[] memory spendAmounts = new uint256[](2);
+        spendAmounts[0] = 30e6;
+        spendAmounts[1] = 30e6;
+
+        Cashback[] memory cashbacks;
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
         // Helper function to fund the safe with a specific token amount

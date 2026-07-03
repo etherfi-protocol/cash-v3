@@ -10,6 +10,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -71,6 +72,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address settlementDispatcherPix;
         /// @notice Address of the SettlementDispatcher for CardOrder
         address settlementDispatcherCardOrder;
+        /// @notice The Aave gateway that runs position operations (borrow/withdraw/repay) on a safe's behalf
+        IGateway gateway;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -102,9 +105,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
-
-    /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
-    error BorrowingsExceedMaxBorrowAfterSpending();
 
     /// @notice Error thrown when a recipient address is set to zero
     error RecipientCannotBeAddressZero();
@@ -159,6 +159,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
 
+    /// @notice Error thrown when attempting to configure the Aave gateway after the initial bootstrap
+    error GatewayAlreadySet();
+
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         _disableInitializers();
     }
@@ -205,17 +208,19 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @dev Cancels withdrawal request if necessary based on available balance
+     * @dev The upcoming outflow and a pending withdrawal are competing claims on the safe's balance.
+     *      If the balance cannot honor both, the outflow wins: the whole request is cancelled (requests
+     *      are all-or-nothing across their tokens). No-op if no pending withdrawal holds this token.
      * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to update
-     * @param amount Amount being processed
-     * @custom:throws InsufficientBalance if there is not enough balance for the operation
+     * @param token Address of the token about to leave the safe
+     * @param outflow Amount about to leave the safe
+     * @custom:throws InsufficientBalance if the safe's balance cannot cover the outflow itself
      */
-    function _cancelWithdrawalRequestIfNecessary(address safe, address token, uint256 amount) internal {
+    function _cancelConflictingWithdrawal(address safe, address token, uint256 outflow) internal {
         SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
         uint256 balance = IERC20(token).balanceOf(safe);
 
-        if (amount > balance) revert InsufficientBalance();
+        if (outflow > balance) revert InsufficientBalance();
 
         uint256 len = safeCashConfig.pendingWithdrawalRequest.tokens.length;
         uint256 tokenIndex = len;
@@ -232,7 +237,10 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         // If the token does not exist in withdrawal request, return
         if (tokenIndex == len) return;
 
-        if (amount + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
+        // The pending withdrawal reserves part of the balance; balance - pending is the unreserved rest.
+        // An outflow larger than that dips into the reservation, so the request can no longer be honored
+        // afterwards: cancel it and free the reservation.
+        if (outflow + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
             _cancelOldWithdrawal(safe);
         }
     }
