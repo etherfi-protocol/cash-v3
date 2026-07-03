@@ -90,4 +90,25 @@ contract ModuleGatewaySandwichTest is Test {
         vm.expectRevert(ModuleGatewaySandwich.OperationBreachesHealth.selector);
         harness.runSandwich(safe, asset, AMOUNT);
     }
+
+    // When lend is disabled for the safe, the withdraw bookend is a no-op: its assets already sit in the safe.
+    function test_withdraw_noOpWhenLendDisabled() public {
+        gateway.setLendEnabled(safe, false);
+        harness.withdrawFromGateway(safe, asset, AMOUNT);
+
+        (address s,, uint256 amount,) = gateway.lastWithdraw();
+        assertEq(s, address(0), "no withdraw call recorded");
+        assertEq(amount, 0);
+    }
+
+    // When lend is disabled, the resupply bookend is a no-op: the output stays in the safe, nothing goes to Aave.
+    function test_resupply_noOpWhenLendDisabled() public {
+        gateway.setLendEnabled(safe, false);
+        harness.resupplyToGateway(safe, asset, AMOUNT);
+
+        (address s,, uint256 amount,) = gateway.lastSupply();
+        assertEq(s, address(0), "no supply call recorded");
+        assertEq(amount, 0);
+        assertFalse(gateway.usingAsCollateral(safe, asset), "collateral flag untouched");
+    }
 }

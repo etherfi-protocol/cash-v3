@@ -188,6 +188,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashModuleSetters() public {
+        // CashModuleSetters gains the lend opt-out (setLendGateway/toggleLend) for Lend, so its bytecode no
+        // longer matches the deployed pre-Lend version. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new CashModuleSetters(dataProviderProxy));
         _verify("CashModuleSetters", cashModuleSettersImpl, local);
     }

@@ -10,6 +10,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -71,7 +72,18 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address settlementDispatcherPix;
         /// @notice Address of the SettlementDispatcher for CardOrder
         address settlementDispatcherCardOrder;
+        /// @notice The Aave v4 gateway used to withdraw collateral when a safe opts out of lend
+        IGateway gateway;
     }
+
+    /// @notice Emitted when a safe requests to disable lend (opt out of Aave); executable after finalizeTime
+    event LendDisableRequested(address indexed safe, uint256 finalizeTime);
+    /// @notice Emitted when a safe's lend is disabled: collateral withdrawn from Aave, mode forced to Debit
+    event LendDisableExecuted(address indexed safe);
+    /// @notice Emitted when a safe re-enables lend (opts back into Aave)
+    event LendEnabled(address indexed safe);
+    /// @notice Emitted when the lend gateway is configured
+    event LendGatewaySet(address indexed gateway);
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant CashModuleStorageLocation = 0xe000c7adec5855bcf51f74b73aa86172d0a325bc54c3f73cb406d259df90ea00;
@@ -158,6 +170,21 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
+
+    /// @notice Error thrown when a lend op is attempted while the safe has opted out of lend
+    error LendDisabled();
+    /// @notice Error thrown when disabling lend while the safe still has open borrows
+    error HasOpenBorrows();
+    /// @notice Error thrown when executing a disable-lend that was never requested
+    error NoPendingLendDisable();
+    /// @notice Error thrown when executing a disable-lend before its delay has elapsed
+    error LendDisableNotReady();
+    /// @notice Error thrown when disabling lend that is already disabled, or when a request is already pending
+    error LendAlreadyDisabled();
+    /// @notice Error thrown when enabling lend that is already enabled
+    error LendNotDisabled();
+    /// @notice Error thrown when the lend gateway has not been configured
+    error LendGatewayNotSet();
 
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         _disableInitializers();
@@ -267,6 +294,81 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
             delete $.incomingModeStartTime;
             delete $.incomingMode;
         }
+    }
+
+    /**
+     * @dev Whether a safe has any open borrows (Aave debt via the gateway, or legacy DebtManager debt).
+     *      Disabling lend is only allowed with zero debt — the collateral backing it is about to leave Aave.
+     */
+    function _hasOpenBorrows(address safe) internal view returns (bool) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        if (address($.gateway) != address(0) && $.gateway.getAccountData(safe).debtUsd != 0) return true;
+        (, uint256 debtManagerDebt) = $.debtManager.borrowingOf(safe);
+        return debtManagerDebt != 0;
+    }
+
+    /**
+     * @dev Records a request to disable lend for a safe (executable after modeDelay). Reverts if lend is
+     *      already disabled/pending or the safe has open borrows. Executes immediately if the delay is zero.
+     */
+    function _requestDisableLend(address safe) internal {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
+
+        if ($$.lendDisabled || $$.lendDisableFinalizeTime != 0) revert LendAlreadyDisabled();
+        if (_hasOpenBorrows(safe)) revert HasOpenBorrows();
+
+        uint96 finalizeTime = uint96(block.timestamp) + $.modeDelay;
+        $$.lendDisableFinalizeTime = finalizeTime;
+        emit LendDisableRequested(safe, finalizeTime);
+
+        if ($.modeDelay == 0) _disableLend(safe);
+    }
+
+    /**
+     * @dev Executes the disable-lend: withdraws ALL of the safe's Aave collateral back to the safe, marks
+     *      lend disabled, and forces the safe into Debit mode (credit is impossible without lend collateral).
+     *      The whole thing reverts if the gateway isn't set. Re-checks no open borrows at the call sites.
+     */
+    function _disableLend(address safe) internal {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        IGateway gateway = $.gateway;
+        if (address(gateway) == address(0)) revert LendGatewayNotSet();
+
+        // Pull every supported collateral token out of Aave, back into the safe (idle)
+        address[] memory collateralTokens = $.debtManager.getCollateralTokens();
+        uint256 len = collateralTokens.length;
+        for (uint256 i = 0; i < len;) {
+            uint256 supplied = gateway.suppliedOf(safe, collateralTokens[i]);
+            if (supplied != 0) gateway.withdraw(safe, collateralTokens[i], supplied, safe);
+            unchecked {
+                ++i;
+            }
+        }
+
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
+        $$.lendDisabled = true;
+        $$.lendDisableFinalizeTime = 0;
+        // Credit needs lend collateral, so force Debit and drop any pending mode change
+        $$.mode = Mode.Debit;
+        delete $$.incomingMode;
+        delete $$.incomingModeStartTime;
+
+        emit LendDisableExecuted(safe);
+    }
+
+    /**
+     * @dev Re-enables lend for a safe (opts it back into the Aave market) and cancels any pending disable
+     *      request. Instant — opting back into earning is not risk-increasing. Auto-supply resumes on the
+     *      safe's next deposit. Reverts if lend is already enabled and no disable is pending.
+     */
+    function _enableLend(address safe) internal {
+        SafeCashConfig storage $$ = _getCashModuleStorage().safeCashConfig[safe];
+        if (!$$.lendDisabled && $$.lendDisableFinalizeTime == 0) revert LendNotDisabled();
+
+        $$.lendDisabled = false;
+        $$.lendDisableFinalizeTime = 0;
+        emit LendEnabled(safe);
     }
 
     /**

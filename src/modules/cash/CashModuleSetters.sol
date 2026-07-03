@@ -10,6 +10,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -130,6 +131,45 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
+     * @notice Sets the Aave gateway used to withdraw collateral when a safe disables lend
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param gateway Address of the gateway
+     */
+    function setLendGateway(address gateway) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (gateway == address(0)) revert InvalidInput();
+        _getCashModuleStorage().gateway = IGateway(gateway);
+        emit LendGatewaySet(gateway);
+    }
+
+    /**
+     * @notice Toggles a safe's participation in the Aave lend market (auto-supply and borrow ops)
+     * @dev Owner-signed, and the signature binds the requested `enable` flag. The two directions are
+     *      deliberately asymmetric:
+     *      - enable == true: opts the safe back in immediately (opting into earning is not risk-increasing)
+     *        and cancels any pending disable request. Auto-supply resumes on the safe's next deposit.
+     *      - enable == false: does NOT disable immediately. It records a request that becomes executable
+     *        after the mode-change delay, at which point anyone may call processLendDisable to carry it out
+     *        (withdraw all collateral from Aave, force Debit mode). Disabling is only allowed when the safe
+     *        has no open borrows, since the collateral backing them is about to leave Aave.
+     * @param safe Address of the EtherFi Safe
+     * @param enable True to enable lend now, false to request disabling it
+     * @param signer A safe admin authorizing the change
+     * @param signature The signer's signature over the intent
+     * @custom:throws OnlyEtherFiSafe if safe is not a valid EtherFi Safe
+     * @custom:throws OnlySafeAdmin if signer is not a safe admin
+     * @custom:throws InvalidSignatures if signature verification fails
+     * @custom:throws LendNotDisabled if enabling while lend is already enabled and no disable is pending
+     * @custom:throws LendAlreadyDisabled if disabling while lend is already disabled or a request is pending
+     * @custom:throws HasOpenBorrows if disabling while the safe still has open borrows
+     */
+    function toggleLend(address safe, bool enable, address signer, bytes calldata signature) external nonReentrant onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        CashVerificationLib.verifyToggleLendSig(safe, signer, _useNonce(safe), enable, signature);
+        if (enable) _enableLend(safe);
+        else _requestDisableLend(safe);
+    }
+
+    /**
      * @notice Sets the operating mode for a safe
      * @dev Switches between Debit and Credit modes with delay 
      * @param safe Address of the EtherFi Safe
@@ -144,6 +184,8 @@ contract CashModuleSetters is CashModuleStorageContract {
         _setCurrentMode($.safeCashConfig[safe]);
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
+        // Credit mode requires lend collateral on Aave; a safe that opted out of lend cannot enter Credit
+        if (mode == Mode.Credit && $.safeCashConfig[safe].lendDisabled) revert LendDisabled();
 
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 

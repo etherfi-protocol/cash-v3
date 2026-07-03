@@ -24,6 +24,8 @@ contract MockGateway is IGateway {
     mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
     mapping(address asset => uint256) internal _availableCash;
     mapping(address asset => uint256) internal _ltv;
+    /// @dev Whether lend is disabled for a safe; defaults to false so isLendEnabled returns true
+    mapping(address safe => bool) internal _lendDisabled;
 
     Call public lastSupply;
     Call public lastWithdraw;
@@ -53,6 +55,11 @@ contract MockGateway is IGateway {
     /// @notice Sets the LTV (100e18 = 100%) a subsequent `ltv(asset)` will return
     function setLtv(address asset, uint256 ltvValue) external {
         _ltv[asset] = ltvValue;
+    }
+
+    /// @notice Sets whether lend is enabled for a safe (defaults to enabled)
+    function setLendEnabled(address safe, bool enabled) external {
+        _lendDisabled[safe] = !enabled;
     }
 
     function supply(address safe, address asset, uint256 amount) external {
@@ -94,5 +101,9 @@ contract MockGateway is IGateway {
 
     function ltv(address asset) external view returns (uint256) {
         return _ltv[asset];
+    }
+
+    function isLendEnabled(address safe) external view returns (bool) {
+        return !_lendDisabled[safe];
     }
 }

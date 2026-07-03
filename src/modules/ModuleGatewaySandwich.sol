@@ -55,6 +55,9 @@ abstract contract ModuleGatewaySandwich {
      * @param amount The amount to withdraw
      */
     function _withdrawFromGateway(address safe, address asset, uint256 amount) internal {
+        // A lend-disabled safe holds no Aave position: its assets already sit in the safe, so there is
+        // nothing to pull back. Skipping keeps the sandwich a no-op for opted-out safes.
+        if (!gateway.isLendEnabled(safe)) return;
         gateway.withdraw(safe, asset, amount, safe);
     }
 
@@ -65,6 +68,9 @@ abstract contract ModuleGatewaySandwich {
      * @param amount The amount to supply
      */
     function _resupplyToGateway(address safe, address asset, uint256 amount) internal {
+        // A lend-disabled safe does not participate in Aave: leave the output in the safe rather than
+        // re-supplying. The gateway would reject the supply anyway; skipping avoids the revert.
+        if (!gateway.isLendEnabled(safe)) return;
         gateway.supply(safe, asset, amount);
         gateway.setUsingAsCollateral(safe, asset, true);
     }
