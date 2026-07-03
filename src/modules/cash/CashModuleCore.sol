@@ -20,7 +20,7 @@ import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLi
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
-import { CashbackLib } from "./CashbackLib.sol";
+import { CashModuleLib } from "./CashModuleLib.sol";
 
 /**
  * @title CashModule
@@ -140,7 +140,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @return totalCashbackInUsd Total pending cashback amount in USD
      */
     function getPendingCashback(address account, address[] memory tokens) external view returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd) {
-        return CashbackLib.getPendingCashback(_getCashModuleStorage(), account, tokens);
+        return CashModuleLib.getPendingCashback(_getCashModuleStorage(), account, tokens);
     }
 
     /**
@@ -315,7 +315,7 @@ contract CashModuleCore is CashModuleStorageContract {
 
         if ($.safeCashConfig[safe].mode == Mode.Credit) _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
         else _spendDebit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-        CashbackLib.processCashback($, safe, totalSpendingInUsd, cashbacks);
+        CashModuleLib.processCashback($, safe, totalSpendingInUsd, cashbacks);
     }
 
     function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256) {
@@ -451,7 +451,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param tokens Addresses of cashback tokens
      */
     function clearPendingCashback(address[] calldata users, address[] calldata tokens) external nonReentrant whenNotPaused {
-        CashbackLib.clearPending(_getCashModuleStorage(), users, tokens);
+        CashModuleLib.clearPending(_getCashModuleStorage(), users, tokens);
     }
 
     /**
@@ -477,24 +477,13 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws AmountZero if the converted amount is zero
      */
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
-        uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
+        uint256 amount = debtManager.convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();
         _cancelWithdrawalRequestIfNecessary(safe, token, amount);
 
-        address[] memory to = new address[](3);
-        bytes[] memory data = new bytes[](3);
-        uint256[] memory values = new uint256[](3);
-
-        to[0] = token;
-        to[1] = address(debtManager);
-        to[2] = token;
-
-        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), amount);
-        data[1] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
-        data[2] = abi.encodeWithSelector(IERC20.approve.selector, address(debtManager), 0);
-
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-        _getCashModuleStorage().cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
+        // A migrated safe repays on Aave via the gateway; a legacy safe repays the DebtManager. Both paths run
+        // in CashModuleLib (extracted to keep this contract within the code-size limit).
+        CashModuleLib.repay(_getCashModuleStorage(), safe, token, amount, amountInUsd);
     }
 
     /**

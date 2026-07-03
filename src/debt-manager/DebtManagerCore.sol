@@ -574,24 +574,19 @@ contract DebtManagerCore is DebtManagerStorageContract {
         _onlyEtherFiSafe(safe);
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
-        // 1. Snapshot the outstanding debt. A Safe with no debt is trivially migrated: mark it and return,
-        //    so a batch runner can call this over every Safe without special-casing (and idempotently).
-        (TokenData[] memory borrowings, uint256 totalDebtUsd) = borrowingOf(safe);
-        if (totalDebtUsd == 0) {
-            $.migratedToAave[safe] = true;
-            emit MigratedToAave(safe, 0);
-            return;
-        }
-
         IGateway _gateway = $.gateway;
         if (address(_gateway) == address(0)) revert GatewayNotSet();
+
+        // 1. Snapshot the outstanding DebtManager debt. A debt-free Safe still migrates its collateral (below),
+        //    so a batch runner can call this over every Safe without special-casing (and idempotently).
+        (TokenData[] memory borrowings, uint256 totalDebtUsd) = borrowingOf(safe);
         uint256 bLen = borrowings.length;
 
-        // 2. Clear the legacy DebtManager debt FIRST, capturing the token amount to re-borrow, and check Aave
-        //    has the cash to fund it. Clearing first is load-bearing: supplying collateral (step 3) moves it
-        //    out of the Safe via execTransactionFromModule, which runs the EtherFiHook's DebtManager health
-        //    check — that would revert while the debt is still open. The Aave borrow (step 4) re-funds the
-        //    pool; the whole tx reverts on any failure, so the Safe is never left half-migrated nor the pool short.
+        // 2. Clear the legacy DebtManager debt FIRST (if any), capturing the token amount to re-borrow, and
+        //    check Aave has the cash to fund it. Clearing first is load-bearing: supplying collateral (step 3)
+        //    moves it out of the Safe via execTransactionFromModule, which runs the EtherFiHook's DebtManager
+        //    health check — that would revert while the debt is still open. The Aave borrow (step 5) re-funds
+        //    the pool; the whole tx reverts on any failure, so the Safe is never left half-migrated nor the pool short.
         uint256[] memory debtTokenAmts = new uint256[](bLen);
         for (uint256 i = 0; i < bLen;) {
             if (borrowings[i].amount != 0) {
@@ -605,7 +600,9 @@ contract DebtManagerCore is DebtManagerStorageContract {
         }
 
         // 3. Supply all of the Safe's collateral into Aave, enabled as collateral (Safe is now debt-free on
-        //    DebtManager, so the hook's health check passes as the collateral moves).
+        //    DebtManager, so the hook's health check passes as the collateral moves). This runs even for a
+        //    debt-free Safe: once migrated, credit spends borrow against the Aave position, so the collateral
+        //    must actually move to Aave rather than sit idle in the Safe.
         address[] memory collateralTokens = getCollateralTokens();
         uint256 cLen = collateralTokens.length;
         for (uint256 i = 0; i < cLen;) {
@@ -619,15 +616,17 @@ contract DebtManagerCore is DebtManagerStorageContract {
             }
         }
 
-        // 4. LTV-fit check (specific error) so the runner can route positions that fit DebtManager's params
-        //    but not Aave's. availableBorrowsUsd is the supplied collateral weighted by Aave's LTVs.
-        if (_gateway.getAccountData(safe).availableBorrowsUsd < totalDebtUsd) revert PositionExceedsAaveLtv();
+        // 4/5. Only when there is debt to re-home: check the supplied collateral (weighted by Aave's LTVs) covers
+        //      it — specific error so the runner can route positions that fit DebtManager's params but not Aave's —
+        //      then borrow each debt from Aave into this contract, re-funding the debt cleared in step 2.
+        if (totalDebtUsd != 0) {
+            if (_gateway.getAccountData(safe).availableBorrowsUsd < totalDebtUsd) revert PositionExceedsAaveLtv();
 
-        // 5. Borrow each debt from Aave into this contract — these funds re-fund the debt cleared in step 2
-        for (uint256 i = 0; i < bLen;) {
-            if (debtTokenAmts[i] != 0) _gateway.borrow(safe, borrowings[i].token, debtTokenAmts[i], address(this));
-            unchecked {
-                ++i;
+            for (uint256 i = 0; i < bLen;) {
+                if (debtTokenAmts[i] != 0) _gateway.borrow(safe, borrowings[i].token, debtTokenAmts[i], address(this));
+                unchecked {
+                    ++i;
+                }
             }
         }
 

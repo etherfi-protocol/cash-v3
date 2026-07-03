@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 import { Cashback, CashbackTokens, TokenDataInUsd } from "../../interfaces/ICashModule.sol";
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
+import { IDebtManager } from "../../interfaces/IDebtManager.sol";
+import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
 
 /**
- * @title CashbackLib
- * @notice Cashback accounting for the CashModule, extracted into an external (delegatecalled) library.
+ * @title CashModuleLib
+ * @notice Heavy CashModule logic (cashback accounting and repayment execution) extracted into an external,
+ *         delegatecalled library.
  * @dev Deployed once and linked into CashModuleCore, so this logic does not count against CashModuleCore's
  *      EIP-170 runtime code-size limit. Every function is called via delegatecall and therefore runs in the
  *      CashModule's storage context: the caller passes its CashModuleStorage pointer and the library reads and
@@ -17,11 +23,13 @@ import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
  *      implementation.
  * @author ether.fi
  */
-library CashbackLib {
+library CashModuleLib {
     using ArrayDeDupLib for address[];
 
     /// @dev Same selector as CashModule's InvalidInput, so reverts are indistinguishable to callers
     error InvalidInput();
+    /// @dev Same selector as CashModule's LendGatewayNotSet
+    error LendGatewayNotSet();
 
     /**
      * @notice Gets the pending cashback amounts for an account across a set of tokens
@@ -130,6 +138,43 @@ library CashbackLib {
                 ++i;
             }
         }
+    }
+
+    /**
+     * @notice Executes a repayment on behalf of a safe, routing by migration state
+     * @dev The caller must have already validated the amount and cancelled any conflicting withdrawal request.
+     *      A migrated safe repays on Aave via the gateway (which pulls the token from the safe, repays, refunds
+     *      dust, and emits Repaid); a legacy safe repays the DebtManager through the safe's module execution.
+     * @param $ The CashModule storage (passed by the delegatecalling module)
+     * @param safe The safe whose debt is repaid
+     * @param token The token to repay
+     * @param amount The token amount to repay
+     * @param amountInUsd The USD value of the repayment (for the emitted DebtManager event)
+     * @custom:throws LendGatewayNotSet if the safe is migrated but no gateway is configured
+     */
+    function repay(CashModuleStorageContract.CashModuleStorage storage $, address safe, address token, uint256 amount, uint256 amountInUsd) external {
+        if ($.debtManager.hasMigratedToAave(safe)) {
+            IGateway gateway = $.gateway;
+            if (address(gateway) == address(0)) revert LendGatewayNotSet();
+            uint256 repaid = gateway.repay(safe, token, amount);
+            $.cashEventEmitter.emitRepay(safe, token, repaid, amountInUsd);
+            return;
+        }
+
+        address[] memory to = new address[](3);
+        bytes[] memory data = new bytes[](3);
+        uint256[] memory values = new uint256[](3);
+
+        to[0] = token;
+        to[1] = address($.debtManager);
+        to[2] = token;
+
+        data[0] = abi.encodeWithSelector(IERC20.approve.selector, address($.debtManager), amount);
+        data[1] = abi.encodeWithSelector(IDebtManager.repay.selector, safe, token, amount);
+        data[2] = abi.encodeWithSelector(IERC20.approve.selector, address($.debtManager), 0);
+
+        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        $.cashEventEmitter.emitRepayDebtManager(safe, token, amount, amountInUsd);
     }
 
     /**

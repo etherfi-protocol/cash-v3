@@ -125,6 +125,15 @@ interface ICashEventEmitter {
     function emitRepayDebtManager(address safe, address token, uint256 amount, uint256 amountInUsd) external;
 
     /**
+     * @notice Emits an event when a migrated safe repays debt on Aave via the gateway
+     * @param safe Address of the safe whose debt was repaid
+     * @param token Address of the token repaid
+     * @param amount Amount of token actually repaid (net of any refunded dust)
+     * @param amountInUsd USD value requested for the repayment
+     */
+    function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external;
+
+    /**
      * @notice Emits an event when spending limits are changed
      * @param oldLimit Previous spending limit
      * @param newLimit New spending limit

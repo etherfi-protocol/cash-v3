@@ -10,6 +10,7 @@ import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { BinSponsor, Cashback, Mode } from "../../src/interfaces/ICashModule.sol";
 import { IGateway } from "../../src/interfaces/IGateway.sol";
 import { Gateway } from "../../src/modules/gateway/Gateway.sol";
+import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
@@ -124,7 +125,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         dm.migrateToAave(address(safe));
     }
 
-    function test_migrateToAave_noDebt_marksMigratedWithoutReverting() public {
+    function test_migrateToAave_noDebt_suppliesCollateralAndMarksMigrated() public {
         deal(address(weETH), address(safe), 10 ether); // collateral but no debt
         assertFalse(dm.hasMigratedToAave(address(safe)));
 
@@ -132,9 +133,11 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         dm.migrateToAave(address(safe));
 
         assertTrue(dm.hasMigratedToAave(address(safe)), "marked migrated");
-        // Nothing moved: no debt to migrate, so the collateral stays in the Safe
-        assertEq(weETH.balanceOf(address(safe)), 10 ether, "collateral untouched");
-        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "nothing supplied to Aave");
+        // A debt-free migration still moves the collateral to Aave, so credit borrowing works post-migration
+        // (marking migrated while leaving collateral idle in the Safe would break gateway-based credit spends).
+        assertEq(weETH.balanceOf(address(safe)), 0, "collateral moved out of the Safe");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 10 ether, 2, "collateral supplied to Aave");
+        assertGt(gw.getAccountData(address(safe)).availableBorrowsUsd, 0, "has Aave borrowing power");
     }
 
     function test_migrateToAave_onlyDebtManagerAdmin() public {
@@ -212,6 +215,40 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)) - aaveDebtBefore, spendUsd, 1e6, "borrowed from Aave");
         assertApproxEqAbs(usdc.balanceOf(dispatcher) - dispatcherBefore, spendUsd, 2, "dispatcher funded from Aave borrow");
         assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "no new DebtManager debt");
+    }
+
+    /// @dev After migration, the wallet's standard repay must reduce the Aave debt via the gateway, not revert
+    ///      on the frozen DebtManager.repay. Regression for the "migrated safes cannot repay" finding.
+    function test_migratedSafe_repayReducesAaveDebt() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+
+        // Migrate a position carrying debt, so there is Aave debt to repay
+        deal(address(weETH), address(safe), 10 ether);
+        uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        vm.prank(migrator);
+        dm.migrateToAave(address(safe));
+        uint256 aaveDebtBefore = gw.debtOf(address(safe), address(usdc));
+        assertGt(aaveDebtBefore, 0, "has Aave debt");
+
+        // Point the CashModule at the gateway and fund the safe to repay
+        vm.prank(owner);
+        cashModule.setLendGateway(address(gw));
+        deal(address(usdc), address(safe), 500e6);
+        uint256 repayUsd = 200e6;
+
+        // Must NOT revert with AlreadyMigratedToAave, and must surface a gateway-repay event (indexed topics
+        // checked; the exact repaid amount is left to the assertions below)
+        vm.expectEmit(true, true, false, false);
+        emit CashEventEmitter.Repay(address(safe), address(usdc), 0, 0);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), repayUsd);
+
+        // Aave debt reduced by ~the repay amount; the DebtManager was never touched
+        assertApproxEqAbs(aaveDebtBefore - gw.debtOf(address(safe), address(usdc)), repayUsd, 1e6, "Aave debt reduced");
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "DebtManager debt still zero");
     }
 
     // ----------------------------------------------------------------- helpers

@@ -85,7 +85,16 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param debtAmountInUsd USD value of the debt repaid
      */
     event RepayDebtManager(address indexed safe, address indexed token, uint256 debtAmount, uint256 debtAmountInUsd);
-    
+
+    /**
+     * @notice Emitted when a migrated safe repays debt on Aave via the gateway
+     * @param safe Address of the safe whose debt was repaid
+     * @param token Address of the token used to repay
+     * @param debtAmount Amount of debt actually repaid in token units (net of any refunded dust)
+     * @param debtAmountInUsd USD value requested for the repayment
+     */
+    event Repay(address indexed safe, address indexed token, uint256 debtAmount, uint256 debtAmountInUsd);
+
     /**
      * @notice Emitted when a spending limit is changed
      * @param safe Address of the safe changing the spending limit
@@ -375,6 +384,10 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitRepayDebtManager(address safe, address token, uint256 amount, uint256 amountInUsd) external onlyCashModule {
         emit RepayDebtManager(safe, token, amount, amountInUsd);
+    }
+
+    function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external onlyCashModule {
+        emit Repay(safe, token, amount, amountInUsd);
     }
 
     /**
