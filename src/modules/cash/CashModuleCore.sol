@@ -12,6 +12,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -19,6 +20,7 @@ import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLi
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
+import { CashbackLib } from "./CashbackLib.sol";
 
 /**
  * @title CashModule
@@ -138,32 +140,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @return totalCashbackInUsd Total pending cashback amount in USD
      */
     function getPendingCashback(address account, address[] memory tokens) external view returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd) {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-
-        uint256 len = tokens.length;
-        if (len > 1) tokens.checkDuplicates();
-        data = new TokenDataInUsd[](len);
-        uint256 m = 0;
-
-        for (uint256 i = 0; i < len;) {
-            uint256 pendingCashbackInUsd = $.pendingCashbackForTokenInUsd[account][tokens[i]];
-            if (pendingCashbackInUsd > 0) {
-                data[m] = TokenDataInUsd({ token: tokens[i], amountInUsd: pendingCashbackInUsd });
-
-                totalCashbackInUsd += pendingCashbackInUsd;
-
-                unchecked {
-                    ++m;
-                }
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        assembly ("memory-safe") {
-            mstore(data, m)
-        }
+        return CashbackLib.getPendingCashback(_getCashModuleStorage(), account, tokens);
     }
 
     /**
@@ -338,7 +315,7 @@ contract CashModuleCore is CashModuleStorageContract {
 
         if ($.safeCashConfig[safe].mode == Mode.Credit) _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
         else _spendDebit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-        _cashback($, safe, totalSpendingInUsd, cashbacks);
+        CashbackLib.processCashback($, safe, totalSpendingInUsd, cashbacks);
     }
 
     function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256) {
@@ -387,18 +364,30 @@ contract CashModuleCore is CashModuleStorageContract {
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
         if (amount == 0) revert AmountZero();
 
-        address[] memory to = new address[](1);
-        bytes[] memory data = new bytes[](1);
-        uint256[] memory values = new uint256[](1);
+        if ($.debtManager.hasMigratedToAave(safe)) {
+            // Migrated safe: its position lives on Aave. Borrow there via the gateway (the CashModule is always
+            // a gateway driver) and send the borrowed token straight to the settlement dispatcher. The legacy
+            // DebtManager.borrow path reverts for a migrated safe, and CashLens already sizes credit against the
+            // gateway, so routing here keeps the on-chain spend consistent with the precheck. Aave enforces the
+            // borrowing-power/health check on the borrow itself.
+            IGateway gateway = $.gateway;
+            if (address(gateway) == address(0)) revert LendGatewayNotSet();
+            gateway.borrow(safe, tokens[0], amount, getSettlementDispatcher(binSponsor));
+        } else {
+            // Legacy safe: borrow from the DebtManager, executed by the safe itself.
+            address[] memory to = new address[](1);
+            bytes[] memory data = new bytes[](1);
+            uint256[] memory values = new uint256[](1);
 
-        to[0] = address($.debtManager);
-        data[0] = abi.encodeWithSelector(IDebtManager.borrow.selector, binSponsor, tokens[0], amount);
-        values[0] = 0;
+            to[0] = address($.debtManager);
+            data[0] = abi.encodeWithSelector(IDebtManager.borrow.selector, binSponsor, tokens[0], amount);
+            values[0] = 0;
 
-        try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) { }
-        catch {
-            _cancelOldWithdrawal(safe);
-            IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+            try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) { }
+            catch {
+                _cancelOldWithdrawal(safe);
+                IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+            }
         }
 
         uint256[] memory amounts = new uint256[](1);
@@ -462,90 +451,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param tokens Addresses of cashback tokens
      */
     function clearPendingCashback(address[] calldata users, address[] calldata tokens) external nonReentrant whenNotPaused {
-        uint256 len = users.length;
-        if (len == 0) revert InvalidInput();
-        if (tokens.length > 1) tokens.checkDuplicates();
-        if (len > 1) users.checkDuplicates();
-
-        for (uint256 i = 0; i < len;) {
-            if (users[i] == address(0)) revert InvalidInput();
-
-            for (uint256 j = 0; j < tokens.length;) {
-                if (tokens[j] == address(0)) revert InvalidInput();
-
-                _retrievePendingCashback(users[i], tokens[j]);
-                unchecked {
-                    ++j;
-                }
-            }
-
-            unchecked {
-                ++i;
-            }
-        }
-    }
-
-    /**
-     * @notice Attempts to retrieve pending cashback for a user
-     * @dev Calls the cashback dispatcher to clear pending cashback and updates storage if successful
-     * @param user Address of the user who may have pending cashback
-     * @param token Address of the cashback token
-     */
-    function _retrievePendingCashback(address user, address token) internal {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-
-        uint256 amountInUsd = getPendingCashbackForToken(user, token);
-
-        if (amountInUsd > 0) {
-            try $.cashbackDispatcher.clearPendingCashback(user, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
-                if (paid) {
-                    $.cashEventEmitter.emitPendingCashbackClearedEvent(user, token, cashbackAmountInToken, amountInUsd);
-                    delete $.pendingCashbackForTokenInUsd[user][token];
-                }
-            } catch { }
-        }
-    }
-
-    /**
-     * @notice Processes cashback for a spending transaction
-     * @dev Calculates and distributes cashback
-     * @param $ Storage reference to the CashModuleStorage
-     * @param cashbacks Array of Cashback struct
-     */
-    function _cashback(CashModuleStorage storage $, address safe, uint256 spendAmount, Cashback[] calldata cashbacks) internal {
-        uint256 len = cashbacks.length;
-
-        for (uint256 i = 0; i < len;) {
-            address to = cashbacks[i].to;
-            if (to == address(0)) continue;
-            CashbackTokens[] memory cashbackTokens = cashbacks[i].cashbackTokens;
-
-            for (uint256 j = 0; j < cashbackTokens.length;) {
-                address token = cashbackTokens[j].token;
-                _retrievePendingCashback(to, token);
-
-                uint256 amountInUsd = cashbackTokens[j].amountInUsd;
-                $.safeCashConfig[to].totalCashbackEarnedInUsd += amountInUsd;
-
-                if (amountInUsd != 0) {
-                    try $.cashbackDispatcher.cashback(to, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
-                        if (!paid) $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
-                        $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, cashbackAmountInToken, amountInUsd, cashbackTokens[j].cashbackType, paid);
-                    } catch {
-                        $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
-                        $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, 0, amountInUsd, cashbackTokens[j].cashbackType, false);
-                    }
-                }
-
-                unchecked {
-                    ++j;
-                }
-            }
-
-            unchecked {
-                ++i;
-            }
-        }
+        CashbackLib.clearPending(_getCashModuleStorage(), users, tokens);
     }
 
     /**

@@ -7,7 +7,7 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerStorageContract } from "../../src/debt-manager/DebtManagerStorageContract.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
-import { BinSponsor } from "../../src/interfaces/ICashModule.sol";
+import { BinSponsor, Cashback, Mode } from "../../src/interfaces/ICashModule.sol";
 import { IGateway } from "../../src/interfaces/IGateway.sol";
 import { Gateway } from "../../src/modules/gateway/Gateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
@@ -168,6 +168,50 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         // Legacy repay is frozen for a migrated Safe
         vm.expectRevert(DebtManagerStorageContract.AlreadyMigratedToAave.selector);
         debtManager.repay(address(safe), address(usdc), 1e6);
+    }
+
+    /// @dev After migration, a credit-mode spend must borrow from Aave (via the gateway), not the frozen
+    ///      DebtManager. Regression for: migrated safe passes CashLens (gateway-based) but reverts on spend
+    ///      with AlreadyMigratedToAave because _spendCredit still called DebtManager.borrow.
+    function test_migratedSafe_creditSpendBorrowsFromAave() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+
+        // Legacy position with collateral + modest debt, then migrate to Aave (leaves borrow headroom there)
+        deal(address(weETH), address(safe), 10 ether);
+        uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        vm.prank(migrator);
+        dm.migrateToAave(address(safe));
+        assertTrue(dm.hasMigratedToAave(address(safe)), "safe migrated");
+
+        // Point the CashModule at the gateway (owner holds CASH_MODULE_CONTROLLER_ROLE) and enter Credit mode
+        vm.prank(owner);
+        cashModule.setLendGateway(address(gw));
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit), "in credit mode");
+
+        address dispatcher = cashModule.getSettlementDispatcher(BinSponsor.Reap);
+        uint256 dispatcherBefore = usdc.balanceOf(dispatcher);
+        uint256 aaveDebtBefore = gw.debtOf(address(safe), address(usdc));
+
+        uint256 spendUsd = 100e6; // $100, within the daily limit
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = spendUsd;
+        Cashback[] memory cashbacks;
+
+        // Must NOT revert with AlreadyMigratedToAave
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("credit-after-migration"), BinSponsor.Reap, tokens, amounts, cashbacks);
+
+        // Borrowed from Aave and forwarded to the settlement dispatcher; DebtManager debt stays zero
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)) - aaveDebtBefore, spendUsd, 1e6, "borrowed from Aave");
+        assertApproxEqAbs(usdc.balanceOf(dispatcher) - dispatcherBefore, spendUsd, 2, "dispatcher funded from Aave borrow");
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "no new DebtManager debt");
     }
 
     // ----------------------------------------------------------------- helpers
