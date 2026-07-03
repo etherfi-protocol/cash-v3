@@ -132,6 +132,13 @@ interface ICashEventEmitter {
     function emitRepayDebtManager(address safe, address token, uint256 amount, uint256 amountInUsd) external;
 
     /**
+     * @notice Emits an event when loose collateral is supplied to cover a credit spend's borrowing shortfall
+     * @param token Collateral token supplied
+     * @param amount Token amount supplied
+     */
+    function emitCollateralResupplied(address safe, address token, uint256 amount) external;
+
+    /**
      * @notice Emits an event when spending limits are changed
      * @param oldLimit Previous spending limit
      * @param newLimit New spending limit

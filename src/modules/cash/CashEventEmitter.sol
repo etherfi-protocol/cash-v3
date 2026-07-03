@@ -115,6 +115,14 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param mode Operational mode in which the spending occurs
      */
     event Spend(address indexed safe, bytes32 indexed txId, BinSponsor indexed binSponsor, address[] tokens, uint256[] amounts, uint256[] amountInUsd, uint256 totalUsdAmt, Mode mode);
+
+    /**
+     * @notice Emitted when loose collateral is supplied to cover a credit spend's borrowing shortfall
+     * @param safe Address of the safe
+     * @param token Collateral token supplied
+     * @param amount Token amount supplied
+     */
+    event CollateralResupplied(address indexed safe, address indexed token, uint256 amount);
     
     /**
      * @notice Emitted when cashback is calculated and potentially distributed
@@ -391,6 +399,17 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitRepayDebtManager(address safe, address token, uint256 amount, uint256 amountInUsd) external onlyCashModule {
         emit RepayDebtManager(safe, token, amount, amountInUsd);
+    }
+
+    /**
+     * @notice Emits the CollateralResupplied event
+     * @dev Can only be called by the Cash Module
+     * @param safe Address of the safe
+     * @param token Collateral token supplied
+     * @param amount Token amount supplied
+     */
+    function emitCollateralResupplied(address safe, address token, uint256 amount) external onlyCashModule {
+        emit CollateralResupplied(safe, token, amount);
     }
 
     /**

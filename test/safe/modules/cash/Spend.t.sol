@@ -739,4 +739,199 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
+
+    // ========== Credit resupply: supply loose collateral when the borrow doesn't fit ==========
+
+    function _enterCreditMode() internal {
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
+    }
+
+    function _creditSpendUsdc(uint256 amountInUsd) internal {
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amountInUsd;
+        Cashback[] memory cashbacks;
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+    }
+
+    function _setBorrowCapacity(uint256 availableBorrowsUsd) internal {
+        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 0, debtUsd: 0, availableBorrowsUsd: availableBorrowsUsd, healthFactor: type(uint256).max }));
+    }
+
+    /// @dev Mirrors CreditSourcingLib._supplyAmount: token amount whose LTV-weighted value covers neededUsd, ceil + 10 bps pad
+    function _resupplyAmount(address token, uint8 decimals, uint256 tokenLtv, uint256 neededUsd) internal view returns (uint256) {
+        uint256 num = neededUsd * 100e18 * (10 ** decimals) * 10_010;
+        uint256 den = tokenLtv * priceProvider.price(token) * 10_000;
+        return (num + den - 1) / den;
+    }
+
+    /// @dev Mirrors the partial-cover remainder: taking `capacity` of `needed` covers the same fraction of the shortfall
+    function _residualUsd(uint256 shortfallUsd, uint256 capacity, uint256 needed) internal pure returns (uint256) {
+        return shortfallUsd - (shortfallUsd * capacity) / needed;
+    }
+
+    /// Borrowing capacity covers the spend: nothing is supplied and the borrow just goes through
+    function test_spend_creditResupply_skipped_whenCapacityCovers() public {
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        gateway.setLtv(address(usdc), 80e18);
+        _setBorrowCapacity(80e6);
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(gateway.suppliesCount(), 0);
+        (address s,, uint256 amt, address to) = gateway.lastBorrow();
+        assertEq(s, address(safe));
+        assertEq(amt, 10e6);
+        assertEq(to, address(settlementDispatcherReap));
+    }
+
+    /// A one-token shortfall supplies the exact buffered amount, flags it as collateral, and the borrow lands
+    function test_spend_creditResupply_suppliesOneToken() public {
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        gateway.setLtv(address(usdc), 80e18);
+        _setBorrowCapacity(4e6);
+
+        // Shortfall is 6e6; also the borrow-token == collateral-token case (USDC both)
+        uint256 expected = _resupplyAmount(address(usdc), 6, 80e18, 6e6);
+
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.CollateralResupplied(address(safe), address(usdc), expected);
+        _creditSpendUsdc(10e6);
+
+        assertEq(gateway.suppliesCount(), 1);
+        (address s, address asset, uint256 amt,) = gateway.lastSupply();
+        assertEq(s, address(safe));
+        assertEq(asset, address(usdc));
+        assertEq(amt, expected);
+        assertTrue(gateway.usingAsCollateral(address(safe), address(usdc)));
+        (,, uint256 borrowed, address to) = gateway.lastBorrow();
+        assertEq(borrowed, 10e6);
+        assertEq(to, address(settlementDispatcherReap));
+    }
+
+    /// The unreserved loose balance covers the shortfall, so the pending withdrawal request survives
+    function test_spend_creditResupply_prefersUnreserved_keepsWithdrawal() public {
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 50e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        gateway.setLtv(address(usdc), 80e18);
+        _setBorrowCapacity(4e6);
+
+        // Needed (~7.5e6) fits in the 50e6 unreserved balance, so the request survives
+        _creditSpendUsdc(10e6);
+
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 50e6);
+        assertEq(gateway.suppliesCount(), 1);
+    }
+
+    /// Covering the shortfall needs withdrawal-reserved balance: the request is cancelled and the dip is supplied
+    function test_spend_creditResupply_dipsIntoReserved_cancelsWithdrawal() public {
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 95e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        gateway.setLtv(address(usdc), 80e18);
+        _setBorrowCapacity(4e6);
+
+        // Unreserved is 5e6, needed ~7.5e6: pass one takes the 5e6, pass two cancels the request for the rest
+        uint256 residualUsd = _residualUsd(6e6, 5e6, _resupplyAmount(address(usdc), 6, 80e18, 6e6));
+        uint256 expected = 5e6 + _resupplyAmount(address(usdc), 6, 80e18, residualUsd);
+
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.WithdrawalCancelled(address(safe), tokens, amounts, withdrawRecipient);
+        _creditSpendUsdc(10e6);
+
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0);
+        assertEq(gateway.suppliesCount(), 1);
+        (,, uint256 amt,) = gateway.lastSupply();
+        assertEq(amt, expected);
+    }
+
+    /// Another token's loose balance covers the shortfall, so the reserved token's request survives (two-pass order)
+    function test_spend_creditResupply_otherTokenCovers_keepsWithdrawal() public {
+        deal(address(usdc), address(safe), 50e6);
+        deal(address(weETH), address(safe), 1 ether);
+        _enterCreditMode();
+
+        // The whole USDC balance is reserved by the request; loose weETH must cover without touching it
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 50e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        gateway.setLtv(address(usdc), 80e18);
+        gateway.setLtv(address(weETH), 50e18);
+        _setBorrowCapacity(4e6);
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 50e6);
+        assertEq(gateway.suppliesCount(), 1);
+        (, address asset, uint256 amt,) = gateway.lastSupply();
+        assertEq(asset, address(weETH));
+        assertEq(amt, _resupplyAmount(address(weETH), 18, 50e18, 6e6));
+        assertTrue(gateway.usingAsCollateral(address(safe), address(weETH)));
+    }
+
+    /// With no eligible collateral nothing is supplied, and the failing borrow reverts the whole spend
+    function test_spend_creditResupply_noEligibleCollateral_borrowReverts() public {
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        // No LTVs set: every collateral token is ineligible, nothing is supplied, and the borrow is rejected
+        gateway.setBorrowReverts(true);
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 10e6;
+        Cashback[] memory cashbacks;
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(MockGateway.BorrowBlocked.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+    }
+
+    /// A shortfall spanning tokens exhausts the first and covers the proportional remainder from the next
+    function test_spend_creditResupply_multipleTokens_partialCover() public {
+        // Collateral order is [weETH, usdc]: the small weETH balance is exhausted first, USDC covers the rest
+        deal(address(weETH), address(safe), 0.001 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        gateway.setLtv(address(weETH), 50e18);
+        gateway.setLtv(address(usdc), 80e18);
+        _setBorrowCapacity(0);
+
+        uint256 residualUsd = _residualUsd(10e6, 0.001 ether, _resupplyAmount(address(weETH), 18, 50e18, 10e6));
+        uint256 expectedUsdc = _resupplyAmount(address(usdc), 6, 80e18, residualUsd);
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(gateway.suppliesCount(), 2);
+        (, address asset0, uint256 amt0,) = gateway.supplies(0);
+        assertEq(asset0, address(weETH));
+        assertEq(amt0, 0.001 ether);
+        (, address asset1, uint256 amt1,) = gateway.supplies(1);
+        assertEq(asset1, address(usdc));
+        assertEq(amt1, expectedUsdc);
+        assertTrue(gateway.usingAsCollateral(address(safe), address(weETH)));
+        assertTrue(gateway.usingAsCollateral(address(safe), address(usdc)));
+    }
 }

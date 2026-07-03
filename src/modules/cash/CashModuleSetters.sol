@@ -302,6 +302,17 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
+     * @notice Processes a pending withdrawal request after the delay period
+     * @dev Executes the token transfers and clears the request. Lives here with the rest of the
+     *      withdrawal lifecycle; CashModuleCore's fallback routes calls through.
+     * @param safe Address of the EtherFi Safe
+     * @custom:throws CannotWithdrawYet if the withdrawal delay period hasn't passed
+     */
+    function processWithdrawal(address safe) public onlyEtherFiSafe(safe) nonReentrant {
+        _processWithdrawal(safe);
+    }
+
+    /**
      * @notice Updates the spending limits for a safe
      * @dev Can only be called by the safe itself with a valid admin signature
      * @param safe Address of the EtherFi Safe

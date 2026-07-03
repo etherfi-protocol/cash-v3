@@ -16,6 +16,7 @@ import { IGateway } from "../../interfaces/IGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
+import { CreditSourcingLib } from "../../libraries/CreditSourcingLib.sol";
 import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
@@ -220,16 +221,6 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Processes a pending withdrawal request after the delay period
-     * @dev Executes the token transfers and clears the request
-     * @param safe Address of the EtherFi Safe
-     * @custom:throws CannotWithdrawYet if the withdrawal delay period hasn't passed
-     */
-    function processWithdrawal(address safe) public onlyEtherFiSafe(safe) nonReentrant {
-        _processWithdrawal(safe);
-    }
-
-    /**
      * @notice Retrieves cash configuration data for a Safe
      * @dev Only callable for valid EtherFi Safe addresses
      * @param safe Address of the EtherFi Safe
@@ -337,7 +328,10 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @dev Internal function to execute credit mode spending transaction (single token)
+     * @dev Internal function to execute credit mode spending transaction (single token). If the safe's
+     *      borrowing capacity does not cover the spend, loose collateral is first resupplied to Aave to
+     *      cover the shortfall, so an auth approved before an instant collateral withdrawal
+     *      still lands.
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
      * @param binSponsor Bin sponsor used for spending
@@ -350,6 +344,13 @@ contract CashModuleCore is CashModuleStorageContract {
         if (!_isBorrowToken($.debtManager, tokens[0])) revert UnsupportedToken();
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
         if (amount == 0) revert AmountZero();
+
+        // The resupply runs from a linked library so its machinery does not count against this
+        // contract's EIP-170 size. A dip into withdrawal-reserved balance voids the request.
+        bool dippedReserved = CreditSourcingLib.resupplyCollateral($.gateway, $.debtManager, IPriceProvider(etherFiDataProvider.getPriceProvider()), $.cashEventEmitter, $.safeCashConfig[safe].pendingWithdrawalRequest, safe, amountsInUsd[0]);
+        if (dippedReserved) {
+            _cancelOldWithdrawal(safe);
+        }
 
         address dispatcher = getSettlementDispatcher(binSponsor);
 
