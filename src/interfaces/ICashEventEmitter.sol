@@ -25,12 +25,8 @@ interface ICashEventEmitter {
      */
     function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external;
 
-    /**
-     * @notice Emits the GatewayUpdated event
-     * @param oldGateway Address of the previous gateway
-     * @param newGateway Address of the new gateway
-     */
-    function emitGatewayUpdated(address oldGateway, address newGateway) external;
+    /// @notice Emits the GatewaySet event
+    function emitGatewaySet(address gateway) external;
 
     /**
      * @notice Emits an event when pending cashback is cleared
@@ -130,6 +126,24 @@ interface ICashEventEmitter {
      * @param amountInUsd USD value of the amount repaid
      */
     function emitRepayDebtManager(address safe, address token, uint256 amount, uint256 amountInUsd) external;
+
+    /**
+     * @notice Emits an event when a migrated safe repays debt on Aave via the gateway
+     * @param safe Address of the safe whose debt was repaid
+     * @param token Address of the token repaid
+     * @param amount Amount of token actually repaid (net of any refunded dust)
+     * @param amountInUsd USD value of the debt actually repaid
+     */
+    function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external;
+
+    /// @notice Emits the LendDisableRequested event
+    function emitLendDisableRequested(address safe, uint256 finalizeTime) external;
+
+    /// @notice Emits the LendDisableExecuted event
+    function emitLendDisableExecuted(address safe) external;
+
+    /// @notice Emits the LendEnabled event
+    function emitLendEnabled(address safe) external;
 
     /**
      * @notice Emits an event when spending limits are changed

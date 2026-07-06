@@ -115,25 +115,21 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        (address borrowedSafe, address borrowedAsset, uint256 borrowedAmount, address borrowRecipient) = gateway.lastBorrow();
-        assertEq(borrowedSafe, address(safe));
-        assertEq(borrowedAsset, address(usdc));
-        assertEq(borrowedAmount, spendAmounts[0]);
-        assertEq(borrowRecipient, address(settlementDispatcherReap));
-
         (borrowings, totalBorrowingsInUsd, totalLiquidStableAmounts) = debtManager.getCurrentState();
-        assertEq(borrowings.length, 0);
-        assertEq(totalBorrowingsInUsd, 0);
+        assertEq(borrowings.length, 1);
+        assertEq(borrowings[0].token, spendTokens[0]);
+        assertApproxEqAbs(borrowings[0].amount, spendAmounts[0], 1);
+        assertApproxEqAbs(totalBorrowingsInUsd, spendAmounts[0], 1);
 
         assertEq(totalLiquidStableAmounts.length, 2);
         assertEq(totalLiquidStableAmounts[0].token, address(usdc));
-        assertApproxEqAbs(totalLiquidStableAmounts[0].amount, principle, 1);
+        assertApproxEqAbs(totalLiquidStableAmounts[0].amount, principle - spendAmounts[0], 1);
         assertEq(totalLiquidStableAmounts[1].token, address(weETH));
         assertApproxEqAbs(totalLiquidStableAmounts[1].amount, principle, 1);
     }
 
-    /// @notice CashModule spends now borrow through the gateway, so DebtManager suppliers should not earn interest from them.
-    function test_supplyAndWithdraw_doesNotAccrueInterestFromGatewayBorrow() public {
+    /// @notice A non-migrated safe borrows from the DebtManager, so its suppliers accrue interest and can withdraw principal plus earnings.
+    function test_supply_andWithdraw_succeeds() public {
         deal(address(usdc), notOwner, 1 ether);
         uint256 principle = 0.01 ether;
 
@@ -147,19 +143,13 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
 
         assertApproxEqAbs(debtManager.supplierBalance(notOwner, address(usdc)), principle, 1);
 
-        // Record the DebtManager supplier balance before a CashModule spend that now routes through the gateway.
-        uint256 supplierBalanceBefore = debtManager.supplierBalance(notOwner, address(usdc));
-        _spendThroughGateway(debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 2, txId);
-        vm.warp(block.timestamp + 24 * 60 * 60);
+        uint256 earnings = _borrowAndRepay();
 
-        // No DebtManager interest should accrue because the spend did not create DebtManager debt.
-        assertApproxEqAbs(debtManager.supplierBalance(notOwner, address(usdc)), supplierBalanceBefore, 1);
+        assertApproxEqAbs(debtManager.supplierBalance(notOwner, address(usdc)), principle + earnings, 1);
 
-        // The supplier can withdraw exactly the unchanged DebtManager balance.
         vm.prank(notOwner);
-        debtManager.withdrawBorrowToken(address(usdc), supplierBalanceBefore);
+        debtManager.withdrawBorrowToken(address(usdc), principle + earnings);
 
-        // After withdrawing that balance, the supplier has no DebtManager supply left.
         assertEq(debtManager.supplierBalance(notOwner, address(usdc)), 0);
     }
 
@@ -334,10 +324,11 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         assertEq(debtManager.supplierBalance(notOwner, address(usdc)), 0);
     }
 
-    /// @dev Performs a CashModule spend and verifies it borrowed through the gateway, not DebtManager.
-    function _spendThroughGateway(uint256 borrowAmt, bytes32 _txId) internal {
+    /// @dev CashModule spend borrows from the DebtManager for a non-migrated safe; repay a day later to realize supplier interest.
+    function _borrowAndRepay() internal returns (uint256) {
         vm.startPrank(etherFiWallet);
 
+        uint256 borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 2;
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdc);
         uint256[] memory spendAmounts = new uint256[](1);
@@ -345,16 +336,15 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
 
         Cashback[] memory cashbacks;
 
-        cashModule.spend(address(safe), _txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        // 1 day after, there should be some interest accumulated
+        vm.warp(block.timestamp + 24 * 60 * 60);
+        uint256 repayAmt = debtManager.borrowingOf(address(safe), address(usdc));
+        deal(address(usdc), address(safe), repayAmt);
+        cashModule.repay(address(safe), address(usdc), repayAmt);
         vm.stopPrank();
 
-        (address borrowedSafe, address borrowedAsset, uint256 borrowedAmount, address borrowRecipient) = gateway.lastBorrow();
-        assertEq(borrowedSafe, address(safe));
-        assertEq(borrowedAsset, address(usdc));
-        assertEq(borrowedAmount, borrowAmt);
-        assertEq(borrowRecipient, address(settlementDispatcherReap));
-
-        (, uint256 totalBorrowingsOfSafe) = debtManager.borrowingOf(address(safe));
-        assertEq(totalBorrowingsOfSafe, 0);
+        return repayAmt - borrowAmt;
     }
 }

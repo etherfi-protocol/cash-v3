@@ -22,7 +22,7 @@ contract CashModuleSetGatewayTest is CashModuleTestSetup {
         MockGateway newGateway = new MockGateway();
 
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.GatewayUpdated(address(0), address(newGateway));
+        emit CashEventEmitter.GatewaySet(address(newGateway));
 
         vm.prank(owner);
         unconfiguredCashModule.setGateway(address(newGateway));

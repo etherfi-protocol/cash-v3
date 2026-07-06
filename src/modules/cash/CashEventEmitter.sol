@@ -85,7 +85,31 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param debtAmountInUsd USD value of the debt repaid
      */
     event RepayDebtManager(address indexed safe, address indexed token, uint256 debtAmount, uint256 debtAmountInUsd);
-    
+
+    /**
+     * @notice Emitted when a migrated safe repays debt on Aave via the gateway
+     * @param safe Address of the safe whose debt was repaid
+     * @param token Address of the token used to repay
+     * @param debtAmount Amount of debt actually repaid in token units (net of any refunded dust)
+     * @param debtAmountInUsd USD value of the debt actually repaid
+     */
+    event Repay(address indexed safe, address indexed token, uint256 debtAmount, uint256 debtAmountInUsd);
+
+    /**
+     * @notice Emitted when a safe requests to disable lend (opt out of the Aave market)
+     * @param safe Address of the safe
+     * @param finalizeTime Timestamp after which the request can be executed
+     */
+    event LendDisableRequested(address indexed safe, uint256 finalizeTime);
+
+    /// @notice Emitted when a safe's pending lend-disable request is executed
+    /// @param safe Address of the safe
+    event LendDisableExecuted(address indexed safe);
+
+    /// @notice Emitted when a safe re-enables lend (opts back into the Aave market)
+    /// @param safe Address of the safe
+    event LendEnabled(address indexed safe);
+
     /**
      * @notice Emitted when a spending limit is changed
      * @param safe Address of the safe changing the spending limit
@@ -176,12 +200,8 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     event SettlementDispatcheUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher);
 
-    /**
-     * @notice Emitted when the gateway is updated
-     * @param oldGateway Address of the previous gateway
-     * @param newGateway Address of the new gateway
-     */
-    event GatewayUpdated(address oldGateway, address newGateway);
+    /// @notice Emitted when the gateway is set during the one-time Lend bootstrap
+    event GatewaySet(address indexed gateway);
     
     /**
      * @notice Emitted when the withdrawal tokens are updated
@@ -226,13 +246,10 @@ contract CashEventEmitter is UpgradeableProxy {
         emit SettlementDispatcheUpdated(binSponsor, oldDispatcher, newDispatcher);
     }
 
-    /**
-     * @notice Emits the GatewayUpdated event
-     * @param oldGateway Address of the previous gateway
-     * @param newGateway Address of the new gateway
-     */
-    function emitGatewayUpdated(address oldGateway, address newGateway) external onlyCashModule {
-        emit GatewayUpdated(oldGateway, newGateway);
+    /// @notice Emits the GatewaySet event
+    /// @dev Can only be called by the Cash Module
+    function emitGatewaySet(address gateway) external onlyCashModule {
+        emit GatewaySet(gateway);
     }
 
     /**
@@ -391,6 +408,28 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitRepayDebtManager(address safe, address token, uint256 amount, uint256 amountInUsd) external onlyCashModule {
         emit RepayDebtManager(safe, token, amount, amountInUsd);
+    }
+
+    function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external onlyCashModule {
+        emit Repay(safe, token, amount, amountInUsd);
+    }
+
+    /// @notice Emits the LendDisableRequested event
+    /// @dev Can only be called by the Cash Module
+    function emitLendDisableRequested(address safe, uint256 finalizeTime) external onlyCashModule {
+        emit LendDisableRequested(safe, finalizeTime);
+    }
+
+    /// @notice Emits the LendDisableExecuted event
+    /// @dev Can only be called by the Cash Module
+    function emitLendDisableExecuted(address safe) external onlyCashModule {
+        emit LendDisableExecuted(safe);
+    }
+
+    /// @notice Emits the LendEnabled event
+    /// @dev Can only be called by the Cash Module
+    function emitLendEnabled(address safe) external onlyCashModule {
+        emit LendEnabled(safe);
     }
 
     /**
