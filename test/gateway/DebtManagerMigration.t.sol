@@ -281,6 +281,37 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "DebtManager debt still zero");
     }
 
+    /// A repay that covers the debt clears it fully: the sentinel path repays the live Aave debt (principal plus
+    /// interest accrued since the quote) so no dust survives, and refunds the unused balance to the safe.
+    function test_migratedSafe_fullRepay_clearsAaveDebtWithoutDust() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+
+        // Migrate a position carrying debt, then let interest accrue so the live debt exceeds the migrated principal.
+        deal(address(weETH), address(safe), 10 ether);
+        uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        vm.prank(migrator);
+        dm.migrateToAave(address(safe));
+
+        vm.warp(block.timestamp + 30 days);
+        uint256 liveDebt = gw.debtOf(address(safe), address(usdc));
+        assertGt(liveDebt, borrowAmt, "interest accrued on the Aave debt");
+
+        // Repay a USD amount above the live debt so the sentinel path fires; fund the safe with more than that.
+        uint256 liveDebtUsd = debtManager.convertCollateralTokenToUsd(address(usdc), liveDebt);
+        deal(address(usdc), address(safe), liveDebtUsd * 2);
+        uint256 safeBalBefore = usdc.balanceOf(address(safe));
+
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), liveDebtUsd + 1e6);
+
+        // Full repay leaves zero dust, and only the live debt was pulled from the safe (the excess is refunded).
+        assertEq(gw.debtOf(address(safe), address(usdc)), 0, "Aave debt fully cleared, no dust");
+        assertApproxEqAbs(safeBalBefore - usdc.balanceOf(address(safe)), liveDebt, 2, "only the live debt was pulled");
+    }
+
     // ----------------------------------------------------------------- helpers
 
     /// @dev Opts the safe out of lend (owner-signed toggleLend(false)), executing the pending request if the
