@@ -8,7 +8,7 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerStorageContract } from "../../src/debt-manager/DebtManagerStorageContract.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
-import { BinSponsor, Cashback, Mode } from "../../src/interfaces/ICashModule.sol";
+import { BinSponsor, Cashback, ICashModule, Mode } from "../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
 import { IGateway } from "../../src/interfaces/IGateway.sol";
 import { Gateway } from "../../src/modules/gateway/Gateway.sol";
@@ -65,6 +65,10 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
 
         _enableModule(address(gw));
         _activateAavePositionManager(address(gw));
+
+        // The safes in this suite model the pre-gateway population: route them to the legacy engine so
+        // migration is the thing that flips them (new safes onboard onto the gateway by default).
+        _forceLegacyEngine(address(safe));
     }
 
     /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setGateway(gw) above is
@@ -88,9 +92,10 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         vm.prank(migrator);
         dm.migrateToAave(address(safe));
 
-        // Legacy debt closed and Safe flagged migrated
+        // Legacy debt closed and Safe flagged migrated; both latches flip in the same tx
         assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "legacy debt cleared");
         assertTrue(dm.hasMigratedToAave(address(safe)), "marked migrated");
+        assertTrue(cashModule.isAaveGatewaySafe(address(safe)), "CashModule routing flag flipped");
         // Position now lives on Aave: same collateral, same debt size
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 10 ether, 3, "collateral on Aave");
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 1e6, "debt on Aave");
@@ -176,6 +181,45 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         vm.prank(migrator);
         vm.expectRevert(DebtManagerStorageContract.LendDisabledSafeHasDebt.selector);
         dm.migrateToAave(address(safe));
+    }
+
+    /// @dev Pending withdrawals reserve loose funds; migration must not sweep them into Aave. The queued
+    ///      withdrawal is a plain transfer of the Safe's balance, so supplying it would brick processWithdrawal.
+    function test_migrateToAave_leavesPendingWithdrawalLoose() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+
+        deal(address(weETH), address(safe), 10 ether);
+        uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 8;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        // Queue a withdrawal of 2 weETH, then migrate before the delay elapses
+        uint256 withdrawAmt = 2 ether;
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(weETH);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawAmt;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        vm.prank(migrator);
+        dm.migrateToAave(address(safe));
+
+        // Reserved amount stayed loose; only the rest was supplied
+        assertEq(weETH.balanceOf(address(safe)), withdrawAmt, "reserved amount left loose in the safe");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 10 ether - withdrawAmt, 3, "unreserved collateral supplied");
+
+        // The queued withdrawal still processes normally after the delay
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay + 1);
+        cashModule.processWithdrawal(address(safe));
+        assertEq(weETH.balanceOf(withdrawRecipient), withdrawAmt, "withdrawal paid out post-migration");
+        assertEq(weETH.balanceOf(address(safe)), 0, "safe holds nothing loose afterwards");
+    }
+
+    function test_markAaveGatewaySafe_onlyDebtManager() public {
+        vm.prank(makeAddr("rando"));
+        vm.expectRevert(ICashModule.OnlyDebtManager.selector);
+        cashModule.markAaveGatewaySafe(address(safe));
     }
 
     function test_migrateToAave_onlyDebtManagerAdmin() public {
@@ -314,6 +358,97 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         // Full repay leaves zero dust, and only the live debt was pulled from the safe (the excess is refunded).
         assertEq(gw.debtOf(address(safe), address(usdc)), 0, "Aave debt fully cleared, no dust");
         assertApproxEqAbs(safeBalBefore - usdc.balanceOf(address(safe)), liveDebt, 2, "only the live debt was pulled");
+    }
+
+    // ----------------------------------------------------------------- migration boundary
+    // A card auth is decided off-chain (CashLens.canSpend) seconds before the spend lands on-chain. If the
+    // migration sweep moves the safe in between, the auth was checked against the legacy engine but the
+    // spend executes on the gateway. These tests pin that hand-off.
+
+    /// A credit auth approved pre-migration (legacy check) lands post-migration as an Aave borrow.
+    function test_migrationBoundary_creditAuth_landsOnAave() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+        deal(address(weETH), address(safe), 10 ether);
+        deal(address(usdc), address(debtManager), 1000e6); // legacy credit check requires DebtManager liquidity
+
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), keccak256("boundary-credit"), tokens, amounts);
+        assertTrue(ok, reason);
+
+        vm.prank(migrator);
+        dm.migrateToAave(address(safe));
+
+        Cashback[] memory cashbacks;
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("boundary-credit"), BinSponsor.Reap, tokens, amounts, cashbacks);
+
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 100e6, 1e6, "borrowed on Aave, not the DebtManager");
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "no legacy debt");
+    }
+
+    /// A debit auth approved pre-migration against the loose balance sources from the Aave-supplied
+    /// position post-migration (migration moved the funds there).
+    function test_migrationBoundary_debitAuth_sourcesFromAave() public {
+        deal(address(usdc), address(safe), 100e6);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 50e6;
+
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), keccak256("boundary-debit"), tokens, amounts);
+        assertTrue(ok, reason);
+
+        vm.prank(migrator);
+        dm.migrateToAave(address(safe));
+        assertEq(usdc.balanceOf(address(safe)), 0, "migration supplied the loose balance");
+
+        address dispatcher = cashModule.getSettlementDispatcher(BinSponsor.Reap);
+        uint256 dispatcherBefore = usdc.balanceOf(dispatcher);
+
+        Cashback[] memory cashbacks;
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("boundary-debit"), BinSponsor.Reap, tokens, amounts, cashbacks);
+
+        assertEq(usdc.balanceOf(dispatcher), dispatcherBefore + 50e6, "debit sourced from the supplied position");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 50e6, 2, "supplied position reduced");
+    }
+
+    /// Gateway-credit declined-side parity: a check declined for borrowing power implies the Aave borrow
+    /// reverts (the mock gateway cannot model this; the real Aave instance enforces it).
+    function test_migrationBoundary_gatewayCreditDeclined_revertsOnSpend() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+        deal(address(weETH), address(safe), 1 ether);
+
+        vm.prank(migrator);
+        dm.migrateToAave(address(safe));
+
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
+
+        uint256 tooMuch = gw.getAccountData(address(safe)).availableBorrowsUsd + 100e6;
+        assertLt(tooMuch, dailyLimitInUsd, "test premise: declined by borrow power, not the limit");
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = tooMuch;
+
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), keccak256("boundary-declined"), tokens, amounts);
+        assertFalse(ok);
+        assertEq(reason, "Insufficient borrowing power");
+
+        Cashback[] memory cashbacks;
+        vm.prank(etherFiWallet);
+        vm.expectRevert(); // Aave enforces the borrowing power on the borrow itself
+        cashModule.spend(address(safe), keccak256("boundary-declined"), BinSponsor.Reap, tokens, amounts, cashbacks);
     }
 
     // ----------------------------------------------------------------- helpers

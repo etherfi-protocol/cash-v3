@@ -25,6 +25,9 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
     function setUp() public override {
         super.setUp();
 
+        // This suite tests the legacy DebtManager engine (new safes default to the Aave gateway)
+        _forceLegacyEngine(address(safe));
+
         uint256 nonce = cashModule.getNonce(address(safe));
         bytes32 msgHash = keccak256(
             abi.encodePacked(

@@ -23,6 +23,9 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
     function setUp() public override {
         super.setUp();
 
+        // This suite tests the legacy DebtManager engine (new safes default to the Aave gateway)
+        _forceLegacyEngine(address(safe));
+
         // remove all supplies from debt manager
         vm.startPrank(owner);
         debtManager.withdrawBorrowToken(address(usdc), debtManager.supplierBalance(owner, address(usdc)));

@@ -513,6 +513,79 @@ contract DebtManagerCore is DebtManagerStorageContract {
     }
 
     /**
+     * @notice Liquidates an unhealthy position
+     * @dev Can liquidate up to 50% of the debt in first attempt, and remainder if still unhealthy
+     * @param user Address of the user to liquidate
+     * @param borrowToken Address of the borrow token to repay
+     * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
+     */
+    function liquidate(address user, address borrowToken, address[] memory collateralTokensPreference) external whenNotPaused nonReentrant whenNotMigrated(user) {
+        if (collateralTokensPreference.length == 0) revert CollateralPreferenceIsEmpty();
+        _updateInterestIndex(borrowToken);
+        uint256 interestIndex = _getDebtManagerStorage().borrowTokenConfig[borrowToken].interestIndexSnapshot;
+        if (!isBorrowToken(borrowToken)) revert UnsupportedBorrowToken();
+        if (!liquidatable(user)) revert CannotLiquidateYet();
+
+        _liquidateUser(user, borrowToken, collateralTokensPreference, interestIndex);
+    }
+
+    /**
+     * @dev Liquidates a user's position
+     * @param user Address of the user to liquidate
+     * @param borrowToken Address of the borrow token to repay
+     * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
+     */
+    function _liquidateUser(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 interestIndex) internal {
+        DebtManagerStorage storage $ = _getDebtManagerStorage();
+
+        uint256 debtAmountToLiquidateInUsd = _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken].ceilDiv(2), interestIndex);
+        _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
+
+        uint256 remainingNormalizedBorrowAmt = $.userNormalizedBorrowings[user][borrowToken];
+        if (remainingNormalizedBorrowAmt > 0 && liquidatable(user)) {
+            debtAmountToLiquidateInUsd = _getActualBorrowAmount(remainingNormalizedBorrowAmt, interestIndex);
+            _liquidate(user, borrowToken, collateralTokensPreference, debtAmountToLiquidateInUsd, interestIndex);
+
+            // If there's still 1 wei left due to rounding, force it to zero
+            remainingNormalizedBorrowAmt = $.userNormalizedBorrowings[user][borrowToken];
+            if (remainingNormalizedBorrowAmt == 1) {
+                $.userNormalizedBorrowings[user][borrowToken] = 0;
+                $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= 1;
+            }
+        }
+    }
+
+    /**
+     * @dev Executes the liquidation process
+     * @param user Address of the user to liquidate
+     * @param borrowToken Address of the borrow token to repay
+     * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
+     * @param debtAmountToLiquidateInUsd Amount of debt to liquidate in USD with 6 decimals
+     */
+    function _liquidate(address user, address borrowToken, address[] memory collateralTokensPreference, uint256 debtAmountToLiquidateInUsd, uint256 interestIndex) internal {
+        DebtManagerStorage storage $ = _getDebtManagerStorage();
+        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+
+        cashModule.preLiquidate(user);
+        if (debtAmountToLiquidateInUsd == 0) revert LiquidatableAmountIsZero();
+
+        uint256 beforeDebtAmount = _getActualBorrowAmount($.userNormalizedBorrowings[user][borrowToken], interestIndex);
+
+        (IDebtManager.LiquidationTokenData[] memory collateralTokensToSend, uint256 remainingDebt) = _getCollateralTokensForDebtAmount(user, debtAmountToLiquidateInUsd, collateralTokensPreference);
+
+        cashModule.postLiquidate(user, msg.sender, collateralTokensToSend);
+
+        uint256 liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt;
+        uint256 normalizedLiquidatedAmount = _getNormalizedAmount(liquidatedAmt, interestIndex, Math.Rounding.Floor);
+        $.userNormalizedBorrowings[user][borrowToken] -= normalizedLiquidatedAmount;
+        $.borrowTokenConfig[borrowToken].totalNormalizedBorrowingAmount -= normalizedLiquidatedAmount;
+
+        IERC20(borrowToken).safeTransferFrom(msg.sender, address(this), convertUsdToCollateralToken(borrowToken, liquidatedAmt));
+
+        emit Liquidated(msg.sender, user, borrowToken, collateralTokensToSend, beforeDebtAmount, liquidatedAmt);
+    }
+
+    /**
      * @dev Processes repayment with borrow token
      * @param token Address of the token being repaid
      * @param user Address of the user whose debt is being repaid
@@ -528,6 +601,61 @@ contract DebtManagerCore is DebtManagerStorageContract {
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         emit Repaid(user, msg.sender, token, repayDebtusdAmount);
+    }
+
+    /**
+     * @dev Calculates collateral tokens needed to cover a debt amount
+     * @param user Address of the user being liquidated
+     * @param repayDebtUsdAmt Debt amount to cover in USD with 6 decimals
+     * @param collateralTokenPreference Order of preference for collateral tokens
+     * @return Array of liquidation token data
+     * @return Remaining debt that could not be covered
+     */
+    function _getCollateralTokensForDebtAmount(address user, uint256 repayDebtUsdAmt, address[] memory collateralTokenPreference) internal view returns (IDebtManager.LiquidationTokenData[] memory, uint256) {
+        DebtManagerStorage storage $ = _getDebtManagerStorage();
+        uint256 len = collateralTokenPreference.length;
+        IDebtManager.LiquidationTokenData[] memory collateral = new IDebtManager.LiquidationTokenData[](len);
+
+        for (uint256 i = 0; i < len;) {
+            address collateralToken = collateralTokenPreference[i];
+            if (!isCollateralToken(collateralToken)) revert NotACollateralToken();
+
+            uint256 collateralAmountForDebt = convertUsdToCollateralToken(collateralToken, repayDebtUsdAmt);
+            uint256 totalCollateral = IERC20(collateralToken).balanceOf(user);
+
+            uint256 netCollateralRepayValue = (totalCollateral * HUNDRED_PERCENT) / (HUNDRED_PERCENT + $.collateralTokenConfig[collateralToken].liquidationBonus);
+            uint256 maxBonus = totalCollateral - netCollateralRepayValue;
+
+            if (totalCollateral - maxBonus < collateralAmountForDebt) {
+                uint256 liquidationBonus = maxBonus;
+                collateral[i] = IDebtManager.LiquidationTokenData({ token: collateralToken, amount: totalCollateral, liquidationBonus: liquidationBonus });
+
+                uint256 usdValueOfCollateral = convertCollateralTokenToUsd(collateralToken, totalCollateral - liquidationBonus);
+
+                repayDebtUsdAmt -= usdValueOfCollateral;
+            } else {
+                uint256 liquidationBonus = (collateralAmountForDebt * $.collateralTokenConfig[collateralToken].liquidationBonus) / HUNDRED_PERCENT;
+
+                collateral[i] = IDebtManager.LiquidationTokenData({ token: collateralToken, amount: collateralAmountForDebt + liquidationBonus, liquidationBonus: liquidationBonus });
+
+                repayDebtUsdAmt = 0;
+            }
+
+            if (repayDebtUsdAmt == 0) {
+                uint256 arrLen = i + 1;
+                assembly ("memory-safe") {
+                    mstore(collateral, arrLen)
+                }
+
+                break;
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        return (collateral, repayDebtUsdAmt);
     }
 
     /**
@@ -590,16 +718,18 @@ contract DebtManagerCore is DebtManagerStorageContract {
             }
         }
 
-        // 3. Supply all of the Safe's collateral into Aave, enabled as collateral (Safe is now debt-free on
+        // 3. Supply the Safe's collateral into Aave, enabled as collateral (Safe is now debt-free on
         //    DebtManager, so the hook's health check passes as the collateral moves). This runs even for a
         //    debt-free Safe: once migrated, credit spends borrow against the Aave position, so the collateral
         //    must actually move to Aave rather than sit idle in the Safe. Skipped for a lend-disabled safe,
-        //    which keeps its funds idle in the Safe by choice.
+        //    which keeps its funds idle in the Safe by choice. Amounts reserved by a pending withdrawal stay
+        //    loose in the Safe: the queued withdrawal is a plain transfer of the Safe's balance, so supplying
+        //    them would brick it. Pending withdrawals reserve funds; migration must not outrank them.
         if (lendEnabled) {
             address[] memory collateralTokens = getCollateralTokens();
             uint256 cLen = collateralTokens.length;
             for (uint256 i = 0; i < cLen;) {
-                uint256 bal = IERC20(collateralTokens[i]).balanceOf(safe);
+                uint256 bal = _suppliableBalance(cashModule, safe, collateralTokens[i]);
                 if (bal != 0) {
                     _gateway.supply(safe, collateralTokens[i], bal);
                     _gateway.setUsingAsCollateral(safe, collateralTokens[i], true);
@@ -625,7 +755,17 @@ contract DebtManagerCore is DebtManagerStorageContract {
         }
 
         $.migratedToAave[safe] = true;
+        // Flip the CashModule routing flag in the same tx, so the freeze latch here and the routing of
+        // spend/repay/lens can never disagree about which engine serves the Safe.
+        cashModule.markAaveGatewaySafe(safe);
         emit MigratedToAave(safe, totalDebtUsd);
+    }
+
+    /// @dev A Safe's balance of `token` minus what a pending withdrawal has reserved - the amount migration may supply
+    function _suppliableBalance(ICashModule cashModule, address safe, address token) internal view returns (uint256) {
+        uint256 bal = IERC20(token).balanceOf(safe);
+        uint256 reserved = cashModule.getPendingWithdrawalAmount(safe, token);
+        return bal > reserved ? bal - reserved : 0;
     }
 
     /**

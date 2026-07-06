@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
-import { ICashModule, Mode, SafeCashData } from "../../../../src/interfaces/ICashModule.sol";
+import { BinSponsor, ICashModule, Mode, SafeCashData } from "../../../../src/interfaces/ICashModule.sol";
 import { IGateway } from "../../../../src/interfaces/IGateway.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 import { MockGateway } from "../../../../src/mocks/MockGateway.sol";
@@ -15,6 +15,32 @@ import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.s
 
 contract CashModuleSetGatewayTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
+
+    /// @notice New safes onboard onto the Aave gateway engine; a debt-free re-setup also flips to the gateway.
+    function test_setupModule_flagsNewSafeAsAaveGateway() public {
+        assertTrue(cashModule.isAaveGatewaySafe(address(safe)), "new safe defaults to the gateway engine");
+
+        _forceLegacyEngine(address(safe));
+
+        vm.prank(address(safe));
+        cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
+        assertTrue(cashModule.isAaveGatewaySafe(address(safe)), "debt-free re-setup flips to the gateway");
+    }
+
+    /// @notice A legacy safe with open DebtManager debt must keep routing to DebtManager if setup re-runs;
+    ///         flipping it without migrating would strand the legacy debt behind gateway routing.
+    function test_setupModule_keepsLegacySafeWithDebtOnLegacyEngine() public {
+        _forceLegacyEngine(address(safe));
+
+        deal(address(weETH), address(safe), 10 ether);
+        deal(address(usdc), address(debtManager), 1_000_000e6);
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), 10e6);
+
+        vm.prank(address(safe));
+        cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
+        assertFalse(cashModule.isAaveGatewaySafe(address(safe)), "safe with legacy debt stays on the legacy engine");
+    }
 
     /// @notice A controller can configure the first gateway during Lend bootstrap and the change is emitted.
     function test_setGateway_emitsAndUpdates() public {

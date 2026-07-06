@@ -13,11 +13,20 @@ import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
+import { CashLensLegacyLib } from "./CashLensLegacyLib.sol";
 
 /**
  * @title CashLens
  * @notice Read-only contract providing views into a Safe's cash state
- * @dev Reads the Safe's position from the Aave gateway and the supported-token list from DebtManager.
+ * @dev Every engine-touching view branches on CashModule.isAaveGatewaySafe: gateway safes are read from the
+ *      Aave gateway (the logic in this contract), legacy safes from the DebtManager (preserved output-identical
+ *      in the linked CashLensLegacyLib). The check side of a spend must always agree with what the execution
+ *      side (CashLendLib) will do, so both read the same flag. Legacy code always sits inside an
+ *      `if (!isAaveGatewaySafe(safe))` block (routing to CashLensLegacyLib, or a couple of master-verbatim
+ *      lines inline), deleted wholesale when the legacy engine is retired; the gateway path is the unguarded
+ *      fall-through.
+ *
+ *      Gateway safes: the position is read from the Aave gateway; the supported-token list from DebtManager.
  *      Credit capacity comes straight from Aave. Debit spendable is the raw Safe balance plus the
  *      withdrawable supplied amount; when the Safe has debt, the withdrawable part is capped by the
  *      borrowing headroom (collateral weighted by LTV, minus debt) so the leftover position keeps
@@ -134,13 +143,13 @@ contract CashLens is UpgradeableProxy {
         amountsInUsd[0] = amountInUsd;
         address[] memory singleToken = new address[](1);
 
-        string memory firstError;
+        string memory firstReason;
 
         for (uint256 i = 0; i < tokenPreferences.length;) {
             singleToken[0] = tokenPreferences[i];
 
-            (bool success, string memory error) = canSpend(safe, txId, singleToken, amountsInUsd);
-            if (i == 0) firstError = error;
+            (bool success, string memory reason) = canSpend(safe, txId, singleToken, amountsInUsd);
+            if (i == 0) firstReason = reason;
 
             if (success) return (tokenPreferences[i], true, "");
 
@@ -149,7 +158,7 @@ contract CashLens is UpgradeableProxy {
             }
         }
 
-        return (tokenPreferences[0], false, firstError);
+        return (tokenPreferences[0], false, firstReason);
     }
 
     /// @notice Validates mode and spending limits, then runs the mode-specific check
@@ -167,6 +176,12 @@ contract CashLens is UpgradeableProxy {
         (bool withinLimit, string memory limitMessage) = safeData.spendingLimit.canSpend(totalSpendingInUsd);
         if (!withinLimit) {
             return (false, limitMessage);
+        }
+
+        // Route by engine, mirroring the spend execution: legacy safes get the pre-gateway DebtManager
+        // checks (and decline strings) exactly as before the gateway existed.
+        if (!cashModule.isAaveGatewaySafe(safe)) {
+            return CashLensLegacyLib.check(cashModule, safe, tokens, amountsInUsd, totalSpendingInUsd, safeData, mode);
         }
 
         if (mode == Mode.Credit) {
@@ -261,19 +276,24 @@ contract CashLens is UpgradeableProxy {
         IDebtManager debtManager = cashModule.getDebtManager();
         IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
         SafeData memory safeData = cashModule.getData(safe);
-        IGateway.AccountData memory account = gateway().getAccountData(safe);
 
         SafeCashData memory data;
 
         address[] memory collateralTokens = debtManager.getCollateralTokens();
         address[] memory borrowTokens = debtManager.getBorrowTokens();
 
-        data.collateralBalances = _suppliedBalances(safe, collateralTokens);
-        data.borrows = _debtBalances(safe, borrowTokens);
-        data.totalCollateral = account.collateralUsd;
-        data.totalBorrow = account.debtUsd;
-        // Gross borrowing power (collateral weighted by LTV): the gateway headroom plus current debt
-        data.maxBorrow = account.availableBorrowsUsd + account.debtUsd;
+        if (!cashModule.isAaveGatewaySafe(safe)) {
+            (data.collateralBalances, data.totalCollateral, data.borrows, data.totalBorrow) = debtManager.getUserCurrentState(safe);
+            data.maxBorrow = debtManager.getMaxBorrowAmount(safe, true);
+        } else {
+            IGateway.AccountData memory account = gateway().getAccountData(safe);
+            data.collateralBalances = _suppliedBalances(safe, collateralTokens);
+            data.borrows = _debtBalances(safe, borrowTokens);
+            data.totalCollateral = account.collateralUsd;
+            data.totalBorrow = account.debtUsd;
+            // Gross borrowing power (collateral weighted by LTV): the gateway headroom plus current debt
+            data.maxBorrow = account.availableBorrowsUsd + account.debtUsd;
+        }
 
         uint256 len = collateralTokens.length;
         data.tokenPrices = new IDebtManager.TokenData[](len);
@@ -328,6 +348,10 @@ contract CashLens is UpgradeableProxy {
         if (len == 0) return DebitModeMaxSpend(new address[](0), new uint256[](0), new uint256[](0), 0);
         if (len > 1) debtServiceTokenPreference.checkDuplicates();
 
+        if (!cashModule.isAaveGatewaySafe(safe)) {
+            return CashLensLegacyLib.maxSpendDebit(cashModule, safe, debtServiceTokenPreference);
+        }
+
         IDebtManager debtManager = cashModule.getDebtManager();
         SafeData memory safeData = cashModule.getData(safe);
 
@@ -375,6 +399,10 @@ contract CashLens is UpgradeableProxy {
      * @return Maximum amount that can be spent in credit mode (USD, 6 decimals)
      */
     function getMaxSpendCredit(address safe) public view returns (uint256) {
+        if (!cashModule.isAaveGatewaySafe(safe)) {
+            return CashLensLegacyLib.maxSpendCredit(cashModule, safe);
+        }
+
         IGateway lendGateway = cashModule.getGateway();
         uint256 borrowPower = lendGateway.getAccountData(safe).availableBorrowsUsd;
 
@@ -430,8 +458,10 @@ contract CashLens is UpgradeableProxy {
 
     /**
      * @notice Gets the effective collateral amount for a specific token
-     * @dev Returns the raw Safe balance minus pending withdrawals. DebtManager reads this during its
-     *      retirement window, so it stays on the raw balance until the Aave cutover.
+     * @dev A gateway safe's collateral is its Aave-supplied balance (pending withdrawals reserve loose funds,
+     *      not the supplied position). A legacy safe's collateral is its raw balance minus pending
+     *      withdrawals — DebtManager reads this branch for its health and borrow checks, so it must keep the
+     *      exact pre-gateway semantics until the legacy engine is retired.
      * @param safe Address of the safe
      * @param token Address of the collateral token to check
      * @return Effective collateral amount
@@ -441,47 +471,34 @@ contract CashLens is UpgradeableProxy {
         IDebtManager debtManager = cashModule.getDebtManager();
 
         if (!debtManager.isCollateralToken(token)) revert NotACollateralToken();
-        uint256 balance = IERC20(token).balanceOf(safe);
-        uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
 
-        return balance > pendingWithdrawalAmount ? balance - pendingWithdrawalAmount : 0;
+        if (!cashModule.isAaveGatewaySafe(safe)) {
+            uint256 balance = IERC20(token).balanceOf(safe);
+            uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
+
+            return balance > pendingWithdrawalAmount ? balance - pendingWithdrawalAmount : 0;
+        }
+
+        return gateway().suppliedOf(safe, token);
     }
 
     /**
      * @notice Gets all effective collateral balances for a safe
-     * @dev Returns the raw Safe balances minus pending withdrawals. DebtManager reads this during its
-     *      retirement window, so it stays on the raw balance until the Aave cutover.
+     * @dev A gateway safe's collateral is its Aave-supplied balances; a legacy safe's is its raw balances
+     *      minus pending withdrawals. DebtManager reads the legacy branch for its health and borrow checks,
+     *      so that branch must keep the exact pre-gateway semantics until the legacy engine is retired.
      * @param safe Address of the safe
      * @return Array of token data with token addresses and effective amounts
      */
     function getUserTotalCollateral(address safe) public view returns (IDebtManager.TokenData[] memory) {
         IDebtManager debtManager = cashModule.getDebtManager();
         address[] memory collateralTokens = debtManager.getCollateralTokens();
-        uint256 len = collateralTokens.length;
-        IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
-        uint256 m = 0;
-        for (uint256 i = 0; i < len;) {
-            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
-            uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
-            if (balance != 0) {
-                balance = balance > pendingWithdrawalAmount ? balance - pendingWithdrawalAmount : 0;
-                if (balance != 0) {
-                    tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
-                    unchecked {
-                        ++m;
-                    }
-                }
-            }
-            unchecked {
-                ++i;
-            }
+
+        if (!cashModule.isAaveGatewaySafe(safe)) {
+            return CashLensLegacyLib.userTotalCollateral(cashModule, safe, collateralTokens);
         }
 
-        assembly ("memory-safe") {
-            mstore(tokenAmounts, m)
-        }
-
-        return tokenAmounts;
+        return _suppliedBalances(safe, collateralTokens);
     }
 
     /**

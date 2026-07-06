@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
 import { SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
@@ -16,6 +15,7 @@ import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { CashLendLib } from "./CashLendLib.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
@@ -104,6 +104,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
+
+    /// @notice Error thrown when a non-DebtManager contract calls restricted functions
+    error OnlyDebtManager();
 
     /// @notice Error thrown when a recipient address is set to zero
     error RecipientCannotBeAddressZero();
@@ -198,26 +201,21 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @dev Cancels pending withdrawal requests for a Safe
+     * @notice Whether the safe's borrow/collateral engine is the Aave gateway (vs the legacy DebtManager)
+     * @dev The canonical routing flag: every engine-touching path must branch on this and nothing else.
+     * @param safe Address of the EtherFi Safe
+     * @return True if the safe uses the Aave gateway
+     */
+    function _isAaveGatewaySafe(address safe) internal view returns (bool) {
+        return _getCashModuleStorage().safeCashConfig[safe].onAaveGateway;
+    }
+
+    /**
+     * @dev Cancels pending withdrawal requests for a Safe; the logic lives in CashLendLib for code size
      * @param safe Address of the EtherFi Safe
      */
     function _cancelOldWithdrawal(address safe) internal {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-
-        ICashEventEmitter eventEmitter = $.cashEventEmitter;
-        SafeCashConfig storage safeCashConfig = $.safeCashConfig[safe];
-
-        address recipient = safeCashConfig.pendingWithdrawalRequest.recipient;
-
-        if (safeCashConfig.pendingWithdrawalRequest.tokens.length > 0) {
-            if ($.whitelistedModulesCanRequestWithdraw.contains(recipient)) {
-                // Only call the function if the module is whitelisted on data provider
-                if (etherFiDataProvider.isWhitelistedModule(recipient)) IBridgeModule(recipient).cancelBridgeByCashModule(safe);
-            }
-
-            eventEmitter.emitWithdrawalCancelled(safe, safeCashConfig.pendingWithdrawalRequest.tokens, safeCashConfig.pendingWithdrawalRequest.amounts, recipient);
-            delete safeCashConfig.pendingWithdrawalRequest;
-        }
+        CashLendLib.cancelOldWithdrawal(_getCashModuleStorage(), etherFiDataProvider, safe);
     }
 
     /**
@@ -342,6 +340,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
         delete $$.pendingWithdrawalRequest;
 
+        // Deliberately unconditional: load-bearing for legacy safes (loose tokens are DebtManager collateral)
+        // and provably a no-op for gateway safes, whose DebtManager books are zero by construction.
         $.debtManager.ensureHealth(safe);
     }
 }

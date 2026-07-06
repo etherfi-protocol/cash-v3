@@ -212,6 +212,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     /// @notice A non-migrated safe borrows from the DebtManager, so withdrawing its backing collateral reverts as unhealthy.
     function test_processWithdrawals_fails_ifPositionUnhealthyAfterWithdrawal() external {
+        _forceLegacyEngine(address(safe));
         uint256 totalSafeBalance = 100e6;
         deal(address(usdc), address(safe), totalSafeBalance);
         deal(address(weETH), address(safe), 0);
@@ -277,6 +278,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
     /// @notice Reserving all collateral for withdrawal while DebtManager debt is open makes the request unhealthy.
     function test_requestWithdrawal_fails_whenAccountBecomesUnhealthy() external {
+        _forceLegacyEngine(address(safe));
         address[] memory tokens = new address[](2);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);

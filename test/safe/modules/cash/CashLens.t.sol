@@ -70,7 +70,9 @@ contract CashLensTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// A legacy safe's collateral is its raw balance minus pending withdrawals.
     function test_getUserCollateralForToken() public {
+        _forceLegacyEngine(address(safe));
         uint256 depositAmount = 5 ether;
         deal(address(weETH), address(safe), depositAmount);
         
@@ -97,7 +99,22 @@ contract CashLensTest is CashModuleTestSetup {
         cashLens.getUserCollateralForToken(address(safe), nonCollateralToken);
     }
 
+    /// A gateway safe's collateral is its Aave-supplied balance; loose funds and pending withdrawals don't count.
+    function test_getUserCollateralForToken_gatewaySafe_readsSuppliedBalance() public {
+        deal(address(weETH), address(safe), 5 ether); // loose, not collateral for a gateway safe
+        assertEq(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 0, "loose balance is not collateral");
+
+        gateway.setSuppliedOf(address(safe), address(weETH), 3 ether);
+        assertEq(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 3 ether, "supplied balance is the collateral");
+
+        IDebtManager.TokenData[] memory collateral = cashLens.getUserTotalCollateral(address(safe));
+        assertEq(collateral.length, 1, "only the supplied token shows up");
+        assertEq(collateral[0].token, address(weETH));
+        assertEq(collateral[0].amount, 3 ether);
+    }
+
     function test_getUserTotalCollateral() public {
+        _forceLegacyEngine(address(safe));
         // Add multiple collateral types
         deal(address(weETH), address(safe), 5 ether);
         deal(address(usdc), address(safe), 10000e6);

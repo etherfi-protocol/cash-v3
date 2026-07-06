@@ -25,6 +25,9 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     function setUp() public override {
         super.setUp();
 
+        // This suite tests the legacy DebtManager engine (new safes default to the Aave gateway)
+        _forceLegacyEngine(address(safe));
+
         collateralValueInUsdc = debtManager.convertCollateralTokenToUsd(address(weETH), collateralAmount);
 
         deal(address(weETH), address(safe), collateralAmount);

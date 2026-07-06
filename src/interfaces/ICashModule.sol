@@ -141,6 +141,8 @@ struct SafeCashConfig {
     bool lendDisabled;
     /// @notice Timestamp after which a pending disable-lend request can be executed (0 if none)
     uint96 lendDisableFinalizeTime;
+    /// @notice True once the safe's borrow/collateral engine is the Aave gateway (set at onboarding or by migration; one-way)
+    bool onAaveGateway;
 }
 
 /**
@@ -211,6 +213,9 @@ interface ICashModule {
 
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
+
+    /// @notice Error thrown when a non-DebtManager contract calls restricted functions
+    error OnlyDebtManager();
 
     /// @notice Error thrown when a recipient address is zero
     error RecipientCannotBeAddressZero();
@@ -360,6 +365,23 @@ interface ICashModule {
      * @return Address of the gateway (address(0) if not set)
      */
     function getLendGateway() external view returns (address);
+
+    /**
+     * @notice Whether the safe's borrow/collateral engine is the Aave gateway (vs the legacy DebtManager)
+     * @dev The canonical routing flag: every spend/repay/lens path branches on this. True for safes onboarded
+     *      after the gateway launch and for safes migrated via DebtManager.migrateToAave; false means legacy.
+     * @param safe The safe to query
+     * @return True if the safe uses the Aave gateway
+     */
+    function isAaveGatewaySafe(address safe) external view returns (bool);
+
+    /**
+     * @notice Marks a safe as using the Aave gateway engine
+     * @dev Only callable by the DebtManager, as the last step of migrateToAave. Idempotent and one-way.
+     * @param safe The safe to mark
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
+    function markAaveGatewaySafe(address safe) external;
 
     /**
      * @notice Gets the debt manager contract
@@ -627,6 +649,24 @@ interface ICashModule {
      * @custom:throws If spending would exceed limits or balances
      */
     function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external;
+
+    /**
+     * @notice Prepares a safe for liquidation by canceling any pending withdrawals
+     * @dev Only callable by the DebtManager
+     * @param safe Address of the EtherFi Safe being liquidated
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
+    function preLiquidate(address safe) external;
+
+    /**
+     * @notice Executes post-liquidation logic to transfer tokens to the liquidator
+     * @dev Only callable by the DebtManager after a successful liquidation
+     * @param safe Address of the EtherFi Safe being liquidated
+     * @param liquidator Address that will receive the liquidated tokens
+     * @param tokensToSend Array of token data with amounts to send to the liquidator
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
+    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
 
     /**
      * @notice Clears pending cashback for users

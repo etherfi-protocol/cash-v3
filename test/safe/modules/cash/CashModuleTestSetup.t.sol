@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import { Test } from "forge-std/Test.sol";
+import { StdStorage, Test, stdStorage } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 import { CashbackDispatcher } from "../../../../src/cashback-dispatcher/CashbackDispatcher.sol";
@@ -26,6 +26,7 @@ import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, Saf
 contract CashModuleTestSetup is SafeTestSetup {
     using MessageHashUtils for bytes32;
     using TimeLib for uint256;
+    using stdStorage for StdStorage;
 
     address withdrawRecipient = makeAddr("withdrawRecipient");
     bytes32 txId = keccak256("txId");
@@ -154,6 +155,17 @@ contract CashModuleTestSetup is SafeTestSetup {
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.SpendingLimitChanged(address(safe), oldLimit, newLimit);
         cashModule.updateSpendingLimit(address(safe), dailyLimit, monthlyLimit, owner1, signature);
+    }
+
+    /**
+     * @notice Flips a safe back to the legacy DebtManager engine, modeling a safe that predates the gateway
+     *         (new safes onboard onto the Aave gateway in setupModule).
+     * @dev Writes the packed onAaveGateway flag via stdstore, then asserts through the public getter so any
+     *      storage-layout drift fails loudly here instead of silently testing the wrong engine.
+     */
+    function _forceLegacyEngine(address _safe) internal {
+        stdstore.enable_packed_slots().target(address(cashModule)).sig(ICashModule.isAaveGatewaySafe.selector).with_key(_safe).checked_write(false);
+        assertFalse(cashModule.isAaveGatewaySafe(_safe), "forceLegacyEngine: flag still set");
     }
 
     /**
