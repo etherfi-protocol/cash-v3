@@ -137,6 +137,10 @@ struct SafeCashConfig {
     uint256 totalCashbackEarnedInUsd;
     /// @notice Incoming mode that will be applied after the delay
     Mode incomingMode;
+    /// @notice True once the safe has opted out of the Aave lend market (no auto-supply, no lend ops)
+    bool lendDisabled;
+    /// @notice Timestamp after which a pending disable-lend request can be executed (0 if none)
+    uint96 lendDisableFinalizeTime;
 }
 
 /**
@@ -222,6 +226,21 @@ interface ICashModule {
 
     /// @notice Error thrown when trying to set a mode that's already active
     error ModeAlreadySet();
+
+    /// @notice Error thrown when a lend op is attempted while the safe has opted out of lend
+    error LendDisabled();
+    /// @notice Error thrown when disabling lend while the safe still has open borrows
+    error HasOpenBorrows();
+    /// @notice Error thrown when executing a disable-lend that was never requested
+    error NoPendingLendDisable();
+    /// @notice Error thrown when executing a disable-lend before its delay has elapsed
+    error LendDisableNotReady();
+    /// @notice Error thrown when disabling lend that is already disabled, or when a request is already pending
+    error LendAlreadyDisabled();
+    /// @notice Error thrown when enabling lend that is already enabled
+    error LendNotDisabled();
+    /// @notice Error thrown when the lend gateway has not been configured
+    error LendGatewayNotSet();
 
     /// @notice Error thrown when trying to set a tier that's already set
     error AlreadyInSameTier(uint256 index);
@@ -321,6 +340,26 @@ interface ICashModule {
      * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
      */
     function transactionCleared(address safe, bytes32 txId) external view returns (bool);
+
+    /**
+     * @notice Whether the safe currently participates in the Aave lend market (auto-supply + lend ops enabled)
+     * @param safe The safe to query
+     * @return True unless the safe has opted out via toggleLend(false) + processLendDisable
+     */
+    function isLendEnabled(address safe) external view returns (bool);
+
+    /**
+     * @notice Returns the timestamp when a pending lend-disable request becomes executable
+     * @param safe The safe to query
+     * @return Timestamp when processLendDisable may be called, or 0 if none pending
+     */
+    function lendDisableFinalizeTime(address safe) external view returns (uint256);
+
+    /**
+     * @notice Returns the configured Aave gateway used for lend operations
+     * @return Address of the gateway (address(0) if not set)
+     */
+    function getLendGateway() external view returns (address);
 
     /**
      * @notice Gets the debt manager contract
@@ -532,6 +571,37 @@ interface ICashModule {
      * @custom:throws InvalidSignatures if signature verification fails
      */
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external;
+
+    /**
+     * @notice Sets the Aave gateway used to withdraw collateral when a safe disables lend
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @param gateway Address of the gateway
+     */
+    function setLendGateway(address gateway) external;
+
+    /**
+     * @notice Toggles a safe's participation in the Aave lend market (auto-supply and borrow ops)
+     * @dev Owner-signed, with the requested flag bound into the signature. Enabling (enable == true) opts the
+     *      safe back in immediately and cancels any pending disable. Disabling (enable == false) does not act
+     *      immediately: it records a request that becomes executable after the mode-change delay, at which
+     *      point anyone may call processLendDisable. Disabling requires the safe to have no open borrows.
+     * @param safe Address of the EtherFi Safe
+     * @param enable True to enable lend now, false to request disabling it
+     * @param signer A safe admin authorizing the change
+     * @param signature The signer's signature over the intent
+     * @custom:throws LendNotDisabled if enabling while lend is already enabled and no disable is pending
+     * @custom:throws LendAlreadyDisabled if disabling while lend is already disabled or a request is pending
+     * @custom:throws HasOpenBorrows if disabling while the safe still has open borrows
+     */
+    function toggleLend(address safe, bool enable, address signer, bytes calldata signature) external;
+
+    /**
+     * @notice Executes a pending lend-disable request (from toggleLend(false)) once its delay has elapsed
+     * @dev Permissionless. Withdraws all of the safe's Aave collateral back to the safe, marks lend disabled,
+     *      and forces the safe into Debit mode. Re-checks the safe has no open borrows.
+     * @param safe Address of the EtherFi Safe
+     */
+    function processLendDisable(address safe) external;
 
     /**
      * @notice Updates the spending limits for a safe

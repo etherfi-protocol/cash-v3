@@ -188,8 +188,8 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashModuleSetters() public {
-        // CashModuleSetters now includes gateway wiring for Lend, so it no longer matches the deployed
-        // pre-Lend OP implementation. Re-enable after the Lend deployment.
+        // CashModuleSetters gains gateway wiring plus the lend opt-out (setLendGateway/toggleLend) for Lend, so
+        // its bytecode no longer matches the deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
         vm.skip(true);
         address local = address(new CashModuleSetters(dataProviderProxy));
         _verify("CashModuleSetters", cashModuleSettersImpl, local);
@@ -204,8 +204,8 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashEventEmitter() public {
-        // CashEventEmitter now includes the gateway update event for Lend, so it no longer matches the
-        // deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
+        // CashEventEmitter gains the gateway update and Repay events for Lend, so its bytecode no longer
+        // matches the deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
         vm.skip(true);
         address local = address(new CashEventEmitter(cashModuleProxy));
         _verify("CashEventEmitter", cashEventEmitterImpl, local);

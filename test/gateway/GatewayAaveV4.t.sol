@@ -3,15 +3,16 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { IGateway } from "../../src/interfaces/IGateway.sol";
 import { Gateway } from "../../src/modules/gateway/Gateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
 import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
+import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 /**
  * @title GatewayAaveV4Test
@@ -39,8 +40,8 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
         //    - weETH: composite weETH/ETH x ETH/USD via the repo's ChainlinkCompositePriceFeed
         //    - USDC: the USDC/USD aggregator directly (it already exposes decimals/description/latestAnswer)
         address weethSource = address(new ChainlinkCompositePriceFeed(IAggregatorV3(weEthWethOracle), IAggregatorV3(ethUsdcOracle), 8, 30 days, 30 days, "weETH / USD"));
-        weethReserveId = _addAaveReserve(address(weETH), weethSource, 80_00, false);
-        usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 80_00, true);
+        weethReserveId = _addAaveReserve(address(weETH), weethSource, 8000, false);
+        usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 8000, true);
 
         // Seed borrowable USDC liquidity into the hub
         _seedAaveLiquidity(usdcReserveId, address(usdc), 1_000_000e6);
@@ -369,8 +370,24 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 1 ether);
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
-        vm.expectRevert(); // Aave health-factor / borrowing-power check
+        // Pinned to the health gate (not a bare revert): with 1M USDC seeded, a $50k borrow can only fail
+        // Aave's borrowing-power / health check, not liquidity.
+        vm.expectRevert(ISpoke.HealthFactorBelowThreshold.selector);
         gw.borrow(address(safe), address(usdc), 50_000e6, recipient);
+        vm.stopPrank();
+    }
+
+    /// @dev Withdrawing collateral that would break the position's health must trip Aave's liquidation-threshold gate.
+    function test_withdraw_breakingHealthReverts() public {
+        deal(address(weETH), address(safe), 5 ether);
+        vm.startPrank(driver);
+        gw.supply(address(safe), address(weETH), 5 ether);
+        gw.setUsingAsCollateral(address(safe), address(weETH), true);
+        gw.borrow(address(safe), address(usdc), 1000e6, recipient);
+
+        // Pulling all the collateral while $1000 of debt is open must trip Aave's liquidation-threshold gate.
+        vm.expectRevert(ISpoke.HealthFactorBelowThreshold.selector);
+        gw.withdraw(address(safe), address(weETH), 5 ether, recipient);
         vm.stopPrank();
     }
 

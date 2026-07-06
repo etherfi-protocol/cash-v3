@@ -7,6 +7,7 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IAaveV4Spoke } from "../../interfaces/IAaveV4Spoke.sol";
+import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IGateway } from "../../interfaces/IGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
@@ -101,6 +102,8 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     error ZeroAddress();
     /// @notice Thrown when an amount argument is zero
     error ZeroAmount();
+    /// @notice Thrown when a lend op is attempted for a safe that has opted out of lend
+    error LendDisabled();
 
     /**
      * @param _etherFiDataProvider Address of the EtherFiDataProvider
@@ -134,6 +137,13 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         _;
     }
 
+    /// @dev Reverts if `safe` has opted out of lend. Placed before ensuresApproval so a disabled safe's
+    ///      supply/borrow reverts without re-establishing position-manager approval as a side effect.
+    modifier whenLendEnabled(address safe) {
+        if (!_isLendEnabled(safe)) revert LendDisabled();
+        _;
+    }
+
     // ---------------------------------------------------------------------
     // Reserve registry & driver management (governance)
     // ---------------------------------------------------------------------
@@ -143,6 +153,9 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * @dev Reverts unless the Spoke's reserve `reserveId` has `underlying == asset`
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId for the asset
+     * @dev Warning: do not re-point an asset safes already hold positions under; 
+     * the USD views then read the new reserve and miss the old, understating debt and 
+     * inflating borrow headroom.
      */
     function setReserveId(address asset, uint256 reserveId) external onlyRole(GATEWAY_ADMIN_ROLE) {
         if (asset == address(0)) revert ZeroAddress();
@@ -158,6 +171,8 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     /**
      * @notice De-registers an asset
      * @param asset The asset to remove from the registry
+     * @dev Warning: do not remove an asset any safe still holds a position in; 
+     * it drops from the USD views (debt reads 0), understating debt and inflating borrow headroom.
      */
     function removeReserve(address asset) external onlyRole(GATEWAY_ADMIN_ROLE) {
         GatewayStorage storage $ = _getGatewayStorage();
@@ -214,8 +229,20 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     // IGateway operations (drivers only)
     // ---------------------------------------------------------------------
 
-    /// @inheritdoc IGateway
-    function supply(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
+    /**
+     * @notice Supplies `amount` of `asset` to Aave on behalf of `safe`
+     * @dev Driver-only. The Spoke debits the caller, so the gateway first pulls the asset from the safe and
+     *      approves the Spoke, then supplies into the safe's position. Rejected if the safe has opted out of
+     *      lend, or while the gateway is paused.
+     * @param safe The safe whose position is credited
+     * @param asset The asset being supplied (must be a registered reserve)
+     * @param amount The amount to supply
+     * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
+     * @custom:throws LendDisabled if the safe has opted out of lend
+     * @custom:throws ZeroAmount if amount is zero
+     * @custom:throws AssetNotRegistered if asset has no registered reserveId
+     */
+    function supply(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant whenLendEnabled(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         uint256 reserveId = _reserveIdOf(asset);
 
@@ -227,7 +254,21 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         emit Supplied(safe, asset, amount);
     }
 
-    /// @inheritdoc IGateway
+    /**
+     * @notice Withdraws `amount` of `asset` from `safe`'s Aave position to `to`
+     * @dev Driver-only. The Spoke sends the underlying to this gateway, which forwards exactly the amount
+     *      received to `to`. Intentionally NOT gated by lend being enabled, so an opted-out safe can always
+     *      exit its position. Aave reverts the withdraw itself if it would drop the position below its
+     *      liquidation threshold.
+     * @param safe The safe whose position is debited
+     * @param asset The asset being withdrawn (must be a registered reserve)
+     * @param amount The amount to withdraw
+     * @param to The recipient of the withdrawn asset
+     * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
+     * @custom:throws ZeroAmount if amount is zero
+     * @custom:throws ZeroAddress if to is the zero address
+     * @custom:throws AssetNotRegistered if asset has no registered reserveId
+     */
     function withdraw(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert ZeroAddress();
@@ -240,8 +281,22 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         emit Withdrawn(safe, asset, assetsWithdrawn, to);
     }
 
-    /// @inheritdoc IGateway
-    function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
+    /**
+     * @notice Borrows `amount` of `asset` against `safe`'s position and sends it to `to`
+     * @dev Driver-only. The Spoke sends the borrowed underlying to this gateway, which forwards it to `to`.
+     *      Rejected if the safe has opted out of lend, or while the gateway is paused. Aave reverts if the
+     *      borrow would exceed the position's borrowing power.
+     * @param safe The safe whose position takes on the debt
+     * @param asset The asset being borrowed (must be a registered reserve)
+     * @param amount The amount to borrow
+     * @param to The recipient of the borrowed asset
+     * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
+     * @custom:throws LendDisabled if the safe has opted out of lend
+     * @custom:throws ZeroAmount if amount is zero
+     * @custom:throws ZeroAddress if to is the zero address
+     * @custom:throws AssetNotRegistered if asset has no registered reserveId
+     */
+    function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant whenLendEnabled(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert ZeroAddress();
         uint256 reserveId = _reserveIdOf(asset);
@@ -253,7 +308,19 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         emit Borrowed(safe, asset, assetsBorrowed, to);
     }
 
-    /// @inheritdoc IGateway
+    /**
+     * @notice Repays `amount` of `asset` debt on behalf of `safe`
+     * @dev Driver-only. Resolves type(uint256).max to the current debt, pulls that amount from the safe,
+     *      approves the Spoke, and repays; any amount the Spoke does not consume is refunded to the safe.
+     *      Intentionally NOT gated by lend being enabled, so an opted-out safe can always reduce its debt.
+     * @param safe The safe whose debt is repaid
+     * @param asset The asset being repaid (must be a registered reserve)
+     * @param amount The amount to repay; use type(uint256).max to repay the full debt
+     * @return The actual amount repaid
+     * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
+     * @custom:throws ZeroAmount if the resolved repay amount is zero (e.g. max with no outstanding debt)
+     * @custom:throws AssetNotRegistered if asset has no registered reserveId
+     */
     function repay(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) returns (uint256) {
         uint256 reserveId = _reserveIdOf(asset);
 
@@ -272,8 +339,22 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         return assetsRepaid;
     }
 
-    /// @inheritdoc IGateway
+    /**
+     * @notice Toggles whether `safe`'s supplied `asset` counts as collateral on Aave
+     * @dev Driver-only. Enabling collateral is a lend op, rejected if the safe has opted out of lend; disabling
+     *      is an exit action (like withdraw/repay) and stays open to opted-out safes so a residual position can
+     *      still be cleaned up. Rejected while the gateway is paused.
+     * @param safe The safe whose position is updated
+     * @param asset The supplied asset (must be a registered reserve)
+     * @param useAsCollateral True to use as collateral, false to disable
+     * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
+     * @custom:throws LendDisabled if enabling collateral usage for a safe that has opted out of lend
+     * @custom:throws AssetNotRegistered if asset has no registered reserveId
+     */
     function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
+        // Gate only enabling (a lend op); disabling must stay open so an opted-out safe can drop a residual
+        // supplied position from collateral (e.g. one left on Aave after processLendDisable). It only de-risks.
+        if (useAsCollateral && !_isLendEnabled(safe)) revert LendDisabled();
         spoke.setUsingAsCollateral(_reserveIdOf(asset), useAsCollateral, safe);
         emit CollateralUsageSet(safe, asset, useAsCollateral);
     }
@@ -282,7 +363,15 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     // IGateway reads
     // ---------------------------------------------------------------------
 
-    /// @inheritdoc IGateway
+    /**
+     * @notice Returns `safe`'s Aave position summary (collateral, debt, borrow headroom, health factor)
+     * @dev Re-derives USD from ether.fi's PriceProvider over the registered assets (not from Aave's opaque
+     *      value units): sums supplied value into collateralUsd, weights collateral-enabled supply by each
+     *      reserve's LTV for the borrow headroom, sums debt into debtUsd, and takes healthFactor (WAD)
+     *      directly from Aave. Source of truth for CashLens canSpend and EtherFiHook health checks.
+     * @param safe The safe to query
+     * @return data The safe's account data (USD fields are 6-decimal; healthFactor is 1e18)
+     */
     function getAccountData(address safe) external view returns (AccountData memory data) {
         IPriceProvider priceProvider = IPriceProvider(etherFiDataProvider.getPriceProvider());
         GatewayStorage storage $ = _getGatewayStorage();
@@ -315,21 +404,35 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         data.healthFactor = spoke.getUserAccountData(safe).healthFactor;
     }
 
-    /// @inheritdoc IGateway
+    /**
+     * @notice Returns the amount of `asset` that `safe` has supplied to Aave
+     * @param safe The safe to query
+     * @param asset The supplied asset
+     * @return The supplied amount in asset units, or 0 if the asset is not registered
+     */
     function suppliedOf(address safe, address asset) external view returns (uint256) {
         GatewayStorage storage $ = _getGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
         return spoke.getUserSuppliedAssets($.reserveId[asset], safe);
     }
 
-    /// @inheritdoc IGateway
+    /**
+     * @notice Returns the amount of `asset` debt that `safe` owes Aave
+     * @param safe The safe to query
+     * @param asset The borrowed asset
+     * @return The debt amount in asset units, or 0 if the asset is not registered
+     */
     function debtOf(address safe, address asset) external view returns (uint256) {
         GatewayStorage storage $ = _getGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
         return spoke.getUserTotalDebt($.reserveId[asset], safe);
     }
 
-    /// @inheritdoc IGateway
+    /**
+     * @notice Returns the withdrawable/borrowable liquidity of `asset`'s reserve (supplied minus borrowed)
+     * @param asset The reserve asset
+     * @return The available liquidity in asset units, or 0 if the asset is not registered
+     */
     function availableCash(address asset) external view returns (uint256) {
         GatewayStorage storage $ = _getGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
@@ -339,11 +442,27 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         return supplied > debt ? supplied - debt : 0;
     }
 
-    /// @inheritdoc IGateway
+    /**
+     * @notice Returns the loan-to-value of `asset`'s reserve in the 100e18 = 100% scale (matching DebtManager)
+     * @dev Derived from the reserve's current dynamic collateralFactor (BPS), scaled by 1e16.
+     * @param asset The reserve asset
+     * @return The LTV where 100e18 is 100%, or 0 if the asset is not registered
+     */
     function ltv(address asset) external view returns (uint256) {
         GatewayStorage storage $ = _getGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
         return _ltv($.reserveId[asset]);
+    }
+
+    /**
+     * @notice Returns whether lend is enabled for `safe` (i.e. the safe participates in the Aave market)
+     * @dev Reads the CashModule, the source of truth for the opt-out. When false, this gateway rejects
+     *      supply / borrow / setUsingAsCollateral for the safe; withdraw and repay stay open.
+     * @param safe The safe to query
+     * @return True if lend is enabled, false if the safe has opted out
+     */
+    function isLendEnabled(address safe) external view returns (bool) {
+        return _isLendEnabled(safe);
     }
 
     // ---------------------------------------------------------------------
@@ -386,6 +505,11 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         to[0] = asset;
         data[0] = abi.encodeWithSelector(IERC20.transfer.selector, address(this), amount);
         IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](1), data);
+    }
+
+    /// @dev Whether `safe` participates in lend, per the CashModule (the source of truth for the opt-out)
+    function _isLendEnabled(address safe) internal view returns (bool) {
+        return ICashModule(etherFiDataProvider.getCashModule()).isLendEnabled(safe);
     }
 
     /// @dev The registered reserveId for `asset`, reverting if unregistered
