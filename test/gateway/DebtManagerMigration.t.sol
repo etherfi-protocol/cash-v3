@@ -95,7 +95,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         // Legacy debt closed and Safe flagged migrated; both latches flip in the same tx
         assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "legacy debt cleared");
         assertTrue(dm.hasMigratedToAave(address(safe)), "marked migrated");
-        assertTrue(cashModule.isAaveGatewaySafe(address(safe)), "CashModule routing flag flipped");
+        assertTrue(cashModule.usesAave(address(safe)), "CashModule routing flag flipped");
         // Position now lives on Aave: same collateral, same debt size
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 10 ether, 3, "collateral on Aave");
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 1e6, "debt on Aave");
@@ -216,10 +216,10 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         assertEq(weETH.balanceOf(address(safe)), 0, "safe holds nothing loose afterwards");
     }
 
-    function test_markAaveGatewaySafe_onlyDebtManager() public {
+    function test_markUsesAave_onlyDebtManager() public {
         vm.prank(makeAddr("rando"));
         vm.expectRevert(ICashModule.OnlyDebtManager.selector);
-        cashModule.markAaveGatewaySafe(address(safe));
+        cashModule.markUsesAave(address(safe));
     }
 
     function test_migrateToAave_onlyDebtManagerAdmin() public {

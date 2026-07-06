@@ -100,9 +100,9 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param safe Address of the EtherFi Safe
      * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
      */
-    function markAaveGatewaySafe(address safe) external {
+    function markUsesAave(address safe) external {
         if (msg.sender != address(_getDebtManager())) revert OnlyDebtManager();
-        _getCashModuleStorage().safeCashConfig[safe].onAaveGateway = true;
+        _getCashModuleStorage().safeCashConfig[safe].usesAave = true;
     }
 
     /**

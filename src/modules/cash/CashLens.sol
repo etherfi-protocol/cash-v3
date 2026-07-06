@@ -18,11 +18,11 @@ import { CashLensLegacyLib } from "./CashLensLegacyLib.sol";
 /**
  * @title CashLens
  * @notice Read-only contract providing views into a Safe's cash state
- * @dev Every engine-touching view branches on CashModule.isAaveGatewaySafe: gateway safes are read from the
+ * @dev Every engine-touching view branches on CashModule.usesAave: gateway safes are read from the
  *      Aave gateway (the logic in this contract), legacy safes from the DebtManager (preserved output-identical
  *      in the linked CashLensLegacyLib). The check side of a spend must always agree with what the execution
  *      side (CashLendLib) will do, so both read the same flag. Legacy code always sits inside an
- *      `if (!isAaveGatewaySafe(safe))` block (routing to CashLensLegacyLib, or a couple of master-verbatim
+ *      `if (!usesAave(safe))` block (routing to CashLensLegacyLib, or a couple of master-verbatim
  *      lines inline), deleted wholesale when the legacy engine is retired; the gateway path is the unguarded
  *      fall-through.
  *
@@ -180,7 +180,7 @@ contract CashLens is UpgradeableProxy {
 
         // Route by engine, mirroring the spend execution: legacy safes get the pre-gateway DebtManager
         // checks (and decline strings) exactly as before the gateway existed.
-        if (!cashModule.isAaveGatewaySafe(safe)) {
+        if (!cashModule.usesAave(safe)) {
             return CashLensLegacyLib.check(cashModule, safe, tokens, amountsInUsd, totalSpendingInUsd, safeData, mode);
         }
 
@@ -282,7 +282,7 @@ contract CashLens is UpgradeableProxy {
         address[] memory collateralTokens = debtManager.getCollateralTokens();
         address[] memory borrowTokens = debtManager.getBorrowTokens();
 
-        if (!cashModule.isAaveGatewaySafe(safe)) {
+        if (!cashModule.usesAave(safe)) {
             (data.collateralBalances, data.totalCollateral, data.borrows, data.totalBorrow) = debtManager.getUserCurrentState(safe);
             data.maxBorrow = debtManager.getMaxBorrowAmount(safe, true);
         } else {
@@ -348,7 +348,7 @@ contract CashLens is UpgradeableProxy {
         if (len == 0) return DebitModeMaxSpend(new address[](0), new uint256[](0), new uint256[](0), 0);
         if (len > 1) debtServiceTokenPreference.checkDuplicates();
 
-        if (!cashModule.isAaveGatewaySafe(safe)) {
+        if (!cashModule.usesAave(safe)) {
             return CashLensLegacyLib.maxSpendDebit(cashModule, safe, debtServiceTokenPreference);
         }
 
@@ -399,7 +399,7 @@ contract CashLens is UpgradeableProxy {
      * @return Maximum amount that can be spent in credit mode (USD, 6 decimals)
      */
     function getMaxSpendCredit(address safe) public view returns (uint256) {
-        if (!cashModule.isAaveGatewaySafe(safe)) {
+        if (!cashModule.usesAave(safe)) {
             return CashLensLegacyLib.maxSpendCredit(cashModule, safe);
         }
 
@@ -472,7 +472,7 @@ contract CashLens is UpgradeableProxy {
 
         if (!debtManager.isCollateralToken(token)) revert NotACollateralToken();
 
-        if (!cashModule.isAaveGatewaySafe(safe)) {
+        if (!cashModule.usesAave(safe)) {
             uint256 balance = IERC20(token).balanceOf(safe);
             uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
 
@@ -494,7 +494,7 @@ contract CashLens is UpgradeableProxy {
         IDebtManager debtManager = cashModule.getDebtManager();
         address[] memory collateralTokens = debtManager.getCollateralTokens();
 
-        if (!cashModule.isAaveGatewaySafe(safe)) {
+        if (!cashModule.usesAave(safe)) {
             return CashLensLegacyLib.userTotalCollateral(cashModule, safe, collateralTokens);
         }
 

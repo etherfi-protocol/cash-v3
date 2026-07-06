@@ -206,8 +206,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
      * @param safe Address of the EtherFi Safe
      * @return True if the safe uses the Aave gateway
      */
-    function _isAaveGatewaySafe(address safe) internal view returns (bool) {
-        return _getCashModuleStorage().safeCashConfig[safe].onAaveGateway;
+    function _usesAave(address safe) internal view returns (bool) {
+        return _getCashModuleStorage().safeCashConfig[safe].usesAave;
     }
 
     /**

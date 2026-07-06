@@ -18,13 +18,13 @@ contract CashModuleSetGatewayTest is CashModuleTestSetup {
 
     /// @notice New safes onboard onto the Aave gateway engine; a debt-free re-setup also flips to the gateway.
     function test_setupModule_flagsNewSafeAsAaveGateway() public {
-        assertTrue(cashModule.isAaveGatewaySafe(address(safe)), "new safe defaults to the gateway engine");
+        assertTrue(cashModule.usesAave(address(safe)), "new safe defaults to the gateway engine");
 
         _forceLegacyEngine(address(safe));
 
         vm.prank(address(safe));
         cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
-        assertTrue(cashModule.isAaveGatewaySafe(address(safe)), "debt-free re-setup flips to the gateway");
+        assertTrue(cashModule.usesAave(address(safe)), "debt-free re-setup flips to the gateway");
     }
 
     /// @notice A legacy safe with open DebtManager debt must keep routing to DebtManager if setup re-runs;
@@ -39,7 +39,7 @@ contract CashModuleSetGatewayTest is CashModuleTestSetup {
 
         vm.prank(address(safe));
         cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
-        assertFalse(cashModule.isAaveGatewaySafe(address(safe)), "safe with legacy debt stays on the legacy engine");
+        assertFalse(cashModule.usesAave(address(safe)), "safe with legacy debt stays on the legacy engine");
     }
 
     /// @notice A controller can configure the first gateway during Lend bootstrap and the change is emitted.

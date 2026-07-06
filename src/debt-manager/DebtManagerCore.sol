@@ -757,7 +757,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         $.migratedToAave[safe] = true;
         // Flip the CashModule routing flag in the same tx, so the freeze latch here and the routing of
         // spend/repay/lens can never disagree about which engine serves the Safe.
-        cashModule.markAaveGatewaySafe(safe);
+        cashModule.markUsesAave(safe);
         emit MigratedToAave(safe, totalDebtUsd);
     }
 

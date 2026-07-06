@@ -29,7 +29,7 @@ import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
  *      (cancelOldWithdrawal) so the spend paths can cancel inline; the module's internal helper delegates
  *      to it.
  *
- *      Engine convention: legacy DebtManager code always sits inside an `if (!_onGateway(...))` block (or a
+ *      Engine convention: legacy DebtManager code always sits inside an `if (!_usesAave(...))` block (or a
  *      legacy-named helper) that is deleted wholesale when the legacy engine is retired; the gateway path is
  *      the unguarded fall-through, already in its final shape.
  * @author ether.fi
@@ -62,8 +62,8 @@ library CashLendLib {
 
     /// @dev The canonical engine check: true routes the safe to the Aave gateway, false to the legacy DebtManager.
     ///      Every branch point in this library must read the flag through here and nothing else.
-    function _onGateway(CashModuleStorageContract.CashModuleStorage storage $, address safe) private view returns (bool) {
-        return $.safeCashConfig[safe].onAaveGateway;
+    function _usesAave(CashModuleStorageContract.CashModuleStorage storage $, address safe) private view returns (bool) {
+        return $.safeCashConfig[safe].usesAave;
     }
 
     /**
@@ -122,7 +122,7 @@ library CashLendLib {
      * @custom:throws LendGatewayNotSet if the safe uses the gateway but none is configured
      */
     function repay(CashModuleStorageContract.CashModuleStorage storage $, address safe, address token, uint256 amount, uint256 amountInUsd) external {
-        if (!_onGateway($, safe)) {
+        if (!_usesAave($, safe)) {
             address[] memory to = new address[](3);
             bytes[] memory data = new bytes[](3);
             uint256[] memory values = new uint256[](3);
@@ -212,7 +212,7 @@ library CashLendLib {
      * @param safe Address of the EtherFi Safe
      */
     function disableLend(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
-        if (_onGateway($, safe)) {
+        if (_usesAave($, safe)) {
             IGateway gateway = $.gateway;
             if (address(gateway) == address(0)) revert LendGatewayNotSet();
 
@@ -277,7 +277,7 @@ library CashLendLib {
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
         if (amount == 0) revert AmountZero();
 
-        if (!_onGateway($, safe)) {
+        if (!_usesAave($, safe)) {
             _spendLegacyCredit($, dataProvider, safe, binSponsor, tokens[0], amount);
         } else {
             _borrowOnGateway($, safe, binSponsor, tokens[0], amount);
@@ -334,7 +334,7 @@ library CashLendLib {
      * @param totalSpendingInUsd Total spend in USD, for the emitted event
      */
     function spendDebit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) external {
-        if (!_onGateway($, safe)) {
+        if (!_usesAave($, safe)) {
             _spendLegacyDebit($, dataProvider, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
             return;
         }

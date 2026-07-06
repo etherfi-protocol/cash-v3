@@ -82,7 +82,7 @@ contract CashModuleCore is CashModuleStorageContract {
         // New safes run on the Aave gateway. Guarded because setupModule is re-runnable: a legacy safe with
         // open DebtManager debt must keep routing to DebtManager until migrateToAave moves its position.
         (, uint256 legacyDebtUsd) = _getDebtManager().borrowingOf(msg.sender);
-        if (legacyDebtUsd == 0) $.onAaveGateway = true;
+        if (legacyDebtUsd == 0) $.usesAave = true;
     }
 
     /**
@@ -253,12 +253,12 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Whether the safe's borrow/collateral engine is the Aave gateway (vs the legacy DebtManager)
-     * @dev The canonical routing flag; see ICashModule.isAaveGatewaySafe
+     * @dev The canonical routing flag; see ICashModule.usesAave
      * @param safe Address of the EtherFi Safe
      * @return True if the safe uses the Aave gateway
      */
-    function isAaveGatewaySafe(address safe) external view returns (bool) {
-        return _isAaveGatewaySafe(safe);
+    function usesAave(address safe) external view returns (bool) {
+        return _usesAave(safe);
     }
 
     /**

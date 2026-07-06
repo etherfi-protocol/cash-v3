@@ -142,7 +142,7 @@ struct SafeCashConfig {
     /// @notice Timestamp after which a pending disable-lend request can be executed (0 if none)
     uint96 lendDisableFinalizeTime;
     /// @notice True once the safe's borrow/collateral engine is the Aave gateway (set at onboarding or by migration; one-way)
-    bool onAaveGateway;
+    bool usesAave;
 }
 
 /**
@@ -373,7 +373,7 @@ interface ICashModule {
      * @param safe The safe to query
      * @return True if the safe uses the Aave gateway
      */
-    function isAaveGatewaySafe(address safe) external view returns (bool);
+    function usesAave(address safe) external view returns (bool);
 
     /**
      * @notice Marks a safe as using the Aave gateway engine
@@ -381,7 +381,7 @@ interface ICashModule {
      * @param safe The safe to mark
      * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
      */
-    function markAaveGatewaySafe(address safe) external;
+    function markUsesAave(address safe) external;
 
     /**
      * @notice Gets the debt manager contract

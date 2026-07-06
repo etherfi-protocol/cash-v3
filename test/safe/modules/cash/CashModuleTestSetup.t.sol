@@ -160,12 +160,12 @@ contract CashModuleTestSetup is SafeTestSetup {
     /**
      * @notice Flips a safe back to the legacy DebtManager engine, modeling a safe that predates the gateway
      *         (new safes onboard onto the Aave gateway in setupModule).
-     * @dev Writes the packed onAaveGateway flag via stdstore, then asserts through the public getter so any
+     * @dev Writes the packed usesAave flag via stdstore, then asserts through the public getter so any
      *      storage-layout drift fails loudly here instead of silently testing the wrong engine.
      */
     function _forceLegacyEngine(address _safe) internal {
-        stdstore.enable_packed_slots().target(address(cashModule)).sig(ICashModule.isAaveGatewaySafe.selector).with_key(_safe).checked_write(false);
-        assertFalse(cashModule.isAaveGatewaySafe(_safe), "forceLegacyEngine: flag still set");
+        stdstore.enable_packed_slots().target(address(cashModule)).sig(ICashModule.usesAave.selector).with_key(_safe).checked_write(false);
+        assertFalse(cashModule.usesAave(_safe), "forceLegacyEngine: flag still set");
     }
 
     /**
