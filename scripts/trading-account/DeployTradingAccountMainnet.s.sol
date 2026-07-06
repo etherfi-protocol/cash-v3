@@ -7,6 +7,7 @@ import { stdJson } from "forge-std/StdJson.sol";
 import { Utils } from "../utils/Utils.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
+import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { OwnershipBridgeReceiver } from "../../src/ownership-bridge/OwnershipBridgeReceiver.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
@@ -51,6 +52,10 @@ contract DeployTradingAccountMainnet is Utils {
     // Across SpokePoolPeriphery — origin-swap (anyToBridgeable) routes for the Sell flow.
     address constant PERIPHERY = 0x10D8b8DaA26d307489803e10477De69C0492B610;
 
+    // Enso Router V2 (same address on Ethereum and Optimism). Pinned target for the
+    // EnsoSwapModule's forward-calldata swaps.
+    address constant ENSO_ROUTER = 0xF75584eF6673aD213a685a1B58Cc0330B8eA22Cf;
+
     address constant RECOVERY_SIGNER_1 = 0xbfCe61CE31359267605F18dcE65Cb6c3cc9694A7;
     address constant RECOVERY_SIGNER_2 = 0xa265C271adbb0984EFd67310cfe85A77f449e291;
 
@@ -61,6 +66,7 @@ contract DeployTradingAccountMainnet is Utils {
     address internal predictedDataProvider;
     address internal predictedFactory;
     address internal predictedAcrossModule;
+    address internal predictedEnsoModule;
     RoleRegistry internal roleRegistry;
     PriceProviderV2 internal priceProvider;
     OwnershipBridgeReceiver internal receiver;
@@ -69,6 +75,7 @@ contract DeployTradingAccountMainnet is Utils {
     TradingLens internal lens;
     EtherFiDataProvider internal dataProvider;
     AcrossSwapModule internal acrossModule;
+    EnsoSwapModule internal ensoModule;
     // Existing TopUp source factory (not deployed here) — the `isTokenSupported` oracle the
     // factory's `redirectToTopUp` consults. Read from this chain's deployments.json.
     address internal topUpFactory;
@@ -88,6 +95,7 @@ contract DeployTradingAccountMainnet is Utils {
         predictedDataProvider = DEPLOYER.getDeterministicAddress(getSalt("TradingDataProviderProxyDev"));
         predictedFactory = DEPLOYER.getDeterministicAddress(getSalt("TradingSafeFactoryProxyDev"));
         predictedAcrossModule = DEPLOYER.getDeterministicAddress(getSalt("AcrossSwapModuleDev"));
+        predictedEnsoModule = DEPLOYER.getDeterministicAddress(getSalt("EnsoSwapModuleDev"));
 
         _deployCore();
         _deployBridgeAndFactory();
@@ -159,15 +167,16 @@ contract DeployTradingAccountMainnet is Utils {
         ));
     }
 
-    /// @dev DataProvider initialises atomically with full InitParams; the across module is
-    ///      referenced by prediction (stored only) and whitelisted + default so every
-    ///      TradingSafe deploys with it installed. AcrossSwapModule deploys LAST because
-    ///      its constructor CALLS dataProvider.getCashModule() (needs code there; returns 0
+    /// @dev DataProvider initialises atomically with full InitParams; the Across + Enso swap
+    ///      modules are referenced by prediction (stored only) and whitelisted + default so
+    ///      every TradingSafe deploys with both installed. Both modules deploy LAST because
+    ///      their constructors CALL dataProvider.getCashModule() (needs code there; returns 0
     ///      since InitParams set no cash module, permanently disabling the hold path —
     ///      correct for the mainnet TradingSafe: no card rail, no hold).
     function _deployDataProviderAndModule() internal {
-        address[] memory modules = new address[](1);
+        address[] memory modules = new address[](2);
         modules[0] = predictedAcrossModule;
+        modules[1] = predictedEnsoModule;
         address dataProviderImpl = _deploy("TradingDataProviderImplDev", type(EtherFiDataProvider).creationCode, "");
         dataProvider = EtherFiDataProvider(_deployProxy(
             "TradingDataProviderProxyDev",
@@ -204,6 +213,23 @@ contract DeployTradingAccountMainnet is Utils {
             )
         ));
         require(address(acrossModule) == predictedAcrossModule, "across module landed off-prediction");
+
+        // EnsoSwapModule — same forward-calldata lifecycle, targeting the pinned Enso Router.
+        // Its constructor reads getCashModule() (0 on the mainnet trading DataProvider), so the
+        // hold path is disabled and requestSwap executes immediately here.
+        address ensoImpl = _deploy(
+            "EnsoSwapModuleImplDev", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider))
+        );
+        ensoModule = EnsoSwapModule(_deployProxy(
+            "EnsoSwapModuleDev",
+            ensoImpl,
+            abi.encodeWithSelector(
+                EnsoSwapModule.initialize.selector,
+                address(roleRegistry),
+                ENSO_ROUTER
+            )
+        ));
+        require(address(ensoModule) == predictedEnsoModule, "enso module landed off-prediction");
     }
 
     /// @dev Wires roles + both redirect directions. Safe → TopUp: `setTopUpFactory` (the
@@ -215,6 +241,9 @@ contract DeployTradingAccountMainnet is Utils {
         roleRegistry.grantRole(acrossModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), deployer);
         // Periphery isn't part of initialize() — set it post-grant so origin-swap (Sell) routes work.
         acrossModule.setPeriphery(PERIPHERY);
+        // Enso router rides in initialize(); only the admin role is granted here so the router
+        // can be repointed later (e.g. an Enso V3 deployment).
+        roleRegistry.grantRole(ensoModule.ENSO_SWAP_MODULE_ADMIN_ROLE(), deployer);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), keeper);
         roleRegistry.grantRole(lens.TRADING_LENS_ADMIN_ROLE(), deployer);
 
@@ -248,6 +277,7 @@ contract DeployTradingAccountMainnet is Utils {
         vm.serializeAddress(out, "TradingSafeImpl", tradingSafeImpl);
         vm.serializeAddress(out, "OwnershipBridgeReceiver", address(receiver));
         vm.serializeAddress(out, "AcrossSwapModule", address(acrossModule));
+        vm.serializeAddress(out, "EnsoSwapModule", address(ensoModule));
         vm.serializeAddress(out, "TopUpFactory", topUpFactory);
         string memory json = vm.serializeAddress(out, "TradingLens", address(lens));
         vm.writeJson(json, string.concat(
@@ -261,6 +291,7 @@ contract DeployTradingAccountMainnet is Utils {
         console.log("TradingSafeImpl:        ", tradingSafeImpl);
         console.log("OwnershipBridgeReceiver:", address(receiver));
         console.log("AcrossSwapModule:       ", address(acrossModule));
+        console.log("EnsoSwapModule:         ", address(ensoModule));
         console.log("TradingLens:            ", address(lens));
         console.log("TopUpFactory (wired):   ", topUpFactory);
     }
