@@ -406,10 +406,10 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param amountsInUsd Array of amounts to spend in USD
      */
     function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
-        (uint256[] memory amounts, uint256[] memory fromLoose, bool dipped) = CashLendLib.sourceDebits($, etherFiDataProvider, safe, tokens, amountsInUsd);
-        // Sizing dipped into balance reserved by the pending withdrawal request: the spend wins the
+        (uint256[] memory amounts, uint256[] memory fromLoose, bool cancelWithdrawal) = CashLendLib.sourceDebits($, etherFiDataProvider, safe, tokens, amountsInUsd);
+        // Sizing needs balance reserved by the pending withdrawal request: the spend wins the
         // competing claim and the request is cancelled before any transfer executes.
-        if (dipped) _cancelOldWithdrawal(safe);
+        if (cancelWithdrawal) _cancelOldWithdrawal(safe);
         CashLendLib.executeDebits($, safe, getSettlementDispatcher(binSponsor), tokens, amounts, fromLoose);
 
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);

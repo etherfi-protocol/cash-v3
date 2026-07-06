@@ -47,7 +47,7 @@ library CashLendLib {
         uint256[] fromLoose; // portion of each amount taken from the safe's loose balance
         uint256 borrowHeadroom; // remaining USD borrowing headroom, consumed as supplied balance is drawn
         bool hasDebt; // whether the safe carries debt (the headroom cap only applies then)
-        bool dipped; // whether sizing dipped into withdrawal-reserved balance (caller must cancel the request)
+        bool cancelWithdrawal; // sizing needs withdrawal-reserved balance: the caller cancels the request, and later tokens treat all loose balance as unreserved
     }
 
     /**
@@ -270,8 +270,8 @@ library CashLendLib {
      * @param amountsInUsd Amounts to spend in USD
      * @return Token amounts to spend
      * @return Portion of each amount taken from the safe's loose balance
-     * @return Whether sizing dipped into balance reserved by the pending withdrawal request, in which case
-     *         the caller must cancel the request before executing
+     * @return Whether sizing needs balance reserved by the pending withdrawal request, in which case the
+     *         caller must cancel the request before executing
      */
     function sourceDebits(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, address[] calldata tokens, uint256[] calldata amountsInUsd) external view returns (uint256[] memory, uint256[] memory, bool) {
         DebitSpendState memory s;
@@ -288,7 +288,7 @@ library CashLendLib {
             _sourceDebitToken($, s, priceProvider, safe, tokens[i], amountsInUsd[i], i);
         }
 
-        return (s.amounts, s.fromLoose, s.dipped);
+        return (s.amounts, s.fromLoose, s.cancelWithdrawal);
     }
 
     /**
@@ -315,8 +315,8 @@ library CashLendLib {
 
     /**
      * @dev Sources one token of a debit spend: validates it, sizes the loose/supplied split against the
-     *      borrowing headroom, and writes the result into s at index i. Sets s.dipped when the spend has to
-     *      dip into balance reserved by the pending withdrawal request; once set, later tokens treat the
+     *      borrowing headroom, and writes the result into s at index i. Sets s.cancelWithdrawal when the
+     *      spend needs balance reserved by the pending withdrawal request; once set, later tokens treat the
      *      reservation as void, matching the request having been cancelled at that point.
      */
     function _sourceDebitToken(CashModuleStorageContract.CashModuleStorage storage $, DebitSpendState memory s, IPriceProvider priceProvider, address safe, address token, uint256 amountInUsd, uint256 i) internal view {
@@ -330,18 +330,18 @@ library CashLendLib {
         }
 
         // A pending withdrawal reserves loose balance. Prefer the unreserved portion plus the supplied
-        // withdrawal so the request survives (matching CashLens); dip into the reserved portion, signalling
-        // the caller to cancel the request, only when the spend cannot be funded otherwise.
+        // withdrawal so the request survives (matching CashLens). Only when that cannot fund the spend is
+        // the request condemned: the caller cancels it, so the reservation is lifted here and for every
+        // later token.
         uint256 fromLoose;
         {
-            uint256 pending = s.dipped ? 0 : _pendingWithdrawalAmount($, safe, token);
-            uint256 unreserved = loose > pending ? loose - pending : 0;
-            if (unreserved + withdrawable >= amount) {
-                fromLoose = unreserved < amount ? unreserved : amount;
-            } else {
-                fromLoose = loose < amount ? loose : amount;
-                s.dipped = true;
+            uint256 pending = s.cancelWithdrawal ? 0 : _pendingWithdrawalAmount($, safe, token);
+            uint256 spendableLoose = loose > pending ? loose - pending : 0;
+            if (spendableLoose + withdrawable < amount) {
+                s.cancelWithdrawal = true;
+                spendableLoose = loose;
             }
+            fromLoose = spendableLoose < amount ? spendableLoose : amount;
         }
 
         // The supplied portion drawn for this token consumes borrowing headroom for later tokens.
