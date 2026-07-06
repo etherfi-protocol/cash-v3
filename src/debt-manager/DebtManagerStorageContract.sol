@@ -123,6 +123,9 @@ contract DebtManagerStorageContract is UpgradeableProxy {
                 
         /// @notice Shares of borrow tokens with 18 decimals precision
         mapping(address supplier => mapping(address borrowToken => uint256 shares)) sharesOfBorrowTokens;
+
+        /// @notice Whether a Safe's position has been migrated to Aave (set once migrated, including Safes that had no debt)
+        mapping(address safe => bool migrated) migratedToAave;
     }
 
     /// @notice Storage location for DebtManagerStorage (ERC-7201 compliant)
@@ -270,6 +273,11 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      */
     event InterestIndexUpdated(address indexed borrowToken, uint256 oldIndex, uint256 newIndex);
 
+    /// @notice Emitted when a Safe's position is migrated from DebtManager to the Aave instance
+    /// @param safe The migrated Safe
+    /// @param debtUsd The total debt migrated, in USD with 6 decimals
+    event MigratedToAave(address indexed safe, uint256 debtUsd);
+
     /**
      * @notice Error thrown when collateral token preference array is empty while liquidating
      */
@@ -384,6 +392,21 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @notice Error thrown when borrow shares are insufficient
      */
     error InsufficientBorrowShares();
+
+    /// @notice Thrown when the Aave reserve lacks the liquidity to fund the migration borrow
+    error InsufficientAaveLiquidity(address token);
+
+    /// @notice Thrown when, after supplying its collateral, the Safe's debt does not fit Aave's LTVs
+    error PositionExceedsAaveLtv();
+
+    /// @notice Thrown when the migration gateway has not been configured
+    error GatewayNotSet();
+
+    /// @notice Thrown when migrating a lend-disabled Safe that still carries DebtManager debt (repay it first)
+    error LendDisabledSafeHasDebt();
+
+    /// @notice Thrown when a legacy DebtManager operation (borrow/repay) is attempted on a Safe already migrated to Aave
+    error AlreadyMigratedToAave();
     
     /**
      * @notice Error thrown when user is still liquidatable

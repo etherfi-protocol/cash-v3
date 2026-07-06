@@ -102,4 +102,22 @@ interface IGateway {
      * @return The LTV, where 100e18 is 100%
      */
     function ltv(address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns whether lend is enabled for `safe` (i.e. the safe participates in the Aave market)
+     * @dev Source of truth is the CashModule. When false, the gateway rejects supply / borrow /
+     *      setUsingAsCollateral for the safe and the sandwich skips its Aave bookends. Withdraw and
+     *      repay stay open so an opted-out safe can always exit or reduce debt.
+     * @param safe The safe to query
+     * @return True if lend is enabled, false if the safe has opted out
+     */
+    function isLendEnabled(address safe) external view returns (bool);
+
+    /**
+     * @notice Returns the assets registered on the gateway (each mapped to an Aave reserveId)
+     * @dev The authoritative list of assets a safe can have a position in, keyed on the gateway rather than
+     *      DebtManager's collateral list (which can be delisted while an Aave position is still open).
+     * @return The registered asset addresses
+     */
+    function registeredAssets() external view returns (address[] memory);
 }

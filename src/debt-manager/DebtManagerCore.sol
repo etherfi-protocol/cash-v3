@@ -9,6 +9,7 @@ import { ICashLens } from "../interfaces/ICashLens.sol";
 import { BinSponsor, ICashModule } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { IGateway } from "../interfaces/IGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { DebtManagerStorageContract } from "./DebtManagerStorageContract.sol";
 
@@ -458,7 +459,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param token Address of the token to borrow
      * @param amount Amount of tokens to borrow
      */
-    function borrow(BinSponsor binSponsor, address token, uint256 amount) public whenNotPaused nonReentrant onlyEtherFiSafe {
+    function borrow(BinSponsor binSponsor, address token, uint256 amount) public whenNotPaused nonReentrant onlyEtherFiSafe whenNotMigrated(msg.sender) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         if (!isBorrowToken(token)) revert UnsupportedBorrowToken();
@@ -488,7 +489,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param token Address of the token being repaid
      * @param amount Amount of tokens to repay
      */
-    function repay(address user, address token, uint256 amount) external whenNotPaused nonReentrant {
+    function repay(address user, address token, uint256 amount) external whenNotPaused nonReentrant whenNotMigrated(user) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         _onlyEtherFiSafe(user);
@@ -527,6 +528,126 @@ contract DebtManagerCore is DebtManagerStorageContract {
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
         emit Repaid(user, msg.sender, token, repayDebtusdAmount);
+    }
+
+    /**
+     * @notice Whether a Safe's position has been migrated to Aave
+     * @param safe The Safe to query
+     */
+    function hasMigratedToAave(address safe) external view returns (bool) {
+        return _getDebtManagerStorage().migratedToAave[safe];
+    }
+
+    /**
+     * @notice Migrates a Safe's position from DebtManager to the Aave instance, atomically and without a
+     *         flash loan: the Safe's collateral is supplied to Aave, the outstanding debt is borrowed against
+     *         it, and that borrow funds the DebtManager repayment. End state: same collateral and debt size,
+     *         now on Aave, with the legacy DebtManager debt cleared.
+     * @dev The order (supply -> borrow -> repay) is load-bearing — the repayment is funded by the Aave borrow,
+     *      which is only possible once the collateral is on Aave. The whole thing reverts (leaving the Safe
+     *      untouched) if the Safe has no debt, the Aave reserve lacks liquidity, or the position does not fit
+     *      Aave's LTVs. Only callable by DEBT_MANAGER_ADMIN_ROLE (the migration runner).
+     *      Requires the gateway to be a default module on the Safe and DebtManager to be an authorized gateway
+     *      driver; the gateway self-approves as the Safe's Aave position manager on its first op.
+     * @param safe The Safe to migrate
+     */
+    function migrateToAave(address safe) external whenNotPaused nonReentrant onlyRole(DEBT_MANAGER_ADMIN_ROLE) {
+        _onlyEtherFiSafe(safe);
+        DebtManagerStorage storage $ = _getDebtManagerStorage();
+
+        // Single source of truth: the gateway lives on CashModule (this contract already reaches it for the
+        // settlement dispatcher), so migration reads it from there rather than keeping its own copy.
+        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+        IGateway _gateway = IGateway(cashModule.getLendGateway());
+        if (address(_gateway) == address(0)) revert GatewayNotSet();
+
+        // 1. Snapshot the outstanding DebtManager debt. A debt-free Safe still migrates its collateral (below),
+        //    so a batch runner can call this over every Safe without special-casing (and idempotently).
+        (TokenData[] memory borrowings, uint256 totalDebtUsd) = borrowingOf(safe);
+        uint256 bLen = borrowings.length;
+
+        // A safe that opted out of lend has no Aave position by choice: skip the supply below and just mark it
+        // migrated (freezing legacy borrow/repay). It should be debt-free (disabling lend requires zero borrows),
+        // but it can still call DebtManager.borrow directly afterward, so reject a disabled safe with debt rather
+        // than let the gateway borrow/supply revert opaquely.
+        bool lendEnabled = cashModule.isLendEnabled(safe);
+        if (!lendEnabled && totalDebtUsd != 0) revert LendDisabledSafeHasDebt();
+
+        // 2. Clear the legacy DebtManager debt FIRST (if any), capturing the token amount to re-borrow, and
+        //    check Aave has the cash to fund it. Clearing first is load-bearing: supplying collateral (step 3)
+        //    moves it out of the Safe via execTransactionFromModule, which runs the EtherFiHook's DebtManager
+        //    health check — that would revert while the debt is still open. The Aave borrow (step 5) re-funds
+        //    the pool; the whole tx reverts on any failure, so the Safe is never left half-migrated nor the pool short.
+        uint256[] memory debtTokenAmts = new uint256[](bLen);
+        for (uint256 i = 0; i < bLen;) {
+            if (borrowings[i].amount != 0) {
+                uint256 debtTokenAmt = _clearLegacyDebt(safe, borrowings[i].token);
+                if (_gateway.availableCash(borrowings[i].token) < debtTokenAmt) revert InsufficientAaveLiquidity(borrowings[i].token);
+                debtTokenAmts[i] = debtTokenAmt;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        // 3. Supply all of the Safe's collateral into Aave, enabled as collateral (Safe is now debt-free on
+        //    DebtManager, so the hook's health check passes as the collateral moves). This runs even for a
+        //    debt-free Safe: once migrated, credit spends borrow against the Aave position, so the collateral
+        //    must actually move to Aave rather than sit idle in the Safe. Skipped for a lend-disabled safe,
+        //    which keeps its funds idle in the Safe by choice.
+        if (lendEnabled) {
+            address[] memory collateralTokens = getCollateralTokens();
+            uint256 cLen = collateralTokens.length;
+            for (uint256 i = 0; i < cLen;) {
+                uint256 bal = IERC20(collateralTokens[i]).balanceOf(safe);
+                if (bal != 0) {
+                    _gateway.supply(safe, collateralTokens[i], bal);
+                    _gateway.setUsingAsCollateral(safe, collateralTokens[i], true);
+                }
+                unchecked {
+                    ++i;
+                }
+            }
+        }
+
+        // 4/5. Only when there is debt to re-home: check the supplied collateral (weighted by Aave's LTVs) covers
+        //      it — specific error so the runner can route positions that fit DebtManager's params but not Aave's —
+        //      then borrow each debt from Aave into this contract, re-funding the debt cleared in step 2.
+        if (totalDebtUsd != 0) {
+            if (_gateway.getAccountData(safe).availableBorrowsUsd < totalDebtUsd) revert PositionExceedsAaveLtv();
+
+            for (uint256 i = 0; i < bLen;) {
+                if (debtTokenAmts[i] != 0) _gateway.borrow(safe, borrowings[i].token, debtTokenAmts[i], address(this));
+                unchecked {
+                    ++i;
+                }
+            }
+        }
+
+        $.migratedToAave[safe] = true;
+        emit MigratedToAave(safe, totalDebtUsd);
+    }
+
+    /**
+     * @dev Clears a Safe's full outstanding debt in `token` from DebtManager's books and returns the debt in
+     *      token units (to be re-borrowed from Aave). Only the accounting is cleared here; the re-borrowed
+     *      funds arriving later ARE the repayment that replenishes the lent-out balance.
+     */
+    function _clearLegacyDebt(address safe, address token) internal returns (uint256) {
+        DebtManagerStorage storage $ = _getDebtManagerStorage();
+
+        uint256 interestIndex = _updateInterestIndex(token);
+        uint256 normalizedAmount = $.userNormalizedBorrowings[safe][token];
+        if (normalizedAmount == 0) return 0;
+
+        uint256 debtUsd = _getActualBorrowAmount(normalizedAmount, interestIndex);
+        uint256 debtTokenAmt = convertUsdToCollateralToken(token, debtUsd);
+
+        $.userNormalizedBorrowings[safe][token] = 0;
+        $.borrowTokenConfig[token].totalNormalizedBorrowingAmount -= normalizedAmount;
+
+        emit Repaid(safe, address(this), token, debtUsd);
+        return debtTokenAmt;
     }
 
     /**
@@ -598,6 +719,16 @@ contract DebtManagerCore is DebtManagerStorageContract {
      */
     function _onlyEtherFiSafe(address account) internal view {
         if (!etherFiDataProvider.isEtherFiSafe(account)) revert OnlyEtherFiSafe();
+    }
+
+    /**
+     * @dev Blocks legacy DebtManager operations for a Safe once it has migrated to Aave
+     * @param safe The Safe to check
+     * @custom:throws AlreadyMigratedToAave if the Safe has been migrated
+     */
+    modifier whenNotMigrated(address safe) {
+        if (_getDebtManagerStorage().migratedToAave[safe]) revert AlreadyMigratedToAave();
+        _;
     }
 
     /**

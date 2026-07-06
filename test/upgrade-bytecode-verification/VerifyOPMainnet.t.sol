@@ -188,6 +188,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashModuleSetters() public {
+        // CashModuleSetters gains the lend opt-out (setLendGateway/toggleLend) for Lend, so its bytecode no
+        // longer matches the deployed pre-Lend version. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new CashModuleSetters(dataProviderProxy));
         _verify("CashModuleSetters", cashModuleSettersImpl, local);
     }
@@ -201,6 +204,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashEventEmitter() public {
+        // CashEventEmitter gains the Repay event (emitted when a migrated safe repays on Aave via the gateway)
+        // for Lend, so its bytecode no longer matches the deployed pre-Lend version. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new CashEventEmitter(cashModuleProxy));
         _verify("CashEventEmitter", cashEventEmitterImpl, local);
     }
