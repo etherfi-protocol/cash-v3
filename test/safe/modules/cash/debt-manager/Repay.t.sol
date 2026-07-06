@@ -2,84 +2,214 @@
 pragma solidity ^0.8.28;
 
 import { CashEventEmitter, CashModuleTestSetup, IERC20, IDebtManager, ICashModule, Mode } from "../CashModuleTestSetup.t.sol";
-import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
+import { BinSponsor, Cashback } from "../../../../../src/interfaces/ICashModule.sol";
 
-/// @notice Repay now routes to the Aave gateway (repay onBehalf) instead of DebtManager. These tests
-///         assert the gateway call and the CashModule-level guards; debt accounting (interest, partial,
-///         cap-at-debt, capacity) is Aave's behavior and is covered by the gateway ops tests.
 contract DebtManagerRepayTest is CashModuleTestSetup {
-    uint256 amountInUsd = 100e6;
-    uint256 expectedAmount;
+    uint256 collateralAmount = 0.01 ether;
+    uint256 collateralValueInUsdc;
+    uint256 borrowAmt;
 
     function setUp() public override {
         super.setUp();
-        expectedAmount = debtManager.convertUsdToCollateralToken(address(usdc), amountInUsd);
+
+        vm.prank(owner);
+        cashModule.setDelays(60, 3600, 0); // set credit mode delay to 0
+
+        _setMode(Mode.Credit);
+
+        deal(address(weETH), address(safe), collateralAmount);
+
+        collateralValueInUsdc = debtManager.convertCollateralTokenToUsd(address(weETH), collateralAmount);
+
+        borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 2;
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
+        Cashback[] memory cashbacks;
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
-    function test_repay_partial_callsGatewayRepayWithExactAmount() public {
-        gateway.setDebtOf(address(safe), address(usdc), expectedAmount * 2);
-        deal(address(usdc), address(safe), expectedAmount);
+    /// Repaying the full debt through the CashModule clears it and emits RepayDebtManager.
+    function test_repay_works() public {
+        uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
+        assertGt(debtAmtBefore, 0);
 
+        uint256 repayAmt = debtAmtBefore;
+        deal(address(usdc), address(safe), repayAmt);
         vm.startPrank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.RepayDebtManager(address(safe), address(usdc), expectedAmount, amountInUsd);
-        cashModule.repay(address(safe), address(usdc), amountInUsd);
+        emit CashEventEmitter.RepayDebtManager(address(safe), address(usdc), repayAmt, repayAmt);
+        cashModule.repay(address(safe), address(usdc), repayAmt);
         vm.stopPrank();
 
-        (address s, address asset, uint256 amt, address to) = gateway.lastRepay();
-        assertEq(s, address(safe));
-        assertEq(asset, address(usdc));
-        assertEq(amt, expectedAmount);
-        assertEq(to, address(0));
-        assertEq(gateway.debtOf(address(safe), address(usdc)), expectedAmount);
+        uint256 debtAmtAfter = debtManager.borrowingOf(address(safe), address(usdc));
+        assertEq(debtAmtBefore - debtAmtAfter, repayAmt);
     }
 
-    function test_repay_full_passesMaxSentinelAndEmitsActualRepaid() public {
-        uint256 outstandingDebt = expectedAmount / 2;
-        uint256 outstandingDebtInUsd = debtManager.convertCollateralTokenToUsd(address(usdc), outstandingDebt);
+     /// A partial repay reduces the debt by the repaid amount and leaves the rest outstanding.
+     function test_repay_partial_amount_works() public {
+        uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
+        assertGt(debtAmtBefore, 0);
 
-        gateway.setDebtOf(address(safe), address(usdc), outstandingDebt);
-        deal(address(usdc), address(safe), outstandingDebt);
-
+        // Repay only half of the debt
+        uint256 repayAmt = debtAmtBefore / 2;
+        deal(address(usdc), address(safe), repayAmt);
+        
         vm.startPrank(etherFiWallet);
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.RepayDebtManager(address(safe), address(usdc), outstandingDebt, outstandingDebtInUsd);
-        cashModule.repay(address(safe), address(usdc), amountInUsd);
+        emit CashEventEmitter.RepayDebtManager(address(safe), address(usdc), repayAmt, repayAmt);
+        cashModule.repay(address(safe), address(usdc), repayAmt);
         vm.stopPrank();
 
-        (address s, address asset, uint256 amt, address to) = gateway.lastRepay();
-        assertEq(s, address(safe));
-        assertEq(asset, address(usdc));
-        assertEq(amt, type(uint256).max);
-        assertEq(to, address(0));
-        assertEq(gateway.debtOf(address(safe), address(usdc)), 0);
+        uint256 debtAmtAfter = debtManager.borrowingOf(address(safe), address(usdc));
+        assertApproxEqAbs(debtAmtBefore - debtAmtAfter, repayAmt, 1);
+        assertApproxEqAbs(debtAmtAfter, repayAmt, 1); // Half of the debt remains
     }
 
+    /// Repaying more than the debt only pulls the debt amount and leaves the excess in the safe.
+    function test_repay_more_than_debt_only_repays_debt() public {
+        uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
+        assertGt(debtAmtBefore, 0);
+
+        // Try to repay twice the debt amount
+        uint256 repayAmt = debtAmtBefore * 2;
+        deal(address(usdc), address(safe), repayAmt);
+        
+        vm.startPrank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), repayAmt);
+        vm.stopPrank();
+
+        // Should have only repaid the actual debt amount
+        uint256 debtAmtAfter = debtManager.borrowingOf(address(safe), address(usdc));
+        assertEq(debtAmtAfter, 0);
+        
+        // Check that only the actual debt was transferred, not the excess
+        uint256 remainingBalance = IERC20(address(usdc)).balanceOf(address(safe));
+        assertApproxEqAbs(remainingBalance, repayAmt - debtAmtBefore, 1);
+    }
+
+    /// A zero repay amount reverts.
+    function test_repay_fails_whenAmountIsZero() public {
+        vm.startPrank(address(safe));
+        vm.expectRevert(IDebtManager.RepaymentAmountIsZero.selector);
+        debtManager.repay(address(safe), address(usdc), 0);
+        vm.stopPrank();
+    }
+
+    /// A third party can repay a safe's debt directly on the DebtManager.
+    function test_repay_by_third_party_works() public {
+        address thirdParty = makeAddr("thirdParty");
+        uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
+        
+        // Third party repays on behalf of the safe
+        deal(address(usdc), thirdParty, debtAmtBefore);
+        
+        vm.startPrank(thirdParty);
+        IERC20(address(usdc)).approve(address(debtManager), debtAmtBefore);
+        vm.expectEmit(true, true, true, true);
+        emit IDebtManager.Repaid(address(safe), thirdParty, address(usdc), debtAmtBefore);
+        debtManager.repay(address(safe), address(usdc), debtAmtBefore);
+        vm.stopPrank();
+        
+        uint256 debtAmtAfter = debtManager.borrowingOf(address(safe), address(usdc));
+        assertEq(debtAmtAfter, 0);
+    }
+
+    /// Repaying frees the safe's borrowing capacity by the repaid amount.
+    function test_repay_affects_borrowingCapacity() public {
+        uint256 capacityBefore = debtManager.remainingBorrowingCapacityInUSD(address(safe));
+        
+        uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
+        deal(address(usdc), address(safe), debtAmtBefore);
+        
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), debtAmtBefore);
+        
+        uint256 capacityAfter = debtManager.remainingBorrowingCapacityInUSD(address(safe));
+        
+        // Capacity should increase by approximately the amount repaid
+        assertApproxEqAbs(capacityAfter, capacityBefore + debtAmtBefore, 1);
+    }
+
+    /// Repaying reduces the DebtManager's tracked total borrowing amounts.
+    function test_repay_updates_totalBorrowingAmounts() public {
+        (IDebtManager.TokenData[] memory beforeTokenData, uint256 beforeTotalAmount) = debtManager.totalBorrowingAmounts();
+        
+        uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
+        deal(address(usdc), address(safe), debtAmtBefore);
+        
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), debtAmtBefore);
+        
+        (IDebtManager.TokenData[] memory afterTokenData, uint256 afterTotalAmount) = debtManager.totalBorrowingAmounts();
+        
+        // Total borrowing amount should decrease by approximately the amount repaid
+        assertApproxEqAbs(beforeTotalAmount - afterTotalAmount, debtAmtBefore, 1);
+        
+        // If this was the only debt for this token, it might be removed from the array
+        if (afterTokenData.length < beforeTokenData.length) {
+            assertEq(afterTokenData.length, beforeTokenData.length - 1);
+        } else {
+            // Otherwise, the token's amount should be reduced
+            for (uint i = 0; i < afterTokenData.length; i++) {
+                if (afterTokenData[i].token == address(usdc)) {
+                    assertApproxEqAbs(
+                        beforeTokenData[i].amount - afterTokenData[i].amount, 
+                        debtAmtBefore, 
+                        1
+                    );
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Repaying for a non-EtherFi safe reverts.
+    function test_repay_fails_nonEtherFiSafe() public {
+        uint256 debtAmt = debtManager.borrowingOf(address(safe), address(usdc));
+        deal(address(usdc), address(this), debtAmt);
+        
+        vm.expectRevert(IDebtManager.OnlyEtherFiSafe.selector);
+        debtManager.repay(makeAddr("notSafe"), address(usdc), debtAmt);
+    }
+
+    /// Repaying a token that is not a borrow token reverts.
     function test_repay_fails_withNonBorrowToken() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.OnlyBorrowToken.selector);
         cashModule.repay(address(safe), address(weETH), 1 ether);
     }
 
-    function test_repay_fails_nonEtherFiSafe() public {
-        // onlyEtherFiSafe reverts OnlyEtherFiSafe(); the selector is shared across contracts declaring it
+    /// Repaying after time passes clears the debt plus its accrued interest.
+    function test_repay_incursInterest() public {
+        uint256 timeElapsed = 10;
+
+        vm.warp(block.timestamp + timeElapsed);
+        uint256 expectedInterest = (borrowAmt * borrowApyPerSecond * timeElapsed) / 1e20;
+        uint256 debtAmtBefore = borrowAmt + expectedInterest;
+
+        assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdc)), debtAmtBefore, 1);
+        uint256 repayAmt = debtAmtBefore;
+        deal(address(usdc), address(safe), repayAmt);
         vm.prank(etherFiWallet);
-        vm.expectRevert(IDebtManager.OnlyEtherFiSafe.selector);
-        cashModule.repay(makeAddr("notSafe"), address(usdc), amountInUsd);
+        cashModule.repay(address(safe), address(usdc), repayAmt);
+
+        uint256 debtAmtAfter = debtManager.borrowingOf(address(safe), address(usdc));
+        assertApproxEqAbs(debtAmtBefore - debtAmtAfter, repayAmt, 1);
     }
 
-    function test_repay_fails_whenAmountIsZero() public {
-        vm.prank(etherFiWallet);
-        vm.expectRevert(ICashModule.AmountZero.selector);
-        cashModule.repay(address(safe), address(usdc), 0);
-    }
-
+    /// Repaying with insufficient safe balance reverts.
     function test_repay_fails_whenBalanceIsInsufficient() public {
-        gateway.setDebtOf(address(safe), address(usdc), expectedAmount);
         deal(address(usdc), address(safe), 0);
 
-        vm.prank(etherFiWallet);
+        vm.startPrank(etherFiWallet);
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
-        cashModule.repay(address(safe), address(usdc), amountInUsd);
+        cashModule.repay(address(safe), address(usdc), 1);
+        vm.stopPrank();
     }
 }

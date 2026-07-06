@@ -22,14 +22,6 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     uint256 collateralAmount = 0.01 ether;
     uint256 collateralValueInUsdc;
 
-    function _assertLastBorrow(address expectedSafe, address expectedAsset, uint256 expectedAmount, address expectedRecipient) internal view {
-        (address borrowedSafe, address borrowedAsset, uint256 borrowedAmount, address borrowRecipient) = gateway.lastBorrow();
-        assertEq(borrowedSafe, expectedSafe);
-        assertEq(borrowedAsset, expectedAsset);
-        assertApproxEqAbs(borrowedAmount, expectedAmount, 1);
-        assertEq(borrowRecipient, expectedRecipient);
-    }
-
     function setUp() public override {
         super.setUp();
 
@@ -60,6 +52,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     }
 
     // Borrow token support related tests
+    /// Admin adds a new borrow token (with collateral config), then removes it, checking the borrow-token set.
     function test_supportBorrowToken_succeeds_whenTokenIsValid() public {
         address newBorrowToken = address(new MockERC20("abc", "ABC", 12));
         uint64 borrowApy = 1000;
@@ -107,6 +100,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// A borrow token still in use by the system cannot be unsupported.
     function test_unsupportBorrowToken_reverts_whenTokenStillInUse() public {
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.BorrowTokenStillInTheSystem.selector);
@@ -115,6 +109,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Only the admin can support or unsupport a borrow token.
     function test_supportBorrowToken_reverts_whenCallerNotAdmin() public {
         address newBorrowToken = address(new MockERC20("abc", "ABC", 12));
 
@@ -127,6 +122,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Supporting an already-supported borrow token reverts.
     function test_supportBorrowToken_reverts_whenTokenAlreadySupported() public {
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.AlreadyBorrowToken.selector);
@@ -134,6 +130,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Unsupporting a token that is not a borrow token reverts.
     function test_unsupportBorrowToken_reverts_whenTokenNotBorrowToken() public {
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.NotABorrowToken.selector);
@@ -141,6 +138,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// The last remaining borrow token cannot be removed.
     function test_unsupportBorrowToken_reverts_whenLastBorrowToken() public {
         deal(address(usdc), address(debtManager), 0);
         vm.startPrank(owner);
@@ -150,6 +148,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     }
 
     // Borrow APY related tests
+    /// Admin sets a new borrow APY and it is stored.
     function test_setBorrowApy_succeeds_whenValidValue() public {
         uint64 apy = 1;
         vm.startPrank(owner);
@@ -162,6 +161,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Only the admin can set the borrow APY.
     function test_setBorrowApy_reverts_whenCallerNotAdmin() public {
         vm.startPrank(notOwner);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
@@ -169,6 +169,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// A zero borrow APY is rejected.
     function test_setBorrowApy_reverts_whenApyIsZero() public {
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.InvalidValue.selector);
@@ -176,6 +177,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Setting the APY for an unsupported borrow token reverts.
     function test_setBorrowApy_reverts_whenTokenNotSupported() public {
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.UnsupportedBorrowToken.selector);
@@ -184,6 +186,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     }
 
     // Min shares related tests
+    /// Admin sets the minimum borrow-token shares and it is stored.
     function test_setMinBorrowTokenShares_succeeds_whenValidValue() public {
         uint128 shares = 100;
         vm.prank(owner);
@@ -195,6 +198,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         assertEq(config.minShares, shares);
     }
 
+    /// Only the admin can set the minimum borrow-token shares.
     function test_setMinBorrowTokenShares_reverts_whenCallerNotAdmin() public {
         vm.startPrank(notOwner);
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
@@ -202,6 +206,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Zero minimum shares is rejected.
     function test_setMinBorrowTokenShares_reverts_whenSharesIsZero() public {
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.InvalidValue.selector);
@@ -209,6 +214,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Setting minimum shares for an unsupported borrow token reverts.
     function test_setMinBorrowTokenShares_reverts_whenTokenNotSupported() public {
         vm.startPrank(owner);
         vm.expectRevert(IDebtManager.UnsupportedBorrowToken.selector);
@@ -217,6 +223,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     }
 
     // Borrow functionality tests
+    /// A non-migrated credit spend borrows from the DebtManager and updates the safe's and total borrowings.
     function test_borrow_succeeds_whenValidAmount() public {
         uint256 totalCanBorrow = debtManager.remainingBorrowingCapacityInUSD(address(safe));
         uint256 borrowAmt = totalCanBorrow / 2;
@@ -239,20 +246,52 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
 
         vm.startPrank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        vm.stopPrank();
 
-        _assertLastBorrow(address(safe), address(usdc), borrowAmt, address(settlementDispatcherReap));
+        uint256 borrowInUsdc = debtManager.borrowingOf(address(safe), address(usdc));
+        assertApproxEqAbs(borrowInUsdc, borrowAmt, 1);
 
         (, uint256 totalBorrowingAmountAfter) = debtManager.totalBorrowingAmounts();
-        assertEq(totalBorrowingAmountAfter, 0);
+        assertApproxEqAbs(totalBorrowingAmountAfter, borrowAmt, 1);
 
         bool isUserLiquidatableAfter = debtManager.liquidatable(address(safe));
         assertEq(isUserLiquidatableAfter, false);
 
         (, uint256 borrowingOfUserAfter) = debtManager.borrowingOf(address(safe));
-        assertEq(borrowingOfUserAfter, 0);
+        assertApproxEqAbs(borrowingOfUserAfter, borrowAmt, 1);
     }
 
+    /// DebtManager debt grows by the expected interest after some time passes.
+    function test_borrow_accumulatesInterest_overTime() public {
+        uint256 borrowAmt = debtManager.remainingBorrowingCapacityInUSD(
+            address(safe)
+        ) / 2;
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = borrowAmt;
+
+        Cashback[] memory cashbacks;
+
+        vm.startPrank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+        vm.stopPrank();
+
+        assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdc)), borrowAmt, 1);
+
+        uint256 timeElapsed = 10;
+
+        vm.warp(block.timestamp + timeElapsed);
+        uint256 expectedInterest = (borrowAmt * borrowApyPerSecond * timeElapsed) / 1e20;
+
+        assertApproxEqAbs(
+            debtManager.borrowingOf(address(safe), address(usdc)),
+            borrowAmt + expectedInterest,
+            1
+        );
+    }
+
+    /// Borrowing a token with non-6 decimals converts the USD amount to the token amount correctly.
     function test_borrow_succeeds_withNonStandardDecimals() public {
         MockERC20 newToken = new MockERC20("mockToken", "MTK", 12);
         deal(address(newToken), address(debtManager), 1 ether);
@@ -293,7 +332,8 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         (, uint256 totalBorrowingsOfAliceSafe) = debtManager.borrowingOf(address(safe));
         assertEq(totalBorrowingsOfAliceSafe, 0);
 
-        uint256 borrowInToken = debtManager.convertUsdToCollateralToken(address(newToken), remainingBorrowCapacityInUsdc);
+        uint256 borrowInToken = (remainingBorrowCapacityInUsdc * 1e12) / 1e6;
+        uint256 debtManagerBalBefore = newToken.balanceOf(address(debtManager));
 
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(newToken);
@@ -306,13 +346,14 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         cashModule.spend(address(safe),  txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         (, totalBorrowingsOfAliceSafe) = debtManager.borrowingOf(address(safe));
-        assertEq(totalBorrowingsOfAliceSafe, 0);
-
-        _assertLastBorrow(address(safe), address(newToken), borrowInToken, address(settlementDispatcherReap));
+        assertEq(totalBorrowingsOfAliceSafe, remainingBorrowCapacityInUsdc);
+        
+        uint256 debtManagerBalAfter = newToken.balanceOf(address(debtManager));
+        assertEq(debtManagerBalBefore - debtManagerBalAfter, borrowInToken);
     }
 
-    /// @notice Subsequent CashModule gateway borrows should still leave DebtManager borrowing state empty.
-    function test_gatewayBorrow_doesNotAddDebtManagerInterest_onSubsequentBorrows() public {
+    /// A second borrow adds to the existing debt plus its accrued interest.
+    function test_borrow_addsInterest_onSubsequentBorrows() public {
         uint256 borrowAmt = debtManager.remainingBorrowingCapacityInUSD(
             address(safe)
         ) / 4;
@@ -327,33 +368,42 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.startPrank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        _assertLastBorrow(address(safe), address(usdc), borrowAmt, address(settlementDispatcherReap));
-        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
+        assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(usdc)), borrowAmt, 1);
 
         uint256 timeElapsed = 10;
 
         vm.warp(block.timestamp + timeElapsed);
+        uint256 expectedInterest = (borrowAmt *
+            borrowApyPerSecond *
+            timeElapsed) / 1e20;
 
-        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
-        (, uint256 totalBorrowingAmountAfterFirstSpend) = debtManager.totalBorrowingAmounts();
-        assertEq(totalBorrowingAmountAfterFirstSpend, 0);
+        uint256 expectedTotalBorrowWithInterest = borrowAmt + expectedInterest;
+
+        assertApproxEqAbs(
+            debtManager.borrowingOf(address(safe), address(usdc)),
+            expectedTotalBorrowWithInterest,
+            2
+        );
 
         cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-        _assertLastBorrow(address(safe), address(usdc), borrowAmt, address(settlementDispatcherReap));
-        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0);
-        (, uint256 totalBorrowingAmount) = debtManager.totalBorrowingAmounts();
-        assertEq(totalBorrowingAmount, 0);
+        assertApproxEqAbs(
+            debtManager.borrowingOf(address(safe), address(usdc)),
+            expectedTotalBorrowWithInterest + borrowAmt,
+            2
+        );
 
         vm.stopPrank();
     }
 
+    /// Borrowing an unsupported token reverts.
     function test_borrow_reverts_whenTokenNotSupported() public {
         vm.prank(address(safe));        
         vm.expectRevert(IDebtManager.UnsupportedBorrowToken.selector);
         debtManager.borrow(BinSponsor.Reap, address(weETH), 1);
     }
 
+    /// Borrowing beyond the safe's capacity reverts as unhealthy.
     function test_borrow_reverts_whenDebtExceedsThreshold() public {
         uint256 totalCanBorrow = debtManager.remainingBorrowingCapacityInUSD(address(safe));
         
@@ -366,6 +416,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Borrowing more than the DebtManager holds reverts for insufficient liquidity.
     function test_borrow_reverts_whenInsufficientLiquidity() public {
         deal(address(usdc), address(debtManager), 0);
         vm.startPrank(address(safe));
@@ -374,6 +425,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Borrowing with no collateral reverts as unhealthy.
     function test_borrow_reverts_whenNoCollateral() public {
         deal(address(weETH), address(safe), 0);
         vm.startPrank(address(safe));
@@ -382,11 +434,13 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Only an EtherFi safe can call borrow directly on the DebtManager.
     function test_borrow_reverts_whenCallerNotSafe() public {
         vm.expectRevert(IDebtManager.OnlyEtherFiSafe.selector);
         debtManager.borrow(BinSponsor.Reap, address(usdc), 1);
     }
 
+    /// A zero borrow amount reverts.
     function test_borrow_reverts_whenAmountIsZero() public {
         vm.startPrank(address(safe));
         vm.expectRevert(IDebtManager.BorrowAmountZero.selector);
@@ -394,6 +448,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Borrowing exactly the max capacity leaves zero headroom and stays non-liquidatable.
     function test_borrow_succeeds_atExactMaxCapacity() public {
         uint256 maxBorrowCapacity = debtManager.remainingBorrowingCapacityInUSD(address(safe));
         
@@ -408,6 +463,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// Debt grows by the expected interest over a one-year period.
     function test_borrow_accumulatesInterest_overLongPeriod() public {
         uint256 borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 2;
 
@@ -429,6 +485,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         );
     }
 
+    /// Two safes borrow independently and both debts plus the total are tracked correctly.
     function test_borrow_multipleUsers_succeeds() public {
         // Setup a second safe
         address safe2 = address(0x456);
@@ -465,6 +522,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     }
 
 
+    /// A collateral price drop reduces borrow capacity proportionally, and borrowing at the new capacity works.
     function test_borrow_whenCollateralPriceChanges() public {
         priceProvider = PriceProvider(address(new MockPriceProvider(3000e6, address(usdc))));
         
