@@ -94,6 +94,18 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
+     * @notice Marks a safe as using the Aave gateway engine
+     * @dev Only callable by the DebtManager, as the last step of migrateToAave. Idempotent and one-way:
+     *      nothing ever clears the flag.
+     * @param safe Address of the EtherFi Safe
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
+    function markUsesAave(address safe) external {
+        if (msg.sender != address(_getDebtManager())) revert OnlyDebtManager();
+        _getCashModuleStorage().safeCashConfig[safe].usesAave = true;
+    }
+
+    /**
      * @notice Configures the withdraw assets whitelist
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
      * @param assets Array of asset addresses to configure
@@ -407,6 +419,8 @@ contract CashModuleSetters is CashModuleStorageContract {
         $$.pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
         $.cashEventEmitter.emitWithdrawalRequested(safe, tokens, amounts, recipient, finalTime);
 
+        // Deliberately unconditional: load-bearing for legacy safes (loose tokens are DebtManager collateral)
+        // and provably a no-op for gateway safes, whose DebtManager books are zero by construction.
         _getDebtManager().ensureHealth(safe);
 
         if ($.withdrawalDelay == 0) _processWithdrawal(safe);

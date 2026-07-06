@@ -82,6 +82,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.setGateway(address(gw));
     }
 
+    /// A fresh safe starts with lend enabled and no pending disable.
     function test_lendEnabledByDefault() public view {
         assertTrue(cashModule.isLendEnabled(address(safe)), "lend on by default (cash module)");
         assertTrue(gw.isLendEnabled(address(safe)), "lend on by default (gateway view)");
@@ -90,6 +91,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
 
     // ----------------------------------------------------------------- happy path
 
+    /// Executing the opt-out pulls all Aave collateral into the safe, forces Debit, and blocks every later lend op.
     function test_disableLend_withdrawsCollateralForcesDebitAndBlocksLend() public {
         // Position: 5 weETH supplied as collateral on Aave, no debt
         deal(address(weETH), address(safe), 5 ether);
@@ -134,6 +136,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         vm.stopPrank();
     }
 
+    /// Opting out from Credit mode drops the safe back to Debit.
     function test_disableLend_forcesDebitFromCreditMode() public {
         // Move the safe into Credit mode first (no borrows), then opt out
         _setModeCredit();
@@ -146,6 +149,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "credit dropped to debit");
     }
 
+    /// Opting out with no Aave position just flips the flag and forces Debit.
     function test_disableLend_noCollateral_marksDisabled() public {
         // No Aave position at all: opting out is still valid and just flips the flag
         _requestDisable();
@@ -156,8 +160,37 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit));
     }
 
+    /// @dev A legacy-engine safe's opt-out is just the flag plus forced Debit: its funds are already loose,
+    ///      so nothing is unwound from Aave. This is the pre-migration opt-out lever.
+    function test_disableLend_legacySafe_disablesWithoutTouchingGateway() public {
+        _forceLegacyEngine(address(safe));
+        deal(address(weETH), address(safe), 5 ether);
+
+        _requestDisable();
+        vm.warp(block.timestamp + MODE_DELAY);
+        cashModule.processLendDisable(address(safe));
+
+        assertFalse(cashModule.isLendEnabled(address(safe)), "legacy safe disabled");
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "forced to debit");
+        assertEq(weETH.balanceOf(address(safe)), 5 ether, "funds stayed loose in the safe");
+    }
+
+    /// @dev A legacy safe with open DebtManager debt cannot opt out: the borrow check counts both engines.
+    function test_toggleLendDisable_legacySafe_revertsWithOpenDebtManagerBorrow() public {
+        _forceLegacyEngine(address(safe));
+        deal(address(weETH), address(safe), 5 ether);
+        deal(address(usdc), address(debtManager), 100_000e6);
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), 100e6);
+
+        (address signer, bytes memory sig) = _toggleLendSig(false);
+        vm.expectRevert(ICashModule.HasOpenBorrows.selector);
+        cashModule.toggleLend(address(safe), false, signer, sig);
+    }
+
     // ----------------------------------------------------------------- disable-request guards
 
+    /// Requesting the opt-out reverts when the safe has an open Aave borrow.
     function test_toggleLendDisable_revertsWithOpenAaveBorrow() public {
         // Open an Aave borrow so the safe has debt
         deal(address(weETH), address(safe), 5 ether);
@@ -172,6 +205,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.toggleLend(address(safe), false, signer, sig);
     }
 
+    /// A second opt-out request reverts while one is already pending.
     function test_toggleLendDisable_revertsWhenAlreadyPending() public {
         _requestDisable();
 
@@ -180,6 +214,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.toggleLend(address(safe), false, signer, sig);
     }
 
+    /// Requesting the opt-out reverts when lend is already disabled.
     function test_toggleLendDisable_revertsWhenAlreadyDisabled() public {
         _requestDisable();
         vm.warp(block.timestamp + MODE_DELAY);
@@ -190,12 +225,14 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.toggleLend(address(safe), false, signer, sig);
     }
 
+    /// toggleLend reverts when the named signer is not a safe admin.
     function test_toggleLend_rejectsNonAdminSigner() public {
         (, bytes memory sig) = _toggleLendSig(false);
         vm.expectRevert(ICashModule.OnlySafeAdmin.selector);
         cashModule.toggleLend(address(safe), false, makeAddr("notAdmin"), sig);
     }
 
+    /// toggleLend reverts when an admin is named but the signature is from the wrong key.
     function test_toggleLend_rejectsBadSignature() public {
         // Correct signer (an admin) but signed by the wrong key
         uint256 nonce = cashModule.getNonce(address(safe));
@@ -207,6 +244,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.toggleLend(address(safe), false, owner1, sig);
     }
 
+    /// A signature for disable cannot be replayed to enable (the flag is bound into the digest).
     function test_toggleLend_signatureBindsEnableFlag() public {
         // A signature authorizing disable (enable=false) must not be accepted for enable (enable=true)
         (address signer, bytes memory sig) = _toggleLendSig(false);
@@ -216,11 +254,13 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
 
     // ----------------------------------------------------------------- execute (processLendDisable) guards
 
+    /// processLendDisable reverts when there is no pending request.
     function test_processLendDisable_revertsWhenNoPending() public {
         vm.expectRevert(ICashModule.NoPendingLendDisable.selector);
         cashModule.processLendDisable(address(safe));
     }
 
+    /// processLendDisable reverts while still inside the mode-change delay.
     function test_processLendDisable_revertsWhenNotReady() public {
         _requestDisable();
         // Still inside the delay window
@@ -228,6 +268,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.processLendDisable(address(safe));
     }
 
+    /// processLendDisable reverts if a borrow was opened during the delay window.
     function test_processLendDisable_revertsWhenBorrowTakenDuringDelay() public {
         // Request with no debt, then take an Aave borrow during the delay window
         _requestDisable();
@@ -278,6 +319,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
 
     // ----------------------------------------------------------------- credit mode interaction
 
+    /// A lend-disabled safe cannot switch into Credit mode.
     function test_afterDisable_cannotEnterCreditMode() public {
         _requestDisable();
         vm.warp(block.timestamp + MODE_DELAY);
@@ -294,6 +336,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
 
     // ----------------------------------------------------------------- re-enable (toggleLend true)
 
+    /// Re-enabling lend flips the flag back on and resumes auto-supply.
     function test_enableLend_reenablesAndResumesSupply() public {
         _requestDisable();
         vm.warp(block.timestamp + MODE_DELAY);
@@ -314,12 +357,14 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 2 ether, 2, "supply resumed");
     }
 
+    /// Re-enabling reverts when lend was never disabled.
     function test_enableLend_revertsWhenNotDisabled() public {
         (address signer, bytes memory sig) = _toggleLendSig(true);
         vm.expectRevert(ICashModule.LendNotDisabled.selector);
         cashModule.toggleLend(address(safe), true, signer, sig);
     }
 
+    /// Re-enabling cancels a pending disable so it can no longer be executed.
     function test_enableLend_cancelsPendingRequest() public {
         // A pending (not-yet-executed) request can be cancelled by re-enabling
         _requestDisable();

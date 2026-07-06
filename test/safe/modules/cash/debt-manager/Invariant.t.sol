@@ -44,7 +44,10 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
 
             address deployedSafe = safeFactory.getDeterministicAddress(salt);
             safes.push(IEtherFiSafe(deployedSafe));
-            
+
+            // This suite tests the legacy DebtManager engine (new safes default to the Aave gateway)
+            _forceLegacyEngine(deployedSafe);
+
             // Setup borrower with sufficient collateral
             deal(address(weETH), deployedSafe, INITIAL_COLLATERAL_IN_WEETH);
             

@@ -78,6 +78,11 @@ contract CashModuleCore is CashModuleStorageContract {
         SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         $.mode = Mode.Debit;
+
+        // New safes run on the Aave gateway. Guarded because setupModule is re-runnable: a legacy safe with
+        // open DebtManager debt must keep routing to DebtManager until migrateToAave moves its position.
+        (, uint256 legacyDebtUsd) = _getDebtManager().borrowingOf(msg.sender);
+        if (legacyDebtUsd == 0) $.usesAave = true;
     }
 
     /**
@@ -185,13 +190,8 @@ contract CashModuleCore is CashModuleStorageContract {
      * @return settlementDispatcher The address of the settlement dispatcher
      * @custom:throws SettlementDispatcherNotSetForBinSponsor If the address of the settlement dispatcher is address(0) for bin sponsor
      */
-    function getSettlementDispatcher(BinSponsor binSponsor) public view returns (address settlementDispatcher) {
-        if (binSponsor == BinSponsor.Rain) settlementDispatcher = _getCashModuleStorage().settlementDispatcherRain;
-        else if (binSponsor == BinSponsor.PIX) settlementDispatcher = _getCashModuleStorage().settlementDispatcherPix;
-        else if (binSponsor == BinSponsor.CardOrder) settlementDispatcher = _getCashModuleStorage().settlementDispatcherCardOrder;
-        else settlementDispatcher = _getCashModuleStorage().settlementDispatcherReap;
-
-        if (settlementDispatcher == address(0)) revert SettlementDispatcherNotSetForBinSponsor();
+    function getSettlementDispatcher(BinSponsor binSponsor) public view returns (address) {
+        return CashLendLib.settlementDispatcher(_getCashModuleStorage(), binSponsor);
     }
 
     /**
@@ -218,6 +218,30 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Prepares a safe for liquidation by canceling any pending withdrawals
+     * @dev Only callable by the DebtManager
+     * @param safe Address of the EtherFi Safe being liquidated
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
+    function preLiquidate(address safe) external {
+        if (msg.sender != address(getDebtManager())) revert OnlyDebtManager();
+        _cancelOldWithdrawal(safe);
+    }
+
+    /**
+     * @notice Executes post-liquidation logic to transfer tokens to the liquidator
+     * @dev Only callable by the DebtManager after a successful liquidation
+     * @param safe Address of the EtherFi Safe being liquidated
+     * @param liquidator Address that will receive the liquidated tokens
+     * @param tokensToSend Array of token data with amounts to send to the liquidator
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
+    function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external {
+        if (msg.sender != address(getDebtManager())) revert OnlyDebtManager();
+        CashLendLib.postLiquidateTransfers(safe, liquidator, tokensToSend);
+    }
+
+    /**
      * @notice Returns whether lend (Aave auto-supply and borrow ops) is enabled for a safe
      * @dev Lend is enabled by default; a safe with no borrows may opt out via toggleLend(false) + processLendDisable
      * @param safe Address of the EtherFi Safe
@@ -225,6 +249,16 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function isLendEnabled(address safe) external view returns (bool) {
         return !_getCashModuleStorage().safeCashConfig[safe].lendDisabled;
+    }
+
+    /**
+     * @notice Whether the safe's borrow/collateral engine is the Aave gateway (vs the legacy DebtManager)
+     * @dev The canonical routing flag; see ICashModule.usesAave
+     * @param safe Address of the EtherFi Safe
+     * @return True if the safe uses the Aave gateway
+     */
+    function usesAave(address safe) external view returns (bool) {
+        return _usesAave(safe);
     }
 
     /**
@@ -338,8 +372,12 @@ contract CashModuleCore is CashModuleStorageContract {
 
         uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
 
-        if ($.safeCashConfig[safe].mode == Mode.Credit) _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-        else _spendDebit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        // CashLendLib routes each mode by engine (gateway vs legacy DebtManager) and emits Spend.
+        if ($.safeCashConfig[safe].mode == Mode.Credit) {
+            CashLendLib.spendCredit($, etherFiDataProvider, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        } else {
+            CashLendLib.spendDebit($, etherFiDataProvider, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        }
         _cashback($, safe, totalSpendingInUsd, cashbacks);
     }
 
@@ -370,49 +408,6 @@ contract CashModuleCore is CashModuleStorageContract {
         $$.spendingLimit.spend(totalSpendingInUsd);
 
         return totalSpendingInUsd;
-    }
-
-    /**
-     * @dev Internal function to execute credit mode spending transaction (single token), run in
-     *      CashLendLib; a blocked legacy borrow cancels the pending withdrawal request and retries
-     * @param $ Storage reference to the CashModuleStorage
-     * @param safe Address of the EtherFi Safe
-     * @param txId Transaction identifier
-     * @param tokens Addresses of the tokens to spend
-     * @param amountsInUsd Amounts to spend in USD
-     */
-    function _spendCredit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd) internal {
-        (uint256 amount, bool retryAfterCancel) = CashLendLib.spendCredit($, safe, binSponsor, getSettlementDispatcher(binSponsor), tokens[0], amountsInUsd[0]);
-        if (retryAfterCancel) {
-            // The legacy borrow was blocked; cancel the pending withdrawal request and retry, matching the
-            // debit path's competing-claims rule (the spend wins over the reservation).
-            _cancelOldWithdrawal(safe);
-            CashLendLib.legacyBorrow($, safe, binSponsor, tokens[0], amount);
-        }
-
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = amount;
-
-        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
-    }
-
-    /**
-     * @dev Internal function to execute debit mode spending transactions (multiple tokens), sized and
-     *      executed in CashLendLib against the safe's loose and Aave-supplied balances
-     * @param $ Storage reference to the CashModuleStorage
-     * @param safe Address of the EtherFi Safe
-     * @param txId Transaction identifier
-     * @param tokens Array of addresses of the tokens to spend
-     * @param amountsInUsd Array of amounts to spend in USD
-     */
-    function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
-        (uint256[] memory amounts, uint256[] memory fromLoose, bool cancelWithdrawal) = CashLendLib.sourceDebits($, etherFiDataProvider, safe, tokens, amountsInUsd);
-        // Sizing needs balance reserved by the pending withdrawal request: the spend wins the
-        // competing claim and the request is cancelled before any transfer executes.
-        if (cancelWithdrawal) _cancelOldWithdrawal(safe);
-        CashLendLib.executeDebits($, safe, getSettlementDispatcher(binSponsor), tokens, amounts, fromLoose);
-
-        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
     }
 
     /**
