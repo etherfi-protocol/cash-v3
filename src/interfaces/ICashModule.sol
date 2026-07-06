@@ -573,13 +573,6 @@ interface ICashModule {
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external;
 
     /**
-     * @notice Sets the Aave gateway used to withdraw collateral when a safe disables lend
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param gateway Address of the gateway
-     */
-    function setLendGateway(address gateway) external;
-
-    /**
      * @notice Toggles a safe's participation in the Aave lend market (auto-supply and borrow ops)
      * @dev Owner-signed, with the requested flag bound into the signature. Enabling (enable == true) opts the
      *      safe back in immediately and cancels any pending disable. Disabling (enable == false) does not act

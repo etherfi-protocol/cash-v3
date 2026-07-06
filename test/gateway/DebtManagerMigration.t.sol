@@ -59,13 +59,17 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         gw.setReserveId(address(usdc), usdcReserveId);
         gw.setDriver(address(dm), true); // DebtManager drives the gateway during migration
         // Migration reads the gateway from CashModule (single source of truth); authorize the migration runner
-        cashModule.setLendGateway(address(gw));
+        cashModule.setGateway(address(gw));
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, migrator);
         vm.stopPrank();
 
         _enableModule(address(gw));
         _activateAavePositionManager(address(gw));
     }
+
+    /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setGateway(gw) above is
+    ///      the first and only set. Without this, that call would revert GatewayAlreadySet.
+    function _wireDefaultGateway() internal override { }
 
     // ----------------------------------------------------------------- happy path
 

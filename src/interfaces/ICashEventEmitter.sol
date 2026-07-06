@@ -25,12 +25,8 @@ interface ICashEventEmitter {
      */
     function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external;
 
-    /**
-     * @notice Emits the GatewayUpdated event
-     * @param oldGateway Address of the previous gateway
-     * @param newGateway Address of the new gateway
-     */
-    function emitGatewayUpdated(address oldGateway, address newGateway) external;
+    /// @notice Emits the GatewaySet event
+    function emitGatewaySet(address gateway) external;
 
     /**
      * @notice Emits an event when pending cashback is cleared
@@ -148,9 +144,6 @@ interface ICashEventEmitter {
 
     /// @notice Emits the LendEnabled event
     function emitLendEnabled(address safe) external;
-
-    /// @notice Emits the LendGatewaySet event
-    function emitLendGatewaySet(address gateway) external;
 
     /**
      * @notice Emits an event when spending limits are changed

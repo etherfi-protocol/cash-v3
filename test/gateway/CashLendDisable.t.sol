@@ -11,7 +11,6 @@ import { IGateway } from "../../src/interfaces/IGateway.sol";
 import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../src/libraries/SignatureUtils.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
-import { MockGateway } from "../../src/mocks/MockGateway.sol";
 import { Gateway } from "../../src/modules/gateway/Gateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
@@ -59,8 +58,8 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         gw.setReserveId(address(weETH), weethReserveId);
         gw.setReserveId(address(usdc), usdcReserveId);
         gw.setDriver(driver, true);
-        // Wire the CashModule to the gateway (source of the collateral-withdraw path) and give a real mode delay
-        cashModule.setLendGateway(address(gw));
+        // Wire the CashModule to the real gateway (source of the collateral-withdraw path) and give a real mode delay
+        cashModule.setGateway(address(gw));
         cashModule.setDelays(1, 3600, MODE_DELAY);
         vm.stopPrank();
 
@@ -68,18 +67,19 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         _activateAavePositionManager(address(gw));
     }
 
+    /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setGateway(gw) above is
+    ///      the first and only set. Without this, that call would revert GatewayAlreadySet.
+    function _wireDefaultGateway() internal override { }
+
     // ----------------------------------------------------------------- wiring & defaults
 
-    function test_setLendGateway_setsAddressAndGuardsRole() public {
+    /// @notice The gateway is wired once during setup and cannot be repointed (role/zero/codeless guards live in SetGateway.t.sol).
+    function test_lendGateway_wiredOnceAndImmutable() public {
         assertEq(cashModule.getLendGateway(), address(gw));
 
-        vm.prank(makeAddr("notController"));
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
-        cashModule.setLendGateway(address(gw));
-
         vm.prank(owner);
-        vm.expectRevert(ICashModule.InvalidInput.selector);
-        cashModule.setLendGateway(address(0));
+        vm.expectRevert(ICashModule.GatewayAlreadySet.selector);
+        cashModule.setGateway(address(gw));
     }
 
     function test_lendEnabledByDefault() public view {
@@ -246,16 +246,13 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
 
     /// @dev Dust debt (sub-$0.000001) floors to zero in getAccountData's 6-decimal debtUsd, so the open-borrows
     ///      check must look at the raw per-asset debtOf instead, else disable would proceed and later revert
-    ///      deep in Aave when withdrawing the collateral. Uses a mock gateway to inject the dust precisely.
+    ///      deep in Aave when withdrawing the collateral. Injects 1 wei of raw debt via a mocked debtOf on the
+    ///      wired gateway; there is no real Aave position, so the USD aggregate still floors to zero.
     function test_toggleLendDisable_revertsOnDustDebtBelowUsdFloor() public {
-        MockGateway mockGw = new MockGateway();
-        mockGw.setRegisteredAssets(_addr1(address(weETH)));
-        mockGw.setDebtOf(address(safe), address(weETH), 1); // 1 wei of raw debt
-        vm.prank(owner);
-        cashModule.setLendGateway(address(mockGw));
+        vm.mockCall(address(gw), abi.encodeWithSelector(IGateway.debtOf.selector, address(safe), address(weETH)), abi.encode(uint256(1)));
 
         // Premise of the test: the USD aggregate floors this dust to zero, so only the raw debtOf check catches it
-        assertEq(mockGw.getAccountData(address(safe)).debtUsd, 0, "dust floors to zero USD");
+        assertEq(gw.getAccountData(address(safe)).debtUsd, 0, "dust floors to zero USD");
 
         (address signer, bytes memory sig) = _toggleLendSig(false);
         vm.expectRevert(ICashModule.HasOpenBorrows.selector);

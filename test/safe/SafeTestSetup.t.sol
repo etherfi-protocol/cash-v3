@@ -203,7 +203,7 @@ contract SafeTestSetup is Utils {
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
 
-        cashModule.setGateway(address(gateway));
+        _wireDefaultGateway();
 
         _setupWithdrawTokenWhitelist();
 
@@ -222,6 +222,12 @@ contract SafeTestSetup is Utils {
         safe = EtherFiSafe(payable(safeFactory.getDeterministicAddress(keccak256("safe"))));
 
         vm.stopPrank();
+    }
+
+    /// @dev Wires the one-time gateway during setup. The gateway is set once and never repointed, so an Aave
+    ///      suite that needs the real gateway overrides this to a no-op and sets it after deploying Aave.
+    function _wireDefaultGateway() internal virtual {
+        cashModule.setGateway(address(gateway));
     }
 
     function _setupWithdrawTokenWhitelist() internal {

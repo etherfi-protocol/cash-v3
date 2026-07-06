@@ -110,10 +110,6 @@ contract CashEventEmitter is UpgradeableProxy {
     /// @param safe Address of the safe
     event LendEnabled(address indexed safe);
 
-    /// @notice Emitted when the Aave lend gateway is set on the CashModule
-    /// @param gateway Address of the gateway
-    event LendGatewaySet(address indexed gateway);
-
     /**
      * @notice Emitted when a spending limit is changed
      * @param safe Address of the safe changing the spending limit
@@ -204,12 +200,8 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     event SettlementDispatcheUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher);
 
-    /**
-     * @notice Emitted when the gateway is updated
-     * @param oldGateway Address of the previous gateway
-     * @param newGateway Address of the new gateway
-     */
-    event GatewayUpdated(address oldGateway, address newGateway);
+    /// @notice Emitted when the gateway is set during the one-time Lend bootstrap
+    event GatewaySet(address indexed gateway);
     
     /**
      * @notice Emitted when the withdrawal tokens are updated
@@ -254,13 +246,10 @@ contract CashEventEmitter is UpgradeableProxy {
         emit SettlementDispatcheUpdated(binSponsor, oldDispatcher, newDispatcher);
     }
 
-    /**
-     * @notice Emits the GatewayUpdated event
-     * @param oldGateway Address of the previous gateway
-     * @param newGateway Address of the new gateway
-     */
-    function emitGatewayUpdated(address oldGateway, address newGateway) external onlyCashModule {
-        emit GatewayUpdated(oldGateway, newGateway);
+    /// @notice Emits the GatewaySet event
+    /// @dev Can only be called by the Cash Module
+    function emitGatewaySet(address gateway) external onlyCashModule {
+        emit GatewaySet(gateway);
     }
 
     /**
@@ -441,12 +430,6 @@ contract CashEventEmitter is UpgradeableProxy {
     /// @dev Can only be called by the Cash Module
     function emitLendEnabled(address safe) external onlyCashModule {
         emit LendEnabled(safe);
-    }
-
-    /// @notice Emits the LendGatewaySet event
-    /// @dev Can only be called by the Cash Module
-    function emitLendGatewaySet(address gateway) external onlyCashModule {
-        emit LendGatewaySet(gateway);
     }
 
     /**
