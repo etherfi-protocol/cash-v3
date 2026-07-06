@@ -5,10 +5,9 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
-import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IGateway } from "../../interfaces/IGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
@@ -222,19 +221,17 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @dev The upcoming outflow and a pending withdrawal are competing claims on the safe's balance.
-     *      If the balance cannot honor both, the outflow wins: the whole request is cancelled (requests
-     *      are all-or-nothing across their tokens). No-op if no pending withdrawal holds this token.
+     * @dev Cancels withdrawal request if necessary based on available balance
      * @param safe Address of the EtherFi Safe
-     * @param token Address of the token about to leave the safe
-     * @param outflow Amount about to leave the safe
-     * @custom:throws InsufficientBalance if the safe's balance cannot cover the outflow itself
+     * @param token Address of the token to update
+     * @param amount Amount being processed
+     * @custom:throws InsufficientBalance if there is not enough balance for the operation
      */
-    function _cancelConflictingWithdrawal(address safe, address token, uint256 outflow) internal {
+    function _cancelWithdrawalRequestIfNecessary(address safe, address token, uint256 amount) internal {
         SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
         uint256 balance = IERC20(token).balanceOf(safe);
 
-        if (outflow > balance) revert InsufficientBalance();
+        if (amount > balance) revert InsufficientBalance();
 
         uint256 len = safeCashConfig.pendingWithdrawalRequest.tokens.length;
         uint256 tokenIndex = len;
@@ -251,10 +248,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         // If the token does not exist in withdrawal request, return
         if (tokenIndex == len) return;
 
-        // The pending withdrawal reserves part of the balance; balance - pending is the unreserved rest.
-        // An outflow larger than that dips into the reservation, so the request can no longer be honored
-        // afterwards: cancel it and free the reservation.
-        if (outflow + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
+        if (amount + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
             _cancelOldWithdrawal(safe);
         }
     }
@@ -289,97 +283,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
             delete $.incomingModeStartTime;
             delete $.incomingMode;
         }
-    }
-
-    /**
-     * @dev Whether a safe has any open borrows (Aave debt via the gateway, or legacy DebtManager debt).
-     *      Disabling lend is only allowed with zero debt — the collateral backing it is about to leave Aave.
-     */
-    function _hasOpenBorrows(address safe) internal view returns (bool) {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-        IGateway gateway = $.gateway;
-        if (address(gateway) != address(0)) {
-            // Check raw per-asset debt, not getAccountData().debtUsd: the USD aggregate floors to 6 decimals,
-            // so sub-$0.000001 dust reads as zero here and then reverts deep in Aave (HealthFactorBelowThreshold)
-            // when _disableLend tries to withdraw all collateral.
-            address[] memory assets = gateway.registeredAssets();
-            uint256 aLen = assets.length;
-            for (uint256 i = 0; i < aLen;) {
-                if (gateway.debtOf(safe, assets[i]) != 0) return true;
-                unchecked {
-                    ++i;
-                }
-            }
-        }
-        (, uint256 debtManagerDebt) = $.debtManager.borrowingOf(safe);
-        return debtManagerDebt != 0;
-    }
-
-    /**
-     * @dev Records a request to disable lend for a safe (executable after modeDelay). Reverts if lend is
-     *      already disabled/pending or the safe has open borrows. Executes immediately if the delay is zero.
-     */
-    function _requestDisableLend(address safe) internal {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-        SafeCashConfig storage $$ = $.safeCashConfig[safe];
-
-        if ($$.lendDisabled || $$.lendDisableFinalizeTime != 0) revert LendAlreadyDisabled();
-        if (_hasOpenBorrows(safe)) revert HasOpenBorrows();
-
-        uint96 finalizeTime = uint96(block.timestamp) + $.modeDelay;
-        $$.lendDisableFinalizeTime = finalizeTime;
-        $.cashEventEmitter.emitLendDisableRequested(safe, finalizeTime);
-
-        if ($.modeDelay == 0) _disableLend(safe);
-    }
-
-    /**
-     * @dev Executes the disable-lend: withdraws ALL of the safe's Aave collateral back to the safe, marks
-     *      lend disabled, and forces the safe into Debit mode (credit is impossible without lend collateral).
-     *      The whole thing reverts if the gateway isn't set. Re-checks no open borrows at the call sites.
-     */
-    function _disableLend(address safe) internal {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-        IGateway gateway = $.gateway;
-        if (address(gateway) == address(0)) revert LendGatewayNotSet();
-
-        // Pull every gateway-registered asset out of Aave, back into the safe (idle). Iterate the gateway's
-        // registry, not DebtManager's collateral list: a token delisted from DebtManager while still supplied
-        // on Aave must remain withdrawable, and the Aave position is keyed on the gateway's assets anyway.
-        address[] memory collateralTokens = gateway.registeredAssets();
-        uint256 len = collateralTokens.length;
-        for (uint256 i = 0; i < len;) {
-            uint256 supplied = gateway.suppliedOf(safe, collateralTokens[i]);
-            if (supplied != 0) gateway.withdraw(safe, collateralTokens[i], supplied, safe);
-            unchecked {
-                ++i;
-            }
-        }
-
-        SafeCashConfig storage $$ = $.safeCashConfig[safe];
-        $$.lendDisabled = true;
-        $$.lendDisableFinalizeTime = 0;
-        // Credit needs lend collateral, so force Debit and drop any pending mode change
-        $$.mode = Mode.Debit;
-        delete $$.incomingMode;
-        delete $$.incomingModeStartTime;
-
-        $.cashEventEmitter.emitLendDisableExecuted(safe);
-    }
-
-    /**
-     * @dev Re-enables lend for a safe (opts it back into the Aave market) and cancels any pending disable
-     *      request. Instant — opting back into earning is not risk-increasing. Auto-supply resumes on the
-     *      safe's next deposit. Reverts if lend is already enabled and no disable is pending.
-     */
-    function _enableLend(address safe) internal {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-        SafeCashConfig storage $$ = $.safeCashConfig[safe];
-        if (!$$.lendDisabled && $$.lendDisableFinalizeTime == 0) revert LendNotDisabled();
-
-        $$.lendDisabled = false;
-        $$.lendDisableFinalizeTime = 0;
-        $.cashEventEmitter.emitLendEnabled(safe);
     }
 
     /**

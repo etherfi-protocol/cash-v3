@@ -12,17 +12,14 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { IGateway } from "../../interfaces/IGateway.sol";
-import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
-import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { CashLendLib } from "./CashLendLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
-import { CashModuleLib } from "./CashModuleLib.sol";
 
 /**
  * @title CashModule
@@ -142,7 +139,32 @@ contract CashModuleCore is CashModuleStorageContract {
      * @return totalCashbackInUsd Total pending cashback amount in USD
      */
     function getPendingCashback(address account, address[] memory tokens) external view returns (TokenDataInUsd[] memory data, uint256 totalCashbackInUsd) {
-        return CashModuleLib.getPendingCashback(_getCashModuleStorage(), account, tokens);
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        uint256 len = tokens.length;
+        if (len > 1) tokens.checkDuplicates();
+        data = new TokenDataInUsd[](len);
+        uint256 m = 0;
+
+        for (uint256 i = 0; i < len;) {
+            uint256 pendingCashbackInUsd = $.pendingCashbackForTokenInUsd[account][tokens[i]];
+            if (pendingCashbackInUsd > 0) {
+                data[m] = TokenDataInUsd({ token: tokens[i], amountInUsd: pendingCashbackInUsd });
+
+                totalCashbackInUsd += pendingCashbackInUsd;
+
+                unchecked {
+                    ++m;
+                }
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        assembly ("memory-safe") {
+            mstore(data, m)
+        }
     }
 
     /**
@@ -245,11 +267,12 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws HasOpenBorrows if the safe borrowed during the delay window
      */
     function processLendDisable(address safe) external onlyEtherFiSafe(safe) nonReentrant {
-        SafeCashConfig storage safeConfig = _getCashModuleStorage().safeCashConfig[safe];
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        SafeCashConfig storage safeConfig = $.safeCashConfig[safe];
         if (safeConfig.lendDisableFinalizeTime == 0) revert NoPendingLendDisable();
         if (block.timestamp < safeConfig.lendDisableFinalizeTime) revert LendDisableNotReady();
-        if (_hasOpenBorrows(safe)) revert HasOpenBorrows();
-        _disableLend(safe);
+        if (CashLendLib.hasOpenBorrows($, safe)) revert HasOpenBorrows();
+        CashLendLib.disableLend($, safe);
     }
 
     /**
@@ -315,19 +338,9 @@ contract CashModuleCore is CashModuleStorageContract {
 
         uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
 
-        _executeSpend($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-        CashModuleLib.processCashback($, safe, totalSpendingInUsd, cashbacks);
-    }
-
-    /// @dev Runs the mode-specific spend and emits the shared Spend event with the resulting token amounts.
-    function _executeSpend(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
-        Mode mode = $.safeCashConfig[safe].mode;
-
-        uint256[] memory amounts;
-        if (mode == Mode.Credit) amounts = _spendCredit($, safe, binSponsor, tokens, amountsInUsd);
-        else amounts = _spendDebit($, safe, binSponsor, tokens, amountsInUsd);
-
-        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, mode);
+        if ($.safeCashConfig[safe].mode == Mode.Credit) _spendCredit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        else _spendDebit($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+        _cashback($, safe, totalSpendingInUsd, cashbacks);
     }
 
     function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256) {
@@ -360,162 +373,46 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @dev Internal function to execute credit mode spending transaction (single token)
+     * @dev Internal function to execute credit mode spending transaction (single token), run in
+     *      CashLendLib; a blocked legacy borrow cancels the pending withdrawal request and retries
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
-     * @param binSponsor Bin sponsor used for spending
+     * @param txId Transaction identifier
      * @param tokens Addresses of the tokens to spend
      * @param amountsInUsd Amounts to spend in USD
-     * @return Token amounts spent
      */
-    function _spendCredit(CashModuleStorage storage $, address safe, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd) internal returns (uint256[] memory) {
-        // Credit mode validation
-        // Defense-in-depth: a safe that opted out of lend is forced to Debit and blocked from re-entering Credit,
-        // so credit spending must never reach a lend-disabled safe.
-        if ($.safeCashConfig[safe].lendDisabled) revert LendDisabled();
-        if (!_isBorrowToken($.debtManager, tokens[0])) revert UnsupportedToken();
-        uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
-        if (amount == 0) revert AmountZero();
-
-        if ($.debtManager.hasMigratedToAave(safe)) {
-            // Migrated safe: its position lives on Aave. Borrow there via the gateway (the CashModule is always
-            // a gateway driver) and send the borrowed token straight to the settlement dispatcher. The legacy
-            // DebtManager.borrow path reverts for a migrated safe, and CashLens already sizes credit against the
-            // gateway, so routing here keeps the on-chain spend consistent with the precheck. Aave enforces the
-            // borrowing-power/health check on the borrow itself.
-            IGateway gateway = $.gateway;
-            if (address(gateway) == address(0)) revert LendGatewayNotSet();
-            gateway.borrow(safe, tokens[0], amount, getSettlementDispatcher(binSponsor));
-        } else {
-            // Legacy safe: borrow from the DebtManager, executed by the safe itself.
-            address[] memory to = new address[](1);
-            bytes[] memory data = new bytes[](1);
-            uint256[] memory values = new uint256[](1);
-
-            to[0] = address($.debtManager);
-            data[0] = abi.encodeWithSelector(IDebtManager.borrow.selector, binSponsor, tokens[0], amount);
-            values[0] = 0;
-
-            try IEtherFiSafe(safe).execTransactionFromModule(to, values, data) { }
-            catch {
-                _cancelOldWithdrawal(safe);
-                IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-            }
+    function _spendCredit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd) internal {
+        (uint256 amount, bool retryAfterCancel) = CashLendLib.spendCredit($, safe, binSponsor, getSettlementDispatcher(binSponsor), tokens[0], amountsInUsd[0]);
+        if (retryAfterCancel) {
+            // The legacy borrow was blocked; cancel the pending withdrawal request and retry, matching the
+            // debit path's competing-claims rule (the spend wins over the reservation).
+            _cancelOldWithdrawal(safe);
+            CashLendLib.legacyBorrow($, safe, binSponsor, tokens[0], amount);
         }
 
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amount;
-        return amounts;
+
+        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
     }
 
     /**
-     * @dev Debit spend across tokens: spend the safe's loose balance first, then withdraw the
-     *      Aave-supplied balance for any shortfall, both routed to the settlement dispatcher.
+     * @dev Internal function to execute debit mode spending transactions (multiple tokens), sized and
+     *      executed in CashLendLib against the safe's loose and Aave-supplied balances
      * @param $ Storage reference to the CashModuleStorage
      * @param safe Address of the EtherFi Safe
-     * @param binSponsor Bin sponsor used for spending
+     * @param txId Transaction identifier
      * @param tokens Array of addresses of the tokens to spend
      * @param amountsInUsd Array of amounts to spend in USD
-     * @return Token amounts spent
      */
-    function _spendDebit(CashModuleStorage storage $, address safe, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256[] memory) {
-        uint256[] memory amounts = new uint256[](tokens.length);
-        uint256[] memory fromLoose = new uint256[](tokens.length);
+    function _spendDebit(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) internal {
+        (uint256[] memory amounts, uint256[] memory fromLoose, bool dipped) = CashLendLib.sourceDebits($, etherFiDataProvider, safe, tokens, amountsInUsd);
+        // Sizing dipped into balance reserved by the pending withdrawal request: the spend wins the
+        // competing claim and the request is cancelled before any transfer executes.
+        if (dipped) _cancelOldWithdrawal(safe);
+        CashLendLib.executeDebits($, safe, getSettlementDispatcher(binSponsor), tokens, amounts, fromLoose);
 
-        // Per token, _sourceDebitToken sizes the loose/supplied split and threads the borrowing headroom across
-        // tokens, so a debit cannot push a debt-carrying safe past its LTV max borrow.
-        {
-            IGateway.AccountData memory account = $.gateway.getAccountData(safe);
-            bool hasDebt = account.debtUsd != 0;
-            uint256 borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
-
-            for (uint256 i = 0; i < tokens.length; i++) {
-                (amounts[i], fromLoose[i], borrowHeadroom) = _sourceDebitToken($, safe, tokens[i], amountsInUsd[i], borrowHeadroom, hasDebt);
-            }
-        }
-
-        address dispatcher = getSettlementDispatcher(binSponsor);
-        _transferLoose(safe, dispatcher, tokens, fromLoose);
-
-        // The headroom cap above already bounds the supplied withdrawals; no post-withdrawal health check is needed.
-        for (uint256 i = 0; i < tokens.length; i++) {
-            uint256 fromSupplied = amounts[i] - fromLoose[i];
-            if (fromSupplied != 0) {
-                $.gateway.withdraw(safe, tokens[i], fromSupplied, dispatcher);
-            }
-        }
-
-        return amounts;
-    }
-
-    /**
-     * @dev Sources one token of a debit spend: validates it, sizes the loose/supplied split against the borrowing
-     *      headroom, and cancels a pending withdrawal only when the spend must dip into its reserved balance.
-     * @param $ Storage reference to the CashModuleStorage
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to source
-     * @param amountInUsd Amount to spend for this token in USD
-     * @param borrowHeadroom Borrowing headroom (USD) available to this token's supplied withdrawal
-     * @param hasDebt Whether the safe carries debt; the headroom cap only applies when true
-     * @return The token amount for this spend
-     * @return The loose portion of that amount
-     * @return The borrowing headroom left after this token's supplied withdrawal
-     */
-    function _sourceDebitToken(CashModuleStorage storage $, address safe, address token, uint256 amountInUsd, uint256 borrowHeadroom, bool hasDebt) internal returns (uint256, uint256, uint256) {
-        if (!_isBorrowToken($.debtManager, token)) {
-            revert UnsupportedToken();
-        }
-        uint256 amount = $.debtManager.convertUsdToCollateralToken(token, amountInUsd);
-        IPriceProvider priceProvider = IPriceProvider(etherFiDataProvider.getPriceProvider());
-
-        uint256 loose = IERC20(token).balanceOf(safe);
-        uint256 withdrawable = DebitSourcingLib.withdrawableSupplied($.gateway, priceProvider, safe, token, borrowHeadroom, hasDebt);
-        if (loose + withdrawable < amount) {
-            revert InsufficientBalance();
-        }
-
-        // A pending withdrawal reserves loose balance. Prefer the unreserved portion plus the supplied
-        // withdrawal so the request survives (matching CashLens); dip into the reserved portion, cancelling
-        // the request, only when the spend cannot be funded otherwise. Dipping implies the request holds
-        // this token (unreserved < loose requires pending > 0), so the cancel is unconditional there.
-        uint256 fromLoose;
-        {
-            uint256 pending = getPendingWithdrawalAmount(safe, token);
-            uint256 unreserved = loose > pending ? loose - pending : 0;
-            if (unreserved + withdrawable >= amount) {
-                fromLoose = unreserved < amount ? unreserved : amount;
-            } else {
-                fromLoose = loose < amount ? loose : amount;
-                _cancelOldWithdrawal(safe);
-            }
-        }
-
-        // The supplied portion drawn for this token consumes borrowing headroom for later tokens.
-        if (hasDebt) {
-            uint256 usedUsd = DebitSourcingLib.headroomConsumed($.gateway, priceProvider, token, amount - fromLoose);
-            borrowHeadroom = borrowHeadroom > usedUsd ? borrowHeadroom - usedUsd : 0;
-        }
-
-        return (amount, fromLoose, borrowHeadroom);
-    }
-
-    /**
-     * @dev Transfers each token's loose amount from the safe to the dispatcher in one batched module call.
-     * @param safe Address of the EtherFi Safe
-     * @param dispatcher Settlement dispatcher receiving the tokens
-     * @param tokens Addresses of the tokens to transfer
-     * @param amounts Loose amount of each token to transfer
-     */
-    function _transferLoose(address safe, address dispatcher, address[] calldata tokens, uint256[] memory amounts) internal {
-        address[] memory to = new address[](tokens.length);
-        bytes[] memory data = new bytes[](tokens.length);
-        uint256[] memory values = new uint256[](tokens.length);
-
-        for (uint256 i = 0; i < tokens.length; i++) {
-            to[i] = tokens[i];
-            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, dispatcher, amounts[i]);
-        }
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
     }
 
     /**
@@ -524,7 +421,95 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param tokens Addresses of cashback tokens
      */
     function clearPendingCashback(address[] calldata users, address[] calldata tokens) external nonReentrant whenNotPaused {
-        CashModuleLib.clearPending(_getCashModuleStorage(), users, tokens);
+        uint256 len = users.length;
+        if (len == 0) revert InvalidInput();
+        if (tokens.length > 1) tokens.checkDuplicates();
+        if (len > 1) users.checkDuplicates();
+
+        for (uint256 i = 0; i < len;) {
+            if (users[i] == address(0)) revert InvalidInput();
+
+            for (uint256 j = 0; j < tokens.length;) {
+                if (tokens[j] == address(0)) revert InvalidInput();
+
+                _retrievePendingCashback(users[i], tokens[j]);
+                unchecked {
+                    ++j;
+                }
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
+     * @notice Attempts to retrieve pending cashback for a user
+     * @dev Calls the cashback dispatcher to clear pending cashback and updates storage if successful
+     * @param user Address of the user who may have pending cashback
+     * @param token Address of the cashback token
+     */
+    function _retrievePendingCashback(address user, address token) internal {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+
+        uint256 amountInUsd = getPendingCashbackForToken(user, token);
+
+        if (amountInUsd > 0) {
+            try $.cashbackDispatcher.clearPendingCashback(user, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
+                if (paid) {
+                    $.cashEventEmitter.emitPendingCashbackClearedEvent(user, token, cashbackAmountInToken, amountInUsd);
+                    delete $.pendingCashbackForTokenInUsd[user][token];
+                }
+            } catch { }
+        }
+    }
+
+    /**
+     * @notice Processes cashback for a spending transaction
+     * @dev Calculates and distributes cashback
+     * @param $ Storage reference to the CashModuleStorage
+     * @param cashbacks Array of Cashback struct
+     */
+    function _cashback(CashModuleStorage storage $, address safe, uint256 spendAmount, Cashback[] calldata cashbacks) internal {
+        uint256 len = cashbacks.length;
+
+        for (uint256 i = 0; i < len;) {
+            address to = cashbacks[i].to;
+            if (to == address(0)) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
+            CashbackTokens[] memory cashbackTokens = cashbacks[i].cashbackTokens;
+
+            for (uint256 j = 0; j < cashbackTokens.length;) {
+                address token = cashbackTokens[j].token;
+                _retrievePendingCashback(to, token);
+
+                uint256 amountInUsd = cashbackTokens[j].amountInUsd;
+                $.safeCashConfig[to].totalCashbackEarnedInUsd += amountInUsd;
+
+                if (amountInUsd != 0) {
+                    try $.cashbackDispatcher.cashback(to, token, amountInUsd) returns (uint256 cashbackAmountInToken, bool paid) {
+                        if (!paid) $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
+                        $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, cashbackAmountInToken, amountInUsd, cashbackTokens[j].cashbackType, paid);
+                    } catch {
+                        $.pendingCashbackForTokenInUsd[to][token] += amountInUsd;
+                        $.cashEventEmitter.emitCashbackEvent(safe, spendAmount, to, token, 0, amountInUsd, cashbackTokens[j].cashbackType, false);
+                    }
+                }
+
+                unchecked {
+                    ++j;
+                }
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
     }
 
     /**
@@ -550,13 +535,13 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws AmountZero if the converted amount is zero
      */
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
-        uint256 amount = debtManager.convertUsdToCollateralToken(token, amountInUsd);
+        uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();
-        _cancelConflictingWithdrawal(safe, token, amount);
+        _cancelWithdrawalRequestIfNecessary(safe, token, amount);
 
         // A migrated safe repays on Aave via the gateway; a legacy safe repays the DebtManager. Both paths run
-        // in CashModuleLib (extracted to keep this contract within the code-size limit).
-        CashModuleLib.repay(_getCashModuleStorage(), safe, token, amount, amountInUsd);
+        // in CashLendLib (extracted to keep this contract within the code-size limit).
+        CashLendLib.repay(_getCashModuleStorage(), safe, token, amount, amountInUsd);
     }
 
     /**

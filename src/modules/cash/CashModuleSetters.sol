@@ -18,6 +18,7 @@ import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { CashLendLib } from "./CashLendLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
 
 /**
@@ -195,8 +196,9 @@ contract CashModuleSetters is CashModuleStorageContract {
      */
     function toggleLend(address safe, bool enable, address signer, bytes calldata signature) external nonReentrant onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashVerificationLib.verifyToggleLendSig(safe, signer, _useNonce(safe), enable, signature);
-        if (enable) _enableLend(safe);
-        else _requestDisableLend(safe);
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        if (enable) CashLendLib.enableLend($, safe);
+        else CashLendLib.requestDisableLend($, safe);
     }
 
     /**
