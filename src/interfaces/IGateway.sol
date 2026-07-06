@@ -112,4 +112,12 @@ interface IGateway {
      * @return True if lend is enabled, false if the safe has opted out
      */
     function isLendEnabled(address safe) external view returns (bool);
+
+    /**
+     * @notice Returns the assets registered on the gateway (each mapped to an Aave reserveId)
+     * @dev The authoritative list of assets a safe can have a position in, keyed on the gateway rather than
+     *      DebtManager's collateral list (which can be delisted while an Aave position is still open).
+     * @return The registered asset addresses
+     */
+    function registeredAssets() external view returns (address[] memory);
 }

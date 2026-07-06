@@ -2,12 +2,14 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerStorageContract } from "../../src/debt-manager/DebtManagerStorageContract.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { BinSponsor, Cashback, Mode } from "../../src/interfaces/ICashModule.sol";
+import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
 import { IGateway } from "../../src/interfaces/IGateway.sol";
 import { Gateway } from "../../src/modules/gateway/Gateway.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
@@ -25,6 +27,8 @@ import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
  * @dev Run with: FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/gateway/DebtManagerMigration.t.sol
  */
 contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
+    using MessageHashUtils for bytes32;
+
     DebtManagerCore internal dm;
     Gateway internal gw;
     address internal migrator = makeAddr("migrationRunner");
@@ -54,12 +58,10 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         gw.setReserveId(address(weETH), weethReserveId);
         gw.setReserveId(address(usdc), usdcReserveId);
         gw.setDriver(address(dm), true); // DebtManager drives the gateway during migration
-        // DebtManager migration wiring: point it at the gateway and authorize the migration runner
+        // Migration reads the gateway from CashModule (single source of truth); authorize the migration runner
+        cashModule.setLendGateway(address(gw));
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, migrator);
         vm.stopPrank();
-
-        vm.prank(migrator);
-        dm.setGateway(address(gw));
 
         _enableModule(address(gw));
         _activateAavePositionManager(address(gw));
@@ -140,6 +142,38 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         assertGt(gw.getAccountData(address(safe)).availableBorrowsUsd, 0, "has Aave borrowing power");
     }
 
+    /// @dev A lend-disabled safe opted out of Aave, so migration must not force its collateral in: it just
+    ///      gets marked migrated (freezing legacy borrow/repay) with its balance left idle in the safe.
+    function test_migrateToAave_lendDisabledSafe_marksMigratedWithoutSupplying() public {
+        deal(address(weETH), address(safe), 10 ether);
+        _disableLendForSafe();
+        assertFalse(cashModule.isLendEnabled(address(safe)), "lend disabled");
+
+        vm.prank(migrator);
+        dm.migrateToAave(address(safe));
+
+        assertTrue(dm.hasMigratedToAave(address(safe)), "marked migrated");
+        assertEq(weETH.balanceOf(address(safe)), 10 ether, "collateral stayed in the safe");
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "nothing supplied to Aave");
+    }
+
+    /// @dev A lend-disabled safe should be debt-free (disabling requires zero borrows), but it can still borrow
+    ///      on DebtManager directly afterward. Migration must reject that case rather than revert opaquely.
+    function test_migrateToAave_lendDisabledSafe_withDebt_reverts() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+        deal(address(weETH), address(safe), 10 ether);
+        _disableLendForSafe();
+
+        // Borrow on DebtManager while lend is disabled (borrow only checks whenNotMigrated, not lend)
+        uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        vm.prank(migrator);
+        vm.expectRevert(DebtManagerStorageContract.LendDisabledSafeHasDebt.selector);
+        dm.migrateToAave(address(safe));
+    }
+
     function test_migrateToAave_onlyDebtManagerAdmin() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 10 ether);
@@ -189,9 +223,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         dm.migrateToAave(address(safe));
         assertTrue(dm.hasMigratedToAave(address(safe)), "safe migrated");
 
-        // Point the CashModule at the gateway (owner holds CASH_MODULE_CONTROLLER_ROLE) and enter Credit mode
-        vm.prank(owner);
-        cashModule.setLendGateway(address(gw));
+        // Enter Credit mode (the gateway is wired to the CashModule in setUp)
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit), "in credit mode");
@@ -233,9 +265,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         uint256 aaveDebtBefore = gw.debtOf(address(safe), address(usdc));
         assertGt(aaveDebtBefore, 0, "has Aave debt");
 
-        // Point the CashModule at the gateway and fund the safe to repay
-        vm.prank(owner);
-        cashModule.setLendGateway(address(gw));
+        // Fund the safe to repay (the gateway is wired to the CashModule in setUp)
         deal(address(usdc), address(safe), 500e6);
         uint256 repayUsd = 200e6;
 
@@ -252,6 +282,21 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
     }
 
     // ----------------------------------------------------------------- helpers
+
+    /// @dev Opts the safe out of lend (owner-signed toggleLend(false)), executing the pending request if the
+    ///      mode delay is nonzero so the safe ends up fully lend-disabled.
+    function _disableLendForSafe() internal {
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.TOGGLE_LEND_METHOD, block.chainid, address(safe), nonce, abi.encode(false))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
+        cashModule.toggleLend(address(safe), false, owner1, abi.encodePacked(r, s, v));
+
+        if (cashModule.isLendEnabled(address(safe))) {
+            (,, uint64 modeDelay) = cashModule.getDelays();
+            vm.warp(block.timestamp + modeDelay + 1);
+            cashModule.processLendDisable(address(safe));
+        }
+    }
 
     function _enableModule(address module) internal {
         address[] memory modules = _addr1(module);

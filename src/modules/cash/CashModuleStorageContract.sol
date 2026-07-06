@@ -76,15 +76,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         IGateway gateway;
     }
 
-    /// @notice Emitted when a safe requests to disable lend (opt out of Aave); executable after finalizeTime
-    event LendDisableRequested(address indexed safe, uint256 finalizeTime);
-    /// @notice Emitted when a safe's lend is disabled: collateral withdrawn from Aave, mode forced to Debit
-    event LendDisableExecuted(address indexed safe);
-    /// @notice Emitted when a safe re-enables lend (opts back into Aave)
-    event LendEnabled(address indexed safe);
-    /// @notice Emitted when the lend gateway is configured
-    event LendGatewaySet(address indexed gateway);
-
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant CashModuleStorageLocation = 0xe000c7adec5855bcf51f74b73aa86172d0a325bc54c3f73cb406d259df90ea00;
 
@@ -302,7 +293,20 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
      */
     function _hasOpenBorrows(address safe) internal view returns (bool) {
         CashModuleStorage storage $ = _getCashModuleStorage();
-        if (address($.gateway) != address(0) && $.gateway.getAccountData(safe).debtUsd != 0) return true;
+        IGateway gateway = $.gateway;
+        if (address(gateway) != address(0)) {
+            // Check raw per-asset debt, not getAccountData().debtUsd: the USD aggregate floors to 6 decimals,
+            // so sub-$0.000001 dust reads as zero here and then reverts deep in Aave (HealthFactorBelowThreshold)
+            // when _disableLend tries to withdraw all collateral.
+            address[] memory assets = gateway.registeredAssets();
+            uint256 aLen = assets.length;
+            for (uint256 i = 0; i < aLen;) {
+                if (gateway.debtOf(safe, assets[i]) != 0) return true;
+                unchecked {
+                    ++i;
+                }
+            }
+        }
         (, uint256 debtManagerDebt) = $.debtManager.borrowingOf(safe);
         return debtManagerDebt != 0;
     }
@@ -320,7 +324,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
         uint96 finalizeTime = uint96(block.timestamp) + $.modeDelay;
         $$.lendDisableFinalizeTime = finalizeTime;
-        emit LendDisableRequested(safe, finalizeTime);
+        $.cashEventEmitter.emitLendDisableRequested(safe, finalizeTime);
 
         if ($.modeDelay == 0) _disableLend(safe);
     }
@@ -335,8 +339,10 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         IGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
 
-        // Pull every supported collateral token out of Aave, back into the safe (idle)
-        address[] memory collateralTokens = $.debtManager.getCollateralTokens();
+        // Pull every gateway-registered asset out of Aave, back into the safe (idle). Iterate the gateway's
+        // registry, not DebtManager's collateral list: a token delisted from DebtManager while still supplied
+        // on Aave must remain withdrawable, and the Aave position is keyed on the gateway's assets anyway.
+        address[] memory collateralTokens = gateway.registeredAssets();
         uint256 len = collateralTokens.length;
         for (uint256 i = 0; i < len;) {
             uint256 supplied = gateway.suppliedOf(safe, collateralTokens[i]);
@@ -354,7 +360,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         delete $$.incomingMode;
         delete $$.incomingModeStartTime;
 
-        emit LendDisableExecuted(safe);
+        $.cashEventEmitter.emitLendDisableExecuted(safe);
     }
 
     /**
@@ -363,12 +369,13 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
      *      safe's next deposit. Reverts if lend is already enabled and no disable is pending.
      */
     function _enableLend(address safe) internal {
-        SafeCashConfig storage $$ = _getCashModuleStorage().safeCashConfig[safe];
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
         if (!$$.lendDisabled && $$.lendDisableFinalizeTime == 0) revert LendNotDisabled();
 
         $$.lendDisabled = false;
         $$.lendDisableFinalizeTime = 0;
-        emit LendEnabled(safe);
+        $.cashEventEmitter.emitLendEnabled(safe);
     }
 
     /**

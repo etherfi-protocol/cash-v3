@@ -341,15 +341,20 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
 
     /**
      * @notice Toggles whether `safe`'s supplied `asset` counts as collateral on Aave
-     * @dev Driver-only. Rejected if the safe has opted out of lend, or while the gateway is paused.
+     * @dev Driver-only. Enabling collateral is a lend op, rejected if the safe has opted out of lend; disabling
+     *      is an exit action (like withdraw/repay) and stays open to opted-out safes so a residual position can
+     *      still be cleaned up. Rejected while the gateway is paused.
      * @param safe The safe whose position is updated
      * @param asset The supplied asset (must be a registered reserve)
      * @param useAsCollateral True to use as collateral, false to disable
      * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
-     * @custom:throws LendDisabled if the safe has opted out of lend
+     * @custom:throws LendDisabled if enabling collateral usage for a safe that has opted out of lend
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused nonReentrant whenLendEnabled(safe) ensuresApproval(safe) {
+    function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
+        // Gate only enabling (a lend op); disabling must stay open so an opted-out safe can drop a residual
+        // supplied position from collateral (e.g. one left on Aave after processLendDisable). It only de-risks.
+        if (useAsCollateral && !_isLendEnabled(safe)) revert LendDisabled();
         spoke.setUsingAsCollateral(_reserveIdOf(asset), useAsCollateral, safe);
         emit CollateralUsageSet(safe, asset, useAsCollateral);
     }

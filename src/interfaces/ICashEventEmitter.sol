@@ -129,9 +129,21 @@ interface ICashEventEmitter {
      * @param safe Address of the safe whose debt was repaid
      * @param token Address of the token repaid
      * @param amount Amount of token actually repaid (net of any refunded dust)
-     * @param amountInUsd USD value requested for the repayment
+     * @param amountInUsd USD value of the debt actually repaid
      */
     function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external;
+
+    /// @notice Emits the LendDisableRequested event
+    function emitLendDisableRequested(address safe, uint256 finalizeTime) external;
+
+    /// @notice Emits the LendDisableExecuted event
+    function emitLendDisableExecuted(address safe) external;
+
+    /// @notice Emits the LendEnabled event
+    function emitLendEnabled(address safe) external;
+
+    /// @notice Emits the LendGatewaySet event
+    function emitLendGatewaySet(address gateway) external;
 
     /**
      * @notice Emits an event when spending limits are changed

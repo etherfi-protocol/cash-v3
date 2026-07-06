@@ -109,7 +109,12 @@ library CashModuleLib {
 
         for (uint256 i = 0; i < len;) {
             address to = cashbacks[i].to;
-            if (to == address(0)) continue;
+            if (to == address(0)) {
+                unchecked {
+                    ++i;
+                }
+                continue;
+            }
             CashbackTokens[] memory cashbackTokens = cashbacks[i].cashbackTokens;
 
             for (uint256 j = 0; j < cashbackTokens.length;) {
@@ -157,7 +162,10 @@ library CashModuleLib {
             IGateway gateway = $.gateway;
             if (address(gateway) == address(0)) revert LendGatewayNotSet();
             uint256 repaid = gateway.repay(safe, token, amount);
-            $.cashEventEmitter.emitRepay(safe, token, repaid, amountInUsd);
+            // The gateway may repay less than requested (dust refund, or the live Aave debt being smaller than
+            // the quote), so report the USD value of what was actually repaid, not the requested amount.
+            uint256 repaidInUsd = repaid == amount ? amountInUsd : $.debtManager.convertCollateralTokenToUsd(token, repaid);
+            $.cashEventEmitter.emitRepay(safe, token, repaid, repaidInUsd);
             return;
         }
 

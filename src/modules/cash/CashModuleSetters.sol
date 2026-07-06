@@ -138,8 +138,9 @@ contract CashModuleSetters is CashModuleStorageContract {
     function setLendGateway(address gateway) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
         if (gateway == address(0)) revert InvalidInput();
-        _getCashModuleStorage().gateway = IGateway(gateway);
-        emit LendGatewaySet(gateway);
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        $.gateway = IGateway(gateway);
+        $.cashEventEmitter.emitLendGatewaySet(gateway);
     }
 
     /**

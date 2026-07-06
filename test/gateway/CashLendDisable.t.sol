@@ -10,7 +10,8 @@ import { BinSponsor, ICashModule, Mode } from "../../src/interfaces/ICashModule.
 import { IGateway } from "../../src/interfaces/IGateway.sol";
 import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../src/libraries/SignatureUtils.sol";
-import { CashModuleStorageContract } from "../../src/modules/cash/CashModuleStorageContract.sol";
+import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
+import { MockGateway } from "../../src/mocks/MockGateway.sol";
 import { Gateway } from "../../src/modules/gateway/Gateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
@@ -100,16 +101,16 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
 
         // Request the opt-out (owner-signed); it becomes executable after MODE_DELAY
         uint256 expectedFinalize = block.timestamp + MODE_DELAY;
-        vm.expectEmit(true, false, false, true, address(cashModule));
-        emit CashModuleStorageContract.LendDisableRequested(address(safe), expectedFinalize);
+        vm.expectEmit(true, false, false, true, address(cashEventEmitter));
+        emit CashEventEmitter.LendDisableRequested(address(safe), expectedFinalize);
         _requestDisable();
         assertEq(cashModule.lendDisableFinalizeTime(address(safe)), expectedFinalize, "finalize time recorded");
         assertTrue(cashModule.isLendEnabled(address(safe)), "still enabled until executed");
 
         // Execute after the delay: permissionless
         vm.warp(block.timestamp + MODE_DELAY);
-        vm.expectEmit(true, false, false, false, address(cashModule));
-        emit CashModuleStorageContract.LendDisableExecuted(address(safe));
+        vm.expectEmit(true, false, false, false, address(cashEventEmitter));
+        emit CashEventEmitter.LendDisableExecuted(address(safe));
         cashModule.processLendDisable(address(safe));
 
         // Collateral pulled back into the safe; Aave position emptied
@@ -243,6 +244,41 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.processLendDisable(address(safe));
     }
 
+    /// @dev Dust debt (sub-$0.000001) floors to zero in getAccountData's 6-decimal debtUsd, so the open-borrows
+    ///      check must look at the raw per-asset debtOf instead, else disable would proceed and later revert
+    ///      deep in Aave when withdrawing the collateral. Uses a mock gateway to inject the dust precisely.
+    function test_toggleLendDisable_revertsOnDustDebtBelowUsdFloor() public {
+        MockGateway mockGw = new MockGateway();
+        mockGw.setRegisteredAssets(_addr1(address(weETH)));
+        mockGw.setDebtOf(address(safe), address(weETH), 1); // 1 wei of raw debt
+        vm.prank(owner);
+        cashModule.setLendGateway(address(mockGw));
+
+        // Premise of the test: the USD aggregate floors this dust to zero, so only the raw debtOf check catches it
+        assertEq(mockGw.getAccountData(address(safe)).debtUsd, 0, "dust floors to zero USD");
+
+        (address signer, bytes memory sig) = _toggleLendSig(false);
+        vm.expectRevert(ICashModule.HasOpenBorrows.selector);
+        cashModule.toggleLend(address(safe), false, signer, sig);
+    }
+
+    // ----------------------------------------------------------------- collateral-flag exit
+
+    /// @dev Turning the collateral flag OFF is an exit action (like withdraw/repay), so it stays open to a
+    ///      lend-disabled safe; only turning it ON is a lend op that a disabled safe is blocked from.
+    function test_setUsingAsCollateralFalse_allowedWhenLendDisabled() public {
+        _requestDisable();
+        vm.warp(block.timestamp + MODE_DELAY);
+        cashModule.processLendDisable(address(safe));
+        assertFalse(cashModule.isLendEnabled(address(safe)));
+
+        vm.startPrank(driver);
+        gw.setUsingAsCollateral(address(safe), address(weETH), false); // must not revert
+        vm.expectRevert(Gateway.LendDisabled.selector);
+        gw.setUsingAsCollateral(address(safe), address(weETH), true);
+        vm.stopPrank();
+    }
+
     // ----------------------------------------------------------------- credit mode interaction
 
     function test_afterDisable_cannotEnterCreditMode() public {
@@ -267,8 +303,8 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.processLendDisable(address(safe));
         assertFalse(cashModule.isLendEnabled(address(safe)));
 
-        vm.expectEmit(true, false, false, false, address(cashModule));
-        emit CashModuleStorageContract.LendEnabled(address(safe));
+        vm.expectEmit(true, false, false, false, address(cashEventEmitter));
+        emit CashEventEmitter.LendEnabled(address(safe));
         _enable();
 
         assertTrue(cashModule.isLendEnabled(address(safe)), "lend re-enabled (cash module)");
