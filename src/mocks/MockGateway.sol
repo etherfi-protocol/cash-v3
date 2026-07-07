@@ -36,6 +36,9 @@ contract MockGateway is IGateway {
     Call public lastBorrow;
     Call public lastRepay;
 
+    /// @notice Full supply-call history, for tests that assert more than the last call
+    Call[] public supplies;
+
     /// @notice When set, borrow reverts, to model a blocked borrow (e.g. insufficient Aave collateral)
     bool public borrowReverts;
 
@@ -81,6 +84,12 @@ contract MockGateway is IGateway {
 
     function supply(address safe, address asset, uint256 amount) external {
         lastSupply = Call(safe, asset, amount, address(0));
+        supplies.push(lastSupply);
+    }
+
+    /// @notice Number of recorded supply calls
+    function suppliesCount() external view returns (uint256) {
+        return supplies.length;
     }
 
     function withdraw(address safe, address asset, uint256 amount, address to) external {

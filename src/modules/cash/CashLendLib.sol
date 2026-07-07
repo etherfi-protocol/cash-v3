@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
@@ -48,6 +49,9 @@ library CashLendLib {
     error LendDisabled();
     error AmountZero();
     error SettlementDispatcherNotSetForBinSponsor();
+
+    /// @dev Pad on resupply sizing so Aave share rounding cannot leave the headroom short; excess supply is harmless
+    uint256 internal constant RESUPPLY_BUFFER_BPS = 10;
 
     // Threads a debit spend's cross-token state through the sizing pass. Bundled into one struct so the
     // sizing frames stay well under the legacy stack limit (the price provider is a parameter here, where in
@@ -258,7 +262,8 @@ library CashLendLib {
      * @notice Credit spend (single token): borrows against the safe's position, sends the borrowed token
      *         to the settlement dispatcher, and emits Spend
      * @dev A legacy safe borrows from the DebtManager, executed by the safe itself; a gateway safe borrows
-     *      on Aave via the gateway. The caller has already validated the array shapes and the
+     *      on Aave via the gateway, first resupplying loose collateral if the position's borrowing power no
+     *      longer covers the spend. The caller has already validated the array shapes and the
      *      one-token-in-credit rule.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param dataProvider The module's data provider (to vet a legacy withdrawal cancel)
@@ -280,7 +285,7 @@ library CashLendLib {
         if (!_usesAave($, safe)) {
             _spendLegacyCredit($, dataProvider, safe, binSponsor, tokens[0], amount);
         } else {
-            _borrowOnGateway($, safe, binSponsor, tokens[0], amount);
+            _borrowOnGateway($, dataProvider, safe, binSponsor, tokens[0], amount, amountsInUsd[0]);
         }
 
         uint256[] memory amounts = new uint256[](1);
@@ -292,11 +297,102 @@ library CashLendLib {
     ///      CashModule is always a gateway driver) and send the borrowed token straight to the settlement
     ///      dispatcher. The legacy DebtManager.borrow path reverts for a migrated safe, and CashLens sizes
     ///      credit against the same engine flag, so routing here keeps the on-chain spend consistent with
-    ///      the precheck. Aave enforces the borrowing-power/health check on the borrow itself.
-    function _borrowOnGateway(CashModuleStorageContract.CashModuleStorage storage $, address safe, BinSponsor binSponsor, address token, uint256 amount) private {
+    ///      the precheck. Aave enforces the borrowing-power/health check on the borrow itself; when the
+    ///      borrow no longer fits (an instant collateral withdrawal can land between the auth-time canSpend
+    ///      and the spend tx), loose collateral is first resupplied to cover the shortfall.
+    function _borrowOnGateway(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, BinSponsor binSponsor, address token, uint256 amount, uint256 amountInUsd) private {
         IGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
+        _resupplyCollateral($, dataProvider, gateway, safe, amountInUsd);
         gateway.borrow(safe, token, amount, settlementDispatcher($, binSponsor));
+    }
+
+    /**
+     * @dev Supplies loose collateral from the safe as Aave collateral to cover the part of a credit spend
+     *      that the position's borrowing power no longer covers. The first pass sizes only against balance
+     *      not reserved by the pending withdrawal request; the reserved remainder is taken only when the
+     *      spend cannot be funded otherwise, and then the spend wins the competing claim: the request is
+     *      cancelled before any supply executes (the debit path's rule). Sizing finishes before any supply,
+     *      so it does not depend on the gateway's transfer timing. If loose collateral cannot fully cover,
+     *      it supplies what fits and the caller's subsequent borrow reverts the spend. CashLens never
+     *      counts this capacity, so canSpend does not advertise it as headroom.
+     */
+    function _resupplyCollateral(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, IGateway gateway, address safe, uint256 spendUsd) private {
+        uint256 availableUsd = gateway.getAccountData(safe).availableBorrowsUsd;
+        if (spendUsd <= availableUsd) return;
+        uint256 shortfallUsd = spendUsd - availableUsd;
+
+        IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
+        address[] memory tokens = gateway.registeredAssets();
+        uint256[] memory supplyAmounts = new uint256[](tokens.length);
+
+        shortfallUsd = _sizeResupply($, gateway, priceProvider, safe, tokens, supplyAmounts, shortfallUsd, false);
+        if (shortfallUsd != 0) {
+            _sizeResupply($, gateway, priceProvider, safe, tokens, supplyAmounts, shortfallUsd, true);
+            cancelOldWithdrawal($, dataProvider, safe);
+        }
+
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (supplyAmounts[i] != 0) {
+                gateway.supply(safe, tokens[i], supplyAmounts[i]);
+                gateway.setUsingAsCollateral(safe, tokens[i], true);
+                $.cashEventEmitter.emitCollateralResupplied(safe, tokens[i], supplyAmounts[i]);
+            }
+        }
+    }
+
+    /**
+     * @dev One resupply sizing pass over the gateway's registered assets, accumulating into `supplyAmounts`.
+     *      Skips the balance reserved by the pending withdrawal request unless `useReserved` is set.
+     * @return The USD shortfall left after the pass
+     */
+    function _sizeResupply(CashModuleStorageContract.CashModuleStorage storage $, IGateway gateway, IPriceProvider priceProvider, address safe, address[] memory tokens, uint256[] memory supplyAmounts, uint256 shortfallUsd, bool useReserved) private view returns (uint256) {
+        for (uint256 i = 0; i < tokens.length && shortfallUsd != 0; i++) {
+            // A zero-LTV asset adds no borrowing headroom, so supplying it cannot help
+            uint256 tokenLtv = gateway.ltv(tokens[i]);
+            if (tokenLtv == 0) continue;
+
+            // Loose balance still available for this token, net of what an earlier pass already claimed
+            uint256 capacity = IERC20(tokens[i]).balanceOf(safe) - supplyAmounts[i];
+            if (!useReserved) {
+                // First pass: leave the pending withdrawal's reservation untouched
+                uint256 pending = _pendingWithdrawalAmount($, safe, tokens[i]);
+                capacity = capacity > pending ? capacity - pending : 0;
+            }
+            if (capacity == 0) continue;
+
+            // Full cover fits in this token: take it and stop
+            uint256 needed = _resupplyAmount(priceProvider, tokens[i], tokenLtv, shortfallUsd);
+            if (needed <= capacity) {
+                supplyAmounts[i] += needed;
+                return 0;
+            }
+
+            // Partial cover: exhaust this token and carry the rest to the next one.
+            // Taking capacity of the needed amount covers the same fraction of the shortfall; floor keeps the remainder conservative
+            supplyAmounts[i] += capacity;
+            shortfallUsd -= (shortfallUsd * capacity) / needed;
+        }
+        return shortfallUsd;
+    }
+
+    /**
+     * @dev Amount of `token` to supply so the position gains `neededUsd` of borrowing headroom.
+     *      Collateral only counts toward borrowing power at its LTV: supplying $V adds
+     *      $V * tokenLtv / LTV_SCALE of headroom (DebitSourcingLib.headroomConsumed, in reverse), so
+     *      gaining neededUsd takes $ neededUsd * LTV_SCALE / tokenLtv of collateral (e.g. $7.50 of USDC
+     *      at 80% LTV for $6 of headroom). Converting that value into token units ($1 of token is
+     *      10^decimals / price tokens) and padding by RESUPPLY_BUFFER_BPS gives
+     *
+     *        amount = neededUsd * LTV_SCALE / tokenLtv * 10^decimals / price * 10_010 / 10_000
+     *
+     *      computed as a single fraction so truncation happens once, and rounded up (ceil-div) so the
+     *      error is always a hair of extra supply, never short headroom. Caller guarantees tokenLtv != 0.
+     */
+    function _resupplyAmount(IPriceProvider priceProvider, address token, uint256 tokenLtv, uint256 neededUsd) private view returns (uint256) {
+        uint256 numerator = neededUsd * DebitSourcingLib.LTV_SCALE * (10 ** IERC20Metadata(token).decimals()) * (10_000 + RESUPPLY_BUFFER_BPS);
+        uint256 denominator = tokenLtv * priceProvider.price(token) * 10_000;
+        return (numerator + denominator - 1) / denominator;
     }
 
     /// @dev Legacy credit spend: a DebtManager borrow executed by the safe itself. A blocked borrow means
