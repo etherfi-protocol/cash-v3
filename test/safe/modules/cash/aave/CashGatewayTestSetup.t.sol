@@ -20,6 +20,15 @@ import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
  * @dev These tests run only under the aave profile (the default profile skips test/safe/modules/cash/aave/**,
  *      since a real Aave v4 build needs via_ir). Run with:
  *      source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/aave/**"
+ *
+ *      Dual-engine test convention (functions that route on CashModule.usesLendGateway):
+ *      1. The gateway is the default path. Tests of a flag-routed function live in this aave/ directory on a
+ *         gateway safe, with positions built through the real supply / borrow helpers below.
+ *      2. The legacy DebtManager path lives in its default-profile twin (a Legacy* file or debt-manager/*),
+ *         opening with _forceLegacyEngine(safe); it may keep the mock gateway as inert plumbing but never sets
+ *         gateway state.
+ *      3. aave/EngineParity.t.sol is the drift detector: for every (mode x engine) cell it asserts canSpend and
+ *         spend agree, so the check side and the execution side never diverge.
  */
 abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
     LendGateway internal gw;

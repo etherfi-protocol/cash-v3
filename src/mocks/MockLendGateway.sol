@@ -5,15 +5,17 @@ import { ILendGateway } from "../interfaces/ILendGateway.sol";
 
 /**
  * @title MockLendGateway
- * @notice Test double for ILendGateway. Lets cash-side tests drive a safe's position state directly,
- *         with no live Aave v4 instance, and records the last call to each mutating op for
- *         assertions. Not for production.
+ * @notice Inert test double for ILendGateway. Non-lend safe suites wire it so the cash contracts have a codeful
+ *         gateway that reports an empty position, and the SetLendGateway guard tests plus the ModuleGatewaySandwich
+ *         call-order test drive it directly. Real gateway behavior is exercised against a live Aave v4 instance
+ *         under the aave profile (test/safe/modules/cash/aave/**), so this mock no longer fabricates positions.
+ *         Not for production.
+ * @dev Records the last supply / withdraw call and the collateral flag for the sandwich test; the position
+ *      aggregate (getAccountData) and reserve liquidity (availableCash) are settable for the guard tests. The
+ *      remaining reads return empty defaults, matching the inert wiring.
  */
 contract MockLendGateway is ILendGateway {
-    /// @notice Thrown when the mock is configured to reject borrow calls
-    error BorrowBlocked();
-
-    /// @notice Recorded arguments of a mutating gateway call (`to` is zero for supply/repay)
+    /// @notice Recorded arguments of a mutating gateway call (`to` is zero for supply)
     struct Call {
         address safe;
         address asset;
@@ -23,43 +25,17 @@ contract MockLendGateway is ILendGateway {
 
     mapping(address => AccountData) internal _accountData;
     mapping(address => mapping(address => bool)) public usingAsCollateral;
-    mapping(address safe => mapping(address asset => uint256)) internal _suppliedOf;
     mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
     mapping(address asset => uint256) internal _availableCash;
-    mapping(address asset => uint256) internal _ltv;
     /// @dev Whether lend is disabled for a safe; defaults to false so isLendEnabled returns true
     mapping(address safe => bool) internal _lendDisabled;
-    address[] internal _registeredAssets;
 
     Call public lastSupply;
     Call public lastWithdraw;
-    Call public lastBorrow;
-    Call public lastRepay;
-
-    /// @notice Full supply-call history, for tests that assert more than the last call
-    Call[] public supplies;
-
-    /// @notice When set, borrow reverts, to model a blocked borrow (e.g. insufficient Aave collateral)
-    bool public borrowReverts;
-
-    /// @notice Toggles the borrow revert
-    function setBorrowReverts(bool value) external {
-        borrowReverts = value;
-    }
 
     /// @notice Sets the account data a subsequent `getAccountData(safe)` will return
     function setAccountData(address safe, AccountData calldata data) external {
         _accountData[safe] = data;
-    }
-
-    /// @notice Sets the supplied amount a subsequent `suppliedOf(safe, asset)` will return
-    function setSuppliedOf(address safe, address asset, uint256 amount) external {
-        _suppliedOf[safe][asset] = amount;
-    }
-
-    /// @notice Sets the debt a subsequent `debtOf(safe, asset)` will return
-    function setDebtOf(address safe, address asset, uint256 amount) external {
-        _debtOf[safe][asset] = amount;
     }
 
     /// @notice Sets the reserve liquidity a subsequent `availableCash(asset)` will return
@@ -67,45 +43,25 @@ contract MockLendGateway is ILendGateway {
         _availableCash[asset] = amount;
     }
 
-    /// @notice Sets the LTV (100e18 = 100%) a subsequent `ltv(asset)` will return
-    function setLtv(address asset, uint256 ltvValue) external {
-        _ltv[asset] = ltvValue;
-    }
-
     /// @notice Sets whether lend is enabled for a safe (defaults to enabled)
     function setLendEnabled(address safe, bool enabled) external {
         _lendDisabled[safe] = !enabled;
     }
 
-    /// @notice Sets the assets a subsequent `registeredAssets()` will return
-    function setRegisteredAssets(address[] calldata assets) external {
-        _registeredAssets = assets;
-    }
-
     function supply(address safe, address asset, uint256 amount) external {
         lastSupply = Call(safe, asset, amount, address(0));
-        supplies.push(lastSupply);
-    }
-
-    /// @notice Number of recorded supply calls
-    function suppliesCount() external view returns (uint256) {
-        return supplies.length;
     }
 
     function withdraw(address safe, address asset, uint256 amount, address to) external {
         lastWithdraw = Call(safe, asset, amount, to);
     }
 
-    function borrow(address safe, address asset, uint256 amount, address to) external {
-        if (borrowReverts) revert BorrowBlocked();
-        lastBorrow = Call(safe, asset, amount, to);
-    }
+    function borrow(address safe, address asset, uint256 amount, address to) external { }
 
     function repay(address safe, address asset, uint256 amount) external returns (uint256) {
         uint256 debt = _debtOf[safe][asset];
         uint256 repaid = amount < debt ? amount : debt;
         _debtOf[safe][asset] = debt - repaid;
-        lastRepay = Call(safe, asset, amount, address(0));
         return repaid;
     }
 
@@ -117,8 +73,8 @@ contract MockLendGateway is ILendGateway {
         return _accountData[safe];
     }
 
-    function suppliedOf(address safe, address asset) external view returns (uint256) {
-        return _suppliedOf[safe][asset];
+    function suppliedOf(address, address) external pure returns (uint256) {
+        return 0;
     }
 
     function debtOf(address safe, address asset) external view returns (uint256) {
@@ -129,15 +85,15 @@ contract MockLendGateway is ILendGateway {
         return _availableCash[asset];
     }
 
-    function ltv(address asset) external view returns (uint256) {
-        return _ltv[asset];
+    function ltv(address) external pure returns (uint256) {
+        return 0;
     }
 
     function isLendEnabled(address safe) external view returns (bool) {
         return !_lendDisabled[safe];
     }
 
-    function registeredAssets() external view returns (address[] memory) {
-        return _registeredAssets;
+    function registeredAssets() external pure returns (address[] memory) {
+        return new address[](0);
     }
 }
