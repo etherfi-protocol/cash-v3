@@ -201,7 +201,10 @@ contract CashLens is UpgradeableProxy {
             return (false, "Insufficient liquidity to cover the loan");
         }
 
-        // availableBorrowsUsd is the supplied position's capacity; a pending sits against the loose balance, so it is not deducted here
+        // availableBorrowsUsd is only the already-supplied position's capacity. This gate deliberately excludes
+        // loose collateral the spend-time resupply can pull in (CashLendLib._resupplyCollateral), since that
+        // capacity exists only by cancelling the safe's pending withdrawal; canSpend must not advertise it as
+        // headroom. So a credit spend declined here may still execute via resupply if it was authorized.
         if (totalSpendingInUsd > lendGateway.getAccountData(safe).availableBorrowsUsd) {
             return (false, "Insufficient borrowing power");
         }

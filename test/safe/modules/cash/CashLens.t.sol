@@ -7,7 +7,6 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 
 import { Mode, SafeCashData, BinSponsor, SafeData, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
-import { ILendGateway } from "../../../../src/interfaces/ILendGateway.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -99,20 +98,6 @@ contract CashLensTest is CashModuleTestSetup {
         cashLens.getUserCollateralForToken(address(safe), nonCollateralToken);
     }
 
-    /// A gateway safe's collateral is its Aave-supplied balance; loose funds and pending withdrawals don't count.
-    function test_getUserCollateralForToken_gatewaySafe_readsSuppliedBalance() public {
-        deal(address(weETH), address(safe), 5 ether); // loose, not collateral for a gateway safe
-        assertEq(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 0, "loose balance is not collateral");
-
-        gateway.setSuppliedOf(address(safe), address(weETH), 3 ether);
-        assertEq(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 3 ether, "supplied balance is the collateral");
-
-        IDebtManager.TokenData[] memory collateral = cashLens.getUserTotalCollateral(address(safe));
-        assertEq(collateral.length, 1, "only the supplied token shows up");
-        assertEq(collateral[0].token, address(weETH));
-        assertEq(collateral[0].amount, 3 ether);
-    }
-
     function test_getUserTotalCollateral() public {
         _forceLegacyEngine(address(safe));
         // Add multiple collateral types
@@ -150,45 +135,6 @@ contract CashLensTest is CashModuleTestSetup {
         }
     }
 
-    function test_getSafeCashData() public {
-        // Setup test state
-        deal(address(weETH), address(safe), 5 ether);
-        deal(address(usdc), address(safe), 10000e6);
-        
-        // Create a withdrawal request
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(usdc);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = 5000e6;
-        _requestWithdrawal(tokens, amounts, withdrawRecipient);
-        
-        // Get safe cash data
-        _mirrorPositionToGateway(address(safe));
-        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
-
-        // Verify basic data
-        assertEq(uint8(data.mode), uint8(Mode.Debit), "Initial mode should be Debit");
-        assertEq(data.incomingModeStartTime, 0, "No incoming mode change");
-        assertEq(data.totalCashbackEarnedInUsd, 0, "No cashback earned initially");
-        
-        // Verify collateral and borrows
-        assertEq(data.collateralBalances.length, 2, "Should have two collateral entries");
-        assertEq(data.borrows.length, 0, "Should have no borrows initially");
-        
-        // Verify withdrawal request
-        assertEq(data.withdrawalRequest.tokens.length, 1, "Should have one withdrawal token");
-        assertEq(data.withdrawalRequest.amounts.length, 1, "Should have one withdrawal amount");
-        assertEq(data.withdrawalRequest.tokens[0], address(usdc), "Withdrawal token should be USDC");
-        assertEq(data.withdrawalRequest.amounts[0], 5000e6, "Withdrawal amount should be 5000 USDC");
-        
-        // Verify total values stay aligned with the old DebtManager-facing effective state.
-        (, uint256 expectedTotalCollateral,,) = debtManager.getUserCurrentState(address(safe));
-        uint256 expectedMaxBorrow = debtManager.getMaxBorrowAmount(address(safe), true);
-        assertEq(data.totalCollateral, expectedTotalCollateral, "Total collateral should exclude pending withdrawals");
-        assertEq(data.totalBorrow, 0, "Total borrow should be zero initially");
-        assertEq(data.maxBorrow, expectedMaxBorrow, "Max borrow should exclude pending withdrawals");
-    }
-
     function test_getSafeCashData_inCreditMode() public {
         // Setup test state
         deal(address(weETH), address(safe), 5 ether);
@@ -212,40 +158,6 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Verify mode is now Credit
         assertEq(uint8(data.mode), uint8(Mode.Credit), "Mode should now be Credit");
-    }
-
-    function test_getSafeCashData_withBorrows() public {
-        // Setup test state
-        deal(address(weETH), address(safe), 5 ether);
-        
-        // Set to credit mode and wait for it to activate
-        _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
-
-        uint256 spendAmount = 1000e6;
-
-        // Mirror the current position (collateral only; no real borrow was executed, so debt is 0).
-        _mirrorPositionToGateway(address(safe));
-        // Layer a fabricated borrow on top for CashLens to read.
-        ILendGateway.AccountData memory account = gateway.getAccountData(address(safe));
-        gateway.setDebtOf(address(safe), address(usdc), spendAmount);
-        gateway.setAccountData(address(safe), ILendGateway.AccountData({
-            collateralUsd: account.collateralUsd,
-            debtUsd: spendAmount,
-            availableBorrowsUsd: account.availableBorrowsUsd > spendAmount ? account.availableBorrowsUsd - spendAmount : 0,
-            healthFactor: account.healthFactor
-        }));
-
-        // Get safe cash data
-        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
-        
-        // Verify borrows
-        assertEq(data.borrows.length, 1, "Should have one borrow entry");
-        assertEq(data.borrows[0].token, address(usdc), "Borrow token should be USDC");
-        assertApproxEqAbs(data.borrows[0].amount, spendAmount, 1, "Borrow amount should match spend amount");
-        
-        // Verify total borrow
-        assertApproxEqAbs(data.totalBorrow, spendAmount, 1, "Total borrow should match spend amount");
     }
 
     function test_applicableSpendingLimit() public {

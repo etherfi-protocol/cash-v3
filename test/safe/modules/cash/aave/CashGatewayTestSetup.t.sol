@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { IAggregatorV3 } from "../../../../../src/interfaces/IAggregatorV3.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
@@ -73,6 +75,36 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
     /// @dev Borrowable liquidity seeded into the USDC reserve at setup; override to seed a different amount (or none).
     function _seedInitialLiquidity() internal virtual {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 1_000_000e6);
+    }
+
+    // ----------------------------------------------------------------- position builders
+
+    /// @dev Supplies `amount` of `token` to Aave for `safe_` (dealing it first) and enables it as collateral.
+    function _supplyToGateway(address safe_, address token, uint256 amount) internal {
+        deal(token, safe_, IERC20(token).balanceOf(safe_) + amount);
+        vm.startPrank(driver);
+        gw.supply(safe_, token, amount);
+        gw.setUsingAsCollateral(safe_, token, true);
+        vm.stopPrank();
+    }
+
+    /// @dev Borrows `amount` of `token` against `safe_`'s position, sending it to `to`.
+    function _borrowOnGateway(address safe_, address token, uint256 amount, address to) internal {
+        vm.prank(driver);
+        gw.borrow(safe_, token, amount, to);
+    }
+
+    /// @dev Builds a full position for `safe_`: supplies collateral, then (if debtAmt > 0) borrows against it.
+    function _buildGatewayPosition(address safe_, address collateral, uint256 collateralAmt, address debtToken, uint256 debtAmt) internal {
+        _supplyToGateway(safe_, collateral, collateralAmt);
+        if (debtAmt > 0) {
+            _borrowOnGateway(safe_, debtToken, debtAmt, recipient);
+        }
+    }
+
+    /// @dev Sets a registered asset's Aave collateral factor (BPS), i.e. its LTV, for the whole reserve.
+    function _setAaveCollateralFactor(address token, uint16 cfBps) internal {
+        _setAaveReserveCollateralFactor(gw.reserveIdOf(token), cfBps);
     }
 
     // ----------------------------------------------------------------- module wiring helpers
