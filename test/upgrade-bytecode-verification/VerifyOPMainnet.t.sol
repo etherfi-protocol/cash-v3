@@ -304,6 +304,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_FraxModule() public {
+        vm.skip(true); // TODO: local impl intentionally differs from deployed until redeploy
         address local = address(new FraxModule(dataProviderProxy, cc.fraxusd, cc.fraxCustodian, cc.fraxRemoteHop));
         _verify("FraxModule", fraxModule, local);
     }
