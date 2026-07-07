@@ -5,7 +5,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
-import { IGateway } from "../interfaces/IGateway.sol";
+import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
@@ -142,7 +142,7 @@ struct SafeCashConfig {
     /// @notice Timestamp after which a pending disable-lend request can be executed (0 if none)
     uint96 lendDisableFinalizeTime;
     /// @notice True once the safe's borrow/collateral engine is the Aave gateway (set at onboarding or by migration; one-way)
-    bool usesAave;
+    bool usesLendGateway;
 }
 
 /**
@@ -362,26 +362,26 @@ interface ICashModule {
 
     /**
      * @notice Returns the configured Aave gateway used for lend operations
-     * @return Address of the gateway (address(0) if not set)
+     * @return LendGateway instance (zero if not set)
      */
-    function getLendGateway() external view returns (address);
+    function getLendGateway() external view returns (ILendGateway);
 
     /**
      * @notice Whether the safe's borrow/collateral engine is the Aave gateway (vs the legacy DebtManager)
      * @dev The canonical routing flag: every spend/repay/lens path branches on this. True for safes onboarded
-     *      after the gateway launch and for safes migrated via DebtManager.migrateToAave; false means legacy.
+     *      after the gateway launch and for safes migrated via DebtManager.migrateToLendGateway; false means legacy.
      * @param safe The safe to query
      * @return True if the safe uses the Aave gateway
      */
-    function usesAave(address safe) external view returns (bool);
+    function usesLendGateway(address safe) external view returns (bool);
 
     /**
      * @notice Marks a safe as using the Aave gateway engine
-     * @dev Only callable by the DebtManager, as the last step of migrateToAave. Idempotent and one-way.
+     * @dev Only callable by the DebtManager, as the last step of migrateToLendGateway. Idempotent and one-way.
      * @param safe The safe to mark
      * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
      */
-    function markUsesAave(address safe) external;
+    function markUsesLendGateway(address safe) external;
 
     /**
      * @notice Gets the debt manager contract
@@ -396,12 +396,6 @@ interface ICashModule {
      * @return settlementDispatcher The address of the settlement dispatcher
      */
     function getSettlementDispatcher(BinSponsor binSponsor) external view returns (address settlementDispatcher);
-
-    /**
-     * @notice Returns the Aave gateway contract
-     * @return Gateway instance
-     */
-    function getGateway() external view returns (IGateway);
 
     /**
      * @notice Returns the EtherFiDataProvider contract reference
@@ -556,7 +550,7 @@ interface ICashModule {
      * @custom:throws InvalidInput if gateway = address(0)
      * @custom:throws GatewayAlreadySet if the gateway has already been configured
      */
-    function setGateway(address gateway) external;
+    function setLendGateway(address gateway) external;
 
     /**
      * @notice Sets the tier for one or more safes

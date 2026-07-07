@@ -209,7 +209,7 @@ contract CashEventEmitter is UpgradeableProxy {
     event SettlementDispatcheUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher);
 
     /// @notice Emitted when the gateway is set during the one-time Lend bootstrap
-    event GatewaySet(address indexed gateway);
+    event LendGatewaySet(address indexed gateway);
     
     /**
      * @notice Emitted when the withdrawal tokens are updated
@@ -254,10 +254,10 @@ contract CashEventEmitter is UpgradeableProxy {
         emit SettlementDispatcheUpdated(binSponsor, oldDispatcher, newDispatcher);
     }
 
-    /// @notice Emits the GatewaySet event
+    /// @notice Emits the LendGatewaySet event
     /// @dev Can only be called by the Cash Module
-    function emitGatewaySet(address gateway) external onlyCashModule {
-        emit GatewaySet(gateway);
+    function emitLendGatewaySet(address gateway) external onlyCashModule {
+        emit LendGatewaySet(gateway);
     }
 
     /**

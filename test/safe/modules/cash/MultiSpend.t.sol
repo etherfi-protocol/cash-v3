@@ -9,7 +9,7 @@ import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 import { ICashModule, Mode, BinSponsor, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
-import { IGateway } from "../../../../src/interfaces/IGateway.sol";
+import { ILendGateway } from "../../../../src/interfaces/ILendGateway.sol";
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { UpgradeableProxy } from "../../../../src/utils/UpgradeableProxy.sol";
@@ -637,7 +637,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         gateway.setAvailableCash(address(weETH), type(uint128).max);
 
         // Safe carries debt with ample borrowing headroom, so the weETH withdrawal is allowed.
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 500e6, debtUsd: 100e6, availableBorrowsUsd: 100e6, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 500e6, debtUsd: 100e6, availableBorrowsUsd: 100e6, healthFactor: 1e18 }));
 
         uint256 dispatcherUsdcBefore = usdc.balanceOf(address(settlementDispatcherReap));
         uint256 dispatcherWeETHBefore = weETH.balanceOf(address(settlementDispatcherReap));
@@ -688,7 +688,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
 
         // $40 headroom at 80% LTV funds $50 of withdrawals in total. usdc's $30 draw spends $24 of it, leaving
         // room for only $20 of weETH, short of its $30 draw.
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 500e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 500e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
 
         address[] memory spendTokens = new address[](2);
         spendTokens[0] = address(usdc);

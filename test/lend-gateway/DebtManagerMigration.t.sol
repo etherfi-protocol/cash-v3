@@ -10,8 +10,8 @@ import { DebtManagerStorageContract } from "../../src/debt-manager/DebtManagerSt
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { BinSponsor, Cashback, ICashModule, Mode } from "../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
-import { IGateway } from "../../src/interfaces/IGateway.sol";
-import { Gateway } from "../../src/modules/gateway/Gateway.sol";
+import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
+import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
@@ -20,17 +20,17 @@ import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 
 /**
  * @title DebtManagerMigrationTest
- * @notice Fork tests for DebtManager.migrateToAave: a legacy Safe position (weETH collateral + USDC debt on
+ * @notice Fork tests for DebtManager.migrateToLendGateway: a legacy Safe position (weETH collateral + USDC debt on
  *         DebtManager) migrates atomically to a REAL Aave v4 instance (deployed in-test on an Optimism fork)
  *         via the gateway — no flash loan. Aave's weETH LTV is set below DebtManager's so the LTV-fit path
  *         is exercised.
- * @dev Run with: FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/gateway/DebtManagerMigration.t.sol
+ * @dev Run with: FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/DebtManagerMigration.t.sol
  */
 contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
     using MessageHashUtils for bytes32;
 
     DebtManagerCore internal dm;
-    Gateway internal gw;
+    LendGateway internal gw;
     address internal migrator = makeAddr("migrationRunner");
 
     uint256 internal usdcReserveId;
@@ -48,18 +48,18 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         weethReserveId = _addAaveReserve(address(weETH), weethSource, AAVE_WEETH_LTV, false);
         usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 8000, true);
 
-        // Gateway proxy + wiring
-        address gwImpl = address(new Gateway(address(dataProvider), address(spoke)));
-        gw = Gateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(Gateway.initialize.selector, address(roleRegistry)))));
+        // LendGateway proxy + wiring
+        address gwImpl = address(new LendGateway(address(dataProvider), address(spoke)));
+        gw = LendGateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(LendGateway.initialize.selector, address(roleRegistry)))));
 
         vm.startPrank(owner);
-        roleRegistry.grantRole(gw.GATEWAY_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
         dataProvider.configureModules(_addr1(address(gw)), _bool1(true));
         gw.setReserveId(address(weETH), weethReserveId);
         gw.setReserveId(address(usdc), usdcReserveId);
         gw.setDriver(address(dm), true); // DebtManager drives the gateway during migration
         // Migration reads the gateway from CashModule (single source of truth); authorize the migration runner
-        cashModule.setGateway(address(gw));
+        cashModule.setLendGateway(address(gw));
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, migrator);
         vm.stopPrank();
 
@@ -71,13 +71,13 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         _forceLegacyEngine(address(safe));
     }
 
-    /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setGateway(gw) above is
+    /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setLendGateway(gw) above is
     ///      the first and only set. Without this, that call would revert GatewayAlreadySet.
     function _wireDefaultGateway() internal override { }
 
     // ----------------------------------------------------------------- happy path
 
-    function test_migrateToAave_atomic_noFlashLoan() public {
+    function test_migrateToLendGateway_atomic_noFlashLoan() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
         // Legacy position: 10 weETH collateral, borrow a modest fraction that fits Aave's 30% LTV
@@ -90,12 +90,12 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         uint256 dmUsdcBefore = usdc.balanceOf(address(debtManager));
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
 
         // Legacy debt closed and Safe flagged migrated; both latches flip in the same tx
         assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "legacy debt cleared");
-        assertTrue(dm.hasMigratedToAave(address(safe)), "marked migrated");
-        assertTrue(cashModule.usesAave(address(safe)), "CashModule routing flag flipped");
+        assertTrue(dm.hasMigratedToLendGateway(address(safe)), "marked migrated");
+        assertTrue(cashModule.usesLendGateway(address(safe)), "CashModule routing flag flipped");
         // Position now lives on Aave: same collateral, same debt size
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 10 ether, 3, "collateral on Aave");
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 1e6, "debt on Aave");
@@ -110,7 +110,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
 
     // ----------------------------------------------------------------- reverts
 
-    function test_migrateToAave_revertsWhenExceedsAaveLtv() public {
+    function test_migrateToLendGateway_revertsWhenExceedsAaveLtv() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
         // Borrow ~90% of DebtManager's max: fits DebtManager's 50% LTV, exceeds Aave's 30%
@@ -120,11 +120,11 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
 
         vm.prank(migrator);
-        vm.expectRevert(DebtManagerStorageContract.PositionExceedsAaveLtv.selector);
-        dm.migrateToAave(address(safe));
+        vm.expectRevert(DebtManagerStorageContract.PositionExceedsLendGatewayLtv.selector);
+        dm.migrateToLendGateway(address(safe));
     }
 
-    function test_migrateToAave_revertsWhenInsufficientAaveLiquidity() public {
+    function test_migrateToLendGateway_revertsWhenInsufficientLendGatewayLiquidity() public {
         // No Aave liquidity seeded → the reserve cannot fund the borrow
         deal(address(weETH), address(safe), 10 ether);
         uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
@@ -132,18 +132,18 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
 
         vm.prank(migrator);
-        vm.expectRevert(abi.encodeWithSelector(DebtManagerStorageContract.InsufficientAaveLiquidity.selector, address(usdc)));
-        dm.migrateToAave(address(safe));
+        vm.expectRevert(abi.encodeWithSelector(DebtManagerStorageContract.InsufficientLendGatewayLiquidity.selector, address(usdc)));
+        dm.migrateToLendGateway(address(safe));
     }
 
-    function test_migrateToAave_noDebt_suppliesCollateralAndMarksMigrated() public {
+    function test_migrateToLendGateway_noDebt_suppliesCollateralAndMarksMigrated() public {
         deal(address(weETH), address(safe), 10 ether); // collateral but no debt
-        assertFalse(dm.hasMigratedToAave(address(safe)));
+        assertFalse(dm.hasMigratedToLendGateway(address(safe)));
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
 
-        assertTrue(dm.hasMigratedToAave(address(safe)), "marked migrated");
+        assertTrue(dm.hasMigratedToLendGateway(address(safe)), "marked migrated");
         // A debt-free migration still moves the collateral to Aave, so credit borrowing works post-migration
         // (marking migrated while leaving collateral idle in the Safe would break gateway-based credit spends).
         assertEq(weETH.balanceOf(address(safe)), 0, "collateral moved out of the Safe");
@@ -153,22 +153,22 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
 
     /// @dev A lend-disabled safe opted out of Aave, so migration must not force its collateral in: it just
     ///      gets marked migrated (freezing legacy borrow/repay) with its balance left idle in the safe.
-    function test_migrateToAave_lendDisabledSafe_marksMigratedWithoutSupplying() public {
+    function test_migrateToLendGateway_lendDisabledSafe_marksMigratedWithoutSupplying() public {
         deal(address(weETH), address(safe), 10 ether);
         _disableLendForSafe();
         assertFalse(cashModule.isLendEnabled(address(safe)), "lend disabled");
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
 
-        assertTrue(dm.hasMigratedToAave(address(safe)), "marked migrated");
+        assertTrue(dm.hasMigratedToLendGateway(address(safe)), "marked migrated");
         assertEq(weETH.balanceOf(address(safe)), 10 ether, "collateral stayed in the safe");
         assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "nothing supplied to Aave");
     }
 
     /// @dev A lend-disabled safe should be debt-free (disabling requires zero borrows), but it can still borrow
     ///      on DebtManager directly afterward. Migration must reject that case rather than revert opaquely.
-    function test_migrateToAave_lendDisabledSafe_withDebt_reverts() public {
+    function test_migrateToLendGateway_lendDisabledSafe_withDebt_reverts() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 10 ether);
         _disableLendForSafe();
@@ -180,12 +180,12 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
 
         vm.prank(migrator);
         vm.expectRevert(DebtManagerStorageContract.LendDisabledSafeHasDebt.selector);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
     }
 
     /// @dev Pending withdrawals reserve loose funds; migration must not sweep them into Aave. The queued
     ///      withdrawal is a plain transfer of the Safe's balance, so supplying it would brick processWithdrawal.
-    function test_migrateToAave_leavesPendingWithdrawalLoose() public {
+    function test_migrateToLendGateway_leavesPendingWithdrawalLoose() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
         deal(address(weETH), address(safe), 10 ether);
@@ -202,7 +202,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
 
         // Reserved amount stayed loose; only the rest was supplied
         assertEq(weETH.balanceOf(address(safe)), withdrawAmt, "reserved amount left loose in the safe");
@@ -216,13 +216,13 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         assertEq(weETH.balanceOf(address(safe)), 0, "safe holds nothing loose afterwards");
     }
 
-    function test_markUsesAave_onlyDebtManager() public {
+    function test_markUsesLendGateway_onlyDebtManager() public {
         vm.prank(makeAddr("rando"));
         vm.expectRevert(ICashModule.OnlyDebtManager.selector);
-        cashModule.markUsesAave(address(safe));
+        cashModule.markUsesLendGateway(address(safe));
     }
 
-    function test_migrateToAave_onlyDebtManagerAdmin() public {
+    function test_migrateToLendGateway_onlyDebtManagerAdmin() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 10 ether);
         uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
@@ -231,7 +231,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
 
         vm.prank(makeAddr("notMigrator"));
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
     }
 
     function test_migratedSafe_cannotBorrowOrRepayOnDebtManager() public {
@@ -242,22 +242,22 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
-        assertTrue(dm.hasMigratedToAave(address(safe)));
+        dm.migrateToLendGateway(address(safe));
+        assertTrue(dm.hasMigratedToLendGateway(address(safe)));
 
         // Legacy borrow is frozen for a migrated Safe
         vm.prank(address(safe));
-        vm.expectRevert(DebtManagerStorageContract.AlreadyMigratedToAave.selector);
+        vm.expectRevert(DebtManagerStorageContract.AlreadyMigratedToLendGateway.selector);
         debtManager.borrow(BinSponsor.Reap, address(usdc), 1e6);
 
         // Legacy repay is frozen for a migrated Safe
-        vm.expectRevert(DebtManagerStorageContract.AlreadyMigratedToAave.selector);
+        vm.expectRevert(DebtManagerStorageContract.AlreadyMigratedToLendGateway.selector);
         debtManager.repay(address(safe), address(usdc), 1e6);
     }
 
     /// @dev After migration, a credit-mode spend must borrow from Aave (via the gateway), not the frozen
     ///      DebtManager. Regression for: migrated safe passes CashLens (gateway-based) but reverts on spend
-    ///      with AlreadyMigratedToAave because _spendCredit still called DebtManager.borrow.
+    ///      with AlreadyMigratedToLendGateway because _spendCredit still called DebtManager.borrow.
     function test_migratedSafe_creditSpendBorrowsFromAave() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
@@ -268,8 +268,8 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
-        assertTrue(dm.hasMigratedToAave(address(safe)), "safe migrated");
+        dm.migrateToLendGateway(address(safe));
+        assertTrue(dm.hasMigratedToLendGateway(address(safe)), "safe migrated");
 
         // Enter Credit mode (the gateway is wired to the CashModule in setUp)
         _setMode(Mode.Credit);
@@ -287,7 +287,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         amounts[0] = spendUsd;
         Cashback[] memory cashbacks;
 
-        // Must NOT revert with AlreadyMigratedToAave
+        // Must NOT revert with AlreadyMigratedToLendGateway
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), keccak256("credit-after-migration"), BinSponsor.Reap, tokens, amounts, cashbacks);
 
@@ -309,7 +309,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
         uint256 aaveDebtBefore = gw.debtOf(address(safe), address(usdc));
         assertGt(aaveDebtBefore, 0, "has Aave debt");
 
@@ -317,7 +317,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         deal(address(usdc), address(safe), 500e6);
         uint256 repayUsd = 200e6;
 
-        // Must NOT revert with AlreadyMigratedToAave, and must surface a gateway-repay event (indexed topics
+        // Must NOT revert with AlreadyMigratedToLendGateway, and must surface a gateway-repay event (indexed topics
         // checked; the exact repaid amount is left to the assertions below)
         vm.expectEmit(true, true, false, false);
         emit CashEventEmitter.Repay(address(safe), address(usdc), 0, 0);
@@ -341,7 +341,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
 
         vm.warp(block.timestamp + 30 days);
         uint256 liveDebt = gw.debtOf(address(safe), address(usdc));
@@ -383,7 +383,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         assertTrue(ok, reason);
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
 
         Cashback[] memory cashbacks;
         vm.prank(etherFiWallet);
@@ -407,7 +407,7 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         assertTrue(ok, reason);
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
         assertEq(usdc.balanceOf(address(safe)), 0, "migration supplied the loose balance");
 
         address dispatcher = cashModule.getSettlementDispatcher(BinSponsor.Reap);
@@ -421,14 +421,14 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 50e6, 2, "supplied position reduced");
     }
 
-    /// Gateway-credit declined-side parity: a check declined for borrowing power implies the Aave borrow
+    /// LendGateway-credit declined-side parity: a check declined for borrowing power implies the Aave borrow
     /// reverts (the mock gateway cannot model this; the real Aave instance enforces it).
     function test_migrationBoundary_gatewayCreditDeclined_revertsOnSpend() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 1 ether);
 
         vm.prank(migrator);
-        dm.migrateToAave(address(safe));
+        dm.migrateToLendGateway(address(safe));
 
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);

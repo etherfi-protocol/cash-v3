@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IGateway } from "../interfaces/IGateway.sol";
+import { ILendGateway } from "../interfaces/ILendGateway.sol";
 
 /**
- * @title MockGateway
- * @notice Test double for IGateway. Lets cash-side tests drive a safe's position state directly,
+ * @title MockLendGateway
+ * @notice Test double for ILendGateway. Lets cash-side tests drive a safe's position state directly,
  *         with no live Aave v4 instance, and records the last call to each mutating op for
  *         assertions. Not for production.
  */
-contract MockGateway is IGateway {
+contract MockLendGateway is ILendGateway {
     /// @notice Thrown when the mock is configured to reject borrow calls
     error BorrowBlocked();
 

@@ -28,7 +28,7 @@ interface IProxyInit {
 /**
  * @title AaveV4Fixture
  * @notice Deploys a real, self-owned Aave v4 instance inside a Foundry test (works on any fork), so the
- *         Gateway can be exercised against genuine Aave v4 code rather than a mock. This test contract
+ *         LendGateway can be exercised against genuine Aave v4 code rather than a mock. This test contract
  *         holds every admin role, so it can list reserves, set collateral factors, and activate position
  *         managers freely. Mirrors aave-v4 v0.5.11 `tests/Base.t.sol` deployFixtures/setUpRoles.
  * @dev The Hub/Spoke instances are compiled via_ir (foundry.toml compilation_restrictions) and their

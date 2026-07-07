@@ -12,6 +12,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -80,9 +81,9 @@ contract CashModuleCore is CashModuleStorageContract {
         $.mode = Mode.Debit;
 
         // New safes run on the Aave gateway. Guarded because setupModule is re-runnable: a legacy safe with
-        // open DebtManager debt must keep routing to DebtManager until migrateToAave moves its position.
+        // open DebtManager debt must keep routing to DebtManager until migrateToLendGateway moves its position.
         (, uint256 legacyDebtUsd) = _getDebtManager().borrowingOf(msg.sender);
-        if (legacyDebtUsd == 0) $.usesAave = true;
+        if (legacyDebtUsd == 0) $.usesLendGateway = true;
     }
 
     /**
@@ -253,12 +254,12 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Whether the safe's borrow/collateral engine is the Aave gateway (vs the legacy DebtManager)
-     * @dev The canonical routing flag; see ICashModule.usesAave
+     * @dev The canonical routing flag; see ICashModule.usesLendGateway
      * @param safe Address of the EtherFi Safe
      * @return True if the safe uses the Aave gateway
      */
-    function usesAave(address safe) external view returns (bool) {
-        return _usesAave(safe);
+    function usesLendGateway(address safe) external view returns (bool) {
+        return _usesLendGateway(safe);
     }
 
     /**
@@ -273,10 +274,10 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Returns the configured Aave gateway used for lend operations
-     * @return Address of the gateway (address(0) if not set)
+     * @return LendGateway instance (zero if not set)
      */
-    function getLendGateway() external view returns (address) {
-        return address(_getCashModuleStorage().gateway);
+    function getLendGateway() external view returns (ILendGateway) {
+        return _getCashModuleStorage().gateway;
     }
 
     /**
@@ -532,7 +533,7 @@ contract CashModuleCore is CashModuleStorageContract {
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
         uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();
-        _cancelWithdrawalRequestIfNecessary(safe, token, amount);
+        _cancelCompetingWithdrawal(safe, token, amount);
 
         // A migrated safe repays on Aave via the gateway; a legacy safe repays the DebtManager. Both paths run
         // in CashLendLib (extracted to keep this contract within the code-size limit).

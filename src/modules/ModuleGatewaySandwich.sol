@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IGateway } from "../interfaces/IGateway.sol";
+import { ILendGateway } from "../interfaces/ILendGateway.sol";
 
 /**
  * @title ModuleGatewaySandwich
@@ -19,7 +19,7 @@ import { IGateway } from "../interfaces/IGateway.sol";
  */
 abstract contract ModuleGatewaySandwich {
     /// @notice The gateway that performs Aave ops on a safe's behalf
-    IGateway public immutable gateway;
+    ILendGateway public immutable gateway;
     /// @notice The lowest health factor the operation may leave the safe at once it completes
     uint256 public immutable minHealthFactor;
 
@@ -42,7 +42,7 @@ abstract contract ModuleGatewaySandwich {
 
     constructor(address _gateway, uint256 _minHealthFactor) {
         if (_gateway == address(0)) revert InvalidGateway();
-        gateway = IGateway(_gateway);
+        gateway = ILendGateway(_gateway);
         minHealthFactor = _minHealthFactor;
     }
 

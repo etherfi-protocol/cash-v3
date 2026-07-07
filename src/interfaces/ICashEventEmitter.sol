@@ -25,8 +25,8 @@ interface ICashEventEmitter {
      */
     function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external;
 
-    /// @notice Emits the GatewaySet event
-    function emitGatewaySet(address gateway) external;
+    /// @notice Emits the LendGatewaySet event
+    function emitLendGatewaySet(address gateway) external;
 
     /**
      * @notice Emits an event when pending cashback is cleared

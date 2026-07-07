@@ -6,20 +6,20 @@ import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
-import { Gateway } from "../../src/modules/gateway/Gateway.sol";
+import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
 import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 
 /**
- * @title GatewayHandler
- * @notice Drives random sequences of Gateway ops (as an authorized driver) for the invariant campaign.
+ * @title LendGatewayHandler
+ * @notice Drives random sequences of LendGateway ops (as an authorized driver) for the invariant campaign.
  *         Amounts are bounded to mostly succeed so the campaign exercises real Aave state transitions;
  *         residual reverts (e.g. a withdraw that would breach health) are tolerated (fail_on_revert=false).
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/gateway/GatewayInvariant.t.sol"
+ * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/lend-gateway/LendGatewayInvariant.t.sol"
  */
-contract GatewayHandler is Test {
-    Gateway internal immutable gw;
+contract LendGatewayHandler is Test {
+    LendGateway internal immutable gw;
     address internal immutable safe;
     address internal immutable recipient;
     IERC20 internal immutable weeth;
@@ -28,7 +28,7 @@ contract GatewayHandler is Test {
     /// @notice Count of fully-successful gateway ops (guards against a hollow, all-reverting campaign)
     uint256 public opsExecuted;
 
-    constructor(Gateway _gw, address _safe, address _recipient, IERC20 _weeth, IERC20 _usdc) {
+    constructor(LendGateway _gw, address _safe, address _recipient, IERC20 _weeth, IERC20 _usdc) {
         gw = _gw;
         safe = _safe;
         recipient = _recipient;
@@ -72,14 +72,14 @@ contract GatewayHandler is Test {
 }
 
 /**
- * @title GatewayInvariantTest
+ * @title LendGatewayInvariantTest
  * @notice Invariant: after any sequence of gateway operations the gateway holds no tokens — its custody
  *         flow (pull-from-safe -> supply, withdraw/borrow -> forward, repay -> refund dust) must never
  *         strand user funds in the gateway. Runs against a real Aave v4 instance on an Optimism fork.
  */
-contract GatewayInvariantTest is CashModuleTestSetup, AaveV4Fixture {
-    Gateway internal gw;
-    GatewayHandler internal handler;
+contract LendGatewayInvariantTest is CashModuleTestSetup, AaveV4Fixture {
+    LendGateway internal gw;
+    LendGatewayHandler internal handler;
     address internal recipient = makeAddr("invariantRecipient");
     uint256 internal usdcReserveId;
     uint256 internal weethReserveId;
@@ -93,13 +93,13 @@ contract GatewayInvariantTest is CashModuleTestSetup, AaveV4Fixture {
         usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 8000, true);
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
-        address gwImpl = address(new Gateway(address(dataProvider), address(spoke)));
-        gw = Gateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(Gateway.initialize.selector, address(roleRegistry)))));
+        address gwImpl = address(new LendGateway(address(dataProvider), address(spoke)));
+        gw = LendGateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(LendGateway.initialize.selector, address(roleRegistry)))));
 
-        handler = new GatewayHandler(gw, address(safe), recipient, weETH, usdc);
+        handler = new LendGatewayHandler(gw, address(safe), recipient, weETH, usdc);
 
         vm.startPrank(owner);
-        roleRegistry.grantRole(gw.GATEWAY_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
         dataProvider.configureModules(_addr1(address(gw)), _bool1(true));
         gw.setReserveId(address(weETH), weethReserveId);
         gw.setReserveId(address(usdc), usdcReserveId);

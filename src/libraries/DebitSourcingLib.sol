@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
-import { IGateway } from "../interfaces/IGateway.sol";
+import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 
 /**
@@ -14,7 +14,7 @@ import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
  * @author ether.fi
  */
 library DebitSourcingLib {
-    /// @dev The gateway reports LTV on the 100e18 = 100% scale (see IGateway.ltv)
+    /// @dev The gateway reports LTV on the 100e18 = 100% scale (see ILendGateway.ltv)
     uint256 internal constant LTV_SCALE = 100e18;
 
     /**
@@ -22,7 +22,7 @@ library DebitSourcingLib {
      * @dev min(supplied, reserve cash); when the safe carries debt this is further capped by the borrowing
      *      headroom, and is zero for a zero-LTV reserve (no borrow weight, so it cannot be sized against debt).
      */
-    function withdrawableSupplied(IGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256) {
+    function withdrawableSupplied(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256) {
         uint256 supplied = gateway.suppliedOf(safe, token);
         uint256 cash = gateway.availableCash(token);
         uint256 cap = supplied < cash ? supplied : cash;
@@ -42,7 +42,7 @@ library DebitSourcingLib {
     }
 
     /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
-    function headroomConsumed(IGateway gateway, IPriceProvider priceProvider, address token, uint256 amount) internal view returns (uint256) {
+    function headroomConsumed(ILendGateway gateway, IPriceProvider priceProvider, address token, uint256 amount) internal view returns (uint256) {
         return (_toUsd(priceProvider, token, amount) * gateway.ltv(token)) / LTV_SCALE;
     }
 

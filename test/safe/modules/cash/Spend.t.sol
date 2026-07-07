@@ -9,10 +9,10 @@ import { Test } from "forge-std/Test.sol";
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 import { ICashModule, Mode, BinSponsor, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
-import { IGateway } from "../../../../src/interfaces/IGateway.sol";
+import { ILendGateway } from "../../../../src/interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
-import { MockGateway } from "../../../../src/mocks/MockGateway.sol";
+import { MockLendGateway } from "../../../../src/mocks/MockLendGateway.sol";
 import { SpendingLimitLib } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -367,7 +367,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         gateway.setLtv(address(usdc), 80e18);
         gateway.setSuppliedOf(address(safe), address(usdc), 100e6);
         gateway.setAvailableCash(address(usdc), type(uint128).max);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
 
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdc);
@@ -387,7 +387,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         gateway.setLtv(address(usdc), 80e18);
         gateway.setSuppliedOf(address(safe), address(usdc), 50e6);
         gateway.setAvailableCash(address(usdc), type(uint128).max);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
 
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdc);
@@ -413,7 +413,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         gateway.setLtv(address(usdc), 0);
         gateway.setSuppliedOf(address(safe), address(usdc), 100e6);
         gateway.setAvailableCash(address(usdc), type(uint128).max);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 40e6, healthFactor: 1e18 }));
 
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdc);
@@ -432,7 +432,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         deal(address(usdc), address(safe), amount);
 
         // Safe is already over its LTV-based borrow limit (headroom 0 with debt), e.g. after a price drop.
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 0, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 200e6, debtUsd: 100e6, availableBorrowsUsd: 0, healthFactor: 1e18 }));
 
         uint256 dispatcherBalBefore = usdc.balanceOf(address(settlementDispatcherReap));
 
@@ -844,7 +844,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
     }
 
     function _setBorrowCapacity(uint256 availableBorrowsUsd) internal {
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 0, debtUsd: 0, availableBorrowsUsd: availableBorrowsUsd, healthFactor: type(uint256).max }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 0, debtUsd: 0, availableBorrowsUsd: availableBorrowsUsd, healthFactor: type(uint256).max }));
     }
 
     /// @dev Registers the gateway's asset list; resupply sizes over it in order (empty by default in the mock)
@@ -1014,7 +1014,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         Cashback[] memory cashbacks;
 
         vm.prank(etherFiWallet);
-        vm.expectRevert(MockGateway.BorrowBlocked.selector);
+        vm.expectRevert(MockLendGateway.BorrowBlocked.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
         assertEq(gateway.suppliesCount(), 0);

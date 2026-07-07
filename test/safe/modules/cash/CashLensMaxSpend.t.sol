@@ -8,7 +8,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { BinSponsor, Cashback, CashbackTokens, DebitModeMaxSpend, Mode, SafeCashData, SafeData } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
-import { IGateway } from "../../../../src/interfaces/IGateway.sol";
+import { ILendGateway } from "../../../../src/interfaces/ILendGateway.sol";
 import { AccountantWithRateProviders, ILayerZeroTeller } from "../../../../src/interfaces/ILayerZeroTeller.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { SpendingLimit } from "../../../../src/libraries/SpendingLimitLib.sol";
@@ -143,7 +143,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
     /// @notice Sets the gateway account aggregate, deriving availableBorrowsUsd = collateralUsd x ltv - debtUsd (floored at 0). CashLens does not read healthFactor.
     function _setGatewayAccount(uint256 collateralUsd, uint256 debtUsd, uint256 ltv) internal {
         uint256 maxBorrowUsd = (collateralUsd * ltv) / HUNDRED_PERCENT;
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: collateralUsd, debtUsd: debtUsd, availableBorrowsUsd: maxBorrowUsd > debtUsd ? maxBorrowUsd - debtUsd : 0, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: collateralUsd, debtUsd: debtUsd, availableBorrowsUsd: maxBorrowUsd > debtUsd ? maxBorrowUsd - debtUsd : 0, healthFactor: 1e18 }));
     }
 
     /// @notice Sets a gateway debt position: both stables supplied with ample reserve cash, a uniform LTV, a debt, and zero raw safe balance. The borrowing headroom is derived as collateral x LTV - debt (stables valued at $1)
@@ -587,7 +587,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         gateway.setAvailableCash(address(liquidUsd), type(uint128).max);
         gateway.setLtv(address(usdc), 50e18);
         gateway.setLtv(address(liquidUsd), 50e18);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 1200e6, debtUsd: 500e6, availableBorrowsUsd: 100e6, healthFactor: 144e16 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 1200e6, debtUsd: 500e6, availableBorrowsUsd: 100e6, healthFactor: 144e16 }));
 
         address[] memory withdrawTokens = new address[](1);
         withdrawTokens[0] = address(usdc);
@@ -642,7 +642,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         gateway.setAvailableCash(address(liquidUsd), type(uint128).max);
         gateway.setLtv(address(usdc), 80e18);
         gateway.setLtv(address(liquidUsd), 50e18);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 2200e6, debtUsd: 700e6, availableBorrowsUsd: 460e6, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 2200e6, debtUsd: 700e6, availableBorrowsUsd: 460e6, healthFactor: 1e18 }));
 
         address[] memory tokenPreference = new address[](2);
         tokenPreference[0] = address(usdc);
@@ -672,7 +672,7 @@ contract CashLensMaxSpendTest is CashModuleTestSetup {
         gateway.setAvailableCash(address(liquidUsd), type(uint128).max);
         gateway.setLtv(address(usdc), 90e18);
         gateway.setLtv(address(liquidUsd), 90e18);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 13_340e6, debtUsd: 4000e6, availableBorrowsUsd: 7406e6, healthFactor: 1e18 }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 13_340e6, debtUsd: 4000e6, availableBorrowsUsd: 7406e6, healthFactor: 1e18 }));
 
         address[] memory tokenPreference = new address[](2);
         tokenPreference[0] = address(usdc);

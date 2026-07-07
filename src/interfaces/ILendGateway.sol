@@ -2,17 +2,17 @@
 pragma solidity ^0.8.28;
 
 /**
- * @title IGateway
+ * @title ILendGateway
  * @notice Seam between the Cash contracts and the ether.fi-managed Aave v4 instance. The gateway
  *         acts as a safe's Aave position manager, performing supply / withdraw / borrow / repay on
  *         the safe's behalf (a card spend cannot wait for a user signature). Cash-side contracts
  *         (CashModule, CashLens, EtherFiHook) depend only on this interface; both the live gateway
- *         and a MockGateway satisfy it, so the two tracks can build in parallel.
+ *         and a MockLendGateway satisfy it, so the two tracks can build in parallel.
  * @dev v0 — expected to change. Locked to just enough surface to unblock both tracks. Borrow and
  *      withdraw take an explicit `to` because Aave pays the caller; the caller forwards atomically.
  * @author ether.fi
  */
-interface IGateway {
+interface ILendGateway {
     /// @notice A safe's Aave position summary. USD fields are 6 decimals (matching PriceProvider.DECIMALS); healthFactor is 1e18.
     struct AccountData {
         uint256 collateralUsd;

@@ -5,26 +5,26 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 import { BinSponsor, ICashModule, Mode, SafeCashData } from "../../../../src/interfaces/ICashModule.sol";
-import { IGateway } from "../../../../src/interfaces/IGateway.sol";
+import { ILendGateway } from "../../../../src/interfaces/ILendGateway.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
-import { MockGateway } from "../../../../src/mocks/MockGateway.sol";
+import { MockLendGateway } from "../../../../src/mocks/MockLendGateway.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { CashModuleCore } from "../../../../src/modules/cash/CashModuleCore.sol";
 import { CashModuleSetters } from "../../../../src/modules/cash/CashModuleSetters.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
-contract CashModuleSetGatewayTest is CashModuleTestSetup {
+contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
     /// @notice New safes onboard onto the Aave gateway engine; a debt-free re-setup also flips to the gateway.
     function test_setupModule_flagsNewSafeAsAaveGateway() public {
-        assertTrue(cashModule.usesAave(address(safe)), "new safe defaults to the gateway engine");
+        assertTrue(cashModule.usesLendGateway(address(safe)), "new safe defaults to the gateway engine");
 
         _forceLegacyEngine(address(safe));
 
         vm.prank(address(safe));
         cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
-        assertTrue(cashModule.usesAave(address(safe)), "debt-free re-setup flips to the gateway");
+        assertTrue(cashModule.usesLendGateway(address(safe)), "debt-free re-setup flips to the gateway");
     }
 
     /// @notice A legacy safe with open DebtManager debt must keep routing to DebtManager if setup re-runs;
@@ -39,27 +39,27 @@ contract CashModuleSetGatewayTest is CashModuleTestSetup {
 
         vm.prank(address(safe));
         cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
-        assertFalse(cashModule.usesAave(address(safe)), "safe with legacy debt stays on the legacy engine");
+        assertFalse(cashModule.usesLendGateway(address(safe)), "safe with legacy debt stays on the legacy engine");
     }
 
     /// @notice A controller can configure the first gateway during Lend bootstrap and the change is emitted.
-    function test_setGateway_emitsAndUpdates() public {
+    function test_setLendGateway_emitsAndUpdates() public {
         (ICashModule unconfiguredCashModule,) = _deployUnconfiguredCashModule();
-        MockGateway newGateway = new MockGateway();
+        MockLendGateway newGateway = new MockLendGateway();
 
         vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.GatewaySet(address(newGateway));
+        emit CashEventEmitter.LendGatewaySet(address(newGateway));
 
         vm.prank(owner);
-        unconfiguredCashModule.setGateway(address(newGateway));
+        unconfiguredCashModule.setLendGateway(address(newGateway));
 
-        assertEq(address(unconfiguredCashModule.getGateway()), address(newGateway));
+        assertEq(address(unconfiguredCashModule.getLendGateway()), address(newGateway));
     }
 
     /// @notice CashLens should read the gateway configured during the one-time Lend bootstrap.
-    function test_setGateway_bootstrapUpdatesCashLensReads() public {
+    function test_setLendGateway_bootstrapUpdatesCashLensReads() public {
         (ICashModule unconfiguredCashModule, CashLens unconfiguredCashLens) = _deployUnconfiguredCashModule();
-        MockGateway newGateway = new MockGateway();
+        MockLendGateway newGateway = new MockLendGateway();
 
         vm.prank(address(safe));
         unconfiguredCashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
@@ -72,10 +72,10 @@ contract CashModuleSetGatewayTest is CashModuleTestSetup {
         amountsInUsd[0] = 100e6;
 
         newGateway.setAvailableCash(address(usdc), type(uint128).max);
-        newGateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 200e6, debtUsd: 0, availableBorrowsUsd: amountsInUsd[0], healthFactor: type(uint256).max }));
+        newGateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 200e6, debtUsd: 0, availableBorrowsUsd: amountsInUsd[0], healthFactor: type(uint256).max }));
 
         vm.prank(owner);
-        unconfiguredCashModule.setGateway(address(newGateway));
+        unconfiguredCashModule.setLendGateway(address(newGateway));
 
         assertEq(address(unconfiguredCashLens.gateway()), address(newGateway));
 
@@ -88,26 +88,26 @@ contract CashModuleSetGatewayTest is CashModuleTestSetup {
         assertEq(reason, "");
     }
 
-    /// @notice Gateway bootstrap rejects unauthorized callers, zero addresses, and attempts to overwrite a configured gateway.
-    function test_setGateway_revertsForInvalidCalls() public {
-        MockGateway newGateway = new MockGateway();
+    /// @notice LendGateway bootstrap rejects unauthorized callers, zero addresses, and attempts to overwrite a configured gateway.
+    function test_setLendGateway_revertsForInvalidCalls() public {
+        MockLendGateway newGateway = new MockLendGateway();
 
         vm.prank(notOwner);
         vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
-        cashModule.setGateway(address(newGateway));
+        cashModule.setLendGateway(address(newGateway));
 
         vm.prank(owner);
         vm.expectRevert(ICashModule.InvalidInput.selector);
-        cashModule.setGateway(address(0));
+        cashModule.setLendGateway(address(0));
 
         // An address with no contract code is rejected by the deployed-contract check.
         vm.prank(owner);
         vm.expectRevert(ICashModule.InvalidInput.selector);
-        cashModule.setGateway(makeAddr("codelessGateway"));
+        cashModule.setLendGateway(makeAddr("codelessGateway"));
 
         vm.prank(owner);
         vm.expectRevert(ICashModule.GatewayAlreadySet.selector);
-        cashModule.setGateway(address(newGateway));
+        cashModule.setLendGateway(address(newGateway));
     }
 
     /// @dev Deploys a CashModule/CashLens pair with no gateway configured so tests can exercise first-time bootstrap.
