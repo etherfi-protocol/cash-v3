@@ -42,6 +42,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
 
         address rrImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(rrImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), owner);
 
         address dispImpl = address(new SettlementDispatcherV2(BinSponsor.Reap, dataProvider));
 

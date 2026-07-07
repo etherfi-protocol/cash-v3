@@ -70,6 +70,7 @@ contract SettlementDispatcherV2CCTPTest is Test, Constants {
 
         address rrImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(rrImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), owner);
 
         address dispImpl = address(new SettlementDispatcherV2(BinSponsor.Reap, dataProvider));
 
@@ -127,7 +128,7 @@ contract SettlementDispatcherV2CCTPTest is Test, Constants {
 
     function test_cctp_setCCTPConfig_reverts_whenNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         dispatcher.setCCTPConfig(address(mockMessenger), DEST_DOMAIN_ETHEREUM, 0, 2000);
     }
 

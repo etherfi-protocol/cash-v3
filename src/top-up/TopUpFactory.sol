@@ -182,7 +182,7 @@ contract TopUpFactory is BeaconFactory, Constants {
 
     /**
      * @notice Sets configuration parameters for multiple tokens
-     * @dev Allows admin to configure bridge settings for multiple tokens in a single transaction
+     * @dev Only callable by the governance multisig (GOVERNANCE_ROLE); configures bridge settings for multiple tokens in a single transaction
      * @param tokens Array of token addresses to configure
      * @param configs Array of TokenConfig structs containing bridge settings for each token
      * @custom:throws ArrayLengthMismatch if tokens and configs arrays have different lengths
@@ -193,7 +193,7 @@ contract TopUpFactory is BeaconFactory, Constants {
      *   - maxSlippageInBps exceeds MAX_ALLOWED_SLIPPAGE
      * @custom:emits TokenConfigSet when configs are updated
      */
-    function setTokenConfig(address[] calldata tokens, uint256[] calldata chainIds, TokenConfig[] calldata configs) external onlyRoleRegistryOwner {
+    function setTokenConfig(address[] calldata tokens, uint256[] calldata chainIds, TokenConfig[] calldata configs) external onlyGovernanceMultisig {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
         if (len != configs.length || len != chainIds.length) revert ArrayLengthMismatch();
@@ -245,15 +245,15 @@ contract TopUpFactory is BeaconFactory, Constants {
 
     /**
      * @notice Recovers ERC20 tokens to the designated recovery wallet
-     * @dev Only callable by admin role
+     * @dev Only callable by the governance multisig (GOVERNANCE_ROLE)
      * @param token The address of the token to recover
      * @param amount The amount of tokens to recover
-     * @custom:throws OnlyAdmin if caller doesn't have admin role
+     * @custom:throws OnlyGovernanceMultisig if caller doesn't have GOVERNANCE_ROLE
      * @custom:throws TokenCannotBeZeroAddress if token address is zero
      * @custom:throws OnlyUnsupportedTokens if token is a supported bridge asset
      * @custom:throws RecoveryWalletNotSet if recovery wallet is not configured
      */
-    function recoverFunds(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner {
+    function recoverFunds(address token, uint256 amount) external nonReentrant onlyGovernanceMultisig {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
@@ -270,12 +270,12 @@ contract TopUpFactory is BeaconFactory, Constants {
 
     /**
      * @notice Sets the recovery wallet address for emergency fund recovery
-     * @dev Only callable by admin role
+     * @dev Only callable by the governance multisig (GOVERNANCE_ROLE)
      * @param _recoveryWallet The new recovery wallet address
-     * @custom:throws OnlyAdmin if caller doesn't have admin role
+     * @custom:throws OnlyGovernanceMultisig if caller doesn't have GOVERNANCE_ROLE
      * @custom:throws RecoveryWalletCannotBeZeroAddress if provided address is zero
      */
-    function setRecoveryWallet(address _recoveryWallet) external onlyRoleRegistryOwner {
+    function setRecoveryWallet(address _recoveryWallet) external onlyGovernanceMultisig {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (_recoveryWallet == address(0)) revert RecoveryWalletCannotBeZeroAddress();

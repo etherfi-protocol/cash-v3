@@ -33,6 +33,10 @@ contract VerifyTopUpBaseBytecode is ContractCodeChecker, Utils {
     // ---- TopUpFactory (proxy → impl) ----
 
     function test_verifyBytecode_TopUpFactory() public {
+        // Skipped: this contract was re-gated to GOVERNANCE_ROLE in STAKE-1673, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the new
+        // impl is deployed (STAKE-1676).
+        vm.skip(true);
         address proxy = stdJson.readAddress(deployments, ".addresses.TopUpSourceFactory");
         address deployed = address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
         address local = address(new TopUpFactory());
