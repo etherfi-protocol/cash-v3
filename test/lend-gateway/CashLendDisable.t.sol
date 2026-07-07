@@ -7,11 +7,11 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { BinSponsor, ICashModule, Mode } from "../../src/interfaces/ICashModule.sol";
-import { IGateway } from "../../src/interfaces/IGateway.sol";
+import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
 import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../src/libraries/SignatureUtils.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
-import { Gateway } from "../../src/modules/gateway/Gateway.sol";
+import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
@@ -24,13 +24,13 @@ import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
  *         pulling ALL its collateral out of Aave back into the safe, forcing Debit mode, and blocking every
  *         further lend op (auto-supply / borrow) until it opts back in with toggleLend(true). Runs against a
  *         REAL Aave v4 instance deployed in-test on an Optimism fork, driven by the real ether.fi stack
- *         (CashModule, Gateway, EtherFiSafe) — no mocks.
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/gateway/CashLendDisable.t.sol
+ *         (CashModule, LendGateway, EtherFiSafe) — no mocks.
+ * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/CashLendDisable.t.sol
  */
 contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
     using MessageHashUtils for bytes32;
 
-    Gateway internal gw;
+    LendGateway internal gw;
     address internal driver = makeAddr("gwDriver"); // arranges Aave positions directly in tests
 
     uint256 internal usdcReserveId;
@@ -48,18 +48,18 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 8000, true);
         _seedAaveLiquidity(usdcReserveId, address(usdc), 1_000_000e6);
 
-        // Gateway proxy + wiring
-        address gwImpl = address(new Gateway(address(dataProvider), address(spoke)));
-        gw = Gateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(Gateway.initialize.selector, address(roleRegistry)))));
+        // LendGateway proxy + wiring
+        address gwImpl = address(new LendGateway(address(dataProvider), address(spoke)));
+        gw = LendGateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(LendGateway.initialize.selector, address(roleRegistry)))));
 
         vm.startPrank(owner);
-        roleRegistry.grantRole(gw.GATEWAY_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
         dataProvider.configureModules(_addr1(address(gw)), _bool1(true));
         gw.setReserveId(address(weETH), weethReserveId);
         gw.setReserveId(address(usdc), usdcReserveId);
         gw.setDriver(driver, true);
         // Wire the CashModule to the real gateway (source of the collateral-withdraw path) and give a real mode delay
-        cashModule.setGateway(address(gw));
+        cashModule.setLendGateway(address(gw));
         cashModule.setDelays(1, 3600, MODE_DELAY);
         vm.stopPrank();
 
@@ -67,19 +67,19 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         _activateAavePositionManager(address(gw));
     }
 
-    /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setGateway(gw) above is
+    /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setLendGateway(gw) above is
     ///      the first and only set. Without this, that call would revert GatewayAlreadySet.
     function _wireDefaultGateway() internal override { }
 
     // ----------------------------------------------------------------- wiring & defaults
 
-    /// @notice The gateway is wired once during setup and cannot be repointed (role/zero/codeless guards live in SetGateway.t.sol).
+    /// @notice The gateway is wired once during setup and cannot be repointed (role/zero/codeless guards live in SetLendGateway.t.sol).
     function test_lendGateway_wiredOnceAndImmutable() public {
-        assertEq(cashModule.getLendGateway(), address(gw));
+        assertEq(address(cashModule.getLendGateway()), address(gw));
 
         vm.prank(owner);
         vm.expectRevert(ICashModule.GatewayAlreadySet.selector);
-        cashModule.setGateway(address(gw));
+        cashModule.setLendGateway(address(gw));
     }
 
     /// A fresh safe starts with lend enabled and no pending disable.
@@ -127,11 +127,11 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         // Every lend op through the gateway is now rejected
         deal(address(weETH), address(safe), 1 ether);
         vm.startPrank(driver);
-        vm.expectRevert(Gateway.LendDisabled.selector);
+        vm.expectRevert(LendGateway.LendDisabled.selector);
         gw.supply(address(safe), address(weETH), 1 ether);
-        vm.expectRevert(Gateway.LendDisabled.selector);
+        vm.expectRevert(LendGateway.LendDisabled.selector);
         gw.borrow(address(safe), address(usdc), 1e6, driver);
-        vm.expectRevert(Gateway.LendDisabled.selector);
+        vm.expectRevert(LendGateway.LendDisabled.selector);
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
         vm.stopPrank();
     }
@@ -290,7 +290,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
     ///      deep in Aave when withdrawing the collateral. Injects 1 wei of raw debt via a mocked debtOf on the
     ///      wired gateway; there is no real Aave position, so the USD aggregate still floors to zero.
     function test_toggleLendDisable_revertsOnDustDebtBelowUsdFloor() public {
-        vm.mockCall(address(gw), abi.encodeWithSelector(IGateway.debtOf.selector, address(safe), address(weETH)), abi.encode(uint256(1)));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.debtOf.selector, address(safe), address(weETH)), abi.encode(uint256(1)));
 
         // Premise of the test: the USD aggregate floors this dust to zero, so only the raw debtOf check catches it
         assertEq(gw.getAccountData(address(safe)).debtUsd, 0, "dust floors to zero USD");
@@ -312,7 +312,7 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
 
         vm.startPrank(driver);
         gw.setUsingAsCollateral(address(safe), address(weETH), false); // must not revert
-        vm.expectRevert(Gateway.LendDisabled.selector);
+        vm.expectRevert(LendGateway.LendDisabled.selector);
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
         vm.stopPrank();
     }

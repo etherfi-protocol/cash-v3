@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 
-import { IGateway } from "../../../src/interfaces/IGateway.sol";
-import { MockGateway } from "../../../src/mocks/MockGateway.sol";
+import { ILendGateway } from "../../../src/interfaces/ILendGateway.sol";
+import { MockLendGateway } from "../../../src/mocks/MockLendGateway.sol";
 import { ModuleGatewaySandwich } from "../../../src/modules/ModuleGatewaySandwich.sol";
 
 /// @notice Exposes the base's internal bookends so they can be called directly in tests
@@ -27,7 +27,7 @@ contract SandwichHarness is ModuleGatewaySandwich {
 }
 
 contract ModuleGatewaySandwichTest is Test {
-    MockGateway gateway;
+    MockLendGateway gateway;
     SandwichHarness harness;
 
     uint256 constant MIN_HEALTH_FACTOR = 1e18;
@@ -36,12 +36,12 @@ contract ModuleGatewaySandwichTest is Test {
     address asset = makeAddr("asset");
 
     function setUp() public {
-        gateway = new MockGateway();
+        gateway = new MockLendGateway();
         harness = new SandwichHarness(address(gateway), MIN_HEALTH_FACTOR);
     }
 
     function _setHealthFactor(uint256 healthFactor) internal {
-        gateway.setAccountData(safe, IGateway.AccountData({ collateralUsd: 0, debtUsd: 0, availableBorrowsUsd: 0, healthFactor: healthFactor }));
+        gateway.setAccountData(safe, ILendGateway.AccountData({ collateralUsd: 0, debtUsd: 0, availableBorrowsUsd: 0, healthFactor: healthFactor }));
     }
 
     // A zero gateway address is rejected at deployment.

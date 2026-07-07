@@ -306,7 +306,7 @@ interface IDebtManager {
      * @param safe Address of the EtherFi Safe.
      * @return True if the safe has migrated to Aave.
      */
-    function hasMigratedToAave(address safe) external view returns (bool);
+    function hasMigratedToLendGateway(address safe) external view returns (bool);
 
     /**
      * @notice Function to fetch the max borrow amount for ltv or liquidation purpose.

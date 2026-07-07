@@ -7,7 +7,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 
 import { Mode, SafeCashData, BinSponsor, SafeData, Cashback, CashbackTokens } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiSafeFactory } from "../../../../src/interfaces/IEtherFiSafeFactory.sol";
-import { IGateway } from "../../../../src/interfaces/IGateway.sol";
+import { ILendGateway } from "../../../../src/interfaces/ILendGateway.sol";
 import { CashLens } from "../../../../src/modules/cash/CashLens.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
@@ -227,9 +227,9 @@ contract CashLensTest is CashModuleTestSetup {
         // Mirror the current position (collateral only; no real borrow was executed, so debt is 0).
         _mirrorPositionToGateway(address(safe));
         // Layer a fabricated borrow on top for CashLens to read.
-        IGateway.AccountData memory account = gateway.getAccountData(address(safe));
+        ILendGateway.AccountData memory account = gateway.getAccountData(address(safe));
         gateway.setDebtOf(address(safe), address(usdc), spendAmount);
-        gateway.setAccountData(address(safe), IGateway.AccountData({
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({
             collateralUsd: account.collateralUsd,
             debtUsd: spendAmount,
             availableBorrowsUsd: account.availableBorrowsUsd > spendAmount ? account.availableBorrowsUsd - spendAmount : 0,

@@ -9,13 +9,13 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { IAaveV4Spoke } from "../../interfaces/IAaveV4Spoke.sol";
 import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { IGateway } from "../../interfaces/IGateway.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
 /**
- * @title Gateway
+ * @title LendGateway
  * @notice A safe's Aave v4 position manager. The gateway is registered on the Spoke by governance
  *         (updatePositionManager) and approved per-safe (setUserPositionManager); once both hold, it can
  *         supply/withdraw/borrow/repay on a safe's behalf without a per-op user signature.
@@ -26,13 +26,13 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  *         break until re-approved). This is enforced by Aave, not re-implemented here.
  *      2. Cash side: only an authorized driver may call the mutating ops. The CashModule is always a driver
  *         (resolved live from the data provider); further drivers (auto-supply, migration) are added by a
- *         GATEWAY_ADMIN_ROLE holder. A position manager can move user funds, so who may drive it is the most
+ *         LEND_GATEWAY_ADMIN_ROLE holder. A position manager can move user funds, so who may drive it is the most
  *         security-critical surface in this contract.
  *
  *      Aave v4 addresses reserves by a uint256 reserveId, not by asset address. The gateway keeps its own
  *      asset -> reserveId registry, each entry validated against the Spoke's getReserve at registration time.
  *
- *      USD reads: IGateway's collateralUsd/debtUsd/availableBorrowsUsd are 6-decimal USD (PriceProvider
+ *      USD reads: ILendGateway's collateralUsd/debtUsd/availableBorrowsUsd are 6-decimal USD (PriceProvider
  *      scale). Aave reports position value in opaque "units of Value"/RAY, so the gateway does NOT consume
  *      those; it re-derives USD from ether.fi's PriceProvider over the registered assets (matching CashLens),
  *      applying each reserve's LTV for the borrow headroom, and takes only healthFactor (WAD == 1e18) from Aave.
@@ -45,7 +45,7 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  *      on the Spoke, or pausing this gateway — not a per-safe opt-out.
  * @author ether.fi
  */
-contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
+contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     using SafeERC20 for IERC20;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
 
@@ -53,15 +53,15 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     IAaveV4Spoke public immutable spoke;
 
     /// @notice Role that registers reserves and manages the driver allowlist
-    bytes32 public constant GATEWAY_ADMIN_ROLE = keccak256("GATEWAY_ADMIN_ROLE");
+    bytes32 public constant LEND_GATEWAY_ADMIN_ROLE = keccak256("LEND_GATEWAY_ADMIN_ROLE");
 
-    /// @notice 100% in the IGateway ltv scale (100e18 == 100%)
+    /// @notice 100% in the ILendGateway ltv scale (100e18 == 100%)
     uint256 internal constant HUNDRED_PERCENT = 100e18;
     /// @notice Converts Aave's BPS collateralFactor to the 100e18 ltv scale (bps * 1e16; 10_000 * 1e16 == 100e18)
     uint256 internal constant BPS_TO_LTV_SCALE = 1e16;
 
-    /// @custom:storage-location erc7201:etherfi.storage.Gateway
-    struct GatewayStorage {
+    /// @custom:storage-location erc7201:etherfi.storage.LendGateway
+    struct LendGatewayStorage {
         /// @notice asset -> Aave reserveId (membership is tracked by `assets`, since reserveId 0 is valid)
         mapping(address asset => uint256 reserveId) reserveId;
         /// @notice The registered assets; membership doubles as the "is registered" check
@@ -70,8 +70,8 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         mapping(address driver => bool authorized) isDriver;
     }
 
-    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.Gateway")) - 1)) & ~bytes32(uint256(0xff))
-    bytes32 private constant GatewayStorageLocation = 0xef6b7ff7f22dbe95f109f1722b6c4f5324bd342b000fbc132fbeb4f135815100;
+    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.LendGateway")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant LendGatewayStorageLocation = 0x08cdfbb611f2a1b86b361fad47cf7e3d848e6642121a10c5da4ae64fe25c9800;
 
     /// @notice Emitted when an asset's reserveId is registered or updated
     event ReserveRegistered(address indexed asset, uint256 indexed reserveId);
@@ -129,7 +129,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
 
     /// @dev Reverts unless the caller is the CashModule or an authorized driver
     function _onlyDriver() internal view {
-        if (msg.sender != etherFiDataProvider.getCashModule() && !_getGatewayStorage().isDriver[msg.sender]) revert OnlyDriver();
+        if (msg.sender != etherFiDataProvider.getCashModule() && !_getLendGatewayStorage().isDriver[msg.sender]) revert OnlyDriver();
     }
 
     modifier onlyDriver() {
@@ -157,11 +157,11 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * the USD views then read the new reserve and miss the old, understating debt and 
      * inflating borrow headroom.
      */
-    function setReserveId(address asset, uint256 reserveId) external onlyRole(GATEWAY_ADMIN_ROLE) {
+    function setReserveId(address asset, uint256 reserveId) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
         if (asset == address(0)) revert ZeroAddress();
         if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
 
-        GatewayStorage storage $ = _getGatewayStorage();
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
         $.assets.add(asset);
         $.reserveId[asset] = reserveId;
 
@@ -174,8 +174,8 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * @dev Warning: do not remove an asset any safe still holds a position in; 
      * it drops from the USD views (debt reads 0), understating debt and inflating borrow headroom.
      */
-    function removeReserve(address asset) external onlyRole(GATEWAY_ADMIN_ROLE) {
-        GatewayStorage storage $ = _getGatewayStorage();
+    function removeReserve(address asset) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
 
         $.assets.remove(asset);
@@ -189,9 +189,9 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * @param driver The driver contract (e.g. an auto-supply or migration module)
      * @param authorized True to authorize, false to revoke
      */
-    function setDriver(address driver, bool authorized) external onlyRole(GATEWAY_ADMIN_ROLE) {
+    function setDriver(address driver, bool authorized) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
         if (driver == address(0)) revert ZeroAddress();
-        _getGatewayStorage().isDriver[driver] = authorized;
+        _getLendGatewayStorage().isDriver[driver] = authorized;
         emit DriverSet(driver, authorized);
     }
 
@@ -226,7 +226,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     }
 
     // ---------------------------------------------------------------------
-    // IGateway operations (drivers only)
+    // ILendGateway operations (drivers only)
     // ---------------------------------------------------------------------
 
     /**
@@ -360,7 +360,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     }
 
     // ---------------------------------------------------------------------
-    // IGateway reads
+    // ILendGateway reads
     // ---------------------------------------------------------------------
 
     /**
@@ -374,7 +374,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      */
     function getAccountData(address safe) external view returns (AccountData memory data) {
         IPriceProvider priceProvider = IPriceProvider(etherFiDataProvider.getPriceProvider());
-        GatewayStorage storage $ = _getGatewayStorage();
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
 
         uint256 maxBorrowUsd;
         uint256 len = $.assets.length();
@@ -400,7 +400,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
         }
 
         data.availableBorrowsUsd = maxBorrowUsd > data.debtUsd ? maxBorrowUsd - data.debtUsd : 0;
-        // healthFactor is WAD (1e18) on Aave, matching IGateway's 1e18 scale.
+        // healthFactor is WAD (1e18) on Aave, matching ILendGateway's 1e18 scale.
         data.healthFactor = spoke.getUserAccountData(safe).healthFactor;
     }
 
@@ -411,7 +411,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * @return The supplied amount in asset units, or 0 if the asset is not registered
      */
     function suppliedOf(address safe, address asset) external view returns (uint256) {
-        GatewayStorage storage $ = _getGatewayStorage();
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
         return spoke.getUserSuppliedAssets($.reserveId[asset], safe);
     }
@@ -423,7 +423,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * @return The debt amount in asset units, or 0 if the asset is not registered
      */
     function debtOf(address safe, address asset) external view returns (uint256) {
-        GatewayStorage storage $ = _getGatewayStorage();
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
         return spoke.getUserTotalDebt($.reserveId[asset], safe);
     }
@@ -434,7 +434,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * @return The available liquidity in asset units, or 0 if the asset is not registered
      */
     function availableCash(address asset) external view returns (uint256) {
-        GatewayStorage storage $ = _getGatewayStorage();
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
         uint256 reserveId = $.reserveId[asset];
         uint256 supplied = spoke.getReserveSuppliedAssets(reserveId);
@@ -449,7 +449,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
      * @return The LTV where 100e18 is 100%, or 0 if the asset is not registered
      */
     function ltv(address asset) external view returns (uint256) {
-        GatewayStorage storage $ = _getGatewayStorage();
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
         return _ltv($.reserveId[asset]);
     }
@@ -476,17 +476,17 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
 
     /// @notice Whether `asset` has a registered reserveId
     function isRegistered(address asset) external view returns (bool) {
-        return _getGatewayStorage().assets.contains(asset);
+        return _getLendGatewayStorage().assets.contains(asset);
     }
 
     /// @notice The list of registered assets
     function registeredAssets() external view returns (address[] memory) {
-        return _getGatewayStorage().assets.values();
+        return _getLendGatewayStorage().assets.values();
     }
 
     /// @notice Whether `account` may drive the gateway (CashModule or an authorized driver)
     function isDriver(address account) external view returns (bool) {
-        return account == etherFiDataProvider.getCashModule() || _getGatewayStorage().isDriver[account];
+        return account == etherFiDataProvider.getCashModule() || _getLendGatewayStorage().isDriver[account];
     }
 
     /// @notice Whether `safe` currently approves this gateway as an (active) position manager on the Spoke
@@ -514,7 +514,7 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
 
     /// @dev The registered reserveId for `asset`, reverting if unregistered
     function _reserveIdOf(address asset) internal view returns (uint256) {
-        GatewayStorage storage $ = _getGatewayStorage();
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
         return $.reserveId[asset];
     }
@@ -532,9 +532,9 @@ contract Gateway is IGateway, UpgradeableProxy, ModuleBase {
     }
 
     /// @dev Returns the ERC-7201 storage struct
-    function _getGatewayStorage() internal pure returns (GatewayStorage storage $) {
+    function _getLendGatewayStorage() internal pure returns (LendGatewayStorage storage $) {
         assembly {
-            $.slot := GatewayStorageLocation
+            $.slot := LendGatewayStorageLocation
         }
     }
 }

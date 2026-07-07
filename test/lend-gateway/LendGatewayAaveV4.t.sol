@@ -5,8 +5,8 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
-import { IGateway } from "../../src/interfaces/IGateway.sol";
-import { Gateway } from "../../src/modules/gateway/Gateway.sol";
+import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
+import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
@@ -15,14 +15,14 @@ import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 /**
- * @title GatewayAaveV4Test
- * @notice End-to-end Gateway tests against a REAL Aave v4 instance deployed inside the test on an Optimism
+ * @title LendGatewayAaveV4Test
+ * @notice End-to-end LendGateway tests against a REAL Aave v4 instance deployed inside the test on an Optimism
  *         fork, driven by the REAL ether.fi stack (EtherFiSafe, EtherFiDataProvider, RoleRegistry,
  *         PriceProvider) — no mocks. Aave reserves are priced by live Optimism Chainlink feeds.
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/gateway/GatewayAaveV4.t.sol
+ * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/LendGatewayAaveV4.t.sol
  */
-contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
-    Gateway internal gw;
+contract LendGatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
+    LendGateway internal gw;
     address internal driver = makeAddr("gwDriver");
     address internal recipient = makeAddr("gwRecipient");
 
@@ -46,20 +46,20 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
         // Seed borrowable USDC liquidity into the hub
         _seedAaveLiquidity(usdcReserveId, address(usdc), 1_000_000e6);
 
-        // 3. Deploy the Gateway proxy pointing at the fresh spoke
-        address gwImpl = address(new Gateway(address(dataProvider), address(spoke)));
-        gw = Gateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(Gateway.initialize.selector, address(roleRegistry)))));
+        // 3. Deploy the LendGateway proxy pointing at the fresh spoke
+        address gwImpl = address(new LendGateway(address(dataProvider), address(spoke)));
+        gw = LendGateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(LendGateway.initialize.selector, address(roleRegistry)))));
 
-        // 4. Wire the Gateway: roles, reserve registry, driver, whitelist as a module
+        // 4. Wire the LendGateway: roles, reserve registry, driver, whitelist as a module
         vm.startPrank(owner);
-        roleRegistry.grantRole(gw.GATEWAY_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
         dataProvider.configureModules(_addr1(address(gw)), _bool1(true));
         gw.setReserveId(address(weETH), weethReserveId);
         gw.setReserveId(address(usdc), usdcReserveId);
         gw.setDriver(driver, true);
         vm.stopPrank();
 
-        // Enable the Gateway as a module on the safe (owner-signed) and activate it as an Aave position manager
+        // Enable the LendGateway as a module on the safe (owner-signed) and activate it as an Aave position manager
         _enableModule(address(gw));
         _activateAavePositionManager(address(gw));
     }
@@ -73,12 +73,12 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
 
         // A reserveId whose underlying != the asset is rejected
         vm.prank(owner);
-        vm.expectRevert(Gateway.ReserveAssetMismatch.selector);
+        vm.expectRevert(LendGateway.ReserveAssetMismatch.selector);
         gw.setReserveId(address(weETH), usdcReserveId);
     }
 
     function test_reads_ltvAndLiquidity() public view {
-        // 80_00 bps -> 80e18 in IGateway's 100e18 scale
+        // 80_00 bps -> 80e18 in ILendGateway's 100e18 scale
         assertEq(gw.ltv(address(usdc)), 80e18);
         assertEq(gw.ltv(address(weETH)), 80e18);
         // Seeded liquidity is withdrawable/borrowable cash
@@ -86,7 +86,7 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
     }
 
     function test_getAccountData_freshSafeIsEmptyAndHealthy() public view {
-        IGateway.AccountData memory data = gw.getAccountData(address(safe));
+        ILendGateway.AccountData memory data = gw.getAccountData(address(safe));
         assertEq(data.collateralUsd, 0);
         assertEq(data.debtUsd, 0);
         assertEq(data.availableBorrowsUsd, 0);
@@ -124,7 +124,7 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
         assertEq(usdc.balanceOf(recipient), 1000e6, "recipient receives borrow");
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 1000e6, 2, "debt recorded");
 
-        IGateway.AccountData memory data = gw.getAccountData(address(safe));
+        ILendGateway.AccountData memory data = gw.getAccountData(address(safe));
         assertGt(data.collateralUsd, 0, "collateral valued");
         assertApproxEqAbs(data.debtUsd, 1000e6, 1e6, "debt in USD");
         assertGt(data.availableBorrowsUsd, 0, "headroom remains");
@@ -169,7 +169,7 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
     function test_onlyDriverCanOperate() public {
         deal(address(weETH), address(safe), 1 ether);
         vm.prank(makeAddr("notADriver"));
-        vm.expectRevert(Gateway.OnlyDriver.selector);
+        vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.supply(address(safe), address(weETH), 1 ether);
     }
 
@@ -189,7 +189,7 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
 
     function test_setReserveId_rejectsZeroAsset() public {
         vm.prank(owner);
-        vm.expectRevert(Gateway.ZeroAddress.selector);
+        vm.expectRevert(LendGateway.ZeroAddress.selector);
         gw.setReserveId(address(0), 0);
     }
 
@@ -203,14 +203,14 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
         assertEq(gw.suppliedOf(address(safe), address(usdc)), 0);
         assertEq(gw.debtOf(address(safe), address(usdc)), 0);
 
-        vm.expectRevert(abi.encodeWithSelector(Gateway.AssetNotRegistered.selector, address(usdc)));
+        vm.expectRevert(abi.encodeWithSelector(LendGateway.AssetNotRegistered.selector, address(usdc)));
         gw.reserveIdOf(address(usdc));
     }
 
     function test_removeReserve_guards() public {
         address never = makeAddr("neverRegistered");
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(Gateway.AssetNotRegistered.selector, never));
+        vm.expectRevert(abi.encodeWithSelector(LendGateway.AssetNotRegistered.selector, never));
         gw.removeReserve(never);
 
         vm.prank(makeAddr("notAdmin"));
@@ -226,12 +226,12 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
         gw.setDriver(driver, false);
         deal(address(weETH), address(safe), 1 ether);
         vm.prank(driver);
-        vm.expectRevert(Gateway.OnlyDriver.selector);
+        vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.supply(address(safe), address(weETH), 1 ether);
 
         // Zero address and role gating
         vm.prank(owner);
-        vm.expectRevert(Gateway.ZeroAddress.selector);
+        vm.expectRevert(LendGateway.ZeroAddress.selector);
         gw.setDriver(address(0), true);
 
         vm.prank(makeAddr("notAdmin"));
@@ -243,20 +243,20 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
 
     function test_mutatingOps_onlyDriver() public {
         vm.startPrank(makeAddr("notADriver"));
-        vm.expectRevert(Gateway.OnlyDriver.selector);
+        vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.withdraw(address(safe), address(weETH), 1, recipient);
-        vm.expectRevert(Gateway.OnlyDriver.selector);
+        vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.borrow(address(safe), address(usdc), 1, recipient);
-        vm.expectRevert(Gateway.OnlyDriver.selector);
+        vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.repay(address(safe), address(usdc), 1);
-        vm.expectRevert(Gateway.OnlyDriver.selector);
+        vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
         vm.stopPrank();
     }
 
     function test_mutatingOps_revertOnUnregisteredAsset() public {
         address unreg = makeAddr("unregisteredAsset");
-        bytes memory notRegistered = abi.encodeWithSelector(Gateway.AssetNotRegistered.selector, unreg);
+        bytes memory notRegistered = abi.encodeWithSelector(LendGateway.AssetNotRegistered.selector, unreg);
         vm.startPrank(driver);
         vm.expectRevert(notRegistered);
         gw.supply(address(safe), unreg, 1e18);
@@ -273,18 +273,18 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
 
     function test_ops_revertOnZeroAmountAndRecipient() public {
         vm.startPrank(driver);
-        vm.expectRevert(Gateway.ZeroAmount.selector);
+        vm.expectRevert(LendGateway.ZeroAmount.selector);
         gw.supply(address(safe), address(weETH), 0);
-        vm.expectRevert(Gateway.ZeroAmount.selector);
+        vm.expectRevert(LendGateway.ZeroAmount.selector);
         gw.withdraw(address(safe), address(weETH), 0, recipient);
-        vm.expectRevert(Gateway.ZeroAmount.selector);
+        vm.expectRevert(LendGateway.ZeroAmount.selector);
         gw.borrow(address(safe), address(usdc), 0, recipient);
-        vm.expectRevert(Gateway.ZeroAddress.selector);
+        vm.expectRevert(LendGateway.ZeroAddress.selector);
         gw.withdraw(address(safe), address(weETH), 1, address(0));
-        vm.expectRevert(Gateway.ZeroAddress.selector);
+        vm.expectRevert(LendGateway.ZeroAddress.selector);
         gw.borrow(address(safe), address(usdc), 1, address(0));
         // repay(max) with no debt resolves to a zero pull amount
-        vm.expectRevert(Gateway.ZeroAmount.selector);
+        vm.expectRevert(LendGateway.ZeroAmount.selector);
         gw.repay(address(safe), address(usdc), type(uint256).max);
         vm.stopPrank();
     }
@@ -357,8 +357,8 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
     }
 
     function test_constructor_revertsOnZeroSpoke() public {
-        vm.expectRevert(Gateway.ZeroAddress.selector);
-        new Gateway(address(dataProvider), address(0));
+        vm.expectRevert(LendGateway.ZeroAddress.selector);
+        new LendGateway(address(dataProvider), address(0));
     }
 
     // ----------------------------------------------------------------- proof the deployed Aave pool is live
@@ -438,7 +438,7 @@ contract GatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
         gw.setUsingAsCollateral(address(safe), address(weETH), false);
         vm.stopPrank();
 
-        IGateway.AccountData memory data = gw.getAccountData(address(safe));
+        ILendGateway.AccountData memory data = gw.getAccountData(address(safe));
         assertGt(data.collateralUsd, 0, "supplied value counted as collateralUsd");
         assertEq(data.availableBorrowsUsd, 0, "no borrow power without collateral enabled");
         assertEq(data.debtUsd, 0);

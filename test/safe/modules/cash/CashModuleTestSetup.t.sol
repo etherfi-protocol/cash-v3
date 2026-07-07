@@ -13,7 +13,7 @@ import { DebtManagerCore, DebtManagerStorageContract } from "../../../../src/deb
 import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
 import { Cashback, CashbackTokens, Mode, SafeTiers } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
-import { IGateway } from "../../../../src/interfaces/IGateway.sol";
+import { ILendGateway } from "../../../../src/interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../../../src/interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 import { SpendingLimit } from "../../../../src/libraries/SpendingLimitLib.sol";
@@ -160,12 +160,12 @@ contract CashModuleTestSetup is SafeTestSetup {
     /**
      * @notice Flips a safe back to the legacy DebtManager engine, modeling a safe that predates the gateway
      *         (new safes onboard onto the Aave gateway in setupModule).
-     * @dev Writes the packed usesAave flag via stdstore, then asserts through the public getter so any
+     * @dev Writes the packed usesLendGateway flag via stdstore, then asserts through the public getter so any
      *      storage-layout drift fails loudly here instead of silently testing the wrong engine.
      */
     function _forceLegacyEngine(address _safe) internal {
-        stdstore.enable_packed_slots().target(address(cashModule)).sig(ICashModule.usesAave.selector).with_key(_safe).checked_write(false);
-        assertFalse(cashModule.usesAave(_safe), "forceLegacyEngine: flag still set");
+        stdstore.enable_packed_slots().target(address(cashModule)).sig(ICashModule.usesLendGateway.selector).with_key(_safe).checked_write(false);
+        assertFalse(cashModule.usesLendGateway(_safe), "forceLegacyEngine: flag still set");
     }
 
     /**
@@ -206,6 +206,6 @@ contract CashModuleTestSetup is SafeTestSetup {
             gateway.setAvailableCash(borrowTokens[i], type(uint128).max);
         }
 
-        gateway.setAccountData(_safe, IGateway.AccountData({ collateralUsd: totalCollateralUsd, debtUsd: totalBorrowUsd, availableBorrowsUsd: maxBorrowUsd > totalBorrowUsd ? maxBorrowUsd - totalBorrowUsd : 0, healthFactor: type(uint256).max }));
+        gateway.setAccountData(_safe, ILendGateway.AccountData({ collateralUsd: totalCollateralUsd, debtUsd: totalBorrowUsd, availableBorrowsUsd: maxBorrowUsd > totalBorrowUsd ? maxBorrowUsd - totalBorrowUsd : 0, healthFactor: type(uint256).max }));
     }
 }

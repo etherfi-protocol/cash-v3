@@ -10,7 +10,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { IGateway } from "../../interfaces/IGateway.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
@@ -71,7 +71,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @custom:throws InvalidInput if gateway has no contract code (also rejects address(0))
      * @custom:throws GatewayAlreadySet if the gateway has already been configured
      */
-    function setGateway(address gateway) external {
+    function setLendGateway(address gateway) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
         // One-time bootstrap that can't be repointed, so guard against a mistyped EOA or undeployed address.
         if (gateway.code.length == 0) revert InvalidInput();
@@ -81,28 +81,20 @@ contract CashModuleSetters is CashModuleStorageContract {
         // Repointing after positions exist can strand accounting and must use a dedicated migration flow.
         if (address($.gateway) != address(0)) revert GatewayAlreadySet();
 
-        $.gateway = IGateway(gateway);
-        $.cashEventEmitter.emitGatewaySet(gateway);
-    }
-
-    /**
-     * @notice Returns the Aave gateway contract
-     * @return Gateway instance
-     */
-    function getGateway() public view returns (IGateway) {
-        return _getCashModuleStorage().gateway;
+        $.gateway = ILendGateway(gateway);
+        $.cashEventEmitter.emitLendGatewaySet(gateway);
     }
 
     /**
      * @notice Marks a safe as using the Aave gateway engine
-     * @dev Only callable by the DebtManager, as the last step of migrateToAave. Idempotent and one-way:
+     * @dev Only callable by the DebtManager, as the last step of migrateToLendGateway. Idempotent and one-way:
      *      nothing ever clears the flag.
      * @param safe Address of the EtherFi Safe
      * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
      */
-    function markUsesAave(address safe) external {
+    function markUsesLendGateway(address safe) external {
         if (msg.sender != address(_getDebtManager())) revert OnlyDebtManager();
-        _getCashModuleStorage().safeCashConfig[safe].usesAave = true;
+        _getCashModuleStorage().safeCashConfig[safe].usesLendGateway = true;
     }
 
     /**

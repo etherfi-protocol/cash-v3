@@ -9,7 +9,7 @@ import { ICashLens } from "../interfaces/ICashLens.sol";
 import { BinSponsor, ICashModule } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
-import { IGateway } from "../interfaces/IGateway.sol";
+import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { DebtManagerStorageContract } from "./DebtManagerStorageContract.sol";
 
@@ -662,8 +662,8 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @notice Whether a Safe's position has been migrated to Aave
      * @param safe The Safe to query
      */
-    function hasMigratedToAave(address safe) external view returns (bool) {
-        return _getDebtManagerStorage().migratedToAave[safe];
+    function hasMigratedToLendGateway(address safe) external view returns (bool) {
+        return _getDebtManagerStorage().migratedToLendGateway[safe];
     }
 
     /**
@@ -679,14 +679,14 @@ contract DebtManagerCore is DebtManagerStorageContract {
      *      driver; the gateway self-approves as the Safe's Aave position manager on its first op.
      * @param safe The Safe to migrate
      */
-    function migrateToAave(address safe) external whenNotPaused nonReentrant onlyRole(DEBT_MANAGER_ADMIN_ROLE) {
+    function migrateToLendGateway(address safe) external whenNotPaused nonReentrant onlyRole(DEBT_MANAGER_ADMIN_ROLE) {
         _onlyEtherFiSafe(safe);
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         // Single source of truth: the gateway lives on CashModule (this contract already reaches it for the
         // settlement dispatcher), so migration reads it from there rather than keeping its own copy.
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
-        IGateway _gateway = IGateway(cashModule.getLendGateway());
+        ILendGateway _gateway = cashModule.getLendGateway();
         if (address(_gateway) == address(0)) revert GatewayNotSet();
 
         // 1. Snapshot the outstanding DebtManager debt. A debt-free Safe still migrates its collateral (below),
@@ -710,7 +710,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         for (uint256 i = 0; i < bLen;) {
             if (borrowings[i].amount != 0) {
                 uint256 debtTokenAmt = _clearLegacyDebt(safe, borrowings[i].token);
-                if (_gateway.availableCash(borrowings[i].token) < debtTokenAmt) revert InsufficientAaveLiquidity(borrowings[i].token);
+                if (_gateway.availableCash(borrowings[i].token) < debtTokenAmt) revert InsufficientLendGatewayLiquidity(borrowings[i].token);
                 debtTokenAmts[i] = debtTokenAmt;
             }
             unchecked {
@@ -744,7 +744,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         //      it — specific error so the runner can route positions that fit DebtManager's params but not Aave's —
         //      then borrow each debt from Aave into this contract, re-funding the debt cleared in step 2.
         if (totalDebtUsd != 0) {
-            if (_gateway.getAccountData(safe).availableBorrowsUsd < totalDebtUsd) revert PositionExceedsAaveLtv();
+            if (_gateway.getAccountData(safe).availableBorrowsUsd < totalDebtUsd) revert PositionExceedsLendGatewayLtv();
 
             for (uint256 i = 0; i < bLen;) {
                 if (debtTokenAmts[i] != 0) _gateway.borrow(safe, borrowings[i].token, debtTokenAmts[i], address(this));
@@ -754,11 +754,11 @@ contract DebtManagerCore is DebtManagerStorageContract {
             }
         }
 
-        $.migratedToAave[safe] = true;
+        $.migratedToLendGateway[safe] = true;
         // Flip the CashModule routing flag in the same tx, so the freeze latch here and the routing of
         // spend/repay/lens can never disagree about which engine serves the Safe.
-        cashModule.markUsesAave(safe);
-        emit MigratedToAave(safe, totalDebtUsd);
+        cashModule.markUsesLendGateway(safe);
+        emit MigratedToLendGateway(safe, totalDebtUsd);
     }
 
     /// @dev A Safe's balance of `token` minus what a pending withdrawal has reserved - the amount migration may supply
@@ -864,10 +864,10 @@ contract DebtManagerCore is DebtManagerStorageContract {
     /**
      * @dev Blocks legacy DebtManager operations for a Safe once it has migrated to Aave
      * @param safe The Safe to check
-     * @custom:throws AlreadyMigratedToAave if the Safe has been migrated
+     * @custom:throws AlreadyMigratedToLendGateway if the Safe has been migrated
      */
     modifier whenNotMigrated(address safe) {
-        if (_getDebtManagerStorage().migratedToAave[safe]) revert AlreadyMigratedToAave();
+        if (_getDebtManagerStorage().migratedToLendGateway[safe]) revert AlreadyMigratedToLendGateway();
         _;
     }
 

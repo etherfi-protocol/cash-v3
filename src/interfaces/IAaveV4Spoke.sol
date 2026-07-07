@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 /**
  * @title IAaveV4Spoke
- * @notice The slice of the Aave v4 Spoke that the Gateway calls.
+ * @notice The slice of the Aave v4 Spoke that the LendGateway calls.
  * @author ether.fi
  */
 interface IAaveV4Spoke {

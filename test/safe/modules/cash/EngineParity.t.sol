@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
 import { BinSponsor, Cashback, ICashModule, Mode } from "../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
-import { IGateway } from "../../../../src/interfaces/IGateway.sol";
+import { ILendGateway } from "../../../../src/interfaces/ILendGateway.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
@@ -15,8 +15,8 @@ import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
  *         (mode x engine) cell: an approved check implies the spend lands, and a declined check implies the
  *         spend reverts with the matching error. These are the two on-chain halves of a card auth, so drift
  *         between them declines good taps or, worse, lands taps the check already rejected.
- * @dev Gateway-credit declined-side parity (borrow power) is enforced by Aave itself, which the mock gateway
- *      cannot model; it runs in the fork suite (test/gateway/DebtManagerMigration.t.sol) instead.
+ * @dev LendGateway-credit declined-side parity (borrow power) is enforced by Aave itself, which the mock gateway
+ *      cannot model; it runs in the fork suite (test/lend-gateway/DebtManagerMigration.t.sol) instead.
  */
 contract EngineParityTest is CashModuleTestSetup {
     Cashback[] internal noCashback;
@@ -104,12 +104,12 @@ contract EngineParityTest is CashModuleTestSetup {
 
     // ----------------------------------------------------------------- gateway engine
 
-    /// Gateway debit: an approved check withdraws the shortfall from Aave and lands; an over-balance check reverts.
+    /// LendGateway debit: an approved check withdraws the shortfall from Aave and lands; an over-balance check reverts.
     function test_parity_gatewayDebit() public {
         deal(address(usdc), address(safe), 30e6);
         gateway.setSuppliedOf(address(safe), address(usdc), 50e6);
         gateway.setAvailableCash(address(usdc), type(uint128).max);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 50e6, debtUsd: 0, availableBorrowsUsd: 40e6, healthFactor: type(uint256).max }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 50e6, debtUsd: 0, availableBorrowsUsd: 40e6, healthFactor: type(uint256).max }));
 
         // Loose (30) + supplied (50) cover the spend; the shortfall is withdrawn from Aave
         (bool ok, string memory reason) = _canSpend(keccak256("gd1"), address(usdc), 60e6);
@@ -130,12 +130,12 @@ contract EngineParityTest is CashModuleTestSetup {
         _spend(keccak256("gd2"), address(usdc), 100e6);
     }
 
-    /// Gateway credit: an approved check borrows on the gateway and lands; one beyond borrow power is declined.
+    /// LendGateway credit: an approved check borrows on the gateway and lands; one beyond borrow power is declined.
     function test_parity_gatewayCredit_approvedLands() public {
         _setMode(Mode.Credit);
         vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         gateway.setAvailableCash(address(usdc), type(uint128).max);
-        gateway.setAccountData(address(safe), IGateway.AccountData({ collateralUsd: 1000e6, debtUsd: 0, availableBorrowsUsd: 500e6, healthFactor: type(uint256).max }));
+        gateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 1000e6, debtUsd: 0, availableBorrowsUsd: 500e6, healthFactor: type(uint256).max }));
 
         (bool ok, string memory reason) = _canSpend(keccak256("gc1"), address(usdc), 100e6);
         assertTrue(ok, reason);

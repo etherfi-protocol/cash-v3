@@ -8,7 +8,7 @@ import { SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../in
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { IGateway } from "../../interfaces/IGateway.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -72,7 +72,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         /// @notice Address of the SettlementDispatcher for CardOrder
         address settlementDispatcherCardOrder;
         /// @notice The Aave gateway that runs position operations (borrow/withdraw/repay) on a safe's behalf
-        IGateway gateway;
+        ILendGateway gateway;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -206,8 +206,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
      * @param safe Address of the EtherFi Safe
      * @return True if the safe uses the Aave gateway
      */
-    function _usesAave(address safe) internal view returns (bool) {
-        return _getCashModuleStorage().safeCashConfig[safe].usesAave;
+    function _usesLendGateway(address safe) internal view returns (bool) {
+        return _getCashModuleStorage().safeCashConfig[safe].usesLendGateway;
     }
 
     /**
@@ -219,13 +219,20 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @dev Cancels withdrawal request if necessary based on available balance
+     * @dev Cancels the safe's pending withdrawal request when it competes with a repay/spend of `token`.
+     *      Reverts if `amount` exceeds the safe's loose balance. Otherwise, if `token` has a leg in the
+     *      pending request and `amount` plus that reserved leg exceeds the loose balance, the whole request
+     *      is cancelled: the repay/spend outranks the reservation. Conservative on purpose: the check uses
+     *      the quoted `amount`, but both engines cap the actual pull at the live debt (a full repay resolves
+     *      to the outstanding debt), so a repay quoted above the debt can cancel a request that the real,
+     *      smaller pull would have left intact. Only the repaid token's leg and the current balance are
+     *      considered.
      * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to update
-     * @param amount Amount being processed
-     * @custom:throws InsufficientBalance if there is not enough balance for the operation
+     * @param token Address of the token being repaid/spent
+     * @param amount Quoted token amount for the operation
+     * @custom:throws InsufficientBalance if `amount` exceeds the safe's loose balance of `token`
      */
-    function _cancelWithdrawalRequestIfNecessary(address safe, address token, uint256 amount) internal {
+    function _cancelCompetingWithdrawal(address safe, address token, uint256 amount) internal {
         SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
         uint256 balance = IERC20(token).balanceOf(safe);
 

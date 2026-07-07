@@ -10,7 +10,7 @@ import { BinSponsor, Mode, SafeCashConfig, WithdrawalRequest } from "../../inter
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { IGateway } from "../../interfaces/IGateway.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
@@ -30,7 +30,7 @@ import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
  *      (cancelOldWithdrawal) so the spend paths can cancel inline; the module's internal helper delegates
  *      to it.
  *
- *      Engine convention: legacy DebtManager code always sits inside an `if (!_usesAave(...))` block (or a
+ *      Engine convention: legacy DebtManager code always sits inside an `if (!_usesLendGateway(...))` block (or a
  *      legacy-named helper) that is deleted wholesale when the legacy engine is retired; the gateway path is
  *      the unguarded fall-through, already in its final shape.
  * @author ether.fi
@@ -66,8 +66,8 @@ library CashLendLib {
 
     /// @dev The canonical engine check: true routes the safe to the Aave gateway, false to the legacy DebtManager.
     ///      Every branch point in this library must read the flag through here and nothing else.
-    function _usesAave(CashModuleStorageContract.CashModuleStorage storage $, address safe) private view returns (bool) {
-        return $.safeCashConfig[safe].usesAave;
+    function _usesLendGateway(CashModuleStorageContract.CashModuleStorage storage $, address safe) private view returns (bool) {
+        return $.safeCashConfig[safe].usesLendGateway;
     }
 
     /**
@@ -126,7 +126,7 @@ library CashLendLib {
      * @custom:throws LendGatewayNotSet if the safe uses the gateway but none is configured
      */
     function repay(CashModuleStorageContract.CashModuleStorage storage $, address safe, address token, uint256 amount, uint256 amountInUsd) external {
-        if (!_usesAave($, safe)) {
+        if (!_usesLendGateway($, safe)) {
             address[] memory to = new address[](3);
             bytes[] memory data = new bytes[](3);
             uint256[] memory values = new uint256[](3);
@@ -144,7 +144,7 @@ library CashLendLib {
             return;
         }
 
-        IGateway gateway = $.gateway;
+        ILendGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
         // Full repays pass the max sentinel so no interest dust survives the exact-amount rounding.
         uint256 debt = gateway.debtOf(safe, token);
@@ -170,7 +170,7 @@ library CashLendLib {
      * @param safe Address of the EtherFi Safe
      */
     function hasOpenBorrows(CashModuleStorageContract.CashModuleStorage storage $, address safe) public view returns (bool) {
-        IGateway gateway = $.gateway;
+        ILendGateway gateway = $.gateway;
         if (address(gateway) != address(0)) {
             address[] memory assets = gateway.registeredAssets();
             uint256 aLen = assets.length;
@@ -216,8 +216,8 @@ library CashLendLib {
      * @param safe Address of the EtherFi Safe
      */
     function disableLend(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
-        if (_usesAave($, safe)) {
-            IGateway gateway = $.gateway;
+        if (_usesLendGateway($, safe)) {
+            ILendGateway gateway = $.gateway;
             if (address(gateway) == address(0)) revert LendGatewayNotSet();
 
             address[] memory collateralTokens = gateway.registeredAssets();
@@ -282,7 +282,7 @@ library CashLendLib {
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
         if (amount == 0) revert AmountZero();
 
-        if (!_usesAave($, safe)) {
+        if (!_usesLendGateway($, safe)) {
             _spendLegacyCredit($, dataProvider, safe, binSponsor, tokens[0], amount);
         } else {
             _borrowOnGateway($, dataProvider, safe, binSponsor, tokens[0], amount, amountsInUsd[0]);
@@ -293,7 +293,7 @@ library CashLendLib {
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
     }
 
-    /// @dev Gateway credit spend: the safe's position lives on Aave, so borrow there via the gateway (the
+    /// @dev LendGateway credit spend: the safe's position lives on Aave, so borrow there via the gateway (the
     ///      CashModule is always a gateway driver) and send the borrowed token straight to the settlement
     ///      dispatcher. The legacy DebtManager.borrow path reverts for a migrated safe, and CashLens sizes
     ///      credit against the same engine flag, so routing here keeps the on-chain spend consistent with
@@ -301,7 +301,7 @@ library CashLendLib {
     ///      borrow no longer fits (an instant collateral withdrawal can land between the auth-time canSpend
     ///      and the spend tx), loose collateral is first resupplied to cover the shortfall.
     function _borrowOnGateway(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, BinSponsor binSponsor, address token, uint256 amount, uint256 amountInUsd) private {
-        IGateway gateway = $.gateway;
+        ILendGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
         _resupplyCollateral($, dataProvider, gateway, safe, amountInUsd);
         gateway.borrow(safe, token, amount, settlementDispatcher($, binSponsor));
@@ -317,7 +317,7 @@ library CashLendLib {
      *      it supplies what fits and the caller's subsequent borrow reverts the spend. CashLens never
      *      counts this capacity, so canSpend does not advertise it as headroom.
      */
-    function _resupplyCollateral(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, IGateway gateway, address safe, uint256 spendUsd) private {
+    function _resupplyCollateral(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, ILendGateway gateway, address safe, uint256 spendUsd) private {
         uint256 availableUsd = gateway.getAccountData(safe).availableBorrowsUsd;
         if (spendUsd <= availableUsd) return;
         uint256 shortfallUsd = spendUsd - availableUsd;
@@ -346,7 +346,7 @@ library CashLendLib {
      *      Skips the balance reserved by the pending withdrawal request unless `useReserved` is set.
      * @return The USD shortfall left after the pass
      */
-    function _sizeResupply(CashModuleStorageContract.CashModuleStorage storage $, IGateway gateway, IPriceProvider priceProvider, address safe, address[] memory tokens, uint256[] memory supplyAmounts, uint256 shortfallUsd, bool useReserved) private view returns (uint256) {
+    function _sizeResupply(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, IPriceProvider priceProvider, address safe, address[] memory tokens, uint256[] memory supplyAmounts, uint256 shortfallUsd, bool useReserved) private view returns (uint256) {
         for (uint256 i = 0; i < tokens.length && shortfallUsd != 0; i++) {
             // A zero-LTV asset adds no borrowing headroom, so supplying it cannot help
             uint256 tokenLtv = gateway.ltv(tokens[i]);
@@ -430,7 +430,7 @@ library CashLendLib {
      * @param totalSpendingInUsd Total spend in USD, for the emitted event
      */
     function spendDebit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) external {
-        if (!_usesAave($, safe)) {
+        if (!_usesLendGateway($, safe)) {
             _spendLegacyDebit($, dataProvider, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
             return;
         }
@@ -470,7 +470,7 @@ library CashLendLib {
         s.amounts = new uint256[](tokens.length);
         s.fromLoose = new uint256[](tokens.length);
         {
-            IGateway.AccountData memory account = $.gateway.getAccountData(safe);
+            ILendGateway.AccountData memory account = $.gateway.getAccountData(safe);
             s.hasDebt = account.debtUsd != 0;
             s.borrowHeadroom = s.hasDebt ? account.availableBorrowsUsd : 0;
         }
