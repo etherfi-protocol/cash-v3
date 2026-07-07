@@ -58,3 +58,11 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
         id: test
+
+      # The Aave v4 gateway + gateway-path cash tests are skipped by the default profile (they need via_ir +
+      # the aave-v4 dependency). Run them under the aave profile against the Optimism fork.
+      - name: Run Aave gateway tests
+        run: FOUNDRY_PROFILE=aave forge test -vvv
+        env:
+          TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
+        id: test-aave

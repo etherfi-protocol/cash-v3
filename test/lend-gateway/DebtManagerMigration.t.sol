@@ -1,22 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerStorageContract } from "../../src/debt-manager/DebtManagerStorageContract.sol";
-import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { BinSponsor, Cashback, ICashModule, Mode } from "../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
-import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
-import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
-import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
-import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
-import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
+import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestSetup.t.sol";
 
 /**
  * @title DebtManagerMigrationTest
@@ -26,15 +19,11 @@ import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
  *         is exercised.
  * @dev Run with: FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/DebtManagerMigration.t.sol
  */
-contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
+contract DebtManagerMigrationTest is CashGatewayTestSetup {
     using MessageHashUtils for bytes32;
 
     DebtManagerCore internal dm;
-    LendGateway internal gw;
     address internal migrator = makeAddr("migrationRunner");
-
-    uint256 internal usdcReserveId;
-    uint256 internal weethReserveId;
 
     uint16 internal constant AAVE_WEETH_LTV = 3000; // below DebtManager's 50%, to exercise the LTV-fit guard
 
@@ -42,38 +31,23 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
         super.setUp();
         dm = DebtManagerCore(address(debtManager));
 
-        // Real Aave v4 instance on the fork
-        _deployAaveV4();
-        address weethSource = address(new ChainlinkCompositePriceFeed(IAggregatorV3(weEthWethOracle), IAggregatorV3(ethUsdcOracle), 8, 30 days, 30 days, "weETH / USD"));
-        weethReserveId = _addAaveReserve(address(weETH), weethSource, AAVE_WEETH_LTV, false);
-        usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 8000, true);
-
-        // LendGateway proxy + wiring
-        address gwImpl = address(new LendGateway(address(dataProvider), address(spoke)));
-        gw = LendGateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(LendGateway.initialize.selector, address(roleRegistry)))));
-
         vm.startPrank(owner);
-        roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
-        dataProvider.configureModules(_addr1(address(gw)), _bool1(true));
-        gw.setReserveId(address(weETH), weethReserveId);
-        gw.setReserveId(address(usdc), usdcReserveId);
         gw.setDriver(address(dm), true); // DebtManager drives the gateway during migration
-        // Migration reads the gateway from CashModule (single source of truth); authorize the migration runner
-        cashModule.setLendGateway(address(gw));
-        roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, migrator);
+        roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, migrator); // authorize the migration runner
         vm.stopPrank();
-
-        _enableModule(address(gw));
-        _activateAavePositionManager(address(gw));
 
         // The safes in this suite model the pre-gateway population: route them to the legacy engine so
         // migration is the thing that flips them (new safes onboard onto the gateway by default).
         _forceLegacyEngine(address(safe));
     }
 
-    /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setLendGateway(gw) above is
-    ///      the first and only set. Without this, that call would revert GatewayAlreadySet.
-    function _wireDefaultGateway() internal override { }
+    /// @dev Aave's weETH LTV sits below DebtManager's 50%, so migration exercises the LTV-fit path.
+    function _weethCollateralFactorBps() internal pure override returns (uint16) {
+        return AAVE_WEETH_LTV;
+    }
+
+    /// @dev This suite seeds Aave liquidity per-test; a revert case relies on the reserve starting empty.
+    function _seedInitialLiquidity() internal override { }
 
     // ----------------------------------------------------------------- happy path
 
@@ -466,23 +440,5 @@ contract DebtManagerMigrationTest is CashModuleTestSetup, AaveV4Fixture {
             vm.warp(block.timestamp + modeDelay + 1);
             cashModule.processLendDisable(address(safe));
         }
-    }
-
-    function _enableModule(address module) internal {
-        address[] memory modules = _addr1(module);
-        bool[] memory shouldWhitelist = _bool1(true);
-        bytes[] memory setupData = new bytes[](1);
-        setupData[0] = "";
-        _configureModules(modules, shouldWhitelist, setupData);
-    }
-
-    function _addr1(address a) internal pure returns (address[] memory arr) {
-        arr = new address[](1);
-        arr[0] = a;
-    }
-
-    function _bool1(bool b) internal pure returns (bool[] memory arr) {
-        arr = new bool[](1);
-        arr[0] = b;
     }
 }

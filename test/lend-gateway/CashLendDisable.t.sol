@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { BinSponsor, ICashModule, Mode } from "../../src/interfaces/ICashModule.sol";
 import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
 import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../src/libraries/SignatureUtils.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
 import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
-import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
-import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
-import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
-import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
+import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestSetup.t.sol";
 
 /**
  * @title CashLendDisableTest
@@ -27,49 +21,18 @@ import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
  *         (CashModule, LendGateway, EtherFiSafe) — no mocks.
  * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/CashLendDisable.t.sol
  */
-contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
+contract CashLendDisableTest is CashGatewayTestSetup {
     using MessageHashUtils for bytes32;
-
-    LendGateway internal gw;
-    address internal driver = makeAddr("gwDriver"); // arranges Aave positions directly in tests
-
-    uint256 internal usdcReserveId;
-    uint256 internal weethReserveId;
 
     uint64 internal constant MODE_DELAY = 10; // mirrors the "takes ~10 seconds" opt-out spec
 
     function setUp() public override {
         super.setUp();
 
-        // Real Aave v4 instance on the fork, weETH + USDC reserves priced by live Chainlink feeds
-        _deployAaveV4();
-        address weethSource = address(new ChainlinkCompositePriceFeed(IAggregatorV3(weEthWethOracle), IAggregatorV3(ethUsdcOracle), 8, 30 days, 30 days, "weETH / USD"));
-        weethReserveId = _addAaveReserve(address(weETH), weethSource, 8000, false);
-        usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 8000, true);
-        _seedAaveLiquidity(usdcReserveId, address(usdc), 1_000_000e6);
-
-        // LendGateway proxy + wiring
-        address gwImpl = address(new LendGateway(address(dataProvider), address(spoke)));
-        gw = LendGateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(LendGateway.initialize.selector, address(roleRegistry)))));
-
-        vm.startPrank(owner);
-        roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
-        dataProvider.configureModules(_addr1(address(gw)), _bool1(true));
-        gw.setReserveId(address(weETH), weethReserveId);
-        gw.setReserveId(address(usdc), usdcReserveId);
-        gw.setDriver(driver, true);
-        // Wire the CashModule to the real gateway (source of the collateral-withdraw path) and give a real mode delay
-        cashModule.setLendGateway(address(gw));
+        // A real mode delay, so the opt-out request and its execution are separated in time
+        vm.prank(owner);
         cashModule.setDelays(1, 3600, MODE_DELAY);
-        vm.stopPrank();
-
-        _enableModule(address(gw));
-        _activateAavePositionManager(address(gw));
     }
-
-    /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setLendGateway(gw) above is
-    ///      the first and only set. Without this, that call would revert GatewayAlreadySet.
-    function _wireDefaultGateway() internal override { }
 
     // ----------------------------------------------------------------- wiring & defaults
 
@@ -406,25 +369,5 @@ contract CashLendDisableTest is CashModuleTestSetup, AaveV4Fixture {
         cashModule.setMode(address(safe), Mode.Credit, owner1, abi.encodePacked(r, s, v));
         // Credit takes effect after the mode delay
         vm.warp(block.timestamp + MODE_DELAY + 1);
-    }
-
-    // ----------------------------------------------------------------- module helpers
-
-    function _enableModule(address module) internal {
-        address[] memory modules = _addr1(module);
-        bool[] memory shouldWhitelist = _bool1(true);
-        bytes[] memory setupData = new bytes[](1);
-        setupData[0] = "";
-        _configureModules(modules, shouldWhitelist, setupData);
-    }
-
-    function _addr1(address a) internal pure returns (address[] memory arr) {
-        arr = new address[](1);
-        arr[0] = a;
-    }
-
-    function _bool1(bool b) internal pure returns (bool[] memory arr) {
-        arr = new bool[](1);
-        arr[0] = b;
     }
 }
