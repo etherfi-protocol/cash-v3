@@ -136,6 +136,14 @@ interface ICashEventEmitter {
      */
     function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external;
 
+    /**
+     * @notice Emits an event when loose collateral is supplied to cover a credit spend's borrowing shortfall
+     * @param safe Address of the safe
+     * @param token Collateral token supplied
+     * @param amount Token amount supplied
+     */
+    function emitCollateralResupplied(address safe, address token, uint256 amount) external;
+
     /// @notice Emits the LendDisableRequested event
     function emitLendDisableRequested(address safe, uint256 finalizeTime) external;
 
