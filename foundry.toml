@@ -16,7 +16,7 @@ dynamic_test_linking = true
 # The Aave v4 gateway tests need via_ir (Hub/Spoke instances) + the aave-v4 dependency. Keep them out of
 # the default profile so the default build/bytecode-verification settings are unchanged; run them under
 # FOUNDRY_PROFILE=aave (see [profile.aave] below).
-skip = ["test/gateway/**"]
+skip = ["test/lend-gateway/**"]
 
 # Profile for the Aave v4 gateway integration tests: compiles everything (our repo + aave-v4) with via_ir
 # so the Hub/Spoke instances build, and un-skips the gateway tests. Run: FOUNDRY_PROFILE=aave forge test.
