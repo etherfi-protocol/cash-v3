@@ -20,9 +20,7 @@ contract UpgradeableProxy is UUPSUpgradeable, PausableUpgradeable, ReentrancyGua
     }
 
     /// @notice Role identifier for the governance multisig, gating config and treasury functions
-    /// @dev Kept internal so the getter does not alter the bytecode of derived contracts that
-    ///      don't use the governance gate (would break upgrade-bytecode-verification for them)
-    bytes32 internal constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
+    bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.UpgradeableProxy")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant UpgradeableProxyStorageLocation = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
