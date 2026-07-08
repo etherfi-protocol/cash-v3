@@ -173,6 +173,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiHook() public {
+        // EtherFiHook skips the health hook for gateway safes in Lend, so its bytecode no longer
+        // matches the deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new EtherFiHook(dataProviderProxy));
         _verify("EtherFiHook", hookImpl, local);
     }
