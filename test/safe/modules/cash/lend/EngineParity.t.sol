@@ -16,7 +16,7 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  *         between them declines good taps or, worse, lands taps the check already rejected. The gateway cells run
  *         against a real Aave v4 instance, so the declined-credit revert side (enforced by Aave's borrowing-power
  *         check) is asserted here too; the legacy cells force the DebtManager engine.
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/aave/EngineParity.t.sol"
+ * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/EngineParity.t.sol"
  */
 contract EngineParityAaveTest is CashGatewayTestSetup {
     Cashback[] internal noCashback;

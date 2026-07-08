@@ -8,7 +8,7 @@ import { ILendGateway } from "../interfaces/ILendGateway.sol";
  * @notice Inert test double for ILendGateway. Non-lend safe suites wire it so the cash contracts have a codeful
  *         gateway that reports an empty position, and the SetLendGateway guard tests plus the ModuleGatewaySandwich
  *         call-order test drive it directly. Real gateway behavior is exercised against a live Aave v4 instance
- *         under the aave profile (test/safe/modules/cash/aave/**), so this mock no longer fabricates positions.
+ *         under the lend profile (test/safe/modules/cash/lend/**), so this mock no longer fabricates positions.
  *         Not for production.
  * @dev Records the last supply / withdraw call and the collateral flag for the sandwich test; the position
  *      aggregate (getAccountData) and reserve liquidity (availableCash) are settable for the guard tests. The

@@ -31,8 +31,9 @@ interface IProxyInit {
  *         LendGateway can be exercised against genuine Aave v4 code rather than a mock. This test contract
  *         holds every admin role, so it can list reserves, set collateral factors, and activate position
  *         managers freely. Mirrors aave-v4 v0.5.11 `tests/Base.t.sol` deployFixtures/setUpRoles.
- * @dev The Hub/Spoke instances are compiled via_ir (foundry.toml compilation_restrictions) and their
- *      LiquidationLogic library is linked by dynamic_test_linking, so a plain `new` suffices.
+ * @dev SpokeInstance links the external LiquidationLogic library. forge can't resolve that aave-rooted
+ *      `src/` import to an artifact, so foundry.toml `[profile.lend]` libraries pins it to a fixed address and
+ *      `_deployAaveV4` etches the library code there before deploying the spoke.
  */
 abstract contract AaveV4Fixture is Test {
     /// @notice Admin of the Aave instance (holds AccessManager ADMIN + all granted roles)
@@ -45,7 +46,7 @@ abstract contract AaveV4Fixture is Test {
     AssetInterestRateStrategy internal irStrategy;
     ITreasurySpoke internal treasurySpoke;
 
-    /// @notice Fixed link address for LiquidationLogic (see foundry.toml [profile.aave] libraries)
+    /// @notice Fixed link address for LiquidationLogic (see foundry.toml `[profile.lend]` libraries)
     address internal constant LIQUIDATION_LOGIC = 0x0000000000000000000000000000000000000a01;
 
     /// @notice Deploys and wires a full Aave v4 instance (access manager, hub, spoke, oracle, treasury)

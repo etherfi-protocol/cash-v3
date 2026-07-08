@@ -10,7 +10,7 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  *         its loose balance and partly from its Aave-supplied balance under debt, and the shared borrowing
  *         headroom binding across tokens. The loose-only multi-token spends (proportions, cashback, limits,
  *         pending) that never read a gateway position stay in test/safe/modules/cash/MultiSpend.t.sol.
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/aave/MultiSpend.t.sol"
+ * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/MultiSpend.t.sol"
  */
 contract CashModuleMultiSpendAaveTest is CashGatewayTestSetup {
     function setUp() public override {

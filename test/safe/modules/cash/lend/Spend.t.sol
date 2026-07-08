@@ -17,7 +17,7 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  *         dispatcher receipts, gw.suppliedOf / gw.debtOf, and events) rather than mock call recorders.
  * @dev Legacy-engine spend tests (_forceLegacyEngine) and the loose-balance / validation spend tests that never
  *      read a gateway position stay in test/safe/modules/cash/Spend.t.sol (default profile). Run with:
- *      source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/aave/Spend.t.sol"
+ *      source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/Spend.t.sol"
  */
 contract CashModuleSpendAaveTest is CashGatewayTestSetup {
     /// @dev RESUPPLY_BUFFER_BPS in CashLendLib; keep in sync.

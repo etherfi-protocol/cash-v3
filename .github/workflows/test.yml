@@ -49,6 +49,8 @@ jobs:
       - name: Show Forge version
         run: forge --version
 
+      # Size-gate our own contracts. The lend tests (and aave-v4's SpokeInstance) are skipped by the default
+      # profile, so they never reach this size check.
       - name: Run Forge build
         run: forge build --sizes
         id: build
@@ -59,10 +61,10 @@ jobs:
           TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
         id: test
 
-      # The Aave v4 gateway + gateway-path cash tests are skipped by the default profile (they need via_ir +
-      # the aave-v4 dependency). Run them under the aave profile against the Optimism fork.
-      - name: Run Aave gateway tests
-        run: FOUNDRY_PROFILE=aave forge test -vvv
+      # The lend (Aave v4) tests deploy a real Aave v4 instance on an Optimism fork, so they run under the
+      # lend profile against the fork rather than the default profile.
+      - name: Run lend tests
+        run: FOUNDRY_PROFILE=lend forge test -vvv
         env:
           TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
-        id: test-aave
+        id: test-lend
