@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
 import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
-import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
-import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
-import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
-import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
+import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestSetup.t.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 
 /**
  * @title LendGatewayAaveV4Test
@@ -21,49 +15,7 @@ import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/P
  *         PriceProvider) — no mocks. Aave reserves are priced by live Optimism Chainlink feeds.
  * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/LendGatewayAaveV4.t.sol
  */
-contract LendGatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
-    LendGateway internal gw;
-    address internal driver = makeAddr("gwDriver");
-    address internal recipient = makeAddr("gwRecipient");
-
-    uint256 internal usdcReserveId;
-    uint256 internal weethReserveId;
-
-    function setUp() public override {
-        // Real ether.fi stack on an Optimism fork
-        super.setUp();
-
-        // 1. Deploy a real, self-owned Aave v4 instance on the same fork
-        _deployAaveV4();
-
-        // 2. List reserves for the OP tokens, priced by live Chainlink feeds (no mock prices):
-        //    - weETH: composite weETH/ETH x ETH/USD via the repo's ChainlinkCompositePriceFeed
-        //    - USDC: the USDC/USD aggregator directly (it already exposes decimals/description/latestAnswer)
-        address weethSource = address(new ChainlinkCompositePriceFeed(IAggregatorV3(weEthWethOracle), IAggregatorV3(ethUsdcOracle), 8, 30 days, 30 days, "weETH / USD"));
-        weethReserveId = _addAaveReserve(address(weETH), weethSource, 8000, false);
-        usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, 8000, true);
-
-        // Seed borrowable USDC liquidity into the hub
-        _seedAaveLiquidity(usdcReserveId, address(usdc), 1_000_000e6);
-
-        // 3. Deploy the LendGateway proxy pointing at the fresh spoke
-        address gwImpl = address(new LendGateway(address(dataProvider), address(spoke)));
-        gw = LendGateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(LendGateway.initialize.selector, address(roleRegistry)))));
-
-        // 4. Wire the LendGateway: roles, reserve registry, driver, whitelist as a module
-        vm.startPrank(owner);
-        roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
-        dataProvider.configureModules(_addr1(address(gw)), _bool1(true));
-        gw.setReserveId(address(weETH), weethReserveId);
-        gw.setReserveId(address(usdc), usdcReserveId);
-        gw.setDriver(driver, true);
-        vm.stopPrank();
-
-        // Enable the LendGateway as a module on the safe (owner-signed) and activate it as an Aave position manager
-        _enableModule(address(gw));
-        _activateAavePositionManager(address(gw));
-    }
-
+contract LendGatewayAaveV4Test is CashGatewayTestSetup {
     // ----------------------------------------------------------------- registration & reads
 
     function test_registration_validatedAgainstSpoke() public {
@@ -461,26 +413,5 @@ contract LendGatewayAaveV4Test is CashModuleTestSetup, AaveV4Fixture {
         assertApproxEqAbs(repaid, 1000e6, 2, "only the debt is repaid");
         assertLe(gw.debtOf(address(safe), address(usdc)), 1, "debt cleared");
         assertApproxEqAbs(usdc.balanceOf(address(safe)), 500e6, 2, "excess refunded to safe");
-    }
-
-    // ----------------------------------------------------------------- helpers
-
-    /// @dev Whitelists (done in setUp) then enables `module` on the safe via owner signatures
-    function _enableModule(address module) internal {
-        address[] memory modules = _addr1(module);
-        bool[] memory shouldWhitelist = _bool1(true);
-        bytes[] memory setupData = new bytes[](1);
-        setupData[0] = "";
-        _configureModules(modules, shouldWhitelist, setupData);
-    }
-
-    function _addr1(address a) internal pure returns (address[] memory arr) {
-        arr = new address[](1);
-        arr[0] = a;
-    }
-
-    function _bool1(bool b) internal pure returns (bool[] memory arr) {
-        arr = new bool[](1);
-        arr[0] = b;
     }
 }

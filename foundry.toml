@@ -13,15 +13,17 @@ fs_permissions = [{ access = "read-write", path = "./" }]
 extra_output = ["storageLayout"]
 ffi = true
 dynamic_test_linking = true
-# The Aave v4 gateway tests need via_ir (Hub/Spoke instances) + the aave-v4 dependency. Keep them out of
-# the default profile so the default build/bytecode-verification settings are unchanged; run them under
-# FOUNDRY_PROFILE=aave (see [profile.aave] below).
-skip = ["test/lend-gateway/**"]
+# The Aave v4 gateway tests pull in the aave-v4 source (Hub/Spoke) and a fork, so keep them out of the
+# default profile. That keeps the default build small and its bytecode-verification settings unchanged.
+# Run them under FOUNDRY_PROFILE=aave (see [profile.aave] below). test/safe/modules/cash/aave/** are
+# cash-flow tests against the real gateway, so they live behind the same profile.
+skip = ["test/lend-gateway/**", "test/safe/modules/cash/aave/**"]
 
-# Profile for the Aave v4 gateway integration tests: compiles everything (our repo + aave-v4) with via_ir
-# so the Hub/Spoke instances build, and un-skips the gateway tests. Run: FOUNDRY_PROFILE=aave forge test.
+# Profile for the Aave v4 gateway integration tests: un-skips the gateway tests and links the aave-v4
+# LiquidationLogic library so the Hub/Spoke instances build. Run: FOUNDRY_PROFILE=aave forge test.
+# via_ir is intentionally not set. Our aave-v4 subset compiles under the legacy pipeline, and via_ir
+# roughly doubles the compile time. These are test-only, so there is no production bytecode concern.
 [profile.aave]
-via_ir = true
 skip = []
 # LiquidationLogic is linked via the `libraries` entry below (compile-time), so forge's runtime library
 # auto-linking is unneeded here and would noisily re-resolve aave-v4's `src/`-rooted imports.

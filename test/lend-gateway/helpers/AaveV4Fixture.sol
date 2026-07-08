@@ -87,10 +87,11 @@ abstract contract AaveV4Fixture is Test {
         accessManager.grantRole(Roles.HUB_ADMIN_ROLE, aaveAdmin, 0);
         accessManager.grantRole(Roles.SPOKE_ADMIN_ROLE, aaveAdmin, 0);
 
-        bytes4[] memory spokeSelectors = new bytes4[](3);
+        bytes4[] memory spokeSelectors = new bytes4[](4);
         spokeSelectors[0] = ISpoke.addReserve.selector;
         spokeSelectors[1] = ISpoke.updatePositionManager.selector;
         spokeSelectors[2] = ISpoke.updateLiquidationConfig.selector;
+        spokeSelectors[3] = ISpoke.updateDynamicReserveConfig.selector;
         accessManager.setTargetFunctionRole(address(spoke), spokeSelectors, Roles.SPOKE_ADMIN_ROLE);
 
         bytes4[] memory hubSelectors = new bytes4[](3);
@@ -141,6 +142,15 @@ abstract contract AaveV4Fixture is Test {
     function _activateAavePositionManager(address positionManager) internal {
         vm.prank(aaveAdmin);
         spoke.updatePositionManager(positionManager, true);
+    }
+
+    /// @notice Updates a listed reserve's collateral factor (BPS), preserving its other dynamic config
+    function _setAaveReserveCollateralFactor(uint256 reserveId, uint16 collateralFactorBps) internal {
+        uint32 key = spoke.getReserve(reserveId).dynamicConfigKey;
+        ISpoke.DynamicReserveConfig memory cfg = spoke.getDynamicReserveConfig(reserveId, key);
+        cfg.collateralFactor = collateralFactorBps;
+        vm.prank(aaveAdmin);
+        spoke.updateDynamicReserveConfig(reserveId, key, cfg);
     }
 
     function _proxify(address impl, bytes memory initData) private returns (address) {
