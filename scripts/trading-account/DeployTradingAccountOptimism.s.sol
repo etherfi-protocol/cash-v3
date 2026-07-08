@@ -7,6 +7,7 @@ import { stdJson } from "forge-std/StdJson.sol";
 import { Utils } from "../utils/Utils.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
+import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { EtherFiSafe } from "../../src/safe/EtherFiSafe.sol";
@@ -44,6 +45,10 @@ contract DeployTradingAccountOptimism is Utils {
     address constant MULTICALL_HANDLER = 0x0F7Ae28dE1C8532170AD4ee566B5801485c13a0E;
     // Across SpokePoolPeriphery — origin-swap (anyToBridgeable) routes for the Sell flow.
     address constant PERIPHERY = 0x10D8b8DaA26d307489803e10477De69C0492B610;
+
+    // Enso Router V2 (same address on Ethereum and Optimism). Pinned target for the
+    // EnsoSwapModule's forward-calldata swaps.
+    address constant ENSO_ROUTER = 0xF75584eF6673aD213a685a1B58Cc0330B8eA22Cf;
 
     function run() public {
         uint256 pk = vm.envUint("PRIVATE_KEY");
@@ -114,6 +119,27 @@ contract DeployTradingAccountOptimism is Utils {
         // Periphery isn't part of initialize() — set it post-grant so origin-swap (Sell) routes work.
         acrossModule.setPeriphery(PERIPHERY);
 
+        // 4b. EnsoSwapModule — same forward-calldata lifecycle, targeting the pinned Enso Router.
+        //     Behind a UUPS proxy initialised atomically in its deployment tx. The impl
+        //     constructor reads getCashModule() from the OP data provider, so the CashModule
+        //     hold path is live here (same as Across on OP).
+        address ensoImpl = _deploy(
+            "EnsoSwapModuleImplDev", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider))
+        );
+        EnsoSwapModule ensoModule = EnsoSwapModule(_deploy(
+            "EnsoSwapModuleDev",
+            type(UUPSProxy).creationCode,
+            abi.encode(ensoImpl, abi.encodeWithSelector(
+                EnsoSwapModule.initialize.selector,
+                address(roleRegistry),
+                ENSO_ROUTER
+            ))
+        ));
+        modules[0] = address(ensoModule);
+        dataProvider.configureDefaultModules(modules, enable);
+        cashModule.configureModulesCanRequestWithdraw(modules, enable);
+        roleRegistry.grantRole(ensoModule.ENSO_SWAP_MODULE_ADMIN_ROLE(), deployer);
+
         // 5. Upgrade the DataProvider proxy to the bridge-aware impl — the deployed OP dev
         //    impl predates setOwnershipBridgeSender/getOwnershipBridgeSender. UUPS upgrade,
         //    gated on the roleRegistry owner (the dev key). No initializer re-run needed:
@@ -136,6 +162,7 @@ contract DeployTradingAccountOptimism is Utils {
         string memory out = "trading-account-optimism";
         vm.serializeAddress(out, "OwnershipBridgeSender", address(sender));
         vm.serializeAddress(out, "AcrossSwapModule", address(acrossModule));
+        vm.serializeAddress(out, "EnsoSwapModule", address(ensoModule));
         string memory json = vm.serializeAddress(out, "EtherFiSafeImpl", newSafeImpl);
         vm.writeJson(json, string.concat(
             vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/trading-account.json"
@@ -143,6 +170,7 @@ contract DeployTradingAccountOptimism is Utils {
 
         console.log("OwnershipBridgeSender:", address(sender));
         console.log("AcrossSwapModule:     ", address(acrossModule));
+        console.log("EnsoSwapModule:       ", address(ensoModule));
         console.log("EtherFiSafeImpl:      ", newSafeImpl);
     }
 
