@@ -4,15 +4,15 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Test } from "forge-std/Test.sol";
 
-import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
-import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestSetup.t.sol";
+import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
+import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /**
  * @title LendGatewayHandler
  * @notice Drives random sequences of LendGateway ops (as an authorized driver) for the invariant campaign.
  *         Amounts are bounded to mostly succeed so the campaign exercises real Aave state transitions;
  *         residual reverts (e.g. a withdraw that would breach health) are tolerated (fail_on_revert=false).
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/lend-gateway/LendGatewayInvariant.t.sol"
+ * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/LendGatewayInvariant.t.sol"
  */
 contract LendGatewayHandler is Test {
     LendGateway internal immutable gw;

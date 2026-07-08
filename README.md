@@ -66,12 +66,12 @@ For specific test files:
 forge test --match-path test/path/to/file.t.sol -vvv
 ```
 
-The default profile skips the real-gateway tests (`test/lend-gateway/**` and
-`test/safe/modules/cash/aave/**`), which deploy a real Aave v4 instance and so need the
-`aave` profile (via_ir) and an Optimism fork. Run them with:
+The real-gateway tests (`test/safe/modules/cash/lend/**`) deploy a real Aave v4 instance in-test,
+so they are skipped by the default profile and run under the `lend` profile against an Optimism
+fork. Run them with:
 
 ```bash
-source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test
+source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test
 ```
 
 ### Deployment

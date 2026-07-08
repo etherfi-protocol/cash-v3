@@ -22,7 +22,7 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  *      were written against); weETH keeps the base 80%. liquidUSD is priced off the USDC/USD feed so Aave and the
  *      PriceProvider agree at ~$1 (a test simplification; rate-based liquidUSD pricing keeps its own coverage in
  *      LiquidUSDLiquifier.t.sol). Run with:
- *      source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/aave/CashLensMaxSpend.t.sol"
+ *      source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/CashLensMaxSpend.t.sol"
  */
 contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
     IERC20 public liquidUsd = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);

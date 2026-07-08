@@ -7,7 +7,7 @@ import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { IAggregatorV3 } from "../../../../../src/interfaces/IAggregatorV3.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { ChainlinkCompositePriceFeed } from "../../../../../src/oracle/ChainlinkCompositePriceFeed.sol";
-import { AaveV4Fixture } from "../../../../lend-gateway/helpers/AaveV4Fixture.sol";
+import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
 
 /**
@@ -17,17 +17,17 @@ import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
  *         live lend engine. Positions are built through real supply / borrow flows, never injected via mock
  *         setters, so gateway-path behavior (borrowing power, declines, rounding, atomicity) is asserted
  *         against genuine Aave state.
- * @dev These tests run only under the aave profile (the default profile skips test/safe/modules/cash/aave/**,
- *      since a real Aave v4 build needs via_ir). Run with:
- *      source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/aave/**"
+ * @dev These tests run under the lend profile (the default profile skips test/safe/modules/cash/lend/**)
+ *      against an Optimism fork. Run with:
+ *      source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/**"
  *
  *      Dual-engine test convention (functions that route on CashModule.usesLendGateway):
- *      1. The gateway is the default path. Tests of a flag-routed function live in this aave/ directory on a
+ *      1. The gateway is the default path. Tests of a flag-routed function live in this lend/ directory on a
  *         gateway safe, with positions built through the real supply / borrow helpers below.
- *      2. The legacy DebtManager path lives in its default-profile twin (a Legacy* file or debt-manager/*),
+ *      2. The legacy DebtManager path lives in its twin outside lend/ (a Legacy* file or debt-manager/*),
  *         opening with _forceLegacyEngine(safe); it may keep the mock gateway as inert plumbing but never sets
  *         gateway state.
- *      3. aave/EngineParity.t.sol is the drift detector: for every (mode x engine) cell it asserts canSpend and
+ *      3. lend/EngineParity.t.sol is the drift detector: for every (mode x engine) cell it asserts canSpend and
  *         spend agree, so the check side and the execution side never diverge.
  */
 abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {

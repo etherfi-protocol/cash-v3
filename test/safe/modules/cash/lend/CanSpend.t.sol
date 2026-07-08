@@ -11,7 +11,7 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  *         an Aave-supplied balance, all built through real supply/borrow flows against a real Aave v4 instance.
  *         The debit-only / spending-limit / txId / validation canSpend tests that never read a gateway position
  *         stay in test/safe/modules/cash/CanSpend.t.sol (default profile, mock gateway as inert plumbing).
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/aave/CanSpend.t.sol"
+ * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/CanSpend.t.sol"
  */
 contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
     /// Debit spend succeeds when the stable is supplied to Aave rather than held loose, drawing on the withdrawable balance.

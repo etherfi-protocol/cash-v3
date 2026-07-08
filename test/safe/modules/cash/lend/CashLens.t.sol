@@ -11,7 +11,7 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  * @notice The gateway-path CashLens reads (collateral, safe cash data with and without borrows) built through
  *         real Aave supply/borrow flows. The legacy-engine and plumbing CashLens tests stay in
  *         test/safe/modules/cash/CashLens.t.sol (default profile).
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/aave/CashLens.t.sol"
+ * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/CashLens.t.sol"
  */
 contract CashLensAaveTest is CashGatewayTestSetup {
     /// A gateway safe's collateral is its Aave-supplied balance; loose funds don't count.

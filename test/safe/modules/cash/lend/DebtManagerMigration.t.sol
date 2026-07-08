@@ -3,13 +3,13 @@ pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
-import { DebtManagerStorageContract } from "../../src/debt-manager/DebtManagerStorageContract.sol";
-import { BinSponsor, Cashback, ICashModule, Mode } from "../../src/interfaces/ICashModule.sol";
-import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
-import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
-import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
-import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestSetup.t.sol";
+import { DebtManagerCore } from "../../../../../src/debt-manager/DebtManagerCore.sol";
+import { DebtManagerStorageContract } from "../../../../../src/debt-manager/DebtManagerStorageContract.sol";
+import { BinSponsor, Cashback, ICashModule, Mode } from "../../../../../src/interfaces/ICashModule.sol";
+import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
+import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
+import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
+import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /**
  * @title DebtManagerMigrationTest
@@ -17,7 +17,7 @@ import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestS
  *         DebtManager) migrates atomically to a REAL Aave v4 instance (deployed in-test on an Optimism fork)
  *         via the gateway — no flash loan. Aave's weETH LTV is set below DebtManager's so the LTV-fit path
  *         is exercised.
- * @dev Run with: FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/DebtManagerMigration.t.sol
+ * @dev Run with: FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/safe/modules/cash/lend/DebtManagerMigration.t.sol
  */
 contract DebtManagerMigrationTest is CashGatewayTestSetup {
     using MessageHashUtils for bytes32;

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
-import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
-import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
-import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestSetup.t.sol";
+import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
+import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
+import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
+import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 
@@ -13,7 +13,7 @@ import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
  * @notice End-to-end LendGateway tests against a REAL Aave v4 instance deployed inside the test on an Optimism
  *         fork, driven by the REAL ether.fi stack (EtherFiSafe, EtherFiDataProvider, RoleRegistry,
  *         PriceProvider) — no mocks. Aave reserves are priced by live Optimism Chainlink feeds.
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/LendGatewayAaveV4.t.sol
+ * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/safe/modules/cash/lend/LendGatewayAaveV4.t.sol
  */
 contract LendGatewayAaveV4Test is CashGatewayTestSetup {
     // ----------------------------------------------------------------- registration & reads

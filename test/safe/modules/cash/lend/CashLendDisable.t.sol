@@ -3,13 +3,13 @@ pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { BinSponsor, ICashModule, Mode } from "../../src/interfaces/ICashModule.sol";
-import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
-import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
-import { SignatureUtils } from "../../src/libraries/SignatureUtils.sol";
-import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
-import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
-import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestSetup.t.sol";
+import { BinSponsor, ICashModule, Mode } from "../../../../../src/interfaces/ICashModule.sol";
+import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
+import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
+import { SignatureUtils } from "../../../../../src/libraries/SignatureUtils.sol";
+import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
+import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
+import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /**
  * @title CashLendDisableTest
@@ -19,7 +19,7 @@ import { CashGatewayTestSetup } from "../safe/modules/cash/aave/CashGatewayTestS
  *         further lend op (auto-supply / borrow) until it opts back in with toggleLend(true). Runs against a
  *         REAL Aave v4 instance deployed in-test on an Optimism fork, driven by the real ether.fi stack
  *         (CashModule, LendGateway, EtherFiSafe) — no mocks.
- * @dev Run with: source .env && FOUNDRY_PROFILE=aave TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/lend-gateway/CashLendDisable.t.sol
+ * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/safe/modules/cash/lend/CashLendDisable.t.sol
  */
 contract CashLendDisableTest is CashGatewayTestSetup {
     using MessageHashUtils for bytes32;
