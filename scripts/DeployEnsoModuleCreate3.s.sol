@@ -59,24 +59,35 @@ contract DeployEnsoModuleCreate3 is Utils {
         (EtherFiDataProvider dataProvider, RoleRegistry roleRegistry) = _readStack();
 
         address predicted = DEPLOYER.getDeterministicAddress(getSalt("EnsoSwapModuleDev"));
-        require(predicted.code.length == 0, "CREATE3 proxy address already occupied");
 
         vm.startBroadcast(pk);
 
-        // 1. Impl + proxy, both via CREATE3. The impl constructor reads getCashModule() off the data
-        //    provider, so the resulting immutable decides whether the hold path is active on this chain.
-        //    The proxy initialises atomically in its deploy tx (deploy-then-init is front-runnable).
-        address impl = _deploy(
-            "EnsoSwapModuleImplDev", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider))
-        );
-        EnsoSwapModule enso = EnsoSwapModule(_deploy(
-            "EnsoSwapModuleDev",
-            type(UUPSProxy).creationCode,
-            abi.encode(impl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), ENSO_ROUTER))
-        ));
-        require(address(enso) == predicted, "enso landed off-prediction");
+        // 1. Impl + proxy, both via CREATE3 — but ONLY if the deterministic proxy isn't already
+        //    deployed. Making the deploy conditional (rather than reverting on an occupied slot) keeps
+        //    the script idempotent: if the CREATE3 module was already deployed (e.g. by a
+        //    trading-account script) the configure/retire steps below still run and finish the
+        //    migration. The impl constructor reads getCashModule() off the data provider, so its
+        //    immutable decides whether the hold path is active; the proxy initialises atomically in
+        //    its deploy tx (deploy-then-init is front-runnable).
+        EnsoSwapModule enso;
+        address impl;
+        if (predicted.code.length == 0) {
+            impl = _deploy(
+                "EnsoSwapModuleImplDev", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider))
+            );
+            enso = EnsoSwapModule(_deploy(
+                "EnsoSwapModuleDev",
+                type(UUPSProxy).creationCode,
+                abi.encode(impl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), ENSO_ROUTER))
+            ));
+            require(address(enso) == predicted, "enso landed off-prediction");
+        } else {
+            // Already deployed — reuse and (re)wire. Config/retire steps below are all idempotent.
+            enso = EnsoSwapModule(predicted);
+        }
 
         // 2. Whitelist as a default module + (where present) allow it to place withdrawal holds.
+        //    configureDefaultModules / configureModulesCanRequestWithdraw are set-based and idempotent.
         address[] memory mods = new address[](1);
         bool[] memory on = new bool[](1);
         mods[0] = address(enso);
@@ -86,8 +97,9 @@ contract DeployEnsoModuleCreate3 is Utils {
         address cashModule = dataProvider.getCashModule();
         if (cashModule != address(0)) ICashModule(cashModule).configureModulesCanRequestWithdraw(mods, on);
 
-        // 3. Admin role so the pinned Enso router can be repointed later.
-        roleRegistry.grantRole(enso.ENSO_SWAP_MODULE_ADMIN_ROLE(), deployer);
+        // 3. Admin role so the pinned Enso router can be repointed later (guarded — no-op if held).
+        bytes32 adminRole = enso.ENSO_SWAP_MODULE_ADMIN_ROLE();
+        if (!roleRegistry.hasRole(adminRole, deployer)) roleRegistry.grantRole(adminRole, deployer);
 
         // 4. Retire the stale non-CREATE3 module (idempotent — only acts if still whitelisted).
         address stale = block.chainid == 1 ? STALE_ENSO_MAINNET : STALE_ENSO_OP;
