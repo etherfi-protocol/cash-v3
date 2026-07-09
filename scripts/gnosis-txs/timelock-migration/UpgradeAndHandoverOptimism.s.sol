@@ -69,13 +69,12 @@ contract UpgradeAndHandoverOptimism is TimelockMigrationBase {
         proxies[5] = CASHBACK_PROXY;
         proxies[6] = LIQUIFIER_PROXY;
 
-        // ── 2. step1 bundle: 7 upgrades + role grant + schedule handover request ──
+        // ── 2. step1 bundle: 7 upgrades + role grant + schedule handover & canceller grant ──
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(safe));
         for (uint256 i = 0; i < 7; i++) {
             txs = string(abi.encodePacked(txs, _upgradeTx(proxies[i], impls[i], false)));
         }
-        txs = string(abi.encodePacked(txs, _grantGovernanceRoleTx(ROLE_REGISTRY, safe, false)));
-        txs = string(abi.encodePacked(txs, _scheduleHandoverRequestTx(ROLE_REGISTRY, true)));
+        txs = _appendStep1GovernanceTxs(txs, ROLE_REGISTRY, safe);
         string memory step1Path = _writeBundle("step1", txs);
 
         // ── 3. step2 bundle: execute handover request + complete handover ──

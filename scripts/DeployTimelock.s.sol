@@ -7,6 +7,7 @@ import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
 import { EtherFiTimelock } from "../src/timelock/EtherFiTimelock.sol";
+import { Create3Deployer } from "./utils/Create3Deployer.sol";
 import { Utils } from "./utils/Utils.sol";
 
 /// @title DeployTimelock
@@ -108,7 +109,9 @@ contract DeployTimelock is Utils {
         console.log("  [OK] Delay (seconds):", tl.getMinDelay());
     }
 
-    /// @dev Same CREATE3-via-Nick's-factory helper as ReserveAddresses.s.sol
+    /// @dev Atomic CREATE3 deployment via Create3Deployer — a single constructor tx that
+    ///      reverts on inner-CREATE failure, so gas estimation cannot converge on a limit
+    ///      where nothing gets deployed (see Create3Deployer natspec).
     function deployCreate3(bytes memory creationCode, bytes32 salt) internal returns (address deployed) {
         deployed = CREATE3.predictDeterministicAddress(salt, NICKS_FACTORY);
 
@@ -117,17 +120,7 @@ contract DeployTimelock is Utils {
             return deployed;
         }
 
-        address proxy = address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", NICKS_FACTORY, salt, CREATE3.PROXY_INITCODE_HASH)))));
-
-        bool ok;
-        if (proxy.code.length == 0) {
-            (ok,) = NICKS_FACTORY.call(abi.encodePacked(salt, hex"67363d3d37363d34f03d5260086018f3"));
-            require(ok, "CREATE3 proxy deploy failed");
-        }
-
-        (ok,) = proxy.call(creationCode);
-        require(ok, "CREATE3 contract deploy failed");
-
+        new Create3Deployer(creationCode, salt);
         require(deployed.code.length > 0, "CREATE3 deployment verification failed");
     }
 }

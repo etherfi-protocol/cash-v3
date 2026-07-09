@@ -6,6 +6,7 @@ import { console } from "forge-std/console.sol";
 import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { RoleRegistry } from "../../../src/role-registry/RoleRegistry.sol";
+import { Create3Deployer } from "../../utils/Create3Deployer.sol";
 import { GnosisHelpers } from "../../utils/GnosisHelpers.sol";
 import { Utils } from "../../utils/Utils.sol";
 
@@ -36,7 +37,14 @@ abstract contract TimelockMigrationBase is Utils, GnosisHelpers {
     bytes32 constant TL_SALT = bytes32(0);
 
     bytes32 constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
+    bytes32 constant CANCELLER_ROLE = keccak256("CANCELLER_ROLE");
     bytes32 constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+
+    /// @dev ether.fi guardian safe — becomes CANCELLER on the timelock (can veto queued
+    ///      operations, nothing else). Same address on all 6 chains; not yet deployed on
+    ///      Arbitrum but will land at this address there too, and role grants are
+    ///      address-based so granting ahead of deployment is safe.
+    address constant CANCELLER_SAFE = 0x055a8B2B65d0aB4E0C17a0168d032464B7E97bdF;
 
     /// @dev Governance multisig owning the RoleRegistry on Ethereum, Optimism, BNB, Base, Arbitrum
     address constant GOVERNANCE_MULTISIG = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
@@ -76,16 +84,31 @@ abstract contract TimelockMigrationBase is Utils, GnosisHelpers {
         return abi.encodeWithSignature("requestOwnershipHandover()");
     }
 
-    /// @dev step1: schedule roleRegistry.requestOwnershipHandover() on the EtherFi timelock
-    function _scheduleHandoverRequestTx(address roleRegistry, bool isLast) internal pure returns (string memory) {
-        string memory data = iToHex(abi.encodeWithSignature("schedule(address,uint256,bytes,bytes32,bytes32,uint256)", roleRegistry, 0, _handoverRequestCalldata(), TL_PREDECESSOR, TL_SALT, TIMELOCK_DELAY));
-        return _getGnosisTransaction(addressToHex(ETHERFI_TIMELOCK), data, "0", isLast);
+    /// @dev timelock.grantRole(CANCELLER_ROLE, CANCELLER_SAFE) — the timelock is its own admin,
+    ///      so the grant must go through a scheduled operation targeting the timelock itself
+    function _grantCancellerCalldata() internal pure returns (bytes memory) {
+        return abi.encodeWithSignature("grantRole(bytes32,address)", CANCELLER_ROLE, CANCELLER_SAFE);
     }
 
-    /// @dev step2: execute the scheduled handover request (timelock becomes the pending owner)
-    function _executeHandoverRequestTx(address roleRegistry, bool isLast) internal pure returns (string memory) {
-        string memory data = iToHex(abi.encodeWithSignature("execute(address,uint256,bytes,bytes32,bytes32)", roleRegistry, 0, _handoverRequestCalldata(), TL_PREDECESSOR, TL_SALT));
-        return _getGnosisTransaction(addressToHex(ETHERFI_TIMELOCK), data, "0", isLast);
+    /// @dev step1: schedule an operation on the EtherFi timelock (2-day delay)
+    function _scheduleTimelockOpTx(address target, bytes memory data, bool isLast) internal pure returns (string memory) {
+        string memory scheduleData = iToHex(abi.encodeWithSignature("schedule(address,uint256,bytes,bytes32,bytes32,uint256)", target, 0, data, TL_PREDECESSOR, TL_SALT, TIMELOCK_DELAY));
+        return _getGnosisTransaction(addressToHex(ETHERFI_TIMELOCK), scheduleData, "0", isLast);
+    }
+
+    /// @dev step2: execute a previously scheduled timelock operation
+    function _executeTimelockOpTx(address target, bytes memory data, bool isLast) internal pure returns (string memory) {
+        string memory executeData = iToHex(abi.encodeWithSignature("execute(address,uint256,bytes,bytes32,bytes32)", target, 0, data, TL_PREDECESSOR, TL_SALT));
+        return _getGnosisTransaction(addressToHex(ETHERFI_TIMELOCK), executeData, "0", isLast);
+    }
+
+    /// @dev step1 tail shared by every chain: grant GOVERNANCE_ROLE to the safe, schedule the
+    ///      ownership-handover request, and schedule the canceller grant for the guardian safe
+    function _appendStep1GovernanceTxs(string memory txs, address roleRegistry, address safe) internal pure returns (string memory) {
+        txs = string(abi.encodePacked(txs, _grantGovernanceRoleTx(roleRegistry, safe, false)));
+        txs = string(abi.encodePacked(txs, _scheduleTimelockOpTx(roleRegistry, _handoverRequestCalldata(), false)));
+        txs = string(abi.encodePacked(txs, _scheduleTimelockOpTx(ETHERFI_TIMELOCK, _grantCancellerCalldata(), true)));
+        return txs;
     }
 
     /// @dev step2: safe (still owner) completes the handover — timelock becomes owner
@@ -94,11 +117,13 @@ abstract contract TimelockMigrationBase is Utils, GnosisHelpers {
         return _getGnosisTransaction(addressToHex(roleRegistry), data, "0", isLast);
     }
 
-    /// @dev step2 bundle is identical for every chain
+    /// @dev step2 bundle is identical for every chain: execute the handover request, complete
+    ///      the ownership transfer, and execute the canceller grant for the guardian safe
     function _buildStep2(address roleRegistry, address safe) internal view returns (string memory txs) {
         txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(safe));
-        txs = string(abi.encodePacked(txs, _executeHandoverRequestTx(roleRegistry, false)));
-        txs = string(abi.encodePacked(txs, _completeHandoverTx(roleRegistry, true)));
+        txs = string(abi.encodePacked(txs, _executeTimelockOpTx(roleRegistry, _handoverRequestCalldata(), false)));
+        txs = string(abi.encodePacked(txs, _completeHandoverTx(roleRegistry, false)));
+        txs = string(abi.encodePacked(txs, _executeTimelockOpTx(ETHERFI_TIMELOCK, _grantCancellerCalldata(), true)));
     }
 
     function _writeBundle(string memory step, string memory txs) internal returns (string memory path) {
@@ -108,7 +133,7 @@ abstract contract TimelockMigrationBase is Utils, GnosisHelpers {
         console.log("Wrote", path);
     }
 
-    // ── CREATE3 impl deployment (same helper as ReserveAddresses.s.sol) ───────────
+    // ── CREATE3 impl deployment — atomic via Create3Deployer (see its natspec) ─────
 
     function deployCreate3(bytes memory creationCode, bytes32 salt) internal returns (address deployed) {
         deployed = CREATE3.predictDeterministicAddress(salt, NICKS_FACTORY);
@@ -118,17 +143,7 @@ abstract contract TimelockMigrationBase is Utils, GnosisHelpers {
             return deployed;
         }
 
-        address proxy = address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", NICKS_FACTORY, salt, CREATE3.PROXY_INITCODE_HASH)))));
-
-        bool ok;
-        if (proxy.code.length == 0) {
-            (ok,) = NICKS_FACTORY.call(abi.encodePacked(salt, hex"67363d3d37363d34f03d5260086018f3"));
-            require(ok, "CREATE3 proxy deploy failed");
-        }
-
-        (ok,) = proxy.call(creationCode);
-        require(ok, "CREATE3 contract deploy failed");
-
+        new Create3Deployer(creationCode, salt);
         require(deployed.code.length > 0, "CREATE3 deployment verification failed");
     }
 
@@ -167,9 +182,18 @@ abstract contract TimelockMigrationBase is Utils, GnosisHelpers {
         // ...but upgrades authorized by the new owner (the timelock) must work.
         require(RoleRegistry(roleRegistry).hasRole(GOVERNANCE_ROLE, safe), "GOVERNANCE_ROLE lost in handover");
 
+        // Guardian safe is canceller on the timelock — and nothing more
+        (, bytes memory hasCanceller) = ETHERFI_TIMELOCK.staticcall(abi.encodeWithSignature("hasRole(bytes32,address)", CANCELLER_ROLE, CANCELLER_SAFE));
+        require(abi.decode(hasCanceller, (bool)), "canceller safe missing CANCELLER_ROLE");
+        (, bytes memory isProposer) = ETHERFI_TIMELOCK.staticcall(abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("PROPOSER_ROLE"), CANCELLER_SAFE));
+        require(!abi.decode(isProposer, (bool)), "canceller safe must not be proposer");
+        (, bytes memory isAdmin) = ETHERFI_TIMELOCK.staticcall(abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), CANCELLER_SAFE));
+        require(!abi.decode(isAdmin, (bool)), "canceller safe must not be admin");
+
         console.log("");
         console.log("  [OK] all proxies upgraded");
         console.log("  [OK] safe holds GOVERNANCE_ROLE:", safe);
         console.log("  [OK] RoleRegistry owner is the timelock:", ETHERFI_TIMELOCK);
+        console.log("  [OK] canceller safe holds CANCELLER_ROLE:", CANCELLER_SAFE);
     }
 }

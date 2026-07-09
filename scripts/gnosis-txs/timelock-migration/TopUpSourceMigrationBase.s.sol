@@ -35,11 +35,10 @@ abstract contract TopUpSourceMigrationBase is TimelockMigrationBase {
         address[] memory proxies = new address[](1);
         proxies[0] = TOP_UP_FACTORY_PROXY;
 
-        // ── 2. step1 bundle: upgrade + role grant + schedule handover request ──
+        // ── 2. step1 bundle: upgrade + role grant + schedule handover & canceller grant ──
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(safe));
         txs = string(abi.encodePacked(txs, _upgradeTx(TOP_UP_FACTORY_PROXY, impls[0], false)));
-        txs = string(abi.encodePacked(txs, _grantGovernanceRoleTx(roleRegistry(), safe, false)));
-        txs = string(abi.encodePacked(txs, _scheduleHandoverRequestTx(roleRegistry(), true)));
+        txs = _appendStep1GovernanceTxs(txs, roleRegistry(), safe);
         string memory step1Path = _writeBundle("step1", txs);
 
         // ── 3. step2 bundle: execute handover request + complete handover ──
