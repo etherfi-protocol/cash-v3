@@ -45,16 +45,15 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @notice Per-asset admin configuration.
      * @param tokenMessenger CCTP TokenMessenger contract for the burn-token on this chain.
      *                       address(0) = unsupported asset.
-     * @param finalityThreshold CCTP finality: 2000 (Standard/free) or 1000 (Fast/fee).
-     * @param maxFeeBps CCTP relay-fee ceiling in bps of the *burn amount* (amount - providerFee),
-     *                  paid to Circle on the destination in burn-token. 0 for Standard transfers.
-     *                  Must be <= MAX_FEE_BPS.
+     * @param maxFeeBps Admin ceiling on the CCTP relay-fee in bps of the *burn amount*, applied only
+     *                  when the signed request selects Fast (CONFIRMED) finality. Standard requests
+     *                  always burn with maxFee=0. Must be <= MAX_FEE_BPS.
+     * @param providerFeeBps Provider service fee (paid to feeRecipient on source in burn-token).
      */
     struct AssetConfig {
         address tokenMessenger;
-        uint32 finalityThreshold;
-        uint256 maxFeeBps;      // CCTP relay-fee ceiling (paid to Circle on destination in burn-token)
-        uint256 providerFeeBps;  // provider service fee (paid to feeRecipient on source in burn-token)
+        uint256 maxFeeBps;
+        uint256 providerFeeBps;
     }
 
     /// @dev Queued bridge; snapshots the resolved config so execution cannot drift from what was signed.
@@ -70,12 +69,14 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         address providerFeeRecipient; // snapshot of module feeRecipient at request time
     }
 
-    /// @dev Signed request params. Fee/finality/messenger are admin-config, NOT included here.
+    /// @dev Signed request params. Caller picks Fast (CONFIRMED=1000) or Standard (FINALIZED=2000)
+    ///      finality per-request; fee ceiling and messenger remain admin-config.
     struct BridgeParams {
         uint32 destDomain;
         address asset;
         uint256 amount;
         address destRecipient;
+        uint32 finalityThreshold;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.CCTPModule
@@ -105,9 +106,9 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     error InvalidFinalityThreshold();
     error MaxFeeBpsTooHigh();
     error providerFeeBpsTooHigh();
-    error StandardModeFeeNotAllowed();
     error providerFeeRecipientNotSet();
     error BurnAmountZero();
+    error InvalidTokenMessenger();
 
     event AssetConfigSet(address[] assets, AssetConfig[] assetConfigs);
     event AllowedDomainsSet(uint32[] domains, bool[] allowed);
@@ -180,11 +181,11 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     /// @return feeToken The burn asset, or ETH sentinel for an unsupported asset.
     /// @return providerFee provider service fee (goes to feeRecipient on source).
     /// @return cctpMaxFee CCTP relay-fee ceiling (paid to Circle on destination).
-    function getBridgeFee(address asset, uint256 amount) external view returns (address feeToken, uint256 providerFee, uint256 cctpMaxFee) {
+    function getBridgeFee(address asset, uint256 amount, uint32 finalityThreshold) external view returns (address feeToken, uint256 providerFee, uint256 cctpMaxFee) {
         AssetConfig memory cfg = _getCCTPModuleStorage().assetConfig[asset];
         if (cfg.tokenMessenger == address(0)) return (ETH, 0, 0);
         providerFee = _computeMaxFee(amount, cfg.providerFeeBps);
-        cctpMaxFee = _computeMaxFee(amount - providerFee, cfg.maxFeeBps);
+        cctpMaxFee = finalityThreshold == FINALITY_CONFIRMED ? _computeMaxFee(amount - providerFee, cfg.maxFeeBps) : 0;
         feeToken = asset;
     }
 
@@ -230,6 +231,8 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     }
 
     function _buildWithdrawal(BridgeParams calldata p, AssetConfig memory cfg) internal view returns (CrossChainWithdrawal memory w) {
+        if (p.finalityThreshold != FINALITY_CONFIRMED && p.finalityThreshold != FINALITY_FINALIZED) revert InvalidFinalityThreshold();
+
         uint256 providerFee = _computeMaxFee(p.amount, cfg.providerFeeBps);
         address feeRecipient = _getCCTPModuleStorage().providerFeeRecipient;
         if (providerFee > 0 && feeRecipient == address(0)) revert providerFeeRecipientNotSet();
@@ -239,7 +242,9 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         // Unreachable while MAX_FEE_BPS < 10_000 (service fee capped at 5%); kept as defense-in-depth
         // if the cap is ever raised.
         if (burnAmount == 0) revert BurnAmountZero();
-        uint256 maxFee = _computeMaxFee(burnAmount, cfg.maxFeeBps);
+        // Standard/FINALIZED transfers are free on OP's TokenMessengerV2 → force maxFee=0. Fast/CONFIRMED
+        // requests pay up to the admin ceiling in bps of burnAmount.
+        uint256 maxFee = p.finalityThreshold == FINALITY_CONFIRMED ? _computeMaxFee(burnAmount, cfg.maxFeeBps) : 0;
         // Defensive: fee must never consume the whole burn. Guaranteed by MAX_FEE_BPS, re-checked for tiny amounts.
         if (maxFee >= burnAmount) revert MaxFeeExceedsAmount();
 
@@ -250,7 +255,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
             destRecipient: p.destRecipient,
             tokenMessenger: cfg.tokenMessenger,
             maxFee: maxFee,
-            minFinalityThreshold: cfg.finalityThreshold,
+            minFinalityThreshold: p.finalityThreshold,
             providerFee: providerFee,
             providerFeeRecipient: feeRecipient
         });
@@ -279,14 +284,16 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         bytes32 digestHash = keccak256(abi.encodePacked(CANCEL_BRIDGE_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
 
-        CrossChainWithdrawal storage w = _getCCTPModuleStorage().withdrawals[safe];
+        CrossChainWithdrawal memory w = _getCCTPModuleStorage().withdrawals[safe];
         if (w.destRecipient == address(0)) revert NoWithdrawalQueuedForCCTP();
+
+        // CEI: clear + emit before the external CashModule call. The callback (cancelBridgeByCashModule)
+        // then finds nothing and returns silently, so we don't double-emit with a zeroed storage ref.
+        delete _getCCTPModuleStorage().withdrawals[safe];
+        emit BridgeCancelled(safe, w.destDomain, w.asset, w.amount, w.destRecipient);
 
         SafeData memory data = cashModule.getData(safe);
         if (data.pendingWithdrawalRequest.recipient == address(this)) cashModule.cancelWithdrawalByModule(safe);
-
-        emit BridgeCancelled(safe, w.destDomain, w.asset, w.amount, w.destRecipient);
-        delete _getCCTPModuleStorage().withdrawals[safe];
     }
 
     function cancelBridgeByCashModule(address safe) external {
@@ -343,11 +350,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
             // Only validate fee/finality for *supported* assets (tokenMessenger != 0).
             // A zero tokenMessenger is the "remove/unsupported" sentinel and skips validation.
             if (cfg.tokenMessenger != address(0)) {
-                if (cfg.finalityThreshold != FINALITY_CONFIRMED && cfg.finalityThreshold != FINALITY_FINALIZED) revert InvalidFinalityThreshold();
-                // Standard (Finalized) transfers are free on every chain this module sources from
-                // (no Standard-fee-switch on OP's TokenMessengerV2 per Circle docs), so a non-zero
-                // fee paired with Standard finality is always meaningless/misleading — reject it.
-                if (cfg.finalityThreshold == FINALITY_FINALIZED && cfg.maxFeeBps != 0) revert StandardModeFeeNotAllowed();
+                if (cfg.tokenMessenger.code.length == 0) revert InvalidTokenMessenger();
                 if (cfg.maxFeeBps > MAX_FEE_BPS) revert MaxFeeBpsTooHigh();
                 if (cfg.providerFeeBps > MAX_FEE_BPS) revert providerFeeBpsTooHigh();
             }
