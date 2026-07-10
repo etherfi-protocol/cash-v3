@@ -387,7 +387,8 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Internal implementation of withdrawal request logic
-     * @dev Creates a pending withdrawal request and emits events
+     * @dev For a gateway safe, first pulls any lend-market shortfall into the safe (Aave enforces the
+     *      position's health on that pull), then creates a pending withdrawal request and emits events
      * @param safe Address of the EtherFi Safe
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
@@ -406,6 +407,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
 
+        CashLendLib.sourceWithdrawal($, safe, tokens, amounts);
         _checkBalance(safe, tokens, amounts);
 
         $$.pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
