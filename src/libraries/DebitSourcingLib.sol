@@ -22,7 +22,7 @@ library DebitSourcingLib {
      * @dev min(supplied, reserve cash); when the safe carries debt this is further capped by the borrowing
      *      headroom, and is zero for a zero-LTV reserve (no borrow weight, so it cannot be sized against debt).
      */
-    function withdrawableSupplied(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256) {
+    function withdrawableSupplied(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) public view returns (uint256) {
         uint256 supplied = gateway.suppliedOf(safe, token);
         uint256 cash = gateway.availableCash(token);
         uint256 cap = supplied < cash ? supplied : cash;
@@ -42,7 +42,7 @@ library DebitSourcingLib {
     }
 
     /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
-    function headroomConsumed(ILendGateway gateway, IPriceProvider priceProvider, address token, uint256 amount) internal view returns (uint256) {
+    function headroomConsumed(ILendGateway gateway, IPriceProvider priceProvider, address token, uint256 amount) public view returns (uint256) {
         return (_toUsd(priceProvider, token, amount) * gateway.ltv(token)) / LTV_SCALE;
     }
 

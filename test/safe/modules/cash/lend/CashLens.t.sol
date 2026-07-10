@@ -74,4 +74,46 @@ contract CashLensAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(data.borrows[0].amount, borrowAmount, 2, "Borrow amount should match the Aave debt");
         assertApproxEqAbs(data.totalBorrow, borrowAmount, 2, "Total borrow should match the Aave debt");
     }
+
+    /// With no debt, the max is the loose balance (net of a pending withdrawal) plus the full supplied balance.
+    function test_getMaxWithdrawable_noDebt_looseNetOfPendingPlusSupplied() public {
+        _supplyToGateway(address(safe), address(weETH), 3 ether);
+        deal(address(weETH), address(safe), 2 ether);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(weETH);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 0.5 ether;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        assertApproxEqAbs(cashLens.getMaxWithdrawable(address(safe), address(weETH)), 4.5 ether, 2, "loose net of pending plus supplied");
+    }
+
+    /// With debt, the supplied part is capped by the borrowing headroom, and the number is exactly what the
+    /// gateway allows: withdrawing more reverts on Aave's health check, withdrawing it succeeds.
+    function test_getMaxWithdrawable_withDebt_matchesWhatTheGatewayAllows() public {
+        _buildGatewayPosition(address(safe), address(weETH), 10 ether, address(usdc), 5000e6);
+
+        uint256 max = cashLens.getMaxWithdrawable(address(safe), address(weETH));
+        assertLt(max, 10 ether, "debt must cap the withdrawable supplied balance");
+
+        // One weETH-cent past the max breaches Aave's LTV bound.
+        vm.prank(driver);
+        vm.expectRevert();
+        gw.withdraw(address(safe), address(weETH), max + 0.01 ether, address(safe));
+
+        // The max itself goes through, and it means what it says: taking it exhausts the borrowing headroom.
+        vm.prank(driver);
+        gw.withdraw(address(safe), address(weETH), max, address(safe));
+        assertApproxEqAbs(weETH.balanceOf(address(safe)), max, 2, "max withdrawal lands in the safe");
+        assertApproxEqAbs(gw.getAccountData(address(safe)).availableBorrowsUsd, 0, 0.02e6, "max should consume all borrowing headroom");
+    }
+
+    /// A legacy safe's funds are all loose: the max is its balance and the gateway is never consulted.
+    function test_getMaxWithdrawable_legacySafe_looseOnly() public {
+        _forceLegacyEngine(address(safe));
+        deal(address(weETH), address(safe), 2 ether);
+
+        assertEq(cashLens.getMaxWithdrawable(address(safe), address(weETH)), 2 ether, "legacy max is the loose balance");
+    }
 }
