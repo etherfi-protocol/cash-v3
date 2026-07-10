@@ -105,6 +105,22 @@ contract LiquidUsdLiquifierGatewayTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(liquidUsd)), 1000e6 - (expectedLiquidUsd - loose), 2, "only the shortfall should leave Aave");
     }
 
+    // The safe's own loose USDC is not consumed: the gateway pulls exactly the USDC the liquifier deposited,
+    // and the reclaim charges LiquidUSD only for the realized debt reduction.
+    function test_repay_doesNotTouchSafesOwnLooseUsdc() public {
+        _buildDebtAndSuppliedLiquidUsd(500e6, 1000e6);
+        uint256 loose = 300e6;
+        deal(address(usdc), address(safe), loose);
+
+        uint256 debtBefore = gw.debtOf(address(safe), address(usdc));
+
+        vm.prank(etherFiWallet);
+        liquifier.repayUsingLiquidUSD(address(safe), 200e6);
+
+        assertApproxEqAbs(usdc.balanceOf(address(safe)), loose, 1, "safe's own loose USDC was consumed");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), debtBefore - 200e6, 1, "debt not reduced by the repaid amount");
+    }
+
     // A reclaim larger than the safe's total LiquidUSD (loose + supplied) refuses rather than under-collecting.
     function test_repay_revertsWhenSafeCannotCoverReclaim() public {
         _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 200e6);
