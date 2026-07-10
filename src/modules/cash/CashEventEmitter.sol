@@ -149,6 +149,23 @@ contract CashEventEmitter is UpgradeableProxy {
     event CollateralResupplied(address indexed safe, address indexed token, uint256 amount);
 
     /**
+     * @notice Emitted when a safe's loose balance is supplied into the lend market (auto-supply)
+     * @param safe Address of the safe
+     * @param token Token supplied
+     * @param amount Token amount supplied
+     */
+    event LendSupplied(address indexed safe, address indexed token, uint256 amount);
+
+    /**
+     * @notice Emitted when a safe borrows from the lend market to itself (a borrow-page borrow)
+     * @param safe Address of the safe
+     * @param token Token borrowed
+     * @param amount Token amount borrowed
+     * @param amountInUsd USD value of the borrow
+     */
+    event LendBorrowed(address indexed safe, address indexed token, uint256 amount, uint256 amountInUsd);
+
+    /**
      * @notice Emitted when cashback is calculated and potentially distributed
      * @param safe Address of the safe 
      * @param spendingInUsd USD value of the spending that generated the cashback
@@ -431,6 +448,29 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitCollateralResupplied(address safe, address token, uint256 amount) external onlyCashModule {
         emit CollateralResupplied(safe, token, amount);
+    }
+
+    /**
+     * @notice Emits the LendSupplied event
+     * @dev Can only be called by the Cash Module
+     * @param safe Address of the safe
+     * @param token Token supplied
+     * @param amount Token amount supplied
+     */
+    function emitLendSupplied(address safe, address token, uint256 amount) external onlyCashModule {
+        emit LendSupplied(safe, token, amount);
+    }
+
+    /**
+     * @notice Emits the LendBorrowed event
+     * @dev Can only be called by the Cash Module
+     * @param safe Address of the safe
+     * @param token Token borrowed
+     * @param amount Token amount borrowed
+     * @param amountInUsd USD value of the borrow
+     */
+    function emitLendBorrowed(address safe, address token, uint256 amount, uint256 amountInUsd) external onlyCashModule {
+        emit LendBorrowed(safe, token, amount, amountInUsd);
     }
 
     /// @notice Emits the LendDisableRequested event
