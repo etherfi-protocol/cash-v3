@@ -281,6 +281,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiLiquidModule() public {
+        // The liquid modules gain the Aave sandwich for Lend, so their bytecode no longer matches the deployed
+        // pre-Lend OP implementations. Re-enable after the Lend deployment.
+        vm.skip(true);
         address[] memory assets = new address[](4);
         assets[0] = cc.liquidEth;
         assets[1] = cc.liquidBtc;
@@ -298,6 +301,8 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiLiquidModuleWithReferrer() public {
+        // Skipped for the same Lend bytecode change as EtherFiLiquidModule above.
+        vm.skip(true);
         address[] memory assets = new address[](1);
         assets[0] = cc.sethfi;
 

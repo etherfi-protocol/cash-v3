@@ -11,9 +11,11 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { ILayerZeroTeller } from "../../interfaces/ILayerZeroTeller.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 
 
@@ -21,9 +23,12 @@ import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
  * @title EtherFiLiquidModule
  * @author ether.fi
  * @notice Module for interacting with ether.fi Liquid vaults
- * @dev Extends ModuleBase to provide ether.fi Liquid integration for Safes
+ * @dev Extends ModuleBase to provide ether.fi Liquid integration for Safes. A gateway safe's assets may be
+ *      supplied to Aave, so deposit and withdraw sandwich the vault action: withdraw any shortfall of the
+ *      moved asset from the safe's Aave position first, and re-supply a deposit's receipt token when the
+ *      gateway lists it as a reserve (a queued withdrawal's output arrives async and stays loose).
  */
-contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
+contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
 
@@ -161,6 +166,16 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         }
     }
 
+    /// @dev Resolved live from the CashModule, the gateway address's single source of truth.
+    function gateway() public view override returns (ILendGateway) {
+        return cashModule.getLendGateway();
+    }
+
+    /// @dev The sandwich acts only for a safe whose assets live in Aave: on the gateway engine and not opted out.
+    function _lendActive(address safe) internal view override returns (bool) {
+        return cashModule.usesLendGateway(safe) && gateway().isLendEnabled(safe);
+    }
+
     /**
      * @notice Deposits tokens to a Liquid vault using signature verification
      * @param safe The Safe address which holds the tokens
@@ -214,7 +229,10 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         if (address(teller) == address(0)) revert UnsupportedLiquidAsset();
         
         if (amountToDeposit == 0 || minReturn == 0) revert InvalidInput();
-        
+
+        // Pull any shortfall of the deposit asset out of the safe's Aave position (no-op for ETH), then
+        // confirm the safe holds the full amount loose (net of any pending-withdrawal reservation).
+        _withdrawShortfall(safe, assetToDeposit, amountToDeposit, _getAvailableAmount(safe, assetToDeposit));
         _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
@@ -257,6 +275,9 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         
         uint256 liquidTokenReceived = ERC20(liquidAsset).balanceOf(safe) - liquidTokenBalBefore;
         if (liquidTokenReceived < minReturn) revert InsufficientReturnAmount();
+
+        // Re-supply the receipt token as collateral when the gateway lists it; an unlisted receipt stays loose.
+        _resupplyToGateway(safe, liquidAsset, liquidTokenReceived);
 
         emit LiquidDeposit(safe, assetToDeposit, liquidAsset, amountToDeposit, liquidTokenReceived);
     }
@@ -316,7 +337,10 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         IBoringOnChainQueue boringQueue = IBoringOnChainQueue(liquidWithdrawQueue[liquidAsset]);
         if (address(boringQueue) == address(0)) revert LiquidWithdrawConfigNotSet();
         if (amountToWithdraw == 0) revert InvalidInput();
-        
+
+        // Pull any shortfall of the liquid token out of the safe's Aave position. Only this front bookend
+        // applies: the queued withdrawal's output arrives later, loose in the safe.
+        _withdrawShortfall(safe, liquidAsset, amountToWithdraw, _getAvailableAmount(safe, liquidAsset));
         _checkAmountAvailable(safe, liquidAsset, amountToWithdraw);
 
         uint128 amountOutFromQueue = boringQueue.previewAssetsOut(assetOut, amountToWithdraw, discount);
