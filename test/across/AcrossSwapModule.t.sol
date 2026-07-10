@@ -268,6 +268,42 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         module.cancelSwap(address(safe), signers, sigs);
     }
 
+    // ---- cancelExpiredSwap ----
+
+    function test_cancelExpiredSwap_clearsOrderAndHold_permissionlessAfterDeadline() public {
+        AcrossSwapModule.Order memory order = _baseOrder();
+        _request(order);
+        vm.warp(order.deadline + 1);
+
+        // No signature and no role: any caller can clean up an expired order.
+        vm.expectEmit(true, false, false, false);
+        emit AcrossSwapModule.SwapCancelled(address(safe), bytes32(0));
+        vm.prank(makeAddr("randomCaller"));
+        module.cancelExpiredSwap(address(safe));
+
+        assertEq(module.getOrder(address(safe)).srcToken, address(0), "order not cleared");
+        assertEq(
+            cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient,
+            address(0),
+            "hold not cleared"
+        );
+    }
+
+    function test_cancelExpiredSwap_revertsForNoActiveOrder() public {
+        vm.expectRevert(AcrossSwapModule.NoActiveOrder.selector);
+        module.cancelExpiredSwap(address(safe));
+    }
+
+    function test_cancelExpiredSwap_revertsBeforeDeadline() public {
+        AcrossSwapModule.Order memory order = _baseOrder();
+        _request(order);
+
+        // At the deadline (inclusive) it is not yet expired.
+        vm.warp(order.deadline);
+        vm.expectRevert(AcrossSwapModule.OrderNotExpired.selector);
+        module.cancelExpiredSwap(address(safe));
+    }
+
     // ---- swapId linking ----
 
     /// @dev The swapId committed at request time is `keccak256(chainid, module, safe, nonce, order)`.
