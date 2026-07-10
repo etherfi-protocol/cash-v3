@@ -134,6 +134,8 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     error InvalidSignatures();
     /// @notice Reverts when `executeSwap` runs after `order.deadline`.
     error OrderExpired();
+    /// @notice Reverts when `cancelExpiredSwap` runs at or before `order.deadline`.
+    error OrderNotExpired();
     /// @notice Reverts when `depositArgs.outputAmount < order.minOut`.
     error InsufficientOutputAmount();
     /// @notice Reverts when admin-set `spokePool` / `multicallHandler` is still zero.
@@ -447,6 +449,31 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
             // and cancels the swap already, so we need to delete the swap only in else block
             delete $.swaps[safe];
             emit SwapCancelled(safe, swapId);
+        }
+    }
+
+    /**
+     * @notice Permissionlessly cancels an EXPIRED stored swap for `safe`, releasing its
+     *         CashModule solvency hold WITHOUT an owner signature.
+     * @dev Once `block.timestamp > order.deadline`, `executeSwap` can never succeed again (it
+     *      reverts `OrderExpired`), so the stored swap and its hold would otherwise sit until an
+     *      owner signs `cancelSwap`. Authorization is purely the elapsed deadline: this can only
+     *      run after expiry, and it merely refunds the safe's own funds back to the safe (via
+     *      `cancelWithdrawalByModule`) and clears state — there is no fund-movement authority to
+     *      abuse, so it is safe to let the backend keeper (or anyone) call it. Mirrors
+     *      `cancelSwap`'s clearing path; where `cashModule == 0` state is cleared directly.
+     */
+    function cancelExpiredSwap(address safe) external nonReentrant onlyEtherFiSafe(safe) {
+        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
+        StoredSwap memory swap = $.swaps[safe];
+        if (swap.order.srcToken == address(0)) revert NoActiveOrder();
+        if (block.timestamp <= swap.order.deadline) revert OrderNotExpired();
+
+        if (address(cashModule) != address(0)) {
+            cashModule.cancelWithdrawalByModule(safe);
+        } else {
+            delete $.swaps[safe];
+            emit SwapCancelled(safe, swap.swapId);
         }
     }
 
