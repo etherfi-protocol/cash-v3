@@ -214,6 +214,9 @@ interface ICashModule {
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
 
+    /// @notice Error thrown when a lend-market operation targets a safe on the legacy DebtManager engine
+    error OnlyLendGatewaySafe();
+
     /// @notice Error thrown when a non-DebtManager contract calls restricted functions
     error OnlyDebtManager();
 
@@ -682,6 +685,29 @@ interface ICashModule {
      * @custom:throws InsufficientBalance if there is not enough balance for the operation
      */
     function repay(address safe, address token, uint256 amountInUsd) external;
+
+    /**
+     * @notice Supplies a safe's loose token balances into the Aave lend market (the auto-supply sweep)
+     * @dev Per token: supplies the loose balance net of any pending-withdrawal reservation and flags it
+     *      as collateral; zero and unregistered tokens are skipped. No-op for an opted-out safe; reverts
+     *      for a legacy safe.
+     * @param safe Address of the EtherFi Safe
+     * @param tokens Tokens to sweep
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function supplyToLend(address safe, address[] calldata tokens) external;
+
+    /**
+     * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
+     *         are immediately supplied back as collateral
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to borrow
+     * @param amountInUsd Amount to borrow in USD
+     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function borrow(address safe, address token, uint256 amountInUsd) external;
 
     /**
      * @notice Requests a withdrawal of tokens to a recipient

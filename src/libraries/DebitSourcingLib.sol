@@ -46,6 +46,18 @@ library DebitSourcingLib {
         return (_toUsd(priceProvider, token, amount) * gateway.ltv(token)) / LTV_SCALE;
     }
 
+    /**
+     * @notice Amount of `token` withdrawable from `safe`'s supplied balance to fund a repay whose loose leg
+     *         repays `fromLoose` first
+     * @dev Repaying the loose leg lowers the debt by its full USD value while the collateral is untouched,
+     *      so the withdraw leg sizes against that much extra headroom. Callers only get here with debt
+     *      remaining after the loose leg, so the headroom cap always applies.
+     */
+    function repayWithdrawable(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 fromLoose) public view returns (uint256) {
+        uint256 headroomUsd = gateway.getAccountData(safe).availableBorrowsUsd + _toUsd(priceProvider, token, fromLoose);
+        return withdrawableSupplied(gateway, priceProvider, safe, token, headroomUsd, true);
+    }
+
     /// @dev USD value of `amount` of `token` at its current price, on PriceProvider's USD scale
     function _toUsd(IPriceProvider priceProvider, address token, uint256 amount) private view returns (uint256) {
         return (amount * priceProvider.price(token)) / (10 ** IERC20Metadata(token).decimals());

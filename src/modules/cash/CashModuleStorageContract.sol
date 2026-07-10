@@ -105,6 +105,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
 
+    /// @notice Error thrown when a lend-market operation targets a safe on the legacy DebtManager engine
+    error OnlyLendGatewaySafe();
+
     /// @notice Error thrown when a non-DebtManager contract calls restricted functions
     error OnlyDebtManager();
 

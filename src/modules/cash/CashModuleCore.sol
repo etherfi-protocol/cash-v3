@@ -523,6 +523,39 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Supplies a safe's loose token balances into the Aave lend market (the auto-supply sweep)
+     * @dev Only callable by the EtherFi wallet (the cash-be sweeper). Per token: supplies the loose balance
+     *      net of any pending-withdrawal reservation and flags it as collateral; zero and unregistered
+     *      tokens are skipped. No-op for an opted-out safe; reverts for a legacy safe.
+     * @param safe Address of the EtherFi Safe
+     * @param tokens Tokens to sweep
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function supplyToLend(address safe, address[] calldata tokens) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
+        CashLendLib.supplyToLend(_getCashModuleStorage(), safe, tokens);
+    }
+
+    /**
+     * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
+     *         are immediately supplied back as collateral
+     * @dev Only callable by the EtherFi wallet for valid EtherFi Safe addresses. Aave enforces the health
+     *      check on the borrow itself.
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to borrow
+     * @param amountInUsd Amount to borrow in USD
+     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function borrow(address safe, address token, uint256 amountInUsd) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
+        IDebtManager debtManager = getDebtManager();
+        if (!_isBorrowToken(debtManager, token)) revert OnlyBorrowToken();
+        uint256 amount = debtManager.convertUsdToCollateralToken(token, amountInUsd);
+        if (amount == 0) revert AmountZero();
+        CashLendLib.borrow(_getCashModuleStorage(), safe, token, amount, amountInUsd);
+    }
+
+    /**
      * @dev Internal function to execute the repayment transaction
      * @param safe Address of the EtherFi Safe
      * @param debtManager Reference to the debt manager contract
@@ -533,11 +566,14 @@ contract CashModuleCore is CashModuleStorageContract {
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
         uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();
-        _cancelCompetingWithdrawal(safe, token, amount);
+        // A legacy safe repays from its loose balance only, so a repay that needs withdrawal-reserved funds
+        // is resolved here. A gateway safe sources loose plus Aave-supplied balance in CashLendLib.repay,
+        // which owns the reservation handling for that engine.
+        if (!_usesLendGateway(safe)) _cancelCompetingWithdrawal(safe, token, amount);
 
         // A migrated safe repays on Aave via the gateway; a legacy safe repays the DebtManager. Both paths run
         // in CashLendLib (extracted to keep this contract within the code-size limit).
-        CashLendLib.repay(_getCashModuleStorage(), safe, token, amount, amountInUsd);
+        CashLendLib.repay(_getCashModuleStorage(), etherFiDataProvider, safe, token, amount, amountInUsd);
     }
 
     /**
