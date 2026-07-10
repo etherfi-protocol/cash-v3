@@ -337,6 +337,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_LiquidUSDLiquifierModule() public {
+        // The liquifier gains the dual-engine gateway repay for Lend, so its bytecode no longer matches the
+        // deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
+        vm.skip(true);
         address liquifierImpl = _getImpl(liquidUsdLiquifierProxy);
         address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));
         _verify("LiquidUSDLiquifierModule", liquifierImpl, local);
