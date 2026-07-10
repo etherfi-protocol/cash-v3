@@ -273,6 +273,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Modules (non-proxy, deployed via CREATE3) ----
 
     function test_verifyBytecode_OpenOceanSwapModule() public {
+        // OpenOceanSwapModule gains the Aave sandwich for Lend, so its bytecode no longer matches the deployed
+        // pre-Lend OP implementation. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new OpenOceanSwapModule(cc.swapRouterOpenOcean, dataProviderProxy));
         _verify("OpenOceanSwapModule", openOceanSwapModule, local);
     }

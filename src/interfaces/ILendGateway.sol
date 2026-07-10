@@ -114,6 +114,15 @@ interface ILendGateway {
     function isLendEnabled(address safe) external view returns (bool);
 
     /**
+     * @notice Returns whether `asset` is a registered reserve on the gateway
+     * @dev A sandwich re-supplies its output only when the asset is registered; an unregistered output
+     *      (a swap into a non-collateral token, an unlisted Liquid receipt) stays loose in the safe.
+     * @param asset The asset to query
+     * @return True if the asset has a registered reserveId
+     */
+    function isRegistered(address asset) external view returns (bool);
+
+    /**
      * @notice Returns the assets registered on the gateway (each mapped to an Aave reserveId)
      * @dev The authoritative list of assets a safe can have a position in, keyed on the gateway rather than
      *      DebtManager's collateral list (which can be delisted while an Aave position is still open).

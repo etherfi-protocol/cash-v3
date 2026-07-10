@@ -33,10 +33,9 @@ import { CashLensLegacyLib } from "./CashLensLegacyLib.sol";
  *      debt within its borrowing power. USD is 6 decimals throughout, matching PriceProvider.DECIMALS;
  *      the gateway returns its USD aggregates in the same scale.
  *
- *      The debit cap uses LTV, which is stricter than the sandwich's liquidation-threshold health gate
- *      (ModuleGatewaySandwich.minHealthFactor) only while minHealthFactor <= liqThreshold / LTV for every
- *      collateral. Keep that invariant at deploy time, or CashLens can over-report a debit spend that the
- *      sandwich then reverts on.
+ *      The debit cap uses LTV, the same bound Aave enforces on every collateral withdraw (v4's single
+ *      collateralFactor doubles as LTV and liquidation threshold), so what CashLens reports as debit
+ *      spendable is exactly what a gateway withdraw allows; there is no separate module-side health gate.
  *
  *      A pending withdrawal sits against the loose Safe balance, not the supplied position. CashLens reserves
  *      it from the loose balance and uses the gateway's figures (collateral, maxBorrow, credit/debit headroom)
