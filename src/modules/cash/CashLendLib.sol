@@ -221,7 +221,8 @@ library CashLendLib {
      *      request the two pots cannot fund; Aave enforces the position's health on the pull itself, so
      *      a withdrawal that would leave the safe unhealthy reverts here. The pulled funds sit loose
      *      through the withdrawal delay; the auto-supply sweep nets out the pending reservation, so it
-     *      never sweeps them back.
+     *      never sweeps them back. A cancel leaves them loose on purpose (re-supplying there would let
+     *      a paused reserve block the cancel); the next sweep restores them as collateral.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param safe Address of the EtherFi Safe
      * @param tokens Tokens in the withdrawal request
