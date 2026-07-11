@@ -266,6 +266,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Top up ----
 
     function test_verifyBytecode_TopUpDest() public {
+        // TopUpDest supplies topups into the lend gateway for Lend, so its bytecode no longer
+        // matches the deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new TopUpDest(dataProviderProxy, cc.weth));
         _verify("TopUpDest", topUpDestImpl, local);
     }
