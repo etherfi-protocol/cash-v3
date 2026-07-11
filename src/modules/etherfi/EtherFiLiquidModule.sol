@@ -224,6 +224,14 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @custom:throws AssetNotSupportedForDeposit If the asset cannot be deposited to the teller
      * @custom:throws InsufficientReturnAmount If the return amount is less than min return
      */
+    /**
+     * @dev Calldata for the teller's deposit call within the safe's execution batch. Virtual so the
+     *      referrer variant can substitute the referrer-flavored selector; the batch is otherwise identical.
+     */
+    function _encodeTellerDeposit(address depositAsset, uint256 amountToDeposit, uint256 minReturn) internal pure virtual returns (bytes memory) {
+        return abi.encodeWithSelector(ILayerZeroTeller.deposit.selector, ERC20(depositAsset), amountToDeposit, minReturn);
+    }
+
     function _deposit(address safe, address assetToDeposit, address liquidAsset, uint256 amountToDeposit, uint256 minReturn) internal {
         ILayerZeroTeller teller = liquidAssetToTeller[liquidAsset];
         if (address(teller) == address(0)) revert UnsupportedLiquidAsset();
@@ -254,7 +262,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
             data[1] = abi.encodeWithSelector(ERC20.approve.selector, address(liquidAsset), amountToDeposit);
             
             to[2] = address(teller);
-            data[2] = abi.encodeWithSelector(ILayerZeroTeller.deposit.selector, ERC20(weth), amountToDeposit, minReturn);
+            data[2] = _encodeTellerDeposit(weth, amountToDeposit, minReturn);
         } else {
             if (!teller.assetData(ERC20(assetToDeposit)).allowDeposits) revert AssetNotSupportedForDeposit();
 
@@ -266,7 +274,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
             data[0] = abi.encodeWithSelector(ERC20.approve.selector, address(liquidAsset), amountToDeposit);
             
             to[1] = address(teller);
-            data[1] = abi.encodeWithSelector(ILayerZeroTeller.deposit.selector, ERC20(assetToDeposit), amountToDeposit, minReturn);
+            data[1] = _encodeTellerDeposit(assetToDeposit, amountToDeposit, minReturn);
         }
 
         uint256 liquidTokenBalBefore = ERC20(liquidAsset).balanceOf(safe);
