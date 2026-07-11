@@ -25,10 +25,6 @@ contract SandwichHarness is ModuleLendGatewaySandwich {
         return gateway().isLendEnabled(safe);
     }
 
-    function withdrawFromGateway(address safe, address asset, uint256 amount) external {
-        _withdrawFromGateway(safe, asset, amount);
-    }
-
     function withdrawShortfall(address safe, address asset, uint256 amount, uint256 looseAvailable) external {
         _withdrawShortfall(safe, asset, amount, looseAvailable);
     }
@@ -53,7 +49,8 @@ contract ModuleLendGatewaySandwichTest is Test {
 
     // The withdraw bookend routes to the safe and does not guard health; Aave guards the withdraw itself.
     function test_withdraw_routesToSafe() public {
-        harness.withdrawFromGateway(safe, asset, AMOUNT);
+        gateway.setSuppliedOf(safe, asset, AMOUNT);
+        harness.withdrawShortfall(safe, asset, AMOUNT, 0);
 
         (address s, address a, uint256 amount, address to) = gateway.lastWithdraw();
         assertEq(s, safe);
@@ -111,7 +108,8 @@ contract ModuleLendGatewaySandwichTest is Test {
     // When lend is disabled for the safe, the withdraw bookend is a no-op: its assets already sit in the safe.
     function test_withdraw_noOpWhenLendDisabled() public {
         gateway.setLendEnabled(safe, false);
-        harness.withdrawFromGateway(safe, asset, AMOUNT);
+        gateway.setSuppliedOf(safe, asset, AMOUNT);
+        harness.withdrawShortfall(safe, asset, AMOUNT, 0);
 
         (address s,, uint256 amount,) = gateway.lastWithdraw();
         assertEq(s, address(0), "no withdraw call recorded");
