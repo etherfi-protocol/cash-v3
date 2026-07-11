@@ -98,6 +98,36 @@ contract WithdrawalSourcingTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(usdc)), suppliedAfterPull, "nothing swept back");
     }
 
+    /// A full exit at the getMaxWithdrawable quote pays out exactly, even after interest accrual has
+    /// moved the share rate: the pull is capped at the same preview the spoke itself caps with, and the
+    /// hub transfers the capped amount exactly, so no rounding dust can undercut the balance check.
+    function test_requestWithdrawal_fullExitAtQuoteAfterAccrual() public {
+        _supplyToGateway(address(safe), address(usdc), 5000e6);
+
+        // An independent borrower drives USDC utilization so the supplied balance accrues interest
+        address borrower = makeAddr("dustBorrower");
+        deal(address(weETH), borrower, 400 ether);
+        vm.startPrank(borrower);
+        weETH.approve(address(spoke), 400 ether);
+        spoke.supply(weethReserveId, 400 ether, borrower);
+        spoke.setUsingAsCollateral(weethReserveId, true, borrower);
+        spoke.borrow(usdcReserveId, 500_000e6, borrower);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 7 days);
+
+        uint256 max = cashLens.getMaxWithdrawable(address(safe), address(usdc));
+        assertGt(max, 5000e6, "interest accrued on the supplied balance");
+
+        _requestWithdrawal(_addr1(address(usdc)), _uint1(max), withdrawRecipient);
+        assertEq(usdc.balanceOf(address(safe)), max, "full exit lands in the safe exactly");
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay + 1);
+        cashModule.processWithdrawal(address(safe));
+        assertEq(usdc.balanceOf(withdrawRecipient), max, "recipient paid the full quote");
+    }
+
     /// Builds the owner signatures for a withdrawal request, so revert-path tests can place expectRevert
     /// immediately before the module call.
     function _signRequestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient_) internal view returns (address[] memory, bytes[] memory) {
