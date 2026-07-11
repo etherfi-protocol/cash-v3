@@ -113,6 +113,21 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
         assertEq(liquidVault.balanceOf(address(safe)), 0, "receipt left loose in safe");
     }
 
+    // The sandwich is engine-gated, not opt-out-gated: a legacy safe still reports isLendEnabled true, yet
+    // its deposit must not touch Aave — the receipt stays loose where the DebtManager can see it.
+    function test_deposit_legacySafe_receiptStaysLoose() public {
+        _forceLegacyEngine(address(safe));
+        assertTrue(gw.isLendEnabled(address(safe)), "fixture: a legacy safe still reports lend enabled");
+
+        uint256 amount = 1000e6;
+        deal(address(usdc), address(safe), amount);
+
+        liquidModule.deposit(address(safe), address(usdc), address(liquidVault), amount, amount, owner1, _depositSig(address(usdc), amount, amount));
+
+        assertEq(liquidVault.balanceOf(address(safe)), amount, "receipt must stay loose in the safe");
+        assertEq(gw.suppliedOf(address(safe), address(liquidVault)), 0, "receipt must not be supplied to Aave");
+    }
+
     function _depositSig(address assetToDeposit, uint256 amount, uint256 minReturn) internal view returns (bytes memory) {
         bytes32 digestHash = keccak256(
             abi.encodePacked(liquidModule.DEPOSIT_SIG(), block.chainid, address(liquidModule), liquidModule.getNonce(address(safe)), address(safe), abi.encode(assetToDeposit, address(liquidVault), amount, minReturn))

@@ -52,6 +52,24 @@ contract OpenOceanSwapGatewayTest is CashGatewayTestSetup {
         assertEq(usdc.balanceOf(address(safe)), 0, "USDC output left loose in safe");
     }
 
+    // The sandwich is engine-gated, not opt-out-gated: a legacy safe still reports isLendEnabled true, yet
+    // its swap must not touch Aave — the output stays loose where the DebtManager can see it.
+    function test_swap_legacySafe_outputStaysLoose() public {
+        _forceLegacyEngine(address(safe));
+        assertTrue(gw.isLendEnabled(address(safe)), "fixture: a legacy safe still reports lend enabled");
+
+        uint256 swapAmount = 1 ether;
+        deal(address(weETH), address(safe), swapAmount);
+
+        bytes memory swapData = _quote(address(weETH), address(usdc), swapAmount, IERC20Metadata(address(weETH)).decimals());
+        (address[] memory signers, bytes[] memory signatures) = _swapSignatures(safe.nonce(), address(weETH), address(usdc), swapAmount, 1, swapData);
+
+        swapModule.swap(address(safe), address(weETH), address(usdc), swapAmount, 1, swapData, signers, signatures);
+
+        assertGt(usdc.balanceOf(address(safe)), 0, "output must stay loose in the safe");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), 0, "output must not be supplied to Aave");
+    }
+
     function _quote(address srcToken, address dstToken, uint256 amount, uint8 srcTokenDecimals) internal returns (bytes memory) {
         string[] memory inputs = new string[](10);
         inputs[0] = "npx";
