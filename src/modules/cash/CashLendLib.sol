@@ -212,6 +212,40 @@ library CashLendLib {
     }
 
     /**
+     * @notice Pulls each requested token's shortfall out of the lend market into the safe, so a
+     *         withdrawal request is funded even while the balance sits supplied (the pull-first step
+     *         of the withdrawal flow)
+     * @dev A legacy safe skips the pull: its balances never sit in the lend market. The caller has
+     *      already cancelled any pending withdrawal, so the whole loose balance counts. Per token, the
+     *      pull is capped at the safe's supplied balance and the caller's balance check still rejects a
+     *      request the two pots cannot fund; Aave enforces the position's health on the pull itself, so
+     *      a withdrawal that would leave the safe unhealthy reverts here. The pulled funds sit loose
+     *      through the withdrawal delay; the auto-supply sweep nets out the pending reservation, so it
+     *      never sweeps them back. A cancel leaves them loose on purpose (re-supplying there would let
+     *      a paused reserve block the cancel); the next sweep restores them as collateral.
+     * @param $ The CashModule storage (passed by the delegatecalling module)
+     * @param safe Address of the EtherFi Safe
+     * @param tokens Tokens in the withdrawal request
+     * @param amounts Requested token amounts
+     * @custom:throws LendGatewayNotSet if the safe uses the gateway but none is configured
+     */
+    function sourceWithdrawal(CashModuleStorageContract.CashModuleStorage storage $, address safe, address[] memory tokens, uint256[] memory amounts) external {
+        if (!_usesLendGateway($, safe)) return;
+        ILendGateway gateway = $.gateway;
+        if (address(gateway) == address(0)) revert LendGatewayNotSet();
+
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (!gateway.isRegistered(tokens[i])) continue;
+            uint256 loose = IERC20(tokens[i]).balanceOf(safe);
+            if (amounts[i] <= loose) continue;
+            uint256 shortfall = amounts[i] - loose;
+            uint256 supplied = gateway.suppliedOf(safe, tokens[i]);
+            if (supplied == 0) continue;
+            gateway.withdraw(safe, tokens[i], shortfall > supplied ? supplied : shortfall, safe);
+        }
+    }
+
+    /**
      * @notice Supplies a safe's loose balances into the lend market and flags them as collateral (the
      *         auto-supply sweep)
      * @dev Per token: supplies the loose balance net of the pending-withdrawal reservation, so a queued
