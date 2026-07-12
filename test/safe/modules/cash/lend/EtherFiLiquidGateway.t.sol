@@ -113,11 +113,12 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
         assertEq(liquidVault.balanceOf(address(safe)), 0, "receipt left loose in safe");
     }
 
-    // The sandwich is engine-gated, not opt-out-gated: a legacy safe still reports isLendEnabled true, yet
-    // its deposit must not touch Aave — the receipt stays loose where the DebtManager can see it.
+    // The sandwich is engine-gated, not opt-out-gated: a legacy safe has not opted out, yet its deposit must
+    // not touch Aave — the receipt stays loose where the DebtManager can see it.
     function test_deposit_legacySafe_receiptStaysLoose() public {
         _forceLegacyEngine(address(safe));
-        assertTrue(gw.isLendEnabled(address(safe)), "fixture: a legacy safe still reports lend enabled");
+        assertFalse(cashModule.isLendOptedOut(address(safe)), "fixture: a legacy safe has not opted out");
+        assertFalse(cashModule.isLendActive(address(safe)), "fixture: a legacy safe is not lend-active");
 
         uint256 amount = 1000e6;
         deal(address(usdc), address(safe), amount);

@@ -47,8 +47,8 @@ contract CashLendDisableTest is CashGatewayTestSetup {
 
     /// A fresh safe starts with lend enabled and no pending disable.
     function test_lendEnabledByDefault() public view {
-        assertTrue(cashModule.isLendEnabled(address(safe)), "lend on by default (cash module)");
-        assertTrue(gw.isLendEnabled(address(safe)), "lend on by default (gateway view)");
+        assertTrue(cashModule.isLendActive(address(safe)), "lend active by default");
+        assertFalse(cashModule.isLendOptedOut(address(safe)), "not opted out by default");
         assertEq(cashModule.lendDisableFinalizeTime(address(safe)), 0, "no pending disable");
     }
 
@@ -70,7 +70,7 @@ contract CashLendDisableTest is CashGatewayTestSetup {
         emit CashEventEmitter.LendDisableRequested(address(safe), expectedFinalize);
         _requestDisable();
         assertEq(cashModule.lendDisableFinalizeTime(address(safe)), expectedFinalize, "finalize time recorded");
-        assertTrue(cashModule.isLendEnabled(address(safe)), "still enabled until executed");
+        assertTrue(cashModule.isLendActive(address(safe)), "still active until executed");
 
         // Execute after the delay: permissionless
         vm.warp(block.timestamp + MODE_DELAY);
@@ -82,8 +82,8 @@ contract CashLendDisableTest is CashGatewayTestSetup {
         assertApproxEqAbs(weETH.balanceOf(address(safe)), 5 ether, 2, "collateral back in safe");
         assertLe(gw.suppliedOf(address(safe), address(weETH)), 2, "nothing left on Aave");
         // Lend now off everywhere, mode forced to Debit, pending cleared
-        assertFalse(cashModule.isLendEnabled(address(safe)), "lend disabled (cash module)");
-        assertFalse(gw.isLendEnabled(address(safe)), "lend disabled (gateway view)");
+        assertFalse(cashModule.isLendActive(address(safe)), "lend no longer active");
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "safe opted out");
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "forced to Debit");
         assertEq(cashModule.lendDisableFinalizeTime(address(safe)), 0, "pending cleared");
 
@@ -119,7 +119,7 @@ contract CashLendDisableTest is CashGatewayTestSetup {
         vm.warp(block.timestamp + MODE_DELAY);
         cashModule.processLendDisable(address(safe));
 
-        assertFalse(cashModule.isLendEnabled(address(safe)), "disabled with no collateral");
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "opted out with no collateral");
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit));
     }
 
@@ -133,7 +133,7 @@ contract CashLendDisableTest is CashGatewayTestSetup {
         vm.warp(block.timestamp + MODE_DELAY);
         cashModule.processLendDisable(address(safe));
 
-        assertFalse(cashModule.isLendEnabled(address(safe)), "legacy safe disabled");
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "legacy safe opted out");
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "forced to debit");
         assertEq(weETH.balanceOf(address(safe)), 5 ether, "funds stayed loose in the safe");
     }
@@ -271,7 +271,7 @@ contract CashLendDisableTest is CashGatewayTestSetup {
         _requestDisable();
         vm.warp(block.timestamp + MODE_DELAY);
         cashModule.processLendDisable(address(safe));
-        assertFalse(cashModule.isLendEnabled(address(safe)));
+        assertTrue(cashModule.isLendOptedOut(address(safe)));
 
         vm.startPrank(driver);
         gw.setUsingAsCollateral(address(safe), address(weETH), false); // must not revert
@@ -304,14 +304,14 @@ contract CashLendDisableTest is CashGatewayTestSetup {
         _requestDisable();
         vm.warp(block.timestamp + MODE_DELAY);
         cashModule.processLendDisable(address(safe));
-        assertFalse(cashModule.isLendEnabled(address(safe)));
+        assertTrue(cashModule.isLendOptedOut(address(safe)));
 
         vm.expectEmit(true, false, false, false, address(cashEventEmitter));
         emit CashEventEmitter.LendEnabled(address(safe));
         _enable();
 
-        assertTrue(cashModule.isLendEnabled(address(safe)), "lend re-enabled (cash module)");
-        assertTrue(gw.isLendEnabled(address(safe)), "lend re-enabled (gateway view)");
+        assertTrue(cashModule.isLendActive(address(safe)), "lend re-active (cash module)");
+        assertFalse(cashModule.isLendOptedOut(address(safe)), "no longer opted out");
 
         // Auto-supply works again
         deal(address(weETH), address(safe), 2 ether);
@@ -335,7 +335,7 @@ contract CashLendDisableTest is CashGatewayTestSetup {
 
         _enable();
         assertEq(cashModule.lendDisableFinalizeTime(address(safe)), 0, "pending cancelled");
-        assertTrue(cashModule.isLendEnabled(address(safe)), "still enabled");
+        assertTrue(cashModule.isLendActive(address(safe)), "still active");
 
         // With the request cancelled, executing must revert
         vm.warp(block.timestamp + MODE_DELAY);

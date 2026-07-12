@@ -12,7 +12,7 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  * @notice Fork tests for the withdrawal request's pull-first step: a gateway safe's shortfall is withdrawn
  *         from Aave into the safe at request time, then the existing delayed queue runs on the loose
  *         balance. Aave enforces the position's health on the pull, so a request that would leave the safe
- *         unhealthy reverts, and the quote side (CashLens.getMaxWithdrawable) is exactly requestable. The
+ *         unhealthy reverts, and the quote side (CashLens.getMaxSourceable) is exactly requestable. The
  *         legacy path is untouched (the pull is skipped), covered by the default-profile withdrawal tests.
  * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/safe/modules/cash/lend/WithdrawalSourcing.t.sol
  */
@@ -49,11 +49,11 @@ contract WithdrawalSourcingTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 1000e6, 2, "the rest stays supplied");
     }
 
-    /// The lens quote is exactly requestable with debt open: getMaxWithdrawable succeeds and one weETH-cent
+    /// The lens quote is exactly requestable with debt open: getMaxSourceable succeeds and one weETH-cent
     /// more reverts on Aave's health check.
     function test_requestWithdrawal_maxWithdrawableIsRequestableWithDebt() public {
         _buildGatewayPosition(address(safe), address(weETH), 10 ether, address(usdc), 5000e6);
-        uint256 max = cashLens.getMaxWithdrawable(address(safe), address(weETH));
+        uint256 max = cashLens.getMaxSourceable(address(safe), address(weETH));
         assertLt(max, 10 ether, "debt caps the withdrawable balance");
 
         (address[] memory signers, bytes[] memory signatures) = _signRequestWithdrawal(_addr1(address(weETH)), _uint1(max + 0.01 ether), withdrawRecipient);
@@ -98,7 +98,7 @@ contract WithdrawalSourcingTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(usdc)), suppliedAfterPull, "nothing swept back");
     }
 
-    /// A full exit at the getMaxWithdrawable quote pays out exactly, even after interest accrual has
+    /// A full exit at the getMaxSourceable quote pays out exactly, even after interest accrual has
     /// moved the share rate: the pull is capped at the same preview the spoke itself caps with, and the
     /// hub transfers the capped amount exactly, so no rounding dust can undercut the balance check.
     function test_requestWithdrawal_fullExitAtQuoteAfterAccrual() public {
@@ -116,7 +116,7 @@ contract WithdrawalSourcingTest is CashGatewayTestSetup {
 
         vm.warp(block.timestamp + 7 days);
 
-        uint256 max = cashLens.getMaxWithdrawable(address(safe), address(usdc));
+        uint256 max = cashLens.getMaxSourceable(address(safe), address(usdc));
         assertGt(max, 5000e6, "interest accrued on the supplied balance");
 
         _requestWithdrawal(_addr1(address(usdc)), _uint1(max), withdrawRecipient);

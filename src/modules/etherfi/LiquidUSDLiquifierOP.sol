@@ -110,7 +110,7 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
 
     /// @dev The gateway legs act only for a safe whose assets live in Aave: on the gateway engine and not opted out.
     function _lendActive(address safe) internal view override returns (bool) {
-        return cashModule.usesLendGateway(safe) && gateway().isLendEnabled(safe);
+        return cashModule.isLendActive(safe);
     }
 
     /**

@@ -137,10 +137,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         _;
     }
 
-    /// @dev Reverts if `safe` has opted out of lend. Placed before ensuresApproval so a disabled safe's
+    /// @dev Reverts if `safe` has opted out of lend. Placed before ensuresApproval so an opted-out safe's
     ///      supply/borrow reverts without re-establishing position-manager approval as a side effect.
-    modifier whenLendEnabled(address safe) {
-        if (!_isLendEnabled(safe)) revert LendDisabled();
+    modifier whenNotOptedOut(address safe) {
+        if (_isLendOptedOut(safe)) revert LendDisabled();
         _;
     }
 
@@ -242,7 +242,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function supply(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant whenLendEnabled(safe) ensuresApproval(safe) {
+    function supply(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         uint256 reserveId = _reserveIdOf(asset);
 
@@ -296,7 +296,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAddress if to is the zero address
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant whenLendEnabled(safe) ensuresApproval(safe) {
+    function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert ZeroAddress();
         uint256 reserveId = _reserveIdOf(asset);
@@ -354,7 +354,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
         // Gate only enabling (a lend op); disabling must stay open so an opted-out safe can drop a residual
         // supplied position from collateral (e.g. one left on Aave after processLendDisable). It only de-risks.
-        if (useAsCollateral && !_isLendEnabled(safe)) revert LendDisabled();
+        if (useAsCollateral && _isLendOptedOut(safe)) revert LendDisabled();
         spoke.setUsingAsCollateral(_reserveIdOf(asset), useAsCollateral, safe);
         emit CollateralUsageSet(safe, asset, useAsCollateral);
     }
@@ -454,17 +454,6 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         return _ltv($.reserveId[asset]);
     }
 
-    /**
-     * @notice Returns whether lend is enabled for `safe` (i.e. the safe participates in the Aave market)
-     * @dev Reads the CashModule, the source of truth for the opt-out. When false, this gateway rejects
-     *      supply / borrow / setUsingAsCollateral for the safe; withdraw and repay stay open.
-     * @param safe The safe to query
-     * @return True if lend is enabled, false if the safe has opted out
-     */
-    function isLendEnabled(address safe) external view returns (bool) {
-        return _isLendEnabled(safe);
-    }
-
     // ---------------------------------------------------------------------
     // Views into config
     // ---------------------------------------------------------------------
@@ -507,9 +496,9 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](1), data);
     }
 
-    /// @dev Whether `safe` participates in lend, per the CashModule (the source of truth for the opt-out)
-    function _isLendEnabled(address safe) internal view returns (bool) {
-        return ICashModule(etherFiDataProvider.getCashModule()).isLendEnabled(safe);
+    /// @dev Whether `safe` has opted out of lend, per the CashModule (the source of truth for the opt-out)
+    function _isLendOptedOut(address safe) internal view returns (bool) {
+        return ICashModule(etherFiDataProvider.getCashModule()).isLendOptedOut(safe);
     }
 
     /// @dev The registered reserveId for `asset`, reverting if unregistered

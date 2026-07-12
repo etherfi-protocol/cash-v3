@@ -15,9 +15,9 @@ import { ILendGateway } from "../interfaces/ILendGateway.sol";
  *      post-op position can never be worse than what Aave validated at withdraw time; no extra check here.
  *
  *      The helper holds no state: the consumer supplies the gateway (resolved live from the CashModule,
- *      its single source of truth) and the _lendActive predicate. Every bookend sits behind _lendActive,
- *      which short-circuits on usesLendGateway before reading the gateway, so a legacy safe or an unset
- *      gateway is never dereferenced.
+ *      its single source of truth) and the _lendActive predicate (CashModule.isLendActive). Every bookend
+ *      sits behind _lendActive, which is false for a legacy safe or one that opted out, so the gateway is
+ *      only dereferenced for a safe whose assets actually live in Aave.
  * @author ether.fi
  */
 abstract contract ModuleLendGatewaySandwich {
@@ -31,12 +31,10 @@ abstract contract ModuleLendGatewaySandwich {
 
     /**
      * @notice Whether the sandwich should touch Aave for `safe`
-     * @dev A consumer must return true only when the safe's assets actually live in Aave: the safe is on
-     *      the gateway engine (usesLendGateway) and has not opted out (isLendEnabled). A legacy safe reports
-     *      isLendEnabled true yet keeps its assets loose under DebtManager, so gating on isLendEnabled alone
-     *      would re-supply a legacy safe's output into Aave where DebtManager cannot see it. Consumers test
-     *      usesLendGateway first, which is false (and short-circuits) for a legacy safe, so the gateway is
-     *      only read once the safe is known to be on it. Left abstract so every consumer states the predicate.
+     * @dev A consumer must return true only when the safe's assets actually live in Aave: the safe is on the
+     *      gateway engine and has not opted out. That is exactly CashModule.isLendActive, which a legacy safe
+     *      reports false (its assets stay loose under DebtManager, so re-supplying its output into Aave would
+     *      hide it from DebtManager). Left abstract so every consumer states the predicate.
      * @param safe The safe to test
      * @return True if the Aave bookends should run for the safe
      */

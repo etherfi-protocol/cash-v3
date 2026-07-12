@@ -243,13 +243,24 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Returns whether lend (Aave auto-supply and borrow ops) is enabled for a safe
-     * @dev Lend is enabled by default; a safe with no borrows may opt out via toggleLend(false) + processLendDisable
+     * @notice Whether lend is live for a safe: on the Aave gateway engine and not opted out. This is the
+     *         predicate every lend action and module sandwich gates on.
      * @param safe Address of the EtherFi Safe
-     * @return True if lend is enabled, false if the safe has opted out
+     * @return True if the safe uses the gateway engine and has not opted out
      */
-    function isLendEnabled(address safe) external view returns (bool) {
-        return !_getCashModuleStorage().safeCashConfig[safe].lendDisabled;
+    function isLendActive(address safe) external view returns (bool) {
+        return _usesLendGateway(safe) && !_getCashModuleStorage().safeCashConfig[safe].lendOptedOut;
+    }
+
+    /**
+     * @notice The user's raw lend opt-out preference, independent of the safe's engine
+     * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
+     *      Aave during migration before its engine flag flips.
+     * @param safe Address of the EtherFi Safe
+     * @return True if the safe has opted out via toggleLend(false) + processLendDisable
+     */
+    function isLendOptedOut(address safe) external view returns (bool) {
+        return _getCashModuleStorage().safeCashConfig[safe].lendOptedOut;
     }
 
     /**
@@ -538,21 +549,24 @@ contract CashModuleCore is CashModuleStorageContract {
     /**
      * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
      *         are immediately supplied back as collateral
-     * @dev Only callable by the EtherFi wallet for valid EtherFi Safe addresses. Aave enforces the health
-     *      check on the borrow itself.
+     * @dev Owner-signed: the signature binds the token and USD amount so a compromised backend cannot lever
+     *      a safe up. Any relayer may submit the signed intent. Aave enforces the health check on the borrow
+     *      itself.
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to borrow
      * @param amountInUsd Amount to borrow in USD
+     * @param signer A safe admin authorizing the borrow
+     * @param signature The signer's signature over the intent
+     * @custom:throws OnlySafeAdmin if signer is not a safe admin
+     * @custom:throws InvalidSignature if signature verification fails
      * @custom:throws OnlyBorrowToken if token is not a valid borrow token
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
      */
-    function borrow(address safe, address token, uint256 amountInUsd) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
-        IDebtManager debtManager = getDebtManager();
-        if (!_isBorrowToken(debtManager, token)) revert OnlyBorrowToken();
-        uint256 amount = debtManager.convertUsdToCollateralToken(token, amountInUsd);
-        if (amount == 0) revert AmountZero();
-        CashLendLib.borrow(_getCashModuleStorage(), safe, token, amount, amountInUsd);
+    function borrow(address safe, address token, uint256 amountInUsd, address signer, bytes calldata signature) external whenNotPaused nonReentrant onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        uint256 nonce = _useNonce(safe);
+        CashLendLib.borrow($, safe, token, amountInUsd, signer, nonce, signature);
     }
 
     /**

@@ -698,8 +698,8 @@ contract DebtManagerCore is DebtManagerStorageContract {
         // migrated (freezing legacy borrow/repay). It should be debt-free (disabling lend requires zero borrows),
         // but it can still call DebtManager.borrow directly afterward, so reject a disabled safe with debt rather
         // than let the gateway borrow/supply revert opaquely.
-        bool lendEnabled = cashModule.isLendEnabled(safe);
-        if (!lendEnabled && totalDebtUsd != 0) revert LendDisabledSafeHasDebt();
+        bool lendOptedOut = cashModule.isLendOptedOut(safe);
+        if (lendOptedOut && totalDebtUsd != 0) revert LendDisabledSafeHasDebt();
 
         // 2. Clear the legacy DebtManager debt FIRST (if any), capturing the token amount to re-borrow, and
         //    check Aave has the cash to fund it. Clearing first is load-bearing: supplying collateral (step 3)
@@ -725,7 +725,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         //    which keeps its funds idle in the Safe by choice. Amounts reserved by a pending withdrawal stay
         //    loose in the Safe: the queued withdrawal is a plain transfer of the Safe's balance, so supplying
         //    them would brick it. Pending withdrawals reserve funds; migration must not outrank them.
-        if (lendEnabled) {
+        if (!lendOptedOut) {
             address[] memory collateralTokens = getCollateralTokens();
             uint256 cLen = collateralTokens.length;
             for (uint256 i = 0; i < cLen;) {

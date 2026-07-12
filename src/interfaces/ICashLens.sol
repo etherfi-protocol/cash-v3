@@ -44,7 +44,7 @@ interface ICashLens {
      * @param token Address of the token (or the ETH marker address)
      * @return Max sourceable amount of `token`, in token units
      */
-    function getMaxWithdrawable(address safe, address token) external view returns (uint256);
+    function getMaxSourceable(address safe, address token) external view returns (uint256);
 
     function getUserCollateralForToken(address safe, address token) external view returns (uint256);
 

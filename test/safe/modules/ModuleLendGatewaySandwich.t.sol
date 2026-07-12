@@ -12,6 +12,9 @@ contract SandwichHarness is ModuleLendGatewaySandwich {
     /// @dev A real consumer resolves this from the CashModule; the harness pins the mock directly.
     ILendGateway private immutable mockGateway;
 
+    /// @dev A real consumer computes this from cashModule.isLendActive; the harness sets it directly (defaults on).
+    bool public lendActive = true;
+
     constructor(address _gateway) {
         mockGateway = ILendGateway(_gateway);
     }
@@ -20,9 +23,12 @@ contract SandwichHarness is ModuleLendGatewaySandwich {
         return mockGateway;
     }
 
-    /// @dev A gateway-engine safe that has not opted out; mirrors a real consumer's usesLendGateway && isLendEnabled.
-    function _lendActive(address safe) internal view override returns (bool) {
-        return gateway().isLendEnabled(safe);
+    function setLendActive(bool active) external {
+        lendActive = active;
+    }
+
+    function _lendActive(address) internal view override returns (bool) {
+        return lendActive;
     }
 
     function withdrawShortfall(address safe, address asset, uint256 amount, uint256 looseAvailable) external {
@@ -107,7 +113,7 @@ contract ModuleLendGatewaySandwichTest is Test {
 
     // When lend is disabled for the safe, the withdraw bookend is a no-op: its assets already sit in the safe.
     function test_withdraw_noOpWhenLendDisabled() public {
-        gateway.setLendEnabled(safe, false);
+        harness.setLendActive(false);
         gateway.setSuppliedOf(safe, asset, AMOUNT);
         harness.withdrawShortfall(safe, asset, AMOUNT, 0);
 
@@ -118,7 +124,7 @@ contract ModuleLendGatewaySandwichTest is Test {
 
     // When lend is disabled, the resupply bookend is a no-op: the output stays in the safe, nothing goes to Aave.
     function test_resupply_noOpWhenLendDisabled() public {
-        gateway.setLendEnabled(safe, false);
+        harness.setLendActive(false);
         harness.resupplyToGateway(safe, asset, AMOUNT);
 
         (address s,, uint256 amount,) = gateway.lastSupply();

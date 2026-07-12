@@ -130,7 +130,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
     function test_migrateToLendGateway_lendDisabledSafe_marksMigratedWithoutSupplying() public {
         deal(address(weETH), address(safe), 10 ether);
         _disableLendForSafe();
-        assertFalse(cashModule.isLendEnabled(address(safe)), "lend disabled");
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "safe opted out of lend");
 
         vm.prank(migrator);
         dm.migrateToLendGateway(address(safe));
@@ -435,7 +435,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
         cashModule.toggleLend(address(safe), false, owner1, abi.encodePacked(r, s, v));
 
-        if (cashModule.isLendEnabled(address(safe))) {
+        if (!cashModule.isLendOptedOut(address(safe))) {
             (,, uint64 modeDelay) = cashModule.getDelays();
             vm.warp(block.timestamp + modeDelay + 1);
             cashModule.processLendDisable(address(safe));

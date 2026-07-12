@@ -104,16 +104,6 @@ interface ILendGateway {
     function ltv(address asset) external view returns (uint256);
 
     /**
-     * @notice Returns whether lend is enabled for `safe` (i.e. the safe participates in the Aave market)
-     * @dev Source of truth is the CashModule. When false, the gateway rejects supply / borrow /
-     *      setUsingAsCollateral for the safe and the sandwich skips its Aave bookends. Withdraw and
-     *      repay stay open so an opted-out safe can always exit or reduce debt.
-     * @param safe The safe to query
-     * @return True if lend is enabled, false if the safe has opted out
-     */
-    function isLendEnabled(address safe) external view returns (bool);
-
-    /**
      * @notice Returns whether `asset` is a registered reserve on the gateway
      * @dev A sandwich re-supplies its output only when the asset is registered; an unregistered output
      *      (a swap into a non-collateral token, an unlisted Liquid receipt) stays loose in the safe.

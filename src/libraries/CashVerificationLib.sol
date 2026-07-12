@@ -36,6 +36,9 @@ library CashVerificationLib {
     /// @notice Method identifier for toggling lend participation (opt in/out of Aave)
     bytes32 public constant TOGGLE_LEND_METHOD = keccak256("toggleLend");
 
+    /// @notice Method identifier for borrowing against the safe's lend-market position
+    bytes32 public constant BORROW_METHOD = keccak256("borrow");
+
     /// @notice Error for Invalid Owner quorum signatures
     error InvalidSignatures();
 
@@ -141,5 +144,21 @@ library CashVerificationLib {
      */
     function verifyToggleLendSig(address safe, address signer, uint256 nonce, bool enable, bytes calldata signature) internal view {
         verifySignature(safe, signer, TOGGLE_LEND_METHOD, nonce, abi.encode(enable), signature);
+    }
+
+    /**
+     * @notice Verifies a signature authorizing a borrow against the safe's lend-market position
+     * @dev The signature binds the borrow token and USD amount, so a compromised backend cannot lever a
+     *      safe up: only a borrow the owner signed can execute
+     * @param safe Address of the safe
+     * @param signer Address of the signer to verify against
+     * @param nonce Transaction nonce for replay protection
+     * @param token Address of the token to borrow
+     * @param amountInUsd USD amount to borrow
+     * @param signature ECDSA signature bytes
+     * @custom:throws SignatureUtils.InvalidSigner if the signature is invalid
+     */
+    function verifyBorrowSig(address safe, address signer, uint256 nonce, address token, uint256 amountInUsd, bytes calldata signature) internal view {
+        verifySignature(safe, signer, BORROW_METHOD, nonce, abi.encode(token, amountInUsd), signature);
     }
 }

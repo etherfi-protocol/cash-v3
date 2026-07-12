@@ -440,19 +440,19 @@ contract CashLens is UpgradeableProxy, Constants {
      * @notice Max amount of `token` an operation can source from the safe: the loose balance (net of any
      *         pending-withdrawal reservation) plus the Aave-supplied amount withdrawable without leaving
      *         the position over-LTV
-     * @dev The number a module's sandwich (swap input, Liquid deposit/withdraw) can actually pull, sized by
-     *      the same DebitSourcingLib math the spend paths use, so a frontend max never needs to reimplement
-     *      LTV accounting. Works for any token: an unregistered token or ETH has no supplied part, and a
-     *      legacy safe's funds are all loose. Conservative for a zero-LTV reserve while the safe has debt
-     *      (it cannot be sized against debt), matching the debit-spend sizing. For a legacy safe with
-     *      DebtManager debt the number is an upper bound, not a health promise: an operation that removes
-     *      value from the safe (rather than swapping it in place) is still subject to the hook's
-     *      DebtManager health check at execution, matching what the legacy engine has always enforced.
+     * @dev The number a module's sandwich (swap input, Liquid deposit/withdraw) or a backend repay can
+     *      actually pull, sized by the same DebitSourcingLib math the spend paths use, so a frontend max
+     *      never needs to reimplement LTV accounting. Works for any token: an unregistered token or ETH has no supplied part, and a legacy safe's funds
+     *      are all loose. Conservative for a zero-LTV reserve while the safe has debt (it cannot be sized
+     *      against debt), matching the debit-spend sizing. For a legacy safe with DebtManager debt the number
+     *      is an upper bound, not a health promise: an operation that removes value from the safe (rather than
+     *      swapping it in place) is still subject to the hook's DebtManager health check at execution,
+     *      matching what the legacy engine has always enforced.
      * @param safe Address of the safe
      * @param token Address of the token (or the ETH marker address)
      * @return Max sourceable amount of `token`, in token units
      */
-    function getMaxWithdrawable(address safe, address token) external view returns (uint256) {
+    function getMaxSourceable(address safe, address token) external view returns (uint256) {
         SafeData memory safeData = cashModule.getData(safe);
         uint256 loose = token == ETH ? safe.balance : IERC20(token).balanceOf(safe);
         uint256 pending = _getPendingWithdrawalAmount(safeData, token);

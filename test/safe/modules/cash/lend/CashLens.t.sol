@@ -76,7 +76,7 @@ contract CashLensAaveTest is CashGatewayTestSetup {
     }
 
     /// With no debt, the max is the loose balance (net of a pending withdrawal) plus the full supplied balance.
-    function test_getMaxWithdrawable_noDebt_looseNetOfPendingPlusSupplied() public {
+    function test_getMaxSourceable_noDebt_looseNetOfPendingPlusSupplied() public {
         _supplyToGateway(address(safe), address(weETH), 3 ether);
         deal(address(weETH), address(safe), 2 ether);
 
@@ -86,15 +86,15 @@ contract CashLensAaveTest is CashGatewayTestSetup {
         amounts[0] = 0.5 ether;
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
-        assertApproxEqAbs(cashLens.getMaxWithdrawable(address(safe), address(weETH)), 4.5 ether, 2, "loose net of pending plus supplied");
+        assertApproxEqAbs(cashLens.getMaxSourceable(address(safe), address(weETH)), 4.5 ether, 2, "loose net of pending plus supplied");
     }
 
     /// With debt, the supplied part is capped by the borrowing headroom, and the number is exactly what the
     /// gateway allows: withdrawing more reverts on Aave's health check, withdrawing it succeeds.
-    function test_getMaxWithdrawable_withDebt_matchesWhatTheGatewayAllows() public {
+    function test_getMaxSourceable_withDebt_matchesWhatTheGatewayAllows() public {
         _buildGatewayPosition(address(safe), address(weETH), 10 ether, address(usdc), 5000e6);
 
-        uint256 max = cashLens.getMaxWithdrawable(address(safe), address(weETH));
+        uint256 max = cashLens.getMaxSourceable(address(safe), address(weETH));
         assertLt(max, 10 ether, "debt must cap the withdrawable supplied balance");
 
         // One weETH-cent past the max breaches Aave's LTV bound.
@@ -110,10 +110,10 @@ contract CashLensAaveTest is CashGatewayTestSetup {
     }
 
     /// A legacy safe's funds are all loose: the max is its balance and the gateway is never consulted.
-    function test_getMaxWithdrawable_legacySafe_looseOnly() public {
+    function test_getMaxSourceable_legacySafe_looseOnly() public {
         _forceLegacyEngine(address(safe));
         deal(address(weETH), address(safe), 2 ether);
 
-        assertEq(cashLens.getMaxWithdrawable(address(safe), address(weETH)), 2 ether, "legacy max is the loose balance");
+        assertEq(cashLens.getMaxSourceable(address(safe), address(weETH)), 2 ether, "legacy max is the loose balance");
     }
 }

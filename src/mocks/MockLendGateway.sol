@@ -28,8 +28,6 @@ contract MockLendGateway is ILendGateway {
     mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
     mapping(address safe => mapping(address asset => uint256)) internal _suppliedOf;
     mapping(address asset => uint256) internal _availableCash;
-    /// @dev Whether lend is disabled for a safe; defaults to false so isLendEnabled returns true
-    mapping(address safe => bool) internal _lendDisabled;
     /// @dev Whether an asset is a registered reserve; defaults to false
     mapping(address asset => bool) internal _registered;
 
@@ -44,11 +42,6 @@ contract MockLendGateway is ILendGateway {
     /// @notice Sets the reserve liquidity a subsequent `availableCash(asset)` will return
     function setAvailableCash(address asset, uint256 amount) external {
         _availableCash[asset] = amount;
-    }
-
-    /// @notice Sets whether lend is enabled for a safe (defaults to enabled)
-    function setLendEnabled(address safe, bool enabled) external {
-        _lendDisabled[safe] = !enabled;
     }
 
     /// @notice Sets whether an asset is a registered reserve (defaults to unregistered)
@@ -100,10 +93,6 @@ contract MockLendGateway is ILendGateway {
 
     function ltv(address) external pure returns (uint256) {
         return 0;
-    }
-
-    function isLendEnabled(address safe) external view returns (bool) {
-        return !_lendDisabled[safe];
     }
 
     function isRegistered(address asset) external view returns (bool) {

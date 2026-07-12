@@ -138,7 +138,7 @@ struct SafeCashConfig {
     /// @notice Incoming mode that will be applied after the delay
     Mode incomingMode;
     /// @notice True once the safe has opted out of the Aave lend market (no auto-supply, no lend ops)
-    bool lendDisabled;
+    bool lendOptedOut;
     /// @notice Timestamp after which a pending disable-lend request can be executed (0 if none)
     uint96 lendDisableFinalizeTime;
     /// @notice True once the safe's borrow/collateral engine is the Aave gateway (set at onboarding or by migration; one-way)
@@ -350,11 +350,21 @@ interface ICashModule {
     function transactionCleared(address safe, bytes32 txId) external view returns (bool);
 
     /**
-     * @notice Whether the safe currently participates in the Aave lend market (auto-supply + lend ops enabled)
+     * @notice Whether lend is live for the safe: on the Aave gateway engine and not opted out. This is the
+     *         predicate every lend action and module sandwich gates on.
      * @param safe The safe to query
-     * @return True unless the safe has opted out via toggleLend(false) + processLendDisable
+     * @return True if the safe uses the gateway engine and has not opted out
      */
-    function isLendEnabled(address safe) external view returns (bool);
+    function isLendActive(address safe) external view returns (bool);
+
+    /**
+     * @notice The user's raw lend opt-out preference, independent of which engine the safe runs on
+     * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
+     *      Aave during migration before its engine flag flips.
+     * @param safe The safe to query
+     * @return True if the safe has opted out via toggleLend(false) + processLendDisable
+     */
+    function isLendOptedOut(address safe) external view returns (bool);
 
     /**
      * @notice Returns the timestamp when a pending lend-disable request becomes executable
@@ -700,14 +710,19 @@ interface ICashModule {
     /**
      * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
      *         are immediately supplied back as collateral
+     * @dev Owner-signed: the signature binds the token and USD amount. Any relayer may submit the intent.
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to borrow
      * @param amountInUsd Amount to borrow in USD
+     * @param signer A safe admin authorizing the borrow
+     * @param signature The signer's signature over the intent
+     * @custom:throws OnlySafeAdmin if signer is not a safe admin
+     * @custom:throws InvalidSignature if signature verification fails
      * @custom:throws OnlyBorrowToken if token is not a valid borrow token
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
      */
-    function borrow(address safe, address token, uint256 amountInUsd) external;
+    function borrow(address safe, address token, uint256 amountInUsd, address signer, bytes calldata signature) external;
 
     /**
      * @notice Requests a withdrawal of tokens to a recipient

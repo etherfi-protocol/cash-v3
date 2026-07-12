@@ -5,6 +5,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
+import { SignatureUtils } from "../../../../../src/libraries/SignatureUtils.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -86,12 +87,12 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         uint256 availableBefore = gw.getAccountData(address(safe)).availableBorrowsUsd;
 
         uint256 borrowAmt = debtManager.convertUsdToCollateralToken(address(usdc), borrowUsd);
+        (address signer, bytes memory sig) = _borrowSig(address(usdc), borrowUsd);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.LendSupplied(address(safe), address(usdc), borrowAmt);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.LendBorrowed(address(safe), address(usdc), borrowAmt, borrowUsd);
-        vm.prank(etherFiWallet);
-        cashModule.borrow(address(safe), address(usdc), borrowUsd);
+        cashModule.borrow(address(safe), address(usdc), borrowUsd, signer, sig);
 
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 2, "debt opened");
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), borrowAmt, 2, "proceeds supplied back");
@@ -106,17 +107,45 @@ contract AutoSupplyTest is CashGatewayTestSetup {
     function test_borrow_revertsWhenOptedOut() public {
         _optOut();
 
-        vm.prank(etherFiWallet);
+        (address signer, bytes memory sig) = _borrowSig(address(usdc), 100e6);
         vm.expectRevert(ICashModule.LendDisabled.selector);
-        cashModule.borrow(address(safe), address(usdc), 100e6);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
     }
 
     /// A legacy safe has no gateway borrow flow.
     function test_borrow_revertsForLegacySafe() public {
         _forceLegacyEngine(address(safe));
-        vm.prank(etherFiWallet);
+        (address signer, bytes memory sig) = _borrowSig(address(usdc), 100e6);
         vm.expectRevert(ICashModule.OnlyLendGatewaySafe.selector);
-        cashModule.borrow(address(safe), address(usdc), 100e6);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
+    }
+
+    /// Borrow is owner-signed: a named signer who is not a safe admin is rejected.
+    function test_borrow_rejectsNonAdminSigner() public {
+        (, bytes memory sig) = _borrowSig(address(usdc), 100e6);
+        vm.expectRevert(ICashModule.OnlySafeAdmin.selector);
+        cashModule.borrow(address(safe), address(usdc), 100e6, makeAddr("notAdmin"), sig);
+    }
+
+    /// Borrow is owner-signed: an admin is named but the signature is from the wrong key.
+    function test_borrow_rejectsBadSignature() public {
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.BORROW_METHOD, block.chainid, address(safe), nonce, abi.encode(address(usdc), uint256(100e6)))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner2Pk, digest); // owner2 signs, but we claim owner1
+        bytes memory sig = abi.encodePacked(r, s, v);
+
+        vm.expectRevert(SignatureUtils.InvalidSigner.selector);
+        cashModule.borrow(address(safe), address(usdc), 100e6, owner1, sig);
+    }
+
+    /// The nonce advances on a successful borrow, so replaying the same signature is rejected.
+    function test_borrow_rejectsReplay() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        (address signer, bytes memory sig) = _borrowSig(address(usdc), 100e6);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
+
+        vm.expectRevert(SignatureUtils.InvalidSigner.selector);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
     }
 
     /// @dev Opts the safe out of the lend market, riding out the mode-change delay.
@@ -133,6 +162,13 @@ contract AutoSupplyTest is CashGatewayTestSetup {
     function _toggleLendSig(bool enable) internal view returns (address, bytes memory) {
         uint256 nonce = cashModule.getNonce(address(safe));
         bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.TOGGLE_LEND_METHOD, block.chainid, address(safe), nonce, abi.encode(enable))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
+        return (owner1, abi.encodePacked(r, s, v));
+    }
+
+    function _borrowSig(address token, uint256 amountInUsd) internal view returns (address, bytes memory) {
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.BORROW_METHOD, block.chainid, address(safe), nonce, abi.encode(token, amountInUsd))).toEthSignedMessageHash();
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
         return (owner1, abi.encodePacked(r, s, v));
     }
