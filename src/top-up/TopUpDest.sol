@@ -3,7 +3,9 @@ pragma solidity ^0.8.28;
 
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+import { ICashModule } from "../interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { IWETH } from "../interfaces/IWETH.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
@@ -83,6 +85,9 @@ contract TopUpDest is UpgradeableProxy {
 
     /// @notice Error thrown when the topup is already processed
     error TopUpAlreadyProcessed();
+
+    /// @notice Error thrown when a self-call-only function is called externally
+    error OnlySelf();
 
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
@@ -207,7 +212,33 @@ contract TopUpDest is UpgradeableProxy {
         $.transactionCompleted[txId] = true;
         _transfer(user, token, amount);
 
+        try this.supplyTopUpToLend(user, token, amount) { } catch { }
+
         emit TopUp(txId, user, token, txHash, chainId, amount);
+    }
+
+    /**
+     * @notice Supplies a topped-up amount into the lend gateway on behalf of the safe
+     * @dev External + self-call only: try/catch needs an external call, so _topUp invokes this via
+     *      this.supplyTopUpToLend(...) to isolate any failure and fall back to a loose topup. The
+     *      msg.sender guard keeps it a private helper. No-op unless the safe is lend-active and the
+     *      token is registered.
+     * @param safe Address of the safe that was topped up
+     * @param token Address of the topped-up token
+     * @param amount Amount of tokens to supply
+     * @custom:throws OnlySelf if called by anyone other than this contract
+     */
+    function supplyTopUpToLend(address safe, address token, uint256 amount) external {
+        if (msg.sender != address(this)) revert OnlySelf();
+
+        ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
+        if (!cashModule.isLendActive(safe)) return;
+
+        ILendGateway lendGateway = cashModule.getLendGateway();
+        if (!lendGateway.isRegistered(token)) return;
+
+        lendGateway.supply(safe, token, amount);
+        lendGateway.setUsingAsCollateral(safe, token, true);
     }
 
     /**
