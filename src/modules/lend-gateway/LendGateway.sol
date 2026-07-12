@@ -103,7 +103,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     /// @notice Thrown when an amount argument is zero
     error ZeroAmount();
     /// @notice Thrown when a lend op is attempted for a safe that has opted out of lend
-    error LendDisabled();
+    error LendOptedOut();
 
     /**
      * @param _etherFiDataProvider Address of the EtherFiDataProvider
@@ -140,7 +140,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     /// @dev Reverts if `safe` has opted out of lend. Placed before ensuresApproval so an opted-out safe's
     ///      supply/borrow reverts without re-establishing position-manager approval as a side effect.
     modifier whenNotOptedOut(address safe) {
-        if (_isLendOptedOut(safe)) revert LendDisabled();
+        if (_isLendOptedOut(safe)) revert LendOptedOut();
         _;
     }
 
@@ -238,7 +238,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param asset The asset being supplied (must be a registered reserve)
      * @param amount The amount to supply
      * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
-     * @custom:throws LendDisabled if the safe has opted out of lend
+     * @custom:throws LendOptedOut if the safe has opted out of lend
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
@@ -291,7 +291,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param amount The amount to borrow
      * @param to The recipient of the borrowed asset
      * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
-     * @custom:throws LendDisabled if the safe has opted out of lend
+     * @custom:throws LendOptedOut if the safe has opted out of lend
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws ZeroAddress if to is the zero address
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
@@ -348,13 +348,13 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param asset The supplied asset (must be a registered reserve)
      * @param useAsCollateral True to use as collateral, false to disable
      * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
-     * @custom:throws LendDisabled if enabling collateral usage for a safe that has opted out of lend
+     * @custom:throws LendOptedOut if enabling collateral usage for a safe that has opted out of lend
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
     function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
         // Gate only enabling (a lend op); disabling must stay open so an opted-out safe can drop a residual
-        // supplied position from collateral (e.g. one left on Aave after processLendDisable). It only de-risks.
-        if (useAsCollateral && _isLendOptedOut(safe)) revert LendDisabled();
+        // supplied position from collateral (e.g. one left on Aave after processLendOptOut). It only de-risks.
+        if (useAsCollateral && _isLendOptedOut(safe)) revert LendOptedOut();
         spoke.setUsingAsCollateral(_reserveIdOf(asset), useAsCollateral, safe);
         emit CollateralUsageSet(safe, asset, useAsCollateral);
     }

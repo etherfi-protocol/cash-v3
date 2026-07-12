@@ -134,11 +134,11 @@ library CashVerificationLib {
     /**
      * @notice Verifies a signature for toggling lend participation (opt in/out of the Aave market)
      * @dev Creates and validates an EIP-191 signed message hash. The requested `enable` flag is bound into
-     *      the digest, so an authorization to enable cannot be replayed to disable (or vice versa).
+     *      the digest, so an opt-in authorization cannot be replayed as an opt-out (or vice versa).
      * @param safe Address of the safe
      * @param signer Address of the signer to verify against
      * @param nonce Transaction nonce for replay protection
-     * @param enable True to enable lend, false to request disabling it
+     * @param enable True to enable lend, false to request opting out
      * @param signature ECDSA signature bytes
      * @custom:throws SignatureUtils.InvalidSigner if the signature is invalid
      */

@@ -108,7 +108,7 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         _optOut();
 
         (address signer, bytes memory sig) = _borrowSig(address(usdc), 100e6);
-        vm.expectRevert(ICashModule.LendDisabled.selector);
+        vm.expectRevert(ICashModule.LendOptedOut.selector);
         cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
     }
 
@@ -155,7 +155,7 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         (,, uint64 modeDelay) = cashModule.getDelays();
         if (modeDelay != 0) {
             vm.warp(block.timestamp + modeDelay + 1);
-            cashModule.processLendDisable(address(safe));
+            cashModule.processLendOptOut(address(safe));
         }
     }
 

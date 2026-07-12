@@ -167,17 +167,17 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when attempting to configure the Aave gateway after the initial bootstrap
     error GatewayAlreadySet();
     /// @notice Error thrown when a lend op is attempted while the safe has opted out of lend
-    error LendDisabled();
-    /// @notice Error thrown when disabling lend while the safe still has open borrows
+    error LendOptedOut();
+    /// @notice Error thrown when opting out of lend while the safe still has open borrows
     error HasOpenBorrows();
-    /// @notice Error thrown when executing a disable-lend that was never requested
-    error NoPendingLendDisable();
-    /// @notice Error thrown when executing a disable-lend before its delay has elapsed
-    error LendDisableNotReady();
-    /// @notice Error thrown when disabling lend that is already disabled, or when a request is already pending
-    error LendAlreadyDisabled();
+    /// @notice Error thrown when executing a lend opt-out that was never requested
+    error NoPendingLendOptOut();
+    /// @notice Error thrown when executing a lend opt-out before its delay has elapsed
+    error LendOptOutNotReady();
+    /// @notice Error thrown when opting out while already opted out, or when a request is already pending
+    error LendAlreadyOptedOut();
     /// @notice Error thrown when enabling lend that is already enabled
-    error LendNotDisabled();
+    error LendNotOptedOut();
     /// @notice Error thrown when the lend gateway has not been configured
     error LendGatewayNotSet();
 

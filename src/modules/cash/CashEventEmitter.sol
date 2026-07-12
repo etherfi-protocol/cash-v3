@@ -96,19 +96,19 @@ contract CashEventEmitter is UpgradeableProxy {
     event Repay(address indexed safe, address indexed token, uint256 debtAmount, uint256 debtAmountInUsd);
 
     /**
-     * @notice Emitted when a safe requests to disable lend (opt out of the Aave market)
+     * @notice Emitted when a safe requests to opt out of lend (the Aave market)
      * @param safe Address of the safe
      * @param finalizeTime Timestamp after which the request can be executed
      */
-    event LendDisableRequested(address indexed safe, uint256 finalizeTime);
+    event LendOptOutRequested(address indexed safe, uint256 finalizeTime);
 
-    /// @notice Emitted when a safe's pending lend-disable request is executed
+    /// @notice Emitted when a safe's pending lend opt-out request is executed
     /// @param safe Address of the safe
-    event LendDisableExecuted(address indexed safe);
+    event LendOptOutExecuted(address indexed safe);
 
     /// @notice Emitted when a safe re-enables lend (opts back into the Aave market)
     /// @param safe Address of the safe
-    event LendEnabled(address indexed safe);
+    event LendOptedIn(address indexed safe);
 
     /**
      * @notice Emitted when a spending limit is changed
@@ -473,22 +473,22 @@ contract CashEventEmitter is UpgradeableProxy {
         emit LendBorrowed(safe, token, amount, amountInUsd);
     }
 
-    /// @notice Emits the LendDisableRequested event
+    /// @notice Emits the LendOptOutRequested event
     /// @dev Can only be called by the Cash Module
-    function emitLendDisableRequested(address safe, uint256 finalizeTime) external onlyCashModule {
-        emit LendDisableRequested(safe, finalizeTime);
+    function emitLendOptOutRequested(address safe, uint256 finalizeTime) external onlyCashModule {
+        emit LendOptOutRequested(safe, finalizeTime);
     }
 
-    /// @notice Emits the LendDisableExecuted event
+    /// @notice Emits the LendOptOutExecuted event
     /// @dev Can only be called by the Cash Module
-    function emitLendDisableExecuted(address safe) external onlyCashModule {
-        emit LendDisableExecuted(safe);
+    function emitLendOptOutExecuted(address safe) external onlyCashModule {
+        emit LendOptOutExecuted(safe);
     }
 
-    /// @notice Emits the LendEnabled event
+    /// @notice Emits the LendOptedIn event
     /// @dev Can only be called by the Cash Module
-    function emitLendEnabled(address safe) external onlyCashModule {
-        emit LendEnabled(safe);
+    function emitLendOptedIn(address safe) external onlyCashModule {
+        emit LendOptedIn(safe);
     }
 
     /**

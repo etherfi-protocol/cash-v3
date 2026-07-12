@@ -257,7 +257,7 @@ contract CashModuleCore is CashModuleStorageContract {
      * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
      *      Aave during migration before its engine flag flips.
      * @param safe Address of the EtherFi Safe
-     * @return True if the safe has opted out via toggleLend(false) + processLendDisable
+     * @return True if the safe has opted out via toggleLend(false) + processLendOptOut
      */
     function isLendOptedOut(address safe) external view returns (bool) {
         return _getCashModuleStorage().safeCashConfig[safe].lendOptedOut;
@@ -274,13 +274,13 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Returns the timestamp when a pending lend-disable request becomes executable
-     * @dev Returns 0 if no disable is pending
+     * @notice Returns the timestamp when a pending lend opt-out request becomes executable
+     * @dev Returns 0 if no opt-out is pending
      * @param safe Address of the EtherFi Safe
-     * @return Timestamp when processLendDisable may be called, or 0 if none pending
+     * @return Timestamp when processLendOptOut may be called, or 0 if none pending
      */
-    function lendDisableFinalizeTime(address safe) external view returns (uint256) {
-        return _getCashModuleStorage().safeCashConfig[safe].lendDisableFinalizeTime;
+    function lendOptOutFinalizeTime(address safe) external view returns (uint256) {
+        return _getCashModuleStorage().safeCashConfig[safe].lendOptOutFinalizeTime;
     }
 
     /**
@@ -302,23 +302,23 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Executes a pending lend-disable request (from toggleLend(false)) after its delay has elapsed
+     * @notice Executes a pending lend opt-out request (from toggleLend(false)) after its delay has elapsed
      * @dev Permissionless once the delay has elapsed. Withdraws all Aave collateral back to the safe, marks
-     *      lend disabled, and forces the safe into Debit mode. Re-checks that the safe has no open borrows so
+     *      the safe opted out, and forces it into Debit mode. Re-checks that the safe has no open borrows so
      *      a borrow taken during the delay window cannot strand collateral.
      * @param safe Address of the EtherFi Safe
      * @custom:throws OnlyEtherFiSafe if safe is not a valid EtherFi Safe
-     * @custom:throws NoPendingLendDisable if no disable request is pending
-     * @custom:throws LendDisableNotReady if the delay period hasn't passed
+     * @custom:throws NoPendingLendOptOut if no disable request is pending
+     * @custom:throws LendOptOutNotReady if the delay period hasn't passed
      * @custom:throws HasOpenBorrows if the safe borrowed during the delay window
      */
-    function processLendDisable(address safe) external onlyEtherFiSafe(safe) nonReentrant {
+    function processLendOptOut(address safe) external onlyEtherFiSafe(safe) nonReentrant {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage safeConfig = $.safeCashConfig[safe];
-        if (safeConfig.lendDisableFinalizeTime == 0) revert NoPendingLendDisable();
-        if (block.timestamp < safeConfig.lendDisableFinalizeTime) revert LendDisableNotReady();
+        if (safeConfig.lendOptOutFinalizeTime == 0) revert NoPendingLendOptOut();
+        if (block.timestamp < safeConfig.lendOptOutFinalizeTime) revert LendOptOutNotReady();
         if (CashLendLib.hasOpenBorrows($, safe)) revert HasOpenBorrows();
-        CashLendLib.disableLend($, safe);
+        CashLendLib.executeLendOptOut($, safe);
     }
 
     /**

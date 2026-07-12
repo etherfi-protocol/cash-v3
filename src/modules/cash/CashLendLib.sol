@@ -19,7 +19,7 @@ import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
 /**
  * @title CashLendLib
  * @notice The CashModule's lend logic: every module operation that touches the Aave gateway or the safe's
- *         position. It holds credit and debit spend execution, debt repayment, and the lend enable/disable
+ *         position. It holds credit and debit spend execution, debt repayment, and the lend opt-in/opt-out
  *         lifecycle. CashModuleCore and CashModuleSetters keep only the thin entrypoints (access control,
  *         signature checks, events wiring) and delegate the work here.
  * @dev Deployed once and linked into CashModuleCore and CashModuleSetters, so this logic does not count
@@ -44,10 +44,10 @@ library CashLendLib {
     error LendGatewayNotSet();
     error UnsupportedToken();
     error InsufficientBalance();
-    error LendAlreadyDisabled();
+    error LendAlreadyOptedOut();
     error HasOpenBorrows();
-    error LendNotDisabled();
-    error LendDisabled();
+    error LendNotOptedOut();
+    error LendOptedOut();
     error AmountZero();
     error SettlementDispatcherNotSetForBinSponsor();
     error OnlyLendGatewaySafe();
@@ -296,7 +296,7 @@ library CashLendLib {
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
      * @custom:throws LendGatewayNotSet if no gateway is configured
-     * @custom:throws LendDisabled if the safe has opted out of the lend market
+     * @custom:throws LendOptedOut if the safe has opted out of the lend market
      */
     function borrow(CashModuleStorageContract.CashModuleStorage storage $, address safe, address token, uint256 amountInUsd, address signer, uint256 nonce, bytes calldata signature) external {
         CashVerificationLib.verifyBorrowSig(safe, signer, nonce, token, amountInUsd, signature);
@@ -305,7 +305,7 @@ library CashLendLib {
         if (amount == 0) revert AmountZero();
 
         ILendGateway gateway = _requireGateway($, safe);
-        if ($.safeCashConfig[safe].lendOptedOut) revert LendDisabled();
+        if ($.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
 
         gateway.borrow(safe, token, amount, safe);
         _supplyAsCollateral($, gateway, safe, token, amount);
@@ -332,11 +332,11 @@ library CashLendLib {
      * @dev Both engines are checked regardless of the safe's routing flag. In steady state debt can only
      *      live on the safe's own engine, but disabling lend must never proceed with debt anywhere: a
      *      gateway safe's disable withdraws all its Aave collateral, and an opted-out legacy safe with
-     *      DebtManager debt cannot be migrated (mark-only migration reverts with LendDisabledSafeHasDebt).
+     *      DebtManager debt cannot be migrated (mark-only migration reverts with LendOptedOutSafeHasDebt).
      *      Checking both sides is cheap insurance instead of trusting the routing invariant.
      *
      *      Checks raw per-asset debt, not getAccountData().debtUsd: the USD aggregate floors to 6 decimals,
-     *      so sub-$0.000001 dust reads as zero here and then reverts deep in Aave when disableLend tries to
+     *      so sub-$0.000001 dust reads as zero here and then reverts deep in Aave when executeLendOptOut tries to
      *      withdraw all collateral.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param safe Address of the EtherFi Safe
@@ -358,28 +358,28 @@ library CashLendLib {
     }
 
     /**
-     * @notice Records a request to disable lend for a safe (executable after modeDelay)
-     * @dev Reverts if lend is already disabled/pending or the safe has open borrows. Executes immediately
+     * @notice Records a lend opt-out request for a safe (executable after modeDelay)
+     * @dev Reverts if the safe already opted out or a request is pending or the safe has open borrows. Executes immediately
      *      if the delay is zero.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param safe Address of the EtherFi Safe
      */
-    function requestDisableLend(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
+    function requestLendOptOut(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
-        if ($$.lendOptedOut || $$.lendDisableFinalizeTime != 0) revert LendAlreadyDisabled();
+        if ($$.lendOptedOut || $$.lendOptOutFinalizeTime != 0) revert LendAlreadyOptedOut();
         if (hasOpenBorrows($, safe)) revert HasOpenBorrows();
 
         uint96 finalizeTime = uint96(block.timestamp) + $.modeDelay;
-        $$.lendDisableFinalizeTime = finalizeTime;
-        $.cashEventEmitter.emitLendDisableRequested(safe, finalizeTime);
+        $$.lendOptOutFinalizeTime = finalizeTime;
+        $.cashEventEmitter.emitLendOptOutRequested(safe, finalizeTime);
 
-        if ($.modeDelay == 0) disableLend($, safe);
+        if ($.modeDelay == 0) executeLendOptOut($, safe);
     }
 
     /**
-     * @notice Executes the disable-lend: withdraws ALL of the safe's Aave collateral back to the safe, marks
-     *         lend disabled, and forces the safe into Debit mode
+     * @notice Executes the lend opt-out: withdraws ALL of the safe's Aave collateral back to the safe, marks
+     *         the safe opted out, and forces it into Debit mode
      * @dev For a gateway safe, iterates the gateway's registered assets, not DebtManager's collateral list,
      *      so a token delisted from DebtManager while still supplied on Aave stays withdrawable. A legacy
      *      safe has nothing on Aave to unwind — its opt-out is just the flag plus forced Debit mode, and it
@@ -387,7 +387,7 @@ library CashLendLib {
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param safe Address of the EtherFi Safe
      */
-    function disableLend(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
+    function executeLendOptOut(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
         if (_usesLendGateway($, safe)) {
             ILendGateway gateway = $.gateway;
             if (address(gateway) == address(0)) revert LendGatewayNotSet();
@@ -405,29 +405,29 @@ library CashLendLib {
 
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         $$.lendOptedOut = true;
-        $$.lendDisableFinalizeTime = 0;
+        $$.lendOptOutFinalizeTime = 0;
         // Credit needs lend collateral, so force Debit and drop any pending mode change
         $$.mode = Mode.Debit;
         delete $$.incomingMode;
         delete $$.incomingModeStartTime;
 
-        $.cashEventEmitter.emitLendDisableExecuted(safe);
+        $.cashEventEmitter.emitLendOptOutExecuted(safe);
     }
 
     /**
-     * @notice Re-enables lend for a safe and cancels any pending disable request
+     * @notice Opts a safe back into lend and cancels any pending opt-out request
      * @dev Instant, since opting back into earning is not risk-increasing. Reverts if lend is already
-     *      enabled and no disable is pending.
+     *      enabled and no opt-out is pending.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param safe Address of the EtherFi Safe
      */
-    function enableLend(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
+    function optInToLend(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
-        if (!$$.lendOptedOut && $$.lendDisableFinalizeTime == 0) revert LendNotDisabled();
+        if (!$$.lendOptedOut && $$.lendOptOutFinalizeTime == 0) revert LendNotOptedOut();
 
         $$.lendOptedOut = false;
-        $$.lendDisableFinalizeTime = 0;
-        $.cashEventEmitter.emitLendEnabled(safe);
+        $$.lendOptOutFinalizeTime = 0;
+        $.cashEventEmitter.emitLendOptedIn(safe);
     }
 
     /**
@@ -448,8 +448,8 @@ library CashLendLib {
      */
     function spendCredit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) external {
         // Defense-in-depth: a safe that opted out of lend is forced to Debit and blocked from re-entering
-        // Credit, so credit spending must never reach a lend-disabled safe.
-        if ($.safeCashConfig[safe].lendOptedOut) revert LendDisabled();
+        // Credit, so credit spending must never reach an opted-out safe.
+        if ($.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
         if (!$.debtManager.isBorrowToken(tokens[0])) revert UnsupportedToken();
         uint256 amount = $.debtManager.convertUsdToCollateralToken(tokens[0], amountsInUsd[0]);
         if (amount == 0) revert AmountZero();

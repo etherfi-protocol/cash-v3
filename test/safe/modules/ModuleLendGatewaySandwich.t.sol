@@ -112,7 +112,7 @@ contract ModuleLendGatewaySandwichTest is Test {
     }
 
     // When lend is disabled for the safe, the withdraw bookend is a no-op: its assets already sit in the safe.
-    function test_withdraw_noOpWhenLendDisabled() public {
+    function test_withdraw_noOpWhenLendOptedOut() public {
         harness.setLendActive(false);
         gateway.setSuppliedOf(safe, asset, AMOUNT);
         harness.withdrawShortfall(safe, asset, AMOUNT, 0);
@@ -123,7 +123,7 @@ contract ModuleLendGatewaySandwichTest is Test {
     }
 
     // When lend is disabled, the resupply bookend is a no-op: the output stays in the safe, nothing goes to Aave.
-    function test_resupply_noOpWhenLendDisabled() public {
+    function test_resupply_noOpWhenLendOptedOut() public {
         harness.setLendActive(false);
         harness.resupplyToGateway(safe, asset, AMOUNT);
 

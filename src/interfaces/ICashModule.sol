@@ -139,8 +139,8 @@ struct SafeCashConfig {
     Mode incomingMode;
     /// @notice True once the safe has opted out of the Aave lend market (no auto-supply, no lend ops)
     bool lendOptedOut;
-    /// @notice Timestamp after which a pending disable-lend request can be executed (0 if none)
-    uint96 lendDisableFinalizeTime;
+    /// @notice Timestamp after which a pending lend opt-out request can be executed (0 if none)
+    uint96 lendOptOutFinalizeTime;
     /// @notice True once the safe's borrow/collateral engine is the Aave gateway (set at onboarding or by migration; one-way)
     bool usesLendGateway;
 }
@@ -236,17 +236,17 @@ interface ICashModule {
     error ModeAlreadySet();
 
     /// @notice Error thrown when a lend op is attempted while the safe has opted out of lend
-    error LendDisabled();
-    /// @notice Error thrown when disabling lend while the safe still has open borrows
+    error LendOptedOut();
+    /// @notice Error thrown when opting out of lend while the safe still has open borrows
     error HasOpenBorrows();
-    /// @notice Error thrown when executing a disable-lend that was never requested
-    error NoPendingLendDisable();
-    /// @notice Error thrown when executing a disable-lend before its delay has elapsed
-    error LendDisableNotReady();
-    /// @notice Error thrown when disabling lend that is already disabled, or when a request is already pending
-    error LendAlreadyDisabled();
+    /// @notice Error thrown when executing a lend opt-out that was never requested
+    error NoPendingLendOptOut();
+    /// @notice Error thrown when executing a lend opt-out before its delay has elapsed
+    error LendOptOutNotReady();
+    /// @notice Error thrown when opting out while already opted out, or when a request is already pending
+    error LendAlreadyOptedOut();
     /// @notice Error thrown when enabling lend that is already enabled
-    error LendNotDisabled();
+    error LendNotOptedOut();
     /// @notice Error thrown when the lend gateway has not been configured
     error LendGatewayNotSet();
 
@@ -362,16 +362,16 @@ interface ICashModule {
      * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
      *      Aave during migration before its engine flag flips.
      * @param safe The safe to query
-     * @return True if the safe has opted out via toggleLend(false) + processLendDisable
+     * @return True if the safe has opted out via toggleLend(false) + processLendOptOut
      */
     function isLendOptedOut(address safe) external view returns (bool);
 
     /**
-     * @notice Returns the timestamp when a pending lend-disable request becomes executable
+     * @notice Returns the timestamp when a pending lend opt-out request becomes executable
      * @param safe The safe to query
-     * @return Timestamp when processLendDisable may be called, or 0 if none pending
+     * @return Timestamp when processLendOptOut may be called, or 0 if none pending
      */
-    function lendDisableFinalizeTime(address safe) external view returns (uint256);
+    function lendOptOutFinalizeTime(address safe) external view returns (uint256);
 
     /**
      * @notice Returns the configured Aave gateway used for lend operations
@@ -604,26 +604,26 @@ interface ICashModule {
     /**
      * @notice Toggles a safe's participation in the Aave lend market (auto-supply and borrow ops)
      * @dev Owner-signed, with the requested flag bound into the signature. Enabling (enable == true) opts the
-     *      safe back in immediately and cancels any pending disable. Disabling (enable == false) does not act
+     *      safe back in immediately and cancels any pending opt-out. Opting out (enable == false) does not act
      *      immediately: it records a request that becomes executable after the mode-change delay, at which
-     *      point anyone may call processLendDisable. Disabling requires the safe to have no open borrows.
+     *      point anyone may call processLendOptOut. Disabling requires the safe to have no open borrows.
      * @param safe Address of the EtherFi Safe
-     * @param enable True to enable lend now, false to request disabling it
+     * @param enable True to enable lend now, false to request opting out
      * @param signer A safe admin authorizing the change
      * @param signature The signer's signature over the intent
-     * @custom:throws LendNotDisabled if enabling while lend is already enabled and no disable is pending
-     * @custom:throws LendAlreadyDisabled if disabling while lend is already disabled or a request is pending
-     * @custom:throws HasOpenBorrows if disabling while the safe still has open borrows
+     * @custom:throws LendNotOptedOut if enabling while lend is already enabled and no opt-out is pending
+     * @custom:throws LendAlreadyOptedOut if disabling while lend is already disabled or a request is pending
+     * @custom:throws HasOpenBorrows if opting out while the safe still has open borrows
      */
     function toggleLend(address safe, bool enable, address signer, bytes calldata signature) external;
 
     /**
-     * @notice Executes a pending lend-disable request (from toggleLend(false)) once its delay has elapsed
-     * @dev Permissionless. Withdraws all of the safe's Aave collateral back to the safe, marks lend disabled,
+     * @notice Executes a pending lend opt-out request (from toggleLend(false)) once its delay has elapsed
+     * @dev Permissionless. Withdraws all of the safe's Aave collateral back to the safe, marks the safe opted out,
      *      and forces the safe into Debit mode. Re-checks the safe has no open borrows.
      * @param safe Address of the EtherFi Safe
      */
-    function processLendDisable(address safe) external;
+    function processLendOptOut(address safe) external;
 
     /**
      * @notice Updates the spending limits for a safe

@@ -169,27 +169,27 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @dev Owner-signed, and the signature binds the requested `enable` flag. The two directions are
      *      deliberately asymmetric:
      *      - enable == true: opts the safe back in immediately (opting into earning is not risk-increasing)
-     *        and cancels any pending disable request. Auto-supply resumes on the safe's next deposit.
-     *      - enable == false: does NOT disable immediately. It records a request that becomes executable
-     *        after the mode-change delay, at which point anyone may call processLendDisable to carry it out
-     *        (withdraw all collateral from Aave, force Debit mode). Disabling is only allowed when the safe
+     *        and cancels any pending opt-out request. Auto-supply resumes on the safe's next deposit.
+     *      - enable == false: does NOT opt out immediately. It records a request that becomes executable
+     *        after the mode-change delay, at which point anyone may call processLendOptOut to carry it out
+     *        (withdraw all collateral from Aave, force Debit mode). Opting out is only allowed when the safe
      *        has no open borrows, since the collateral backing them is about to leave Aave.
      * @param safe Address of the EtherFi Safe
-     * @param enable True to enable lend now, false to request disabling it
+     * @param enable True to enable lend now, false to request opting out
      * @param signer A safe admin authorizing the change
      * @param signature The signer's signature over the intent
      * @custom:throws OnlyEtherFiSafe if safe is not a valid EtherFi Safe
      * @custom:throws OnlySafeAdmin if signer is not a safe admin
      * @custom:throws InvalidSignatures if signature verification fails
-     * @custom:throws LendNotDisabled if enabling while lend is already enabled and no disable is pending
-     * @custom:throws LendAlreadyDisabled if disabling while lend is already disabled or a request is pending
-     * @custom:throws HasOpenBorrows if disabling while the safe still has open borrows
+     * @custom:throws LendNotOptedOut if enabling while lend is already enabled and no opt-out is pending
+     * @custom:throws LendAlreadyOptedOut if disabling while lend is already disabled or a request is pending
+     * @custom:throws HasOpenBorrows if opting out while the safe still has open borrows
      */
     function toggleLend(address safe, bool enable, address signer, bytes calldata signature) external nonReentrant onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashVerificationLib.verifyToggleLendSig(safe, signer, _useNonce(safe), enable, signature);
         CashModuleStorage storage $ = _getCashModuleStorage();
-        if (enable) CashLendLib.enableLend($, safe);
-        else CashLendLib.requestDisableLend($, safe);
+        if (enable) CashLendLib.optInToLend($, safe);
+        else CashLendLib.requestLendOptOut($, safe);
     }
 
     /**
@@ -208,7 +208,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
         // Credit mode requires lend collateral on Aave; a safe that opted out of lend cannot enter Credit
-        if (mode == Mode.Credit && $.safeCashConfig[safe].lendOptedOut) revert LendDisabled();
+        if (mode == Mode.Credit && $.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
 
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
