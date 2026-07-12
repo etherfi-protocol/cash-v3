@@ -710,19 +710,18 @@ interface ICashModule {
     /**
      * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
      *         are immediately supplied back as collateral
-     * @dev Owner-signed: the signature binds the token and USD amount. Any relayer may submit the intent.
+     * @dev Owner-quorum signed: the signatures bind the token and USD amount. Any relayer may submit the intent.
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to borrow
      * @param amountInUsd Amount to borrow in USD
-     * @param signer A safe admin authorizing the borrow
-     * @param signature The signer's signature over the intent
-     * @custom:throws OnlySafeAdmin if signer is not a safe admin
-     * @custom:throws InvalidSignature if signature verification fails
+     * @param signers Addresses of the owners authorizing the borrow
+     * @param signatures The signers' signatures over the intent
+     * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
      * @custom:throws OnlyBorrowToken if token is not a valid borrow token
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
      */
-    function borrow(address safe, address token, uint256 amountInUsd, address signer, bytes calldata signature) external;
+    function borrow(address safe, address token, uint256 amountInUsd, address[] calldata signers, bytes[] calldata signatures) external;
 
     /**
      * @notice Requests a withdrawal of tokens to a recipient

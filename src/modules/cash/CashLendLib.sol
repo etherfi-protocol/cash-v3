@@ -281,29 +281,28 @@ library CashLendLib {
     /**
      * @notice Borrows `token` against the safe's lend-market position; the proceeds land in the safe and
      *         are immediately supplied back as collateral (a borrow-page borrow with instant auto-supply)
-     * @dev Owner-signed: the signature binds the token and USD amount, so a compromised backend cannot lever
-     *      a safe up. The signature check lives here (not in the thin module entrypoint) to keep the module's
-     *      runtime code under the EIP-170 limit; the caller has already resolved the nonce and enforced that
-     *      `signer` is a safe admin. The portfolio gains the borrowed asset as supplied collateral, so the
-     *      borrowing power moves by its LTV weight net of the new debt. Aave enforces the health check on the
-     *      borrow itself, and the gateway rejects a borrow for an opted-out safe; the lendOptedOut check here
-     *      is defense-in-depth, mirroring spendCredit.
+     * @dev Owner-quorum signed: the signatures bind the token and USD amount, so neither a compromised backend
+     *      nor a single compromised admin can lever a safe up; the caller has already resolved and consumed the
+     *      nonce. The portfolio gains the borrowed asset as supplied collateral, so the borrowing power moves by
+     *      its LTV weight net of the new debt. Aave enforces the health check on the borrow itself, and the
+     *      gateway rejects a borrow for an opted-out safe; the lendOptedOut check here is defense-in-depth,
+     *      mirroring spendCredit.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param safe Address of the EtherFi Safe
      * @param token The token to borrow
-     * @param amountInUsd The USD value of the borrow (bound by the signature and emitted in the event)
-     * @param signer The safe admin who authorized the borrow
-     * @param nonce The safe's next module nonce (resolved and consumed by the caller)
-     * @param signature The signer's signature over the intent
-     * @custom:throws InvalidSigner if signature verification fails
+     * @param amountInUsd The USD value of the borrow (bound by the signatures and emitted in the event)
+     * @param nonce The safe's next nonce (resolved and consumed by the caller)
+     * @param signers The owners who authorized the borrow
+     * @param signatures The signers' signatures over the intent
+     * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
      * @custom:throws OnlyBorrowToken if token is not a valid borrow token
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
      * @custom:throws LendGatewayNotSet if no gateway is configured
      * @custom:throws LendOptedOut if the safe has opted out of the lend market
      */
-    function borrow(CashModuleStorageContract.CashModuleStorage storage $, address safe, address token, uint256 amountInUsd, address signer, uint256 nonce, bytes calldata signature) external {
-        CashVerificationLib.verifyBorrowSig(safe, signer, nonce, token, amountInUsd, signature);
+    function borrow(CashModuleStorageContract.CashModuleStorage storage $, address safe, address token, uint256 amountInUsd, uint256 nonce, address[] calldata signers, bytes[] calldata signatures) external {
+        CashVerificationLib.verifyBorrowSig(safe, nonce, token, amountInUsd, signers, signatures);
         if (!$.debtManager.isBorrowToken(token)) revert OnlyBorrowToken();
         uint256 amount = $.debtManager.convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();

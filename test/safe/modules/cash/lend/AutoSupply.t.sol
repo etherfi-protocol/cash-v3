@@ -5,8 +5,8 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
-import { SignatureUtils } from "../../../../../src/libraries/SignatureUtils.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
+import { EtherFiSafeErrors } from "../../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /**
@@ -87,12 +87,12 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         uint256 availableBefore = gw.getAccountData(address(safe)).availableBorrowsUsd;
 
         uint256 borrowAmt = debtManager.convertUsdToCollateralToken(address(usdc), borrowUsd);
-        (address signer, bytes memory sig) = _borrowSig(address(usdc), borrowUsd);
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), borrowUsd);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.LendSupplied(address(safe), address(usdc), borrowAmt);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.LendBorrowed(address(safe), address(usdc), borrowAmt, borrowUsd);
-        cashModule.borrow(address(safe), address(usdc), borrowUsd, signer, sig);
+        cashModule.borrow(address(safe), address(usdc), borrowUsd, signers, signatures);
 
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 2, "debt opened");
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), borrowAmt, 2, "proceeds supplied back");
@@ -107,45 +107,58 @@ contract AutoSupplyTest is CashGatewayTestSetup {
     function test_borrow_revertsWhenOptedOut() public {
         _optOut();
 
-        (address signer, bytes memory sig) = _borrowSig(address(usdc), 100e6);
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), 100e6);
         vm.expectRevert(ICashModule.LendOptedOut.selector);
-        cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signers, signatures);
     }
 
     /// A legacy safe has no gateway borrow flow.
     function test_borrow_revertsForLegacySafe() public {
         _forceLegacyEngine(address(safe));
-        (address signer, bytes memory sig) = _borrowSig(address(usdc), 100e6);
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), 100e6);
         vm.expectRevert(ICashModule.OnlyLendGatewaySafe.selector);
-        cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signers, signatures);
     }
 
-    /// Borrow is owner-signed: a named signer who is not a safe admin is rejected.
-    function test_borrow_rejectsNonAdminSigner() public {
-        (, bytes memory sig) = _borrowSig(address(usdc), 100e6);
-        vm.expectRevert(ICashModule.OnlySafeAdmin.selector);
-        cashModule.borrow(address(safe), address(usdc), 100e6, makeAddr("notAdmin"), sig);
+    /// Borrow needs the owner quorum: a non-owner in the signer set is rejected.
+    function test_borrow_rejectsNonOwnerSigner() public {
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), 100e6);
+        signers[1] = notOwner; // owner1 still signs, but the second slot is a non-owner
+
+        vm.expectRevert(abi.encodeWithSelector(EtherFiSafeErrors.InvalidSigner.selector, 1));
+        cashModule.borrow(address(safe), address(usdc), 100e6, signers, signatures);
     }
 
-    /// Borrow is owner-signed: an admin is named but the signature is from the wrong key.
+    /// Borrow needs the owner quorum: a single owner signature is below the threshold of two.
+    function test_borrow_rejectsBelowThreshold() public {
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), 100e6);
+        address[] memory one = _addr1(signers[0]);
+        bytes[] memory oneSig = new bytes[](1);
+        oneSig[0] = signatures[0];
+
+        vm.expectRevert(EtherFiSafeErrors.InsufficientSigners.selector);
+        cashModule.borrow(address(safe), address(usdc), 100e6, one, oneSig);
+    }
+
+    /// Borrow needs the owner quorum: an owner is named but its signature is from the wrong key.
     function test_borrow_rejectsBadSignature() public {
-        uint256 nonce = cashModule.getNonce(address(safe));
-        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.BORROW_METHOD, block.chainid, address(safe), nonce, abi.encode(address(usdc), uint256(100e6)))).toEthSignedMessageHash();
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner2Pk, digest); // owner2 signs, but we claim owner1
-        bytes memory sig = abi.encodePacked(r, s, v);
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), 100e6);
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.BORROW_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(address(usdc), uint256(100e6)))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner3Pk, digest); // owner3 signs the owner2 slot
+        signatures[1] = abi.encodePacked(r, s, v);
 
-        vm.expectRevert(SignatureUtils.InvalidSigner.selector);
-        cashModule.borrow(address(safe), address(usdc), 100e6, owner1, sig);
+        vm.expectRevert(CashVerificationLib.InvalidSignatures.selector);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signers, signatures);
     }
 
-    /// The nonce advances on a successful borrow, so replaying the same signature is rejected.
+    /// The nonce advances on a successful borrow, so replaying the same signatures is rejected.
     function test_borrow_rejectsReplay() public {
         _supplyToGateway(address(safe), address(weETH), 5 ether);
-        (address signer, bytes memory sig) = _borrowSig(address(usdc), 100e6);
-        cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), 100e6);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signers, signatures);
 
-        vm.expectRevert(SignatureUtils.InvalidSigner.selector);
-        cashModule.borrow(address(safe), address(usdc), 100e6, signer, sig);
+        vm.expectRevert(CashVerificationLib.InvalidSignatures.selector);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signers, signatures);
     }
 
     /// @dev Opts the safe out of the lend market, riding out the mode-change delay.
@@ -166,11 +179,20 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         return (owner1, abi.encodePacked(r, s, v));
     }
 
-    function _borrowSig(address token, uint256 amountInUsd) internal view returns (address, bytes memory) {
-        uint256 nonce = cashModule.getNonce(address(safe));
-        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.BORROW_METHOD, block.chainid, address(safe), nonce, abi.encode(token, amountInUsd))).toEthSignedMessageHash();
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
-        return (owner1, abi.encodePacked(r, s, v));
+    /// @dev Builds the owner quorum (owner1 + owner2, the safe's threshold) signing a borrow intent.
+    function _borrowSig(address token, uint256 amountInUsd) internal view returns (address[] memory, bytes[] memory) {
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.BORROW_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(token, amountInUsd))).toEthSignedMessageHash();
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digest);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digest);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+        return (signers, signatures);
     }
 
     function _uint1(uint256 a) internal pure returns (uint256[] memory) {
