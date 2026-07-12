@@ -41,6 +41,21 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         assertApproxEqAbs(suppliedBefore - gw.suppliedOf(address(safe), address(usdc)), debt, 2, "repay withdrew only the debt from the supplied pot");
     }
 
+    /// An over-repay is capped at the open debt and the event reports the capped USD value, not the
+    /// requested one.
+    function test_repay_overRepay_emitsCappedUsd() public {
+        uint256 borrowedUsdc = 300e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        deal(address(usdc), address(safe), 1000e6);
+
+        uint256 debt = gw.debtOf(address(safe), address(usdc));
+        uint256 debtUsd = debtManager.convertCollateralTokenToUsd(address(usdc), debt);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Repay(address(safe), address(usdc), debt, debtUsd);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), debtUsd + 100e6);
+    }
+
     /// A partial repay consumes the loose balance before touching the supplied pot.
     function test_repay_sourcesLooseBeforeSupplied() public {
         uint256 borrowedUsdc = 400e6;

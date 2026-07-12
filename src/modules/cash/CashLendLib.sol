@@ -157,7 +157,11 @@ library CashLendLib {
         ILendGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
         uint256 debt = gateway.debtOf(safe, token);
-        if (amount > debt) amount = debt;
+        if (amount > debt) {
+            // Re-derive the USD value so the capped repay does not report the requested amount
+            amount = debt;
+            amountInUsd = $.debtManager.convertCollateralTokenToUsd(token, amount);
+        }
         if (amount == 0) revert AmountZero();
 
         (uint256 fromLoose, uint256 fromSupplied, bool cancelWithdrawal) = _sourceRepay($, gateway, dataProvider, safe, token, amount);
