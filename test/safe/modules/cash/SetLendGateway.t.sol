@@ -23,7 +23,7 @@ contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
         _forceLegacyEngine(address(safe));
 
         vm.prank(address(safe));
-        cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
+        cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, true));
         assertTrue(cashModule.usesLendGateway(address(safe)), "debt-free re-setup flips to the gateway");
     }
 
@@ -38,7 +38,7 @@ contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
         debtManager.borrow(BinSponsor.Reap, address(usdc), 10e6);
 
         vm.prank(address(safe));
-        cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
+        cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, true));
         assertFalse(cashModule.usesLendGateway(address(safe)), "safe with legacy debt stays on the legacy engine");
     }
 
@@ -56,15 +56,11 @@ contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
         assertEq(address(unconfiguredCashModule.getLendGateway()), address(newGateway));
     }
 
-    /// @notice CashLens should read the gateway configured during the one-time Lend bootstrap.
+    /// @notice CashLens should read the gateway configured during the one-time Lend bootstrap. The gateway is
+    ///         set before the safe onboards with the lend flag, so the safe runs on the gateway.
     function test_setLendGateway_bootstrapUpdatesCashLensReads() public {
         (ICashModule unconfiguredCashModule, CashLens unconfiguredCashLens) = _deployUnconfiguredCashModule();
         MockLendGateway newGateway = new MockLendGateway();
-
-        vm.prank(address(safe));
-        unconfiguredCashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset));
-        _setMode(unconfiguredCashModule, Mode.Credit);
-        vm.warp(unconfiguredCashModule.incomingModeStartTime(address(safe)) + 1);
 
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
@@ -78,6 +74,11 @@ contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
         unconfiguredCashModule.setLendGateway(address(newGateway));
 
         assertEq(address(unconfiguredCashLens.gateway()), address(newGateway));
+
+        vm.prank(address(safe));
+        unconfiguredCashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, true));
+        _setMode(unconfiguredCashModule, Mode.Credit);
+        vm.warp(unconfiguredCashModule.incomingModeStartTime(address(safe)) + 1);
 
         SafeCashData memory data = unconfiguredCashLens.getSafeCashData(address(safe), tokens);
         assertEq(data.totalCollateral, 200e6);

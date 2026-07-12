@@ -70,20 +70,27 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Sets up a new Safe's Cash Module with initial configuration
-     * @dev Creates default spending limits and sets initial mode to Debit with 50% cashback split
-     * @param data The encoded initialization data containing daily limit, monthly limit, and timezone offset
+     * @dev Creates default spending limits and sets initial mode to Debit with 50% cashback split. The backend
+     *      picks the engine per safe at deploy time via the useLendGateway flag in the setup data.
+     * @param data ABI-encoded (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset, bool useLendGateway)
      */
     function setupModule(bytes calldata data) external override onlyEtherFiSafe(msg.sender) {
-        (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset) = abi.decode(data, (uint256, uint256, int256));
+        (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset, bool useLendGateway) = abi.decode(data, (uint256, uint256, int256, bool));
 
-        SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
+        CashModuleStorage storage cashStorage = _getCashModuleStorage();
+        SafeCashConfig storage $ = cashStorage.safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         $.mode = Mode.Debit;
 
-        // New safes run on the Aave gateway. Guarded because setupModule is re-runnable: a legacy safe with
-        // open DebtManager debt must keep routing to DebtManager until migrateToLendGateway moves its position.
-        (, uint256 legacyDebtUsd) = _getDebtManager().borrowingOf(msg.sender);
-        if (legacyDebtUsd == 0) $.usesLendGateway = true;
+        // The backend decides the engine per safe. When useLendGateway is set the safe onboards onto the Aave
+        // gateway; otherwise it stays on the legacy DebtManager. The legacyDebtUsd guard keeps a safe with open
+        // DebtManager debt on DebtManager until migrateToLendGateway moves its position, since setupModule is
+        // re-runnable.
+        if (useLendGateway) {
+            if (address(cashStorage.gateway) == address(0)) revert LendGatewayNotSet();
+            (, uint256 legacyDebtUsd) = _getDebtManager().borrowingOf(msg.sender);
+            if (legacyDebtUsd == 0) $.usesLendGateway = true;
+        }
     }
 
     /**

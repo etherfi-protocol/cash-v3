@@ -224,8 +224,9 @@ contract SafeTestSetup is Utils {
         vm.stopPrank();
     }
 
-    /// @dev Wires the one-time gateway during setup. The gateway is set once and never repointed, so an Aave
-    ///      suite that needs the real gateway overrides this to a no-op and sets it after deploying Aave.
+    /// @dev Wires the one-time gateway during setup, so a safe onboarded with useLendGateway set lands on the
+    ///      gateway. The gateway is set once and never repointed, so an Aave suite that needs the real gateway
+    ///      overrides this to a no-op and sets it after deploying Aave.
     function _wireDefaultGateway() internal virtual {
         cashModule.setLendGateway(address(gateway));
     }

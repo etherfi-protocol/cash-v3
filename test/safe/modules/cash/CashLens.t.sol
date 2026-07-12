@@ -254,8 +254,8 @@ contract CashLensTest is CashModuleTestSetup {
         shouldWhitelist[0] = true;
         
         bytes[] memory setupData = new bytes[](1);
-        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
-        
+        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, true);
+
         vm.prank(owner);
         safeFactory.deployEtherFiSafe(keccak256("insufficientSafe"), owners, modules, setupData, 1);
         address insufficientSafe = safeFactory.getDeterministicAddress(keccak256("insufficientSafe"));
