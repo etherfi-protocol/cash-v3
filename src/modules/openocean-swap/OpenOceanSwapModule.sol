@@ -6,16 +6,20 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import {OpenOceanSwapDescription, IOpenOceanCaller, IOpenOceanRouter} from "../../interfaces/IOpenOcean.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 
 /**
  * @title OpenOceanSwapModule
  * @author ether.fi
  * @notice Module for executing token swaps through OpenOcean exchange
- * @dev Extends ModuleBase to integrate with the EtherFi ecosystem
+ * @dev Extends ModuleBase to integrate with the EtherFi ecosystem. A gateway safe's input may be supplied to
+ *      Aave, so the swap sandwiches the aggregator call: it withdraws any shortfall of the input from the
+ *      safe's Aave position, swaps, and re-supplies the output when the gateway lists it as a reserve.
  */
-contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
+contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
 
     /// @notice OpenOcean router contract to give allowance to perform swaps
@@ -53,6 +57,16 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
         swapRouter = _swapRouter;
     }
 
+    /// @dev Resolved live from the CashModule, the gateway address's single source of truth.
+    function gateway() public view override returns (ILendGateway) {
+        return cashModule.getLendGateway();
+    }
+
+    /// @dev The sandwich acts only for a safe whose assets live in Aave: on the gateway engine and not opted out.
+    function _lendActive(address safe) internal view override returns (bool) {
+        return cashModule.isLendActive(safe);
+    }
+
     /**
      * @notice Executes a token swap through OpenOcean
      * @param safe Address of the EtherFi safe to execute the swap from
@@ -74,8 +88,8 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
         address toAsset, 
         uint256 fromAssetAmount, 
         uint256 minToAssetAmount, 
-        bytes calldata data, 
-        address[] calldata signers, 
+        bytes calldata data,
+        address[] calldata signers,
         bytes[] calldata signatures
     ) external onlyEtherFiSafe(safe) {
         _checkSignatures(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data, signers, signatures);
@@ -159,7 +173,10 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
     ) internal {
         if (fromAsset == toAsset) revert SwappingToSameAsset();
         if (minToAssetAmount == 0) revert InvalidInput();
-        
+
+        // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
+        // full amount loose (net of any pending-withdrawal reservation).
+        _withdrawShortfall(safe, fromAsset, fromAssetAmount, _getAvailableAmount(safe, fromAsset));
         _checkAmountAvailable(safe, fromAsset, fromAssetAmount);
 
         uint256 balBefore;
@@ -182,6 +199,9 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
 
         uint256 receivedAmt = balAfter - balBefore;
         if (receivedAmt < minToAssetAmount) revert OutputLessThanMinAmount();
+
+        // Re-supply the output as collateral when the gateway lists it; an unlisted output (or ETH) stays loose.
+        _resupplyToGateway(safe, toAsset, receivedAmt);
 
         emit SwapOnOpenOcean(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, receivedAmt);
     }

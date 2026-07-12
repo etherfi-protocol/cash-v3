@@ -402,8 +402,8 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     /// @notice Thrown when the migration gateway has not been configured
     error GatewayNotSet();
 
-    /// @notice Thrown when migrating a lend-disabled Safe that still carries DebtManager debt (repay it first)
-    error LendDisabledSafeHasDebt();
+    /// @notice Thrown when migrating an opted-out Safe that still carries DebtManager debt (repay it first)
+    error LendOptedOutSafeHasDebt();
 
     /// @notice Thrown when a legacy DebtManager operation (borrow/repay) is attempted on a Safe already migrated to Aave
     error AlreadyMigratedToLendGateway();

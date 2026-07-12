@@ -55,7 +55,6 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
 
         vm.startPrank(owner);
         roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
-        dataProvider.configureModules(_addr1(address(gw)), _bool1(true));
         gw.setReserveId(address(weETH), weethReserveId);
         gw.setReserveId(address(usdc), usdcReserveId);
         gw.setDriver(driver, true);
@@ -122,6 +121,8 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
     function _enableModule(address module) internal {
         address[] memory modules = _addr1(module);
         bool[] memory shouldWhitelist = _bool1(true);
+        vm.prank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
         bytes[] memory setupData = new bytes[](1);
         setupData[0] = "";
         _configureModules(modules, shouldWhitelist, setupData);

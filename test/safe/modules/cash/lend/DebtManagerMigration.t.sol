@@ -127,10 +127,10 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
     /// @dev A lend-disabled safe opted out of Aave, so migration must not force its collateral in: it just
     ///      gets marked migrated (freezing legacy borrow/repay) with its balance left idle in the safe.
-    function test_migrateToLendGateway_lendDisabledSafe_marksMigratedWithoutSupplying() public {
+    function test_migrateToLendGateway_optedOutSafe_marksMigratedWithoutSupplying() public {
         deal(address(weETH), address(safe), 10 ether);
-        _disableLendForSafe();
-        assertFalse(cashModule.isLendEnabled(address(safe)), "lend disabled");
+        _optOutOfLend();
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "safe opted out of lend");
 
         vm.prank(migrator);
         dm.migrateToLendGateway(address(safe));
@@ -142,10 +142,10 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
     /// @dev A lend-disabled safe should be debt-free (disabling requires zero borrows), but it can still borrow
     ///      on DebtManager directly afterward. Migration must reject that case rather than revert opaquely.
-    function test_migrateToLendGateway_lendDisabledSafe_withDebt_reverts() public {
+    function test_migrateToLendGateway_optedOutSafe_withDebt_reverts() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 10 ether);
-        _disableLendForSafe();
+        _optOutOfLend();
 
         // Borrow on DebtManager while lend is disabled (borrow only checks whenNotMigrated, not lend)
         uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
@@ -153,7 +153,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
 
         vm.prank(migrator);
-        vm.expectRevert(DebtManagerStorageContract.LendDisabledSafeHasDebt.selector);
+        vm.expectRevert(DebtManagerStorageContract.LendOptedOutSafeHasDebt.selector);
         dm.migrateToLendGateway(address(safe));
     }
 
@@ -429,16 +429,16 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
     /// @dev Opts the safe out of lend (owner-signed toggleLend(false)), executing the pending request if the
     ///      mode delay is nonzero so the safe ends up fully lend-disabled.
-    function _disableLendForSafe() internal {
+    function _optOutOfLend() internal {
         uint256 nonce = cashModule.getNonce(address(safe));
         bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.TOGGLE_LEND_METHOD, block.chainid, address(safe), nonce, abi.encode(false))).toEthSignedMessageHash();
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
         cashModule.toggleLend(address(safe), false, owner1, abi.encodePacked(r, s, v));
 
-        if (cashModule.isLendEnabled(address(safe))) {
+        if (!cashModule.isLendOptedOut(address(safe))) {
             (,, uint64 modeDelay) = cashModule.getDelays();
             vm.warp(block.timestamp + modeDelay + 1);
-            cashModule.processLendDisable(address(safe));
+            cashModule.processLendOptOut(address(safe));
         }
     }
 }

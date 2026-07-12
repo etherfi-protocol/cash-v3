@@ -6,7 +6,7 @@ import { ILendGateway } from "../interfaces/ILendGateway.sol";
 /**
  * @title MockLendGateway
  * @notice Inert test double for ILendGateway. Non-lend safe suites wire it so the cash contracts have a codeful
- *         gateway that reports an empty position, and the SetLendGateway guard tests plus the ModuleGatewaySandwich
+ *         gateway that reports an empty position, and the SetLendGateway guard tests plus the ModuleLendGatewaySandwich
  *         call-order test drive it directly. Real gateway behavior is exercised against a live Aave v4 instance
  *         under the lend profile (test/safe/modules/cash/lend/**), so this mock no longer fabricates positions.
  *         Not for production.
@@ -26,9 +26,10 @@ contract MockLendGateway is ILendGateway {
     mapping(address => AccountData) internal _accountData;
     mapping(address => mapping(address => bool)) public usingAsCollateral;
     mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
+    mapping(address safe => mapping(address asset => uint256)) internal _suppliedOf;
     mapping(address asset => uint256) internal _availableCash;
-    /// @dev Whether lend is disabled for a safe; defaults to false so isLendEnabled returns true
-    mapping(address safe => bool) internal _lendDisabled;
+    /// @dev Whether an asset is a registered reserve; defaults to false
+    mapping(address asset => bool) internal _registered;
 
     Call public lastSupply;
     Call public lastWithdraw;
@@ -43,9 +44,14 @@ contract MockLendGateway is ILendGateway {
         _availableCash[asset] = amount;
     }
 
-    /// @notice Sets whether lend is enabled for a safe (defaults to enabled)
-    function setLendEnabled(address safe, bool enabled) external {
-        _lendDisabled[safe] = !enabled;
+    /// @notice Sets whether an asset is a registered reserve (defaults to unregistered)
+    function setRegistered(address asset, bool registered) external {
+        _registered[asset] = registered;
+    }
+
+    /// @notice Sets the amount a subsequent `suppliedOf(safe, asset)` will return
+    function setSuppliedOf(address safe, address asset, uint256 amount) external {
+        _suppliedOf[safe][asset] = amount;
     }
 
     function supply(address safe, address asset, uint256 amount) external {
@@ -73,8 +79,8 @@ contract MockLendGateway is ILendGateway {
         return _accountData[safe];
     }
 
-    function suppliedOf(address, address) external pure returns (uint256) {
-        return 0;
+    function suppliedOf(address safe, address asset) external view returns (uint256) {
+        return _suppliedOf[safe][asset];
     }
 
     function debtOf(address safe, address asset) external view returns (uint256) {
@@ -89,8 +95,8 @@ contract MockLendGateway is ILendGateway {
         return 0;
     }
 
-    function isLendEnabled(address safe) external view returns (bool) {
-        return !_lendDisabled[safe];
+    function isRegistered(address asset) external view returns (bool) {
+        return _registered[asset];
     }
 
     function registeredAssets() external pure returns (address[] memory) {

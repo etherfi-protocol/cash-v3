@@ -138,9 +138,9 @@ struct SafeCashConfig {
     /// @notice Incoming mode that will be applied after the delay
     Mode incomingMode;
     /// @notice True once the safe has opted out of the Aave lend market (no auto-supply, no lend ops)
-    bool lendDisabled;
-    /// @notice Timestamp after which a pending disable-lend request can be executed (0 if none)
-    uint96 lendDisableFinalizeTime;
+    bool lendOptedOut;
+    /// @notice Timestamp after which a pending lend opt-out request can be executed (0 if none)
+    uint96 lendOptOutFinalizeTime;
     /// @notice True once the safe's borrow/collateral engine is the Aave gateway (set at onboarding or by migration; one-way)
     bool usesLendGateway;
 }
@@ -214,6 +214,9 @@ interface ICashModule {
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
 
+    /// @notice Error thrown when a lend-market operation targets a safe on the legacy DebtManager engine
+    error OnlyLendGatewaySafe();
+
     /// @notice Error thrown when a non-DebtManager contract calls restricted functions
     error OnlyDebtManager();
 
@@ -233,17 +236,17 @@ interface ICashModule {
     error ModeAlreadySet();
 
     /// @notice Error thrown when a lend op is attempted while the safe has opted out of lend
-    error LendDisabled();
-    /// @notice Error thrown when disabling lend while the safe still has open borrows
+    error LendOptedOut();
+    /// @notice Error thrown when opting out of lend while the safe still has open borrows
     error HasOpenBorrows();
-    /// @notice Error thrown when executing a disable-lend that was never requested
-    error NoPendingLendDisable();
-    /// @notice Error thrown when executing a disable-lend before its delay has elapsed
-    error LendDisableNotReady();
-    /// @notice Error thrown when disabling lend that is already disabled, or when a request is already pending
-    error LendAlreadyDisabled();
+    /// @notice Error thrown when executing a lend opt-out that was never requested
+    error NoPendingLendOptOut();
+    /// @notice Error thrown when executing a lend opt-out before its delay has elapsed
+    error LendOptOutNotReady();
+    /// @notice Error thrown when opting out while already opted out, or when a request is already pending
+    error LendAlreadyOptedOut();
     /// @notice Error thrown when enabling lend that is already enabled
-    error LendNotDisabled();
+    error LendNotOptedOut();
     /// @notice Error thrown when the lend gateway has not been configured
     error LendGatewayNotSet();
 
@@ -347,18 +350,28 @@ interface ICashModule {
     function transactionCleared(address safe, bytes32 txId) external view returns (bool);
 
     /**
-     * @notice Whether the safe currently participates in the Aave lend market (auto-supply + lend ops enabled)
+     * @notice Whether lend is live for the safe: on the Aave gateway engine and not opted out. This is the
+     *         predicate every lend action and module sandwich gates on.
      * @param safe The safe to query
-     * @return True unless the safe has opted out via toggleLend(false) + processLendDisable
+     * @return True if the safe uses the gateway engine and has not opted out
      */
-    function isLendEnabled(address safe) external view returns (bool);
+    function isLendActive(address safe) external view returns (bool);
 
     /**
-     * @notice Returns the timestamp when a pending lend-disable request becomes executable
+     * @notice The user's raw lend opt-out preference, independent of which engine the safe runs on
+     * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
+     *      Aave during migration before its engine flag flips.
      * @param safe The safe to query
-     * @return Timestamp when processLendDisable may be called, or 0 if none pending
+     * @return True if the safe has opted out via toggleLend(false) + processLendOptOut
      */
-    function lendDisableFinalizeTime(address safe) external view returns (uint256);
+    function isLendOptedOut(address safe) external view returns (bool);
+
+    /**
+     * @notice Returns the timestamp when a pending lend opt-out request becomes executable
+     * @param safe The safe to query
+     * @return Timestamp when processLendOptOut may be called, or 0 if none pending
+     */
+    function lendOptOutFinalizeTime(address safe) external view returns (uint256);
 
     /**
      * @notice Returns the configured Aave gateway used for lend operations
@@ -591,26 +604,26 @@ interface ICashModule {
     /**
      * @notice Toggles a safe's participation in the Aave lend market (auto-supply and borrow ops)
      * @dev Owner-signed, with the requested flag bound into the signature. Enabling (enable == true) opts the
-     *      safe back in immediately and cancels any pending disable. Disabling (enable == false) does not act
+     *      safe back in immediately and cancels any pending opt-out. Opting out (enable == false) does not act
      *      immediately: it records a request that becomes executable after the mode-change delay, at which
-     *      point anyone may call processLendDisable. Disabling requires the safe to have no open borrows.
+     *      point anyone may call processLendOptOut. Disabling requires the safe to have no open borrows.
      * @param safe Address of the EtherFi Safe
-     * @param enable True to enable lend now, false to request disabling it
+     * @param enable True to enable lend now, false to request opting out
      * @param signer A safe admin authorizing the change
      * @param signature The signer's signature over the intent
-     * @custom:throws LendNotDisabled if enabling while lend is already enabled and no disable is pending
-     * @custom:throws LendAlreadyDisabled if disabling while lend is already disabled or a request is pending
-     * @custom:throws HasOpenBorrows if disabling while the safe still has open borrows
+     * @custom:throws LendNotOptedOut if enabling while lend is already enabled and no opt-out is pending
+     * @custom:throws LendAlreadyOptedOut if disabling while lend is already disabled or a request is pending
+     * @custom:throws HasOpenBorrows if opting out while the safe still has open borrows
      */
     function toggleLend(address safe, bool enable, address signer, bytes calldata signature) external;
 
     /**
-     * @notice Executes a pending lend-disable request (from toggleLend(false)) once its delay has elapsed
-     * @dev Permissionless. Withdraws all of the safe's Aave collateral back to the safe, marks lend disabled,
+     * @notice Executes a pending lend opt-out request (from toggleLend(false)) once its delay has elapsed
+     * @dev Permissionless. Withdraws all of the safe's Aave collateral back to the safe, marks the safe opted out,
      *      and forces the safe into Debit mode. Re-checks the safe has no open borrows.
      * @param safe Address of the EtherFi Safe
      */
-    function processLendDisable(address safe) external;
+    function processLendOptOut(address safe) external;
 
     /**
      * @notice Updates the spending limits for a safe
@@ -682,6 +695,33 @@ interface ICashModule {
      * @custom:throws InsufficientBalance if there is not enough balance for the operation
      */
     function repay(address safe, address token, uint256 amountInUsd) external;
+
+    /**
+     * @notice Supplies a safe's loose token balances into the Aave lend market (the auto-supply sweep)
+     * @dev Per token: supplies the loose balance net of any pending-withdrawal reservation and flags it
+     *      as collateral; zero and unregistered tokens are skipped. No-op for an opted-out safe; reverts
+     *      for a legacy safe.
+     * @param safe Address of the EtherFi Safe
+     * @param tokens Tokens to sweep
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function supplyToLend(address safe, address[] calldata tokens) external;
+
+    /**
+     * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
+     *         are immediately supplied back as collateral
+     * @dev Owner-quorum signed: the signatures bind the token and USD amount. Any relayer may submit the intent.
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to borrow
+     * @param amountInUsd Amount to borrow in USD
+     * @param signers Addresses of the owners authorizing the borrow
+     * @param signatures The signers' signatures over the intent
+     * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
+     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function borrow(address safe, address token, uint256 amountInUsd, address[] calldata signers, bytes[] calldata signatures) external;
 
     /**
      * @notice Requests a withdrawal of tokens to a recipient

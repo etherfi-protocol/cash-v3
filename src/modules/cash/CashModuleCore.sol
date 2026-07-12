@@ -243,13 +243,24 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Returns whether lend (Aave auto-supply and borrow ops) is enabled for a safe
-     * @dev Lend is enabled by default; a safe with no borrows may opt out via toggleLend(false) + processLendDisable
+     * @notice Whether lend is live for a safe: on the Aave gateway engine and not opted out. This is the
+     *         predicate every lend action and module sandwich gates on.
      * @param safe Address of the EtherFi Safe
-     * @return True if lend is enabled, false if the safe has opted out
+     * @return True if the safe uses the gateway engine and has not opted out
      */
-    function isLendEnabled(address safe) external view returns (bool) {
-        return !_getCashModuleStorage().safeCashConfig[safe].lendDisabled;
+    function isLendActive(address safe) external view returns (bool) {
+        return _usesLendGateway(safe) && !_getCashModuleStorage().safeCashConfig[safe].lendOptedOut;
+    }
+
+    /**
+     * @notice The user's raw lend opt-out preference, independent of the safe's engine
+     * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
+     *      Aave during migration before its engine flag flips.
+     * @param safe Address of the EtherFi Safe
+     * @return True if the safe has opted out via toggleLend(false) + processLendOptOut
+     */
+    function isLendOptedOut(address safe) external view returns (bool) {
+        return _getCashModuleStorage().safeCashConfig[safe].lendOptedOut;
     }
 
     /**
@@ -263,13 +274,13 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Returns the timestamp when a pending lend-disable request becomes executable
-     * @dev Returns 0 if no disable is pending
+     * @notice Returns the timestamp when a pending lend opt-out request becomes executable
+     * @dev Returns 0 if no opt-out is pending
      * @param safe Address of the EtherFi Safe
-     * @return Timestamp when processLendDisable may be called, or 0 if none pending
+     * @return Timestamp when processLendOptOut may be called, or 0 if none pending
      */
-    function lendDisableFinalizeTime(address safe) external view returns (uint256) {
-        return _getCashModuleStorage().safeCashConfig[safe].lendDisableFinalizeTime;
+    function lendOptOutFinalizeTime(address safe) external view returns (uint256) {
+        return _getCashModuleStorage().safeCashConfig[safe].lendOptOutFinalizeTime;
     }
 
     /**
@@ -291,23 +302,23 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Executes a pending lend-disable request (from toggleLend(false)) after its delay has elapsed
+     * @notice Executes a pending lend opt-out request (from toggleLend(false)) after its delay has elapsed
      * @dev Permissionless once the delay has elapsed. Withdraws all Aave collateral back to the safe, marks
-     *      lend disabled, and forces the safe into Debit mode. Re-checks that the safe has no open borrows so
+     *      the safe opted out, and forces it into Debit mode. Re-checks that the safe has no open borrows so
      *      a borrow taken during the delay window cannot strand collateral.
      * @param safe Address of the EtherFi Safe
      * @custom:throws OnlyEtherFiSafe if safe is not a valid EtherFi Safe
-     * @custom:throws NoPendingLendDisable if no disable request is pending
-     * @custom:throws LendDisableNotReady if the delay period hasn't passed
+     * @custom:throws NoPendingLendOptOut if no disable request is pending
+     * @custom:throws LendOptOutNotReady if the delay period hasn't passed
      * @custom:throws HasOpenBorrows if the safe borrowed during the delay window
      */
-    function processLendDisable(address safe) external onlyEtherFiSafe(safe) nonReentrant {
+    function processLendOptOut(address safe) external onlyEtherFiSafe(safe) nonReentrant {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage safeConfig = $.safeCashConfig[safe];
-        if (safeConfig.lendDisableFinalizeTime == 0) revert NoPendingLendDisable();
-        if (block.timestamp < safeConfig.lendDisableFinalizeTime) revert LendDisableNotReady();
+        if (safeConfig.lendOptOutFinalizeTime == 0) revert NoPendingLendOptOut();
+        if (block.timestamp < safeConfig.lendOptOutFinalizeTime) revert LendOptOutNotReady();
         if (CashLendLib.hasOpenBorrows($, safe)) revert HasOpenBorrows();
-        CashLendLib.disableLend($, safe);
+        CashLendLib.executeLendOptOut($, safe);
     }
 
     /**
@@ -523,6 +534,39 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Supplies a safe's loose token balances into the Aave lend market (the auto-supply sweep)
+     * @dev Only callable by the EtherFi wallet (the cash-be sweeper). Per token: supplies the loose balance
+     *      net of any pending-withdrawal reservation and flags it as collateral; zero and unregistered
+     *      tokens are skipped. No-op for an opted-out safe; reverts for a legacy safe.
+     * @param safe Address of the EtherFi Safe
+     * @param tokens Tokens to sweep
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function supplyToLend(address safe, address[] calldata tokens) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
+        CashLendLib.supplyToLend(_getCashModuleStorage(), safe, tokens);
+    }
+
+    /**
+     * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
+     *         are immediately supplied back as collateral
+     * @dev Owner-quorum signed: the signatures bind the token and USD amount so neither a compromised backend
+     *      nor a single compromised admin can lever a safe up. Any relayer may submit the signed intent. Aave
+     *      enforces the health check on the borrow itself.
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to borrow
+     * @param amountInUsd Amount to borrow in USD
+     * @param signers Addresses of the owners authorizing the borrow
+     * @param signatures The signers' signatures over the intent
+     * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
+     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function borrow(address safe, address token, uint256 amountInUsd, address[] calldata signers, bytes[] calldata signatures) external whenNotPaused nonReentrant onlyEtherFiSafe(safe) {
+        CashLendLib.borrow(_getCashModuleStorage(), safe, token, amountInUsd, IEtherFiSafe(safe).useNonce(), signers, signatures);
+    }
+
+    /**
      * @dev Internal function to execute the repayment transaction
      * @param safe Address of the EtherFi Safe
      * @param debtManager Reference to the debt manager contract
@@ -533,11 +577,14 @@ contract CashModuleCore is CashModuleStorageContract {
     function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
         uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
         if (amount == 0) revert AmountZero();
-        _cancelCompetingWithdrawal(safe, token, amount);
+        // A legacy safe repays from its loose balance only, so a repay that needs withdrawal-reserved funds
+        // is resolved here. A gateway safe sources loose plus Aave-supplied balance in CashLendLib.repay,
+        // which owns the reservation handling for that engine.
+        if (!_usesLendGateway(safe)) _cancelCompetingWithdrawal(safe, token, amount);
 
         // A migrated safe repays on Aave via the gateway; a legacy safe repays the DebtManager. Both paths run
         // in CashLendLib (extracted to keep this contract within the code-size limit).
-        CashLendLib.repay(_getCashModuleStorage(), safe, token, amount, amountInUsd);
+        CashLendLib.repay(_getCashModuleStorage(), etherFiDataProvider, safe, token, amount, amountInUsd);
     }
 
     /**

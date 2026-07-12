@@ -96,19 +96,19 @@ contract CashEventEmitter is UpgradeableProxy {
     event Repay(address indexed safe, address indexed token, uint256 debtAmount, uint256 debtAmountInUsd);
 
     /**
-     * @notice Emitted when a safe requests to disable lend (opt out of the Aave market)
+     * @notice Emitted when a safe requests to opt out of lend (the Aave market)
      * @param safe Address of the safe
      * @param finalizeTime Timestamp after which the request can be executed
      */
-    event LendDisableRequested(address indexed safe, uint256 finalizeTime);
+    event LendOptOutRequested(address indexed safe, uint256 finalizeTime);
 
-    /// @notice Emitted when a safe's pending lend-disable request is executed
+    /// @notice Emitted when a safe's pending lend opt-out request is executed
     /// @param safe Address of the safe
-    event LendDisableExecuted(address indexed safe);
+    event LendOptOutExecuted(address indexed safe);
 
     /// @notice Emitted when a safe re-enables lend (opts back into the Aave market)
     /// @param safe Address of the safe
-    event LendEnabled(address indexed safe);
+    event LendOptedIn(address indexed safe);
 
     /**
      * @notice Emitted when a spending limit is changed
@@ -147,6 +147,23 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param amount Token amount supplied
      */
     event CollateralResupplied(address indexed safe, address indexed token, uint256 amount);
+
+    /**
+     * @notice Emitted when a safe's loose balance is supplied into the lend market (auto-supply)
+     * @param safe Address of the safe
+     * @param token Token supplied
+     * @param amount Token amount supplied
+     */
+    event LendSupplied(address indexed safe, address indexed token, uint256 amount);
+
+    /**
+     * @notice Emitted when a safe borrows from the lend market to itself (a borrow-page borrow)
+     * @param safe Address of the safe
+     * @param token Token borrowed
+     * @param amount Token amount borrowed
+     * @param amountInUsd USD value of the borrow
+     */
+    event LendBorrowed(address indexed safe, address indexed token, uint256 amount, uint256 amountInUsd);
 
     /**
      * @notice Emitted when cashback is calculated and potentially distributed
@@ -433,22 +450,45 @@ contract CashEventEmitter is UpgradeableProxy {
         emit CollateralResupplied(safe, token, amount);
     }
 
-    /// @notice Emits the LendDisableRequested event
-    /// @dev Can only be called by the Cash Module
-    function emitLendDisableRequested(address safe, uint256 finalizeTime) external onlyCashModule {
-        emit LendDisableRequested(safe, finalizeTime);
+    /**
+     * @notice Emits the LendSupplied event
+     * @dev Can only be called by the Cash Module
+     * @param safe Address of the safe
+     * @param token Token supplied
+     * @param amount Token amount supplied
+     */
+    function emitLendSupplied(address safe, address token, uint256 amount) external onlyCashModule {
+        emit LendSupplied(safe, token, amount);
     }
 
-    /// @notice Emits the LendDisableExecuted event
-    /// @dev Can only be called by the Cash Module
-    function emitLendDisableExecuted(address safe) external onlyCashModule {
-        emit LendDisableExecuted(safe);
+    /**
+     * @notice Emits the LendBorrowed event
+     * @dev Can only be called by the Cash Module
+     * @param safe Address of the safe
+     * @param token Token borrowed
+     * @param amount Token amount borrowed
+     * @param amountInUsd USD value of the borrow
+     */
+    function emitLendBorrowed(address safe, address token, uint256 amount, uint256 amountInUsd) external onlyCashModule {
+        emit LendBorrowed(safe, token, amount, amountInUsd);
     }
 
-    /// @notice Emits the LendEnabled event
+    /// @notice Emits the LendOptOutRequested event
     /// @dev Can only be called by the Cash Module
-    function emitLendEnabled(address safe) external onlyCashModule {
-        emit LendEnabled(safe);
+    function emitLendOptOutRequested(address safe, uint256 finalizeTime) external onlyCashModule {
+        emit LendOptOutRequested(safe, finalizeTime);
+    }
+
+    /// @notice Emits the LendOptOutExecuted event
+    /// @dev Can only be called by the Cash Module
+    function emitLendOptOutExecuted(address safe) external onlyCashModule {
+        emit LendOptOutExecuted(safe);
+    }
+
+    /// @notice Emits the LendOptedIn event
+    /// @dev Can only be called by the Cash Module
+    function emitLendOptedIn(address safe) external onlyCashModule {
+        emit LendOptedIn(safe);
     }
 
     /**
