@@ -20,6 +20,9 @@ contract FraxVerifyBytecode is ContractCodeChecker, Test {
     }
 
     function test_fraxModule_verifyBytecode() public {
+        // FraxModule gains the Aave sandwich for Lend, so its bytecode no longer matches the deployed
+        // pre-Lend implementation. Re-enable after the Lend deployment.
+        vm.skip(true);
         FraxModule fraxModule = new FraxModule(dataProvider, fraxusd, custodian, remoteHop);
 
         console.log("-------------- FraxModule ----------------");
