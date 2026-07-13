@@ -493,21 +493,26 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
 
     /// @notice The registered assets whose reserves accept a borrow on the Spoke
     function borrowableAssets() external view returns (address[] memory) {
+        return _filterAssets(true);
+    }
+
+    /**
+     * @notice Whether `asset` can fund a debit spend: registered, marked borrowable, and not paused
+     * @dev A debit spend transfers loose balance and withdraws supplied balance, and Aave allows both
+     *      while frozen, so frozen is tolerated here. The borrowable flag does membership duty (it marks
+     *      the spendable stables); paused blocks the withdraw leg. Only new debt takes the full
+     *      isBorrowable gate.
+     * @param asset The asset to query
+     */
+    function isSpendAsset(address asset) external view returns (bool) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
-        address[] memory assets = $.assets.values();
-        uint256 count = 0;
-        for (uint256 i = 0; i < assets.length; i++) {
-            if (_isBorrowable($.reserveId[assets[i]])) {
-                assets[count] = assets[i];
-                unchecked {
-                    ++count;
-                }
-            }
-        }
-        assembly ("memory-safe") {
-            mstore(assets, count)
-        }
-        return assets;
+        if (!$.assets.contains(asset)) return false;
+        return _isSpendAsset($.reserveId[asset]);
+    }
+
+    /// @notice The registered assets that can fund a debit spend (see isSpendAsset)
+    function spendAssets() external view returns (address[] memory) {
+        return _filterAssets(false);
     }
 
     /// @notice Whether `account` may drive the gateway (CashModule or an authorized driver)
@@ -542,6 +547,32 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     function _isBorrowable(uint256 reserveId) internal view returns (bool) {
         IAaveV4Spoke.ReserveConfig memory config = spoke.getReserveConfig(reserveId);
         return config.borrowable && !config.frozen && !config.paused;
+    }
+
+    /// @dev Whether the reserve can fund a debit spend: borrowable (membership), not paused; frozen tolerated
+    function _isSpendAsset(uint256 reserveId) internal view returns (bool) {
+        IAaveV4Spoke.ReserveConfig memory config = spoke.getReserveConfig(reserveId);
+        return config.borrowable && !config.paused;
+    }
+
+    /// @dev The registered assets passing the borrow gate (`borrowGate`) or the debit-spend gate
+    function _filterAssets(bool borrowGate) internal view returns (address[] memory) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        address[] memory assets = $.assets.values();
+        uint256 count = 0;
+        for (uint256 i = 0; i < assets.length; i++) {
+            uint256 reserveId = $.reserveId[assets[i]];
+            if (borrowGate ? _isBorrowable(reserveId) : _isSpendAsset(reserveId)) {
+                assets[count] = assets[i];
+                unchecked {
+                    ++count;
+                }
+            }
+        }
+        assembly ("memory-safe") {
+            mstore(assets, count)
+        }
+        return assets;
     }
 
     /// @dev The registered reserveId for `asset`, reverting if unregistered

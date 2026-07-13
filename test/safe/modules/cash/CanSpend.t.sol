@@ -553,7 +553,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         (bool canSpend, string memory message) = cashLens.canSpend(address(safe), txId, tokens, amountsInUsd);
         
         assertFalse(canSpend, "Should not allow spending a non-borrow token");
-        assertEq(message, "Not a supported borrow token", "Error message should match");
+        assertEq(message, "Not a supported spend token", "Error message should match");
     }
 
     /// canSpend is declined when reusing a txId that was already spent.

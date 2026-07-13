@@ -119,6 +119,22 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 200e6 - 20e6, 2, "20 shortfall withdrawn from Aave");
     }
 
+    /// A freeze does not stop debit: the loose leg is a plain transfer and the supplied leg is an Aave
+    /// withdraw, both allowed on a frozen reserve, so the spend lands.
+    function test_spend_debit_succeeds_whileReserveFrozen() public {
+        _supplyToGateway(address(safe), address(usdc), 100e6);
+        deal(address(usdc), address(safe), 40e6);
+        _setAaveReserveFrozen(usdcReserveId, true);
+
+        uint256 dispatcherBefore = usdc.balanceOf(address(settlementDispatcherReap));
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(100e6), _noCashback());
+
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBefore + 100e6, "loose plus supplied funded the spend while frozen");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 100e6 - 60e6, 2, "shortfall withdrawn from the frozen reserve");
+    }
+
     /// The auth-vs-freeze race: an auth approved while the reserve was borrowable cannot settle once the
     /// reserve is frozen. The spend reverts on the module's gate — the same predicate the auth now declines
     /// on — instead of deep inside Aave.

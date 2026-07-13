@@ -226,8 +226,8 @@ contract CashLens is UpgradeableProxy, Constants {
 
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
-            if (!lendGateway.isBorrowable(token)) {
-                return (false, "Not a supported borrow token");
+            if (!lendGateway.isSpendAsset(token)) {
+                return (false, "Not a supported spend token");
             }
 
             uint256 needed = _fromUsd(token, amountsInUsd[i]);
@@ -283,20 +283,21 @@ contract CashLens is UpgradeableProxy, Constants {
         SafeCashData memory data;
 
         // Each engine names its own token universe: DebtManager's lists for a legacy safe, the gateway's
-        // registered/borrowable assets for an Aave safe.
+        // registered/spendable assets for an Aave safe. The spend list is the debitMaxSpend default; on
+        // the legacy engine the borrow-token list is that same list.
         address[] memory collateralTokens;
-        address[] memory borrowTokens;
+        address[] memory debitSpendTokens;
 
         if (!cashModule.usesLendGateway(safe)) {
             IDebtManager debtManager = cashModule.getDebtManager();
             collateralTokens = debtManager.getCollateralTokens();
-            borrowTokens = debtManager.getBorrowTokens();
+            debitSpendTokens = debtManager.getBorrowTokens();
             (data.collateralBalances, data.totalCollateral, data.borrows, data.totalBorrow) = debtManager.getUserCurrentState(safe);
             data.maxBorrow = debtManager.getMaxBorrowAmount(safe, true);
         } else {
             ILendGateway lendGateway = gateway();
             collateralTokens = lendGateway.registeredAssets();
-            borrowTokens = lendGateway.borrowableAssets();
+            debitSpendTokens = lendGateway.spendAssets();
             ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
             data.collateralBalances = _suppliedBalances(safe, collateralTokens);
             // Debt can sit on any registered reserve, including one that stopped being borrowable after
@@ -324,7 +325,7 @@ contract CashLens is UpgradeableProxy, Constants {
         data.creditMaxSpend = getMaxSpendCredit(safe);
 
         if (debtServiceTokenPreference.length == 0) {
-            data.debitMaxSpend = getMaxSpendDebit(safe, borrowTokens);
+            data.debitMaxSpend = getMaxSpendDebit(safe, debitSpendTokens);
         } else {
             data.debitMaxSpend = getMaxSpendDebit(safe, debtServiceTokenPreference);
         }
@@ -385,7 +386,7 @@ contract CashLens is UpgradeableProxy, Constants {
 
         for (uint256 i = 0; i < len;) {
             address token = debtServiceTokenPreference[i];
-            if (!lendGateway.isBorrowable(token)) revert NotABorrowToken();
+            if (!lendGateway.isSpendAsset(token)) revert NotABorrowToken();
 
             (uint256 spendable, uint256 used) = _debitSpendable(safe, token, safeData, borrowHeadroom, hasDebt);
             borrowHeadroom = borrowHeadroom > used ? borrowHeadroom - used : 0;

@@ -65,6 +65,23 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertTrue(gw.isBorrowable(address(usdc)), "borrowable again after unpause");
     }
 
+    /// isSpendAsset (the debit gate) keeps the borrowable flag as membership (weETH stays non-spendable)
+    /// and tolerates a freeze, since a debit only transfers and withdraws; only a pause blocks it.
+    function test_reads_spendAsset_toleratesFreezeNotPause() public {
+        assertTrue(gw.isSpendAsset(address(usdc)));
+        assertFalse(gw.isSpendAsset(address(weETH)), "collateral-only asset is not spendable");
+        assertFalse(gw.isSpendAsset(address(0xdead)));
+
+        _setAaveReserveFrozen(usdcReserveId, true);
+        assertTrue(gw.isSpendAsset(address(usdc)), "frozen reserve still spendable");
+        assertEq(gw.spendAssets().length, 1, "stays in spendAssets while frozen");
+        _setAaveReserveFrozen(usdcReserveId, false);
+
+        _setAaveReservePaused(usdcReserveId, true);
+        assertFalse(gw.isSpendAsset(address(usdc)), "paused reserve not spendable");
+        assertEq(gw.spendAssets().length, 0, "dropped from spendAssets while paused");
+    }
+
     function test_getAccountData_freshSafeIsEmptyAndHealthy() public view {
         ILendGateway.AccountData memory data = gw.getAccountData(address(safe));
         assertEq(data.collateralUsd, 0);

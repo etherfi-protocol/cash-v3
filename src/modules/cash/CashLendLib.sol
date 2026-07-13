@@ -782,7 +782,8 @@ library CashLendLib {
      *      reservation as void, matching the request having been cancelled at that point.
      */
     function _sourceDebitToken(CashModuleStorageContract.CashModuleStorage storage $, DebitSpendState memory s, IPriceProvider priceProvider, address safe, address token, uint256 amountInUsd, uint256 i) internal view {
-        if (!$.gateway.isBorrowable(token)) revert UnsupportedToken();
+        // The debit-spend gate, not the borrow gate: a debit only transfers and withdraws, so frozen is fine
+        if (!$.gateway.isSpendAsset(token)) revert UnsupportedToken();
         uint256 amount = DebitSourcingLib.fromUsd(priceProvider, token, amountInUsd);
 
         uint256 loose = IERC20(token).balanceOf(safe);

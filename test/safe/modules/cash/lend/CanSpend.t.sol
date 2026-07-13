@@ -29,6 +29,22 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         assertEq(reason, "");
     }
 
+    /// A freeze does not stop debit: the spend only transfers loose and withdraws supplied balance, both
+    /// allowed on a frozen reserve, so the auth keeps approving.
+    function test_canSpend_succeeds_inDebitMode_whileReserveFrozen() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        _supplyToGateway(address(safe), address(usdc), 1000e6);
+        _setAaveReserveFrozen(usdcReserveId, true);
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, true);
+        assertEq(reason, "");
+    }
+
     /// Credit spend succeeds when the supplied collateral gives enough borrowing power to cover the amount.
     function test_canSpend_succeeds_inCreditMode_whenCollateralAvailable() public {
         _setMode(Mode.Credit);

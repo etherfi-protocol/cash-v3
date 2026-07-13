@@ -121,6 +121,15 @@ contract MockLendGateway is ILendGateway {
         return _filterAssets(true);
     }
 
+    /// @dev The mock models no freeze or pause, so the debit-spend gate equals the borrow gate
+    function isSpendAsset(address asset) external view returns (bool) {
+        return _registered[asset] && _borrowable[asset];
+    }
+
+    function spendAssets() external view returns (address[] memory) {
+        return _filterAssets(true);
+    }
+
     /// @dev The registered assets, optionally narrowed to the borrowable ones
     function _filterAssets(bool onlyBorrowable) internal view returns (address[] memory) {
         address[] memory out = new address[](_assets.length);
