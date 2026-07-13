@@ -135,6 +135,25 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 100e6 - 60e6, 2, "shortfall withdrawn from the frozen reserve");
     }
 
+    /// A debit spend does not need the reserve to be borrowable: membership is the admin spend set, so a
+    /// supply-only reserve (borrowable flag off, e.g. a stable listed only to hold and spend) still funds a
+    /// debit spend from loose balance plus an Aave withdraw.
+    function test_spend_debit_succeeds_whenReserveNotBorrowable() public {
+        _supplyToGateway(address(safe), address(usdc), 100e6);
+        deal(address(usdc), address(safe), 40e6);
+        _setAaveReserveBorrowable(usdcReserveId, false);
+        assertFalse(gw.isBorrowable(address(usdc)), "reserve is supply-only");
+        assertTrue(gw.isSpendAsset(address(usdc)), "still a declared spend asset");
+
+        uint256 dispatcherBefore = usdc.balanceOf(address(settlementDispatcherReap));
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(100e6), _noCashback());
+
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBefore + 100e6, "loose plus supplied funded the spend on a supply-only reserve");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 100e6 - 60e6, 2, "shortfall withdrawn from the supply-only reserve");
+    }
+
     /// The auth-vs-freeze race: an auth approved while the reserve was borrowable cannot settle once the
     /// reserve is frozen. The spend reverts on the module's gate — the same predicate the auth now declines
     /// on — instead of deep inside Aave.

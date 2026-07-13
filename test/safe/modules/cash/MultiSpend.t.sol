@@ -24,6 +24,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         vm.prank(owner);
         debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);
         gateway.setBorrowable(address(weETH), true);
+        gateway.setSpendAsset(address(weETH), true);
     }
 
     function test_spend_variousTokenProportions_inDebitMode() public {
@@ -565,6 +566,7 @@ contract CashModuleMultiSpendTest is CashModuleTestSetup {
         debtManager.supportBorrowToken(address(cashbackToken), borrowApyPerSecond, minShares);
         gateway.setRegistered(address(cashbackToken), true);
         gateway.setBorrowable(address(cashbackToken), true);
+        gateway.setSpendAsset(address(cashbackToken), true);
         vm.stopPrank();
         
         // Setup three tokens with sample amounts

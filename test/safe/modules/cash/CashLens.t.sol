@@ -60,6 +60,7 @@ contract CashLensTest is CashModuleTestSetup {
         debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
         gateway.setRegistered(address(liquidUsd), true);
         gateway.setBorrowable(address(liquidUsd), true);
+        gateway.setSpendAsset(address(liquidUsd), true);
 
         // Add some collateral to safe for tests
         deal(address(weETH), address(safe), 10 ether);

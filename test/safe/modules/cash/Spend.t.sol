@@ -49,6 +49,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         vm.prank(owner);
         debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);
         gateway.setBorrowable(address(weETH), true);
+        gateway.setSpendAsset(address(weETH), true);
 
         uint256 amountInUsd = 100e6;
         uint256 totalAmountInUsd = amountInUsd * 2; // Pre-calculate total

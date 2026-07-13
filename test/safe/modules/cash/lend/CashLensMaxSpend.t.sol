@@ -60,8 +60,10 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
 
         // liquidUSD Aave reserve at 50% collateral factor, priced by the USDC/USD feed; seed borrowable liquidity.
         liquidUsdReserveId = _addAaveReserve(address(liquidUsd), usdcUsdOracle, 5000, true);
-        vm.prank(owner);
+        vm.startPrank(owner);
         gw.setReserveId(address(liquidUsd), liquidUsdReserveId);
+        gw.setSpendAsset(address(liquidUsd), true);
+        vm.stopPrank();
         _seedAaveLiquidity(liquidUsdReserveId, address(liquidUsd), 1_000_000e6);
     }
 

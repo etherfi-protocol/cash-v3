@@ -185,6 +185,7 @@ contract SafeTestSetup is Utils {
         gateway.setRegistered(address(weETH), true);
         gateway.setRegistered(address(usdc), true);
         gateway.setBorrowable(address(usdc), true);
+        gateway.setSpendAsset(address(usdc), true);
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
