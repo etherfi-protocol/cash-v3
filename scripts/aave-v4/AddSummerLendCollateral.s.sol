@@ -100,6 +100,9 @@ contract AddSummerLendCollateral is Utils {
 
     uint8 constant FEED_DECIMALS = 8;
     uint256 constant CHAINLINK_MAX_STALENESS = 1 days;
+    // Our own bound on the Pyth publish time, enforced by PythPriceFeed against the Pyth core
+    // contract (the Morpho adapters' baked-in max age is 4200s and not ours to control)
+    uint256 constant PYTH_MAX_STALENESS = 1 days;
     uint256 constant VEDA_RATE_MAX_STALENESS = 2 days;
     // The Midas proxies update roughly weekly (the PriceProvider config allows 7 days)
     uint256 constant MIDAS_RATE_MAX_STALENESS = 7 days;
@@ -126,6 +129,11 @@ contract AddSummerLendCollateral is Utils {
         usdcReserveId = stdJson.readUint(json, ".usdcReserveId");
 
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
+
+        // updateReservePriceSource is `restricted`; its selector was not mapped at instance deploy.
+        bytes4[] memory sourceSelectors = new bytes4[](1);
+        sourceSelectors[0] = ISpoke.updateReservePriceSource.selector;
+        accessManager.setTargetFunctionRole(address(spoke), sourceSelectors, Roles.SPOKE_ADMIN_ROLE);
 
         // One staleness-checked ChainlinkPriceFeed per Chainlink oracle, shared as direct sources
         // and as underlying legs
@@ -165,11 +173,6 @@ contract AddSummerLendCollateral is Utils {
 
         // Migrate the two deploy-time reserves onto the new staleness-checked feeds:
         // USDC was listed on the raw usdcUsdOracle aggregator, weETH on the pre-refactor composite.
-        // updateReservePriceSource is `restricted`; its selector was not mapped at instance deploy.
-        bytes4[] memory sourceSelectors = new bytes4[](1);
-        sourceSelectors[0] = ISpoke.updateReservePriceSource.selector;
-        accessManager.setTargetFunctionRole(address(spoke), sourceSelectors, Roles.SPOKE_ADMIN_ROLE);
-
         address weethUsd = _chainlink(WEETH_ETH_ORACLE, ethUsd, CHAINLINK_MAX_STALENESS, "weETH / USD");
         spoke.updateReservePriceSource(weethReserveId, weethUsd);
         console.log("updated weETH reserve price source:", weethUsd);
@@ -215,7 +218,7 @@ contract AddSummerLendCollateral is Utils {
 
     /// @dev Deploys a PythPriceFeed over a per-pair oracle, optionally composed on an underlying feed
     function _pyth(address pairOracle, address underlyingUsdFeed, string memory desc) internal returns (address) {
-        PythPriceFeed feed = new PythPriceFeed(IPythPairOracle(pairOracle), PYTH_ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(underlyingUsdFeed), desc);
+        PythPriceFeed feed = new PythPriceFeed(IPythPairOracle(pairOracle), PYTH_ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(underlyingUsdFeed), PYTH_MAX_STALENESS, desc);
         _requireLivePrice(address(feed), desc);
         return address(feed);
     }
@@ -236,10 +239,13 @@ contract AddSummerLendCollateral is Utils {
         console.log(string.concat("  ", desc, ": $", vm.toString(uint256(answer) / 1e8), cents < 10 ? ".0" : ".", vm.toString(cents)));
     }
 
-    /// @dev Lists `token` as a collateral-only reserve, skipping tokens that are already listed
+    /// @dev Lists `token` as a collateral-only reserve; if already listed, refreshes its price
+    ///      source to the newly deployed feed instead (so re-runs migrate reserves onto new feeds)
     function _list(address token, address priceSource, uint16 collateralFactorBps, uint32 maxLiquidationBonusBps) internal {
         if (_isListed(token)) {
-            console.log("already listed, skipping:", IERC20Metadata(token).symbol(), token);
+            uint256 existingId = _reserveIdOf(token);
+            spoke.updateReservePriceSource(existingId, priceSource);
+            console.log("already listed, updated source:", IERC20Metadata(token).symbol(), priceSource);
             return;
         }
 
@@ -262,5 +268,13 @@ contract AddSummerLendCollateral is Utils {
             if (spoke.getReserve(i).underlying == token) return true;
         }
         return false;
+    }
+
+    function _reserveIdOf(address token) internal view returns (uint256) {
+        uint256 count = spoke.getReserveCount();
+        for (uint256 i; i < count; ++i) {
+            if (spoke.getReserve(i).underlying == token) return i;
+        }
+        revert("reserve not found");
     }
 }
