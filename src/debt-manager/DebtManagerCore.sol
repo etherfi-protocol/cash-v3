@@ -702,7 +702,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         if (lendOptedOut && totalDebtUsd != 0) revert LendOptedOutSafeHasDebt();
 
         // 2. Clear the legacy DebtManager debt FIRST (if any), capturing the token amount to re-borrow, and
-        //    check Aave has the cash to fund it. Clearing first is load-bearing: supplying collateral (step 3)
+        //    check Aave can fund it (pool liquidity within the reserve's borrow cap). Clearing first is load-bearing: supplying collateral (step 3)
         //    moves it out of the Safe via execTransactionFromModule, which runs the EtherFiHook's DebtManager
         //    health check — that would revert while the debt is still open. The Aave borrow (step 5) re-funds
         //    the pool; the whole tx reverts on any failure, so the Safe is never left half-migrated nor the pool short.
@@ -710,7 +710,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         for (uint256 i = 0; i < bLen;) {
             if (borrowings[i].amount != 0) {
                 uint256 debtTokenAmt = _clearLegacyDebt(safe, borrowings[i].token);
-                if (_gateway.availableCash(borrowings[i].token) < debtTokenAmt) revert InsufficientLendGatewayLiquidity(borrowings[i].token);
+                if (_gateway.availableToBorrow(borrowings[i].token) < debtTokenAmt) revert InsufficientLendGatewayLiquidity(borrowings[i].token);
                 debtTokenAmts[i] = debtTokenAmt;
             }
             unchecked {

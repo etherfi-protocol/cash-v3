@@ -198,7 +198,7 @@ contract CashLens is UpgradeableProxy, Constants {
             return (false, "Not a supported borrow token");
         }
 
-        if (lendGateway.availableCash(token) < _fromUsd(token, totalSpendingInUsd)) {
+        if (lendGateway.availableToBorrow(token) < _fromUsd(token, totalSpendingInUsd)) {
             return (false, "Insufficient liquidity to cover the loan");
         }
 
@@ -424,7 +424,7 @@ contract CashLens is UpgradeableProxy, Constants {
         address[] memory borrowTokens = lendGateway.borrowableAssets();
         uint256 maxLiquidityUsd = 0;
         for (uint256 i = 0; i < borrowTokens.length;) {
-            uint256 liquidityUsd = _toUsd(borrowTokens[i], lendGateway.availableCash(borrowTokens[i]));
+            uint256 liquidityUsd = _toUsd(borrowTokens[i], lendGateway.availableToBorrow(borrowTokens[i]));
             if (liquidityUsd > maxLiquidityUsd) {
                 maxLiquidityUsd = liquidityUsd;
             }

@@ -90,11 +90,23 @@ interface ILendGateway {
     function debtOf(address safe, address asset) external view returns (uint256);
 
     /**
-     * @notice Returns the withdrawable and borrowable liquidity of `asset`'s reserve
+     * @notice Returns the reserve's withdrawable liquidity: supplied minus borrowed
+     * @dev Answers "how much can a withdraw pull". Not the borrow limit: a borrow is also bounded by the
+     *      Hub's drawCap, so use availableToBorrow for the credit side.
      * @param asset The reserve asset
      * @return The available liquidity, in asset units
      */
     function availableCash(address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns how much of `asset` a borrow can actually draw right now
+     * @dev The lesser of the reserve's withdrawable liquidity and the Hub's remaining drawCap for this
+     *      spoke. Zero if the Hub spoke is inactive or halted. This is the credit-side liquidity gate;
+     *      availableCash is the withdraw-side one.
+     * @param asset The reserve asset
+     * @return The borrowable amount, in asset units
+     */
+    function availableToBorrow(address asset) external view returns (uint256);
 
     /**
      * @notice Returns the loan-to-value of `asset`'s reserve, in the 100e18 = 100% scale (matching DebtManager's CollateralTokenConfig.ltv)

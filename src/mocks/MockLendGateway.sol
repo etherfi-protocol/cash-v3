@@ -101,6 +101,11 @@ contract MockLendGateway is ILendGateway {
         return _availableCash[asset];
     }
 
+    /// @dev The mock models no borrow cap, so the borrowable liquidity equals availableCash
+    function availableToBorrow(address asset) external view returns (uint256) {
+        return _availableCash[asset];
+    }
+
     function ltv(address) external pure returns (uint256) {
         return 0;
     }

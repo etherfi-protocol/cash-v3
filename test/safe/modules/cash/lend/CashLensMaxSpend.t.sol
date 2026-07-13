@@ -365,15 +365,16 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         assertEq(creditMaxSpend, borrowPower, "credit max spend is the gateway borrowing power");
     }
 
-    /// Credit max spend is capped by the borrow token's pool liquidity, not just the borrowing power.
+    /// Credit max spend is capped by the borrow token's borrowable liquidity (pool cash under the drawCap),
+    /// not just the borrowing power.
     function test_credit_cappedByPoolLiquidity() public {
         _supplyToGateway(address(safe), address(usdc), 2000e6); // ~$1000 borrowing power at 50%
 
-        // Every borrow reserve holds less cash than the borrowing power, so liquidity binds.
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableCash.selector, address(usdc)), abi.encode(uint256(400e6)));
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableCash.selector, address(liquidUsd)), abi.encode(uint256(0)));
+        // Every borrow reserve can lend less than the borrowing power, so borrowable liquidity binds.
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableToBorrow.selector, address(usdc)), abi.encode(uint256(400e6)));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableToBorrow.selector, address(liquidUsd)), abi.encode(uint256(0)));
 
-        assertEq(cashLens.getMaxSpendCredit(address(safe)), 400e6, "credit max spend capped by reserve liquidity, not borrowing power");
+        assertEq(cashLens.getMaxSpendCredit(address(safe)), 400e6, "credit max spend capped by borrowable liquidity, not borrowing power");
     }
 
     // ================ getSafeCashData ================

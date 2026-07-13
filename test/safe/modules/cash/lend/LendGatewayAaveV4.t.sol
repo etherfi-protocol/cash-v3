@@ -37,6 +37,22 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertGe(gw.availableCash(address(usdc)), 1_000_000e6);
     }
 
+    /// availableToBorrow is the credit-side liquidity gate: uncapped it equals availableCash, a finite drawCap
+    /// caps it at the spoke's remaining borrow headroom, and a halted Hub spoke drives it to zero.
+    function test_reads_availableToBorrow_boundedByDrawCap() public {
+        // Uncapped (fixture default): equals the withdrawable liquidity
+        assertEq(gw.availableToBorrow(address(usdc)), gw.availableCash(address(usdc)));
+
+        // With no borrows yet, a 400k-token drawCap is the whole borrowable amount (< the 1M seeded cash)
+        _setAaveSpokeCaps(usdcReserveId, type(uint40).max, 400_000);
+        assertEq(gw.availableToBorrow(address(usdc)), 400_000e6, "capped at remaining drawCap");
+        assertGe(gw.availableCash(address(usdc)), 1_000_000e6, "withdraw side is unchanged by the borrow cap");
+
+        // Halting the spoke stops new borrows entirely
+        _setAaveSpokeHalted(usdcReserveId, true);
+        assertEq(gw.availableToBorrow(address(usdc)), 0, "halted spoke cannot borrow");
+    }
+
     /// isBorrowable/borrowableAssets read the reserve's borrowable flag on the Spoke: USDC's reserve allows
     /// borrowing, weETH's is collateral-only, and unregistered assets are never borrowable.
     function test_reads_borrowable() public view {
