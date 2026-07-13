@@ -164,7 +164,9 @@ library CashLendLib {
 
         ILendGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
-        if (!gateway.isBorrowable(token)) revert OnlyBorrowToken();
+        // Registered, not borrowable: debt can sit on a reserve that stopped being borrowable (flag off,
+        // or frozen), and Aave allows repaying it. Only new debt takes the borrowable gate.
+        if (!gateway.isRegistered(token)) revert OnlyBorrowToken();
         IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
         amount = DebitSourcingLib.fromUsd(priceProvider, token, amountInUsd);
         uint256 debt = gateway.debtOf(safe, token);
