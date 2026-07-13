@@ -45,7 +45,7 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
         // Real Aave v4 instance on the fork, weETH + USDC reserves priced by live Chainlink feeds
         _deployAaveV4();
         address weethSource = address(new ChainlinkCompositePriceFeed(IAggregatorV3(weEthWethOracle), IAggregatorV3(ethUsdcOracle), 8, 30 days, 30 days, "weETH / USD"));
-        weethReserveId = _addAaveReserve(address(weETH), weethSource, _weethCollateralFactorBps(), false);
+        weethReserveId = _addAaveReserve(address(weETH), weethSource, _weethCollateralFactorBps(), _weethBorrowable());
         usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, _usdcCollateralFactorBps(), true);
         _seedInitialLiquidity();
 
@@ -84,6 +84,12 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
     /// @dev weETH reserve collateral factor in BPS; override to model a different Aave LTV.
     function _weethCollateralFactorBps() internal pure virtual returns (uint16) {
         return 8000;
+    }
+
+    /// @dev Whether the weETH reserve allows borrowing (collateral-only by default, matching the planned
+    ///      instance config); override to model weETH as a spendable (borrowable) token.
+    function _weethBorrowable() internal pure virtual returns (bool) {
+        return false;
     }
 
     /// @dev USDC reserve collateral factor in BPS; override to model a different Aave LTV.

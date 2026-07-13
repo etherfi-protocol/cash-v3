@@ -39,6 +39,15 @@ interface IAaveV4Spoke {
         uint16 liquidationFee;
     }
 
+    /// @notice Reserve configuration flags. `borrowable` is true if the reserve can be borrowed.
+    struct ReserveConfig {
+        uint24 collateralRisk;
+        bool paused;
+        bool frozen;
+        bool borrowable;
+        bool receiveSharesEnabled;
+    }
+
     /// @notice A user's aggregate position. `healthFactor`/`avgCollateralFactor` are WAD; value fields are Aave Value units.
     struct UserAccountData {
         uint256 riskPremium;
@@ -123,6 +132,9 @@ interface IAaveV4Spoke {
 
     /// @notice The dynamic config (incl. `collateralFactor` in BPS) at `dynamicConfigKey`.
     function getDynamicReserveConfig(uint256 reserveId, uint32 dynamicConfigKey) external view returns (DynamicReserveConfig memory);
+
+    /// @notice The reserve's configuration flags (incl. `borrowable`).
+    function getReserveConfig(uint256 reserveId) external view returns (ReserveConfig memory);
 
     /// @notice The type hash for the SetUserPositionManagers EIP-712 intent.
     function SET_USER_POSITION_MANAGERS_TYPEHASH() external view returns (bytes32);

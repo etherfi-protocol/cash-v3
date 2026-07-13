@@ -690,7 +690,7 @@ interface ICashModule {
      * @param amountInUsd Amount to repay in USD
      * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
      * @custom:throws OnlyEtherFiSafe if the safe is not a valid EtherFi Safe
-     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @custom:throws OnlyBorrowToken if the token cannot carry debt on the safe's engine
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws InsufficientBalance if there is not enough balance for the operation
      */
@@ -717,7 +717,7 @@ interface ICashModule {
      * @param signers Addresses of the owners authorizing the borrow
      * @param signatures The signers' signatures over the intent
      * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
-     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @custom:throws OnlyBorrowToken if token is not borrowable on the gateway
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
      */

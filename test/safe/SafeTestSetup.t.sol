@@ -180,6 +180,11 @@ contract SafeTestSetup is Utils {
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
         gateway = new MockLendGateway();
+        // Mirror the DebtManager's token universe on the mock: the gateway paths read their token checks
+        // from the gateway (isBorrowable/isRegistered), not the DebtManager
+        gateway.setRegistered(address(weETH), true);
+        gateway.setRegistered(address(usdc), true);
+        gateway.setBorrowable(address(usdc), true);
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 

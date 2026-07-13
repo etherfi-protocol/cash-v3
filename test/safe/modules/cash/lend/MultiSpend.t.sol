@@ -13,11 +13,9 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/MultiSpend.t.sol"
  */
 contract CashModuleMultiSpendAaveTest is CashGatewayTestSetup {
-    function setUp() public override {
-        super.setUp();
-        // weETH is a spendable (borrow) token in these multi-token tests.
-        vm.prank(owner);
-        debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, uint128(1));
+    /// @dev weETH is a spendable (borrowable) token in these multi-token tests.
+    function _weethBorrowable() internal pure override returns (bool) {
+        return true;
     }
 
     /// A two-token debit under debt: USDC fully from the loose balance, weETH from a loose + Aave-supplied mix.

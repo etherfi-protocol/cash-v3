@@ -112,6 +112,15 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         cashModule.borrow(address(safe), address(usdc), 100e6, signers, signatures);
     }
 
+    /// A registered but collateral-only asset (weETH's reserve has borrowable off) is rejected with the
+    /// module's own error, not deep inside Aave. The check reads the gateway, not the DebtManager.
+    function test_borrow_revertsForNonBorrowableToken() public {
+        _supplyToGateway(address(safe), address(usdc), 1000e6);
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(weETH), 100e6);
+        vm.expectRevert(ICashModule.OnlyBorrowToken.selector);
+        cashModule.borrow(address(safe), address(weETH), 100e6, signers, signatures);
+    }
+
     /// A legacy safe has no gateway borrow flow.
     function test_borrow_revertsForLegacySafe() public {
         _forceLegacyEngine(address(safe));

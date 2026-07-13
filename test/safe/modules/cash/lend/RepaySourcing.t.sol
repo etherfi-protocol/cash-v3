@@ -139,6 +139,26 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0, "withdrawal request cancelled");
     }
 
+    /// Freezing the reserve blocks new borrows but never repayment: the repay gates on registration, not
+    /// borrowability, and Aave allows both the repay and its supplied-leg withdraw while frozen.
+    function test_repay_worksWhileReserveFrozen() public {
+        uint256 borrowedUsdc = 1000e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        // Part loose, part supplied, so both repay legs run against the frozen reserve
+        _supplyToGateway(address(safe), address(usdc), 600e6);
+        deal(address(usdc), address(safe), 500e6);
+
+        _setAaveReserveFrozen(usdcReserveId, true);
+        assertFalse(gw.isBorrowable(address(usdc)), "frozen reserve no longer borrowable");
+
+        uint256 debt = gw.debtOf(address(safe), address(usdc));
+        uint256 debtUsd = debtManager.convertCollateralTokenToUsd(address(usdc), debt);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), debtUsd);
+
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 0, 2, "debt repaid from loose plus supplied while frozen");
+    }
+
     function _uint1(uint256 a) internal pure returns (uint256[] memory) {
         uint256[] memory arr = new uint256[](1);
         arr[0] = a;
