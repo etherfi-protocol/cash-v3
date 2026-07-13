@@ -155,6 +155,24 @@ abstract contract AaveV4Fixture is Test {
         spoke.updateReserveConfig(reserveId, cfg);
     }
 
+    /// @notice Flips a listed reserve's frozen flag, preserving its other config (Aave blocks new supply and
+    ///         borrows on a frozen reserve while leaving existing positions withdrawable/repayable)
+    function _setAaveReserveFrozen(uint256 reserveId, bool frozen) internal {
+        ISpoke.ReserveConfig memory cfg = spoke.getReserveConfig(reserveId);
+        cfg.frozen = frozen;
+        vm.prank(aaveAdmin);
+        spoke.updateReserveConfig(reserveId, cfg);
+    }
+
+    /// @notice Flips a listed reserve's paused flag, preserving its other config (Aave blocks every op on a
+    ///         paused reserve)
+    function _setAaveReservePaused(uint256 reserveId, bool paused) internal {
+        ISpoke.ReserveConfig memory cfg = spoke.getReserveConfig(reserveId);
+        cfg.paused = paused;
+        vm.prank(aaveAdmin);
+        spoke.updateReserveConfig(reserveId, cfg);
+    }
+
     /// @notice Updates a listed reserve's collateral factor (BPS), preserving its other dynamic config
     function _setAaveReserveCollateralFactor(uint256 reserveId, uint16 collateralFactorBps) internal {
         uint32 key = spoke.getReserve(reserveId).dynamicConfigKey;

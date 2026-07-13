@@ -104,6 +104,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     error ZeroAmount();
     /// @notice Thrown when a lend op is attempted for a safe that has opted out of lend
     error LendOptedOut();
+    /// @notice Thrown when de-registering a reserve that still has outstanding debt or supplied balance
+    error ReserveStillInUse();
 
     /**
      * @param _etherFiDataProvider Address of the EtherFiDataProvider
@@ -170,13 +172,20 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
 
     /**
      * @notice De-registers an asset
+     * @dev Reverts while the reserve still has outstanding debt or supplied balance. Removing a
+     * held asset would drop it from the USD views (debt reads 0, understating debt and inflating
+     * borrow headroom) and strand supplied funds behind AssetNotRegistered on the withdraw paths.
+     * Our whitelabel Spoke serves only our safes, so the reserve aggregates gate on our positions.
      * @param asset The asset to remove from the registry
-     * @dev Warning: do not remove an asset any safe still holds a position in; 
-     * it drops from the USD views (debt reads 0), understating debt and inflating borrow headroom.
      */
     function removeReserve(address asset) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
+
+        uint256 reserveId = $.reserveId[asset];
+        if (spoke.getReserveTotalDebt(reserveId) != 0 || spoke.getReserveSuppliedAssets(reserveId) != 0) {
+            revert ReserveStillInUse();
+        }
 
         $.assets.remove(asset);
         delete $.reserveId[asset];
@@ -473,20 +482,22 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         return _getLendGatewayStorage().assets.values();
     }
 
-    /// @notice Whether `asset` is registered and its reserve's borrowable flag is set on the Spoke
+    /// @notice Whether `asset` is registered and its reserve accepts a borrow on the Spoke
+    /// @dev Mirrors Aave's borrow gate (borrowable, not frozen, not paused) so an asset that passes
+    ///      here at auth cannot then fail the Spoke's borrow at spend.
     function isBorrowable(address asset) external view returns (bool) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return false;
-        return spoke.getReserveConfig($.reserveId[asset]).borrowable;
+        return _isBorrowable($.reserveId[asset]);
     }
 
-    /// @notice The registered assets whose reserves allow borrowing on the Spoke
+    /// @notice The registered assets whose reserves accept a borrow on the Spoke
     function borrowableAssets() external view returns (address[] memory) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         address[] memory assets = $.assets.values();
         uint256 count = 0;
         for (uint256 i = 0; i < assets.length; i++) {
-            if (spoke.getReserveConfig($.reserveId[assets[i]]).borrowable) {
+            if (_isBorrowable($.reserveId[assets[i]])) {
                 assets[count] = assets[i];
                 unchecked {
                     ++count;
@@ -525,6 +536,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     /// @dev Whether `safe` has opted out of lend, per the CashModule (the source of truth for the opt-out)
     function _isLendOptedOut(address safe) internal view returns (bool) {
         return ICashModule(etherFiDataProvider.getCashModule()).isLendOptedOut(safe);
+    }
+
+    /// @dev Whether the reserve accepts a borrow on the Spoke: borrowable, not frozen, not paused
+    function _isBorrowable(uint256 reserveId) internal view returns (bool) {
+        IAaveV4Spoke.ReserveConfig memory config = spoke.getReserveConfig(reserveId);
+        return config.borrowable && !config.frozen && !config.paused;
     }
 
     /// @dev The registered reserveId for `asset`, reverting if unregistered

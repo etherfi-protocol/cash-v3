@@ -45,6 +45,27 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         assertEq(reason, "");
     }
 
+    /// An otherwise-fine credit spend is declined once the borrow reserve is frozen: canSpend gates on the same
+    /// borrow gate Aave enforces at spend, so auth and the on-chain borrow cannot disagree.
+    function test_canSpend_fails_inCreditMode_whenBorrowReserveFrozen() public {
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+
+        // Ample borrowing power, but freezing the USDC reserve makes it non-borrowable
+        _setAaveReserveFrozen(usdcReserveId, true);
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Not a supported borrow token");
+    }
+
     /// Credit spend is declined when borrowing power is ample but the Aave reserve holds too little cash for the loan.
     function test_canSpend_fails_inCreditMode_whenReserveLiquidityUnavailable() public {
         _setMode(Mode.Credit);

@@ -119,6 +119,20 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 200e6 - 20e6, 2, "20 shortfall withdrawn from Aave");
     }
 
+    /// The auth-vs-freeze race: an auth approved while the reserve was borrowable cannot settle once the
+    /// reserve is frozen. The spend reverts on the module's gate — the same predicate the auth now declines
+    /// on — instead of deep inside Aave.
+    function test_spend_credit_reverts_whenReserveFrozenAfterAuth() public {
+        _supplyToGateway(address(safe), address(usdc), 100e6);
+        _enterCreditMode();
+
+        _setAaveReserveFrozen(usdcReserveId, true);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.UnsupportedToken.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(10e6), _noCashback());
+    }
+
     // ================ credit resupply: supply loose collateral when the borrow doesn't fit ================
 
     /// Borrowing power already covers the spend, so nothing is resupplied and the borrow just goes through.

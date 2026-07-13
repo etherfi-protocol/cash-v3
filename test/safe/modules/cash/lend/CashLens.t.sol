@@ -75,8 +75,9 @@ contract CashLensAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(data.totalBorrow, borrowAmount, 2, "Total borrow should match the Aave debt");
     }
 
-    /// Turning a reserve's borrowable flag off after a borrow must not drop that debt from the breakdown:
-    /// the per-token borrows walk registered assets, so they stay consistent with totalBorrow.
+    /// A reserve that stops being borrowable after a borrow (flag off, or frozen/paused) must not drop its
+    /// debt from the breakdown: the per-token borrows walk registered assets, so they stay consistent with
+    /// totalBorrow.
     function test_getSafeCashData_borrowsSurviveReserveMadeNonBorrowable() public {
         uint256 borrowAmount = 1000e6;
         _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowAmount);

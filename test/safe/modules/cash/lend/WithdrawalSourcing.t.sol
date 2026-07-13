@@ -38,6 +38,18 @@ contract WithdrawalSourcingTest is CashGatewayTestSetup {
         assertEq(weETH.balanceOf(withdrawRecipient), 3 ether, "recipient paid the full amount");
     }
 
+    /// A frozen reserve still honors withdrawals: the request pulls from the supplied pot as usual, since
+    /// Aave's freeze blocks supply and borrow but not withdraw.
+    function test_requestWithdrawal_pullsFromSuppliedWhileReserveFrozen() public {
+        _supplyToGateway(address(safe), address(weETH), 3 ether);
+        _setAaveReserveFrozen(weethReserveId, true);
+
+        _requestWithdrawal(_addr1(address(weETH)), _uint1(2 ether), withdrawRecipient);
+
+        assertEq(weETH.balanceOf(address(safe)), 2 ether, "shortfall pulled from Aave while frozen");
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETH)), 2 ether, "request queued");
+    }
+
     /// A fully swept safe (zero loose) can withdraw: the whole amount is pulled from the supplied pot.
     function test_requestWithdrawal_fullySweptSafe() public {
         _supplyToGateway(address(safe), address(usdc), 5000e6);
