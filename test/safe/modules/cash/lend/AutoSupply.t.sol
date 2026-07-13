@@ -57,6 +57,28 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "nothing supplied");
     }
 
+    /// A reserve that rejects the supply (here, frozen) is skipped best-effort: the sweep supplies the
+    /// healthy token, leaves the blocked token's balance loose for the next sweep, and never bricks the batch.
+    function test_supplyToLend_skipsReserveThatRejectsSupply() public {
+        uint256 looseUsdc = 1000e6;
+        uint256 looseWeeth = 2 ether;
+        deal(address(usdc), address(safe), looseUsdc);
+        deal(address(weETH), address(safe), looseWeeth);
+
+        _setAaveReserveFrozen(usdcReserveId, true); // supply into the USDC reserve now reverts inside Aave
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
+
+        vm.prank(etherFiWallet);
+        cashModule.supplyToLend(address(safe), tokens);
+
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), 0, "frozen reserve skipped, nothing supplied");
+        assertEq(usdc.balanceOf(address(safe)), looseUsdc, "blocked token stays loose for the next sweep");
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), looseWeeth, "healthy token still swept");
+    }
+
     /// An opted-out safe is a no-op sweep (the keeper legitimately races an opt-out); its funds stay loose.
     function test_supplyToLend_noopWhenOptedOut() public {
         uint256 looseUsdc = 500e6;
@@ -101,6 +123,28 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         // weight, so the net borrowing-power cost is the remaining (100 - CF)%
         uint256 powerConsumedUsd = borrowUsd - (borrowUsd * _usdcCollateralFactorBps()) / 10_000;
         assertApproxEqAbs(availableBefore - gw.getAccountData(address(safe)).availableBorrowsUsd, powerConsumedUsd, 2e6, "borrow power moved by debt minus LTV-weighted supply");
+    }
+
+    /// The borrow proceeds are supplied back best-effort: with the borrow reserve at its supply cap, the
+    /// borrow the owners signed for still lands and the proceeds stay loose (the next sweep restores them),
+    /// rather than reverting the whole borrow.
+    function test_borrow_proceedsStayLooseWhenSupplyCapped() public {
+        uint256 collateralWeeth = 5 ether;
+        uint256 borrowUsd = 500e6;
+        _supplyToGateway(address(safe), address(weETH), collateralWeeth);
+
+        // USDC reserve at a zero supply cap (any add reverts AddCapExceeded); borrow draw stays uncapped
+        _setAaveSpokeCaps(usdcReserveId, 0, type(uint40).max);
+
+        uint256 borrowAmt = debtManager.convertUsdToCollateralToken(address(usdc), borrowUsd);
+        (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), borrowUsd);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.LendBorrowed(address(safe), address(usdc), borrowAmt, borrowUsd);
+        cashModule.borrow(address(safe), address(usdc), borrowUsd, signers, signatures);
+
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 2, "debt opened");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), 0, "capped reserve rejected the supply-back");
+        assertApproxEqAbs(usdc.balanceOf(address(safe)), borrowAmt, 2, "proceeds stay loose for the next sweep");
     }
 
     /// An opted-out safe cannot borrow.
