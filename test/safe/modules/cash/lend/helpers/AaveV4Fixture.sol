@@ -96,10 +96,11 @@ abstract contract AaveV4Fixture is Test {
         spokeSelectors[4] = ISpoke.updateReserveConfig.selector;
         accessManager.setTargetFunctionRole(address(spoke), spokeSelectors, Roles.SPOKE_ADMIN_ROLE);
 
-        bytes4[] memory hubSelectors = new bytes4[](3);
+        bytes4[] memory hubSelectors = new bytes4[](4);
         hubSelectors[0] = IHub.addAsset.selector;
         hubSelectors[1] = IHub.updateAssetConfig.selector;
         hubSelectors[2] = IHub.addSpoke.selector;
+        hubSelectors[3] = IHub.updateSpokeConfig.selector;
         accessManager.setTargetFunctionRole(address(hub), hubSelectors, Roles.HUB_ADMIN_ROLE);
 
         // A permissive liquidation config, so borrows/withdrawals are governed by collateral factors alone
@@ -171,6 +172,27 @@ abstract contract AaveV4Fixture is Test {
         cfg.paused = paused;
         vm.prank(aaveAdmin);
         spoke.updateReserveConfig(reserveId, cfg);
+    }
+
+    /// @notice Sets a listed reserve's per-spoke supply/borrow caps, in whole tokens (type(uint40).max is the
+    ///         uncapped sentinel), preserving the spoke's other config (active, halted, riskPremiumThreshold)
+    function _setAaveSpokeCaps(uint256 reserveId, uint40 addCap, uint40 drawCap) internal {
+        uint256 assetId = spoke.getReserve(reserveId).assetId;
+        IHub.SpokeConfig memory cfg = hub.getSpokeConfig(assetId, address(spoke));
+        cfg.addCap = addCap;
+        cfg.drawCap = drawCap;
+        vm.prank(aaveAdmin);
+        hub.updateSpokeConfig(assetId, address(spoke), cfg);
+    }
+
+    /// @notice Halts (or resumes) a listed reserve's spoke on the Hub, preserving its other config. A halted
+    ///         spoke rejects new supplies and borrows.
+    function _setAaveSpokeHalted(uint256 reserveId, bool halted) internal {
+        uint256 assetId = spoke.getReserve(reserveId).assetId;
+        IHub.SpokeConfig memory cfg = hub.getSpokeConfig(assetId, address(spoke));
+        cfg.halted = halted;
+        vm.prank(aaveAdmin);
+        hub.updateSpokeConfig(assetId, address(spoke), cfg);
     }
 
     /// @notice Updates a listed reserve's collateral factor (BPS), preserving its other dynamic config

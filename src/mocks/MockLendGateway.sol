@@ -32,6 +32,8 @@ contract MockLendGateway is ILendGateway {
     mapping(address asset => bool) internal _registered;
     /// @dev Whether an asset's reserve allows borrowing; defaults to false
     mapping(address asset => bool) internal _borrowable;
+    /// @dev Whether an asset is an admin-declared debit-spend token; defaults to false
+    mapping(address asset => bool) internal _spendAsset;
     /// @dev Every asset ever registered, in order; registeredAssets/borrowableAssets filter it by the flags
     address[] internal _assets;
 
@@ -57,6 +59,11 @@ contract MockLendGateway is ILendGateway {
     /// @notice Sets whether an asset's reserve allows borrowing (defaults to non-borrowable)
     function setBorrowable(address asset, bool borrowable) external {
         _borrowable[asset] = borrowable;
+    }
+
+    /// @notice Sets whether an asset is a debit-spend token (defaults to non-spendable)
+    function setSpendAsset(address asset, bool spendable) external {
+        _spendAsset[asset] = spendable;
     }
 
     /// @notice Sets the amount a subsequent `suppliedOf(safe, asset)` will return
@@ -101,6 +108,11 @@ contract MockLendGateway is ILendGateway {
         return _availableCash[asset];
     }
 
+    /// @dev The mock models no borrow cap, so the borrowable liquidity equals availableCash
+    function availableToBorrow(address asset) external view returns (uint256) {
+        return _availableCash[asset];
+    }
+
     function ltv(address) external pure returns (uint256) {
         return 0;
     }
@@ -121,13 +133,26 @@ contract MockLendGateway is ILendGateway {
         return _filterAssets(true);
     }
 
-    /// @dev The mock models no freeze or pause, so the debit-spend gate equals the borrow gate
+    /// @dev The mock models no pause, so the debit-spend gate is just the admin spend flag
     function isSpendAsset(address asset) external view returns (bool) {
-        return _registered[asset] && _borrowable[asset];
+        return _spendAsset[asset];
     }
 
     function spendAssets() external view returns (address[] memory) {
-        return _filterAssets(true);
+        address[] memory out = new address[](_assets.length);
+        uint256 count = 0;
+        for (uint256 i = 0; i < _assets.length; i++) {
+            if (_spendAsset[_assets[i]]) {
+                out[count] = _assets[i];
+                unchecked {
+                    ++count;
+                }
+            }
+        }
+        assembly ("memory-safe") {
+            mstore(out, count)
+        }
+        return out;
     }
 
     /// @dev The registered assets, optionally narrowed to the borrowable ones

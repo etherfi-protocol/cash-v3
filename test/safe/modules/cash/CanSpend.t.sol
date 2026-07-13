@@ -53,7 +53,8 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
         gateway.setRegistered(address(liquidUsd), true);
         gateway.setBorrowable(address(liquidUsd), true);
-        
+        gateway.setSpendAsset(address(liquidUsd), true);
+
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
         CashbackTokens memory scr = CashbackTokens({
             token: address(cashbackToken),
@@ -445,6 +446,7 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
         vm.prank(owner);
         debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);
         gateway.setBorrowable(address(weETH), true);
+        gateway.setSpendAsset(address(weETH), true);
 
         // Setup test state with multiple tokens
         deal(address(weETH), address(safe), 5 ether);

@@ -93,10 +93,32 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         amounts[0] = 100e6;
 
         // Ample borrowing power, but the reserve holds less cash than the loan needs. Reaching a genuinely
-        // drained reserve on real Aave takes an unrelated whale borrow, so the reserve read is mocked here to
-        // isolate CashLens's liquidity gate (the branch under test).
+        // drained reserve on real Aave takes an unrelated whale borrow, so the borrowable read is mocked here
+        // to isolate CashLens's liquidity gate (the branch under test).
         _supplyToGateway(address(safe), address(weETH), 1 ether);
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableCash.selector, address(usdc)), abi.encode(amounts[0] - 1));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableToBorrow.selector, address(usdc)), abi.encode(amounts[0] - 1));
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Insufficient liquidity to cover the loan");
+    }
+
+    /// Credit spend is declined when borrowing power is ample and the pool holds cash, but the loan exceeds
+    /// the Hub's remaining drawCap: availableToBorrow folds the cap in, so the auth cannot approve a borrow
+    /// the Hub would revert with DrawCapExceeded.
+    function test_canSpend_fails_inCreditMode_whenBorrowExceedsDrawCap() public {
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        _supplyToGateway(address(safe), address(weETH), 1 ether); // ample borrowing power
+
+        // drawCap of 50 whole USDC ($50), well under the $100 spend, though the pool holds ~1M cash
+        _setAaveSpokeCaps(usdcReserveId, type(uint40).max, 50);
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);

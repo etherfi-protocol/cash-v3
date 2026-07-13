@@ -6,6 +6,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/I
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
+import { IAaveV4Hub } from "../../interfaces/IAaveV4Hub.sol";
 import { IAaveV4Spoke } from "../../interfaces/IAaveV4Spoke.sol";
 import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
@@ -68,6 +69,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         EnumerableSetLib.AddressSet assets;
         /// @notice Extra authorized drivers beyond the CashModule (auto-supply / migration paths)
         mapping(address driver => bool authorized) isDriver;
+        /// @notice The tokens the card can settle a debit spend in; admin-declared, a subset of `assets`
+        EnumerableSetLib.AddressSet spendAssets;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.LendGateway")) - 1)) & ~bytes32(uint256(0xff))
@@ -79,6 +82,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     event ReserveDeregistered(address indexed asset);
     /// @notice Emitted when a driver is authorized or de-authorized
     event DriverSet(address indexed driver, bool authorized);
+    /// @notice Emitted when an asset is added to or removed from the debit-spend set
+    event SpendAssetSet(address indexed asset, bool spendable);
     /// @notice Emitted when the gateway (re-)approves itself as `safe`'s position manager (folded into an op)
     event PositionManagerApproved(address indexed safe);
     /// @notice Emitted on a supply on a safe's behalf
@@ -188,6 +193,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         }
 
         $.assets.remove(asset);
+        $.spendAssets.remove(asset);
         delete $.reserveId[asset];
 
         emit ReserveDeregistered(asset);
@@ -202,6 +208,25 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         if (driver == address(0)) revert ZeroAddress();
         _getLendGatewayStorage().isDriver[driver] = authorized;
         emit DriverSet(driver, authorized);
+    }
+
+    /**
+     * @notice Adds or removes an asset from the debit-spend set (the tokens the card can settle in)
+     * @dev A spend asset must be a registered reserve, so this reverts with AssetNotRegistered when adding
+     *      an unregistered asset. Membership is declared here, not read from Aave's borrowable flag, so a
+     *      supply-only reserve can still be a debit-spend token.
+     * @param asset The registered asset
+     * @param spendable True to add to the set, false to remove
+     */
+    function setSpendAsset(address asset, bool spendable) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (spendable) {
+            if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
+            $.spendAssets.add(asset);
+        } else {
+            $.spendAssets.remove(asset);
+        }
+        emit SpendAssetSet(asset, spendable);
     }
 
     // ---------------------------------------------------------------------
@@ -438,17 +463,45 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @notice Returns the withdrawable/borrowable liquidity of `asset`'s reserve (supplied minus borrowed)
+     * @notice Returns the reserve's withdrawable liquidity (supplied minus borrowed)
+     * @dev The withdraw-side liquidity gate. A borrow is additionally bounded by the Hub's drawCap, so the
+     *      credit side reads availableToBorrow.
      * @param asset The reserve asset
      * @return The available liquidity in asset units, or 0 if the asset is not registered
      */
     function availableCash(address asset) external view returns (uint256) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
+        return _availableCash($.reserveId[asset]);
+    }
+
+    /**
+     * @notice Returns how much of `asset` a borrow can draw right now: min(withdrawable liquidity, remaining
+     *         Hub drawCap), or 0 if the asset is unregistered or the Hub spoke is inactive or halted
+     * @dev The credit-side liquidity gate. drawCap is enforced only in the Hub, so a borrow within
+     *      availableCash can still revert DrawCapExceeded; folding the cap in here keeps the auth decision
+     *      honest. The Hub also counts a reported deficit toward the cap, which this omits, so a nonzero
+     *      deficit makes this a slight overestimate.
+     * @param asset The reserve asset
+     * @return The borrowable amount in asset units
+     */
+    function availableToBorrow(address asset) external view returns (uint256) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return 0;
+
         uint256 reserveId = $.reserveId[asset];
-        uint256 supplied = spoke.getReserveSuppliedAssets(reserveId);
-        uint256 debt = spoke.getReserveTotalDebt(reserveId);
-        return supplied > debt ? supplied - debt : 0;
+        IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(reserveId);
+        IAaveV4Hub hub = IAaveV4Hub(reserve.hub);
+        IAaveV4Hub.SpokeConfig memory config = hub.getSpokeConfig(reserve.assetId, address(spoke));
+        if (!config.active || config.halted) return 0;
+
+        uint256 cash = _availableCash(reserveId);
+        if (config.drawCap == hub.MAX_ALLOWED_SPOKE_CAP()) return cash;
+
+        uint256 capLimit = uint256(config.drawCap) * (10 ** reserve.decimals);
+        uint256 owed = hub.getSpokeTotalOwed(reserve.assetId, address(spoke));
+        uint256 remainingCap = capLimit > owed ? capLimit - owed : 0;
+        return cash < remainingCap ? cash : remainingCap;
     }
 
     /**
@@ -484,7 +537,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
 
     /// @notice Whether `asset` is registered and its reserve accepts a borrow on the Spoke
     /// @dev Mirrors Aave's borrow gate (borrowable, not frozen, not paused) so an asset that passes
-    ///      here at auth cannot then fail the Spoke's borrow at spend.
+    ///      here at auth cannot then fail the Spoke's borrow at spend. Credit membership is Aave's
+    ///      borrowable flag by design; only the debit gate (isSpendAsset) reads the admin spend set.
     function isBorrowable(address asset) external view returns (bool) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return false;
@@ -493,26 +547,41 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
 
     /// @notice The registered assets whose reserves accept a borrow on the Spoke
     function borrowableAssets() external view returns (address[] memory) {
-        return _filterAssets(true);
+        return _borrowableAssets();
     }
 
     /**
-     * @notice Whether `asset` can fund a debit spend: registered, marked borrowable, and not paused
-     * @dev A debit spend transfers loose balance and withdraws supplied balance, and Aave allows both
-     *      while frozen, so frozen is tolerated here. The borrowable flag does membership duty (it marks
-     *      the spendable stables); paused blocks the withdraw leg. Only new debt takes the full
-     *      isBorrowable gate.
+     * @notice Whether `asset` can fund a debit spend: an admin-declared spend asset whose reserve is not paused
+     * @dev Membership is declared via setSpendAsset (always a subset of registered reserves), so "is this a
+     *      card settlement token" no longer keys on Aave's borrowable flag and a supply-only reserve can be
+     *      spendable. A debit spend transfers loose balance and withdraws supplied balance, which Aave allows
+     *      while frozen, so frozen is tolerated; paused blocks the withdraw leg, so a paused reserve is not
+     *      spendable. New debt takes the full isBorrowable gate instead.
      * @param asset The asset to query
      */
     function isSpendAsset(address asset) external view returns (bool) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
-        if (!$.assets.contains(asset)) return false;
-        return _isSpendAsset($.reserveId[asset]);
+        if (!$.spendAssets.contains(asset)) return false;
+        return !spoke.getReserveConfig($.reserveId[asset]).paused;
     }
 
-    /// @notice The registered assets that can fund a debit spend (see isSpendAsset)
+    /// @notice The spend-set assets that can currently fund a debit spend (see isSpendAsset)
     function spendAssets() external view returns (address[] memory) {
-        return _filterAssets(false);
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        address[] memory assets = $.spendAssets.values();
+        uint256 count = 0;
+        for (uint256 i = 0; i < assets.length; i++) {
+            if (!spoke.getReserveConfig($.reserveId[assets[i]]).paused) {
+                assets[count] = assets[i];
+                unchecked {
+                    ++count;
+                }
+            }
+        }
+        assembly ("memory-safe") {
+            mstore(assets, count)
+        }
+        return assets;
     }
 
     /// @notice Whether `account` may drive the gateway (CashModule or an authorized driver)
@@ -549,20 +618,13 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         return config.borrowable && !config.frozen && !config.paused;
     }
 
-    /// @dev Whether the reserve can fund a debit spend: borrowable (membership), not paused; frozen tolerated
-    function _isSpendAsset(uint256 reserveId) internal view returns (bool) {
-        IAaveV4Spoke.ReserveConfig memory config = spoke.getReserveConfig(reserveId);
-        return config.borrowable && !config.paused;
-    }
-
-    /// @dev The registered assets passing the borrow gate (`borrowGate`) or the debit-spend gate
-    function _filterAssets(bool borrowGate) internal view returns (address[] memory) {
+    /// @dev The registered assets whose reserves pass the borrow gate (see _isBorrowable)
+    function _borrowableAssets() internal view returns (address[] memory) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         address[] memory assets = $.assets.values();
         uint256 count = 0;
         for (uint256 i = 0; i < assets.length; i++) {
-            uint256 reserveId = $.reserveId[assets[i]];
-            if (borrowGate ? _isBorrowable(reserveId) : _isSpendAsset(reserveId)) {
+            if (_isBorrowable($.reserveId[assets[i]])) {
                 assets[count] = assets[i];
                 unchecked {
                     ++count;
@@ -580,6 +642,13 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
         return $.reserveId[asset];
+    }
+
+    /// @dev The reserve's withdrawable liquidity (supplied minus borrowed), in asset units
+    function _availableCash(uint256 reserveId) internal view returns (uint256) {
+        uint256 supplied = spoke.getReserveSuppliedAssets(reserveId);
+        uint256 debt = spoke.getReserveTotalDebt(reserveId);
+        return supplied > debt ? supplied - debt : 0;
     }
 
     /// @dev The reserve's LTV in the 100e18 scale, from its current dynamic collateralFactor (BPS)

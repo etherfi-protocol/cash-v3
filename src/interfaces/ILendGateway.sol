@@ -90,11 +90,23 @@ interface ILendGateway {
     function debtOf(address safe, address asset) external view returns (uint256);
 
     /**
-     * @notice Returns the withdrawable and borrowable liquidity of `asset`'s reserve
+     * @notice Returns the reserve's withdrawable liquidity: supplied minus borrowed
+     * @dev Answers "how much can a withdraw pull". Not the borrow limit: a borrow is also bounded by the
+     *      Hub's drawCap, so use availableToBorrow for the credit side.
      * @param asset The reserve asset
      * @return The available liquidity, in asset units
      */
     function availableCash(address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns how much of `asset` a borrow can actually draw right now
+     * @dev The lesser of the reserve's withdrawable liquidity and the Hub's remaining drawCap for this
+     *      spoke. Zero if the Hub spoke is inactive or halted. This is the credit-side liquidity gate;
+     *      availableCash is the withdraw-side one.
+     * @param asset The reserve asset
+     * @return The borrowable amount, in asset units
+     */
+    function availableToBorrow(address asset) external view returns (uint256);
 
     /**
      * @notice Returns the loan-to-value of `asset`'s reserve, in the 100e18 = 100% scale (matching DebtManager's CollateralTokenConfig.ltv)
@@ -140,16 +152,18 @@ interface ILendGateway {
 
     /**
      * @notice Returns whether `asset` can fund a debit spend
-     * @dev Registered, marked borrowable (membership: it marks the spendable stables), and not paused.
-     *      Frozen is tolerated: a debit spend only transfers loose balance and withdraws supplied
-     *      balance, both of which Aave allows while frozen.
+     * @dev An admin-declared spend asset (via setSpendAsset, always a registered reserve) whose reserve is
+     *      not paused. Membership is declared, not read from Aave's borrowable flag, so a supply-only
+     *      reserve can be spendable. Frozen is tolerated: a debit spend only transfers loose balance and
+     *      withdraws supplied balance, both of which Aave allows while frozen. Paused blocks the withdraw
+     *      leg, so a paused reserve is not spendable.
      * @param asset The asset to query
      * @return True if the asset can fund a debit spend
      */
     function isSpendAsset(address asset) external view returns (bool);
 
     /**
-     * @notice Returns the registered assets that can fund a debit spend
+     * @notice Returns the spend-set assets that can currently fund a debit spend
      * @dev See isSpendAsset.
      * @return The spendable asset addresses
      */

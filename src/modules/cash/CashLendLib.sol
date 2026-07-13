@@ -281,9 +281,11 @@ library CashLendLib {
      * @notice Supplies a safe's loose balances into the lend market and flags them as collateral (the
      *         auto-supply sweep)
      * @dev Per token: supplies the loose balance net of the pending-withdrawal reservation, so a queued
-     *      withdrawal is never swept back into Aave. Zero and unregistered tokens are skipped, not
-     *      reverted, so a keeper batch never bricks. An opted-out safe is a no-op, since the keeper
-     *      legitimately races an opt-out; a legacy safe reverts, since routing one here is a keeper bug.
+     *      withdrawal is never swept back into Aave. Zero and unregistered tokens are skipped, and the
+     *      supply is best-effort (a reserve that rejects it, e.g. frozen/paused/at cap, leaves the funds
+     *      loose for the next sweep), so a keeper batch never bricks. An opted-out safe is a no-op, since
+     *      the keeper legitimately races an opt-out; a legacy safe reverts, since routing one here is a
+     *      keeper bug.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param safe Address of the EtherFi Safe
      * @param tokens Tokens to sweep
@@ -306,12 +308,13 @@ library CashLendLib {
 
     /**
      * @notice Borrows `token` against the safe's lend-market position; the proceeds land in the safe and
-     *         are immediately supplied back as collateral (a borrow-page borrow with instant auto-supply)
+     *         are supplied back as collateral, best-effort (a borrow-page borrow with instant auto-supply)
      * @dev Owner-quorum signed: the signatures bind the token and USD amount, so neither a compromised backend
      *      nor a single compromised admin can lever a safe up; the caller has already resolved and consumed the
-     *      nonce. The portfolio gains the borrowed asset as supplied collateral, so the borrowing power moves by
-     *      its LTV weight net of the new debt. Aave enforces the health check on the borrow itself, and the
-     *      gateway rejects a borrow for an opted-out safe; the lendOptedOut check here is defense-in-depth,
+     *      nonce. The proceeds are supplied back as collateral best-effort: if that reserve rejects the supply
+     *      (e.g. at its supply cap), the proceeds stay loose and the next sweep restores them, rather than
+     *      failing the borrow the owners signed for. Aave enforces the health check on the borrow itself, and
+     *      the gateway rejects a borrow for an opted-out safe; the lendOptedOut check here is defense-in-depth,
      *      mirroring spendCredit.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param dataProvider The module's data provider (for the price provider)
@@ -350,11 +353,15 @@ library CashLendLib {
         return gateway;
     }
 
-    /// @dev Supplies `amount` of `token` from the safe into the lend market and flags it as collateral
+    /// @dev Best-effort supply of `amount` of `token` into the lend market as collateral. A supply the
+    ///      reserve rejects (frozen, paused, at its supply cap, or the Hub spoke halted) is swallowed so the
+    ///      funds stay loose for the next sweep. Used by the sweep and the borrow auto-supply, where leaving
+    ///      the funds loose is fine; callers that must not proceed without the supply do not use this.
     function _supplyAsCollateral(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token, uint256 amount) private {
-        gateway.supply(safe, token, amount);
-        gateway.setUsingAsCollateral(safe, token, true);
-        $.cashEventEmitter.emitLendSupplied(safe, token, amount);
+        try gateway.supply(safe, token, amount) {
+            gateway.setUsingAsCollateral(safe, token, true);
+            $.cashEventEmitter.emitLendSupplied(safe, token, amount);
+        } catch { }
     }
 
     /**

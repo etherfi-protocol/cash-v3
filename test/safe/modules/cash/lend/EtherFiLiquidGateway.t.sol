@@ -129,6 +129,22 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(liquidVault)), 0, "receipt must not be supplied to Aave");
     }
 
+    // The receipt re-supply is best-effort: if the receipt's reserve is frozen, the deposit still completes
+    // and the receipt stays loose in the safe for the next sweep, rather than reverting after the vault
+    // deposit already ran.
+    function test_deposit_receiptStaysLooseWhenReserveFrozen() public {
+        uint256 amount = 1000e6;
+        deal(address(usdc), address(safe), amount);
+
+        // Freeze the receipt's reserve so Aave rejects the sandwich's re-supply of the minted receipt
+        _setAaveReserveFrozen(gw.reserveIdOf(address(liquidVault)), true);
+
+        liquidModule.deposit(address(safe), address(usdc), address(liquidVault), amount, amount, owner1, _depositSig(address(usdc), amount, amount));
+
+        assertEq(liquidVault.balanceOf(address(safe)), amount, "receipt stays loose when the re-supply is rejected");
+        assertEq(gw.suppliedOf(address(safe), address(liquidVault)), 0, "nothing supplied to the frozen reserve");
+    }
+
     function _depositSig(address assetToDeposit, uint256 amount, uint256 minReturn) internal view returns (bytes memory) {
         bytes32 digestHash = keccak256(
             abi.encodePacked(liquidModule.DEPOSIT_SIG(), block.chainid, address(liquidModule), liquidModule.getNonce(address(safe)), address(safe), abi.encode(assetToDeposit, address(liquidVault), amount, minReturn))

@@ -65,9 +65,12 @@ abstract contract ModuleLendGatewaySandwich {
     }
 
     /**
-     * @notice Supplies an asset from the safe back into Aave and marks it as collateral
+     * @notice Supplies an asset from the safe back into Aave and marks it as collateral, best-effort
      * @dev No-op for a safe whose assets do not live in Aave, and for an asset the gateway does not list as a
-     *      reserve (the gateway would reject the supply); in both cases the output stays loose in the safe.
+     *      reserve. The supply itself is best-effort: a reserve that rejects it (frozen, paused, at its supply
+     *      cap, or the Hub spoke halted) is swallowed rather than reverting the whole operation after the swap
+     *      or bridge already ran. In every case the output stays loose in the safe and the next sweep restores
+     *      it as collateral.
      * @param safe The safe whose position is credited
      * @param asset The asset to supply
      * @param amount The amount to supply
@@ -76,7 +79,8 @@ abstract contract ModuleLendGatewaySandwich {
         if (!_lendActive(safe)) return;
         ILendGateway lendGateway = gateway();
         if (!lendGateway.isRegistered(asset)) return;
-        lendGateway.supply(safe, asset, amount);
-        lendGateway.setUsingAsCollateral(safe, asset, true);
+        try lendGateway.supply(safe, asset, amount) {
+            lendGateway.setUsingAsCollateral(safe, asset, true);
+        } catch { }
     }
 }
