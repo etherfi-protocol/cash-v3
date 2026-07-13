@@ -37,6 +37,18 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertGe(gw.availableCash(address(usdc)), 1_000_000e6);
     }
 
+    /// isBorrowable/borrowableAssets read the reserve's borrowable flag on the Spoke: USDC's reserve allows
+    /// borrowing, weETH's is collateral-only, and unregistered assets are never borrowable.
+    function test_reads_borrowable() public view {
+        assertTrue(gw.isBorrowable(address(usdc)));
+        assertFalse(gw.isBorrowable(address(weETH)));
+        assertFalse(gw.isBorrowable(address(0xdead)));
+
+        address[] memory borrowable = gw.borrowableAssets();
+        assertEq(borrowable.length, 1);
+        assertEq(borrowable[0], address(usdc));
+    }
+
     function test_getAccountData_freshSafeIsEmptyAndHealthy() public view {
         ILendGateway.AccountData memory data = gw.getAccountData(address(safe));
         assertEq(data.collateralUsd, 0);

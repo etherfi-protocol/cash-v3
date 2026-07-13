@@ -119,4 +119,20 @@ interface ILendGateway {
      * @return The registered asset addresses
      */
     function registeredAssets() external view returns (address[] memory);
+
+    /**
+     * @notice Returns whether `asset` is registered and its Aave reserve allows borrowing
+     * @dev The gateway-native replacement for DebtManager's isBorrowToken: the spend, borrow, and repay
+     *      paths gate their token on this, so retiring the DebtManager does not change what they accept.
+     * @param asset The asset to query
+     * @return True if the asset is registered and the reserve's borrowable flag is set
+     */
+    function isBorrowable(address asset) external view returns (bool);
+
+    /**
+     * @notice Returns the registered assets whose Aave reserves allow borrowing
+     * @dev The gateway-native replacement for DebtManager's getBorrowTokens (see isBorrowable).
+     * @return The borrowable asset addresses
+     */
+    function borrowableAssets() external view returns (address[] memory);
 }

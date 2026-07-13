@@ -51,6 +51,8 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
 
         minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsd)).decimals());
         debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
+        gateway.setRegistered(address(liquidUsd), true);
+        gateway.setBorrowable(address(liquidUsd), true);
         
         CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
         CashbackTokens memory scr = CashbackTokens({
@@ -441,7 +443,8 @@ contract CashLensCanSpendTest is CashModuleTestSetup {
     /// Debit mode allows spending multiple tokens when each has enough balance.
     function test_canSpend_debitMode() public {
         vm.prank(owner);
-        debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);        
+        debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);
+        gateway.setBorrowable(address(weETH), true);
 
         // Setup test state with multiple tokens
         deal(address(weETH), address(safe), 5 ether);

@@ -27,7 +27,8 @@ import { CashLensLegacyLib } from "./CashLensLegacyLib.sol";
  *      lines inline), deleted wholesale when the legacy engine is retired; the gateway path is the unguarded
  *      fall-through.
  *
- *      LendGateway safes: the position is read from the Aave gateway; the supported-token list from DebtManager.
+ *      LendGateway safes: the position and the supported-token lists (registered/borrowable assets) are read
+ *      from the Aave gateway; nothing on the gateway path touches the DebtManager.
  *      Credit capacity comes straight from Aave. Debit spendable is the raw Safe balance plus the
  *      withdrawable supplied amount; when the Safe has debt, the withdrawable part is capped by the
  *      borrowing headroom (collateral weighted by LTV, minus debt) so the leftover position keeps
@@ -192,11 +193,11 @@ contract CashLens is UpgradeableProxy, Constants {
 
     /// @notice Credit mode check: the spend must fit the Aave borrowing capacity and the reserve's liquidity
     function _creditCheck(address safe, address token, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
-        if (!cashModule.getDebtManager().isBorrowToken(token)) {
+        ILendGateway lendGateway = cashModule.getLendGateway();
+        if (!lendGateway.isBorrowable(token)) {
             return (false, "Not a supported borrow token");
         }
 
-        ILendGateway lendGateway = cashModule.getLendGateway();
         if (lendGateway.availableCash(token) < _fromUsd(token, totalSpendingInUsd)) {
             return (false, "Insufficient liquidity to cover the loan");
         }
@@ -214,18 +215,18 @@ contract CashLens is UpgradeableProxy, Constants {
 
     /// @notice Debit mode check: each token's spendable amount must cover its share of the spend, threading the borrowing headroom across tokens
     function _debitCheck(address safe, address[] memory tokens, uint256[] memory amountsInUsd, SafeData memory safeData) internal view returns (bool, string memory) {
-        IDebtManager debtManager = cashModule.getDebtManager();
+        ILendGateway lendGateway = gateway();
         bool hasDebt;
         uint256 borrowHeadroom;
         {
-            ILendGateway.AccountData memory account = gateway().getAccountData(safe);
+            ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
             hasDebt = account.debtUsd != 0;
             borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
         }
 
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
-            if (!debtManager.isBorrowToken(token)) {
+            if (!lendGateway.isBorrowable(token)) {
                 return (false, "Not a supported borrow token");
             }
 
@@ -276,20 +277,27 @@ contract CashLens is UpgradeableProxy, Constants {
      *   - incomingModeStartTime: Timestamp when Credit mode takes effect
      */
     function getSafeCashData(address safe, address[] memory debtServiceTokenPreference) external view returns (SafeCashData memory) {
-        IDebtManager debtManager = cashModule.getDebtManager();
         IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
         SafeData memory safeData = cashModule.getData(safe);
 
         SafeCashData memory data;
 
-        address[] memory collateralTokens = debtManager.getCollateralTokens();
-        address[] memory borrowTokens = debtManager.getBorrowTokens();
+        // Each engine names its own token universe: DebtManager's lists for a legacy safe, the gateway's
+        // registered/borrowable assets for an Aave safe.
+        address[] memory collateralTokens;
+        address[] memory borrowTokens;
 
         if (!cashModule.usesLendGateway(safe)) {
+            IDebtManager debtManager = cashModule.getDebtManager();
+            collateralTokens = debtManager.getCollateralTokens();
+            borrowTokens = debtManager.getBorrowTokens();
             (data.collateralBalances, data.totalCollateral, data.borrows, data.totalBorrow) = debtManager.getUserCurrentState(safe);
             data.maxBorrow = debtManager.getMaxBorrowAmount(safe, true);
         } else {
-            ILendGateway.AccountData memory account = gateway().getAccountData(safe);
+            ILendGateway lendGateway = gateway();
+            collateralTokens = lendGateway.registeredAssets();
+            borrowTokens = lendGateway.borrowableAssets();
+            ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
             data.collateralBalances = _suppliedBalances(safe, collateralTokens);
             data.borrows = _debtBalances(safe, borrowTokens);
             data.totalCollateral = account.collateralUsd;
@@ -355,13 +363,13 @@ contract CashLens is UpgradeableProxy, Constants {
             return CashLensLegacyLib.maxSpendDebit(cashModule, safe, debtServiceTokenPreference);
         }
 
-        IDebtManager debtManager = cashModule.getDebtManager();
+        ILendGateway lendGateway = gateway();
         SafeData memory safeData = cashModule.getData(safe);
 
         bool hasDebt;
         uint256 borrowHeadroom;
         {
-            ILendGateway.AccountData memory account = gateway().getAccountData(safe);
+            ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
             hasDebt = account.debtUsd != 0;
             if (hasDebt) {
                 borrowHeadroom = account.availableBorrowsUsd;
@@ -374,7 +382,7 @@ contract CashLens is UpgradeableProxy, Constants {
 
         for (uint256 i = 0; i < len;) {
             address token = debtServiceTokenPreference[i];
-            if (!debtManager.isBorrowToken(token)) revert NotABorrowToken();
+            if (!lendGateway.isBorrowable(token)) revert NotABorrowToken();
 
             (uint256 spendable, uint256 used) = _debitSpendable(safe, token, safeData, borrowHeadroom, hasDebt);
             borrowHeadroom = borrowHeadroom > used ? borrowHeadroom - used : 0;
@@ -409,7 +417,7 @@ contract CashLens is UpgradeableProxy, Constants {
         ILendGateway lendGateway = cashModule.getLendGateway();
         uint256 borrowPower = lendGateway.getAccountData(safe).availableBorrowsUsd;
 
-        address[] memory borrowTokens = cashModule.getDebtManager().getBorrowTokens();
+        address[] memory borrowTokens = lendGateway.borrowableAssets();
         uint256 maxLiquidityUsd = 0;
         for (uint256 i = 0; i < borrowTokens.length;) {
             uint256 liquidityUsd = _toUsd(borrowTokens[i], lendGateway.availableCash(borrowTokens[i]));
@@ -498,21 +506,20 @@ contract CashLens is UpgradeableProxy, Constants {
      * @param safe Address of the safe
      * @param token Address of the collateral token to check
      * @return Effective collateral amount
-     * @custom:throws NotACollateralToken if token is not a valid collateral token
+     * @custom:throws NotACollateralToken if token is not a collateral token on the safe's engine
      */
     function getUserCollateralForToken(address safe, address token) public view returns (uint256) {
-        IDebtManager debtManager = cashModule.getDebtManager();
-
-        if (!debtManager.isCollateralToken(token)) revert NotACollateralToken();
-
         if (!cashModule.usesLendGateway(safe)) {
+            if (!cashModule.getDebtManager().isCollateralToken(token)) revert NotACollateralToken();
             uint256 balance = IERC20(token).balanceOf(safe);
             uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
 
             return balance > pendingWithdrawalAmount ? balance - pendingWithdrawalAmount : 0;
         }
 
-        return gateway().suppliedOf(safe, token);
+        ILendGateway lendGateway = gateway();
+        if (!lendGateway.isRegistered(token)) revert NotACollateralToken();
+        return lendGateway.suppliedOf(safe, token);
     }
 
     /**
@@ -524,14 +531,11 @@ contract CashLens is UpgradeableProxy, Constants {
      * @return Array of token data with token addresses and effective amounts
      */
     function getUserTotalCollateral(address safe) public view returns (IDebtManager.TokenData[] memory) {
-        IDebtManager debtManager = cashModule.getDebtManager();
-        address[] memory collateralTokens = debtManager.getCollateralTokens();
-
         if (!cashModule.usesLendGateway(safe)) {
-            return CashLensLegacyLib.userTotalCollateral(cashModule, safe, collateralTokens);
+            return CashLensLegacyLib.userTotalCollateral(cashModule, safe, cashModule.getDebtManager().getCollateralTokens());
         }
 
-        return _suppliedBalances(safe, collateralTokens);
+        return _suppliedBalances(safe, gateway().registeredAssets());
     }
 
     /**

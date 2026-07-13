@@ -58,6 +58,8 @@ contract CashLensTest is CashModuleTestSetup {
 
         minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsd)).decimals());
         debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
+        gateway.setRegistered(address(liquidUsd), true);
+        gateway.setBorrowable(address(liquidUsd), true);
 
         // Add some collateral to safe for tests
         deal(address(weETH), address(safe), 10 ether);

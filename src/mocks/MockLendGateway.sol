@@ -30,6 +30,10 @@ contract MockLendGateway is ILendGateway {
     mapping(address asset => uint256) internal _availableCash;
     /// @dev Whether an asset is a registered reserve; defaults to false
     mapping(address asset => bool) internal _registered;
+    /// @dev Whether an asset's reserve allows borrowing; defaults to false
+    mapping(address asset => bool) internal _borrowable;
+    /// @dev Every asset ever registered, in order; registeredAssets/borrowableAssets filter it by the flags
+    address[] internal _assets;
 
     Call public lastSupply;
     Call public lastWithdraw;
@@ -46,7 +50,13 @@ contract MockLendGateway is ILendGateway {
 
     /// @notice Sets whether an asset is a registered reserve (defaults to unregistered)
     function setRegistered(address asset, bool registered) external {
+        if (registered && !_registered[asset]) _assets.push(asset);
         _registered[asset] = registered;
+    }
+
+    /// @notice Sets whether an asset's reserve allows borrowing (defaults to non-borrowable)
+    function setBorrowable(address asset, bool borrowable) external {
+        _borrowable[asset] = borrowable;
     }
 
     /// @notice Sets the amount a subsequent `suppliedOf(safe, asset)` will return
@@ -99,7 +109,34 @@ contract MockLendGateway is ILendGateway {
         return _registered[asset];
     }
 
-    function registeredAssets() external pure returns (address[] memory) {
-        return new address[](0);
+    function registeredAssets() external view returns (address[] memory) {
+        return _filterAssets(false);
+    }
+
+    function isBorrowable(address asset) external view returns (bool) {
+        return _registered[asset] && _borrowable[asset];
+    }
+
+    function borrowableAssets() external view returns (address[] memory) {
+        return _filterAssets(true);
+    }
+
+    /// @dev The registered assets, optionally narrowed to the borrowable ones
+    function _filterAssets(bool onlyBorrowable) internal view returns (address[] memory) {
+        address[] memory out = new address[](_assets.length);
+        uint256 count = 0;
+        for (uint256 i = 0; i < _assets.length; i++) {
+            address asset = _assets[i];
+            if (_registered[asset] && (!onlyBorrowable || _borrowable[asset])) {
+                out[count] = asset;
+                unchecked {
+                    ++count;
+                }
+            }
+        }
+        assembly ("memory-safe") {
+            mstore(out, count)
+        }
+        return out;
     }
 }

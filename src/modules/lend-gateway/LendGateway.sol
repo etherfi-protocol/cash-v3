@@ -473,6 +473,32 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         return _getLendGatewayStorage().assets.values();
     }
 
+    /// @notice Whether `asset` is registered and its reserve's borrowable flag is set on the Spoke
+    function isBorrowable(address asset) external view returns (bool) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return false;
+        return spoke.getReserveConfig($.reserveId[asset]).borrowable;
+    }
+
+    /// @notice The registered assets whose reserves allow borrowing on the Spoke
+    function borrowableAssets() external view returns (address[] memory) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        address[] memory assets = $.assets.values();
+        uint256 count = 0;
+        for (uint256 i = 0; i < assets.length; i++) {
+            if (spoke.getReserveConfig($.reserveId[assets[i]]).borrowable) {
+                assets[count] = assets[i];
+                unchecked {
+                    ++count;
+                }
+            }
+        }
+        assembly ("memory-safe") {
+            mstore(assets, count)
+        }
+        return assets;
+    }
+
     /// @notice Whether `account` may drive the gateway (CashModule or an authorized driver)
     function isDriver(address account) external view returns (bool) {
         return account == etherFiDataProvider.getCashModule() || _getLendGatewayStorage().isDriver[account];
