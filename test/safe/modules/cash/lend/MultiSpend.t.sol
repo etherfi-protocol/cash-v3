@@ -18,6 +18,13 @@ contract CashModuleMultiSpendAaveTest is CashGatewayTestSetup {
         return true;
     }
 
+    function setUp() public override {
+        super.setUp();
+        // These tests debit-spend weETH, so declare it a spend asset (membership is no longer the borrowable flag)
+        vm.prank(owner);
+        gw.setSpendAsset(address(weETH), true);
+    }
+
     /// A two-token debit under debt: USDC fully from the loose balance, weETH from a loose + Aave-supplied mix.
     function test_spend_multiToken_mixedLooseAndSupplied_withDebt() public {
         uint256 usdcAmount = debtManager.convertUsdToCollateralToken(address(usdc), 50e6); // fully from the loose balance

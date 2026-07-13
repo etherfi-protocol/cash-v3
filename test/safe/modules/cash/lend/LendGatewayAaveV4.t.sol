@@ -81,11 +81,12 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertTrue(gw.isBorrowable(address(usdc)), "borrowable again after unpause");
     }
 
-    /// isSpendAsset (the debit gate) keeps the borrowable flag as membership (weETH stays non-spendable)
-    /// and tolerates a freeze, since a debit only transfers and withdraws; only a pause blocks it.
-    function test_reads_spendAsset_toleratesFreezeNotPause() public {
+    /// isSpendAsset (the debit gate) reads the admin spend set, not Aave's borrowable flag: USDC is a declared
+    /// spend asset, weETH is a registered reserve that was never declared spendable, and the set tolerates a
+    /// freeze (a debit only transfers and withdraws) while a pause blocks it.
+    function test_reads_spendAsset_readsAdminSetToleratesFreezeNotPause() public {
         assertTrue(gw.isSpendAsset(address(usdc)));
-        assertFalse(gw.isSpendAsset(address(weETH)), "collateral-only asset is not spendable");
+        assertFalse(gw.isSpendAsset(address(weETH)), "registered but not a declared spend asset");
         assertFalse(gw.isSpendAsset(address(0xdead)));
 
         _setAaveReserveFrozen(usdcReserveId, true);
@@ -96,6 +97,35 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         _setAaveReservePaused(usdcReserveId, true);
         assertFalse(gw.isSpendAsset(address(usdc)), "paused reserve not spendable");
         assertEq(gw.spendAssets().length, 0, "dropped from spendAssets while paused");
+    }
+
+    /// Membership is decoupled from Aave's borrowable flag: turning USDC's borrowable flag off (so it is no
+    /// longer credit-borrowable) leaves it a debit-spend asset, which is the whole point of the admin set.
+    function test_reads_spendAsset_survivesBorrowableFlagOff() public {
+        _setAaveReserveBorrowable(usdcReserveId, false);
+        assertFalse(gw.isBorrowable(address(usdc)), "no longer borrowable for credit");
+        assertTrue(gw.isSpendAsset(address(usdc)), "still a debit-spend asset");
+    }
+
+    /// setSpendAsset is admin-gated, requires a registered reserve, and removeReserve drops spend membership.
+    function test_setSpendAsset_guardsAndRemovalDropsMembership() public {
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(LendGateway.AssetNotRegistered.selector, address(0xdead)));
+        gw.setSpendAsset(address(0xdead), true);
+
+        vm.expectRevert(); // caller lacks LEND_GATEWAY_ADMIN_ROLE
+        gw.setSpendAsset(address(usdc), false);
+
+        // _addAaveReserve manages its own aaveAdmin prank, so list the idle USDT reserve before pranking owner
+        uint256 usdtReserveId = _addAaveReserve(address(usdt), usdcUsdOracle, _usdcCollateralFactorBps(), true);
+
+        vm.startPrank(owner);
+        gw.setReserveId(address(usdt), usdtReserveId);
+        gw.setSpendAsset(address(usdt), true);
+        assertTrue(gw.isSpendAsset(address(usdt)));
+        gw.removeReserve(address(usdt)); // idle reserve: no debt, no supplied balance
+        vm.stopPrank();
+        assertFalse(gw.isSpendAsset(address(usdt)), "removeReserve drops spend membership");
     }
 
     function test_getAccountData_freshSafeIsEmptyAndHealthy() public view {
