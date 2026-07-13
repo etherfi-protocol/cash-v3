@@ -22,8 +22,9 @@ import { IAaveOracle } from "aave-v4/spoke/interfaces/IAaveOracle.sol";
 import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 import { ITreasurySpoke } from "aave-v4/spoke/interfaces/ITreasurySpoke.sol";
 
+import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
-import { ChainlinkCompositePriceFeed } from "../../src/oracle/ChainlinkCompositePriceFeed.sol";
+import { ChainlinkPriceFeed } from "../../src/oracle/ChainlinkPriceFeed.sol";
 import { ChainConfig, Utils } from "../utils/Utils.sol";
 
 /// @dev Minimal init interface shared by the hub/spoke/treasury proxy implementations
@@ -73,7 +74,6 @@ contract DeployAaveV4TestInstance is Utils {
     // Chainlink staleness bounds for the composite weETH/USD feed: the weETH/WETH exchange-rate feed
     // has a 24h heartbeat, ETH/USD updates far more often; 2 days keeps a quiet dev instance usable.
     uint256 constant RATE_FEED_MAX_STALENESS = 1 days;
-    uint256 constant UNDERLYING_FEED_MAX_STALENESS = 1 days;
 
     IAccessManager accessManager;
     IHub hub;
@@ -81,7 +81,7 @@ contract DeployAaveV4TestInstance is Utils {
     IAaveOracle oracle;
     AssetInterestRateStrategy irStrategy;
     ITreasurySpoke treasurySpoke;
-    ChainlinkCompositePriceFeed weethUsdFeed;
+    ChainlinkPriceFeed weethUsdFeed;
 
     uint256 weethReserveId;
     uint256 usdcReserveId;
@@ -108,7 +108,7 @@ contract DeployAaveV4TestInstance is Utils {
         spoke.updateLiquidationConfig(ISpoke.LiquidationConfig({ targetHealthFactor: 1.05e18, healthFactorForMaxBonus: 0.7e18, liquidationBonusFactor: 2000 }));
 
         // weETH priced via weETH/WETH exchange rate x ETH/USD (8-decimal USD), USDC via its direct feed
-        weethUsdFeed = new ChainlinkCompositePriceFeed(IAggregatorV3(cfg.weEthWethOracle), IAggregatorV3(cfg.ethUsdcOracle), 8, RATE_FEED_MAX_STALENESS, UNDERLYING_FEED_MAX_STALENESS, "weETH / USD");
+        weethUsdFeed = new ChainlinkPriceFeed(IAggregatorV3(cfg.weEthWethOracle), IAaveV4PriceFeed(cfg.ethUsdcOracle), 8, RATE_FEED_MAX_STALENESS, "weETH / USD");
         weethReserveId = _addReserve(cfg.weETH, address(weethUsdFeed), WEETH_COLLATERAL_FACTOR_BPS, false);
         usdcReserveId = _addReserve(cfg.usdc, cfg.usdcUsdOracle, USDC_COLLATERAL_FACTOR_BPS, true);
 

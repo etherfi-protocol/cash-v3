@@ -5,15 +5,12 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IAaveV4PriceFeed } from "../interfaces/IAaveV4PriceFeed.sol";
-import { IAggregatorV3 } from "../interfaces/IAggregatorV3.sol";
 import { IVedaAccountant } from "../interfaces/IVedaAccountant.sol";
 
 /**
  * @title VedaAccountantPriceFeed
- * @notice Prices a Veda receipt token (eBTC, the Liquid tokens, eUSD, sETHFI) for the Aave v4 oracle
- *         as the vault rate times the underlying USD price. One instance per token.
  * @dev Implements the Aave v4 price-feed interface and fails closed: latestAnswer reverts on a paused
- *      or stale accountant, a stale or non-positive underlying, or a zero rate.
+ *      or stale accountant, a non-positive or reverting underlying, or a zero rate.
  * @author ether.fi
  */
 contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
@@ -23,19 +20,16 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
 
     /// @notice The Veda accountant that provides the vault exchange rate
     IVedaAccountant public immutable accountant;
-    /// @notice The Chainlink feed for the underlying asset's USD price, e.g. ETH/USD or BTC/USD
-    IAggregatorV3 public immutable underlyingUsdFeed;
+    /// @notice The feed for the underlying asset's USD price; address(0) when the rate is USD-quoted
+    IAaveV4PriceFeed public immutable underlyingUsdFeed;
     /// @notice The decimals of the exchange rate from the accountant
     uint8 public immutable rateDecimals;
-    /// @notice The decimals of the underlying Chainlink feed
+    /// @notice The decimals of the underlying feed (0 when unset)
     uint8 public immutable underlyingDecimals;
     /// @notice The decimals of the price this feed reports
     uint8 public immutable feedDecimals;
     /// @notice The maximum age in seconds for the Veda rate before it is rejected
     uint256 public immutable rateMaxStaleness;
-    /// @notice The maximum age in seconds for the underlying Chainlink price before it is rejected
-    uint256 public immutable underlyingMaxStaleness;
-
     string private _description;
 
     /// @notice Thrown when either price source is older than its staleness limit
@@ -43,14 +37,16 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
     /// @notice Thrown when the rate or the underlying price is zero or negative
     error InvalidPrice();
 
-    constructor(IVedaAccountant _accountant, IAggregatorV3 _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, uint256 _underlyingMaxStaleness, string memory feedDescription) {
+    constructor(IVedaAccountant _accountant, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, string memory feedDescription) {
+        
         accountant = _accountant;
         underlyingUsdFeed = _underlyingUsdFeed;
         rateDecimals = _accountant.decimals();
-        underlyingDecimals = _underlyingUsdFeed.decimals();
+        if (address(_underlyingUsdFeed) != address(0)) {
+            underlyingDecimals = _underlyingUsdFeed.decimals();
+        }
         feedDecimals = _feedDecimals;
         rateMaxStaleness = _rateMaxStaleness;
-        underlyingMaxStaleness = _underlyingMaxStaleness;
         _description = feedDescription;
     }
 
@@ -65,8 +61,9 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
     }
 
     /**
-     * @notice The token's price, the vault rate times the underlying USD price
-     * @dev Reverts if the accountant is paused or stale, the underlying is stale or not positive, or the rate is zero
+     * @notice The token's price: the vault rate, times the underlying USD price when configured
+     * @dev Reverts if the accountant is paused or stale, the underlying is not positive or reverts,
+     *      or the rate is zero
      */
     function latestAnswer() external view returns (int256) {
         IVedaAccountant.AccountantState memory state = accountant.accountantState();
@@ -76,10 +73,12 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
         uint256 rate = accountant.getRateSafe();
         if (rate == 0) revert InvalidPrice();
 
-        // Underlying USD price from Chainlink, checked for validity and staleness.
-        (, int256 answer,, uint256 updatedAt,) = underlyingUsdFeed.latestRoundData();
+        if (address(underlyingUsdFeed) == address(0)) {
+            return rate.mulDiv(10 ** feedDecimals, 10 ** rateDecimals).toInt256();
+        }
+
+        int256 answer = underlyingUsdFeed.latestAnswer();
         if (answer <= 0) revert InvalidPrice();
-        if (block.timestamp > updatedAt + underlyingMaxStaleness) revert StalePrice();
 
         // price = rate * underlyingPrice, normalized from (rateDecimals + underlyingDecimals) to feedDecimals
         uint256 price = rate.mulDiv(answer.toUint256() * 10 ** feedDecimals, 10 ** (rateDecimals + underlyingDecimals));
