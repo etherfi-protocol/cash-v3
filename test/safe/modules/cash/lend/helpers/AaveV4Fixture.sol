@@ -88,11 +88,12 @@ abstract contract AaveV4Fixture is Test {
         accessManager.grantRole(Roles.HUB_ADMIN_ROLE, aaveAdmin, 0);
         accessManager.grantRole(Roles.SPOKE_ADMIN_ROLE, aaveAdmin, 0);
 
-        bytes4[] memory spokeSelectors = new bytes4[](4);
+        bytes4[] memory spokeSelectors = new bytes4[](5);
         spokeSelectors[0] = ISpoke.addReserve.selector;
         spokeSelectors[1] = ISpoke.updatePositionManager.selector;
         spokeSelectors[2] = ISpoke.updateLiquidationConfig.selector;
         spokeSelectors[3] = ISpoke.updateDynamicReserveConfig.selector;
+        spokeSelectors[4] = ISpoke.updateReserveConfig.selector;
         accessManager.setTargetFunctionRole(address(spoke), spokeSelectors, Roles.SPOKE_ADMIN_ROLE);
 
         bytes4[] memory hubSelectors = new bytes4[](3);
@@ -143,6 +144,15 @@ abstract contract AaveV4Fixture is Test {
     function _activateAavePositionManager(address positionManager) internal {
         vm.prank(aaveAdmin);
         spoke.updatePositionManager(positionManager, true);
+    }
+
+    /// @notice Flips a listed reserve's borrowable flag, preserving its other config (models a governance
+    ///         change or freeze that blocks new borrows without clearing existing debt)
+    function _setAaveReserveBorrowable(uint256 reserveId, bool borrowable) internal {
+        ISpoke.ReserveConfig memory cfg = spoke.getReserveConfig(reserveId);
+        cfg.borrowable = borrowable;
+        vm.prank(aaveAdmin);
+        spoke.updateReserveConfig(reserveId, cfg);
     }
 
     /// @notice Updates a listed reserve's collateral factor (BPS), preserving its other dynamic config

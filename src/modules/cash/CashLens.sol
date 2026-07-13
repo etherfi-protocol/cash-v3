@@ -299,7 +299,10 @@ contract CashLens is UpgradeableProxy, Constants {
             borrowTokens = lendGateway.borrowableAssets();
             ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
             data.collateralBalances = _suppliedBalances(safe, collateralTokens);
-            data.borrows = _debtBalances(safe, borrowTokens);
+            // Debt can sit on any registered reserve, including one that stopped being borrowable after
+            // the borrow (borrowable flag turned off, or the reserve frozen/paused), so walk all
+            // registered assets here to match totalBorrow and hasOpenBorrows.
+            data.borrows = _debtBalances(safe, collateralTokens);
             data.totalCollateral = account.collateralUsd;
             data.totalBorrow = account.debtUsd;
             // Gross borrowing power (collateral weighted by LTV): the gateway headroom plus current debt
