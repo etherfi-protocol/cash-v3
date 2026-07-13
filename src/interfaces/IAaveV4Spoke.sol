@@ -133,6 +133,10 @@ interface IAaveV4Spoke {
     /// @notice The dynamic config (incl. `collateralFactor` in BPS) at `dynamicConfigKey`.
     function getDynamicReserveConfig(uint256 reserveId, uint32 dynamicConfigKey) external view returns (DynamicReserveConfig memory);
 
+    /// @notice The number of listed reserves.
+    function getReserveCount() external view returns (uint256);
+
+    /// @notice The reserve configuration flags.
     /// @notice The reserve's configuration flags (incl. `borrowable`).
     function getReserveConfig(uint256 reserveId) external view returns (ReserveConfig memory);
 

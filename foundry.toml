@@ -13,10 +13,10 @@ fs_permissions = [{ access = "read-write", path = "./" }]
 extra_output = ["storageLayout"]
 ffi = true
 dynamic_test_linking = true
-# The lend tests deploy a real Aave v4 instance (Hub/Spoke from the aave-v4 source) on an Optimism fork.
-# Keep them out of the default profile so the default build stays small and free of the aave-v4 dependency;
-# run them under FOUNDRY_PROFILE=lend (see [profile.lend] below).
-skip = ["test/safe/modules/cash/lend/**"]
+# The lend tests deploy a real Aave v4 instance (Hub/Spoke from the aave-v4 source) on an Optimism fork,
+# and scripts/aave-v4/** deploys one for real. Keep both out of the default profile so the default build
+# stays small and free of the aave-v4 dependency; run them under FOUNDRY_PROFILE=lend / aave-deploy (below).
+skip = ["test/safe/modules/cash/lend/**", "scripts/aave-v4/**"]
 
 # Profile for the lend (Aave v4) tests: un-skips them and links aave-v4's external LiquidationLogic library.
 # SpokeInstance links LiquidationLogic via an aave-rooted `src/` import forge can't resolve to an artifact,
@@ -29,6 +29,23 @@ libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x000000
 [profile.lend.invariant]
 runs = 12
 depth = 10
+
+# Profile for scripts/aave-v4/** (real Aave v4 deployments). Forge can't resolve LiquidationLogic's
+# aave-rooted `src/` import to an artifact (same issue as [profile.lend]), so auto-link/auto-deploy fails;
+# instead pin it to its deterministic CREATE2 address (Nick's factory, salt keccak256("ether.fi/aave-v4-test/LiquidationLogic"),
+# current aave-v4 bytecode) and DeployAaveV4TestInstance deploys the library there idempotently before the
+# spoke. The script recomputes this address from the artifact and reverts if the pin is stale.
+[profile.aave-deploy]
+skip = ["test/safe/modules/cash/lend/**"]
+libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x49dEE75906621Ea28D7332bb26E0da6f2d15E838"]
+# HubInstance/SpokeInstance exceed EIP-170 (spoke: 25441 bytes runtime) under this repo's default settings
+# (optimizer_runs = 0, no via-ir). Compile the whole profile with aave-v4's spoke settings (via-ir, 750 runs)
+# so the deployed instances fit the size limit — a per-contract compilation_restrictions split doesn't work
+# here because the deploy script `new`s the instances, embedding their creation code in its own unit.
+# NB these settings change LiquidationLogic's bytecode, so the pinned CREATE2 address above is specific to
+# this profile; the deploy script recomputes it from the artifact and reverts if it drifts.
+via_ir = true
+optimizer_runs = 750
 
 [fuzz]
 runs = 10000
