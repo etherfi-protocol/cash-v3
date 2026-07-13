@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { Test } from "forge-std/Test.sol";
 
+import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { IVedaAccountant } from "../../src/interfaces/IVedaAccountant.sol";
 import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFeed.sol";
@@ -19,13 +20,12 @@ contract VedaAccountantPriceFeedTest is Test {
 
     uint8 constant FEED_DECIMALS = 8;
     uint256 constant RATE_MAX_STALENESS = 2 days;
-    uint256 constant UNDERLYING_MAX_STALENESS = 1 days;
 
     VedaAccountantPriceFeed feed;
 
     function setUp() public {
         vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
-        feed = new VedaAccountantPriceFeed(accountant, IAggregatorV3(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, UNDERLYING_MAX_STALENESS, "liquidETH / USD");
+        feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, "liquidETH / USD");
     }
 
     /// @notice The reported price equals rate x underlying, and lands in a sane USD range.
@@ -47,13 +47,6 @@ contract VedaAccountantPriceFeedTest is Test {
     function test_decimalsAndDescription() public view {
         assertEq(feed.decimals(), FEED_DECIMALS);
         assertEq(feed.description(), "liquidETH / USD");
-    }
-
-    /// @notice Reverts when the underlying Chainlink price is older than the staleness limit.
-    function test_reverts_whenUnderlyingStale() public {
-        vm.warp(block.timestamp + UNDERLYING_MAX_STALENESS + 1);
-        vm.expectRevert(VedaAccountantPriceFeed.StalePrice.selector);
-        feed.latestAnswer();
     }
 
     /// @notice Reverts when the Veda accountant rate is older than the staleness limit.
@@ -86,9 +79,17 @@ contract VedaAccountantPriceFeedTest is Test {
         feed.latestAnswer();
     }
 
+    /// @notice Without an underlying feed, the price is the accountant rate scaled to feed decimals.
+    function test_noUnderlying_latestAnswer_isScaledRate() public {
+        VedaAccountantPriceFeed usdFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, "liquidETH / ETH");
+        uint256 rate = accountant.getRateSafe();
+        uint256 expected = rate * (10 ** FEED_DECIMALS) / (10 ** usdFeed.rateDecimals());
+        assertEq(usdFeed.latestAnswer().toUint256(), expected);
+    }
+
     /// @notice Reverts when the underlying price is zero or negative.
     function test_reverts_whenUnderlyingNotPositive() public {
-        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(uint80(1), int256(0), block.timestamp, block.timestamp, uint80(1)));
+        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAaveV4PriceFeed.latestAnswer.selector), abi.encode(int256(0)));
         vm.expectRevert(VedaAccountantPriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }

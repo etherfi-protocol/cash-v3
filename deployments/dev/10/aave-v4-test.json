@@ -1,5 +1,7 @@
 {
   "aaveOracle": "0xf0793101E1AE76c810b127D1dDF7fC9D3b391A0F",
+  "aaveV4Lens": "0x734F096efd5f1f911FE9570D6215bBe18C0D8d78",
+  "aaveV4LensImpl": "0x30695edd8e35c2ea0e281b7253d029865d5ae804",
   "accessManager": "0x3E05aBDe0588d56ea9B44579Aa93299971FFF3fe",
   "admin": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
   "hub": "0x03641abDa8BF0d9196CE44EbEd9f85ccCe3c5e1f",
@@ -7,9 +9,25 @@
   "liquidationLogic": "0x49dEE75906621Ea28D7332bb26E0da6f2d15E838",
   "spoke": "0x7e99c7846df8527FFE510a2CA0215874052102ed",
   "treasurySpoke": "0xf316938C33E81b4f02e1B7141399b872671f13Ad",
-  "usdcReserveId": 1,
-  "weethReserveId": 0,
-  "weethUsdFeed": "0x844940045786441a67997e9CAa005D712F90D8d5",
-  "aaveV4Lens": "0x734F096efd5f1f911FE9570D6215bBe18C0D8d78",
-  "aaveV4LensImpl": "0x30695edd8e35c2ea0e281b7253d029865d5ae804"
+  "details": {
+    "weETH": { "assetId": 0, "oracle": "0xf66Eff556E36bBb5544a03997d00022C752E507e" },
+    "USDC": { "assetId": 1, "oracle": "0x4E3f45040b9740F2eF3088F94f89c7023551c5A7" },
+    "ETHFI": { "assetId": 2, "oracle": "0x70e6Fc02DAFB89524d5Dde1ef9FC62D0649C1813" },
+    "WHYPE": { "assetId": 3, "oracle": "0x5687ff73Ac71962a79fe9c38720Eea7Ed84aF897" },
+    "beHYPE": { "assetId": 4, "oracle": "0xeFE1D06b73cc1B78aB0f4e30Fba02A2F7c017Ee3" },
+    "EURC": { "assetId": 5, "oracle": "0xB82D272a17Bd79368dEc85B0CDe30B1D94f487Bc" },
+    "sETHFI": { "assetId": 6, "oracle": "0xe1fC91a292CE0add33b0EF3De877A7904E41e7Ad" },
+    "liquidETH": { "assetId": 7, "oracle": "0xa5db43c48F6c3f09D8Ff8d3939770722f1576ddc" },  
+    "liquidBTC": { "assetId": 8, "oracle": "0xB57ab7E2Be000Be79d18e4Bc570D9F5E46206A52" },
+    "liquidUSD": { "assetId": 9, "oracle": "0x6dC246370EFF05A47ac9D5B9CB4b0C316336F510" },
+    "eBTC": { "assetId": 10, "oracle": "0x894ed889eFC501fe59775F964686Dc8364c1Eb8C" },
+    "eUSD": { "assetId": 11, "oracle": "0xD4A430A71C549Abe7ecE93Bdd6aB1ACf517272b2" },
+    "liquidRESERVE": { "assetId": 12, "oracle": "0x2bc92Ad3A748ae3980e0a739c56C9022F9737e2d" },
+    "weEUR": { "assetId": 13, "oracle": "0x884f2254ce1D7Af96B393cF1CA7c378827E45Cdd" },
+    "liquidRWA": { "assetId": 14, "oracle": "0xC5d61d4DA336f115b8C8c8E1C4C3e24686003EED" },
+    "USDT": { "assetId": 15, "oracle": "0x683f70fC596884A10c48C48F02d7e6F16CA91D56" },
+    "WETH": { "assetId": 16, "oracle": "0x569fF3929Dcea762B599e966E31821F4bcADbcf9" },
+    "OP": { "assetId": 17, "oracle": "0xD75b780f007e8d67DE88d901B6E4556537b2d36D" },
+    "frxUSD": { "assetId": 18, "oracle": "0x844940045786441a67997e9CAa005D712F90D8d5" }
+  }
 }
