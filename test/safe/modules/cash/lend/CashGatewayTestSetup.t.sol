@@ -45,7 +45,7 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
         // Real Aave v4 instance on the fork, weETH + USDC reserves priced by live Chainlink feeds
         _deployAaveV4();
         address weethSource = address(new ChainlinkCompositePriceFeed(IAggregatorV3(weEthWethOracle), IAggregatorV3(ethUsdcOracle), 8, 30 days, 30 days, "weETH / USD"));
-        weethReserveId = _addAaveReserve(address(weETH), weethSource, _weethCollateralFactorBps(), false);
+        weethReserveId = _addAaveReserve(address(weETH), weethSource, _weethCollateralFactorBps(), _weethBorrowable());
         usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, _usdcCollateralFactorBps(), true);
         _seedInitialLiquidity();
 
@@ -63,16 +63,33 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
 
         _enableModule(address(gw));
         _activateAavePositionManager(address(gw));
+
+        // The default safe was deployed in super.setUp() before the gateway existed, so it onboarded onto the
+        // legacy engine (onboarding with the lend flag reverts until the gateway is set). This suite exercises
+        // gateway operations on that safe, so put it on the gateway engine now.
+        _forceGatewayEngine(address(safe));
     }
 
     /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setLendGateway(gw) is the first and only set.
     function _wireDefaultGateway() internal override { }
+
+    /// @dev The default safe deploys in super.setUp() before the real gateway exists, so onboarding it with the
+    ///      lend flag would revert LendGatewayNotSet. It onboards legacy, then _forceGatewayEngine flips it.
+    function _newSafeUsesLend() internal pure override returns (bool) {
+        return false;
+    }
 
     // ----------------------------------------------------------------- overridable reserve policy
 
     /// @dev weETH reserve collateral factor in BPS; override to model a different Aave LTV.
     function _weethCollateralFactorBps() internal pure virtual returns (uint16) {
         return 8000;
+    }
+
+    /// @dev Whether the weETH reserve allows borrowing (collateral-only by default, matching the planned
+    ///      instance config); override to model weETH as a spendable (borrowable) token.
+    function _weethBorrowable() internal pure virtual returns (bool) {
+        return false;
     }
 
     /// @dev USDC reserve collateral factor in BPS; override to model a different Aave LTV.

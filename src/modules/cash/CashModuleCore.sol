@@ -70,20 +70,27 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Sets up a new Safe's Cash Module with initial configuration
-     * @dev Creates default spending limits and sets initial mode to Debit with 50% cashback split
-     * @param data The encoded initialization data containing daily limit, monthly limit, and timezone offset
+     * @dev Creates default spending limits and sets initial mode to Debit with 50% cashback split. The backend
+     *      picks the engine per safe at deploy time via the useLendGateway flag in the setup data.
+     * @param data ABI-encoded (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset, bool useLendGateway)
      */
     function setupModule(bytes calldata data) external override onlyEtherFiSafe(msg.sender) {
-        (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset) = abi.decode(data, (uint256, uint256, int256));
+        (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset, bool useLendGateway) = abi.decode(data, (uint256, uint256, int256, bool));
 
-        SafeCashConfig storage $ = _getCashModuleStorage().safeCashConfig[msg.sender];
+        CashModuleStorage storage cashStorage = _getCashModuleStorage();
+        SafeCashConfig storage $ = cashStorage.safeCashConfig[msg.sender];
         $.spendingLimit.initialize(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
         $.mode = Mode.Debit;
 
-        // New safes run on the Aave gateway. Guarded because setupModule is re-runnable: a legacy safe with
-        // open DebtManager debt must keep routing to DebtManager until migrateToLendGateway moves its position.
-        (, uint256 legacyDebtUsd) = _getDebtManager().borrowingOf(msg.sender);
-        if (legacyDebtUsd == 0) $.usesLendGateway = true;
+        // The backend decides the engine per safe. When useLendGateway is set the safe onboards onto the Aave
+        // gateway; otherwise it stays on the legacy DebtManager. The legacyDebtUsd guard keeps a safe with open
+        // DebtManager debt on DebtManager until migrateToLendGateway moves its position, since setupModule is
+        // re-runnable.
+        if (useLendGateway) {
+            if (address(cashStorage.gateway) == address(0)) revert LendGatewayNotSet();
+            (, uint256 legacyDebtUsd) = _getDebtManager().borrowingOf(msg.sender);
+            if (legacyDebtUsd == 0) $.usesLendGateway = true;
+        }
     }
 
     /**
@@ -521,16 +528,15 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Repays borrowed tokens
-     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
+     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses. CashLendLib routes by engine
+     *      and owns the token check, USD conversion, and withdrawal-reservation handling for both.
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to repay
      * @param amountInUsd Amount to repay in USD
-     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @custom:throws OnlyBorrowToken if the token cannot carry debt on the safe's engine
      */
     function repay(address safe, address token, uint256 amountInUsd) public whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
-        IDebtManager debtManager = getDebtManager();
-        if (!_isBorrowToken(debtManager, token)) revert OnlyBorrowToken();
-        _repay(safe, debtManager, token, amountInUsd);
+        CashLendLib.repay(_getCashModuleStorage(), etherFiDataProvider, safe, token, amountInUsd);
     }
 
     /**
@@ -549,45 +555,21 @@ contract CashModuleCore is CashModuleStorageContract {
     /**
      * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
      *         are immediately supplied back as collateral
-     * @dev Owner-signed: the signature binds the token and USD amount so a compromised backend cannot lever
-     *      a safe up. Any relayer may submit the signed intent. Aave enforces the health check on the borrow
-     *      itself.
+     * @dev Owner-quorum signed: the signatures bind the token and USD amount so neither a compromised backend
+     *      nor a single compromised admin can lever a safe up. Any relayer may submit the signed intent. Aave
+     *      enforces the health check on the borrow itself.
      * @param safe Address of the EtherFi Safe
      * @param token Address of the token to borrow
      * @param amountInUsd Amount to borrow in USD
-     * @param signer A safe admin authorizing the borrow
-     * @param signature The signer's signature over the intent
-     * @custom:throws OnlySafeAdmin if signer is not a safe admin
-     * @custom:throws InvalidSignature if signature verification fails
-     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
+     * @param signers Addresses of the owners authorizing the borrow
+     * @param signatures The signers' signatures over the intent
+     * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
+     * @custom:throws OnlyBorrowToken if token is not borrowable on the gateway
      * @custom:throws AmountZero if the converted amount is zero
      * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
      */
-    function borrow(address safe, address token, uint256 amountInUsd, address signer, bytes calldata signature) external whenNotPaused nonReentrant onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-        uint256 nonce = _useNonce(safe);
-        CashLendLib.borrow($, safe, token, amountInUsd, signer, nonce, signature);
-    }
-
-    /**
-     * @dev Internal function to execute the repayment transaction
-     * @param safe Address of the EtherFi Safe
-     * @param debtManager Reference to the debt manager contract
-     * @param token Address of the token to repay
-     * @param amountInUsd Amount to repay in USD
-     * @custom:throws AmountZero if the converted amount is zero
-     */
-    function _repay(address safe, IDebtManager debtManager, address token, uint256 amountInUsd) internal {
-        uint256 amount = IDebtManager(debtManager).convertUsdToCollateralToken(token, amountInUsd);
-        if (amount == 0) revert AmountZero();
-        // A legacy safe repays from its loose balance only, so a repay that needs withdrawal-reserved funds
-        // is resolved here. A gateway safe sources loose plus Aave-supplied balance in CashLendLib.repay,
-        // which owns the reservation handling for that engine.
-        if (!_usesLendGateway(safe)) _cancelCompetingWithdrawal(safe, token, amount);
-
-        // A migrated safe repays on Aave via the gateway; a legacy safe repays the DebtManager. Both paths run
-        // in CashLendLib (extracted to keep this contract within the code-size limit).
-        CashLendLib.repay(_getCashModuleStorage(), etherFiDataProvider, safe, token, amount, amountInUsd);
+    function borrow(address safe, address token, uint256 amountInUsd, address[] calldata signers, bytes[] calldata signatures) external whenNotPaused nonReentrant onlyEtherFiSafe(safe) {
+        CashLendLib.borrow(_getCashModuleStorage(), etherFiDataProvider, safe, token, amountInUsd, IEtherFiSafe(safe).useNonce(), signers, signatures);
     }
 
     /**

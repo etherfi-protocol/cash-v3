@@ -180,6 +180,11 @@ contract SafeTestSetup is Utils {
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
         gateway = new MockLendGateway();
+        // Mirror the DebtManager's token universe on the mock: the gateway paths read their token checks
+        // from the gateway (isBorrowable/isRegistered), not the DebtManager
+        gateway.setRegistered(address(weETH), true);
+        gateway.setRegistered(address(usdc), true);
+        gateway.setBorrowable(address(usdc), true);
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
@@ -224,8 +229,9 @@ contract SafeTestSetup is Utils {
         vm.stopPrank();
     }
 
-    /// @dev Wires the one-time gateway during setup. The gateway is set once and never repointed, so an Aave
-    ///      suite that needs the real gateway overrides this to a no-op and sets it after deploying Aave.
+    /// @dev Wires the one-time gateway during setup, so a safe onboarded with useLendGateway set lands on the
+    ///      gateway. The gateway is set once and never repointed, so an Aave suite that needs the real gateway
+    ///      overrides this to a no-op and sets it after deploying Aave.
     function _wireDefaultGateway() internal virtual {
         cashModule.setLendGateway(address(gateway));
     }

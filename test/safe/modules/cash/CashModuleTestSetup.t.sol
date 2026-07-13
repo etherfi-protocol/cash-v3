@@ -36,7 +36,7 @@ contract CashModuleTestSetup is SafeTestSetup {
         vm.stopPrank();
 
         vm.startPrank(owner);
-        bytes memory safeCashSetupData = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
+        bytes memory safeCashSetupData = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, _newSafeUsesLend());
         bytes[] memory setupData = new bytes[](1);
         setupData[0] = safeCashSetupData;
 
@@ -49,6 +49,12 @@ contract CashModuleTestSetup is SafeTestSetup {
         _configureModules(modules, shouldWhitelist, setupData);
 
         vm.stopPrank();
+    }
+
+    /// @dev Engine the default safe onboards onto. True (gateway) by default; a suite whose gateway is not yet
+    ///      configured at setup (real-Aave suites) overrides this to false and flips the engine later.
+    function _newSafeUsesLend() internal pure virtual returns (bool) {
+        return true;
     }
 
     function _requestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal {
@@ -158,12 +164,22 @@ contract CashModuleTestSetup is SafeTestSetup {
 
     /**
      * @notice Flips a safe back to the legacy DebtManager engine, modeling a safe that predates the gateway
-     *         (new safes onboard onto the Aave gateway in setupModule).
+     *         (a new safe onboards onto the Aave gateway when its setup data carries the lend flag).
      * @dev Writes the packed usesLendGateway flag via stdstore, then asserts through the public getter so any
      *      storage-layout drift fails loudly here instead of silently testing the wrong engine.
      */
     function _forceLegacyEngine(address _safe) internal {
         stdstore.enable_packed_slots().target(address(cashModule)).sig(ICashModule.usesLendGateway.selector).with_key(_safe).checked_write(false);
         assertFalse(cashModule.usesLendGateway(_safe), "forceLegacyEngine: flag still set");
+    }
+
+    /**
+     * @notice Flips a safe onto the Aave gateway engine, for suites whose default safe was deployed before the
+     *         gateway existed (onboarding with the lend flag reverts until the gateway is set).
+     * @dev Writes the packed usesLendGateway flag via stdstore, then asserts through the public getter.
+     */
+    function _forceGatewayEngine(address _safe) internal {
+        stdstore.enable_packed_slots().target(address(cashModule)).sig(ICashModule.usesLendGateway.selector).with_key(_safe).checked_write(true);
+        assertTrue(cashModule.usesLendGateway(_safe), "forceGatewayEngine: flag not set");
     }
 }

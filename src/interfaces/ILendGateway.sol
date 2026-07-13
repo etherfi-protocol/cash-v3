@@ -119,4 +119,39 @@ interface ILendGateway {
      * @return The registered asset addresses
      */
     function registeredAssets() external view returns (address[] memory);
+
+    /**
+     * @notice Returns whether `asset` is registered and its Aave reserve accepts a borrow
+     * @dev Mirrors Aave's borrow gate (borrowable, not frozen, not paused). The paths that create new
+     *      debt gate on this: the credit auth check, the credit spend, and the signed borrow. Debit
+     *      spends gate on isSpendAsset and repay gates on isRegistered, so existing positions survive a
+     *      freeze or delisting of new debt.
+     * @param asset The asset to query
+     * @return True if the asset is registered and the reserve accepts a borrow
+     */
+    function isBorrowable(address asset) external view returns (bool);
+
+    /**
+     * @notice Returns the registered assets whose Aave reserves accept a borrow
+     * @dev The gateway-native replacement for DebtManager's getBorrowTokens (see isBorrowable).
+     * @return The borrowable asset addresses
+     */
+    function borrowableAssets() external view returns (address[] memory);
+
+    /**
+     * @notice Returns whether `asset` can fund a debit spend
+     * @dev Registered, marked borrowable (membership: it marks the spendable stables), and not paused.
+     *      Frozen is tolerated: a debit spend only transfers loose balance and withdraws supplied
+     *      balance, both of which Aave allows while frozen.
+     * @param asset The asset to query
+     * @return True if the asset can fund a debit spend
+     */
+    function isSpendAsset(address asset) external view returns (bool);
+
+    /**
+     * @notice Returns the registered assets that can fund a debit spend
+     * @dev See isSpendAsset.
+     * @return The spendable asset addresses
+     */
+    function spendAssets() external view returns (address[] memory);
 }

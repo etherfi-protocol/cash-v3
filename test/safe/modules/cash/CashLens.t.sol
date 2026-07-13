@@ -58,6 +58,8 @@ contract CashLensTest is CashModuleTestSetup {
 
         minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsd)).decimals());
         debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
+        gateway.setRegistered(address(liquidUsd), true);
+        gateway.setBorrowable(address(liquidUsd), true);
 
         // Add some collateral to safe for tests
         deal(address(weETH), address(safe), 10 ether);
@@ -254,8 +256,8 @@ contract CashLensTest is CashModuleTestSetup {
         shouldWhitelist[0] = true;
         
         bytes[] memory setupData = new bytes[](1);
-        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
-        
+        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, true);
+
         vm.prank(owner);
         safeFactory.deployEtherFiSafe(keccak256("insufficientSafe"), owners, modules, setupData, 1);
         address insufficientSafe = safeFactory.getDeterministicAddress(keccak256("insufficientSafe"));

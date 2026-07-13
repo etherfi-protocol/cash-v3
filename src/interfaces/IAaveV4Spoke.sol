@@ -39,7 +39,7 @@ interface IAaveV4Spoke {
         uint16 liquidationFee;
     }
 
-    /// @notice Reserve config flags. ABI-mirrored subset of the upstream `ReserveConfig`.
+    /// @notice Reserve configuration flags. `borrowable` is true if the reserve can be borrowed.
     struct ReserveConfig {
         uint24 collateralRisk;
         bool paused;
@@ -137,6 +137,7 @@ interface IAaveV4Spoke {
     function getReserveCount() external view returns (uint256);
 
     /// @notice The reserve configuration flags.
+    /// @notice The reserve's configuration flags (incl. `borrowable`).
     function getReserveConfig(uint256 reserveId) external view returns (ReserveConfig memory);
 
     /// @notice The type hash for the SetUserPositionManagers EIP-712 intent.

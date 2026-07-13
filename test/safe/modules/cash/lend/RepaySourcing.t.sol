@@ -41,6 +41,21 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         assertApproxEqAbs(suppliedBefore - gw.suppliedOf(address(safe), address(usdc)), debt, 2, "repay withdrew only the debt from the supplied pot");
     }
 
+    /// An over-repay is capped at the open debt and the event reports the capped USD value, not the
+    /// requested one.
+    function test_repay_overRepay_emitsCappedUsd() public {
+        uint256 borrowedUsdc = 300e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        deal(address(usdc), address(safe), 1000e6);
+
+        uint256 debt = gw.debtOf(address(safe), address(usdc));
+        uint256 debtUsd = debtManager.convertCollateralTokenToUsd(address(usdc), debt);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.Repay(address(safe), address(usdc), debt, debtUsd);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), debtUsd + 100e6);
+    }
+
     /// A partial repay consumes the loose balance before touching the supplied pot.
     function test_repay_sourcesLooseBeforeSupplied() public {
         uint256 borrowedUsdc = 400e6;
@@ -122,6 +137,26 @@ contract RepaySourcingTest is CashGatewayTestSetup {
 
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowedUsdc - repayAmt, 3, "repaid from the reserved balance");
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0, "withdrawal request cancelled");
+    }
+
+    /// Freezing the reserve blocks new borrows but never repayment: the repay gates on registration, not
+    /// borrowability, and Aave allows both the repay and its supplied-leg withdraw while frozen.
+    function test_repay_worksWhileReserveFrozen() public {
+        uint256 borrowedUsdc = 1000e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        // Part loose, part supplied, so both repay legs run against the frozen reserve
+        _supplyToGateway(address(safe), address(usdc), 600e6);
+        deal(address(usdc), address(safe), 500e6);
+
+        _setAaveReserveFrozen(usdcReserveId, true);
+        assertFalse(gw.isBorrowable(address(usdc)), "frozen reserve no longer borrowable");
+
+        uint256 debt = gw.debtOf(address(safe), address(usdc));
+        uint256 debtUsd = debtManager.convertCollateralTokenToUsd(address(usdc), debt);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), debtUsd);
+
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 0, 2, "debt repaid from loose plus supplied while frozen");
     }
 
     function _uint1(uint256 a) internal pure returns (uint256[] memory) {

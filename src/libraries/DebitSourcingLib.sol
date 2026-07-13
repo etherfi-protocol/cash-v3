@@ -32,7 +32,7 @@ library DebitSourcingLib {
             if (tokenLtv == 0) {
                 return 0;
             }
-            uint256 headroomCap = _fromUsd(priceProvider, token, (borrowHeadroomUsd * LTV_SCALE) / tokenLtv);
+            uint256 headroomCap = fromUsd(priceProvider, token, (borrowHeadroomUsd * LTV_SCALE) / tokenLtv);
             if (headroomCap < cap) {
                 cap = headroomCap;
             }
@@ -43,7 +43,7 @@ library DebitSourcingLib {
 
     /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
     function headroomConsumed(ILendGateway gateway, IPriceProvider priceProvider, address token, uint256 amount) public view returns (uint256) {
-        return (_toUsd(priceProvider, token, amount) * gateway.ltv(token)) / LTV_SCALE;
+        return (toUsd(priceProvider, token, amount) * gateway.ltv(token)) / LTV_SCALE;
     }
 
     /**
@@ -54,17 +54,17 @@ library DebitSourcingLib {
      *      remaining after the loose leg, so the headroom cap always applies.
      */
     function repayWithdrawable(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 fromLoose) public view returns (uint256) {
-        uint256 headroomUsd = gateway.getAccountData(safe).availableBorrowsUsd + _toUsd(priceProvider, token, fromLoose);
+        uint256 headroomUsd = gateway.getAccountData(safe).availableBorrowsUsd + toUsd(priceProvider, token, fromLoose);
         return withdrawableSupplied(gateway, priceProvider, safe, token, headroomUsd, true);
     }
 
-    /// @dev USD value of `amount` of `token` at its current price, on PriceProvider's USD scale
-    function _toUsd(IPriceProvider priceProvider, address token, uint256 amount) private view returns (uint256) {
+    /// @notice USD value of `amount` of `token` at its current price, on PriceProvider's USD scale (matching DebtManager's conversion)
+    function toUsd(IPriceProvider priceProvider, address token, uint256 amount) public view returns (uint256) {
         return (amount * priceProvider.price(token)) / (10 ** IERC20Metadata(token).decimals());
     }
 
-    /// @dev Amount of `token` worth `usd` at its current price, inverting _toUsd
-    function _fromUsd(IPriceProvider priceProvider, address token, uint256 usd) private view returns (uint256) {
+    /// @notice Amount of `token` worth `usd` at its current price, inverting toUsd
+    function fromUsd(IPriceProvider priceProvider, address token, uint256 usd) public view returns (uint256) {
         return (usd * (10 ** IERC20Metadata(token).decimals())) / priceProvider.price(token);
     }
 }

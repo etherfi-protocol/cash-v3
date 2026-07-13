@@ -75,6 +75,25 @@ contract CashLensAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(data.totalBorrow, borrowAmount, 2, "Total borrow should match the Aave debt");
     }
 
+    /// A reserve that stops being borrowable after a borrow (flag off, or frozen/paused) must not drop its
+    /// debt from the breakdown: the per-token borrows walk registered assets, so they stay consistent with
+    /// totalBorrow.
+    function test_getSafeCashData_borrowsSurviveReserveMadeNonBorrowable() public {
+        uint256 borrowAmount = 1000e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowAmount);
+
+        // Governance blocks new USDC borrows; the existing debt stays open.
+        _setAaveReserveBorrowable(usdcReserveId, false);
+        assertFalse(gw.isBorrowable(address(usdc)), "USDC no longer borrowable");
+
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
+
+        assertEq(data.borrows.length, 1, "Debt breakdown still lists the USDC borrow");
+        assertEq(data.borrows[0].token, address(usdc), "Borrow token should be USDC");
+        assertApproxEqAbs(data.borrows[0].amount, borrowAmount, 2, "Breakdown matches the Aave debt");
+        assertApproxEqAbs(data.totalBorrow, borrowAmount, 2, "Total still matches, so breakdown and total agree");
+    }
+
     /// With no debt, the max is the loose balance (net of a pending withdrawal) plus the full supplied balance.
     function test_getMaxSourceable_noDebt_looseNetOfPendingPlusSupplied() public {
         _supplyToGateway(address(safe), address(weETH), 3 ether);

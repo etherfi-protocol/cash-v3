@@ -147,18 +147,19 @@ library CashVerificationLib {
     }
 
     /**
-     * @notice Verifies a signature authorizing a borrow against the safe's lend-market position
-     * @dev The signature binds the borrow token and USD amount, so a compromised backend cannot lever a
-     *      safe up: only a borrow the owner signed can execute
+     * @notice Verifies the owner quorum authorizing a borrow against the safe's lend-market position
+     * @dev The signatures bind the borrow token and USD amount, so neither a compromised backend nor a single
+     *      compromised admin can lever a safe up: only a borrow the owner quorum signed can execute
      * @param safe Address of the safe
-     * @param signer Address of the signer to verify against
      * @param nonce Transaction nonce for replay protection
      * @param token Address of the token to borrow
      * @param amountInUsd USD amount to borrow
-     * @param signature ECDSA signature bytes
-     * @custom:throws SignatureUtils.InvalidSigner if the signature is invalid
+     * @param signers Address of the signers
+     * @param signatures ECDSA signatures by signers
+     * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
      */
-    function verifyBorrowSig(address safe, address signer, uint256 nonce, address token, uint256 amountInUsd, bytes calldata signature) internal view {
-        verifySignature(safe, signer, BORROW_METHOD, nonce, abi.encode(token, amountInUsd), signature);
+    function verifyBorrowSig(address safe, uint256 nonce, address token, uint256 amountInUsd, address[] calldata signers, bytes[] calldata signatures) internal view {
+        bytes32 digestHash = keccak256(abi.encodePacked(BORROW_METHOD, block.chainid, safe, nonce, abi.encode(token, amountInUsd))).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 }

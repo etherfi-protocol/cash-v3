@@ -222,56 +222,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @dev Cancels the safe's pending withdrawal request when it competes with a repay/spend of `token`.
-     *      Reverts if `amount` exceeds the safe's loose balance. Otherwise, if `token` has a leg in the
-     *      pending request and `amount` plus that reserved leg exceeds the loose balance, the whole request
-     *      is cancelled: the repay/spend outranks the reservation. Conservative on purpose: the check uses
-     *      the quoted `amount`, but both engines cap the actual pull at the live debt (a full repay resolves
-     *      to the outstanding debt), so a repay quoted above the debt can cancel a request that the real,
-     *      smaller pull would have left intact. Only the repaid token's leg and the current balance are
-     *      considered.
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token being repaid/spent
-     * @param amount Quoted token amount for the operation
-     * @custom:throws InsufficientBalance if `amount` exceeds the safe's loose balance of `token`
-     */
-    function _cancelCompetingWithdrawal(address safe, address token, uint256 amount) internal {
-        SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
-        uint256 balance = IERC20(token).balanceOf(safe);
-
-        if (amount > balance) revert InsufficientBalance();
-
-        uint256 len = safeCashConfig.pendingWithdrawalRequest.tokens.length;
-        uint256 tokenIndex = len;
-        for (uint256 i = 0; i < len;) {
-            if (safeCashConfig.pendingWithdrawalRequest.tokens[i] == token) {
-                tokenIndex = i;
-                break;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        // If the token does not exist in withdrawal request, return
-        if (tokenIndex == len) return;
-
-        if (amount + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
-            _cancelOldWithdrawal(safe);
-        }
-    }
-
-    /**
-     * @dev Checks if a token is a valid borrow token
-     * @param debtManager Reference to the debt manager contract
-     * @param token Address of the token to check
-     * @return Boolean indicating if the token is a borrow token
-     */
-    function _isBorrowToken(IDebtManager debtManager, address token) internal view returns (bool) {
-        return debtManager.isBorrowToken(token);
-    }
-
-    /**
      * @dev Modifier to ensure caller has the EtherFi wallet role
      * @custom:throws OnlyEtherFiWallet if caller does not have the role
      */

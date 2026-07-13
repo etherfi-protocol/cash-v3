@@ -33,7 +33,7 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
             modules[0] = address(cashModule);
 
             bytes[] memory modulesSetupData = new bytes[](1);
-            modulesSetupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
+            modulesSetupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, false);
 
             threshold = 1;
             bytes32 salt = keccak256(abi.encodePacked("borrower", i));
