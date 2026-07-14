@@ -358,11 +358,13 @@ interface ICashModule {
     function isLendActive(address safe) external view returns (bool);
 
     /**
-     * @notice The user's raw lend opt-out preference, independent of which engine the safe runs on
+     * @notice The user's effective lend opt-out state, independent of which engine the safe runs on
      * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
-     *      Aave during migration before its engine flag flips.
+     *      Aave during migration before its engine flag flips. Effective: a pending opt-out whose finalize
+     *      time has passed reports true even before it is processed, mirroring how getMode honors a matured
+     *      incoming mode.
      * @param safe The safe to query
-     * @return True if the safe has opted out via toggleLend(false) + processLendOptOut
+     * @return True if the safe opted out via toggleLend(false), processed or matured-pending
      */
     function isLendOptedOut(address safe) external view returns (bool);
 

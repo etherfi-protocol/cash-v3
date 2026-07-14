@@ -256,18 +256,20 @@ contract CashModuleCore is CashModuleStorageContract {
      * @return True if the safe uses the gateway engine and has not opted out
      */
     function isLendActive(address safe) external view returns (bool) {
-        return _usesLendGateway(safe) && !_getCashModuleStorage().safeCashConfig[safe].lendOptedOut;
+        return _usesLendGateway(safe) && !CashLendLib.isLendOptedOut(_getCashModuleStorage(), safe);
     }
 
     /**
-     * @notice The user's raw lend opt-out preference, independent of the safe's engine
+     * @notice The user's effective lend opt-out state, independent of the safe's engine
      * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
-     *      Aave during migration before its engine flag flips.
+     *      Aave during migration before its engine flag flips. Effective: a pending opt-out whose finalize
+     *      time has passed reports true even before processLendOptOut runs, mirroring how getMode honors a
+     *      matured incoming mode.
      * @param safe Address of the EtherFi Safe
-     * @return True if the safe has opted out via toggleLend(false) + processLendOptOut
+     * @return True if the safe opted out via toggleLend(false), processed or matured-pending
      */
     function isLendOptedOut(address safe) external view returns (bool) {
-        return _getCashModuleStorage().safeCashConfig[safe].lendOptedOut;
+        return CashLendLib.isLendOptedOut(_getCashModuleStorage(), safe);
     }
 
     /**
@@ -323,7 +325,7 @@ contract CashModuleCore is CashModuleStorageContract {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage safeConfig = $.safeCashConfig[safe];
         if (safeConfig.lendOptOutFinalizeTime == 0) revert NoPendingLendOptOut();
-        if (block.timestamp < safeConfig.lendOptOutFinalizeTime) revert LendOptOutNotReady();
+        if (block.timestamp <= safeConfig.lendOptOutFinalizeTime) revert LendOptOutNotReady();
         if (CashLendLib.hasOpenBorrows($, safe)) revert HasOpenBorrows();
         CashLendLib.executeLendOptOut($, safe);
     }
@@ -388,6 +390,10 @@ contract CashModuleCore is CashModuleStorageContract {
      */
     function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
+
+        // A matured opt-out takes effect before the spend routes: it forces Debit mode (and unwinds the
+        // Aave position), so this must run before _validateSpend reads the mode.
+        CashLendLib.processLendOptOutIfReady($, safe);
 
         uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
 
@@ -536,7 +542,10 @@ contract CashModuleCore is CashModuleStorageContract {
      * @custom:throws OnlyBorrowToken if the token cannot carry debt on the safe's engine
      */
     function repay(address safe, address token, uint256 amountInUsd) public whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
-        CashLendLib.repay(_getCashModuleStorage(), etherFiDataProvider, safe, token, amountInUsd);
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        CashLendLib.repay($, etherFiDataProvider, safe, token, amountInUsd);
+        // A repay can clear the open borrows that were blocking a matured opt-out from processing
+        CashLendLib.processLendOptOutIfReady($, safe);
     }
 
     /**

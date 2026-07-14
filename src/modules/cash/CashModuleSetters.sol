@@ -204,10 +204,18 @@ contract CashModuleSetters is CashModuleStorageContract {
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
+        // While an opt-out request is pending, the mode trajectory belongs to the opt-out: a Credit
+        // request would overwrite the Debit switch the request scheduled on the pending-mode rail, and a
+        // Debit request could only DEFER it (both use modeDelay, so a re-request always lands after the
+        // opt-out's finalize time), reopening the window where a matured-but-blocked opt-out sits in
+        // stored Credit. Opting back in (toggleLend(true)) re-opens setMode. No lazy opt-out processing
+        // here: with the request pending this reverts anyway, so processing could never be persisted.
+        if ($.safeCashConfig[safe].lendOptOutFinalizeTime != 0) revert LendOptedOut();
+
         _setCurrentMode($.safeCashConfig[safe]);
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
-        // Credit mode requires lend collateral on Aave; a safe that opted out of lend cannot enter Credit
+        // Credit mode requires collateral on Lend: a safe that opted out of lend cannot re-enter Credit
         if (mode == Mode.Credit && $.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
 
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
@@ -246,6 +254,10 @@ contract CashModuleSetters is CashModuleStorageContract {
             revert InvalidWithdrawRequest();
         }
 
+        // A matured opt-out returns all Aave collateral to the safe first, so the withdrawal sources
+        // from loose balances instead of pulling from the lend market
+        CashLendLib.processLendOptOutIfReady(_getCashModuleStorage(), safe);
+
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
 
@@ -263,6 +275,8 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         if (!etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
         if (!$.whitelistedModulesCanRequestWithdraw.contains(msg.sender)) revert OnlyWhitelistedModuleCanRequestWithdraw();
+
+        CashLendLib.processLendOptOutIfReady($, safe);
 
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);

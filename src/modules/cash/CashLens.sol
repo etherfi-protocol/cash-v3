@@ -167,7 +167,6 @@ contract CashLens is UpgradeableProxy, Constants {
         SafeData memory safeData = cashModule.getData(safe);
 
         Mode mode = safeData.mode;
-        // Update mode if necessary
         if (safeData.incomingModeStartTime != 0) mode = safeData.incomingMode;
 
         // In Credit mode, only one token is allowed
