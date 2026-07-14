@@ -294,7 +294,8 @@ library CashLendLib {
      */
     function supplyToLend(CashModuleStorageContract.CashModuleStorage storage $, address safe, address[] calldata tokens) external {
         ILendGateway gateway = _requireGateway($, safe);
-        if ($.safeCashConfig[safe].lendOptedOut) return;
+        processLendOptOutIfReady($, safe);
+        if (isLendOptedOut($, safe)) return;
 
         for (uint256 i = 0; i < tokens.length; i++) {
             if (!gateway.isRegistered(tokens[i])) continue;
@@ -334,7 +335,7 @@ library CashLendLib {
     function borrow(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, address token, uint256 amountInUsd, uint256 nonce, address[] calldata signers, bytes[] calldata signatures) external {
         CashVerificationLib.verifyBorrowSig(safe, nonce, token, amountInUsd, signers, signatures);
         ILendGateway gateway = _requireGateway($, safe);
-        if ($.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
+        if (isLendOptedOut($, safe)) revert LendOptedOut();
 
         if (!gateway.isBorrowable(token)) revert OnlyBorrowToken();
         uint256 amount = DebitSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountInUsd);
@@ -392,6 +393,36 @@ library CashLendLib {
         }
         (, uint256 debtManagerDebt) = $.debtManager.borrowingOf(safe);
         return debtManagerDebt != 0;
+    }
+
+    /**
+     * @notice Whether the safe is effectively opted out of lend: either the opt-out has been processed,
+     *         or a pending request's finalize time has passed (mirroring how getMode honors a matured
+     *         incoming mode before _setCurrentMode has applied it)
+     * @param $ The CashModule storage (passed by the delegatecalling module)
+     * @param safe Address of the EtherFi Safe
+     * @return True if the safe is opted out or a matured opt-out request awaits processing
+     */
+    function isLendOptedOut(CashModuleStorageContract.CashModuleStorage storage $, address safe) public view returns (bool) {
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
+        return $$.lendOptedOut || ($$.lendOptOutFinalizeTime != 0 && block.timestamp >= $$.lendOptOutFinalizeTime);
+    }
+
+    /**
+     * @notice Lazily executes a matured lend opt-out on the mutating paths, so a user never has to wait
+     *         for the permissionless processLendOptOut call (the opt-out twin of _setCurrentMode)
+     * @dev No-op when nothing is pending or the delay hasn't elapsed. Also a no-op — never a revert — when
+     *      open borrows block the unwind (all collateral cannot be withdrawn under debt): the effective
+     *      views already report the safe as opted out meanwhile, and the next touch after the debt clears
+     *      (e.g. repay) completes the opt-out.
+     * @param $ The CashModule storage (passed by the delegatecalling module)
+     * @param safe Address of the EtherFi Safe
+     */
+    function processLendOptOutIfReady(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
+        SafeCashConfig storage $$ = $.safeCashConfig[safe];
+        if ($$.lendOptOutFinalizeTime == 0 || block.timestamp < $$.lendOptOutFinalizeTime) return;
+        if (hasOpenBorrows($, safe)) return;
+        executeLendOptOut($, safe);
     }
 
     /**
@@ -485,8 +516,9 @@ library CashLendLib {
      */
     function spendCredit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) external {
         // Defense-in-depth: a safe that opted out of lend is forced to Debit and blocked from re-entering
-        // Credit, so credit spending must never reach an opted-out safe.
-        if ($.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
+        // Credit, so credit spending must never reach an opted-out safe. Effective check: a matured
+        // opt-out blocked from lazy processing by open borrows must still stop borrowing more.
+        if (isLendOptedOut($, safe)) revert LendOptedOut();
 
         uint256 amount;
         if (!_usesLendGateway($, safe)) {

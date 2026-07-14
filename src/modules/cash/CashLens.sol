@@ -127,6 +127,7 @@ contract CashLens is UpgradeableProxy, Constants {
         SafeData memory safeData = cashModule.getData(safe);
         if (safeData.incomingModeStartTime != 0) mode = safeData.incomingMode;
         else mode = safeData.mode;
+        if (mode == Mode.Credit && _lendOptOutForcesDebit(safe)) mode = Mode.Debit;
 
         address[] memory tokenPreferences = mode == Mode.Debit ? debitModeTokenPreferences : creditModeTokenPreferences;
 
@@ -137,6 +138,17 @@ contract CashLens is UpgradeableProxy, Constants {
         (token, canSpendResult, declineReason) = _checkTokenPreferences(safe, txId, tokenPreferences, amountInUsd);
 
         return (mode, token, canSpendResult, declineReason);
+    }
+
+    /**
+     * @dev Mirrors the spend path's lazy opt-out processing: a pending lend opt-out forces the safe into
+     *      Debit mode when it matures (executeLendOptOut), so credit-mode simulations must route as Debit.
+     *      A not-yet-matured request is treated the same way — like the incoming-mode handling above — since
+     *      a spend authorized now can settle on-chain after the request matures. isLendOptedOut is the
+     *      effective view (true once the finalize time passes), lendOptOutFinalizeTime covers the pending window.
+     */
+    function _lendOptOutForcesDebit(address safe) internal view returns (bool) {
+        return cashModule.isLendOptedOut(safe) || cashModule.lendOptOutFinalizeTime(safe) != 0;
     }
 
     function _checkTokenPreferences(address safe, bytes32 txId, address[] memory tokenPreferences, uint256 amountInUsd) internal view returns (address token, bool canSpendResult, string memory declineReason) {
@@ -169,6 +181,7 @@ contract CashLens is UpgradeableProxy, Constants {
         Mode mode = safeData.mode;
         // Update mode if necessary
         if (safeData.incomingModeStartTime != 0) mode = safeData.incomingMode;
+        if (mode == Mode.Credit && _lendOptOutForcesDebit(safe)) mode = Mode.Debit;
 
         // In Credit mode, only one token is allowed
         if (mode == Mode.Credit && tokens.length > 1) return (false, "Only one token allowed in Credit mode");

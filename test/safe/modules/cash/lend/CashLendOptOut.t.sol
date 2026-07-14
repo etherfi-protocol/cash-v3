@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { BinSponsor, ICashModule, Mode } from "../../../../../src/interfaces/ICashModule.sol";
+import { BinSponsor, Cashback, ICashModule, Mode } from "../../../../../src/interfaces/ICashModule.sol";
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../../../../src/libraries/SignatureUtils.sol";
@@ -343,6 +343,153 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         cashModule.processLendOptOut(address(safe));
     }
 
+    // ----------------------------------------------------------------- effective state & lazy processing
+
+    /// isLendOptedOut / isLendActive report the opt-out as soon as the finalize time passes — before
+    /// processLendOptOut runs — mirroring how getMode honors a matured incoming mode.
+    function test_isLendOptedOut_effectiveOnceDelayElapses() public {
+        _requestOptOut();
+        assertFalse(cashModule.isLendOptedOut(address(safe)), "not opted out during the delay");
+        assertTrue(cashModule.isLendActive(address(safe)), "still active during the delay");
+
+        vm.warp(block.timestamp + MODE_DELAY);
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "effectively opted out at the finalize time");
+        assertFalse(cashModule.isLendActive(address(safe)), "lend inactive at the finalize time");
+        assertTrue(cashModule.lendOptOutFinalizeTime(address(safe)) != 0, "not yet processed");
+    }
+
+    /// A spend lazily executes a matured opt-out before routing: the collateral comes home, the flag is
+    /// set, and the spend runs as a debit from the loose balance.
+    function test_spend_processesMaturedOptOut() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _requestOptOut();
+        vm.warp(block.timestamp + MODE_DELAY);
+
+        deal(address(usdc), address(safe), 100e6);
+
+        vm.expectEmit(true, false, false, false, address(cashEventEmitter));
+        emit CashEventEmitter.LendOptOutExecuted(address(safe));
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(50e6), _noCashback());
+
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "opted out");
+        assertEq(cashModule.lendOptOutFinalizeTime(address(safe)), 0, "processed, not just matured");
+        assertApproxEqAbs(weETH.balanceOf(address(safe)), 5 ether, 2, "collateral back in the safe");
+        assertTrue(cashModule.transactionCleared(address(safe), txId), "spend went through");
+    }
+
+    /// A credit-mode safe with a matured opt-out spends as Debit: the lazy processing forces the mode
+    /// before spend reads it, so no new Aave debt is ever taken.
+    function test_spend_creditMode_maturedOptOut_routesDebit() public {
+        _setModeCredit();
+        _requestOptOut();
+        vm.warp(block.timestamp + MODE_DELAY);
+
+        deal(address(usdc), address(safe), 100e6);
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(50e6), _noCashback());
+
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "forced to Debit");
+        assertEq(gw.debtOf(address(safe), address(usdc)), 0, "no Aave debt taken");
+        assertApproxEqAbs(usdc.balanceOf(address(safe)), 50e6, 1e5, "spent from the loose balance");
+    }
+
+    /// The auto-supply sweep lazily executes a matured opt-out and then skips supplying.
+    function test_supplyToLend_processesMaturedOptOutAndSkips() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _requestOptOut();
+        vm.warp(block.timestamp + MODE_DELAY);
+
+        deal(address(weETH), address(safe), 1 ether); // loose funds the sweep would otherwise supply
+
+        vm.expectEmit(true, false, false, false, address(cashEventEmitter));
+        emit CashEventEmitter.LendOptOutExecuted(address(safe));
+        vm.prank(etherFiWallet);
+        cashModule.supplyToLend(address(safe), _tokens(address(weETH)));
+
+        assertLe(gw.suppliedOf(address(safe), address(weETH)), 2, "nothing supplied");
+        assertApproxEqAbs(weETH.balanceOf(address(safe)), 6 ether, 2, "loose + returned collateral stay in the safe");
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "opted out");
+        assertEq(cashModule.lendOptOutFinalizeTime(address(safe)), 0, "processed");
+    }
+
+    /// A borrow taken during the delay window blocks processing but not the effective state: the views
+    /// report opted out, credit is blocked, and the repay that clears the debt completes the opt-out.
+    function test_repay_completesOptOutBlockedByOpenBorrows() public {
+        _requestOptOut();
+        // Borrow during the delay window (allowed: the opt-out has not matured yet)
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), 1000e6);
+
+        vm.warp(block.timestamp + MODE_DELAY);
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "effectively opted out while debt blocks processing");
+
+        // The explicit processor still reverts on open borrows
+        vm.expectRevert(ICashModule.HasOpenBorrows.selector);
+        cashModule.processLendOptOut(address(safe));
+
+        // Repaying the debt completes the opt-out in the same call
+        deal(address(usdc), address(safe), 2000e6);
+        vm.expectEmit(true, false, false, false, address(cashEventEmitter));
+        emit CashEventEmitter.LendOptOutExecuted(address(safe));
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), 1100e6); // over-quote; capped at the live debt
+
+        assertEq(gw.debtOf(address(safe), address(usdc)), 0, "debt cleared");
+        assertEq(cashModule.lendOptOutFinalizeTime(address(safe)), 0, "opt-out completed by the repay");
+        assertApproxEqAbs(weETH.balanceOf(address(safe)), 5 ether, 2, "collateral unwound to the safe");
+    }
+
+    /// CashModule.borrow rejects a matured-but-unprocessed opt-out (the effective check).
+    function test_borrow_revertsOnMaturedUnprocessedOptOut() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _requestOptOut();
+        vm.warp(block.timestamp + MODE_DELAY);
+
+        (address[] memory signers, bytes[] memory sigs) = _borrowSig(address(usdc), 100e6);
+        vm.expectRevert(ICashModule.LendOptedOut.selector);
+        cashModule.borrow(address(safe), address(usdc), 100e6, signers, sigs);
+    }
+
+    /// setMode(Credit) is blocked while a matured opt-out awaits processing (the effective check).
+    function test_setMode_maturedOptOut_blocksCredit() public {
+        _requestOptOut();
+        vm.warp(block.timestamp + MODE_DELAY);
+
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.SET_MODE_METHOD, block.chainid, address(safe), nonce, abi.encode(Mode.Credit))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
+
+        vm.expectRevert(ICashModule.LendOptedOut.selector);
+        cashModule.setMode(address(safe), Mode.Credit, owner1, abi.encodePacked(r, s, v));
+    }
+
+    /// The lens routes a credit-mode safe with a pending opt-out as Debit, matching the spend path's
+    /// lazy processing (and the incoming-mode convention: pending counts, since the spend can settle
+    /// after the request matures).
+    function test_canSpendSingleToken_pendingOptOutForcesDebit() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _setModeCredit();
+        _requestOptOut();
+
+        deal(address(usdc), address(safe), 100e6);
+        (Mode mode,,,) = cashLens.canSpendSingleToken(address(safe), txId, _tokens(address(usdc)), _tokens(address(usdc)), 50e6);
+        assertEq(uint8(mode), uint8(Mode.Debit), "pending opt-out routes as Debit");
+    }
+
+    /// Opting back in after the request matured (but before processing) cancels it — the collateral
+    /// never left Aave and lend is immediately active again.
+    function test_optInToLend_cancelsMaturedUnprocessedRequest() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _requestOptOut();
+        vm.warp(block.timestamp + MODE_DELAY);
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "effectively opted out");
+
+        _optIn();
+        assertFalse(cashModule.isLendOptedOut(address(safe)), "opt-out cancelled");
+        assertTrue(cashModule.isLendActive(address(safe)), "lend active again");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 5 ether, 2, "collateral never left Aave");
+    }
+
     // ----------------------------------------------------------------- signing helpers
 
     function _requestOptOut() internal {
@@ -369,5 +516,37 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         cashModule.setMode(address(safe), Mode.Credit, owner1, abi.encodePacked(r, s, v));
         // Credit takes effect after the mode delay
         vm.warp(block.timestamp + MODE_DELAY + 1);
+    }
+
+    /// @dev Builds the owner quorum (owner1 + owner2, the safe's threshold) signing a borrow intent.
+    function _borrowSig(address token, uint256 amountInUsd) internal view returns (address[] memory, bytes[] memory) {
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.BORROW_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(token, amountInUsd))).toEthSignedMessageHash();
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digest);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digest);
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+        return (signers, signatures);
+    }
+
+    function _tokens(address token) internal pure returns (address[] memory) {
+        address[] memory arr = new address[](1);
+        arr[0] = token;
+        return arr;
+    }
+
+    function _amounts(uint256 amount) internal pure returns (uint256[] memory) {
+        uint256[] memory arr = new uint256[](1);
+        arr[0] = amount;
+        return arr;
+    }
+
+    function _noCashback() internal pure returns (Cashback[] memory) {
+        return new Cashback[](0);
     }
 }

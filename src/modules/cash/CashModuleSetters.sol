@@ -204,11 +204,14 @@ contract CashModuleSetters is CashModuleStorageContract {
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
+        // A matured opt-out forces Debit and must land before the mode logic reads or changes state
+        CashLendLib.processLendOptOutIfReady($, safe);
         _setCurrentMode($.safeCashConfig[safe]);
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
-        // Credit mode requires lend collateral on Aave; a safe that opted out of lend cannot enter Credit
-        if (mode == Mode.Credit && $.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
+        // Credit mode requires lend collateral on Aave; a safe that opted out of lend cannot enter Credit.
+        // Effective check: also blocks a matured opt-out that open borrows kept from processing above.
+        if (mode == Mode.Credit && CashLendLib.isLendOptedOut($, safe)) revert LendOptedOut();
 
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
@@ -245,6 +248,10 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (_getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(msg.sender) || _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(recipient)) {
             revert InvalidWithdrawRequest();
         }
+
+        // A matured opt-out returns all Aave collateral to the safe first, so the withdrawal sources
+        // from loose balances instead of pulling from the lend market
+        CashLendLib.processLendOptOutIfReady(_getCashModuleStorage(), safe);
 
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
