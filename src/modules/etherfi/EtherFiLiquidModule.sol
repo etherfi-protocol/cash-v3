@@ -11,7 +11,6 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { ILayerZeroTeller } from "../../interfaces/ILayerZeroTeller.sol";
-import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
@@ -166,15 +165,6 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         }
     }
 
-    /// @dev Resolved live from the CashModule, the gateway address's single source of truth.
-    function gateway() public view override returns (ILendGateway) {
-        return cashModule.getLendGateway();
-    }
-
-    /// @dev The sandwich acts only for a safe whose assets live in Aave: on the gateway engine and not opted out.
-    function _lendActive(address safe) internal view override returns (bool) {
-        return cashModule.isLendActive(safe);
-    }
 
     /**
      * @notice Deposits tokens to a Liquid vault using signature verification

@@ -11,7 +11,6 @@ import { SafeData, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IFraxCustodian } from "../../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop, MessagingFee } from "../../interfaces/IFraxRemoteHop.sol";
-import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
@@ -125,16 +124,6 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         fraxusd = _fraxusd;
         custodian = _custodian;
         remoteHop = _remoteHop;
-    }
-
-    /// @dev Resolved live from the CashModule, the gateway address's single source of truth.
-    function gateway() public view override returns (ILendGateway) {
-        return cashModule.getLendGateway();
-    }
-
-    /// @dev The sandwich acts only for a safe whose assets live in Aave: on the gateway engine and not opted out.
-    function _lendActive(address safe) internal view override returns (bool) {
-        return cashModule.isLendActive(safe);
     }
 
     /**

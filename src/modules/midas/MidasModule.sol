@@ -7,7 +7,6 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
-import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IMidasVault } from "../../interfaces/IMidasVault.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
@@ -96,16 +95,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
                 ++i;
             }
         }
-    }
-
-    /// @dev Resolved live from the CashModule, the gateway address's single source of truth.
-    function gateway() public view override returns (ILendGateway) {
-        return cashModule.getLendGateway();
-    }
-
-    /// @dev The sandwich acts only for a safe whose assets live in Aave: on the gateway engine and not opted out.
-    function _lendActive(address safe) internal view override returns (bool) {
-        return cashModule.isLendActive(safe);
     }
 
     /**

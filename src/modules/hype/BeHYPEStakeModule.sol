@@ -9,7 +9,6 @@ import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 import { IL2BeHYPEOAppStaker } from "../../interfaces/IL2BeHYPEOAppStaker.sol";
-import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 
@@ -74,16 +73,6 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
         whype = _whype;
         beHYPE = _beHYPE;
         _getBeHYPEStakeModuleStorage().refundGasLimit = _refundGasLimit;
-    }
-
-    /// @dev Resolved live from the CashModule, the gateway address's single source of truth.
-    function gateway() public view override returns (ILendGateway) {
-        return cashModule.getLendGateway();
-    }
-
-    /// @dev The sandwich acts only for a safe whose assets live in Aave: on the gateway engine and not opted out.
-    function _lendActive(address safe) internal view override returns (bool) {
-        return cashModule.isLendActive(safe);
     }
 
     /**
