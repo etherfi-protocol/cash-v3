@@ -2,57 +2,50 @@
 pragma solidity ^0.8.28;
 
 import { ILendGateway } from "../interfaces/ILendGateway.sol";
+import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
 
 /**
  * @title ModuleLendGatewaySandwich
- * @notice Shared helper for modules that move a safe's assets once those assets live in Aave.
- *         Auto-supply leaves the asset in the safe's Aave position, not the safe, so a module
- *         withdraws it back to the safe, runs its action, then re-supplies the output as collateral.
- * @dev Provides the two bookends; the module brackets its own action between them. Health is enforced
- *      by Aave itself: the Spoke rejects any collateral withdraw that would leave the position's health
- *      factor below 1, and with Aave v4's single collateralFactor (LTV and liquidation threshold are the
- *      same) that is exactly the under-LTV bound. The back bookend only ever adds collateral, so the
- *      post-op position can never be worse than what Aave validated at withdraw time; no extra check here.
+ * @notice Bookends for modules that move a safe's assets once auto-supply has parked them in Aave:
+ *         withdraw the input back to the safe, run the action, re-supply the output as collateral.
+ * @dev No health check of its own: Aave rejects any withdraw that would push the health factor below 1
+ *      (its collateralFactor is both LTV and liquidation threshold), and the back bookend only adds
+ *      collateral. Both bookends no-op unless _lendActive, so a legacy or opted-out safe is untouched.
  *
- *      The helper holds no state: the consumer supplies the gateway (resolved live from the CashModule,
- *      its single source of truth) and the _lendActive predicate (CashModule.isLendActive). Every bookend
- *      sits behind _lendActive, which is false for a legacy safe or one that opted out, so the gateway is
- *      only dereferenced for a safe whose assets actually live in Aave.
+ *      Inherits ModuleCheckBalance because the bookends extend its balance model (the front bookend
+ *      sources what _getAvailableAmount found missing) and it holds the cashModule reference every
+ *      consumer already has. Abstract, compiled into each consumer, never deployed on its own; changes
+ *      ship by redeploying the consumers.
  * @author ether.fi
  */
-abstract contract ModuleLendGatewaySandwich {
+abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     /**
-     * @notice The lend gateway the bookends drive
-     * @dev A consumer resolves it live from the CashModule (`cashModule.getLendGateway()`), the gateway
-     *      address's single source of truth, rather than capturing it at deploy.
+     * @notice The lend gateway the bookends drive, resolved live from the CashModule
+     * @dev Virtual only for the test harness, which pins a mock
      * @return The lend gateway
      */
-    function gateway() public view virtual returns (ILendGateway);
+    function gateway() public view virtual returns (ILendGateway) {
+        return cashModule.getLendGateway();
+    }
 
     /**
-     * @notice Whether the sandwich should touch Aave for `safe`
-     * @dev A consumer must return true only when the safe's assets actually live in Aave: the safe is on the
-     *      gateway engine and has not opted out. That is exactly CashModule.isLendActive, which a legacy safe
-     *      reports false (its assets stay loose under DebtManager, so re-supplying its output into Aave would
-     *      hide it from DebtManager). Left abstract so every consumer states the predicate.
+     * @notice Whether the safe's assets live in Aave: on the gateway engine and not opted out
+     * @dev Virtual only for the test harness
      * @param safe The safe to test
      * @return True if the Aave bookends should run for the safe
      */
-    function _lendActive(address safe) internal view virtual returns (bool);
+    function _lendActive(address safe) internal view virtual returns (bool) {
+        return cashModule.isLendActive(safe);
+    }
 
     /**
      * @notice Pulls the part of `amount` not already loose in the safe out of its Aave position
-     * @dev Sizes the withdraw at min(amount - looseAvailable, supplied) so it never asks Aave for more than
-     *      the safe supplied and never touches an unsupplied or unregistered asset (suppliedOf is zero for
-     *      both, so ETH and non-reserve inputs stay untouched). The caller passes `looseAvailable` (the loose
-     *      balance net of reservations) since the reservation view lives on the module, not the helper.
-     *      A safe whose assets do not live in Aave has nothing to pull back, so this is a no-op for it.
-     *      Aave reverts if the withdraw would drop the position's health factor below 1 (its collateralFactor
-     *      doubles as LTV and liquidation threshold), so the operation cannot leave the safe over-LTV.
+     * @dev Withdraws min(amount - looseAvailable, supplied), so an unsupplied or unregistered asset (ETH
+     *      included) is untouched. Aave rejects a withdraw that would push the health factor below 1.
      * @param safe The safe whose position is debited
      * @param asset The asset to make available
      * @param amount The total amount the operation needs loose in the safe
-     * @param looseAvailable The loose balance already usable in the safe (balance net of pending-withdrawal reservations)
+     * @param looseAvailable The loose balance already usable in the safe (net of pending-withdrawal reservations)
      */
     function _withdrawShortfall(address safe, address asset, uint256 amount, uint256 looseAvailable) internal {
         if (amount <= looseAvailable) return;
@@ -66,11 +59,8 @@ abstract contract ModuleLendGatewaySandwich {
 
     /**
      * @notice Supplies an asset from the safe back into Aave and marks it as collateral, best-effort
-     * @dev No-op for a safe whose assets do not live in Aave, and for an asset the gateway does not list as a
-     *      reserve. The supply itself is best-effort: a reserve that rejects it (frozen, paused, at its supply
-     *      cap, or the Hub spoke halted) is swallowed rather than reverting the whole operation after the swap
-     *      or bridge already ran. In every case the output stays loose in the safe and the next sweep restores
-     *      it as collateral.
+     * @dev No-op for an unregistered asset. A rejected supply (frozen, paused, capped) is swallowed rather
+     *      than reverting the action that already ran; the output stays loose and the next sweep restores it.
      * @param safe The safe whose position is credited
      * @param asset The asset to supply
      * @param amount The amount to supply

@@ -330,11 +330,17 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_FraxModule() public {
+        // FraxModule gains the Aave sandwich for Lend, so its bytecode no longer matches the deployed
+        // pre-Lend OP implementation. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new FraxModule(dataProviderProxy, cc.fraxusd, cc.fraxCustodian, cc.fraxRemoteHop));
         _verify("FraxModule", fraxModule, local);
     }
 
     function test_verifyBytecode_EtherFiStakeModule() public {
+        // EtherFiStakeModule gains the Aave sandwich for Lend, so its bytecode no longer matches the deployed
+        // pre-Lend OP implementation. Re-enable after the Lend deployment.
+        vm.skip(true);
         address local = address(new EtherFiStakeModule(dataProviderProxy, cc.syncPool, cc.weth, cc.weETH));
         _verify("EtherFiStakeModule", etherFiStakeModule, local);
     }

@@ -10,14 +10,19 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IMidasVault } from "../../interfaces/IMidasVault.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 
 /**
  * @title MidasModule
  * @author ether.fi
  * @notice Module for interacting with Midas Vaults
- * @dev Extends ModuleBase to provide Midas Vault integration for Safes
+ * @dev Extends ModuleBase to provide Midas Vault integration for Safes. A gateway safe's assets may be
+ *      supplied to Aave, so the deposit withdraws any shortfall of the input from the safe's Aave position
+ *      first and re-supplies the Midas-token output when the gateway lists it as a reserve. Withdraw pulls
+ *      any shortfall of the Midas token back from Aave, but has no re-supply bookend because the asset output
+ *      arrives asynchronously through the redemption vault, not in this call.
  */
-contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient {
+contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
 
@@ -165,6 +170,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         if (depositVault == address(0)) revert UnsupportedMidasToken();
 
         uint256 scaledAmount = _scaleAmount(amount, asset, midasToken);
+
+        // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
+        // full amount loose.
+        _withdrawShortfall(safe, asset, amount, _getAvailableAmount(safe, asset));
         _checkAmountAvailable(safe, asset, amount);
 
         uint256 midasTokenBefore = ERC20(midasToken).balanceOf(safe);
@@ -182,6 +191,9 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
 
         uint256 midasTokenReceived = ERC20(midasToken).balanceOf(safe) - midasTokenBefore;
         if (midasTokenReceived < minReturnAmount) revert InsufficientReturnAmount();
+
+        // Re-supply the Midas-token output as collateral when the gateway lists it; an unlisted output stays loose.
+        _resupplyToGateway(safe, midasToken, midasTokenReceived);
 
         emit Deposit(safe, asset, amount, midasToken, midasTokenReceived);
     }
@@ -234,6 +246,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         address redemptionVault = vaultConfig.redemptionVault;
         if (redemptionVault == address(0)) revert UnsupportedMidasToken();
 
+        // Pull any shortfall of the Midas token out of the safe's Aave position, then confirm the safe holds
+        // the full amount loose. No re-supply bookend: the asset output arrives asynchronously via the
+        // redemption vault, not in this call.
+        _withdrawShortfall(safe, midasToken, amount, _getAvailableAmount(safe, midasToken));
         _checkAmountAvailable(safe, midasToken, amount);
 
         address[] memory to = new address[](2);

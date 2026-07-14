@@ -5,7 +5,15 @@ import { Test } from "forge-std/Test.sol";
 
 import { ILendGateway } from "../../../src/interfaces/ILendGateway.sol";
 import { MockLendGateway } from "../../../src/mocks/MockLendGateway.sol";
+import { ModuleCheckBalance } from "../../../src/modules/ModuleCheckBalance.sol";
 import { ModuleLendGatewaySandwich } from "../../../src/modules/ModuleLendGatewaySandwich.sol";
+
+/// @dev Satisfies the ModuleCheckBalance constructor; the harness overrides everything that touches cashModule.
+contract MockDataProvider {
+    function getCashModule() external pure returns (address) {
+        return address(1);
+    }
+}
 
 /// @notice Exposes the base's internal bookends so they can be called directly in tests
 contract SandwichHarness is ModuleLendGatewaySandwich {
@@ -15,7 +23,7 @@ contract SandwichHarness is ModuleLendGatewaySandwich {
     /// @dev A real consumer computes this from cashModule.isLendActive; the harness sets it directly (defaults on).
     bool public lendActive = true;
 
-    constructor(address _gateway) {
+    constructor(address _gateway, address _dataProvider) ModuleCheckBalance(_dataProvider) {
         mockGateway = ILendGateway(_gateway);
     }
 
@@ -50,7 +58,7 @@ contract ModuleLendGatewaySandwichTest is Test {
 
     function setUp() public {
         gateway = new MockLendGateway();
-        harness = new SandwichHarness(address(gateway));
+        harness = new SandwichHarness(address(gateway), address(new MockDataProvider()));
     }
 
     // The withdraw bookend routes to the safe and does not guard health; Aave guards the withdraw itself.

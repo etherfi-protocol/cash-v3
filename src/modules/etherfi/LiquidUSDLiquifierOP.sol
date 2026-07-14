@@ -6,7 +6,6 @@ import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IER
 
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
-import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
@@ -103,15 +102,6 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
         _disableInitializers();
     }
 
-    /// @dev Resolved live from the CashModule, the gateway address's single source of truth.
-    function gateway() public view override returns (ILendGateway) {
-        return cashModule.getLendGateway();
-    }
-
-    /// @dev The gateway legs act only for a safe whose assets live in Aave: on the gateway engine and not opted out.
-    function _lendActive(address safe) internal view override returns (bool) {
-        return cashModule.isLendActive(safe);
-    }
 
     /**
      * @notice Initializes the contract

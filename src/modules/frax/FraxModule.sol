@@ -13,14 +13,19 @@ import { IFraxCustodian } from "../../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop, MessagingFee } from "../../interfaces/IFraxRemoteHop.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 
 /**
  * @title FraxModule
  * @author ether.fi
  * @notice Module for interacting with FraxUSD
- * @dev Extends ModuleBase to provide FraxUSD integration for Safes
+ * @dev Extends ModuleBase to provide FraxUSD integration for Safes. A gateway safe's assets may be supplied
+ *      to Aave, so the synchronous deposit and withdraw withdraw any shortfall of the input from the safe's
+ *      Aave position first and re-supply the output when the gateway lists it as a reserve. The async
+ *      withdraw leg goes through the Cash withdrawal flow, which already sources from Aave, so it is not
+ *      sandwiched here.
  */
-contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
+contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
 
@@ -163,6 +168,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     function _deposit(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturnAmount) internal {
         if (amountToDeposit == 0 || assetToDeposit == address(0)) revert InvalidInput();
 
+        // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
+        // full amount loose.
+        _withdrawShortfall(safe, assetToDeposit, amountToDeposit, _getAvailableAmount(safe, assetToDeposit));
         _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
 
         // Validate that custodian has sufficient balance for synchronous deposit
@@ -188,6 +196,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         uint256 fraxUSDTokenReceived = ERC20(fraxusd).balanceOf(safe) - fraxUSDTokenBefore;
 
         if (fraxUSDTokenReceived < minReturnAmount) revert InsufficientReturnAmount();
+
+        // Re-supply the fraxUSD output as collateral when the gateway lists it; an unlisted output stays loose.
+        _resupplyToGateway(safe, fraxusd, fraxUSDTokenReceived);
 
         emit Deposit(safe, assetToDeposit, amountToDeposit, fraxUSDTokenReceived);
     }
@@ -235,6 +246,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     function _withdraw(address safe, uint128 amountToWithdraw, address outputAsset, uint256 minReceiveAmount) internal {
         if (amountToWithdraw == 0 || outputAsset == address(0)) revert InvalidInput();
 
+        // Pull any shortfall of the fraxUSD input out of the safe's Aave position, then confirm the safe holds
+        // the full amount loose.
+        _withdrawShortfall(safe, fraxusd, amountToWithdraw, _getAvailableAmount(safe, fraxusd));
         _checkAmountAvailable(safe, fraxusd, amountToWithdraw);
 
         address[] memory to = new address[](2);
@@ -254,6 +268,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         uint256 assetReceived = ERC20(outputAsset).balanceOf(safe) - assetBefore;
 
         if (assetReceived < minReceiveAmount) revert InsufficientReturnAmount();
+
+        // Re-supply the output as collateral when the gateway lists it; an unlisted output stays loose.
+        _resupplyToGateway(safe, outputAsset, assetReceived);
 
         emit Withdrawal(safe, outputAsset, amountToWithdraw, assetReceived);
     }

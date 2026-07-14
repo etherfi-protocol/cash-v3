@@ -6,6 +6,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 import { IL2SyncPool } from "../../../src/interfaces/IL2SyncPool.sol";
 import { IWETH } from "../../interfaces/IWETH.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
@@ -14,9 +15,11 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
  * @title EtherFiStakeModule
  * @author ether.fi
  * @notice Module for staking ETH and WETH through the EtherFi protocol
- * @dev Extends ModuleBase to provide staking functionality for Safes
+ * @dev Extends ModuleBase to provide staking functionality for Safes. A gateway safe's WETH may be supplied
+ *      to Aave, so the deposit withdraws any shortfall of the input from the safe's Aave position first and
+ *      re-supplies the weETH output when the gateway lists it as a reserve.
  */
-contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance {
+contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
 
     /// @notice Reference to the L2SyncPool contract for staking operations
@@ -101,6 +104,10 @@ contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance {
     function _deposit(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturn) internal {
         if (assetToDeposit != weth && assetToDeposit != ETH) revert UnsupportedAsset();
         if (amountToDeposit == 0 || minReturn == 0) revert InvalidInput();
+
+        // Pull any shortfall of the input out of the safe's Aave position (a no-op for ETH, which is not a
+        // reserve), then confirm the safe holds the full amount loose.
+        _withdrawShortfall(safe, assetToDeposit, amountToDeposit, _getAvailableAmount(safe, assetToDeposit));
         _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
@@ -133,6 +140,9 @@ contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance {
         uint256 weETHAmtReceived = IERC20(weETH).balanceOf(safe) - weETHBalBefore;
 
         if (weETHAmtReceived < minReturn) revert InsufficientReturnAmount();
+
+        // Re-supply the weETH output as collateral when the gateway lists it; an unlisted output stays loose.
+        _resupplyToGateway(safe, weETH, weETHAmtReceived);
 
         emit StakeDeposit(safe, assetToDeposit, weETH, amountToDeposit, weETHAmtReceived);
     }
