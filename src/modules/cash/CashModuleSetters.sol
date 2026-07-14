@@ -269,6 +269,8 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (!etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
         if (!$.whitelistedModulesCanRequestWithdraw.contains(msg.sender)) revert OnlyWhitelistedModuleCanRequestWithdraw();
 
+        CashLendLib.processLendOptOutIfReady($, safe);
+
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         tokens[0] = token;

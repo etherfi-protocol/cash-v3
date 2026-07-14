@@ -595,6 +595,35 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit), "Credit after the would-be finalize time");
     }
 
+    /// A module withdrawal request lazily executes a matured opt-out just like the owner path: all the
+    /// collateral comes home first, so the request sources loose funds instead of pulling only the
+    /// shortfall and leaving the rest supplied on a safe the views already report as opted out.
+    function test_requestWithdrawalByModule_processesMaturedOptOut() public {
+        address module = makeAddr("withdrawModule");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+        vm.stopPrank();
+
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _requestOptOut();
+        vm.warp(block.timestamp + MODE_DELAY);
+
+        vm.expectEmit(true, false, false, false, address(cashEventEmitter));
+        emit CashEventEmitter.LendOptOutExecuted(address(safe));
+        vm.prank(module);
+        cashModule.requestWithdrawalByModule(address(safe), address(weETH), 1 ether);
+
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "opted out");
+        assertEq(cashModule.lendOptOutFinalizeTime(address(safe)), 0, "fully processed, not left half-honored");
+        assertLe(gw.suppliedOf(address(safe), address(weETH)), 2, "nothing left supplied on Aave");
+        assertApproxEqAbs(weETH.balanceOf(address(safe)), 5 ether, 2, "all collateral loose in the safe");
+    }
+
     /// Opting back in after the request matured (but before processing) cancels it — the collateral
     /// never left Aave and lend is immediately active again.
     function test_optInToLend_cancelsMaturedUnprocessedRequest() public {
