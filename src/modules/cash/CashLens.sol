@@ -192,24 +192,9 @@ contract CashLens is UpgradeableProxy, Constants {
 
     /// @notice Credit mode check: the spend must fit the Aave borrowing capacity and the reserve's liquidity
     function _creditCheck(address safe, address token, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
-        ILendGateway lendGateway = cashModule.getLendGateway();
-        if (!lendGateway.isBorrowable(token)) {
-            return (false, "Not a supported borrow token");
-        }
-
-        if (lendGateway.availableToBorrow(token) < _fromUsd(token, totalSpendingInUsd)) {
-            return (false, "Insufficient liquidity to cover the loan");
-        }
-
-        // availableBorrowsUsd is only the already-supplied position's capacity. This gate deliberately excludes
-        // loose collateral the spend-time resupply can pull in (CashLendLib._resupplyCollateral), since that
-        // capacity exists only by cancelling the safe's pending withdrawal; canSpend must not advertise it as
-        // headroom. So a credit spend declined here may still execute via resupply if it was authorized.
-        if (totalSpendingInUsd > lendGateway.getAccountData(safe).availableBorrowsUsd) {
-            return (false, "Insufficient borrowing power");
-        }
-
-        return (true, "");
+        // Token gate, reserve liquidity, and the health-factor-floor-buffered borrowing power live in the
+        // linked DebitSourcingLib (code size); see creditCheck there for the quote-vs-execution contract.
+        return DebitSourcingLib.creditCheck(cashModule.getLendGateway(), IPriceProvider(dataProvider.getPriceProvider()), safe, token, totalSpendingInUsd);
     }
 
     /// @notice Debit mode check: each token's spendable amount must cover its share of the spend, threading the borrowing headroom across tokens
@@ -220,7 +205,9 @@ contract CashLens is UpgradeableProxy, Constants {
         {
             ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
             hasDebt = account.debtUsd != 0;
-            borrowHeadroom = hasDebt ? account.availableBorrowsUsd : 0;
+            // Buffered by the health-factor floor: quotes size collateral withdrawals so the position
+            // stays above the floor; debit execution keeps the raw bound (spends always settle)
+            borrowHeadroom = hasDebt ? DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account) : 0;
         }
 
         for (uint256 i = 0; i < tokens.length; i++) {
@@ -375,7 +362,8 @@ contract CashLens is UpgradeableProxy, Constants {
             ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
             hasDebt = account.debtUsd != 0;
             if (hasDebt) {
-                borrowHeadroom = account.availableBorrowsUsd;
+                // Buffered by the health-factor floor, matching _debitCheck
+                borrowHeadroom = DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account);
             }
         }
 
@@ -417,22 +405,9 @@ contract CashLens is UpgradeableProxy, Constants {
             return CashLensLegacyLib.maxSpendCredit(cashModule, safe);
         }
 
-        ILendGateway lendGateway = cashModule.getLendGateway();
-        uint256 borrowPower = lendGateway.getAccountData(safe).availableBorrowsUsd;
-
-        address[] memory borrowTokens = lendGateway.borrowableAssets();
-        uint256 maxLiquidityUsd = 0;
-        for (uint256 i = 0; i < borrowTokens.length;) {
-            uint256 liquidityUsd = _toUsd(borrowTokens[i], lendGateway.availableToBorrow(borrowTokens[i]));
-            if (liquidityUsd > maxLiquidityUsd) {
-                maxLiquidityUsd = liquidityUsd;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        return borrowPower < maxLiquidityUsd ? borrowPower : maxLiquidityUsd;
+        // Floor-buffered borrowing power bounded by reserve liquidity; lives in the linked
+        // DebitSourcingLib (code size), matching _creditCheck's gates
+        return DebitSourcingLib.maxSpendCredit(cashModule.getLendGateway(), IPriceProvider(dataProvider.getPriceProvider()), safe);
     }
 
     /**
@@ -473,8 +448,11 @@ contract CashLens is UpgradeableProxy, Constants {
             return looseAvailable;
         }
 
-        ILendGateway.AccountData memory account = gateway().getAccountData(safe);
-        return looseAvailable + _withdrawableSupplied(safe, token, account.availableBorrowsUsd, account.debtUsd != 0);
+        ILendGateway lendGateway = gateway();
+        ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
+        // Buffered by the health-factor floor: withdrawal sourcing enforces the floor at execution, so
+        // this quote is exactly what a request (or module sandwich) can actually pull
+        return looseAvailable + _withdrawableSupplied(safe, token, DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account), account.debtUsd != 0);
     }
 
     /**

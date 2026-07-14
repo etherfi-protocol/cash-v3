@@ -73,6 +73,17 @@ interface ILendGateway {
      */
     function getAccountData(address safe) external view returns (AccountData memory);
 
+    /// @notice The post-op health-factor floor (WAD) for user-extraction ops; 0 = disabled
+    function minHealthFactor() external view returns (uint256);
+
+    /// @notice Reverts HealthFactorBelowMinimum when the floor is set and `safe`'s health factor is below it.
+    ///         Extraction paths (borrow page, withdrawal sourcing, collateral flag off) call this post-op;
+    ///         spends and repays are deliberately exempt.
+    function ensureMinHealthFactor(address safe) external view;
+
+    /// @notice Sets the post-op health-factor floor (WAD; 0 disables, otherwise bounded to [1e18, 2e18])
+    function setMinHealthFactor(uint256 value) external;
+
     /**
      * @notice Returns the amount of `asset` that `safe` has supplied to Aave
      * @param safe The safe to query

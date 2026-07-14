@@ -266,6 +266,7 @@ library CashLendLib {
         ILendGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
 
+        bool pulled;
         for (uint256 i = 0; i < tokens.length; i++) {
             if (!gateway.isRegistered(tokens[i])) continue;
             uint256 loose = IERC20(tokens[i]).balanceOf(safe);
@@ -274,7 +275,11 @@ library CashLendLib {
             uint256 supplied = gateway.suppliedOf(safe, tokens[i]);
             if (supplied == 0) continue;
             gateway.withdraw(safe, tokens[i], shortfall > supplied ? supplied : shortfall, safe);
+            pulled = true;
         }
+        // A withdrawal is a user extraction, so pulling from Aave takes the health-factor floor; a
+        // loose-balance-only withdrawal never touches the position and is exempt (as are card spends)
+        if (pulled) gateway.ensureMinHealthFactor(safe);
     }
 
     /**
@@ -343,6 +348,8 @@ library CashLendLib {
 
         gateway.borrow(safe, token, amount, safe);
         _supplyAsCollateral($, gateway, safe, token, amount);
+        // The borrow page takes the health-factor floor (post-resupply end state); card spends are exempt
+        gateway.ensureMinHealthFactor(safe);
         $.cashEventEmitter.emitLendBorrowed(safe, token, amount, amountInUsd);
     }
 

@@ -41,6 +41,87 @@ library DebitSourcingLib {
         return cap;
     }
 
+    /**
+     * @notice Max credit-mode spend (USD, 6 decimals): the floor-buffered borrowing power bounded by the
+     *         single most liquid borrow reserve (a credit spend draws one borrow token), matching
+     *         creditCheck's liquidity and borrowing-power declines
+     */
+    function maxSpendCredit(ILendGateway gateway, IPriceProvider priceProvider, address safe) public view returns (uint256) {
+        uint256 borrowPower = bufferedCreditHeadroom(gateway, gateway.getAccountData(safe));
+
+        address[] memory borrowTokens = gateway.borrowableAssets();
+        uint256 maxLiquidityUsd = 0;
+        for (uint256 i = 0; i < borrowTokens.length;) {
+            uint256 liquidityUsd = toUsd(priceProvider, borrowTokens[i], gateway.availableToBorrow(borrowTokens[i]));
+            if (liquidityUsd > maxLiquidityUsd) {
+                maxLiquidityUsd = liquidityUsd;
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        return borrowPower < maxLiquidityUsd ? borrowPower : maxLiquidityUsd;
+    }
+
+    /**
+     * @notice The lens's credit-mode spend gate: token borrowability, reserve liquidity, and the
+     *         floor-buffered borrowing power, returning canSpend-style (ok, declineReason)
+     * @dev The quoted headroom is the already-supplied position's capacity, buffered by the gateway's
+     *      health-factor floor (bufferedCreditHeadroom): new auths are approved only up to the amount that
+     *      keeps the post-borrow health factor above the floor, while spend execution keeps Aave's raw
+     *      bound — so a spend authorized here always settles, and a previously-authorized spend can still
+     *      settle past the floor. It also deliberately excludes loose collateral the spend-time resupply
+     *      can pull in (CashLendLib._resupplyCollateral), since that capacity exists only by cancelling
+     *      the safe's pending withdrawal; canSpend must not advertise it as headroom.
+     */
+    function creditCheck(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 totalSpendingInUsd) public view returns (bool, string memory) {
+        if (!gateway.isBorrowable(token)) {
+            return (false, "Not a supported borrow token");
+        }
+
+        if (gateway.availableToBorrow(token) < fromUsd(priceProvider, token, totalSpendingInUsd)) {
+            return (false, "Insufficient liquidity to cover the loan");
+        }
+
+        if (totalSpendingInUsd > bufferedCreditHeadroom(gateway, gateway.getAccountData(safe))) {
+            return (false, "Insufficient borrowing power");
+        }
+
+        return (true, "");
+    }
+
+    /**
+     * @notice Credit headroom (USD) the lens may quote: the new-debt capacity that keeps the post-borrow
+     *         health factor at or above the gateway's floor; raw availableBorrowsUsd while no floor is set
+     * @dev v4's collateralFactor doubles as LTV and liquidation threshold, so healthFactor ==
+     *      maxBorrowUsd / debtUsd and debt' <= maxBorrowUsd / floor keeps HF' >= floor. Quote-side only:
+     *      execution keeps Aave's raw bound (spends are exempt from the floor), so every quoted amount
+     *      still executes — with margin — and a previously-authorized spend can settle past the floor.
+     */
+    function bufferedCreditHeadroom(ILendGateway gateway, ILendGateway.AccountData memory account) public view returns (uint256) {
+        uint256 floor = gateway.minHealthFactor();
+        if (floor == 0) return account.availableBorrowsUsd;
+        uint256 maxDebt = ((account.availableBorrowsUsd + account.debtUsd) * 1e18) / floor;
+        return maxDebt > account.debtUsd ? maxDebt - account.debtUsd : 0;
+    }
+
+    /**
+     * @notice Borrow headroom (USD) the lens may size collateral withdrawals against: consuming it keeps
+     *         the post-withdraw health factor at or above the gateway's floor; raw availableBorrowsUsd
+     *         while no floor is set
+     * @dev HF' = (maxBorrowUsd - consumed) / debtUsd >= floor <=> consumed <= maxBorrowUsd - debtUsd * floor.
+     *      Quote-side only, like bufferedCreditHeadroom — except withdrawal requests, which also enforce
+     *      the floor at execution, so this quote is exactly what a request can pull.
+     */
+    function bufferedDebitHeadroom(ILendGateway gateway, ILendGateway.AccountData memory account) public view returns (uint256) {
+        uint256 floor = gateway.minHealthFactor();
+        if (floor == 0) return account.availableBorrowsUsd;
+        uint256 required = (account.debtUsd * floor) / 1e18;
+        uint256 maxBorrow = account.availableBorrowsUsd + account.debtUsd;
+        return maxBorrow > required ? maxBorrow - required : 0;
+    }
+
     /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
     function headroomConsumed(ILendGateway gateway, IPriceProvider priceProvider, address token, uint256 amount) public view returns (uint256) {
         return (toUsd(priceProvider, token, amount) * gateway.ltv(token)) / LTV_SCALE;

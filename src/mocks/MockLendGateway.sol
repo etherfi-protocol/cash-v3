@@ -81,6 +81,14 @@ contract MockLendGateway is ILendGateway {
 
     function borrow(address safe, address asset, uint256 amount, address to) external { }
 
+    uint256 public minHealthFactor;
+
+    function setMinHealthFactor(uint256 value) external {
+        minHealthFactor = value;
+    }
+
+    function ensureMinHealthFactor(address safe) external view { }
+
     function repay(address safe, address asset, uint256 amount) external returns (uint256) {
         uint256 debt = _debtOf[safe][asset];
         uint256 repaid = amount < debt ? amount : debt;
