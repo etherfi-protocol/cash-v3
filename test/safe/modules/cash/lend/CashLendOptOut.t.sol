@@ -73,7 +73,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         assertTrue(cashModule.isLendActive(address(safe)), "still active until executed");
 
         // Execute after the delay: permissionless
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         vm.expectEmit(true, false, false, false, address(cashEventEmitter));
         emit CashEventEmitter.LendOptOutExecuted(address(safe));
         cashModule.processLendOptOut(address(safe));
@@ -106,7 +106,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit), "in credit mode");
 
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         cashModule.processLendOptOut(address(safe));
 
         assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "credit dropped to debit");
@@ -116,7 +116,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     function test_processLendOptOut_noCollateral_marksOptedOut() public {
         // No Aave position at all: opting out is still valid and just flips the flag
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         cashModule.processLendOptOut(address(safe));
 
         assertTrue(cashModule.isLendOptedOut(address(safe)), "opted out with no collateral");
@@ -130,7 +130,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 5 ether);
 
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         cashModule.processLendOptOut(address(safe));
 
         assertTrue(cashModule.isLendOptedOut(address(safe)), "legacy safe opted out");
@@ -180,7 +180,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     /// Requesting the opt-out reverts when lend is already disabled.
     function test_requestLendOptOut_revertsWhenAlreadyOptedOut() public {
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         cashModule.processLendOptOut(address(safe));
 
         (address signer, bytes memory sig) = _toggleLendSig(false);
@@ -223,10 +223,16 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         cashModule.processLendOptOut(address(safe));
     }
 
-    /// processLendOptOut reverts while still inside the mode-change delay.
+    /// processLendOptOut reverts while still inside the mode-change delay — including at exactly the
+    /// finalize time: processing is strictly after it, matching isLendOptedOut and the mode rail.
     function test_processLendOptOut_revertsWhenNotReady() public {
         _requestOptOut();
         // Still inside the delay window
+        vm.expectRevert(ICashModule.LendOptOutNotReady.selector);
+        cashModule.processLendOptOut(address(safe));
+
+        // The boundary second is still inside the window
+        vm.warp(block.timestamp + MODE_DELAY);
         vm.expectRevert(ICashModule.LendOptOutNotReady.selector);
         cashModule.processLendOptOut(address(safe));
     }
@@ -243,7 +249,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         gw.borrow(address(safe), address(usdc), 1000e6, driver);
         vm.stopPrank();
 
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         vm.expectRevert(ICashModule.HasOpenBorrows.selector);
         cashModule.processLendOptOut(address(safe));
     }
@@ -269,7 +275,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     ///      lend-disabled safe; only turning it ON is a lend op that a disabled safe is blocked from.
     function test_setUsingAsCollateralFalse_allowedWhenLendOptedOut() public {
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         cashModule.processLendOptOut(address(safe));
         assertTrue(cashModule.isLendOptedOut(address(safe)));
 
@@ -285,7 +291,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     /// A lend-disabled safe cannot switch into Credit mode.
     function test_afterOptOut_cannotEnterCreditMode() public {
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         cashModule.processLendOptOut(address(safe));
 
         uint256 nonce = cashModule.getNonce(address(safe));
@@ -302,7 +308,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     /// Re-enabling lend flips the flag back on and resumes auto-supply.
     function test_optInToLend_reenablesAndResumesSupply() public {
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         cashModule.processLendOptOut(address(safe));
         assertTrue(cashModule.isLendOptedOut(address(safe)));
 
@@ -338,7 +344,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         assertTrue(cashModule.isLendActive(address(safe)), "still active");
 
         // With the request cancelled, executing must revert
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         vm.expectRevert(ICashModule.NoPendingLendOptOut.selector);
         cashModule.processLendOptOut(address(safe));
     }
@@ -368,7 +374,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     function test_spend_processesMaturedOptOut() public {
         _supplyToGateway(address(safe), address(weETH), 5 ether);
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
 
         deal(address(usdc), address(safe), 100e6);
 
@@ -388,7 +394,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     function test_spend_creditMode_maturedOptOut_routesDebit() public {
         _setModeCredit();
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
 
         deal(address(usdc), address(safe), 100e6);
         vm.prank(etherFiWallet);
@@ -403,7 +409,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     function test_supplyToLend_processesMaturedOptOutAndSkips() public {
         _supplyToGateway(address(safe), address(weETH), 5 ether);
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
 
         deal(address(weETH), address(safe), 1 ether); // loose funds the sweep would otherwise supply
 
@@ -460,7 +466,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     /// setMode(Credit) is blocked while a matured opt-out awaits processing (the effective check).
     function test_setMode_maturedOptOut_blocksCredit() public {
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
 
         uint256 nonce = cashModule.getNonce(address(safe));
         bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.SET_MODE_METHOD, block.chainid, address(safe), nonce, abi.encode(Mode.Credit))).toEthSignedMessageHash();
@@ -585,6 +591,57 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         cashModule.setMode(address(safe), Mode.Credit, owner1, abi.encodePacked(r, s, v));
     }
 
+    /// setMode(Debit) is also rejected while an opt-out request is pending: a re-request restarts the
+    /// mode delay, so it could only DEFER the Debit switch past the opt-out's finalize time — reopening
+    /// the window where a matured-but-blocked opt-out sits in stored Credit.
+    function test_setMode_pendingOptOut_blocksDebitToo() public {
+        _setModeCredit();
+        _requestOptOut();
+
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.SET_MODE_METHOD, block.chainid, address(safe), nonce, abi.encode(Mode.Debit))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
+        vm.expectRevert(ICashModule.LendOptedOut.selector);
+        cashModule.setMode(address(safe), Mode.Debit, owner1, abi.encodePacked(r, s, v));
+
+        // The scheduled switch is untouched and fires at the original finalize time
+        vm.warp(block.timestamp + MODE_DELAY + 1);
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "original deadline preserved");
+    }
+
+    /// The lazy unwind is best-effort: a paused reserve must not revert the unrelated action that
+    /// triggered it. The opt-out stays pending (nothing is marked processed until everything is actually
+    /// withdrawn), the explicit processor still surfaces the error, and the next touch after unpausing
+    /// completes the opt-out.
+    function test_processLendOptOutIfReady_bestEffort_pausedReserveDoesNotBlock() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _requestOptOut();
+        vm.warp(block.timestamp + MODE_DELAY + 1);
+        _setAaveReservePaused(weethReserveId, true);
+
+        // An unrelated debit spend from loose funds settles; the blocked unwind stays pending
+        deal(address(usdc), address(safe), 100e6);
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(50e6), _noCashback());
+        assertTrue(cashModule.transactionCleared(address(safe), txId), "unrelated spend went through");
+        assertTrue(cashModule.lendOptOutFinalizeTime(address(safe)) != 0, "opt-out still pending, not marked processed");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 5 ether, 2, "collateral still on Aave");
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "effective view unaffected");
+
+        // The explicit processor stays strict and surfaces the paused reserve
+        vm.expectRevert();
+        cashModule.processLendOptOut(address(safe));
+
+        // Unpaused: the next touch completes the opt-out
+        _setAaveReservePaused(weethReserveId, false);
+        vm.expectEmit(true, false, false, false, address(cashEventEmitter));
+        emit CashEventEmitter.LendOptOutExecuted(address(safe));
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), keccak256("second-spend"), BinSponsor.Reap, _tokens(address(usdc)), _amounts(25e6), _noCashback());
+        assertEq(cashModule.lendOptOutFinalizeTime(address(safe)), 0, "opt-out processed");
+        assertApproxEqAbs(weETH.balanceOf(address(safe)), 5 ether, 2, "collateral unwound to the safe");
+    }
+
     /// Opting back in during the window voids the scheduled Debit switch: the safe stays in Credit.
     function test_optInToLend_cancelsScheduledDebitSwitch() public {
         _setModeCredit();
@@ -618,7 +675,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
 
         _supplyToGateway(address(safe), address(weETH), 5 ether);
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        vm.warp(block.timestamp + MODE_DELAY + 1);
 
         vm.expectEmit(true, false, false, false, address(cashEventEmitter));
         emit CashEventEmitter.LendOptOutExecuted(address(safe));

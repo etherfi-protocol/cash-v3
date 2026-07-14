@@ -420,9 +420,16 @@ library CashLendLib {
      */
     function processLendOptOutIfReady(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
-        if ($$.lendOptOutFinalizeTime == 0 || block.timestamp < $$.lendOptOutFinalizeTime) return;
+        // Strictly after the finalize time, matching isLendOptedOut and the incoming-mode rail, so reads
+        // and lazy processing flip in the same second
+        if ($$.lendOptOutFinalizeTime == 0 || block.timestamp <= $$.lendOptOutFinalizeTime) return;
         if (hasOpenBorrows($, safe)) return;
-        executeLendOptOut($, safe);
+        // Best-effort unwind: a temporarily failing withdraw (paused gateway or reserve) must not revert
+        // the unrelated action that triggered the lazy processing — the opt-out stays pending (the
+        // effective views already report it) and the next touch retries. The opt-out is only marked
+        // processed once everything is actually withdrawn.
+        if (!_unwindLendCollateral($, safe, true)) return;
+        _finalizeLendOptOut($, safe);
     }
 
     /**
@@ -466,21 +473,58 @@ library CashLendLib {
      * @param safe Address of the EtherFi Safe
      */
     function executeLendOptOut(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
-        if (_usesLendGateway($, safe)) {
-            ILendGateway gateway = $.gateway;
-            if (address(gateway) == address(0)) revert LendGatewayNotSet();
+        _unwindLendCollateral($, safe, false);
+        _finalizeLendOptOut($, safe);
+    }
 
-            address[] memory collateralTokens = gateway.registeredAssets();
-            uint256 len = collateralTokens.length;
-            for (uint256 i = 0; i < len;) {
-                uint256 supplied = gateway.suppliedOf(safe, collateralTokens[i]);
-                if (supplied != 0) gateway.withdraw(safe, collateralTokens[i], supplied, safe);
-                unchecked {
-                    ++i;
+    /**
+     * @notice Withdraws ALL of the safe's Aave collateral back to the safe
+     * @dev For a gateway safe, iterates the gateway's registered assets, not DebtManager's collateral list,
+     *      so a token delisted from DebtManager while still supplied on Aave stays withdrawable. A legacy
+     *      safe has nothing on Aave to unwind. In best-effort mode a failing withdraw (paused gateway or
+     *      reserve) is swallowed and reported instead of reverting, and the other tokens still unwind, so
+     *      the lazy paths never block an unrelated action; the strict mode (explicit processLendOptOut,
+     *      zero-delay requests) lets the error surface to the caller.
+     * @param $ The CashModule storage (passed by the delegatecalling module)
+     * @param safe Address of the EtherFi Safe
+     * @param bestEffort True to swallow individual withdraw failures instead of reverting
+     * @return fullyUnwound True when nothing is left supplied on Aave
+     */
+    function _unwindLendCollateral(CashModuleStorageContract.CashModuleStorage storage $, address safe, bool bestEffort) private returns (bool fullyUnwound) {
+        fullyUnwound = true;
+        if (!_usesLendGateway($, safe)) return fullyUnwound;
+
+        ILendGateway gateway = $.gateway;
+        if (address(gateway) == address(0)) revert LendGatewayNotSet();
+
+        address[] memory collateralTokens = gateway.registeredAssets();
+        uint256 len = collateralTokens.length;
+        for (uint256 i = 0; i < len;) {
+            uint256 supplied = gateway.suppliedOf(safe, collateralTokens[i]);
+            if (supplied != 0) {
+                if (bestEffort) {
+                    try gateway.withdraw(safe, collateralTokens[i], supplied, safe) { }
+                    catch {
+                        fullyUnwound = false;
+                    }
+                } else {
+                    gateway.withdraw(safe, collateralTokens[i], supplied, safe);
                 }
             }
+            unchecked {
+                ++i;
+            }
         }
+    }
 
+    /**
+     * @notice Marks the opt-out processed: sets the flag, clears the pending request, and forces Debit
+     * @dev Only called once the collateral is fully unwound (or there was none). Credit needs lend
+     *      collateral, so the mode is forced to Debit and any pending mode change is dropped.
+     * @param $ The CashModule storage (passed by the delegatecalling module)
+     * @param safe Address of the EtherFi Safe
+     */
+    function _finalizeLendOptOut(CashModuleStorageContract.CashModuleStorage storage $, address safe) private {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         $$.lendOptedOut = true;
         $$.lendOptOutFinalizeTime = 0;

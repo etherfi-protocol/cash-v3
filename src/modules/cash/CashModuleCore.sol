@@ -325,7 +325,7 @@ contract CashModuleCore is CashModuleStorageContract {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage safeConfig = $.safeCashConfig[safe];
         if (safeConfig.lendOptOutFinalizeTime == 0) revert NoPendingLendOptOut();
-        if (block.timestamp < safeConfig.lendOptOutFinalizeTime) revert LendOptOutNotReady();
+        if (block.timestamp <= safeConfig.lendOptOutFinalizeTime) revert LendOptOutNotReady();
         if (CashLendLib.hasOpenBorrows($, safe)) revert HasOpenBorrows();
         CashLendLib.executeLendOptOut($, safe);
     }

@@ -204,12 +204,19 @@ contract CashModuleSetters is CashModuleStorageContract {
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        // A matured opt-out forces Debit and must land before the mode logic reads or changes state
-        CashLendLib.processLendOptOutIfReady($, safe);
+        // While an opt-out request is pending, the mode trajectory belongs to the opt-out: a Credit
+        // request would overwrite the Debit switch the request scheduled on the pending-mode rail, and a
+        // Debit request could only DEFER it (both use modeDelay, so a re-request always lands after the
+        // opt-out's finalize time), reopening the window where a matured-but-blocked opt-out sits in
+        // stored Credit. Opting back in (toggleLend(true)) re-opens setMode. No lazy opt-out processing
+        // here: with the request pending this reverts anyway, so processing could never be persisted.
+        if ($.safeCashConfig[safe].lendOptOutFinalizeTime != 0) revert LendOptedOut();
+
         _setCurrentMode($.safeCashConfig[safe]);
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
-        if (mode == Mode.Credit && ($.safeCashConfig[safe].lendOptedOut || $.safeCashConfig[safe].lendOptOutFinalizeTime != 0)) revert LendOptedOut();
+        // Credit mode requires collateral on Lend: a safe that opted out of lend cannot re-enter Credit
+        if (mode == Mode.Credit && $.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
 
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
