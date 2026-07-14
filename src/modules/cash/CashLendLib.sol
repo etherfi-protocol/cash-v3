@@ -405,7 +405,7 @@ library CashLendLib {
      */
     function isLendOptedOut(CashModuleStorageContract.CashModuleStorage storage $, address safe) public view returns (bool) {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
-        return $$.lendOptedOut || ($$.lendOptOutFinalizeTime != 0 && block.timestamp >= $$.lendOptOutFinalizeTime);
+        return $$.lendOptedOut || ($$.lendOptOutFinalizeTime != 0 && block.timestamp > $$.lendOptOutFinalizeTime);
     }
 
     /**

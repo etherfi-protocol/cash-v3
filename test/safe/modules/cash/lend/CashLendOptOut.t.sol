@@ -345,16 +345,21 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- effective state & lazy processing
 
-    /// isLendOptedOut / isLendActive report the opt-out as soon as the finalize time passes — before
-    /// processLendOptOut runs — mirroring how getMode honors a matured incoming mode.
+    /// isLendOptedOut / isLendActive report the opt-out as soon as the finalize time PASSES — before
+    /// processLendOptOut runs — with the same strictly-after comparison as the mode rail (getMode /
+    /// _setCurrentMode), so the effective flag and the scheduled Debit switch always flip in the same second.
     function test_isLendOptedOut_effectiveOnceDelayElapses() public {
         _requestOptOut();
         assertFalse(cashModule.isLendOptedOut(address(safe)), "not opted out during the delay");
         assertTrue(cashModule.isLendActive(address(safe)), "still active during the delay");
 
+        // At exactly the finalize time the window is still open, matching the mode rail's strict >
         vm.warp(block.timestamp + MODE_DELAY);
-        assertTrue(cashModule.isLendOptedOut(address(safe)), "effectively opted out at the finalize time");
-        assertFalse(cashModule.isLendActive(address(safe)), "lend inactive at the finalize time");
+        assertFalse(cashModule.isLendOptedOut(address(safe)), "boundary second still inside the window");
+
+        vm.warp(block.timestamp + 1);
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "effectively opted out once the finalize time passes");
+        assertFalse(cashModule.isLendActive(address(safe)), "lend inactive once the finalize time passes");
         assertTrue(cashModule.lendOptOutFinalizeTime(address(safe)) != 0, "not yet processed");
     }
 
@@ -420,7 +425,8 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         // Borrow during the delay window (allowed: the opt-out has not matured yet)
         _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), 1000e6);
 
-        vm.warp(block.timestamp + MODE_DELAY);
+        // The effective flag flips strictly after the finalize time, like the mode rail
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         assertTrue(cashModule.isLendOptedOut(address(safe)), "effectively opted out while debt blocks processing");
 
         // The explicit processor still reverts on open borrows
@@ -443,7 +449,8 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     function test_borrow_revertsOnMaturedUnprocessedOptOut() public {
         _supplyToGateway(address(safe), address(weETH), 5 ether);
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        // The effective flag flips strictly after the finalize time, like the mode rail
+        vm.warp(block.timestamp + MODE_DELAY + 1);
 
         (address[] memory signers, bytes[] memory sigs) = _borrowSig(address(usdc), 100e6);
         vm.expectRevert(ICashModule.LendOptedOut.selector);
@@ -629,7 +636,8 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
     function test_optInToLend_cancelsMaturedUnprocessedRequest() public {
         _supplyToGateway(address(safe), address(weETH), 5 ether);
         _requestOptOut();
-        vm.warp(block.timestamp + MODE_DELAY);
+        // The effective flag flips strictly after the finalize time, like the mode rail
+        vm.warp(block.timestamp + MODE_DELAY + 1);
         assertTrue(cashModule.isLendOptedOut(address(safe)), "effectively opted out");
 
         _optIn();
