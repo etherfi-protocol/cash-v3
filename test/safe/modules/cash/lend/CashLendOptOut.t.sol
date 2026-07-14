@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { BinSponsor, Cashback, ICashModule, Mode } from "../../../../../src/interfaces/ICashModule.sol";
+import { BinSponsor, Cashback, ICashModule, Mode, SafeData } from "../../../../../src/interfaces/ICashModule.sol";
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../../../../src/libraries/SignatureUtils.sol";
@@ -474,6 +474,125 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         deal(address(usdc), address(safe), 100e6);
         (Mode mode,,,) = cashLens.canSpendSingleToken(address(safe), txId, _tokens(address(usdc)), _tokens(address(usdc)), 50e6);
         assertEq(uint8(mode), uint8(Mode.Debit), "pending opt-out routes as Debit");
+    }
+
+    /// Execution stays on the CURRENT mode during the delay window: a credit-mode safe with a pending
+    /// (unmatured) opt-out still spends in credit — a card tapped before the request settles as the user
+    /// expects, even if they hold no debit-spendable assets. (The lens simulates new auths defensively as
+    /// Debit meanwhile; execution demotes only at maturity.)
+    function test_spend_creditMode_pendingOptOut_executesCredit() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _setModeCredit();
+        _requestOptOut();
+        // Still inside the delay window
+        assertFalse(cashModule.isLendOptedOut(address(safe)), "not yet effective");
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(50e6), _noCashback());
+
+        assertTrue(cashModule.transactionCleared(address(safe), txId), "credit spend settled");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 50e6, 1e5, "spent on credit (Aave debt taken)");
+    }
+
+    /// A credit-mode safe whose matured opt-out is BLOCKED from processing by open borrows must still
+    /// spend as Debit from its loose balance — matching the lens, which routes it as Debit — instead of
+    /// reaching spendCredit's LendOptedOut revert (an approved auth would otherwise fail at settlement).
+    /// The forced Debit arrives through the pending-mode rail requestLendOptOut scheduled, so the stored
+    /// mode flips at maturity even though the collateral unwind stays blocked.
+    function test_spend_creditMode_maturedOptOutBlockedByBorrows_spendsDebitFromLooseBalance() public {
+        _setModeCredit();
+        _requestOptOut();
+        // Borrow during the delay window so the unwind is blocked at maturity
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), 1000e6);
+        // The mode rail applies strictly after the start time, so step past the finalize time
+        vm.warp(block.timestamp + MODE_DELAY + 1);
+        assertTrue(cashModule.isLendOptedOut(address(safe)), "effectively opted out, unwind blocked");
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "scheduled Debit switch matured");
+
+        // The lens routes this safe as Debit; the spend must agree and use the loose balance
+        deal(address(usdc), address(safe), 100e6);
+        (Mode lensMode,, bool lensCanSpend,) = cashLens.canSpendSingleToken(address(safe), txId, _tokens(address(usdc)), _tokens(address(usdc)), 50e6);
+        assertEq(uint8(lensMode), uint8(Mode.Debit), "lens routes as Debit");
+        assertTrue(lensCanSpend, "lens approves the debit spend");
+
+        uint256 debtBefore = gw.debtOf(address(safe), address(usdc));
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(50e6), _noCashback());
+
+        assertTrue(cashModule.transactionCleared(address(safe), txId), "spend went through as debit");
+        assertEq(gw.debtOf(address(safe), address(usdc)), debtBefore, "no new Aave debt taken");
+        assertTrue(cashModule.lendOptOutFinalizeTime(address(safe)) != 0, "opt-out still pending (debt blocks unwind)");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 5 ether, 2, "collateral still on Aave");
+    }
+
+    /// A multi-token credit spend attempt reverts on the one-token rule without burning the txId: the
+    /// same txId spends fine afterward.
+    function test_spend_creditMode_multiTokenRevertDoesNotBurnTxId() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _setModeCredit();
+
+        address[] memory twoTokens = new address[](2);
+        twoTokens[0] = address(usdc);
+        twoTokens[1] = address(weETH);
+        uint256[] memory twoAmounts = new uint256[](2);
+        twoAmounts[0] = 30e6;
+        twoAmounts[1] = 20e6;
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.OnlyOneTokenAllowedInCreditMode.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, twoTokens, twoAmounts, _noCashback());
+
+        assertFalse(cashModule.transactionCleared(address(safe), txId), "txId not burned by the failed attempt");
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(50e6), _noCashback());
+        assertTrue(cashModule.transactionCleared(address(safe), txId), "txId spendable after the failed attempt");
+    }
+
+    /// requestLendOptOut schedules the forced Debit switch on the standard pending-mode rail: the lens and
+    /// getMode see it through the ordinary incoming-mode convention, and the stored mode flips at maturity
+    /// with no processing call at all.
+    function test_requestLendOptOut_schedulesIncomingDebit() public {
+        _setModeCredit();
+        uint256 expectedFinalize = block.timestamp + MODE_DELAY;
+        _requestOptOut();
+
+        SafeData memory data = cashModule.getData(address(safe));
+        assertEq(uint8(data.incomingMode), uint8(Mode.Debit), "incoming Debit scheduled");
+        assertEq(data.incomingModeStartTime, expectedFinalize, "scheduled for the finalize time");
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit), "still Credit during the window");
+
+        vm.warp(expectedFinalize + 1);
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Debit), "Debit at maturity, no processing needed");
+    }
+
+    /// setMode(Credit) is rejected while an opt-out request is pending — it would also overwrite the
+    /// scheduled Debit switch. Opting back in re-opens Credit.
+    function test_setMode_pendingOptOut_blocksCredit() public {
+        _requestOptOut();
+
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.SET_MODE_METHOD, block.chainid, address(safe), nonce, abi.encode(Mode.Credit))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
+        vm.expectRevert(ICashModule.LendOptedOut.selector);
+        cashModule.setMode(address(safe), Mode.Credit, owner1, abi.encodePacked(r, s, v));
+    }
+
+    /// Opting back in during the window voids the scheduled Debit switch: the safe stays in Credit.
+    function test_optInToLend_cancelsScheduledDebitSwitch() public {
+        _setModeCredit();
+        _requestOptOut();
+        assertEq(uint8(cashModule.getData(address(safe)).incomingMode), uint8(Mode.Debit), "Debit scheduled");
+
+        _optIn();
+
+        SafeData memory data = cashModule.getData(address(safe));
+        assertEq(data.incomingModeStartTime, 0, "scheduled switch voided");
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit), "still Credit");
+
+        // And the voided switch never fires
+        vm.warp(block.timestamp + MODE_DELAY + 1);
+        assertEq(uint8(cashModule.getMode(address(safe))), uint8(Mode.Credit), "Credit after the would-be finalize time");
     }
 
     /// Opting back in after the request matured (but before processing) cancels it — the collateral

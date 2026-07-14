@@ -440,6 +440,16 @@ library CashLendLib {
 
         uint96 finalizeTime = uint96(block.timestamp) + $.modeDelay;
         $$.lendOptOutFinalizeTime = finalizeTime;
+
+        if ($$.incomingModeStartTime != 0 && block.timestamp > $$.incomingModeStartTime) $$.mode = $$.incomingMode;
+        delete $$.incomingMode;
+        delete $$.incomingModeStartTime;
+        if ($$.mode == Mode.Credit) {
+            $$.incomingMode = Mode.Debit;
+            $$.incomingModeStartTime = finalizeTime;
+            $.cashEventEmitter.emitSetMode(safe, Mode.Credit, Mode.Debit, finalizeTime);
+        }
+
         $.cashEventEmitter.emitLendOptOutRequested(safe, finalizeTime);
 
         if ($.modeDelay == 0) executeLendOptOut($, safe);
@@ -492,6 +502,12 @@ library CashLendLib {
     function optInToLend(CashModuleStorageContract.CashModuleStorage storage $, address safe) public {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
         if (!$$.lendOptedOut && $$.lendOptOutFinalizeTime == 0) revert LendNotOptedOut();
+
+        if ($$.lendOptOutFinalizeTime != 0) {
+            if ($$.incomingModeStartTime != 0 && block.timestamp > $$.incomingModeStartTime) $$.mode = $$.incomingMode;
+            delete $$.incomingMode;
+            delete $$.incomingModeStartTime;
+        }
 
         $$.lendOptedOut = false;
         $$.lendOptOutFinalizeTime = 0;

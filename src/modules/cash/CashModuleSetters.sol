@@ -209,9 +209,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         _setCurrentMode($.safeCashConfig[safe]);
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
-        // Credit mode requires lend collateral on Aave; a safe that opted out of lend cannot enter Credit.
-        // Effective check: also blocks a matured opt-out that open borrows kept from processing above.
-        if (mode == Mode.Credit && CashLendLib.isLendOptedOut($, safe)) revert LendOptedOut();
+        if (mode == Mode.Credit && ($.safeCashConfig[safe].lendOptedOut || $.safeCashConfig[safe].lendOptOutFinalizeTime != 0)) revert LendOptedOut();
 
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
