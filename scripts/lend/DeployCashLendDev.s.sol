@@ -93,20 +93,22 @@ contract DeployCashLendDev is Utils {
         CashLendDevModules.NewModules memory modules = CashLendDevModules.deployNew(existing.modules, existing.dataProvider, existing.debtManager);
         CashLendDevModules.copyLiquidQueues(existing.roleRegistry, existing.modules, modules);
 
-        (address gatewayImpl, address gatewayProxy) = _deployGateway(existing.dataProvider, existing.roleRegistry, spokeAddress);
-        Implementations memory next = _deployImplementations(existing);
-
         // Upgrade existing proxies. The liquifier keeps its proxy and only gets the new implementation.
+        Implementations memory next = _deployImplementations(existing);
         _upgradeExistingContracts(existing, next);
         UUPSUpgradeable(existing.modules.liquifier).upgradeToAndCall(modules.liquifierImplementation, "");
+
+        // CashModule's gateway reference is one-time (setLendGateway reverts on a second set) and survives
+        // rollback, so a redeploy must reuse it. Read it after the CashModule upgrade makes it visible.
+        (address gatewayImpl, address gatewayProxy) = _deployOrUpgradeGateway(existing, spokeAddress);
 
         // Configure every gateway driver before enabling the new modules or routing Safes through Lend.
         _configureGateway(existing, IAaveV4Spoke(spokeAddress), gatewayProxy, modules);
 
         // Swap the new modules in, then activate Lend last so no Safe reaches a half-configured gateway.
         CashLendDevModules.activate(existing.dataProvider, existing.cashModule, existing.modules, modules);
-        IAaveV4Spoke(spokeAddress).updatePositionManager(gatewayProxy, true);
-        ICashModule(existing.cashModule).setLendGateway(gatewayProxy);
+        if (!IAaveV4Spoke(spokeAddress).isPositionManagerActive(gatewayProxy)) IAaveV4Spoke(spokeAddress).updatePositionManager(gatewayProxy, true);
+        if (address(ICashModule(existing.cashModule).getLendGateway()) == address(0)) ICashModule(existing.cashModule).setLendGateway(gatewayProxy);
 
         vm.stopBroadcast();
 
@@ -183,10 +185,16 @@ contract DeployCashLendDev is Utils {
         return address(uint160(uint256(vm.load(proxy, EIP1967_IMPLEMENTATION_SLOT))));
     }
 
-    /// @dev Deploys and initializes the LendGateway implementation and proxy.
-    function _deployGateway(address dataProvider, address roleRegistry, address spoke) internal returns (address, address) {
-        address impl = address(new LendGateway(dataProvider, spoke));
-        address proxy = address(new UUPSProxy(impl, abi.encodeWithSelector(LendGateway.initialize.selector, roleRegistry)));
+    /// @dev Deploys a fresh gateway implementation, then either deploys a new proxy or upgrades the
+    ///      gateway CashModule already references from a previous deploy cycle.
+    function _deployOrUpgradeGateway(ExistingContracts memory c, address spoke) internal returns (address, address) {
+        address impl = address(new LendGateway(c.dataProvider, spoke));
+        address proxy = address(ICashModule(c.cashModule).getLendGateway());
+        if (proxy == address(0)) {
+            proxy = address(new UUPSProxy(impl, abi.encodeWithSelector(LendGateway.initialize.selector, c.roleRegistry)));
+        } else {
+            UUPSUpgradeable(proxy).upgradeToAndCall(impl, "");
+        }
         return (impl, proxy);
     }
 

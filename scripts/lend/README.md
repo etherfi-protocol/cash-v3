@@ -41,7 +41,9 @@ Deploy only runs from a clean starting point, so do not rerun it directly. Inste
 2. Run `VerifyCashLendRollbackDev` to confirm the chain is back at the baseline.
 3. Delete `deployments/dev/10/cash-lend.json`, then rerun the deploy.
 
-Rollback itself can be rerun safely after a partial broadcast.
+Rollback itself can be rerun safely after a partial broadcast. A redeploy after rollback
+reuses the gateway proxy CashModule already references (its one-time `setLendGateway`
+reference survives rollback) and upgrades it to the freshly compiled implementation.
 
 ## Files
 
