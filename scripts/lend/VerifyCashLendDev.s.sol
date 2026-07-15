@@ -3,9 +3,8 @@ pragma solidity ^0.8.28;
 
 import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
-import { CREATE3 } from "solady/utils/CREATE3.sol";
 
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
@@ -20,11 +19,13 @@ import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 import { Utils } from "../utils/Utils.sol";
+import { CashLendDevModules } from "./CashLendDevModules.sol";
 
 /**
  * @title VerifyCashLendDev
  * @notice Verifies the deployment produced by DeployCashLendDev
- * @dev Dev-only and read-only. Reverts on the first mismatch.
+ * @dev Dev-only and read-only. Run it right after deploying, or any time later; it checks the live
+ *      chain against the deployment record and reverts on the first mismatch.
  *
  * Usage:
  *   source .env && ENV=dev forge script \
@@ -32,9 +33,6 @@ import { Utils } from "../utils/Utils.sol";
  *     --rpc-url $OPTIMISM_RPC -vvvv
  */
 contract VerifyCashLendDev is Utils {
-    address internal constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-    bytes32 internal constant GATEWAY_IMPL_SALT = keccak256("ether.fi/cash-lend/dev/LendGatewayImpl/v1");
-    bytes32 internal constant GATEWAY_PROXY_SALT = keccak256("ether.fi/cash-lend/dev/LendGatewayProxy/v1");
     bytes32 internal constant EIP1967_IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     uint256 internal constant MIN_HEALTH_FACTOR = 1.05e18;
 
@@ -47,6 +45,7 @@ contract VerifyCashLendDev is Utils {
         address cashModule;
         address cashModuleCoreImpl;
         address cashModuleSettersImpl;
+        address dataProvider;
         address debtManager;
         address debtManagerAdminImpl;
         address debtManagerCoreImpl;
@@ -55,78 +54,68 @@ contract VerifyCashLendDev is Utils {
         address etherFiHookImpl;
         address lendGateway;
         address lendGatewayImpl;
-        bytes32 lendGatewayImplInitCodeHash;
-        bytes32 lendGatewayProxyInitCodeHash;
+        address roleRegistry;
         address spoke;
         address topUpDest;
         address topUpDestImpl;
+        address[] newModules;
+        address liquifier;
+        address liquifierImplementation;
+        CashLendDevModules.OldModules oldModules;
     }
 
-    /// @dev Loads the Cash Lend manifest and runs every post-deployment verification check.
+    /// @dev Loads the deployment record and runs every post-deployment verification check.
     function run() public view {
         require(block.chainid == 10, "Optimism only");
         require(isEqualString(getEnv(), "dev"), "ENV must be dev");
 
         Deployment memory d = _readDeployment();
-        string memory baseJson = readDeploymentFile();
-        string memory aaveJson = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/aave-v4-test.json"));
-        address dataProvider = stdJson.readAddress(baseJson, ".addresses.EtherFiDataProvider");
-        address roleRegistry = stdJson.readAddress(baseJson, ".addresses.RoleRegistry");
-        address usdc = getChainConfig(vm.toString(block.chainid)).usdc;
-
-        _verifyCanonicalAddresses(d, baseJson, aaveJson);
         _verifyCode(d);
         _verifyImplementations(d);
-        _verifyGatewayCodeVersion(d, dataProvider, roleRegistry);
-        _verifyImmutables(d, dataProvider);
-        _verifyGateway(d, roleRegistry, usdc);
-
+        _verifyImmutables(d);
+        _verifyGateway(d);
+        _verifyModules(d);
         console.log("Cash Lend dev deployment verified");
     }
 
-    /// @dev Reads all deployed proxy and implementation addresses from the Cash Lend manifest.
+    /// @dev Reads the canonical proxies from the base file and the new addresses from the deployment record.
     function _readDeployment() internal view returns (Deployment memory) {
-        string memory path = string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend.json");
-        string memory json = vm.readFile(path);
-        Deployment memory deployment;
+        Deployment memory d;
 
-        require(stdJson.readUint(json, ".chainId") == block.chainid, "deployment chain mismatch");
-        deployment.admin = stdJson.readAddress(json, ".admin");
-        deployment.cashEventEmitter = stdJson.readAddress(json, ".cashEventEmitter");
-        deployment.cashEventEmitterImpl = stdJson.readAddress(json, ".cashEventEmitterImpl");
-        deployment.cashLens = stdJson.readAddress(json, ".cashLens");
-        deployment.cashLensImpl = stdJson.readAddress(json, ".cashLensImpl");
-        deployment.cashModule = stdJson.readAddress(json, ".cashModule");
-        deployment.cashModuleCoreImpl = stdJson.readAddress(json, ".cashModuleCoreImpl");
-        deployment.cashModuleSettersImpl = stdJson.readAddress(json, ".cashModuleSettersImpl");
-        deployment.debtManager = stdJson.readAddress(json, ".debtManager");
-        deployment.debtManagerAdminImpl = stdJson.readAddress(json, ".debtManagerAdminImpl");
-        deployment.debtManagerCoreImpl = stdJson.readAddress(json, ".debtManagerCoreImpl");
-        deployment.deployer = stdJson.readAddress(json, ".deployer");
-        deployment.etherFiHook = stdJson.readAddress(json, ".etherFiHook");
-        deployment.etherFiHookImpl = stdJson.readAddress(json, ".etherFiHookImpl");
-        deployment.lendGateway = stdJson.readAddress(json, ".lendGateway");
-        deployment.lendGatewayImpl = stdJson.readAddress(json, ".lendGatewayImpl");
-        deployment.lendGatewayImplInitCodeHash = stdJson.readBytes32(json, ".lendGatewayImplInitCodeHash");
-        deployment.lendGatewayProxyInitCodeHash = stdJson.readBytes32(json, ".lendGatewayProxyInitCodeHash");
-        deployment.spoke = stdJson.readAddress(json, ".spoke");
-        deployment.topUpDest = stdJson.readAddress(json, ".topUpDest");
-        deployment.topUpDestImpl = stdJson.readAddress(json, ".topUpDestImpl");
-        return deployment;
-    }
+        string memory baseJson = readDeploymentFile();
+        d.cashEventEmitter = stdJson.readAddress(baseJson, ".addresses.CashEventEmitter");
+        d.cashLens = stdJson.readAddress(baseJson, ".addresses.CashLens");
+        d.cashModule = stdJson.readAddress(baseJson, ".addresses.CashModule");
+        d.dataProvider = stdJson.readAddress(baseJson, ".addresses.EtherFiDataProvider");
+        d.debtManager = stdJson.readAddress(baseJson, ".addresses.DebtManager");
+        d.etherFiHook = stdJson.readAddress(baseJson, ".addresses.EtherFiHook");
+        d.roleRegistry = stdJson.readAddress(baseJson, ".addresses.RoleRegistry");
+        d.topUpDest = stdJson.readAddress(baseJson, ".addresses.TopUpDest");
+        d.oldModules = CashLendDevModules.readOld(baseJson);
+        d.liquifier = d.oldModules.liquifier;
 
-    /// @dev Confirms the generated deployment file points to the canonical dev contracts.
-    function _verifyCanonicalAddresses(Deployment memory d, string memory baseJson, string memory aaveJson) internal pure {
-        require(d.cashEventEmitter == stdJson.readAddress(baseJson, ".addresses.CashEventEmitter"), "non-canonical CashEventEmitter proxy");
-        require(d.cashLens == stdJson.readAddress(baseJson, ".addresses.CashLens"), "non-canonical CashLens proxy");
-        require(d.cashModule == stdJson.readAddress(baseJson, ".addresses.CashModule"), "non-canonical CashModule proxy");
-        require(d.debtManager == stdJson.readAddress(baseJson, ".addresses.DebtManager"), "non-canonical DebtManager proxy");
-        require(d.etherFiHook == stdJson.readAddress(baseJson, ".addresses.EtherFiHook"), "non-canonical EtherFiHook proxy");
-        require(d.topUpDest == stdJson.readAddress(baseJson, ".addresses.TopUpDest"), "non-canonical TopUpDest proxy");
+        string memory record = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend.json"));
+        require(stdJson.readUint(record, ".chainId") == block.chainid, "deployment record chain mismatch");
+        d.admin = stdJson.readAddress(record, ".admin");
+        d.deployer = stdJson.readAddress(record, ".deployer");
+        d.cashEventEmitterImpl = stdJson.readAddress(record, ".cashEventEmitterImpl");
+        d.cashLensImpl = stdJson.readAddress(record, ".cashLensImpl");
+        d.cashModuleCoreImpl = stdJson.readAddress(record, ".cashModuleCoreImpl");
+        d.cashModuleSettersImpl = stdJson.readAddress(record, ".cashModuleSettersImpl");
+        d.debtManagerAdminImpl = stdJson.readAddress(record, ".debtManagerAdminImpl");
+        d.debtManagerCoreImpl = stdJson.readAddress(record, ".debtManagerCoreImpl");
+        d.etherFiHookImpl = stdJson.readAddress(record, ".etherFiHookImpl");
+        d.topUpDestImpl = stdJson.readAddress(record, ".topUpDestImpl");
+        d.lendGateway = stdJson.readAddress(record, ".lendGateway");
+        d.lendGatewayImpl = stdJson.readAddress(record, ".lendGatewayImpl");
+        d.spoke = stdJson.readAddress(record, ".spoke");
+        d.newModules = stdJson.readAddressArray(record, ".newModules");
+        d.liquifierImplementation = stdJson.readAddress(record, ".liquifierImplementation");
+
+        string memory aaveJson = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/aave-v4-test.json"));
         require(d.spoke == stdJson.readAddress(aaveJson, ".spoke"), "non-canonical Aave Spoke");
         require(d.admin == stdJson.readAddress(aaveJson, ".admin"), "non-canonical dev admin");
-        require(d.lendGatewayImpl == CREATE3.predictDeterministicAddress(GATEWAY_IMPL_SALT, NICKS_FACTORY), "non-canonical LendGateway implementation");
-        require(d.lendGateway == CREATE3.predictDeterministicAddress(GATEWAY_PROXY_SALT, NICKS_FACTORY), "non-canonical LendGateway proxy");
+        return d;
     }
 
     /// @dev Confirms that every expected proxy and implementation address contains bytecode.
@@ -140,7 +129,7 @@ contract VerifyCashLendDev is Utils {
         require(d.topUpDest.code.length != 0 && d.topUpDestImpl.code.length != 0, "TopUpDest code missing");
     }
 
-    /// @dev Confirms that each proxy and delegated implementation pointer matches the manifest.
+    /// @dev Confirms that each proxy and delegated implementation pointer matches the record.
     function _verifyImplementations(Deployment memory d) internal view {
         require(_implementationOf(d.cashEventEmitter) == d.cashEventEmitterImpl, "CashEventEmitter implementation mismatch");
         require(_implementationOf(d.cashLens) == d.cashLensImpl, "CashLens implementation mismatch");
@@ -151,6 +140,7 @@ contract VerifyCashLendDev is Utils {
         require(_implementationOf(d.etherFiHook) == d.etherFiHookImpl, "EtherFiHook implementation mismatch");
         require(_implementationOf(d.lendGateway) == d.lendGatewayImpl, "LendGateway implementation mismatch");
         require(_implementationOf(d.topUpDest) == d.topUpDestImpl, "TopUpDest implementation mismatch");
+        require(_implementationOf(d.liquifier) == d.liquifierImplementation, "liquifier implementation mismatch");
     }
 
     /// @dev Reads a UUPS proxy's implementation directly from its EIP-1967 storage slot.
@@ -158,45 +148,39 @@ contract VerifyCashLendDev is Utils {
         return address(uint160(uint256(vm.load(proxy, EIP1967_IMPLEMENTATION_SLOT))));
     }
 
-    /// @dev Confirms the deterministic gateway uses the same compiled version recorded by deployment.
-    function _verifyGatewayCodeVersion(Deployment memory d, address dataProvider, address roleRegistry) internal pure {
-        bytes32 implCodeHash = keccak256(abi.encodePacked(type(LendGateway).creationCode, abi.encode(dataProvider, d.spoke)));
-        bytes32 proxyCodeHash = keccak256(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(d.lendGatewayImpl, abi.encodeWithSelector(LendGateway.initialize.selector, roleRegistry))));
-        require(d.lendGatewayImplInitCodeHash == implCodeHash, "LendGateway implementation bytecode mismatch");
-        require(d.lendGatewayProxyInitCodeHash == proxyCodeHash, "LendGateway proxy bytecode mismatch");
-    }
-
     /// @dev Confirms constructor-set references on upgraded implementations still point to dev dependencies.
-    function _verifyImmutables(Deployment memory d, address dataProvider) internal view {
-        require(address(CashModuleCore(d.cashModule).etherFiDataProvider()) == dataProvider, "CashModule core dataProvider mismatch");
-        require(address(CashModuleSetters(d.cashModuleSettersImpl).etherFiDataProvider()) == dataProvider, "CashModule setters dataProvider mismatch");
+    function _verifyImmutables(Deployment memory d) internal view {
+        require(address(CashModuleCore(d.cashModule).etherFiDataProvider()) == d.dataProvider, "CashModule core dataProvider mismatch");
+        require(address(CashModuleSetters(d.cashModuleSettersImpl).etherFiDataProvider()) == d.dataProvider, "CashModule setters dataProvider mismatch");
         require(address(CashLens(d.cashLens).cashModule()) == d.cashModule, "CashLens cashModule mismatch");
-        require(address(CashLens(d.cashLens).dataProvider()) == dataProvider, "CashLens dataProvider mismatch");
+        require(address(CashLens(d.cashLens).dataProvider()) == d.dataProvider, "CashLens dataProvider mismatch");
         require(CashEventEmitter(d.cashEventEmitter).cashModule() == d.cashModule, "CashEventEmitter cashModule mismatch");
-        require(address(DebtManagerCore(d.debtManager).etherFiDataProvider()) == dataProvider, "DebtManager core dataProvider mismatch");
-        require(address(DebtManagerAdmin(d.debtManagerAdminImpl).etherFiDataProvider()) == dataProvider, "DebtManager admin dataProvider mismatch");
-        require(address(EtherFiHook(d.etherFiHook).dataProvider()) == dataProvider, "EtherFiHook dataProvider mismatch");
-        require(address(TopUpDest(payable(d.topUpDest)).etherFiDataProvider()) == dataProvider, "TopUpDest dataProvider mismatch");
+        require(address(DebtManagerCore(d.debtManager).etherFiDataProvider()) == d.dataProvider, "DebtManager core dataProvider mismatch");
+        require(address(DebtManagerAdmin(d.debtManagerAdminImpl).etherFiDataProvider()) == d.dataProvider, "DebtManager admin dataProvider mismatch");
+        require(address(EtherFiHook(d.etherFiHook).dataProvider()) == d.dataProvider, "EtherFiHook dataProvider mismatch");
+        require(address(TopUpDest(payable(d.topUpDest)).etherFiDataProvider()) == d.dataProvider, "TopUpDest dataProvider mismatch");
         require(address(TopUpDest(payable(d.topUpDest)).weth()) == getChainConfig(vm.toString(block.chainid)).weth, "TopUpDest WETH mismatch");
     }
 
     /// @dev Confirms gateway roles, policy, reserve mappings, drivers, and Aave position-manager activation.
-    function _verifyGateway(Deployment memory d, address roleRegistry, address usdc) internal view {
+    function _verifyGateway(Deployment memory d) internal view {
         LendGateway gateway = LendGateway(d.lendGateway);
         IAaveV4Spoke spoke = IAaveV4Spoke(d.spoke);
+        address usdc = getChainConfig(vm.toString(block.chainid)).usdc;
 
-        require(address(gateway.etherFiDataProvider()) == address(CashLens(d.cashLens).dataProvider()), "gateway dataProvider mismatch");
+        require(address(gateway.etherFiDataProvider()) == d.dataProvider, "gateway dataProvider mismatch");
         require(address(gateway.spoke()) == d.spoke, "gateway Spoke mismatch");
-        require(address(gateway.roleRegistry()) == roleRegistry, "gateway role registry mismatch");
+        require(address(gateway.roleRegistry()) == d.roleRegistry, "gateway role registry mismatch");
         require(address(ICashModule(d.cashModule).getLendGateway()) == d.lendGateway, "CashModule gateway mismatch");
         require(gateway.minHealthFactor() == MIN_HEALTH_FACTOR, "minimum health factor mismatch");
         require(gateway.isSpendAsset(usdc), "USDC not spendable");
         require(gateway.isDriver(d.debtManager), "DebtManager not a driver");
         require(gateway.isDriver(d.topUpDest), "TopUpDest not a driver");
+        require(gateway.isDriver(d.liquifier), "liquifier not a driver");
         require(spoke.isPositionManagerActive(d.lendGateway), "gateway not active on Spoke");
         require(d.deployer == d.admin, "deployer is not dev admin");
-        require(RoleRegistry(roleRegistry).owner() == d.admin, "dev admin mismatch");
-        require(RoleRegistry(roleRegistry).hasRole(gateway.LEND_GATEWAY_ADMIN_ROLE(), d.admin), "gateway admin role missing");
+        require(RoleRegistry(d.roleRegistry).owner() == d.admin, "dev admin mismatch");
+        require(RoleRegistry(d.roleRegistry).hasRole(gateway.LEND_GATEWAY_ADMIN_ROLE(), d.admin), "gateway admin role missing");
 
         uint256 count = spoke.getReserveCount();
         require(gateway.registeredAssets().length == count, "registered reserve count mismatch");
@@ -205,5 +189,13 @@ contract VerifyCashLendDev is Utils {
             require(gateway.isRegistered(asset), "reserve asset not registered");
             require(gateway.reserveIdOf(asset) == reserveId, "reserve ID mismatch");
         }
+    }
+
+    /// @dev Confirms the new modules copied the old configuration and fully replaced the old ones.
+    function _verifyModules(Deployment memory d) internal view {
+        CashLendDevModules.NewModules memory next = CashLendDevModules.newFromAddresses(d.newModules, d.liquifierImplementation);
+        CashLendDevModules.verifyNewConfig(d.dataProvider, d.debtManager, d.oldModules, next);
+        CashLendDevModules.verifyActive(d.dataProvider, d.cashModule, LendGateway(d.lendGateway), CashLendDevModules.oldAddresses(d.oldModules), d.newModules);
+        require(EtherFiDataProvider(d.dataProvider).isDefaultModule(d.liquifier), "liquifier not default");
     }
 }
