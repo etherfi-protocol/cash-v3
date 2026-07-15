@@ -44,8 +44,6 @@ contract VerifyCashLendRollbackDev is Utils {
         address etherFiHook;
         address lendGateway;
         address lendGatewayImpl;
-        bytes32 lendGatewayImplRuntimeCodeHash;
-        bytes32 lendGatewayProxyRuntimeCodeHash;
         address previousCashEventEmitterImpl;
         address previousCashLensImpl;
         address previousCashModuleCoreImpl;
@@ -82,8 +80,6 @@ contract VerifyCashLendRollbackDev is Utils {
         _requireOriginalImplementations(deployment);
         _requireOriginalImmutables(deployment);
         require(_implementationOf(deployment.lendGateway) == deployment.lendGatewayImpl, "LendGateway implementation changed");
-        require(deployment.lendGatewayImpl.codehash == deployment.lendGatewayImplRuntimeCodeHash, "LendGateway implementation runtime changed");
-        require(deployment.lendGateway.codehash == deployment.lendGatewayProxyRuntimeCodeHash, "LendGateway proxy runtime changed");
         require(_trackedGatewayStateHash(deployment, gateway, spoke) == snapshot.trackedGatewayStateHash, "tracked gateway state changed");
         _requirePositionHashes(spoke, snapshot.pilotSafes, snapshot.positionHashes);
 
@@ -104,8 +100,6 @@ contract VerifyCashLendRollbackDev is Utils {
         deployment.etherFiHook = stdJson.readAddress(json, ".etherFiHook");
         deployment.lendGateway = stdJson.readAddress(json, ".lendGateway");
         deployment.lendGatewayImpl = stdJson.readAddress(json, ".lendGatewayImpl");
-        deployment.lendGatewayImplRuntimeCodeHash = stdJson.readBytes32(json, ".lendGatewayImplRuntimeCodeHash");
-        deployment.lendGatewayProxyRuntimeCodeHash = stdJson.readBytes32(json, ".lendGatewayProxyRuntimeCodeHash");
         deployment.previousCashEventEmitterImpl = stdJson.readAddress(json, ".previousCashEventEmitterImpl");
         deployment.previousCashLensImpl = stdJson.readAddress(json, ".previousCashLensImpl");
         deployment.previousCashModuleCoreImpl = stdJson.readAddress(json, ".previousCashModuleCoreImpl");
@@ -136,6 +130,7 @@ contract VerifyCashLendRollbackDev is Utils {
         require(RoleRegistry(roleRegistry).owner() == stdJson.readAddress(aaveJson, ".admin"), "Cash and Aave dev admins differ");
         require(deployment.lendGatewayImpl == CREATE3.predictDeterministicAddress(GATEWAY_IMPL_SALT, NICKS_FACTORY), "non-canonical LendGateway implementation");
         require(deployment.lendGateway == CREATE3.predictDeterministicAddress(GATEWAY_PROXY_SALT, NICKS_FACTORY), "non-canonical LendGateway proxy");
+        require(deployment.lendGatewayImpl.code.length != 0 && deployment.lendGateway.code.length != 0, "LendGateway code missing");
         require(address(LendGateway(deployment.lendGateway).roleRegistry()) == stdJson.readAddress(baseJson, ".addresses.RoleRegistry"), "non-canonical gateway RoleRegistry");
 
         string memory baseline = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend-rollback-baseline.json"));

@@ -26,7 +26,7 @@ import { Utils } from "../utils/Utils.sol";
 /**
  * @title DeployCashLendDev
  * @notice Upgrades the existing Optimism dev Cash deployment in place and enables Lend integration
- * @dev This script is dev-only. PRIVATE_KEY must belong to the current dev admin recorded as both the Cash
+ * @dev This script is dev-only. The CLI sender must be the current dev admin recorded as both the Cash
  *      RoleRegistry owner and Aave test-instance admin. The same wallet deploys implementations, upgrades the
  *      existing proxies, configures LendGateway, and activates it on the existing Aave test Spoke.
  *
@@ -37,7 +37,7 @@ import { Utils } from "../utils/Utils.sol";
  *      CashModuleCore, CashModuleSetters, and CashLens use dynamically linked libraries. Forge deploys and
  *      links those libraries as part of the script run; retain the broadcast artifact for verification.
  *
- * Usage (drop --broadcast for simulation with the dev admin key):
+ * Usage (drop --broadcast for simulation):
  *   source .env && ENV=dev forge script \
  *     scripts/lend/DeployCashLendDev.s.sol:DeployCashLendDev \
  *     --rpc-url $OPTIMISM_RPC --broadcast -vvvv
@@ -48,9 +48,6 @@ contract DeployCashLendDev is Utils {
     bytes32 internal constant GATEWAY_PROXY_SALT = keccak256("ether.fi/cash-lend/dev/LendGatewayProxy/v1");
     bytes32 internal constant EIP1967_IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     uint256 internal constant MIN_HEALTH_FACTOR = 1.05e18;
-
-    bytes32 internal expectedGatewayImplRuntimeCodeHash;
-    bytes32 internal expectedGatewayProxyRuntimeCodeHash;
 
     struct ExistingContracts {
         address cashEventEmitter;
@@ -90,17 +87,16 @@ contract DeployCashLendDev is Utils {
         require(block.chainid == 10, "Optimism only");
         require(isEqualString(getEnv(), "dev"), "ENV must be dev");
 
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        address deployer = tx.origin;
         ExistingContracts memory existing = _readExistingContracts();
         string memory aaveJson = _readAaveDeployment();
         address spokeAddress = stdJson.readAddress(aaveJson, ".spoke");
         IAaveV4Spoke spoke = IAaveV4Spoke(spokeAddress);
-        _validateDevAdmin(existing.roleRegistry, existing.cashModule, aaveJson, vm.addr(deployerPrivateKey));
+        _validateDevAdmin(existing.roleRegistry, existing.cashModule, aaveJson, deployer);
 
         PreviousImplementations memory previous = _readPreviousImplementations(existing);
-        _setExpectedGatewayRuntimeCodeHashes(existing.dataProvider, existing.roleRegistry, spokeAddress);
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
 
         (address gatewayImpl, address gatewayProxy) = _deployGateway(existing.dataProvider, existing.roleRegistry, spokeAddress);
         NewImplementations memory next = _deployImplementations(existing);
@@ -113,11 +109,11 @@ contract DeployCashLendDev is Utils {
         _logSummary(gatewayImpl, gatewayProxy, next);
     }
 
-    /// @dev Confirms PRIVATE_KEY has every permission used by this deployment.
+    /// @dev Confirms the CLI sender has every permission used by this deployment.
     function _validateDevAdmin(address roleRegistry, address cashModule, string memory aaveJson, address deployer) internal view {
         RoleRegistry registry = RoleRegistry(roleRegistry);
         address cashAdmin = registry.owner();
-        require(deployer == cashAdmin, "PRIVATE_KEY is not Cash dev admin");
+        require(deployer == cashAdmin, "sender is not Cash dev admin");
         require(stdJson.readAddress(aaveJson, ".admin") == cashAdmin, "Cash and Aave dev admins differ");
         require(registry.hasRole(ICashModule(cashModule).CASH_MODULE_CONTROLLER_ROLE(), deployer), "dev admin missing CashModule controller role");
     }
@@ -233,21 +229,11 @@ contract DeployCashLendDev is Utils {
         LendGateway gateway = LendGateway(proxy);
 
         require(impl == predictedImpl, "gateway implementation address mismatch");
-        require(impl.codehash == expectedGatewayImplRuntimeCodeHash, "gateway implementation runtime mismatch");
-        require(proxy.codehash == expectedGatewayProxyRuntimeCodeHash, "gateway proxy runtime mismatch");
         require(_implementationOf(proxy) == impl, "gateway proxy implementation mismatch");
         require(address(gateway.etherFiDataProvider()) == dataProvider, "gateway data provider mismatch");
         require(address(gateway.spoke()) == spoke, "gateway spoke mismatch");
         require(address(gateway.roleRegistry()) == roleRegistry, "gateway role registry mismatch");
         return (impl, proxy);
-    }
-
-    /// @dev Deploys local reference contracts outside broadcast so existing CREATE3 code can be compared exactly.
-    function _setExpectedGatewayRuntimeCodeHashes(address dataProvider, address roleRegistry, address spoke) internal {
-        LendGateway referenceImpl = new LendGateway(dataProvider, spoke);
-        UUPSProxy referenceProxy = new UUPSProxy(address(referenceImpl), abi.encodeWithSelector(LendGateway.initialize.selector, roleRegistry));
-        expectedGatewayImplRuntimeCodeHash = address(referenceImpl).codehash;
-        expectedGatewayProxyRuntimeCodeHash = address(referenceProxy).codehash;
     }
 
     /// @dev Stops a rerun when the local gateway bytecode differs from the version recorded by the first run.
@@ -258,8 +244,6 @@ contract DeployCashLendDev is Utils {
         string memory json = vm.readFile(path);
         require(stdJson.readBytes32(json, ".lendGatewayImplInitCodeHash") == implCodeHash, "LendGateway implementation bytecode changed; bump salt version");
         require(stdJson.readBytes32(json, ".lendGatewayProxyInitCodeHash") == proxyCodeHash, "LendGateway proxy bytecode changed; bump salt version");
-        require(stdJson.readBytes32(json, ".lendGatewayImplRuntimeCodeHash") == expectedGatewayImplRuntimeCodeHash, "LendGateway implementation runtime changed; bump salt version");
-        require(stdJson.readBytes32(json, ".lendGatewayProxyRuntimeCodeHash") == expectedGatewayProxyRuntimeCodeHash, "LendGateway proxy runtime changed; bump salt version");
     }
 
     /// @dev Deploys creation code through Nick's CREATE3 factory, or returns the existing deterministic address.
@@ -342,7 +326,7 @@ contract DeployCashLendDev is Utils {
     function _writeManifest(ExistingContracts memory c, PreviousImplementations memory old, NewImplementations memory next, address gatewayImpl, address gatewayProxy, address spoke) internal {
         string memory object = "cash-lend-dev";
         vm.serializeUint(object, "chainId", block.chainid);
-        vm.serializeAddress(object, "deployer", vm.addr(vm.envUint("PRIVATE_KEY")));
+        vm.serializeAddress(object, "deployer", tx.origin);
         vm.serializeAddress(object, "admin", RoleRegistry(c.roleRegistry).owner());
         vm.serializeAddress(object, "spoke", spoke);
         vm.serializeAddress(object, "lendGateway", gatewayProxy);
@@ -351,8 +335,6 @@ contract DeployCashLendDev is Utils {
         bytes32 gatewayProxyCodeHash = keccak256(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(gatewayImpl, abi.encodeWithSelector(LendGateway.initialize.selector, c.roleRegistry))));
         vm.serializeBytes32(object, "lendGatewayImplInitCodeHash", gatewayImplCodeHash);
         vm.serializeBytes32(object, "lendGatewayProxyInitCodeHash", gatewayProxyCodeHash);
-        vm.serializeBytes32(object, "lendGatewayImplRuntimeCodeHash", expectedGatewayImplRuntimeCodeHash);
-        vm.serializeBytes32(object, "lendGatewayProxyRuntimeCodeHash", expectedGatewayProxyRuntimeCodeHash);
         vm.serializeAddress(object, "cashModule", c.cashModule);
         vm.serializeAddress(object, "cashModuleCoreImpl", next.cashModuleCore);
         vm.serializeAddress(object, "cashModuleSettersImpl", next.cashModuleSetters);

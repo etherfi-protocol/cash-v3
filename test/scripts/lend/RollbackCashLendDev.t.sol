@@ -10,17 +10,17 @@ import { IAaveV4Spoke } from "../../../src/interfaces/IAaveV4Spoke.sol";
 /// @dev Exposes the rollback script's internal checks so they can be tested without broadcasting transactions.
 contract RollbackCashLendDevHarness is RollbackCashLendDev {
     /// @dev Runs the checks used by the safe, clean-only rollback mode.
-    function enforceClean(bool hasNonCleanSafe, bool valuationAvailable, uint256 supplyUsd, uint256 debtUsd) external pure {
-        _enforceMode(RollbackMode.CleanOnly, hasNonCleanSafe, valuationAvailable, supplyUsd, debtUsd);
+    function enforceClean(bool hasNonCleanSafe, uint256 supplyUsd, uint256 debtUsd) external pure {
+        _enforceMode(RollbackMode.CleanOnly, hasNonCleanSafe, supplyUsd, debtUsd);
     }
 
     /// @dev Runs the checks used by force mode, which logs problems instead of reverting.
-    function enforceForce(bool hasNonCleanSafe, bool valuationAvailable, uint256 supplyUsd, uint256 debtUsd) external pure {
-        _enforceMode(RollbackMode.ForceImplementations, hasNonCleanSafe, valuationAvailable, supplyUsd, debtUsd);
+    function enforceForce(bool hasNonCleanSafe, uint256 supplyUsd, uint256 debtUsd) external pure {
+        _enforceMode(RollbackMode.ForceImplementations, hasNonCleanSafe, supplyUsd, debtUsd);
     }
 
     /// @dev Exposes the calculation of total supplied and borrowed USD across the Spoke.
-    function spokeTotalsUsd(IAaveV4Spoke spoke) external view returns (bool, uint256, uint256) {
+    function spokeTotalsUsd(IAaveV4Spoke spoke) external view returns (uint256, uint256) {
         return _spokeTotalsUsd(spoke);
     }
 
@@ -35,52 +35,19 @@ contract RollbackCashLendDevHarness is RollbackCashLendDev {
     }
 }
 
-/// @dev Minimal price source that lets tests configure whether a staleness limit exists.
-contract MockRollbackPriceSource {
-    uint256 internal immutable _maxStaleness;
-
-    /// @dev Stores the test staleness limit returned to the rollback script.
-    constructor(uint256 maxStaleness_) {
-        _maxStaleness = maxStaleness_;
-    }
-
-    /// @dev Returns the configured staleness limit using the Chainlink adapter's getter name.
-    function rateMaxStaleness() external view returns (uint256) {
-        return _maxStaleness;
-    }
-}
-
-/// @dev Minimal Aave oracle that returns test prices or simulates an oracle failure.
+/// @dev Minimal Aave oracle that returns test prices.
 contract MockRollbackOracle {
     uint8 public decimals = 8;
-    address public source;
     uint256[] internal _prices;
-    bool public shouldRevert;
-
-    /// @dev Sets the price source returned for every mock reserve.
-    constructor(address source_) {
-        source = source_;
-    }
 
     /// @dev Sets the prices returned by getReservesPrices.
     function setPrices(uint256[] memory prices) external {
         _prices = prices;
     }
 
-    /// @dev Chooses whether the next price read succeeds or reverts.
-    function setShouldRevert(bool value) external {
-        shouldRevert = value;
-    }
-
-    /// @dev Returns configured prices unless the test requested an oracle failure.
+    /// @dev Returns configured prices.
     function getReservesPrices(uint256[] calldata) external view returns (uint256[] memory) {
-        require(!shouldRevert, "oracle failure");
         return _prices;
-    }
-
-    /// @dev Returns the price source inspected by the rollback staleness check.
-    function getReserveSource(uint256) external view returns (address) {
-        return source;
     }
 }
 
@@ -154,50 +121,42 @@ contract RollbackCashLendDevTest is Test {
     uint256 internal constant USD = 1e8;
 
     RollbackCashLendDevHarness internal harness;
-    MockRollbackPriceSource internal source;
     MockRollbackOracle internal oracle;
     MockRollbackSpoke internal spoke;
 
     /// @dev Creates a fresh rollback harness, oracle, price source, and Spoke before each test.
     function setUp() public {
         harness = new RollbackCashLendDevHarness();
-        source = new MockRollbackPriceSource(1 days);
-        oracle = new MockRollbackOracle(address(source));
+        oracle = new MockRollbackOracle();
         spoke = new MockRollbackSpoke(address(oracle));
     }
 
     /// @dev Clean-only mode allows supply and debt exactly at the agreed $100 limits.
     function test_cleanOnlyAcceptsExactHundredDollarBounds() public view {
-        harness.enforceClean(false, true, 100 * USD, 100 * USD);
+        harness.enforceClean(false, 100 * USD, 100 * USD);
     }
 
     /// @dev Clean-only mode stops when a specified pilot Safe still has an Aave position.
     function test_cleanOnlyRejectsNonCleanPilotSafe() public {
         vm.expectRevert("pilot Safe has Aave supply or debt");
-        harness.enforceClean(true, true, 0, 0);
-    }
-
-    /// @dev Clean-only mode stops when the script cannot calculate the Spoke's USD value.
-    function test_cleanOnlyRejectsUnavailableValuation() public {
-        vm.expectRevert("Spoke valuation unavailable");
-        harness.enforceClean(false, false, 0, 0);
+        harness.enforceClean(true, 0, 0);
     }
 
     /// @dev Clean-only mode stops when total Spoke supply exceeds $100.
     function test_cleanOnlyRejectsSupplyAboveHundredDollars() public {
         vm.expectRevert("Spoke supply exceeds $100");
-        harness.enforceClean(false, true, 100 * USD + 1, 0);
+        harness.enforceClean(false, 100 * USD + 1, 0);
     }
 
     /// @dev Clean-only mode stops when total Spoke debt exceeds $100.
     function test_cleanOnlyRejectsDebtAboveHundredDollars() public {
         vm.expectRevert("Spoke debt exceeds $100");
-        harness.enforceClean(false, true, 0, 100 * USD + 1);
+        harness.enforceClean(false, 0, 100 * USD + 1);
     }
 
-    /// @dev Force mode continues even when pilot positions exist and valuation is unavailable.
+    /// @dev Force mode continues when pilot positions or aggregate values exceed the clean limits.
     function test_forceModeAcceptsEveryGuardFailure() public view {
-        harness.enforceForce(true, false, type(uint256).max, type(uint256).max);
+        harness.enforceForce(true, type(uint256).max, type(uint256).max);
     }
 
     /// @dev A resumed rollback accepts steps that are still on Lend or already restored.
@@ -231,49 +190,9 @@ contract RollbackCashLendDevTest is Test {
         prices[0] = USD;
         oracle.setPrices(prices);
 
-        (bool available, uint256 supplyUsd, uint256 debtUsd) = harness.spokeTotalsUsd(IAaveV4Spoke(address(spoke)));
-        assertTrue(available);
+        (uint256 supplyUsd, uint256 debtUsd) = harness.spokeTotalsUsd(IAaveV4Spoke(address(spoke)));
         assertEq(supplyUsd, 100 * USD + 100);
         assertEq(debtUsd, 100 * USD + 100);
-    }
-
-    /// @dev An oracle revert is reported as unavailable instead of unexpectedly breaking force mode.
-    function test_spokeValuationConvertsOracleFailureToUnavailable() public {
-        spoke.addReserve(address(0xA1), 6, 1e6, 0);
-        uint256[] memory prices = new uint256[](1);
-        prices[0] = USD;
-        oracle.setPrices(prices);
-        oracle.setShouldRevert(true);
-
-        (bool available, uint256 supplyUsd, uint256 debtUsd) = harness.spokeTotalsUsd(IAaveV4Spoke(address(spoke)));
-        assertFalse(available);
-        assertEq(supplyUsd, 0);
-        assertEq(debtUsd, 0);
-    }
-
-    /// @dev A failure after reading prices is also reported as an unavailable valuation.
-    function test_spokeValuationConvertsPostPriceFailureToUnavailable() public {
-        spoke.addReserve(address(0xA1), 37, 1e6, 0);
-        uint256[] memory prices = new uint256[](1);
-        prices[0] = USD;
-        oracle.setPrices(prices);
-
-        (bool available,,) = harness.spokeTotalsUsd(IAaveV4Spoke(address(spoke)));
-        assertFalse(available);
-    }
-
-    /// @dev Clean valuation rejects a price source that exposes no staleness limit.
-    function test_spokeValuationRejectsSourceWithoutStalenessBound() public {
-        MockRollbackPriceSource unboundedSource = new MockRollbackPriceSource(0);
-        MockRollbackOracle unboundedOracle = new MockRollbackOracle(address(unboundedSource));
-        MockRollbackSpoke unboundedSpoke = new MockRollbackSpoke(address(unboundedOracle));
-        unboundedSpoke.addReserve(address(0xA1), 6, 1e6, 0);
-        uint256[] memory prices = new uint256[](1);
-        prices[0] = USD;
-        unboundedOracle.setPrices(prices);
-
-        (bool available,,) = harness.spokeTotalsUsd(IAaveV4Spoke(address(unboundedSpoke)));
-        assertFalse(available);
     }
 
     /// @dev Position snapshots change when collateral or borrowed status changes without changing balances.

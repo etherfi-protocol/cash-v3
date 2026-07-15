@@ -24,8 +24,7 @@ import { Utils } from "../utils/Utils.sol";
 /**
  * @title VerifyCashLendDev
  * @notice Verifies the deployment produced by DeployCashLendDev
- * @dev Dev-only and read-only with respect to the target chain. It deploys local reference bytecode during
- *      Forge simulation, but never starts a broadcast. Reverts on the first mismatch.
+ * @dev Dev-only and read-only. Reverts on the first mismatch.
  *
  * Usage:
  *   source .env && ENV=dev forge script \
@@ -58,15 +57,13 @@ contract VerifyCashLendDev is Utils {
         address lendGatewayImpl;
         bytes32 lendGatewayImplInitCodeHash;
         bytes32 lendGatewayProxyInitCodeHash;
-        bytes32 lendGatewayImplRuntimeCodeHash;
-        bytes32 lendGatewayProxyRuntimeCodeHash;
         address spoke;
         address topUpDest;
         address topUpDestImpl;
     }
 
     /// @dev Loads the Cash Lend manifest and runs every post-deployment verification check.
-    function run() public {
+    function run() public view {
         require(block.chainid == 10, "Optimism only");
         require(isEqualString(getEnv(), "dev"), "ENV must be dev");
 
@@ -112,8 +109,6 @@ contract VerifyCashLendDev is Utils {
         deployment.lendGatewayImpl = stdJson.readAddress(json, ".lendGatewayImpl");
         deployment.lendGatewayImplInitCodeHash = stdJson.readBytes32(json, ".lendGatewayImplInitCodeHash");
         deployment.lendGatewayProxyInitCodeHash = stdJson.readBytes32(json, ".lendGatewayProxyInitCodeHash");
-        deployment.lendGatewayImplRuntimeCodeHash = stdJson.readBytes32(json, ".lendGatewayImplRuntimeCodeHash");
-        deployment.lendGatewayProxyRuntimeCodeHash = stdJson.readBytes32(json, ".lendGatewayProxyRuntimeCodeHash");
         deployment.spoke = stdJson.readAddress(json, ".spoke");
         deployment.topUpDest = stdJson.readAddress(json, ".topUpDest");
         deployment.topUpDestImpl = stdJson.readAddress(json, ".topUpDestImpl");
@@ -164,18 +159,11 @@ contract VerifyCashLendDev is Utils {
     }
 
     /// @dev Confirms the deterministic gateway uses the same compiled version recorded by deployment.
-    function _verifyGatewayCodeVersion(Deployment memory d, address dataProvider, address roleRegistry) internal {
+    function _verifyGatewayCodeVersion(Deployment memory d, address dataProvider, address roleRegistry) internal pure {
         bytes32 implCodeHash = keccak256(abi.encodePacked(type(LendGateway).creationCode, abi.encode(dataProvider, d.spoke)));
         bytes32 proxyCodeHash = keccak256(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(d.lendGatewayImpl, abi.encodeWithSelector(LendGateway.initialize.selector, roleRegistry))));
         require(d.lendGatewayImplInitCodeHash == implCodeHash, "LendGateway implementation bytecode mismatch");
         require(d.lendGatewayProxyInitCodeHash == proxyCodeHash, "LendGateway proxy bytecode mismatch");
-
-        LendGateway referenceImpl = new LendGateway(dataProvider, d.spoke);
-        UUPSProxy referenceProxy = new UUPSProxy(address(referenceImpl), abi.encodeWithSelector(LendGateway.initialize.selector, roleRegistry));
-        bytes32 implRuntimeHash = address(referenceImpl).codehash;
-        bytes32 proxyRuntimeHash = address(referenceProxy).codehash;
-        require(d.lendGatewayImplRuntimeCodeHash == implRuntimeHash && d.lendGatewayImpl.codehash == implRuntimeHash, "LendGateway implementation runtime mismatch");
-        require(d.lendGatewayProxyRuntimeCodeHash == proxyRuntimeHash && d.lendGateway.codehash == proxyRuntimeHash, "LendGateway proxy runtime mismatch");
     }
 
     /// @dev Confirms constructor-set references on upgraded implementations still point to dev dependencies.

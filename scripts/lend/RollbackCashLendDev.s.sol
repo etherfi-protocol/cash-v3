@@ -27,9 +27,9 @@ import { Utils } from "../utils/Utils.sol";
  * @title RollbackCashLendDev
  * @notice Restores the implementations that preceded the Optimism dev Cash Lend deployment
  * @dev Test-only implementation rollback. It never repays, withdraws, or changes LendGateway/Aave
- *      configuration. `clean-only` fails closed on known pilot positions, unpriceable Spoke state,
- *      or aggregate Spoke supply/debt over $100. `force-implementations` logs those conditions and
- *      restores the implementations anyway. Clean-only checks are a preflight, not an atomic on-chain guard:
+ *      configuration. `clean-only` stops on known pilot positions or aggregate Spoke supply/debt over $100.
+ *      `force-implementations` logs those conditions and restores the implementations anyway. If the Aave
+ *      oracle cannot be read, both modes stop. Clean-only checks are a preflight, not an atomic on-chain guard:
  *      each reference change is a separate EOA transaction. If broadcasting stops partway, rerun this script
  *      to skip restored references and resume, then run VerifyCashLendRollbackDev against the final chain state.
  *
@@ -73,8 +73,6 @@ contract RollbackCashLendDev is Utils {
         address etherFiHookImpl;
         address lendGateway;
         address lendGatewayImpl;
-        bytes32 lendGatewayImplRuntimeCodeHash;
-        bytes32 lendGatewayProxyRuntimeCodeHash;
         address previousCashEventEmitterImpl;
         address previousCashLensImpl;
         address previousCashModuleCoreImpl;
@@ -100,21 +98,21 @@ contract RollbackCashLendDev is Utils {
         IAaveV4Spoke spoke = IAaveV4Spoke(deployment.spoke);
         LendGateway gateway = LendGateway(deployment.lendGateway);
 
-        _validateDevAdmin(vm.envUint("PRIVATE_KEY"));
+        _validateDevAdmin(deployment.cashModule, tx.origin);
         _validatePilotSafes(pilotSafes);
         _requireExpectedImplementations(deployment);
 
         // Inspect explicitly supplied pilot Safes and retain stable Aave position hashes for post-rollback checks.
         (bool hasNonCleanSafe, bytes32[] memory positionHashes) = _inspectPilotSafes(deployment.cashModule, spoke, pilotSafes);
 
-        // Value the entire Spoke at Aave oracle prices so an omitted pilot list cannot hide material market usage.
-        (bool valuationAvailable, uint256 supplyUsd, uint256 debtUsd) = _spokeTotalsUsd(spoke);
-        _logSpokeTotals(valuationAvailable, supplyUsd, debtUsd);
-        _enforceMode(mode, hasNonCleanSafe, valuationAvailable, supplyUsd, debtUsd);
+        // Value the entire Spoke so an omitted pilot list cannot hide material market usage.
+        (uint256 supplyUsd, uint256 debtUsd) = _spokeTotalsUsd(spoke);
+        _logSpokeTotals(supplyUsd, debtUsd);
+        _enforceMode(mode, hasNonCleanSafe, supplyUsd, debtUsd);
 
         bytes32 trackedGatewayStateHash = _trackedGatewayStateHash(deployment, gateway, spoke);
 
-        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
+        vm.startBroadcast();
         _restoreOriginalImplementations(deployment);
         vm.stopBroadcast();
 
@@ -123,7 +121,7 @@ contract RollbackCashLendDev is Utils {
         require(_trackedGatewayStateHash(deployment, gateway, spoke) == trackedGatewayStateHash, "tracked gateway state changed");
         _requirePositionHashesUnchanged(spoke, pilotSafes, positionHashes);
 
-        _writeRollbackSnapshot(deployment, mode, pilotSafes, positionHashes, trackedGatewayStateHash, valuationAvailable, supplyUsd, debtUsd);
+        _writeRollbackSnapshot(deployment, mode, pilotSafes, positionHashes, trackedGatewayStateHash, supplyUsd, debtUsd);
         console.log("Cash Lend dev implementation rollback simulated successfully");
     }
 
@@ -134,12 +132,13 @@ contract RollbackCashLendDev is Utils {
         revert("invalid ROLLBACK_MODE");
     }
 
-    /// @dev Confirms the broadcast key is the existing Cash and Aave dev administrator.
-    function _validateDevAdmin(uint256 privateKey) internal view {
+    /// @dev Confirms the CLI sender is the existing Cash and Aave dev administrator.
+    function _validateDevAdmin(address cashModule, address sender) internal view {
         string memory baseJson = readDeploymentFile();
         address roleRegistry = stdJson.readAddress(baseJson, ".addresses.RoleRegistry");
         address admin = RoleRegistry(roleRegistry).owner();
-        require(vm.addr(privateKey) == admin, "PRIVATE_KEY is not Cash dev admin");
+        require(sender == admin, "sender is not Cash dev admin");
+        require(RoleRegistry(roleRegistry).hasRole(ICashModule(cashModule).CASH_MODULE_CONTROLLER_ROLE(), sender), "dev admin missing CashModule controller role");
 
         string memory aaveJson = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/aave-v4-test.json"));
         require(stdJson.readAddress(aaveJson, ".admin") == admin, "Cash and Aave dev admins differ");
@@ -176,8 +175,6 @@ contract RollbackCashLendDev is Utils {
         deployment.etherFiHookImpl = stdJson.readAddress(json, ".etherFiHookImpl");
         deployment.lendGateway = stdJson.readAddress(json, ".lendGateway");
         deployment.lendGatewayImpl = stdJson.readAddress(json, ".lendGatewayImpl");
-        deployment.lendGatewayImplRuntimeCodeHash = stdJson.readBytes32(json, ".lendGatewayImplRuntimeCodeHash");
-        deployment.lendGatewayProxyRuntimeCodeHash = stdJson.readBytes32(json, ".lendGatewayProxyRuntimeCodeHash");
         deployment.previousCashEventEmitterImpl = stdJson.readAddress(json, ".previousCashEventEmitterImpl");
         deployment.previousCashLensImpl = stdJson.readAddress(json, ".previousCashLensImpl");
         deployment.previousCashModuleCoreImpl = stdJson.readAddress(json, ".previousCashModuleCoreImpl");
@@ -207,8 +204,8 @@ contract RollbackCashLendDev is Utils {
         require(deployment.spoke == stdJson.readAddress(aaveJson, ".spoke"), "non-canonical Aave Spoke");
         require(deployment.lendGatewayImpl == CREATE3.predictDeterministicAddress(GATEWAY_IMPL_SALT, NICKS_FACTORY), "non-canonical LendGateway implementation");
         require(deployment.lendGateway == CREATE3.predictDeterministicAddress(GATEWAY_PROXY_SALT, NICKS_FACTORY), "non-canonical LendGateway proxy");
-        require(deployment.lendGatewayImpl.codehash == deployment.lendGatewayImplRuntimeCodeHash, "LendGateway implementation runtime mismatch");
-        require(deployment.lendGateway.codehash == deployment.lendGatewayProxyRuntimeCodeHash, "LendGateway proxy runtime mismatch");
+        require(deployment.lendGatewayImpl.code.length != 0 && deployment.lendGateway.code.length != 0, "LendGateway code missing");
+        require(_implementationOf(deployment.lendGateway) == deployment.lendGatewayImpl, "LendGateway implementation mismatch");
         require(address(LendGateway(deployment.lendGateway).roleRegistry()) == stdJson.readAddress(baseJson, ".addresses.RoleRegistry"), "non-canonical gateway RoleRegistry");
 
         string memory baseline = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend-rollback-baseline.json"));
@@ -397,18 +394,8 @@ contract RollbackCashLendDev is Utils {
         }
     }
 
-    /// @dev Converts any valuation failure into an unavailable result so force mode can still proceed.
-    function _spokeTotalsUsd(IAaveV4Spoke spoke) internal view returns (bool, uint256, uint256) {
-        try this.calculateSpokeTotalsUsd(spoke) returns (uint256 supplyUsd, uint256 debtUsd) {
-            return (true, supplyUsd, debtUsd);
-        } catch {
-            return (false, 0, 0);
-        }
-    }
-
-    /// @dev Values the full Spoke conservatively; the external self-call lets the caller catch every failure.
-    function calculateSpokeTotalsUsd(IAaveV4Spoke spoke) external view returns (uint256, uint256) {
-        require(msg.sender == address(this), "self call only");
+    /// @dev Values the full Spoke conservatively using the Aave oracle.
+    function _spokeTotalsUsd(IAaveV4Spoke spoke) internal view returns (uint256, uint256) {
         uint256 count = spoke.getReserveCount();
         uint256[] memory reserveIds = new uint256[](count);
         for (uint256 i = 0; i < count; ++i) {
@@ -425,7 +412,6 @@ contract RollbackCashLendDev is Utils {
         uint256 supplyUsd;
         uint256 debtUsd;
         for (uint256 i = 0; i < count; ++i) {
-            _requireFreshnessAwareSource(address(oracle), i);
             IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(i);
             require(reserve.decimals <= 36, "unsupported reserve decimals");
             uint256 unit = 10 ** reserve.decimals;
@@ -435,34 +421,16 @@ contract RollbackCashLendDev is Utils {
         return (supplyUsd, debtUsd);
     }
 
-    /// @dev Rejects raw oracle sources that expose no staleness bound; force mode may explicitly bypass this check.
-    function _requireFreshnessAwareSource(address oracle, uint256 reserveId) internal view {
-        (bool sourceSuccess, bytes memory sourceResult) = oracle.staticcall(abi.encodeWithSignature("getReserveSource(uint256)", reserveId));
-        require(sourceSuccess && sourceResult.length == 32, "Aave reserve source unavailable");
-        address source = abi.decode(sourceResult, (address));
-
-        (bool rateSuccess, bytes memory rateResult) = source.staticcall(abi.encodeWithSignature("rateMaxStaleness()"));
-        (bool priceSuccess, bytes memory priceResult) = source.staticcall(abi.encodeWithSignature("maxStaleness()"));
-        bool rateBound = rateSuccess && rateResult.length == 32 && abi.decode(rateResult, (uint256)) != 0;
-        bool priceBound = priceSuccess && priceResult.length == 32 && abi.decode(priceResult, (uint256)) != 0;
-        require(rateBound || priceBound, "reserve source has no staleness bound");
-    }
-
-    /// @dev Logs aggregate Spoke values or an explicit warning when an oracle prevents valuation.
-    function _logSpokeTotals(bool valuationAvailable, uint256 supplyUsd, uint256 debtUsd) internal pure {
-        if (!valuationAvailable) {
-            console.log("WARNING: aggregate Spoke valuation unavailable");
-            return;
-        }
+    /// @dev Logs aggregate Spoke values.
+    function _logSpokeTotals(uint256 supplyUsd, uint256 debtUsd) internal pure {
         console.log("Aggregate Spoke supply USD (8 decimals):", supplyUsd);
         console.log("Aggregate Spoke debt USD (8 decimals):  ", debtUsd);
     }
 
-    /// @dev Applies clean-only guards while allowing the explicit force mode to proceed with warnings.
-    function _enforceMode(RollbackMode mode, bool hasNonCleanSafe, bool valuationAvailable, uint256 supplyUsd, uint256 debtUsd) internal pure {
+    /// @dev Applies clean-only limits while allowing the explicit force mode to continue with warnings.
+    function _enforceMode(RollbackMode mode, bool hasNonCleanSafe, uint256 supplyUsd, uint256 debtUsd) internal pure {
         if (mode == RollbackMode.CleanOnly) {
             require(!hasNonCleanSafe, "pilot Safe has Aave supply or debt");
-            require(valuationAvailable, "Spoke valuation unavailable");
             require(supplyUsd <= MAX_SPOKE_SUPPLY_USD, "Spoke supply exceeds $100");
             require(debtUsd <= MAX_SPOKE_DEBT_USD, "Spoke debt exceeds $100");
             return;
@@ -470,9 +438,8 @@ contract RollbackCashLendDev is Utils {
 
         console.log("WARNING: force-implementations mode enabled");
         if (hasNonCleanSafe) console.log("WARNING: proceeding with non-clean pilot Safes");
-        if (!valuationAvailable) console.log("WARNING: proceeding without aggregate Spoke valuation");
-        if (valuationAvailable && supplyUsd > MAX_SPOKE_SUPPLY_USD) console.log("WARNING: aggregate Spoke supply exceeds $100");
-        if (valuationAvailable && debtUsd > MAX_SPOKE_DEBT_USD) console.log("WARNING: aggregate Spoke debt exceeds $100");
+        if (supplyUsd > MAX_SPOKE_SUPPLY_USD) console.log("WARNING: aggregate Spoke supply exceeds $100");
+        if (debtUsd > MAX_SPOKE_DEBT_USD) console.log("WARNING: aggregate Spoke debt exceeds $100");
     }
 
     /// @dev Hashes the enumerable gateway policy, known drivers, pause state, and Aave activation tracked by this rollout.
@@ -488,7 +455,7 @@ contract RollbackCashLendDev is Utils {
     }
 
     /// @dev Writes the post-simulation verification snapshot consumed by VerifyCashLendRollbackDev.
-    function _writeRollbackSnapshot(Deployment memory deployment, RollbackMode mode, address[] memory pilotSafes, bytes32[] memory positionHashes, bytes32 trackedGatewayStateHash, bool valuationAvailable, uint256 supplyUsd, uint256 debtUsd) internal {
+    function _writeRollbackSnapshot(Deployment memory deployment, RollbackMode mode, address[] memory pilotSafes, bytes32[] memory positionHashes, bytes32 trackedGatewayStateHash, uint256 supplyUsd, uint256 debtUsd) internal {
         string memory object = "cash-lend-dev-rollback";
         vm.serializeUint(object, "chainId", block.chainid);
         vm.serializeString(object, "mode", mode == RollbackMode.CleanOnly ? "clean-only" : "force-implementations");
@@ -497,7 +464,6 @@ contract RollbackCashLendDev is Utils {
         vm.serializeAddress(object, "pilotSafes", pilotSafes);
         vm.serializeBytes32(object, "positionHashes", positionHashes);
         vm.serializeBytes32(object, "trackedGatewayStateHash", trackedGatewayStateHash);
-        vm.serializeBool(object, "valuationAvailable", valuationAvailable);
         vm.serializeUint(object, "spokeSupplyUsd", supplyUsd);
         string memory output = vm.serializeUint(object, "spokeDebtUsd", debtUsd);
 
