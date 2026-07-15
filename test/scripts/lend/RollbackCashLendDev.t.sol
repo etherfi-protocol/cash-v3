@@ -91,6 +91,8 @@ contract MockRollbackSpoke {
     uint256[] internal _supplied;
     uint256[] internal _debt;
     mapping(uint256 => mapping(address => uint256)) internal _positionWords;
+    mapping(uint256 => mapping(address => bool)) internal _usingAsCollateral;
+    mapping(uint256 => mapping(address => bool)) internal _borrowed;
 
     /// @dev Sets the oracle used to value all mock reserves.
     constructor(address oracle_) {
@@ -107,6 +109,12 @@ contract MockRollbackSpoke {
     /// @dev Changes one mock position value so tests can confirm the position hash changes.
     function setPositionWord(uint256 reserveId, address safe, uint256 value) external {
         _positionWords[reserveId][safe] = value;
+    }
+
+    /// @dev Changes the mock collateral and borrowed flags included in the position hash.
+    function setUserReserveStatus(uint256 reserveId, address safe, bool usingAsCollateral, bool borrowed) external {
+        _usingAsCollateral[reserveId][safe] = usingAsCollateral;
+        _borrowed[reserveId][safe] = borrowed;
     }
 
     /// @dev Returns the number of mock reserves.
@@ -132,6 +140,11 @@ contract MockRollbackSpoke {
     /// @dev Returns stable mock position data used by the rollback position hash.
     function getUserPosition(uint256 reserveId, address safe) external view returns (uint256) {
         return _positionWords[reserveId][safe];
+    }
+
+    /// @dev Returns the mock collateral and borrowed flags used by the rollback position hash.
+    function getUserReserveStatus(uint256 reserveId, address safe) external view returns (bool, bool) {
+        return (_usingAsCollateral[reserveId][safe], _borrowed[reserveId][safe]);
     }
 }
 
@@ -261,6 +274,21 @@ contract RollbackCashLendDevTest is Test {
 
         (bool available,,) = harness.spokeTotalsUsd(IAaveV4Spoke(address(unboundedSpoke)));
         assertFalse(available);
+    }
+
+    /// @dev Position snapshots change when collateral or borrowed status changes without changing balances.
+    function test_positionHashCoversCollateralAndBorrowStatus() public {
+        address safe = address(0x5AFE);
+        spoke.addReserve(address(0xA1), 6, 0, 0);
+        bytes32 beforeHash = harness.positionHash(IAaveV4Spoke(address(spoke)), safe);
+
+        spoke.setUserReserveStatus(0, safe, true, false);
+        bytes32 collateralHash = harness.positionHash(IAaveV4Spoke(address(spoke)), safe);
+        spoke.setUserReserveStatus(0, safe, true, true);
+        bytes32 borrowedHash = harness.positionHash(IAaveV4Spoke(address(spoke)), safe);
+
+        assertNotEq(beforeHash, collateralHash);
+        assertNotEq(collateralHash, borrowedHash);
     }
 
     /// @dev Position snapshots include every Spoke reserve, even if the gateway did not register it.

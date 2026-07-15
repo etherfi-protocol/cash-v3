@@ -1,0 +1,20 @@
+{
+  "chainId": 10,
+  "capturedAtBlock": 154255486,
+  "cashModuleCoreImpl": "0x639a161cd7cdac19b26f53238b12dd1132d8a74b",
+  "cashModuleCoreCodeHash": "0x126909c150d7d28c2f608b2b3f49419fd9770385323c25e5ae074b75767f52ac",
+  "cashModuleSettersImpl": "0x223Dd602e7f0929D121252e923861dDd573b4731",
+  "cashModuleSettersCodeHash": "0x9859f8fb358fc719edf2bd96fdbb0de09eb25e0a3bdc17f03443637e6d15cb8f",
+  "cashLensImpl": "0x1a329fae0ab264328b3c07eb7218775923e6ffaa",
+  "cashLensCodeHash": "0xc866ee29c3b0a89c6ac78f346699802737a5e10a7f72d0177645a6c178f5b394",
+  "cashEventEmitterImpl": "0x9ec8cacc5f08abdab75a430732dbcfd9b1b0a029",
+  "cashEventEmitterCodeHash": "0xa6315f538fec4f13cbeeb17cad2cc09af47e97d3884fb04e390a3eab21966ed1",
+  "debtManagerCoreImpl": "0x76e142ae0bdc94350bb9980A299fBfb1f9ad8639",
+  "debtManagerCoreCodeHash": "0xc7dd6bece2d57c927829b739235ad17bdf95873a24f8ea90b86c397938006c76",
+  "debtManagerAdminImpl": "0x822399950c8458eA7ec2E0B58abbd8C893C636b3",
+  "debtManagerAdminCodeHash": "0x88ce1574a4d69f7adcd42c52aa40c48fafc446cd3f61a7354c1147bee00402c1",
+  "etherFiHookImpl": "0x07ff69c934dabefd3e3437564f28e591f4762229",
+  "etherFiHookCodeHash": "0x69f1ab7d8181aec5a7a4754333876201e601b1b3d7c52c5ea6e52707d7b6bef5",
+  "topUpDestImpl": "0x4ef1d24603d3e945f1fb4bac47074d60d6e3b9a3",
+  "topUpDestCodeHash": "0xeb47efdc58d7b43b44d7975d4054b52416632d5f9e9473cb93cf1b01fd1fcbf9"
+}
