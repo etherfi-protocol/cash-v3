@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { BinSponsor, ICashModule } from "../../../../src/interfaces/ICashModule.sol";
+import { SpendingLimit } from "../../../../src/libraries/SpendingLimitLib.sol";
 import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 
 /**
@@ -37,6 +38,25 @@ contract EngineOnboardingTest is CashModuleTestSetup {
     function test_deploy_withoutFlag_onboardsLegacy() public {
         _wireGateway();
         assertFalse(cashModule.usesLendGateway(_deploySafe("onboard-legacy", false)), "unflagged safe is legacy");
+    }
+
+    /// The three-field setup payload used before Lend still deploys a correctly configured legacy Safe.
+    function test_deploy_withLegacySetup_onboardsLegacy() public {
+        _wireGateway();
+        address legacySafe = _deployLegacySafe("onboard-legacy-payload");
+        SpendingLimit memory limit = cashLens.applicableSpendingLimit(legacySafe);
+
+        assertFalse(cashModule.usesLendGateway(legacySafe), "legacy payload safe is legacy");
+        assertEq(limit.dailyLimit, dailyLimitInUsd, "daily limit initialized");
+        assertEq(limit.monthlyLimit, monthlyLimitInUsd, "monthly limit initialized");
+        assertEq(limit.timezoneOffset, timezoneOffset, "timezone initialized");
+    }
+
+    /// Setup rejects data that is neither the legacy three-field payload nor the new four-field payload.
+    function test_setup_rejectsUnexpectedPayloadLength() public {
+        vm.prank(address(safe));
+        vm.expectRevert(ICashModule.InvalidInput.selector);
+        cashModule.setupModule(abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, false, uint256(0)));
     }
 
     /// Onboarding with the flag set but no gateway configured reverts, so a safe is never flagged for an engine
@@ -80,6 +100,22 @@ contract EngineOnboardingTest is CashModuleTestSetup {
     function _wireGateway() internal {
         vm.prank(owner);
         cashModule.setLendGateway(address(gateway));
+    }
+
+    /// @dev Deploys a fresh Safe with the pre-Lend three-field CashModule setup payload.
+    function _deployLegacySafe(bytes32 salt) internal returns (address) {
+        address[] memory owners = new address[](1);
+        owners[0] = owner1;
+
+        address[] memory modules = new address[](1);
+        modules[0] = address(cashModule);
+
+        bytes[] memory setupData = new bytes[](1);
+        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
+
+        vm.prank(owner);
+        safeFactory.deployEtherFiSafe(salt, owners, modules, setupData, 1);
+        return safeFactory.getDeterministicAddress(salt);
     }
 
     /// @dev Deploys a fresh single-owner safe with the CashModule set up, onboarding it onto the gateway when
