@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IAaveV4Spoke } from "../../../../../src/interfaces/IAaveV4Spoke.sol";
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
 import { ModuleBase } from "../../../../../src/modules/ModuleBase.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
@@ -27,6 +28,37 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         // A reserveId whose underlying != the asset is rejected
         vm.prank(owner);
         vm.expectRevert(LendGateway.ReserveAssetMismatch.selector);
+        gw.setReserveId(address(weETH), usdcReserveId);
+    }
+
+    /// An asset can move to another matching reserve while its current reserve is empty.
+    function test_setReserveId_repointsEmptyReserve() public {
+        IAaveV4Spoke.Reserve memory replacement = IAaveV4Spoke(address(spoke)).getReserve(usdcReserveId);
+        replacement.underlying = address(weETH);
+        vm.mockCall(address(spoke), abi.encodeWithSelector(IAaveV4Spoke.getReserve.selector, usdcReserveId), abi.encode(replacement));
+
+        vm.prank(owner);
+        gw.setReserveId(address(weETH), usdcReserveId);
+        assertEq(gw.reserveIdOf(address(weETH)), usdcReserveId);
+    }
+
+    /// Re-registering the same reserve is harmless, but a live position prevents moving the asset to another reserve.
+    function test_setReserveId_repointRequiresOldReserveEmpty() public {
+        deal(address(weETH), address(safe), 1 ether);
+        vm.prank(driver);
+        gw.supply(address(safe), address(weETH), 1 ether);
+
+        vm.prank(owner);
+        gw.setReserveId(address(weETH), weethReserveId);
+        assertEq(gw.reserveIdOf(address(weETH)), weethReserveId, "same reserve remains registered");
+
+        // Model another Spoke reserve for the same underlying without deploying a second Hub in this focused test.
+        IAaveV4Spoke.Reserve memory replacement = IAaveV4Spoke(address(spoke)).getReserve(usdcReserveId);
+        replacement.underlying = address(weETH);
+        vm.mockCall(address(spoke), abi.encodeWithSelector(IAaveV4Spoke.getReserve.selector, usdcReserveId), abi.encode(replacement));
+
+        vm.prank(owner);
+        vm.expectRevert(LendGateway.ReserveStillInUse.selector);
         gw.setReserveId(address(weETH), usdcReserveId);
     }
 

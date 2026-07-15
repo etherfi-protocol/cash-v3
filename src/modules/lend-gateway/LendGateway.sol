@@ -114,7 +114,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     error ZeroAmount();
     /// @notice Thrown when a lend op is attempted for a safe that has opted out of lend
     error LendOptedOut();
-    /// @notice Thrown when de-registering a reserve that still has outstanding debt or supplied balance
+    /// @notice Thrown when changing or removing a reserve that still has outstanding debt or supplied balance
     error ReserveStillInUse();
     /// @notice Thrown when an operation would leave the safe's health factor below the configured floor
     error HealthFactorBelowMinimum();
@@ -165,19 +165,25 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // ---------------------------------------------------------------------
 
     /**
-     * @notice Registers (or updates) the reserveId for an asset, validated against the Spoke
-     * @dev Reverts unless the Spoke's reserve `reserveId` has `underlying == asset`
+     * @notice Registers or updates the reserveId for an asset, validated against the Spoke
+     * @dev Re-registering the same reserve is a no-op. Moving to another reserve requires the old reserve to
+     *      have zero aggregate supply and debt so existing positions cannot disappear from gateway accounting.
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId for the asset
-     * @dev Warning: do not re-point an asset safes already hold positions under;
-     * the USD views then read the new reserve and miss the old, understating debt and
-     * inflating borrow headroom.
      */
     function setReserveId(address asset, uint256 reserveId) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
         if (asset == address(0)) revert ZeroAddress();
         if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
 
         LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if ($.assets.contains(asset)) {
+            uint256 currentReserveId = $.reserveId[asset];
+            if (currentReserveId == reserveId) return;
+            if (spoke.getReserveTotalDebt(currentReserveId) != 0 || spoke.getReserveSuppliedAssets(currentReserveId) != 0) {
+                revert ReserveStillInUse();
+            }
+        }
+
         $.assets.add(asset);
         $.reserveId[asset] = reserveId;
 
