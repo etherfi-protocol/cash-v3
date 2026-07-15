@@ -163,11 +163,19 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiSafe() public {
+        // RecoveryManager (compiled into EtherFiSafe) now rejects setRecoveryThreshold(0), so its
+        // bytecode no longer matches the deployed pre-fix OP implementation. Re-enable after the
+        // next safe-implementation deployment.
+        vm.skip(true);
         address local = address(new EtherFiSafe(dataProviderProxy));
         _verify("EtherFiSafe", safeImpl, local);
     }
 
     function test_verifyBytecode_EtherFiSafeFactory() public {
+        // The placeholder-upgrade reinitialize hook was removed (the OP prod bootstrap already ran),
+        // so the factory bytecode no longer matches the deployed implementation. Re-enable after the
+        // next factory deployment.
+        vm.skip(true);
         address local = address(new EtherFiSafeFactory());
         _verify("EtherFiSafeFactory", safeFactoryImpl, local);
     }
