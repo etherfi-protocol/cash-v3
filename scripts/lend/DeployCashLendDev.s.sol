@@ -92,7 +92,7 @@ contract DeployCashLendDev is Utils {
         string memory aaveJson = _readAaveDeployment();
         address spokeAddress = stdJson.readAddress(aaveJson, ".spoke");
         IAaveV4Spoke spoke = IAaveV4Spoke(spokeAddress);
-        _validateDevAdmin(existing.roleRegistry, aaveJson, vm.addr(deployerPrivateKey));
+        _validateDevAdmin(existing.roleRegistry, existing.cashModule, aaveJson, vm.addr(deployerPrivateKey));
 
         PreviousImplementations memory previous = _readPreviousImplementations(existing);
 
@@ -109,11 +109,13 @@ contract DeployCashLendDev is Utils {
         _logSummary(gatewayImpl, gatewayProxy, next);
     }
 
-    /// @dev Confirms PRIVATE_KEY controls both the Cash and Aave dev administration paths.
-    function _validateDevAdmin(address roleRegistry, string memory aaveJson, address deployer) internal view {
-        address cashAdmin = RoleRegistry(roleRegistry).owner();
+    /// @dev Confirms PRIVATE_KEY has every permission used by this deployment.
+    function _validateDevAdmin(address roleRegistry, address cashModule, string memory aaveJson, address deployer) internal view {
+        RoleRegistry registry = RoleRegistry(roleRegistry);
+        address cashAdmin = registry.owner();
         require(deployer == cashAdmin, "PRIVATE_KEY is not Cash dev admin");
         require(stdJson.readAddress(aaveJson, ".admin") == cashAdmin, "Cash and Aave dev admins differ");
+        require(registry.hasRole(ICashModule(cashModule).CASH_MODULE_CONTROLLER_ROLE(), deployer), "dev admin missing CashModule controller role");
     }
 
     /// @dev Loads the existing Optimism dev Cash proxy addresses from the base deployment manifest.
@@ -142,9 +144,48 @@ contract DeployCashLendDev is Utils {
         return vm.readFile(path);
     }
 
-    /// @dev Snapshots current implementation addresses for verification and test rollback records.
+    /// @dev Reads the original implementations from the deployment file, or from the proxies on the first run.
     function _readPreviousImplementations(ExistingContracts memory c) internal view returns (PreviousImplementations memory) {
+        string memory path = string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend.json");
         PreviousImplementations memory previous;
+
+        // On reruns, keep the original implementation addresses recorded by the first run.
+        if (vm.exists(path)) {
+            string memory json = vm.readFile(path);
+            require(stdJson.readUint(json, ".chainId") == block.chainid, "deployment file chain mismatch");
+            require(stdJson.readAddress(json, ".cashEventEmitter") == c.cashEventEmitter, "deployment file CashEventEmitter mismatch");
+            require(stdJson.readAddress(json, ".cashLens") == c.cashLens, "deployment file CashLens mismatch");
+            require(stdJson.readAddress(json, ".cashModule") == c.cashModule, "deployment file CashModule mismatch");
+            require(stdJson.readAddress(json, ".debtManager") == c.debtManager, "deployment file DebtManager mismatch");
+            require(stdJson.readAddress(json, ".etherFiHook") == c.hook, "deployment file EtherFiHook mismatch");
+            require(stdJson.readAddress(json, ".topUpDest") == c.topUpDest, "deployment file TopUpDest mismatch");
+
+            previous.cashEventEmitter = stdJson.readAddress(json, ".previousCashEventEmitterImpl");
+            previous.cashLens = stdJson.readAddress(json, ".previousCashLensImpl");
+            previous.cashModuleCore = stdJson.readAddress(json, ".previousCashModuleCoreImpl");
+            previous.cashModuleSetters = stdJson.readAddress(json, ".previousCashModuleSettersImpl");
+            previous.debtManagerAdmin = stdJson.readAddress(json, ".previousDebtManagerAdminImpl");
+            previous.debtManagerCore = stdJson.readAddress(json, ".previousDebtManagerCoreImpl");
+            previous.hook = stdJson.readAddress(json, ".previousEtherFiHookImpl");
+            previous.topUpDest = stdJson.readAddress(json, ".previousTopUpDestImpl");
+
+            // Each proxy must still use either its original implementation or the last Lend implementation.
+            _requireKnownReference(_implementationOf(c.cashEventEmitter), previous.cashEventEmitter, stdJson.readAddress(json, ".cashEventEmitterImpl"));
+            _requireKnownReference(_implementationOf(c.cashLens), previous.cashLens, stdJson.readAddress(json, ".cashLensImpl"));
+            _requireKnownReference(_implementationOf(c.cashModule), previous.cashModuleCore, stdJson.readAddress(json, ".cashModuleCoreImpl"));
+            _requireKnownReference(CashModuleCore(c.cashModule).getCashModuleSetters(), previous.cashModuleSetters, stdJson.readAddress(json, ".cashModuleSettersImpl"));
+            _requireKnownReference(_implementationOf(c.debtManager), previous.debtManagerCore, stdJson.readAddress(json, ".debtManagerCoreImpl"));
+            _requireKnownReference(IDebtManager(c.debtManager).getDebtManagerAdmin(), previous.debtManagerAdmin, stdJson.readAddress(json, ".debtManagerAdminImpl"));
+            _requireKnownReference(_implementationOf(c.hook), previous.hook, stdJson.readAddress(json, ".etherFiHookImpl"));
+            _requireKnownReference(_implementationOf(c.topUpDest), previous.topUpDest, stdJson.readAddress(json, ".topUpDestImpl"));
+            return previous;
+        }
+
+        // If either deterministic gateway contract exists, an earlier deployment started without this file.
+        address gatewayImpl = CREATE3.predictDeterministicAddress(GATEWAY_IMPL_SALT, NICKS_FACTORY);
+        address gatewayProxy = CREATE3.predictDeterministicAddress(GATEWAY_PROXY_SALT, NICKS_FACTORY);
+        require(gatewayImpl.code.length == 0 && gatewayProxy.code.length == 0, "Lend deployment already started; restore cash-lend.json");
+
         previous.cashEventEmitter = _implementationOf(c.cashEventEmitter);
         previous.cashLens = _implementationOf(c.cashLens);
         previous.cashModuleCore = _implementationOf(c.cashModule);
@@ -154,6 +195,11 @@ contract DeployCashLendDev is Utils {
         previous.hook = _implementationOf(c.hook);
         previous.topUpDest = _implementationOf(c.topUpDest);
         return previous;
+    }
+
+    /// @dev Rejects an implementation address that is not recorded in the deployment file.
+    function _requireKnownReference(address current, address original, address lend) internal pure {
+        require(current == original || current == lend, "current implementation not found in deployment file");
     }
 
     /// @dev Reads a UUPS proxy's implementation directly from its EIP-1967 storage slot.
