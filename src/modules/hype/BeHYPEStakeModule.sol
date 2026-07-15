@@ -169,6 +169,10 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
             _refundExcessFee(msg.sender, excessFee);
         }
 
+        // Risk-increasing flow with no resupply (the beHYPE output arrives later, loose): the end state
+        // takes the gateway's health-factor floor
+        _ensureGatewayFloor(safe);
+
         emit StakeDeposit(safe, whype, beHYPE, amountToStake);
     }
 

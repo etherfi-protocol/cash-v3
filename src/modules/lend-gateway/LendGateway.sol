@@ -71,6 +71,9 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         mapping(address driver => bool authorized) isDriver;
         /// @notice The tokens the card can settle a debit spend in; admin-declared, a subset of `assets`
         EnumerableSetLib.AddressSet spendAssets;
+        /// @notice Post-op health-factor floor (WAD) for user-extraction ops (borrow page, withdrawal
+        /// sourcing, collateral flag off). 0 = disabled. Spends and repays are deliberately exempt.
+        uint256 minHealthFactor;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.LendGateway")) - 1)) & ~bytes32(uint256(0xff))
@@ -96,6 +99,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     event Repaid(address indexed safe, address indexed asset, uint256 amount);
     /// @notice Emitted when collateral usage is toggled for a safe
     event CollateralUsageSet(address indexed safe, address indexed asset, bool useAsCollateral);
+    /// @notice Emitted when the post-op health-factor floor is updated
+    event MinHealthFactorSet(uint256 minHealthFactor);
 
     /// @notice Thrown when the caller is not an authorized driver
     error OnlyDriver();
@@ -111,6 +116,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     error LendOptedOut();
     /// @notice Thrown when de-registering a reserve that still has outstanding debt or supplied balance
     error ReserveStillInUse();
+    /// @notice Thrown when an operation would leave the safe's health factor below the configured floor
+    error HealthFactorBelowMinimum();
+    /// @notice Thrown when setting a health-factor floor outside [1e18, 2e18] (0 disables)
+    error InvalidMinHealthFactor();
 
     /**
      * @param _etherFiDataProvider Address of the EtherFiDataProvider
@@ -197,6 +206,22 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         delete $.reserveId[asset];
 
         emit ReserveDeregistered(asset);
+    }
+
+    /**
+     * @notice Sets the post-op health-factor floor for user-extraction operations
+     * @dev Applies to the borrow page, withdrawal sourcing from Aave, and turning a collateral flag off —
+     *      the ops where a user actively extracts risk headroom. Card spends and repays are deliberately
+     *      exempt: settlement obligations must never fail on the floor, and de-risking must always work.
+     *      Aave still liquidates at HF < 1e18 regardless; this floor only keeps ether.fi-initiated
+     *      extraction from parking a position near that line.
+     * @param value The floor in WAD (1e18); 0 disables the check, otherwise bounded to [1e18, 2e18]
+     * @custom:throws InvalidMinHealthFactor if value is non-zero and outside [1e18, 2e18]
+     */
+    function setMinHealthFactor(uint256 value) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
+        if (value != 0 && (value < 1e18 || value > 2e18)) revert InvalidMinHealthFactor();
+        _getLendGatewayStorage().minHealthFactor = value;
+        emit MinHealthFactorSet(value);
     }
 
     /**
@@ -390,12 +415,57 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         // supplied position from collateral (e.g. one left on Aave after processLendOptOut). It only de-risks.
         if (useAsCollateral && _isLendOptedOut(safe)) revert LendOptedOut();
         spoke.setUsingAsCollateral(_reserveIdOf(asset), useAsCollateral, safe);
+        // Dropping a flag with open debt directly cuts the health factor, so it takes the floor; with no
+        // debt the health factor is unbounded and the check passes (the opted-out residual-cleanup case)
+        if (!useAsCollateral) ensureMinHealthFactor(safe);
         emit CollateralUsageSet(safe, asset, useAsCollateral);
     }
 
     // ---------------------------------------------------------------------
     // ILendGateway reads
     // ---------------------------------------------------------------------
+
+    /**
+     * @notice Whether the safe carries any raw debt on Aave
+     * @dev Checks raw per-asset debt, not getAccountData's USD aggregate: debtUsd floors at 6 decimals,
+     *      so sub-$0.000001 dust reads as zero there while Aave still enforces it on withdrawals — a
+     *      debt-free answer here must mean truly debt-free, or quotes overstate what Aave allows.
+     * @param safe The safe to check
+     * @return True when any registered asset carries debt for the safe
+     */
+    function hasDebt(address safe) public view returns (bool) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        uint256 len = $.assets.length();
+        for (uint256 i = 0; i < len;) {
+            if (spoke.getUserTotalDebt($.reserveId[$.assets.at(i)], safe) != 0) return true;
+            unchecked {
+                ++i;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @notice The post-op health-factor floor (WAD) for user-extraction ops; 0 = disabled
+     * @return The floor in WAD
+     */
+    function minHealthFactor() external view returns (uint256) {
+        return _getLendGatewayStorage().minHealthFactor;
+    }
+
+    /**
+     * @notice Reverts when `safe`'s health factor sits below the configured floor
+     * @dev The enforcement hook for the extraction paths: called after the borrow-page borrow, after a
+     *      withdrawal request pulls from Aave, and after a collateral flag is turned off. A safe with no
+     *      debt has an unbounded health factor and always passes. No-op while the floor is disabled.
+     * @param safe The safe to check
+     * @custom:throws HealthFactorBelowMinimum if the floor is set and the safe's health factor is below it
+     */
+    function ensureMinHealthFactor(address safe) public view {
+        uint256 floor = _getLendGatewayStorage().minHealthFactor;
+        if (floor == 0) return;
+        if (spoke.getUserAccountData(safe).healthFactor < floor) revert HealthFactorBelowMinimum();
+    }
 
     /**
      * @notice Returns `safe`'s Aave position summary (collateral, debt, borrow headroom, health factor)
@@ -426,7 +496,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
             }
 
             uint256 debt = spoke.getUserTotalDebt(reserveId, safe);
-            if (debt != 0) data.debtUsd += _toUsd(asset, debt, priceProvider);
+            // Debt rounds UP: flooring lets sub-micro-dollar dust vanish from debtUsd (and inflate
+            // availableBorrowsUsd) while Aave still enforces it, so quotes sized on these aggregates
+            // would overstate what a withdraw or borrow can actually do
+            if (debt != 0) data.debtUsd += _toUsdCeil(asset, debt, priceProvider);
 
             unchecked {
                 ++i;
@@ -661,6 +734,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     /// @dev Converts a token amount to 6-decimal USD via the PriceProvider (matching CashLens)
     function _toUsd(address asset, uint256 amount, IPriceProvider priceProvider) internal view returns (uint256) {
         return (amount * priceProvider.price(asset)) / (10 ** IERC20Metadata(asset).decimals());
+    }
+
+    /// @dev _toUsd rounding up: used for debt legs, where flooring would understate the obligation
+    function _toUsdCeil(address asset, uint256 amount, IPriceProvider priceProvider) internal view returns (uint256) {
+        uint256 unit = 10 ** IERC20Metadata(asset).decimals();
+        return (amount * priceProvider.price(asset) + unit - 1) / unit;
     }
 
     /// @dev Returns the ERC-7201 storage struct
