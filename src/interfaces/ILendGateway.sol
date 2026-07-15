@@ -73,15 +73,32 @@ interface ILendGateway {
      */
     function getAccountData(address safe) external view returns (AccountData memory);
 
-    /// @notice The post-op health-factor floor (WAD) for user-extraction ops; 0 = disabled
+    /**
+     * @notice Whether the safe carries any raw debt on Aave (raw per-asset reads, immune to the
+     *         6-decimal flooring of getAccountData's debtUsd)
+     * @param safe The safe to check
+     * @return True when any registered asset carries debt for the safe
+     */
+    function hasDebt(address safe) external view returns (bool);
+
+    /**
+     * @notice The post-op health-factor floor (WAD) for user-extraction ops; 0 = disabled
+     * @return The floor in WAD
+     */
     function minHealthFactor() external view returns (uint256);
 
-    /// @notice Reverts HealthFactorBelowMinimum when the floor is set and `safe`'s health factor is below it.
-    ///         Extraction paths (borrow page, withdrawal sourcing, collateral flag off) call this post-op;
-    ///         spends and repays are deliberately exempt.
+    /**
+     * @notice Reverts HealthFactorBelowMinimum when the floor is set and `safe`'s health factor is below it
+     * @dev Extraction paths (borrow page, withdrawal sourcing, collateral flag off, risk-increasing module
+     *      flows) call this post-op; spends and repays are deliberately exempt.
+     * @param safe The safe to check
+     */
     function ensureMinHealthFactor(address safe) external view;
 
-    /// @notice Sets the post-op health-factor floor (WAD; 0 disables, otherwise bounded to [1e18, 2e18])
+    /**
+     * @notice Sets the post-op health-factor floor
+     * @param value The floor in WAD; 0 disables, otherwise bounded to [1e18, 2e18]
+     */
     function setMinHealthFactor(uint256 value) external;
 
     /**

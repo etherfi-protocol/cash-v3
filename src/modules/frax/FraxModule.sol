@@ -200,6 +200,8 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         // Re-supply the fraxUSD output as collateral when the gateway lists it; an unlisted output stays loose.
         _resupplyToGateway(safe, fraxusd, fraxUSDTokenReceived);
 
+        _ensureGatewayFloor(safe);
+
         emit Deposit(safe, assetToDeposit, amountToDeposit, fraxUSDTokenReceived);
     }
 
@@ -271,6 +273,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
         // Re-supply the output as collateral when the gateway lists it; an unlisted output stays loose.
         _resupplyToGateway(safe, outputAsset, assetReceived);
+
+        // Risk-increasing flow: the end state takes the gateway's health-factor floor
+        _ensureGatewayFloor(safe);
 
         emit Withdrawal(safe, outputAsset, amountToWithdraw, assetReceived);
     }

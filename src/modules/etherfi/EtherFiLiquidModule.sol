@@ -277,6 +277,8 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         // Re-supply the receipt token as collateral when the gateway lists it; an unlisted receipt stays loose.
         _resupplyToGateway(safe, liquidAsset, liquidTokenReceived);
 
+        _ensureGatewayFloor(safe);
+
         emit LiquidDeposit(safe, assetToDeposit, liquidAsset, amountToDeposit, liquidTokenReceived);
     }
 
@@ -355,6 +357,10 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         data[1] = abi.encodeWithSelector(IBoringOnChainQueue.requestOnChainWithdraw.selector, assetOut, amountToWithdraw, discount, secondsToDeadline);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        // Risk-increasing flow with no resupply (the queued output arrives later, loose): the end state
+        // takes the gateway's health-factor floor
+        _ensureGatewayFloor(safe);
         
         emit LiquidWithdrawal(safe, liquidAsset, amountToWithdraw, amountOutFromQueue);
     }

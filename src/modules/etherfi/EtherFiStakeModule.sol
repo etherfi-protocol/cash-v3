@@ -144,6 +144,8 @@ contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGateway
         // Re-supply the weETH output as collateral when the gateway lists it; an unlisted output stays loose.
         _resupplyToGateway(safe, weETH, weETHAmtReceived);
 
+        _ensureGatewayFloor(safe);
+
         emit StakeDeposit(safe, assetToDeposit, weETH, amountToDeposit, weETHAmtReceived);
     }
 }

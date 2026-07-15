@@ -8,9 +8,13 @@ import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
  * @title ModuleLendGatewaySandwich
  * @notice Bookends for modules that move a safe's assets once auto-supply has parked them in Aave:
  *         withdraw the input back to the safe, run the action, re-supply the output as collateral.
- * @dev No health check of its own: Aave rejects any withdraw that would push the health factor below 1
- *      (its collateralFactor is both LTV and liquidation threshold), and the back bookend only adds
- *      collateral. Both bookends no-op unless _lendActive, so a legacy or opted-out safe is untouched.
+ * @dev Aave rejects any withdraw that would push the health factor below 1 (its collateralFactor is both
+ *      LTV and liquidation threshold), and the back bookend only adds collateral. On top of that,
+ *      risk-increasing consumer flows end with _ensureGatewayFloor: whatever the resupply put back, the
+ *      end state must sit at or above the gateway's configured health-factor floor (a failed or
+ *      unregistered resupply otherwise leaves the health factor between Aave's 1.0 limit and the floor).
+ *      Repayment flows (the LiquidUSD liquifier) are deliberately exempt: de-risking must never be
+ *      blocked. Both bookends no-op unless _lendActive, so a legacy or opted-out safe is untouched.
  *
  *      Inherits ModuleCheckBalance because the bookends extend its balance model (the front bookend
  *      sources what _getAvailableAmount found missing) and it holds the cashModule reference every
@@ -72,5 +76,20 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
         try lendGateway.supply(safe, asset, amount) {
             lendGateway.setUsingAsCollateral(safe, asset, true);
         } catch { }
+    }
+
+    /**
+     * @notice Post-op health-factor floor check for risk-increasing consumer flows
+     * @dev Called at the very end of an operation that may have pulled collateral out of Aave: the
+     *      module's signed amount is not bound to the lens quote, and a failed or unregistered resupply
+     *      can leave the health factor between Aave's 1.0 limit and the configured floor — this makes the
+     *      end state take the floor. Repayment flows are deliberately exempt (de-risking must never be
+     *      blocked). No-op for legacy or opted-out safes (their ops only touch loose, non-collateral
+     *      funds) and while the floor is disabled.
+     * @param safe The safe to check
+     */
+    function _ensureGatewayFloor(address safe) internal view {
+        if (!_lendActive(safe)) return;
+        gateway().ensureMinHealthFactor(safe);
     }
 }

@@ -43,18 +43,24 @@ library DebitSourcingLib {
 
     /**
      * @notice Max credit-mode spend (USD, 6 decimals): the floor-buffered borrowing power bounded by the
-     *         single most liquid borrow reserve (a credit spend draws one borrow token), matching
-     *         creditCheck's liquidity and borrowing-power declines
+     *         most liquid card-settleable borrow reserve (a credit spend draws one settlement token),
+     *         matching creditCheck's liquidity and borrowing-power declines
      */
     function maxSpendCredit(ILendGateway gateway, IPriceProvider priceProvider, address safe) public view returns (uint256) {
         uint256 borrowPower = bufferedCreditHeadroom(gateway, gateway.getAccountData(safe));
 
-        address[] memory borrowTokens = gateway.borrowableAssets();
+        // A credit spend draws ONE token and sends it to the settlement dispatcher, so the achievable
+        // ceiling is set by the card-settleable tokens (spendAssets), not every borrowable reserve: a
+        // reserve the card cannot settle in must not advertise its liquidity as spendable. A spend asset
+        // whose reserve does not allow new borrows cannot fund a credit spend either, so it is skipped.
+        address[] memory spendTokens = gateway.spendAssets();
         uint256 maxLiquidityUsd = 0;
-        for (uint256 i = 0; i < borrowTokens.length;) {
-            uint256 liquidityUsd = toUsd(priceProvider, borrowTokens[i], gateway.availableToBorrow(borrowTokens[i]));
-            if (liquidityUsd > maxLiquidityUsd) {
-                maxLiquidityUsd = liquidityUsd;
+        for (uint256 i = 0; i < spendTokens.length;) {
+            if (gateway.isBorrowable(spendTokens[i])) {
+                uint256 liquidityUsd = toUsd(priceProvider, spendTokens[i], gateway.availableToBorrow(spendTokens[i]));
+                if (liquidityUsd > maxLiquidityUsd) {
+                    maxLiquidityUsd = liquidityUsd;
+                }
             }
             unchecked {
                 ++i;
@@ -76,7 +82,9 @@ library DebitSourcingLib {
      *      the safe's pending withdrawal; canSpend must not advertise it as headroom.
      */
     function creditCheck(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 totalSpendingInUsd) public view returns (bool, string memory) {
-        if (!gateway.isBorrowable(token)) {
+        // Matching spendCredit's execution gate: the drawn token settles the card, so it must be a
+        // card-settleable spend asset AND borrowable on Aave
+        if (!gateway.isBorrowable(token) || !gateway.isSpendAsset(token)) {
             return (false, "Not a supported borrow token");
         }
 
@@ -117,7 +125,9 @@ library DebitSourcingLib {
     function bufferedDebitHeadroom(ILendGateway gateway, ILendGateway.AccountData memory account) public view returns (uint256) {
         uint256 floor = gateway.minHealthFactor();
         if (floor == 0) return account.availableBorrowsUsd;
-        uint256 required = (account.debtUsd * floor) / 1e18;
+        // required is a MINIMUM, so it rounds up: rounding down would let the exact max quote sit one
+        // micro-dollar past the floor and fail the post-op health check
+        uint256 required = (account.debtUsd * floor + 1e18 - 1) / 1e18;
         uint256 maxBorrow = account.availableBorrowsUsd + account.debtUsd;
         return maxBorrow > required ? maxBorrow - required : 0;
     }

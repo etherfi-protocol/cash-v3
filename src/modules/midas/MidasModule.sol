@@ -195,6 +195,8 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         // Re-supply the Midas-token output as collateral when the gateway lists it; an unlisted output stays loose.
         _resupplyToGateway(safe, midasToken, midasTokenReceived);
 
+        _ensureGatewayFloor(safe);
+
         emit Deposit(safe, asset, amount, midasToken, midasTokenReceived);
     }
 
@@ -263,6 +265,11 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         data[1] = abi.encodeWithSelector(IMidasVault.redeemRequest.selector, asset, amount, safe);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        // Risk-increasing flow with no resupply (the redemption output arrives later, loose): the end
+        // state takes the gateway's health-factor floor
+        _ensureGatewayFloor(safe);
+
         emit Withdrawal(safe, amount, asset, midasToken);
     }
 

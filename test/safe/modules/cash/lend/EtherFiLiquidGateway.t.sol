@@ -6,6 +6,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { EtherFiLiquidModule } from "../../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
+import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { ILayerZeroTeller, BoringVault } from "../../../../../src/interfaces/ILayerZeroTeller.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -143,6 +144,29 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
 
         assertEq(liquidVault.balanceOf(address(safe)), amount, "receipt stays loose when the re-supply is rejected");
         assertEq(gw.suppliedOf(address(safe), address(liquidVault)), 0, "nothing supplied to the frozen reserve");
+    }
+
+    // A queued withdrawal is a risk-increasing flow with no resupply (the receipt is escrowed away), so
+    // its end state takes the gateway's health-factor floor: a pull Aave itself would allow (HF stays
+    // >= 1) reverts when it lands below the floor, and a smaller pull clears it.
+    function test_withdraw_takesGatewayHealthFactorFloor() public {
+        _supplyToGateway(address(safe), address(liquidVault), 10_000e6);
+        _borrowOnGateway(address(safe), address(usdc), 4000e6, recipient);
+        vm.prank(owner);
+        gw.setMinHealthFactor(1.05e18);
+
+        // Aave allows up to 5000e6 out (HF -> 1.0); 4900e6 lands ~1.02, below the 1.05 floor
+        uint128 tooMuch = 4900e6;
+        bytes memory sig = _withdrawSig(tooMuch, tooMuch, 0, 1 days);
+        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        liquidModule.withdraw(address(safe), address(liquidVault), address(usdc), tooMuch, tooMuch, 0, 1 days, owner1, sig);
+
+        // 4000e6 lands HF = 0.8 * 6000 / 4000 = 1.2, above the floor
+        uint128 fine = 4000e6;
+        liquidModule.withdraw(address(safe), address(liquidVault), address(usdc), fine, fine, 0, 1 days, owner1, _withdrawSig(fine, fine, 0, 1 days));
+        // Read the health factor from the spoke: the mock receipt has no PriceProvider oracle, so the
+        // gateway's USD-deriving getAccountData cannot price it (the floor check itself is spoke-based)
+        assertGe(spoke.getUserAccountData(address(safe)).healthFactor, 1.05e18, "end state above the floor");
     }
 
     function _depositSig(address assetToDeposit, uint256 amount, uint256 minReturn) internal view returns (bytes memory) {

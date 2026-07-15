@@ -325,3 +325,34 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         return cashbacks;
     }
 }
+
+/// @dev Runs the suite's setup with weETH's reserve flipped to borrowable while it stays OFF the
+///      spend-asset list: a credit spend settles the card, so a borrowable-but-not-settleable token must
+///      be rejected on both the check side and the execution side.
+contract SpendCreditTokenGateTest is CashModuleSpendAaveTest {
+    function _weethBorrowable() internal pure override returns (bool) {
+        return true;
+    }
+
+    function test_creditSpend_rejectsBorrowableNonSpendAsset() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _setMode(Mode.Credit);
+
+        assertTrue(gw.isBorrowable(address(weETH)), "premise: weETH borrowable");
+        assertFalse(gw.isSpendAsset(address(weETH)), "premise: weETH not a spend asset");
+
+        // The lens declines it...
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), txId, _tokens(address(weETH)), _amounts(100e6));
+        assertFalse(ok, "lens declines the non-settleable token");
+        assertEq(reason, "Not a supported borrow token");
+
+        // ...and execution rejects it identically (check/execution parity)
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.UnsupportedToken.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(weETH)), _amounts(100e6), _noCashback());
+
+        // The card settlement token (borrowable AND spend asset) is unaffected
+        (bool okUsdc,) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(100e6));
+        assertTrue(okUsdc, "usdc credit spend unaffected");
+    }
+}

@@ -612,7 +612,9 @@ library CashLendLib {
     function _spendGatewayCredit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, BinSponsor binSponsor, address token, uint256 amountInUsd) private returns (uint256) {
         ILendGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
-        if (!gateway.isBorrowable(token)) revert UnsupportedToken();
+        // The drawn token settles the card, so it must be a card-settleable spend asset AND borrowable on
+        // Aave — a borrowable reserve the card cannot settle in must not fund a credit spend
+        if (!gateway.isBorrowable(token) || !gateway.isSpendAsset(token)) revert UnsupportedToken();
         uint256 amount = DebitSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountInUsd);
         if (amount == 0) revert AmountZero();
         _resupplyCollateral($, dataProvider, gateway, safe, amountInUsd);
@@ -784,7 +786,9 @@ library CashLendLib {
         s.fromLoose = new uint256[](tokens.length);
         {
             ILendGateway.AccountData memory account = $.gateway.getAccountData(safe);
-            s.hasDebt = account.debtUsd != 0;
+            // Raw per-asset debt, not the 6-decimal-floored debtUsd: dust debt must still cap the
+            // supplied-withdraw legs, or Aave reverts the spend on a position the sizing called debt-free
+            s.hasDebt = $.gateway.hasDebt(safe);
             s.borrowHeadroom = s.hasDebt ? account.availableBorrowsUsd : 0;
         }
         IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());

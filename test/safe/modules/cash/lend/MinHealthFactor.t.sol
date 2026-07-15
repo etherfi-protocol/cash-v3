@@ -5,6 +5,10 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { BinSponsor, Cashback, Mode } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
+import { IAaveV4Spoke } from "../../../../../src/interfaces/IAaveV4Spoke.sol";
+import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
+import { DebitSourcingLib } from "../../../../../src/libraries/DebitSourcingLib.sol";
+import { MockLendGateway } from "../../../../../src/mocks/MockLendGateway.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -186,6 +190,44 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
         _setFloor(0);
         vm.prank(driver);
         gw.setUsingAsCollateral(address(safe), address(usdc), false); // Aave's own check still passes
+    }
+
+    // ----------------------------------------------------------------- rounding & dust
+
+    /// bufferedDebitHeadroom rounds the required (post-floor) debt cover UP: `required` is a minimum, so
+    /// rounding it down would let the exact max quote sit one micro-dollar past the floor and fail the
+    /// post-op health check on a fractional boundary.
+    function test_bufferedDebitHeadroom_roundsRequiredUp() public {
+        MockLendGateway mock = new MockLendGateway();
+        mock.setMinHealthFactor(1.05e18);
+
+        // debt 1 micro-dollar: required = ceil(1 * 1.05) = 2, so headroom = (10 + 1) - 2 = 9.
+        // A round-down would say 10 and overquote by one micro-dollar.
+        ILendGateway.AccountData memory account = ILendGateway.AccountData({ collateralUsd: 100, debtUsd: 1, availableBorrowsUsd: 10, healthFactor: 0 });
+        assertEq(DebitSourcingLib.bufferedDebitHeadroom(ILendGateway(address(mock)), account), 9, "fractional boundary rounds up");
+
+        // Exactly divisible: debt 100 -> required 105, headroom = 110 - 105 = 5
+        account.debtUsd = 100;
+        account.availableBorrowsUsd = 10;
+        assertEq(DebitSourcingLib.bufferedDebitHeadroom(ILendGateway(address(mock)), account), 5, "exact boundary unchanged");
+    }
+
+    /// Dust debt below the 6-decimal USD floor must still cap the quotes: Aave enforces it on withdrawals
+    /// even when flooring would read it as zero. Two guards pin that: debt legs round UP in
+    /// getAccountData (so the headroom reserves cover), and hasDebt reads raw per-asset debt — the quote
+    /// stays below the full supplied balance instead of overquoting and reverting on Aave's health check.
+    function test_hasDebt_dustDebtStillCapsQuotes() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        // 1 wei of raw weETH debt injected at the spoke read the gateway derives from: ~3e-9 USD, far
+        // below the 6-decimal USD floor (weETH itself is collateral-only, so it cannot be borrowed for real)
+        vm.mockCall(address(spoke), abi.encodeWithSelector(IAaveV4Spoke.getUserTotalDebt.selector, weethReserveId, address(safe)), abi.encode(uint256(1)));
+
+        // Debt legs round UP in getAccountData, so even sub-micro dust registers as one micro-dollar
+        assertEq(gw.getAccountData(address(safe)).debtUsd, 1, "dust debt ceils to one micro-dollar");
+        assertTrue(gw.hasDebt(address(safe)), "raw read sees the debt too");
+
+        uint256 max = cashLens.getMaxSourceable(address(safe), address(weETH));
+        assertLt(max, 5 ether, "dust debt caps the quote below the full supplied balance");
     }
 
     // ----------------------------------------------------------------- lens quotes are buffered

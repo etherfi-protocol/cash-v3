@@ -425,7 +425,30 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // ILendGateway reads
     // ---------------------------------------------------------------------
 
-    /// @notice The post-op health-factor floor (WAD) for user-extraction ops; 0 = disabled
+    /**
+     * @notice Whether the safe carries any raw debt on Aave
+     * @dev Checks raw per-asset debt, not getAccountData's USD aggregate: debtUsd floors at 6 decimals,
+     *      so sub-$0.000001 dust reads as zero there while Aave still enforces it on withdrawals — a
+     *      debt-free answer here must mean truly debt-free, or quotes overstate what Aave allows.
+     * @param safe The safe to check
+     * @return True when any registered asset carries debt for the safe
+     */
+    function hasDebt(address safe) public view returns (bool) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        uint256 len = $.assets.length();
+        for (uint256 i = 0; i < len;) {
+            if (spoke.getUserTotalDebt($.reserveId[$.assets.at(i)], safe) != 0) return true;
+            unchecked {
+                ++i;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @notice The post-op health-factor floor (WAD) for user-extraction ops; 0 = disabled
+     * @return The floor in WAD
+     */
     function minHealthFactor() external view returns (uint256) {
         return _getLendGatewayStorage().minHealthFactor;
     }
@@ -473,7 +496,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
             }
 
             uint256 debt = spoke.getUserTotalDebt(reserveId, safe);
-            if (debt != 0) data.debtUsd += _toUsd(asset, debt, priceProvider);
+            // Debt rounds UP: flooring lets sub-micro-dollar dust vanish from debtUsd (and inflate
+            // availableBorrowsUsd) while Aave still enforces it, so quotes sized on these aggregates
+            // would overstate what a withdraw or borrow can actually do
+            if (debt != 0) data.debtUsd += _toUsdCeil(asset, debt, priceProvider);
 
             unchecked {
                 ++i;
@@ -708,6 +734,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     /// @dev Converts a token amount to 6-decimal USD via the PriceProvider (matching CashLens)
     function _toUsd(address asset, uint256 amount, IPriceProvider priceProvider) internal view returns (uint256) {
         return (amount * priceProvider.price(asset)) / (10 ** IERC20Metadata(asset).decimals());
+    }
+
+    /// @dev _toUsd rounding up: used for debt legs, where flooring would understate the obligation
+    function _toUsdCeil(address asset, uint256 amount, IPriceProvider priceProvider) internal view returns (uint256) {
+        uint256 unit = 10 ** IERC20Metadata(asset).decimals();
+        return (amount * priceProvider.price(asset) + unit - 1) / unit;
     }
 
     /// @dev Returns the ERC-7201 storage struct

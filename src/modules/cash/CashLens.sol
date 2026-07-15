@@ -204,7 +204,8 @@ contract CashLens is UpgradeableProxy, Constants {
         uint256 borrowHeadroom;
         {
             ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
-            hasDebt = account.debtUsd != 0;
+            // Raw per-asset debt, not the 6-decimal-floored debtUsd: dust debt must still cap withdrawals
+            hasDebt = lendGateway.hasDebt(safe);
             // Buffered by the health-factor floor: quotes size collateral withdrawals so the position
             // stays above the floor; debit execution keeps the raw bound (spends always settle)
             borrowHeadroom = hasDebt ? DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account) : 0;
@@ -360,7 +361,8 @@ contract CashLens is UpgradeableProxy, Constants {
         uint256 borrowHeadroom;
         {
             ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
-            hasDebt = account.debtUsd != 0;
+            // Raw per-asset debt, not the 6-decimal-floored debtUsd: dust debt must still cap withdrawals
+            hasDebt = lendGateway.hasDebt(safe);
             if (hasDebt) {
                 // Buffered by the health-factor floor, matching _debitCheck
                 borrowHeadroom = DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account);
@@ -451,8 +453,9 @@ contract CashLens is UpgradeableProxy, Constants {
         ILendGateway lendGateway = gateway();
         ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
         // Buffered by the health-factor floor: withdrawal sourcing enforces the floor at execution, so
-        // this quote is exactly what a request (or module sandwich) can actually pull
-        return looseAvailable + _withdrawableSupplied(safe, token, DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account), account.debtUsd != 0);
+        // this quote is exactly what a request (or module sandwich) can actually pull. hasDebt reads raw
+        // per-asset debt, not the 6-decimal-floored debtUsd, so dust debt still caps the quote.
+        return looseAvailable + _withdrawableSupplied(safe, token, DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account), lendGateway.hasDebt(safe));
     }
 
     /**

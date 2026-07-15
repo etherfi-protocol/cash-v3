@@ -83,6 +83,13 @@ contract MockLendGateway is ILendGateway {
 
     uint256 public minHealthFactor;
 
+    function hasDebt(address safe) external view returns (bool) {
+        for (uint256 i = 0; i < _assets.length; i++) {
+            if (_debtOf[safe][_assets[i]] != 0) return true;
+        }
+        return false;
+    }
+
     function setMinHealthFactor(uint256 value) external {
         minHealthFactor = value;
     }
