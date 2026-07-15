@@ -105,6 +105,8 @@ library CashLendDevModules {
             require(EtherFiDataProvider(dataProvider).isWhitelistedModule(modules[i]), "old module not whitelisted");
             require(_contains(requesters, modules[i]) == expected[i], "unexpected requester policy");
         }
+        require(EtherFiDataProvider(dataProvider).isDefaultModule(old.liquifier), "liquifier not default");
+        require(EtherFiDataProvider(dataProvider).isWhitelistedModule(old.liquifier), "liquifier not whitelisted");
     }
 
     /// @dev Deploys seven new modules and one implementation for the existing liquifier proxy.
