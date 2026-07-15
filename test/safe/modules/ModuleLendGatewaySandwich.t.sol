@@ -22,6 +22,8 @@ contract SandwichHarness is ModuleLendGatewaySandwich {
 
     /// @dev A real consumer computes this from cashModule.isLendActive; the harness sets it directly (defaults on).
     bool public lendActive = true;
+    /// @dev A real consumer computes this from cashModule.usesLendGateway; the harness sets it directly (defaults on).
+    bool public onGatewayEngine = true;
 
     constructor(address _gateway, address _dataProvider) ModuleCheckBalance(_dataProvider) {
         mockGateway = ILendGateway(_gateway);
@@ -37,6 +39,14 @@ contract SandwichHarness is ModuleLendGatewaySandwich {
 
     function _lendActive(address) internal view override returns (bool) {
         return lendActive;
+    }
+
+    function setOnGatewayEngine(bool onEngine) external {
+        onGatewayEngine = onEngine;
+    }
+
+    function _onGatewayEngine(address) internal view override returns (bool) {
+        return onGatewayEngine;
     }
 
     function withdrawShortfall(address safe, address asset, uint256 amount, uint256 looseAvailable) external {
@@ -119,15 +129,29 @@ contract ModuleLendGatewaySandwichTest is Test {
         assertEq(amount, 0);
     }
 
-    // When lend is disabled for the safe, the withdraw bookend is a no-op: its assets already sit in the safe.
-    function test_withdraw_noOpWhenLendOptedOut() public {
-        harness.setLendActive(false);
+    // Off the gateway engine (legacy safe) the withdraw bookend is a no-op: nothing is supplied on Aave.
+    function test_withdraw_noOpWhenOffGatewayEngine() public {
+        harness.setOnGatewayEngine(false);
         gateway.setSuppliedOf(safe, asset, AMOUNT);
         harness.withdrawShortfall(safe, asset, AMOUNT, 0);
 
         (address s,, uint256 amount,) = gateway.lastWithdraw();
         assertEq(s, address(0), "no withdraw call recorded");
         assertEq(amount, 0);
+    }
+
+    // The withdraw bookend is ENGINE-gated, not lend-active-gated: an opted-out safe (e.g. a matured
+    // opt-out whose unwind open borrows still block) can hold supplied funds, and reclaiming them is an
+    // exit op the repayment paths depend on (repayUsingLiquidUSD sourcing supplied LiquidUSD).
+    function test_withdraw_stillPullsForOptedOutSafeOnEngine() public {
+        harness.setLendActive(false); // opted out...
+        gateway.setSuppliedOf(safe, asset, AMOUNT); // ...but funds still supplied on Aave
+        harness.withdrawShortfall(safe, asset, AMOUNT, 0);
+
+        (address s, address a, uint256 amount,) = gateway.lastWithdraw();
+        assertEq(s, safe, "withdraw pulled for the opted-out safe");
+        assertEq(a, asset);
+        assertEq(amount, AMOUNT);
     }
 
     // When lend is disabled, the resupply bookend is a no-op: the output stays in the safe, nothing goes to Aave.

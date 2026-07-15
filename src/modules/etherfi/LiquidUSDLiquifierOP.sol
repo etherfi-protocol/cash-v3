@@ -160,9 +160,11 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
         if (liquidUsdAmountRepaid == 0) revert LiquidUsdAmountZero();
 
         // LiquidUSD is a listed reserve, so a gateway safe's holdings may be supplied to Aave: pull the
-        // shortfall loose before reclaiming (no-op for legacy or opted-out safes). This repayment flow is
-        // deliberately EXEMPT from the gateway's health-factor floor (_ensureGatewayFloor): it swaps
-        // collateral for a matching debt reduction, and de-risking must never be blocked by the floor.
+        // shortfall loose before reclaiming (no-op for legacy safes; engine-gated, so it still works for
+        // an opted-out safe — including a matured opt-out whose unwind open borrows block — because this
+        // repayment is exactly the deleveraging that unblocks it). The flow is deliberately EXEMPT from
+        // the gateway's health-factor floor (_ensureGatewayFloor): it swaps collateral for a matching
+        // debt reduction, and de-risking must never be blocked by the floor.
         _withdrawShortfall(user, address(LIQUID_USD), liquidUsdAmountRepaid, _getAvailableAmount(user, address(LIQUID_USD)));
         _checkAmountAvailable(user, address(LIQUID_USD), liquidUsdAmountRepaid);
 
