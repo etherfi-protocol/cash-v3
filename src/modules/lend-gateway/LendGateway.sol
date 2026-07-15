@@ -12,8 +12,8 @@ import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
-import { ModuleBase } from "../ModuleBase.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
+import { ModuleBase } from "../ModuleBase.sol";
 
 /**
  * @title LendGateway
@@ -25,10 +25,10 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  *         here) AND the safe must approve it (setUserPositionManager). If either is missing/revoked, every
  *         Spoke op reverts — so a revoked safe simply can no longer be operated (credit spend / auto-supply
  *         break until re-approved). This is enforced by Aave, not re-implemented here.
- *      2. Cash side: only an authorized driver may call the mutating ops. The CashModule is always a driver
- *         (resolved live from the data provider); further drivers (auto-supply, migration) are added by a
- *         LEND_GATEWAY_ADMIN_ROLE holder. A position manager can move user funds, so who may drive it is the most
- *         security-critical surface in this contract.
+ *      2. Cash side: mutating ops only target factory-registered Cash Safes and only an authorized driver may
+ *         call them. Public suppliers use the Aave Spoke directly. The CashModule is always a driver (resolved
+ *         live from the data provider); further drivers are added by a LEND_GATEWAY_ADMIN_ROLE holder. A position
+ *         manager can move user funds, so who may drive it is the most security-critical surface in this contract.
  *
  *      Aave v4 addresses reserves by a uint256 reserveId, not by asset address. The gateway keeps its own
  *      asset -> reserveId registry, each entry validated against the Spoke's getReserve at registration time.
@@ -143,7 +143,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // Access control
     // ---------------------------------------------------------------------
 
-    /// @dev Reverts unless the caller is the CashModule or an authorized driver
+    /// @dev Reverts unless the caller is the CashModule or an authorized driver.
     function _onlyDriver() internal view {
         if (msg.sender != etherFiDataProvider.getCashModule() && !_getLendGatewayStorage().isDriver[msg.sender]) revert OnlyDriver();
     }
@@ -169,8 +169,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @dev Reverts unless the Spoke's reserve `reserveId` has `underlying == asset`
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId for the asset
-     * @dev Warning: do not re-point an asset safes already hold positions under; 
-     * the USD views then read the new reserve and miss the old, understating debt and 
+     * @dev Warning: do not re-point an asset safes already hold positions under;
+     * the USD views then read the new reserve and miss the old, understating debt and
      * inflating borrow headroom.
      */
     function setReserveId(address asset, uint256 reserveId) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
@@ -301,7 +301,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function supply(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
+    function supply(address safe, address asset, uint256 amount) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         uint256 reserveId = _reserveIdOf(asset);
 
@@ -328,7 +328,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAddress if to is the zero address
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function withdraw(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
+    function withdraw(address safe, address asset, uint256 amount, address to) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert ZeroAddress();
         uint256 reserveId = _reserveIdOf(asset);
@@ -355,7 +355,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAddress if to is the zero address
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
+    function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert ZeroAddress();
         uint256 reserveId = _reserveIdOf(asset);
@@ -380,7 +380,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAmount if the resolved repay amount is zero (e.g. max with no outstanding debt)
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function repay(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) returns (uint256) {
+    function repay(address safe, address asset, uint256 amount) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant ensuresApproval(safe) returns (uint256) {
         uint256 reserveId = _reserveIdOf(asset);
 
         // type(uint256).max means "repay the full debt"; resolve it to the current debt so we pull the right amount.
@@ -410,7 +410,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws LendOptedOut if enabling collateral usage for a safe that has opted out of lend
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
+    function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant ensuresApproval(safe) {
         // Gate only enabling (a lend op); disabling must stay open so an opted-out safe can drop a residual
         // supplied position from collateral (e.g. one left on Aave after processLendOptOut). It only de-risks.
         if (useAsCollateral && _isLendOptedOut(safe)) revert LendOptedOut();

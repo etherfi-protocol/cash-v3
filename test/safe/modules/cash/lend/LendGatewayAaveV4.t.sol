@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
+import { ModuleBase } from "../../../../../src/modules/ModuleBase.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
@@ -322,6 +323,23 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         gw.repay(address(safe), address(usdc), 1);
         vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
+        vm.stopPrank();
+    }
+
+    /// Every mutation rejects an address that is not a Safe deployed by EtherFiSafeFactory.
+    function test_mutatingOps_rejectNonSafeTarget() public {
+        address notSafe = makeAddr("notSafe");
+        vm.startPrank(driver);
+        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
+        gw.supply(notSafe, address(weETH), 1);
+        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
+        gw.withdraw(notSafe, address(weETH), 1, notSafe);
+        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
+        gw.borrow(notSafe, address(usdc), 1, notSafe);
+        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
+        gw.repay(notSafe, address(usdc), 1);
+        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
+        gw.setUsingAsCollateral(notSafe, address(weETH), true);
         vm.stopPrank();
     }
 
