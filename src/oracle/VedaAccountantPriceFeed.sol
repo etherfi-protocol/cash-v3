@@ -6,6 +6,7 @@ import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IAaveV4PriceFeed } from "../interfaces/IAaveV4PriceFeed.sol";
 import { IVedaAccountant } from "../interfaces/IVedaAccountant.sol";
+import { StablePriceLib } from "./StablePriceLib.sol";
 
 /**
  * @title VedaAccountantPriceFeed
@@ -77,7 +78,7 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
         if (rate == 0) revert InvalidPrice();
 
         if (address(underlyingUsdFeed) == address(0)) {
-            return _snapStable(rate.mulDiv(10 ** feedDecimals, 10 ** rateDecimals)).toInt256();
+            return StablePriceLib.snap(rate.mulDiv(10 ** feedDecimals, 10 ** rateDecimals), isStableToken, feedDecimals).toInt256();
         }
 
         int256 answer = underlyingUsdFeed.latestAnswer();
@@ -86,15 +87,6 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
         // price = rate * underlyingPrice, normalized from (rateDecimals + underlyingDecimals) to feedDecimals
         uint256 price = rate.mulDiv(answer.toUint256() * 10 ** feedDecimals, 10 ** (rateDecimals + underlyingDecimals));
 
-        return _snapStable(price).toInt256();
-    }
-
-    /// @dev Snaps a USD-stable price to exactly 1 USD when it is within 1% of it, mirroring PriceProviderV2
-    function _snapStable(uint256 price) private view returns (uint256) {
-        if (!isStableToken) return price;
-        uint256 stablePrice = 10 ** feedDecimals;
-        uint256 maxDeviation = stablePrice / 100;
-        if (price > stablePrice - maxDeviation && price < stablePrice + maxDeviation) return stablePrice;
-        return price;
+        return StablePriceLib.snap(price, isStableToken, feedDecimals).toInt256();
     }
 }

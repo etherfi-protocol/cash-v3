@@ -5,6 +5,7 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IAaveV4PriceFeed } from "../interfaces/IAaveV4PriceFeed.sol";
+import { StablePriceLib } from "./StablePriceLib.sol";
 
 /// @notice The slice of the MorphoPythOracle adapters (deployed per pair on OP) the feed reads: the
 ///         fixed-decimals price, plus the Pyth contract and feed ids baked into the adapter, so the
@@ -136,23 +137,14 @@ contract PythPriceFeed is IAaveV4PriceFeed {
         require(price > 0, InvalidPrice());
 
         if (address(underlyingUsdFeed) == address(0)) {
-            return _snapStable(price / 10 ** (oracleDecimals - feedDecimals)).toInt256();
+            return StablePriceLib.snap(price / 10 ** (oracleDecimals - feedDecimals), isStableToken, feedDecimals).toInt256();
         }
 
         int256 underlyingPrice = underlyingUsdFeed.latestAnswer();
         require(underlyingPrice > 0, InvalidPrice());
 
         // price = pair rate * underlying USD, normalized from (oracleDecimals + underlyingDecimals) to feedDecimals
-        return _snapStable(price.mulDiv(uint256(underlyingPrice) * 10 ** feedDecimals, 10 ** (oracleDecimals + underlyingDecimals))).toInt256();
-    }
-
-    /// @dev Snaps a USD-stable price to exactly 1 USD when it is within 1% of it, mirroring PriceProviderV2
-    function _snapStable(uint256 price) private view returns (uint256) {
-        if (!isStableToken) return price;
-        uint256 stablePrice = 10 ** feedDecimals;
-        uint256 maxDeviation = stablePrice / 100;
-        if (price > stablePrice - maxDeviation && price < stablePrice + maxDeviation) return stablePrice;
-        return price;
+        return StablePriceLib.snap(price.mulDiv(uint256(underlyingPrice) * 10 ** feedDecimals, 10 ** (oracleDecimals + underlyingDecimals)), isStableToken, feedDecimals).toInt256();
     }
 
     /// @dev Enforces the feed's own staleness bound against the Pyth publish time; zero ids are unused slots
