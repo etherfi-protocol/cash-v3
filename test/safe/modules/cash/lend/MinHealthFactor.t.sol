@@ -7,7 +7,7 @@ import { BinSponsor, Cashback, Mode } from "../../../../../src/interfaces/ICashM
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { IAaveV4Spoke } from "../../../../../src/interfaces/IAaveV4Spoke.sol";
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
-import { DebitSourcingLib } from "../../../../../src/libraries/DebitSourcingLib.sol";
+import { LendSourcingLib } from "../../../../../src/libraries/LendSourcingLib.sol";
 import { MockLendGateway } from "../../../../../src/mocks/MockLendGateway.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";

@@ -13,7 +13,7 @@ import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
-import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
+import { LendSourcingLib } from "../../libraries/LendSourcingLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
 
 /**
@@ -168,12 +168,12 @@ library CashLendLib {
         // or frozen), and Aave allows repaying it. Only new debt takes the borrowable gate.
         if (!gateway.isRegistered(token)) revert OnlyBorrowToken();
         IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
-        amount = DebitSourcingLib.fromUsd(priceProvider, token, amountInUsd);
+        amount = LendSourcingLib.fromUsd(priceProvider, token, amountInUsd);
         uint256 debt = gateway.debtOf(safe, token);
         if (amount > debt) {
             // Re-derive the USD value so the capped repay does not report the requested amount
             amount = debt;
-            amountInUsd = DebitSourcingLib.toUsd(priceProvider, token, amount);
+            amountInUsd = LendSourcingLib.toUsd(priceProvider, token, amount);
         }
         if (amount == 0) revert AmountZero();
 
@@ -194,7 +194,7 @@ library CashLendLib {
 
         // The gateway may repay less than requested (dust refund, or the live Aave debt being smaller than
         // the quote), so report the USD value of what was actually repaid, not the requested amount.
-        uint256 repaidInUsd = repaid == amount ? amountInUsd : DebitSourcingLib.toUsd(priceProvider, token, repaid);
+        uint256 repaidInUsd = repaid == amount ? amountInUsd : LendSourcingLib.toUsd(priceProvider, token, repaid);
         $.cashEventEmitter.emitRepay(safe, token, repaid, repaidInUsd);
     }
 
@@ -232,7 +232,7 @@ library CashLendLib {
 
         // Pot 2: the safe's Aave-supplied balance, capped by borrowing headroom. The loose leg repays
         // before the withdraw executes, so the sizing credits the headroom that repay frees.
-        uint256 fromSupplied = DebitSourcingLib.repayWithdrawable(gateway, safe, token, fromLoose);
+        uint256 fromSupplied = LendSourcingLib.repayWithdrawable(gateway, safe, token, fromLoose);
         if (fromSupplied > shortfall) fromSupplied = shortfall;
         shortfall -= fromSupplied;
         if (shortfall == 0) return (fromLoose, fromSupplied, false);
@@ -343,7 +343,7 @@ library CashLendLib {
         if (isLendOptedOut($, safe)) revert LendOptedOut();
 
         if (!gateway.isBorrowable(token)) revert OnlyBorrowToken();
-        uint256 amount = DebitSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountInUsd);
+        uint256 amount = LendSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountInUsd);
         if (amount == 0) revert AmountZero();
 
         gateway.borrow(safe, token, amount, safe);
@@ -621,7 +621,7 @@ library CashLendLib {
         // The drawn token settles the card, so it must be a card-settleable spend asset AND borrowable on Aave
         if (!gateway.isBorrowable(token) || !gateway.isSpendAsset(token)) revert UnsupportedToken();
         // Round the token amount up so it always covers the authorized payment USD
-        uint256 amount = DebitSourcingLib.fromUsdUp(IPriceProvider(dataProvider.getPriceProvider()), token, amountInUsd);
+        uint256 amount = LendSourcingLib.fromUsdUp(IPriceProvider(dataProvider.getPriceProvider()), token, amountInUsd);
         if (amount == 0) revert AmountZero();
         _resupplyForCreditShortfall($, dataProvider, gateway, safe, token, amount);
         gateway.borrow(safe, token, amount, settlementDispatcher($, binSponsor));
@@ -899,10 +899,10 @@ library CashLendLib {
     function _sourceDebitToken(CashModuleStorageContract.CashModuleStorage storage $, DebitSpendState memory s, IPriceProvider priceProvider, address safe, address token, uint256 amountInUsd, uint256 i) internal view {
         // The debit-spend gate, not the borrow gate: a debit only transfers and withdraws, so frozen is fine
         if (!$.gateway.isSpendAsset(token)) revert UnsupportedToken();
-        uint256 amount = DebitSourcingLib.fromUsd(priceProvider, token, amountInUsd);
+        uint256 amount = LendSourcingLib.fromUsd(priceProvider, token, amountInUsd);
 
         uint256 loose = IERC20(token).balanceOf(safe);
-        uint256 withdrawable = DebitSourcingLib.withdrawableSupplied($.gateway, safe, token, s.withdrawHeadroom, s.hasDebt);
+        uint256 withdrawable = LendSourcingLib.withdrawableSupplied($.gateway, safe, token, s.withdrawHeadroom, s.hasDebt);
         if (loose + withdrawable < amount) {
             revert InsufficientBalance();
         }

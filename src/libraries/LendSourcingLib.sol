@@ -8,14 +8,15 @@ import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 
 /**
- * @title DebitSourcingLib
- * @notice Shared debit-sizing math for the Cash contracts: how much of a token's Aave-supplied balance can
- *         fund a debit within the gateway's Aave-priced collateral headroom. CashModuleCore (execution) and
- *         CashLens (canSpend) both call it so the two agree; PriceProvider's only role here is converting
- *         payment USD to and from token amounts.
+ * @title LendSourcingLib
+ * @notice Shared sourcing math for the Cash contracts: how debit spends and repays draw on a safe's
+ *         Aave-supplied balance within the gateway's collateral headroom, and how credit spends are
+ *         quoted and gated against its Aave capacity. CashModuleCore (execution) and CashLens (canSpend)
+ *         both call it so the two agree; PriceProvider's only role here is converting payment USD to and
+ *         from token amounts.
  * @author ether.fi
  */
-library DebitSourcingLib {
+library LendSourcingLib {
     /**
      * @notice Amount of `token` withdrawable from `safe`'s Aave-supplied balance to fund a debit
      * @dev min(supplied, reserve cash); when the safe carries debt the supplied side is what the gateway's

@@ -10,7 +10,7 @@ import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
-import { DebitSourcingLib } from "../../libraries/DebitSourcingLib.sol";
+import { LendSourcingLib } from "../../libraries/LendSourcingLib.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { Constants } from "../../utils/Constants.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
@@ -193,8 +193,8 @@ contract CashLens is UpgradeableProxy, Constants {
     /// @notice Credit mode check: the spend must fit the Aave borrowing capacity and the reserve's liquidity
     function _creditCheck(address safe, address token, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
         // Token gate, reserve liquidity, and the health-factor-floor-buffered borrowing power live in the
-        // linked DebitSourcingLib (code size); see creditCheck there for the quote-vs-execution contract.
-        return DebitSourcingLib.creditCheck(cashModule.getLendGateway(), IPriceProvider(dataProvider.getPriceProvider()), safe, token, totalSpendingInUsd);
+        // linked LendSourcingLib (code size); see creditCheck there for the quote-vs-execution contract.
+        return LendSourcingLib.creditCheck(cashModule.getLendGateway(), IPriceProvider(dataProvider.getPriceProvider()), safe, token, totalSpendingInUsd);
     }
 
     /// @notice Debit mode check: each token's spendable amount must cover its share of the spend, threading the borrowing headroom across tokens
@@ -394,8 +394,8 @@ contract CashLens is UpgradeableProxy, Constants {
         }
 
         // Floor-buffered borrowing power bounded by reserve liquidity; lives in the linked
-        // DebitSourcingLib (code size), matching _creditCheck's gates
-        return DebitSourcingLib.maxSpendCredit(cashModule.getLendGateway(), IPriceProvider(dataProvider.getPriceProvider()), safe);
+        // LendSourcingLib (code size), matching _creditCheck's gates
+        return LendSourcingLib.maxSpendCredit(cashModule.getLendGateway(), IPriceProvider(dataProvider.getPriceProvider()), safe);
     }
 
     /**
@@ -415,7 +415,7 @@ contract CashLens is UpgradeableProxy, Constants {
      *         pending-withdrawal reservation) plus the Aave-supplied amount withdrawable without leaving
      *         the position over-LTV
      * @dev The number a module's sandwich (swap input, Liquid deposit/withdraw) or a backend repay can
-     *      actually pull, sized by the same DebitSourcingLib math the spend paths use, so a frontend max
+     *      actually pull, sized by the same LendSourcingLib math the spend paths use, so a frontend max
      *      never needs to reimplement LTV accounting. Works for any token: an unregistered token or ETH has no supplied part, and a legacy safe's funds
      *      are all loose. Conservative for a zero-LTV reserve while the safe has debt (it cannot be sized
      *      against debt), matching the debit-spend sizing. For a legacy safe with DebtManager debt the number
@@ -512,7 +512,7 @@ contract CashLens is UpgradeableProxy, Constants {
      *      Aave-priced collateral headroom allows.
      */
     function _withdrawableSupplied(address safe, address token, uint256 headroom, bool hasDebt) internal view returns (uint256) {
-        return DebitSourcingLib.withdrawableSupplied(gateway(), safe, token, headroom, hasDebt);
+        return LendSourcingLib.withdrawableSupplied(gateway(), safe, token, headroom, hasDebt);
     }
 
     /// @notice The weighted collateral value withdrawing `amount` of `token` consumes (gateway view; helper keeps call-site stacks flat)

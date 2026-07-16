@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
-import { DebitSourcingLib } from "../../../../../src/libraries/DebitSourcingLib.sol";
+import { LendSourcingLib } from "../../../../../src/libraries/LendSourcingLib.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -196,7 +196,7 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         vm.warp(block.timestamp + accrual);
 
         uint256 fromLoose = 500e6;
-        uint256 quote = DebitSourcingLib.repayWithdrawable(gw, address(safe), address(usdc), fromLoose);
+        uint256 quote = LendSourcingLib.repayWithdrawable(gw, address(safe), address(usdc), fromLoose);
         assertGt(quote, 0, "position quotes a supplied leg");
         assertLt(quote, gw.suppliedOf(address(safe), address(usdc)), "the headroom cap binds the quote");
 
