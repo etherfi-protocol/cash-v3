@@ -9,6 +9,8 @@
   "liquidationLogic": "0x49dEE75906621Ea28D7332bb26E0da6f2d15E838",
   "spoke": "0x7e99c7846df8527FFE510a2CA0215874052102ed",
   "treasurySpoke": "0xf316938C33E81b4f02e1B7141399b872671f13Ad",
+  "weethReserveId": 0,
+  "usdcReserveId": 1,
   "details": {
     "weETH": { "assetId": 0, "oracle": "0xf66Eff556E36bBb5544a03997d00022C752E507e" },
     "USDC": { "assetId": 1, "oracle": "0x4E3f45040b9740F2eF3088F94f89c7023551c5A7" },

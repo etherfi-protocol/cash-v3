@@ -6,6 +6,7 @@ import { console } from "forge-std/console.sol";
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import { IAaveV4Hub } from "../../src/interfaces/IAaveV4Hub.sol";
 import { IAaveV4Spoke } from "../../src/interfaces/IAaveV4Spoke.sol";
 import { Utils } from "../utils/Utils.sol";
 
@@ -66,8 +67,11 @@ contract AaveV4TestActions is Utils {
         console.log("1. supplied weETH:", supplied);
         _logState("after supply");
 
-        // 2. Make sure the USDC reserve can cover the borrow, seeding the shortfall from the wallet
-        uint256 available = spoke.getReserveSuppliedAssets(usdcReserveId) - spoke.getReserveTotalDebt(usdcReserveId);
+        // 2. Make sure the USDC reserve can cover the borrow, seeding the shortfall from the wallet.
+        // Actual lendable cash comes from the Hub (supplied minus debt underflows once debt outgrows
+        // this spoke's supply on the shared-liquidity hub).
+        IAaveV4Spoke.Reserve memory usdcReserve = spoke.getReserve(usdcReserveId);
+        uint256 available = IAaveV4Hub(usdcReserve.hub).getAssetLiquidity(usdcReserve.assetId);
         uint256 seeded = 0;
         if (available < borrowUsdc) {
             seeded = borrowUsdc - available;
