@@ -25,7 +25,7 @@ contract VedaAccountantPriceFeedTest is Test {
 
     function setUp() public {
         vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
-        feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, "liquidETH / USD");
+        feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / USD");
     }
 
     /// @notice The reported price equals rate x underlying, and lands in a sane USD range.
@@ -81,10 +81,19 @@ contract VedaAccountantPriceFeedTest is Test {
 
     /// @notice Without an underlying feed, the price is the accountant rate scaled to feed decimals.
     function test_noUnderlying_latestAnswer_isScaledRate() public {
-        VedaAccountantPriceFeed usdFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, "liquidETH / ETH");
+        VedaAccountantPriceFeed usdFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / ETH");
         uint256 rate = accountant.getRateSafe();
         uint256 expected = rate * (10 ** FEED_DECIMALS) / (10 ** usdFeed.rateDecimals());
         assertEq(usdFeed.latestAnswer().toUint256(), expected);
+    }
+
+    /// @notice A stable feed snaps to exactly 1 USD inside the 1% band and passes the raw price outside it.
+    function test_stable_snapsWithinOnePercent() public {
+        VedaAccountantPriceFeed stableFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, true, "STABLE / USD");
+        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), abi.encode(uint256(0.995e18)));
+        assertEq(stableFeed.latestAnswer(), 1e8);
+        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), abi.encode(uint256(1.02e18)));
+        assertEq(stableFeed.latestAnswer(), 1.02e8);
     }
 
     /// @notice Reverts when the underlying price is zero or negative.

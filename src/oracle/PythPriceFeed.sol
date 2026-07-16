@@ -70,6 +70,8 @@ contract PythPriceFeed is IAaveV4PriceFeed {
     IAaveV4PriceFeed public immutable underlyingUsdFeed;
     /// @notice The decimals of the underlying feed (0 when unset)
     uint8 public immutable underlyingDecimals;
+    /// @notice Whether the price snaps to exactly 1 USD when within 1% of it (USD stables only)
+    bool public immutable isStableToken;
 
     string private _description;
 
@@ -88,6 +90,7 @@ contract PythPriceFeed is IAaveV4PriceFeed {
         uint8 _feedDecimals,
         IAaveV4PriceFeed _underlyingUsdFeed,
         uint256 _maxStaleness,
+        bool _isStableToken,
         string memory feedDescription
     ) {
         if (address(_underlyingUsdFeed) == address(0)) {
@@ -108,6 +111,7 @@ contract PythPriceFeed is IAaveV4PriceFeed {
         oracleDecimals = _oracleDecimals;
         feedDecimals = _feedDecimals;
         underlyingUsdFeed = _underlyingUsdFeed;
+        isStableToken = _isStableToken;
         _description = feedDescription;
     }
 
@@ -132,14 +136,23 @@ contract PythPriceFeed is IAaveV4PriceFeed {
         require(price > 0, InvalidPrice());
 
         if (address(underlyingUsdFeed) == address(0)) {
-            return (price / 10 ** (oracleDecimals - feedDecimals)).toInt256();
+            return _snapStable(price / 10 ** (oracleDecimals - feedDecimals)).toInt256();
         }
 
         int256 underlyingPrice = underlyingUsdFeed.latestAnswer();
         require(underlyingPrice > 0, InvalidPrice());
 
         // price = pair rate * underlying USD, normalized from (oracleDecimals + underlyingDecimals) to feedDecimals
-        return price.mulDiv(uint256(underlyingPrice) * 10 ** feedDecimals, 10 ** (oracleDecimals + underlyingDecimals)).toInt256();
+        return _snapStable(price.mulDiv(uint256(underlyingPrice) * 10 ** feedDecimals, 10 ** (oracleDecimals + underlyingDecimals))).toInt256();
+    }
+
+    /// @dev Snaps a USD-stable price to exactly 1 USD when it is within 1% of it, mirroring PriceProviderV2
+    function _snapStable(uint256 price) private view returns (uint256) {
+        if (!isStableToken) return price;
+        uint256 stablePrice = 10 ** feedDecimals;
+        uint256 maxDeviation = stablePrice / 100;
+        if (price > stablePrice - maxDeviation && price < stablePrice + maxDeviation) return stablePrice;
+        return price;
     }
 
     /// @dev Enforces the feed's own staleness bound against the Pyth publish time; zero ids are unused slots

@@ -108,7 +108,7 @@ contract DeployAaveV4TestInstance is Utils {
         spoke.updateLiquidationConfig(ISpoke.LiquidationConfig({ targetHealthFactor: 1.05e18, healthFactorForMaxBonus: 0.7e18, liquidationBonusFactor: 2000 }));
 
         // weETH priced via weETH/WETH exchange rate x ETH/USD (8-decimal USD), USDC via its direct feed
-        weethUsdFeed = new ChainlinkPriceFeed(IAggregatorV3(cfg.weEthWethOracle), IAaveV4PriceFeed(cfg.ethUsdcOracle), 8, RATE_FEED_MAX_STALENESS, "weETH / USD");
+        weethUsdFeed = new ChainlinkPriceFeed(IAggregatorV3(cfg.weEthWethOracle), IAaveV4PriceFeed(cfg.ethUsdcOracle), 8, RATE_FEED_MAX_STALENESS, false, "weETH / USD");
         weethReserveId = _addReserve(cfg.weETH, address(weethUsdFeed), WEETH_COLLATERAL_FACTOR_BPS, false);
         usdcReserveId = _addReserve(cfg.usdc, cfg.usdcUsdOracle, USDC_COLLATERAL_FACTOR_BPS, true);
 

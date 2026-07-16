@@ -30,6 +30,8 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
     uint8 public immutable feedDecimals;
     /// @notice The maximum age in seconds for the Veda rate before it is rejected
     uint256 public immutable rateMaxStaleness;
+    /// @notice Whether the price snaps to exactly 1 USD when within 1% of it (USD stables only)
+    bool public immutable isStableToken;
     string private _description;
 
     /// @notice Thrown when either price source is older than its staleness limit
@@ -37,8 +39,8 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
     /// @notice Thrown when the rate or the underlying price is zero or negative
     error InvalidPrice();
 
-    constructor(IVedaAccountant _accountant, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, string memory feedDescription) {
-        
+    constructor(IVedaAccountant _accountant, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) {
+
         accountant = _accountant;
         underlyingUsdFeed = _underlyingUsdFeed;
         rateDecimals = _accountant.decimals();
@@ -47,6 +49,7 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
         }
         feedDecimals = _feedDecimals;
         rateMaxStaleness = _rateMaxStaleness;
+        isStableToken = _isStableToken;
         _description = feedDescription;
     }
 
@@ -74,7 +77,7 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
         if (rate == 0) revert InvalidPrice();
 
         if (address(underlyingUsdFeed) == address(0)) {
-            return rate.mulDiv(10 ** feedDecimals, 10 ** rateDecimals).toInt256();
+            return _snapStable(rate.mulDiv(10 ** feedDecimals, 10 ** rateDecimals)).toInt256();
         }
 
         int256 answer = underlyingUsdFeed.latestAnswer();
@@ -83,6 +86,15 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
         // price = rate * underlyingPrice, normalized from (rateDecimals + underlyingDecimals) to feedDecimals
         uint256 price = rate.mulDiv(answer.toUint256() * 10 ** feedDecimals, 10 ** (rateDecimals + underlyingDecimals));
 
-        return price.toInt256();
+        return _snapStable(price).toInt256();
+    }
+
+    /// @dev Snaps a USD-stable price to exactly 1 USD when it is within 1% of it, mirroring PriceProviderV2
+    function _snapStable(uint256 price) private view returns (uint256) {
+        if (!isStableToken) return price;
+        uint256 stablePrice = 10 ** feedDecimals;
+        uint256 maxDeviation = stablePrice / 100;
+        if (price > stablePrice - maxDeviation && price < stablePrice + maxDeviation) return stablePrice;
+        return price;
     }
 }
