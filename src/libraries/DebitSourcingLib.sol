@@ -24,7 +24,7 @@ library DebitSourcingLib {
      */
     function withdrawableSupplied(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) public view returns (uint256) {
         uint256 supplied = gateway.suppliedOf(safe, token);
-        uint256 cash = gateway.availableCash(token);
+        uint256 cash = gateway.withdrawalLiquidity(token);
         uint256 cap = supplied < cash ? supplied : cash;
 
         if (hasDebt) {
@@ -57,7 +57,7 @@ library DebitSourcingLib {
         uint256 maxLiquidityUsd = 0;
         for (uint256 i = 0; i < spendTokens.length;) {
             if (gateway.isBorrowable(spendTokens[i])) {
-                uint256 liquidityUsd = toUsd(priceProvider, spendTokens[i], gateway.availableToBorrow(spendTokens[i]));
+                uint256 liquidityUsd = toUsd(priceProvider, spendTokens[i], gateway.borrowLiquidity(spendTokens[i]));
                 if (liquidityUsd > maxLiquidityUsd) {
                     maxLiquidityUsd = liquidityUsd;
                 }
@@ -88,7 +88,7 @@ library DebitSourcingLib {
             return (false, "Not a supported borrow token");
         }
 
-        if (gateway.availableToBorrow(token) < fromUsd(priceProvider, token, totalSpendingInUsd)) {
+        if (gateway.borrowLiquidity(token) < fromUsd(priceProvider, token, totalSpendingInUsd)) {
             return (false, "Insufficient liquidity to cover the loan");
         }
 

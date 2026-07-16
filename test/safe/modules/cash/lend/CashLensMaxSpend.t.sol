@@ -131,7 +131,7 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
 
         // A genuinely drained reserve on real Aave needs an unrelated whale borrow; mock the reserve read to
         // isolate the liquidity cap (the branch under test).
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableCash.selector, address(usdc)), abi.encode(uint256(400e6)));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.withdrawalLiquidity.selector, address(usdc)), abi.encode(uint256(400e6)));
 
         address[] memory pref = new address[](1);
         pref[0] = address(usdc);
@@ -373,8 +373,8 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         _supplyToGateway(address(safe), address(usdc), 2000e6); // ~$1000 borrowing power at 50%
 
         // Every borrow reserve can lend less than the borrowing power, so borrowable liquidity binds.
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableToBorrow.selector, address(usdc)), abi.encode(uint256(400e6)));
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableToBorrow.selector, address(liquidUsd)), abi.encode(uint256(0)));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.borrowLiquidity.selector, address(usdc)), abi.encode(uint256(400e6)));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.borrowLiquidity.selector, address(liquidUsd)), abi.encode(uint256(0)));
 
         assertEq(cashLens.getMaxSpendCredit(address(safe)), 400e6, "credit max spend capped by borrowable liquidity, not borrowing power");
     }

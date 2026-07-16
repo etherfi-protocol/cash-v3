@@ -38,8 +38,14 @@ interface IAaveV4Hub {
     /// @notice The spoke's config for `assetId` (incl. `addCap`, `drawCap`, `active`, `halted`).
     function getSpokeConfig(uint256 assetId, address spoke) external view returns (SpokeConfig memory);
 
+    /// @notice The Hub's available underlying liquidity for `assetId`, shared by every Spoke.
+    function getAssetLiquidity(uint256 assetId) external view returns (uint256);
+
     /// @notice The spoke's current borrow usage for `assetId` (drawn + premium), in asset units.
     function getSpokeTotalOwed(uint256 assetId, address spoke) external view returns (uint256);
+
+    /// @notice The spoke's reported deficit for `assetId`, in asset units scaled by RAY.
+    function getSpokeDeficitRay(uint256 assetId, address spoke) external view returns (uint256);
 
     /// @notice The cap sentinel meaning "uncapped": a cap equal to this imposes no limit.
     function MAX_ALLOWED_SPOKE_CAP() external view returns (uint40);

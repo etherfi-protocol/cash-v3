@@ -11,7 +11,7 @@ import { ILendGateway } from "../interfaces/ILendGateway.sol";
  *         under the lend profile (test/safe/modules/cash/lend/**), so this mock no longer fabricates positions.
  *         Not for production.
  * @dev Records the last supply / withdraw call and the collateral flag for the sandwich test; the position
- *      aggregate (getAccountData) and reserve liquidity (availableCash) are settable for the guard tests. The
+ *      aggregate (getAccountData) and reserve liquidity (withdrawalLiquidity) are settable for the guard tests. The
  *      remaining reads return empty defaults, matching the inert wiring.
  */
 contract MockLendGateway is ILendGateway {
@@ -27,7 +27,7 @@ contract MockLendGateway is ILendGateway {
     mapping(address => mapping(address => bool)) public usingAsCollateral;
     mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
     mapping(address safe => mapping(address asset => uint256)) internal _suppliedOf;
-    mapping(address asset => uint256) internal _availableCash;
+    mapping(address asset => uint256) internal _withdrawalLiquidity;
     /// @dev Whether an asset is a registered reserve; defaults to false
     mapping(address asset => bool) internal _registered;
     /// @dev Whether an asset's reserve allows borrowing; defaults to false
@@ -45,9 +45,9 @@ contract MockLendGateway is ILendGateway {
         _accountData[safe] = data;
     }
 
-    /// @notice Sets the reserve liquidity a subsequent `availableCash(asset)` will return
-    function setAvailableCash(address asset, uint256 amount) external {
-        _availableCash[asset] = amount;
+    /// @notice Sets the reserve liquidity a subsequent `withdrawalLiquidity(asset)` will return
+    function setWithdrawalLiquidity(address asset, uint256 amount) external {
+        _withdrawalLiquidity[asset] = amount;
     }
 
     /// @notice Sets whether an asset is a registered reserve (defaults to unregistered)
@@ -119,13 +119,13 @@ contract MockLendGateway is ILendGateway {
         return _debtOf[safe][asset];
     }
 
-    function availableCash(address asset) external view returns (uint256) {
-        return _availableCash[asset];
+    function withdrawalLiquidity(address asset) external view returns (uint256) {
+        return _withdrawalLiquidity[asset];
     }
 
-    /// @dev The mock models no borrow cap, so the borrowable liquidity equals availableCash
-    function availableToBorrow(address asset) external view returns (uint256) {
-        return _availableCash[asset];
+    /// @dev The mock models no borrow cap, so the borrowable liquidity equals withdrawalLiquidity
+    function borrowLiquidity(address asset) external view returns (uint256) {
+        return _withdrawalLiquidity[asset];
     }
 
     function ltv(address) external pure returns (uint256) {

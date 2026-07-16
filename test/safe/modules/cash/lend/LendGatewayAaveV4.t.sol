@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IAaveV4Hub } from "../../../../../src/interfaces/IAaveV4Hub.sol";
 import { IAaveV4Spoke } from "../../../../../src/interfaces/IAaveV4Spoke.sol";
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
 import { ModuleBase } from "../../../../../src/modules/ModuleBase.sol";
@@ -67,23 +68,50 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertEq(gw.ltv(address(usdc)), 80e18);
         assertEq(gw.ltv(address(weETH)), 80e18);
         // Seeded liquidity is withdrawable/borrowable cash
-        assertGe(gw.availableCash(address(usdc)), 1_000_000e6);
+        assertGe(gw.withdrawalLiquidity(address(usdc)), 1_000_000e6);
     }
 
-    /// availableToBorrow is the credit-side liquidity gate: uncapped it equals availableCash, a finite drawCap
+    /// withdrawalLiquidity reads shared Hub liquidity and returns zero when this Spoke cannot withdraw it.
+    function test_reads_withdrawalLiquidity_usesHubLiquidityAndExecutionState() public {
+        IAaveV4Spoke.Reserve memory reserve = IAaveV4Spoke(address(spoke)).getReserve(usdcReserveId);
+        uint256 expectedLiquidity = 123_456e6;
+        vm.mockCall(reserve.hub, abi.encodeWithSelector(IAaveV4Hub.getAssetLiquidity.selector, reserve.assetId), abi.encode(expectedLiquidity));
+
+        assertEq(gw.withdrawalLiquidity(address(usdc)), expectedLiquidity);
+
+        _setAaveReserveFrozen(usdcReserveId, true);
+        assertEq(gw.withdrawalLiquidity(address(usdc)), expectedLiquidity, "freeze leaves withdrawals open");
+        _setAaveReserveFrozen(usdcReserveId, false);
+
+        _setAaveReservePaused(usdcReserveId, true);
+        assertEq(gw.withdrawalLiquidity(address(usdc)), 0, "paused reserve blocks withdrawals");
+        _setAaveReservePaused(usdcReserveId, false);
+
+        _setAaveSpokeHalted(usdcReserveId, true);
+        assertEq(gw.withdrawalLiquidity(address(usdc)), 0, "halted Hub Spoke blocks withdrawals");
+    }
+
+    /// borrowLiquidity is the credit-side liquidity gate: uncapped it equals withdrawalLiquidity, a finite drawCap
     /// caps it at the spoke's remaining borrow headroom, and a halted Hub spoke drives it to zero.
-    function test_reads_availableToBorrow_boundedByDrawCap() public {
+    function test_reads_borrowLiquidity_boundedByDrawCap() public {
         // Uncapped (fixture default): equals the withdrawable liquidity
-        assertEq(gw.availableToBorrow(address(usdc)), gw.availableCash(address(usdc)));
+        assertEq(gw.borrowLiquidity(address(usdc)), gw.withdrawalLiquidity(address(usdc)));
 
         // With no borrows yet, a 400k-token drawCap is the whole borrowable amount (< the 1M seeded cash)
         _setAaveSpokeCaps(usdcReserveId, type(uint40).max, 400_000);
-        assertEq(gw.availableToBorrow(address(usdc)), 400_000e6, "capped at remaining drawCap");
-        assertGe(gw.availableCash(address(usdc)), 1_000_000e6, "withdraw side is unchanged by the borrow cap");
+        assertEq(gw.borrowLiquidity(address(usdc)), 400_000e6, "capped at remaining drawCap");
+        assertGe(gw.withdrawalLiquidity(address(usdc)), 1_000_000e6, "withdraw side is unchanged by the borrow cap");
+
+        // Hub execution counts reported deficit against the cap and rounds sub-unit deficit up.
+        // 400_000e6 - ceil((25_000e6 * 1e27 + 1) / 1e27) = 374_999_999_999.
+        uint256 assetId = spoke.getReserve(usdcReserveId).assetId;
+        uint256 deficitRay = 25_000e6 * 1e27 + 1;
+        vm.mockCall(address(hub), abi.encodeWithSelector(IAaveV4Hub.getSpokeDeficitRay.selector, assetId, address(spoke)), abi.encode(deficitRay));
+        assertEq(gw.borrowLiquidity(address(usdc)), 374_999_999_999, "deficit reduces draw-cap room with ceil rounding");
 
         // Halting the spoke stops new borrows entirely
         _setAaveSpokeHalted(usdcReserveId, true);
-        assertEq(gw.availableToBorrow(address(usdc)), 0, "halted spoke cannot borrow");
+        assertEq(gw.borrowLiquidity(address(usdc)), 0, "halted spoke cannot borrow");
     }
 
     /// isBorrowable/borrowableAssets read the reserve's borrowable flag on the Spoke: USDC's reserve allows
@@ -104,12 +132,14 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
     function test_reads_borrowable_frozenOrPausedIsNotBorrowable() public {
         _setAaveReserveFrozen(usdcReserveId, true);
         assertFalse(gw.isBorrowable(address(usdc)), "frozen reserve not borrowable");
+        assertEq(gw.borrowLiquidity(address(usdc)), 0, "frozen reserve has no executable borrow capacity");
         assertEq(gw.borrowableAssets().length, 0, "frozen reserve dropped from list");
         _setAaveReserveFrozen(usdcReserveId, false);
         assertTrue(gw.isBorrowable(address(usdc)), "borrowable again after unfreeze");
 
         _setAaveReservePaused(usdcReserveId, true);
         assertFalse(gw.isBorrowable(address(usdc)), "paused reserve not borrowable");
+        assertEq(gw.borrowLiquidity(address(usdc)), 0, "paused reserve has no executable borrow capacity");
         _setAaveReservePaused(usdcReserveId, false);
         assertTrue(gw.isBorrowable(address(usdc)), "borrowable again after unpause");
     }
@@ -279,7 +309,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
 
         assertFalse(gw.isRegistered(address(weETH)));
         assertEq(gw.ltv(address(weETH)), 0);
-        assertEq(gw.availableCash(address(weETH)), 0);
+        assertEq(gw.withdrawalLiquidity(address(weETH)), 0);
         assertEq(gw.suppliedOf(address(safe), address(weETH)), 0);
         assertEq(gw.debtOf(address(safe), address(weETH)), 0);
 
@@ -434,7 +464,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         address unreg = makeAddr("unregisteredRead");
         assertEq(gw.suppliedOf(address(safe), unreg), 0);
         assertEq(gw.debtOf(address(safe), unreg), 0);
-        assertEq(gw.availableCash(unreg), 0);
+        assertEq(gw.withdrawalLiquidity(unreg), 0);
         assertEq(gw.ltv(unreg), 0);
     }
 
@@ -514,7 +544,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
 
     /// @dev Supply and borrow must move the reserve's real hub-level accounting, not just per-user views.
     function test_reserveAccountingReflectsSupplyAndBorrow() public {
-        uint256 cashBefore = gw.availableCash(address(usdc));
+        uint256 cashBefore = gw.withdrawalLiquidity(address(usdc));
         assertApproxEqAbs(cashBefore, 1_000_000e6, 1, "seeded USDC liquidity present");
 
         deal(address(weETH), address(safe), 5 ether);
@@ -525,7 +555,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.stopPrank();
 
         // Borrow drew from the USDC reserve's cash (hub liquidity accounting)
-        assertApproxEqAbs(gw.availableCash(address(usdc)), cashBefore - 1000e6, 2, "borrow reduced reserve cash");
+        assertApproxEqAbs(gw.withdrawalLiquidity(address(usdc)), cashBefore - 1000e6, 2, "borrow reduced reserve cash");
         // Supply landed in the weETH reserve (hub-side supplied assets)
         assertApproxEqAbs(spoke.getReserveSuppliedAssets(weethReserveId), 5 ether, 3, "supply increased reserve assets");
     }

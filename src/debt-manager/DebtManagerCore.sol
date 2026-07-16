@@ -710,7 +710,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
         for (uint256 i = 0; i < bLen;) {
             if (borrowings[i].amount != 0) {
                 uint256 debtTokenAmt = _clearLegacyDebt(safe, borrowings[i].token);
-                if (_gateway.availableToBorrow(borrowings[i].token) < debtTokenAmt) revert InsufficientLendGatewayLiquidity(borrowings[i].token);
+                if (_gateway.borrowLiquidity(borrowings[i].token) < debtTokenAmt) revert InsufficientLendGatewayLiquidity(borrowings[i].token);
                 debtTokenAmts[i] = debtTokenAmt;
             }
             unchecked {

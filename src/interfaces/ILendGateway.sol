@@ -118,23 +118,23 @@ interface ILendGateway {
     function debtOf(address safe, address asset) external view returns (uint256);
 
     /**
-     * @notice Returns the reserve's withdrawable liquidity: supplied minus borrowed
-     * @dev Answers "how much can a withdraw pull". Not the borrow limit: a borrow is also bounded by the
-     *      Hub's drawCap, so use availableToBorrow for the credit side.
+     * @notice Returns the reserve-level Hub liquidity currently available for withdrawals
+     * @dev This is not a Safe's withdrawal limit, which also depends on its supply and position health. A
+     *      borrow is additionally bounded by the Hub's drawCap, so use borrowLiquidity for the credit side.
      * @param asset The reserve asset
      * @return The available liquidity, in asset units
      */
-    function availableCash(address asset) external view returns (uint256);
+    function withdrawalLiquidity(address asset) external view returns (uint256);
 
     /**
-     * @notice Returns how much of `asset` a borrow can actually draw right now
-     * @dev The lesser of the reserve's withdrawable liquidity and the Hub's remaining drawCap for this
-     *      spoke. Zero if the Hub spoke is inactive or halted. This is the credit-side liquidity gate;
-     *      availableCash is the withdraw-side one.
+     * @notice Returns the reserve-level Hub liquidity currently available for borrowing
+     * @dev This is not a Safe's borrowing limit, which also depends on its collateral and position health. It
+     *      is the lesser of shared Hub liquidity and remaining drawCap after debt, premium, and deficit, and is
+     *      zero unless the reserve and Hub Spoke accept borrowing.
      * @param asset The reserve asset
      * @return The borrowable amount, in asset units
      */
-    function availableToBorrow(address asset) external view returns (uint256);
+    function borrowLiquidity(address asset) external view returns (uint256);
 
     /**
      * @notice Returns the loan-to-value of `asset`'s reserve, in the 100e18 = 100% scale (matching DebtManager's CollateralTokenConfig.ltv)

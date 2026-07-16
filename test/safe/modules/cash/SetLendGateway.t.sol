@@ -67,7 +67,7 @@ contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
         uint256[] memory amountsInUsd = new uint256[](1);
         amountsInUsd[0] = 100e6;
 
-        newGateway.setAvailableCash(address(usdc), type(uint128).max);
+        newGateway.setWithdrawalLiquidity(address(usdc), type(uint128).max);
         newGateway.setRegistered(address(usdc), true);
         newGateway.setBorrowable(address(usdc), true);
         newGateway.setSpendAsset(address(usdc), true);

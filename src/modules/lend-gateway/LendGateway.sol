@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IAaveV4Hub } from "../../interfaces/IAaveV4Hub.sol";
@@ -60,6 +61,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     uint256 internal constant HUNDRED_PERCENT = 100e18;
     /// @notice Converts Aave's BPS collateralFactor to the 100e18 ltv scale (bps * 1e16; 10_000 * 1e16 == 100e18)
     uint256 internal constant BPS_TO_LTV_SCALE = 1e16;
+    /// @notice Aave's RAY scale for deficit accounting
+    uint256 internal constant RAY = 1e27;
 
     /// @custom:storage-location erc7201:etherfi.storage.LendGateway
     struct LendGatewayStorage {
@@ -542,44 +545,49 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @notice Returns the reserve's withdrawable liquidity (supplied minus borrowed)
-     * @dev The withdraw-side liquidity gate. A borrow is additionally bounded by the Hub's drawCap, so the
-     *      credit side reads availableToBorrow.
+     * @notice Returns the reserve-level Hub liquidity currently available for withdrawals
+     * @dev This is not a Safe's withdrawal limit. Returns zero while the reserve is paused or its Hub Spoke is
+     *      inactive or halted.
      * @param asset The reserve asset
      * @return The available liquidity in asset units, or 0 if the asset is not registered
      */
-    function availableCash(address asset) external view returns (uint256) {
+    function withdrawalLiquidity(address asset) external view returns (uint256) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
-        return _availableCash($.reserveId[asset]);
+        return _withdrawalLiquidity($.reserveId[asset]);
     }
 
     /**
-     * @notice Returns how much of `asset` a borrow can draw right now: min(withdrawable liquidity, remaining
-     *         Hub drawCap), or 0 if the asset is unregistered or the Hub spoke is inactive or halted
-     * @dev The credit-side liquidity gate. drawCap is enforced only in the Hub, so a borrow within
-     *      availableCash can still revert DrawCapExceeded; folding the cap in here keeps the auth decision
-     *      honest. The Hub also counts a reported deficit toward the cap, which this omits, so a nonzero
-     *      deficit makes this a slight overestimate.
+     * @notice Returns the reserve-level Hub liquidity currently available for borrowing
+     * @dev This is not a Safe's borrowing limit. Returns zero unless both the reserve and Hub Spoke accept a
+     *      borrow. Finite draw-cap usage includes drawn debt, premium, and reported deficit rounded up exactly
+     *      as Hub execution does.
      * @param asset The reserve asset
      * @return The borrowable amount in asset units
      */
-    function availableToBorrow(address asset) external view returns (uint256) {
+    function borrowLiquidity(address asset) external view returns (uint256) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
 
         uint256 reserveId = $.reserveId[asset];
+        if (!_isBorrowable(reserveId)) return 0;
+
         IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(reserveId);
         IAaveV4Hub hub = IAaveV4Hub(reserve.hub);
         IAaveV4Hub.SpokeConfig memory config = hub.getSpokeConfig(reserve.assetId, address(spoke));
         if (!config.active || config.halted) return 0;
 
-        uint256 cash = _availableCash(reserveId);
+        uint256 cash = hub.getAssetLiquidity(reserve.assetId);
         if (config.drawCap == hub.MAX_ALLOWED_SPOKE_CAP()) return cash;
 
         uint256 capLimit = uint256(config.drawCap) * (10 ** reserve.decimals);
         uint256 owed = hub.getSpokeTotalOwed(reserve.assetId, address(spoke));
-        uint256 remainingCap = capLimit > owed ? capLimit - owed : 0;
+        if (owed >= capLimit) return 0;
+
+        uint256 remainingCap = capLimit - owed;
+        uint256 deficit = Math.ceilDiv(hub.getSpokeDeficitRay(reserve.assetId, address(spoke)), RAY);
+        if (deficit >= remainingCap) return 0;
+        remainingCap -= deficit;
         return cash < remainingCap ? cash : remainingCap;
     }
 
@@ -723,11 +731,15 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         return $.reserveId[asset];
     }
 
-    /// @dev The reserve's withdrawable liquidity (supplied minus borrowed), in asset units
-    function _availableCash(uint256 reserveId) internal view returns (uint256) {
-        uint256 supplied = spoke.getReserveSuppliedAssets(reserveId);
-        uint256 debt = spoke.getReserveTotalDebt(reserveId);
-        return supplied > debt ? supplied - debt : 0;
+    /// @dev The shared Hub liquidity currently available to this reserve for withdrawal.
+    function _withdrawalLiquidity(uint256 reserveId) internal view returns (uint256) {
+        if (spoke.getReserveConfig(reserveId).paused) return 0;
+
+        IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(reserveId);
+        IAaveV4Hub hub = IAaveV4Hub(reserve.hub);
+        IAaveV4Hub.SpokeConfig memory config = hub.getSpokeConfig(reserve.assetId, address(spoke));
+        if (!config.active || config.halted) return 0;
+        return hub.getAssetLiquidity(reserve.assetId);
     }
 
     /// @dev The reserve's LTV in the 100e18 scale, from its current dynamic collateralFactor (BPS)
