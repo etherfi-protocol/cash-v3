@@ -9,37 +9,23 @@ import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 
 /**
  * @title DebitSourcingLib
- * @notice Shared debit-sizing math for the Cash contracts: how much of a token's Aave-supplied balance can fund
- *         a debit without pushing the safe past its LTV max borrow, and how much borrowing headroom a supplied
- *         withdrawal consumes. CashModuleCore (execution) and CashLens (canSpend) both call it so the two agree.
+ * @notice Shared debit-sizing math for the Cash contracts: how much of a token's Aave-supplied balance can
+ *         fund a debit within the gateway's Aave-priced collateral headroom. CashModuleCore (execution) and
+ *         CashLens (canSpend) both call it so the two agree; PriceProvider's only role here is converting
+ *         payment USD to and from token amounts.
  * @author ether.fi
  */
 library DebitSourcingLib {
-    /// @dev The gateway reports LTV on the 100e18 = 100% scale (see ILendGateway.ltv)
-    uint256 internal constant LTV_SCALE = 100e18;
-
     /**
      * @notice Amount of `token` withdrawable from `safe`'s Aave-supplied balance to fund a debit
-     * @dev min(supplied, reserve cash); when the safe carries debt this is further capped by the borrowing
-     *      headroom, and is zero for a zero-LTV reserve (no borrow weight, so it cannot be sized against debt).
+     * @dev min(supplied, reserve cash); when the safe carries debt the supplied side is what the gateway's
+     *      Aave-priced headroom allows (collateralForHeadroom), including supply with no borrowing power,
+     *      which Aave lets go freely.
      */
-    function withdrawableSupplied(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) public view returns (uint256) {
-        uint256 supplied = gateway.suppliedOf(safe, token);
+    function withdrawableSupplied(ILendGateway gateway, address safe, address token, uint256 headroom, bool hasDebt) public view returns (uint256) {
+        uint256 supplied = hasDebt ? gateway.collateralForHeadroom(safe, token, headroom) : gateway.suppliedOf(safe, token);
         uint256 cash = gateway.withdrawalLiquidity(token);
-        uint256 cap = supplied < cash ? supplied : cash;
-
-        if (hasDebt) {
-            uint256 tokenLtv = gateway.ltv(token);
-            if (tokenLtv == 0) {
-                return 0;
-            }
-            uint256 headroomCap = fromUsd(priceProvider, token, (borrowHeadroomUsd * LTV_SCALE) / tokenLtv);
-            if (headroomCap < cap) {
-                cap = headroomCap;
-            }
-        }
-
-        return cap;
+        return supplied < cash ? supplied : cash;
     }
 
     /**
@@ -95,38 +81,16 @@ library DebitSourcingLib {
     }
 
     /**
-     * @notice Borrow headroom (USD) the lens may size collateral withdrawals against: consuming it keeps
-     *         the post-withdraw health factor at or above the gateway's floor; raw availableBorrowsUsd
-     *         while no floor is set
-     * @dev HF' = (maxBorrowUsd - consumed) / debtUsd >= floor <=> consumed <= maxBorrowUsd - debtUsd * floor.
-     *      Withdrawal requests also enforce the floor at execution, so this quote is what a request can pull
-     *      while Cash and Aave prices agree.
-     */
-    function bufferedDebitHeadroom(ILendGateway gateway, ILendGateway.AccountData memory account) public view returns (uint256) {
-        uint256 floor = gateway.minHealthFactor();
-        if (floor == 0) return account.availableBorrowsUsd;
-        // required is a MINIMUM, so it rounds up: rounding down would let the exact max quote sit one
-        // micro-dollar past the floor and fail the post-op health check
-        uint256 required = (account.debtUsd * floor + 1e18 - 1) / 1e18;
-        uint256 maxBorrow = account.availableBorrowsUsd + account.debtUsd;
-        return maxBorrow > required ? maxBorrow - required : 0;
-    }
-
-    /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
-    function headroomConsumed(ILendGateway gateway, IPriceProvider priceProvider, address token, uint256 amount) public view returns (uint256) {
-        return (toUsd(priceProvider, token, amount) * gateway.ltv(token)) / LTV_SCALE;
-    }
-
-    /**
      * @notice Amount of `token` withdrawable from `safe`'s supplied balance to fund a repay whose loose leg
      *         repays `fromLoose` first
-     * @dev Repaying the loose leg lowers the debt by its full USD value while the collateral is untouched,
-     *      so the withdraw leg sizes against that much extra headroom. Callers only get here with debt
-     *      remaining after the loose leg, so the headroom cap always applies.
+     * @dev Repaying the loose leg lowers the debt while the collateral is untouched, so the withdraw leg
+     *      sizes against the headroom that repay frees (borrowValue). Raw headroom: a repay de-risks the
+     *      position, so it is floor-exempt like spends. Callers only get here with debt remaining after
+     *      the loose leg, so the headroom cap always applies.
      */
-    function repayWithdrawable(ILendGateway gateway, IPriceProvider priceProvider, address safe, address token, uint256 fromLoose) public view returns (uint256) {
-        uint256 headroomUsd = gateway.getAccountData(safe).availableBorrowsUsd + toUsd(priceProvider, token, fromLoose);
-        return withdrawableSupplied(gateway, priceProvider, safe, token, headroomUsd, true);
+    function repayWithdrawable(ILendGateway gateway, address safe, address token, uint256 fromLoose) public view returns (uint256) {
+        uint256 headroom = gateway.rawWithdrawHeadroom(safe) + gateway.borrowValue(token, fromLoose);
+        return withdrawableSupplied(gateway, safe, token, headroom, true);
     }
 
     /// @notice USD value of `amount` of `token` at its current price, rounding down

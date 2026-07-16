@@ -247,19 +247,20 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(result.spendableAmounts[1], 600e6, 1e4, "liquidUSD is headroom-bound at its own 50% LTV, not USDC's 80%");
     }
 
-    /// With debt, a zero-LTV reserve cannot back a withdrawal, so only the raw balance of that reserve is spendable.
-    function test_debit_zeroLtvReserveWithDebt_onlyRaw() public {
-        // 1000 USDC supplied at 50% with 200 borrowed, so the safe carries debt. Aave rejects a 0 collateral factor,
-        // so the zero-LTV branch (defensive code, unreachable on real Aave) is exercised by mocking gw.ltv.
-        _buildDebtPosition(1000e6, 0, 200e6);
-        deal(address(usdc), address(safe), 300e6);
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.ltv.selector, address(usdc)), abi.encode(uint256(0)));
+    /// With debt, supply that carries no borrowing power (collateral flag off) is still fully spendable:
+    /// withdrawing it cannot lower the health factor, so Aave allows it and the quote matches.
+    function test_debit_nonCollateralSupplyWithDebt_fullySpendable() public {
+        // 1000 USDC (collateral) backs the 200 borrow; the 500 liquidUSD supply carries no borrowing power.
+        _buildDebtPosition(1000e6, 500e6, 200e6);
+        vm.prank(driver);
+        gw.setUsingAsCollateral(address(safe), address(liquidUsd), false);
+        deal(address(liquidUsd), address(safe), 300e6);
 
         address[] memory pref = new address[](1);
-        pref[0] = address(usdc);
+        pref[0] = address(liquidUsd);
 
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), pref);
-        assertEq(result.spendableAmounts[0], 300e6, "only the raw balance is spendable when LTV is zero and there is debt");
+        assertApproxEqAbs(result.spendableAmounts[0], 800e6, 2, "raw plus the full non-collateral supplied balance");
     }
 
     // ================ getMaxSpendDebit: pending withdrawals ================

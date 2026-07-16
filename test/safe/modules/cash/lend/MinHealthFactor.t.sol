@@ -194,22 +194,23 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- rounding & dust
 
-    /// bufferedDebitHeadroom rounds the required (post-floor) debt cover UP: `required` is a minimum, so
-    /// rounding it down would let the exact max quote sit one micro-dollar past the floor and fail the
-    /// post-op health check on a fractional boundary.
-    function test_bufferedDebitHeadroom_roundsRequiredUp() public {
-        MockLendGateway mock = new MockLendGateway();
-        mock.setMinHealthFactor(1.05e18);
+    /// withdrawHeadroom rounds the required (post-floor) debt cover UP: `required` is a minimum, so
+    /// rounding it down would let the exact max quote sit a hair past the floor and fail the post-op
+    /// health check (test_getMaxSourceable_quoteExactlyRequestableWithFloor pins that end-to-end).
+    /// Here: the floor strictly shrinks the headroom while debt is open, and a position below the floor
+    /// quotes zero while the raw (1.00) headroom stays open for settlement.
+    function test_withdrawHeadroom_bufferedInsideRaw() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _borrowOnGateway(address(safe), address(usdc), (gw.getAccountData(address(safe)).availableBorrowsUsd * 99) / 100, recipient);
 
-        // debt 1 micro-dollar: required = ceil(1 * 1.05) = 2, so headroom = (10 + 1) - 2 = 9.
-        // A round-down would say 10 and overquote by one micro-dollar.
-        ILendGateway.AccountData memory account = ILendGateway.AccountData({ collateralUsd: 100, debtUsd: 1, availableBorrowsUsd: 10, healthFactor: 0 });
-        assertEq(DebitSourcingLib.bufferedDebitHeadroom(ILendGateway(address(mock)), account), 9, "fractional boundary rounds up");
+        uint256 raw = gw.rawWithdrawHeadroom(address(safe));
+        assertGt(raw, 0, "healthy position has raw headroom");
+        assertEq(gw.withdrawHeadroom(address(safe)), raw, "no floor: buffered equals raw");
 
-        // Exactly divisible: debt 100 -> required 105, headroom = 110 - 105 = 5
-        account.debtUsd = 100;
-        account.availableBorrowsUsd = 10;
-        assertEq(DebitSourcingLib.bufferedDebitHeadroom(ILendGateway(address(mock)), account), 5, "exact boundary unchanged");
+        _setFloor(FLOOR);
+        assertLt(gw.getAccountData(address(safe)).healthFactor, FLOOR, "position sits below the floor");
+        assertEq(gw.withdrawHeadroom(address(safe)), 0, "below the floor the buffered headroom is zero");
+        assertGt(gw.rawWithdrawHeadroom(address(safe)), 0, "raw headroom stays open for settlement");
     }
 
     /// Dust debt below the 6-decimal USD floor must still cap the quotes: Aave enforces it on withdrawals
@@ -218,9 +219,12 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
     /// stays below the full supplied balance instead of overquoting and reverting on Aave's health check.
     function test_hasDebt_dustDebtStillCapsQuotes() public {
         _supplyToGateway(address(safe), address(weETH), 5 ether);
-        // 1 wei of raw weETH debt injected at the spoke read the gateway derives from: ~3e-9 USD, far
-        // below the 6-decimal USD floor (weETH itself is collateral-only, so it cannot be borrowed for real)
+        // 1 wei of raw weETH debt injected at the spoke reads the gateway derives from: ~3e-9 USD, far
+        // below the 6-decimal USD floor (weETH itself is collateral-only, so it cannot be borrowed for real).
+        // getUserTotalDebt feeds hasDebt/getAccountData; the premium ray feeds the capacity accumulators.
         vm.mockCall(address(spoke), abi.encodeWithSelector(IAaveV4Spoke.getUserTotalDebt.selector, weethReserveId, address(safe)), abi.encode(uint256(1)));
+        vm.mockCall(address(spoke), abi.encodeWithSelector(IAaveV4Spoke.getUserPremiumDebtRay.selector, weethReserveId, address(safe)), abi.encode(uint256(1e27)));
+        vm.mockCall(address(spoke), abi.encodeWithSelector(IAaveV4Spoke.getUserReserveStatus.selector, weethReserveId, address(safe)), abi.encode(true, true));
 
         // Debt legs round UP in getAccountData, so even sub-micro dust registers as one micro-dollar
         assertEq(gw.getAccountData(address(safe)).debtUsd, 1, "dust debt ceils to one micro-dollar");

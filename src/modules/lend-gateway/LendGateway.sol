@@ -8,7 +8,6 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IAaveV4Hub } from "../../interfaces/IAaveV4Hub.sol";
-import { IAaveV4Oracle } from "../../interfaces/IAaveV4Oracle.sol";
 import { IAaveV4Spoke } from "../../interfaces/IAaveV4Spoke.sol";
 import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
@@ -16,6 +15,7 @@ import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { LendCapacityLib } from "./LendCapacityLib.sol";
 
 /**
  * @title LendGateway
@@ -36,8 +36,9 @@ import { ModuleBase } from "../ModuleBase.sol";
  *      asset -> reserveId registry, each entry validated against the Spoke's getReserve at registration time.
  *
  *      USD reads: ILendGateway's collateralUsd/debtUsd/availableBorrowsUsd remain 6-decimal PriceProvider
- *      values for Cash display and debit sizing. Credit authorization instead uses borrowCapacity, which
- *      rebuilds Aave's current oracle-valued collateral and full-RAY debt before quoting a token amount.
+ *      values for Cash display only. Capacity is Aave-priced (LendCapacityLib): credit uses borrowCapacity /
+ *      rawBorrowCapacity and debit sizing uses the withdrawHeadroom family, all rebuilding Aave's current
+ *      oracle-valued collateral and full-RAY debt before quoting.
  *
  *      Per-safe approval needs no user signature: the gateway is a DEFAULT module on every safe, which is the
  *      authorization. Approval is folded into ops (ensuresApproval modifier) — the gateway makes the safe call
@@ -65,16 +66,6 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     uint256 internal constant RAY = 1e27;
     /// @notice Aave's minimum executable health factor
     uint256 internal constant MIN_HEALTH_FACTOR = 1e18;
-    /// @notice Converts collateral weighted by BPS into Aave Value units scaled by RAY, then applies a WAD health factor
-    uint256 internal constant WEIGHTED_COLLATERAL_TO_DEBT_RAY = 1e41;
-
-    struct BorrowCapacityData {
-        uint256 weightedCollateralValueBps;
-        uint256 totalDebtValueRay;
-        uint256 targetPrice;
-        uint256 targetDrawnIndex;
-        uint256 targetDrawnShares;
-    }
 
     /// @custom:storage-location erc7201:etherfi.storage.LendGateway
     struct LendGatewayStorage {
@@ -493,8 +484,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
 
     /**
      * @notice Returns `safe`'s Cash-priced position summary (collateral, debt, borrow headroom, health factor)
-     * @dev Re-derives the USD fields from PriceProvider for display and debit sizing. Credit authorization uses
-     *      borrowCapacity instead. healthFactor (WAD) comes directly from Aave.
+     * @dev Re-derives the USD fields from PriceProvider for display only; capacity and sizing use the
+     *      Aave-priced borrowCapacity and withdrawHeadroom families. healthFactor (WAD) comes directly from Aave.
      * @param safe The safe to query
      * @return data The safe's account data (USD fields are 6-decimal; healthFactor is 1e18)
      */
@@ -614,8 +605,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @return The maximum additional borrow in asset units, or 0 if the asset is unregistered
      */
     function borrowCapacity(address safe, address asset) external view returns (uint256) {
-        uint256 floor = _getLendGatewayStorage().minHealthFactor;
-        return _borrowCapacity(safe, asset, floor == 0 ? MIN_HEALTH_FACTOR : floor);
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return 0;
+        uint256 floor = $.minHealthFactor;
+        return LendCapacityLib.borrowCapacity(spoke, safe, $.reserveId[asset], floor == 0 ? MIN_HEALTH_FACTOR : floor);
     }
 
     /**
@@ -627,49 +620,81 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @return The maximum additional borrow in asset units, or 0 if the asset is unregistered
      */
     function rawBorrowCapacity(address safe, address asset) external view returns (uint256) {
-        return _borrowCapacity(safe, asset, MIN_HEALTH_FACTOR);
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return 0;
+        return LendCapacityLib.borrowCapacity(spoke, safe, $.reserveId[asset], MIN_HEALTH_FACTOR);
     }
 
     /**
-     * @dev Rebuilds Aave's own health-factor inputs (Spoke.getUserAccountData) and runs the formula backwards:
-     *      HF = weightedCollateral * 1e41 / debt >= floor gives a max debt Value, and the room left under it
-     *      converts to target-token debt shares, then to asset units. Every step rounds down, so a borrow of
-     *      the quoted amount always passes Aave's own check. Liquidity and caps are separate (borrowLiquidity).
-     * @param safe The Safe whose position backs the borrow
-     * @param asset The asset to borrow
-     * @param floor The health-factor floor to hold, in WAD (1e18 is Aave's raw executable bound)
-     * @return The maximum additional borrow in asset units, or 0 if the asset is unregistered
+     * @notice The safe's Aave-priced collateral headroom above the configured health-factor floor
+     * @dev The auth quote for collateral withdrawals (debit sizing, max-sourceable), in the weighted
+     *      collateral value unit defined by LendCapacityLib.withdrawHeadroom. Execution reads
+     *      rawWithdrawHeadroom instead, mirroring the borrowCapacity/rawBorrowCapacity pair.
+     * @param safe The Safe whose position is measured
+     * @return The headroom in weighted collateral value units
      */
-    function _borrowCapacity(address safe, address asset, uint256 floor) internal view returns (uint256) {
+    function withdrawHeadroom(address safe) external view returns (uint256) {
+        uint256 floor = _getLendGatewayStorage().minHealthFactor;
+        return LendCapacityLib.withdrawHeadroom(spoke, safe, floor == 0 ? MIN_HEALTH_FACTOR : floor);
+    }
+
+    /**
+     * @notice The safe's Aave-priced collateral headroom above Aave's 1.00 health-factor bound
+     * @dev The execution quote: what an already-authorized debit settlement or repay sizing may consume,
+     *      ignoring the configured floor.
+     * @param safe The Safe whose position is measured
+     * @return The headroom in weighted collateral value units
+     */
+    function rawWithdrawHeadroom(address safe) external view returns (uint256) {
+        return LendCapacityLib.withdrawHeadroom(spoke, safe, MIN_HEALTH_FACTOR);
+    }
+
+    /**
+     * @notice Amount of `asset` the safe can withdraw from Aave while consuming at most `headroom`
+     * @dev Supply carrying no borrowing power (collateral flag off or zero collateral factor) is fully
+     *      withdrawable, matching Aave's own check.
+     * @param safe The Safe whose position is measured
+     * @param asset The supplied asset
+     * @param headroom The weighted collateral value the withdrawal may consume
+     * @return The withdrawable amount in asset units, or 0 if the asset is unregistered
+     */
+    function collateralForHeadroom(address safe, address asset, uint256 headroom) external view returns (uint256) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
+        return LendCapacityLib.collateralForHeadroom(spoke, safe, $.reserveId[asset], headroom);
+    }
 
-        // Health factor is a whole-position number and the Safe can hold positions outside the gateway
-        // registry, so sum collateral and debt across every Spoke reserve, priced by Aave's oracle.
-        uint256 len = spoke.getReserveCount();
-        uint256[] memory reserveIds = new uint256[](len);
-        for (uint256 i = 0; i < len;) {
-            reserveIds[i] = i;
-            unchecked {
-                ++i;
-            }
-        }
-        uint256[] memory prices = IAaveV4Oracle(spoke.ORACLE()).getReservesPrices(reserveIds);
-        BorrowCapacityData memory data = _borrowCapacityData(safe, $.reserveId[asset], reserveIds, prices);
+    /**
+     * @notice The weighted collateral value withdrawing `amount` of `asset` consumes
+     * @param safe The Safe whose position is measured
+     * @param asset The supplied asset (must be registered)
+     * @param amount The withdrawal in asset units
+     * @return The consumed weighted collateral value
+     */
+    function headroomRemoved(address safe, address asset, uint256 amount) external view returns (uint256) {
+        return LendCapacityLib.headroomRemoved(spoke, safe, _reserveIdOf(asset), amount);
+    }
 
-        // Invert HF >= floor into the max debt Value the position may carry (1e41 = Aave's bpsToWad * RAY)
-        uint256 maxDebtValueRay = Math.mulDiv(data.weightedCollateralValueBps, WEIGHTED_COLLATERAL_TO_DEBT_RAY, floor);
-        if (data.totalDebtValueRay >= maxDebtValueRay) return 0;
+    /**
+     * @notice The weighted collateral value a borrow of `amount` of `asset` requires at Aave's 1.00 bound
+     * @dev Also the value a repay of `amount` frees.
+     * @param asset The borrow asset (must be registered)
+     * @param amount The borrow or repay in asset units
+     * @return The required weighted collateral value
+     */
+    function borrowValue(address asset, uint256 amount) external view returns (uint256) {
+        return LendCapacityLib.borrowValue(spoke, _reserveIdOf(asset), amount);
+    }
 
-        // One new drawn share of the target adds drawnIndex * price * 10^(18-decimals) of debt Value, so the
-        // room left under the ceiling divided by that is the new shares that fit, rounded down
-        IAaveV4Spoke.Reserve memory targetReserve = spoke.getReserve($.reserveId[asset]);
-        uint256 valuePerDrawnShareRay = data.targetDrawnIndex * data.targetPrice * (10 ** (18 - targetReserve.decimals));
-        uint256 maxNewDrawnShares = (maxDebtValueRay - data.totalDebtValueRay) / valuePerDrawnShareRay;
-        // Aave stores drawn shares as uint120, so leave room next to the existing shares
-        uint256 shareRoom = type(uint120).max - data.targetDrawnShares;
-        if (maxNewDrawnShares > shareRoom) maxNewDrawnShares = shareRoom;
-        return IAaveV4Hub(targetReserve.hub).previewDrawByShares(targetReserve.assetId, maxNewDrawnShares);
+    /**
+     * @notice Amount of `asset` to supply so the position gains `value` of weighted collateral value
+     * @dev Rounded up. Caller guarantees the reserve's collateral factor is nonzero (see ltv).
+     * @param asset The collateral asset (must be registered)
+     * @param value The weighted collateral value to gain
+     * @return The amount to supply in asset units
+     */
+    function collateralForValue(address asset, uint256 value) external view returns (uint256) {
+        return LendCapacityLib.collateralForValue(spoke, _reserveIdOf(asset), value);
     }
 
     /**
@@ -810,67 +835,6 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
         return $.reserveId[asset];
-    }
-
-    /// @dev Rebuilds the Aave values used by borrow health validation with current reserve configuration.
-    function _borrowCapacityData(address safe, uint256 targetReserveId, uint256[] memory reserveIds, uint256[] memory prices) internal view returns (BorrowCapacityData memory) {
-        BorrowCapacityData memory data;
-        for (uint256 i = 0; i < reserveIds.length;) {
-            data = _addReserveCapacity(data, safe, reserveIds[i], prices[i], reserveIds[i] == targetReserveId);
-            unchecked {
-                ++i;
-            }
-        }
-        return data;
-    }
-
-    /**
-     * @dev Adds one reserve's collateral and debt to the running totals, mirroring the two accumulators in
-     *      Aave's Spoke.getUserAccountData at full precision. Amounts become Aave "Value" units by
-     *      amount * price * 10^(18 - decimals); collateral is further weighted by the reserve's
-     *      collateralFactor (BPS) and debt stays in RAY.
-     * @param data The running totals, returned with this reserve added
-     * @param safe The Safe whose position is being summed
-     * @param reserveId The Spoke reserve to add
-     * @param price The reserve's Aave oracle price
-     * @param isTarget Whether this is the reserve being borrowed, whose conversion inputs the caller needs
-     * @return The updated totals
-     */
-    function _addReserveCapacity(BorrowCapacityData memory data, address safe, uint256 reserveId, uint256 price, bool isTarget) internal view returns (BorrowCapacityData memory) {
-        IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(reserveId);
-        IAaveV4Hub hub = IAaveV4Hub(reserve.hub);
-        IAaveV4Spoke.UserPosition memory position = spoke.getUserPosition(reserveId, safe);
-        (bool isCollateral, bool borrowed) = spoke.getUserReserveStatus(reserveId, safe);
-        // Turns an asset amount into Aave Value units: amount * price * 10^(18 - decimals)
-        uint256 valueFactor = price * (10 ** (18 - reserve.decimals));
-
-        if (isCollateral && position.suppliedShares != 0) {
-            uint256 collateralFactor = spoke.getDynamicReserveConfig(reserveId, reserve.dynamicConfigKey).collateralFactor;
-            if (collateralFactor != 0) {
-                // Aave rounds supplied shares to removable assets down, so collateral power is conservative
-                uint256 suppliedAssets = hub.previewRemoveByShares(reserve.assetId, position.suppliedShares);
-                // Collateral Value weighted by the factor (BPS), Aave's avgCollateralFactor accumulator
-                data.weightedCollateralValueBps += suppliedAssets * valueFactor * collateralFactor;
-            }
-        }
-
-        uint256 drawnIndex;
-        if (borrowed || isTarget) drawnIndex = hub.getAssetDrawnIndex(reserve.assetId);
-        if (borrowed) {
-            // Keep drawn and premium debt at full RAY precision; do not round debt down to asset units
-            uint256 debtRay = uint256(position.drawnShares) * drawnIndex + spoke.getUserPremiumDebtRay(reserveId, safe);
-            data.totalDebtValueRay += debtRay * valueFactor;
-        }
-
-        if (isTarget) {
-            // This is the reserve being borrowed. After the loop, _borrowCapacity turns the remaining debt
-            // budget into an amount of this asset, which needs its price, drawn index, and existing shares.
-            // Save them now, while this iteration already holds them, instead of re-fetching after the loop.
-            data.targetPrice = price;
-            data.targetDrawnIndex = drawnIndex;
-            data.targetDrawnShares = position.drawnShares;
-        }
-        return data;
     }
 
     /// @dev The shared Hub liquidity currently available to this reserve for withdrawal.

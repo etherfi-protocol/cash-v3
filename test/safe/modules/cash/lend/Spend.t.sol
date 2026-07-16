@@ -55,17 +55,46 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), suppliedBefore - cap, 2, "withdrawn from the Aave-supplied balance");
     }
 
-    /// A zero-LTV reserve cannot fund a debit while the safe carries debt, so the spend reverts.
-    function test_spend_debit_reverts_whenWithdrawingZeroLtvCollateralWithDebt() public {
-        // Aave rejects a 0 collateral factor, so the defensive zero-LTV branch is exercised by mocking gw.ltv.
+    /// Supply that carries no borrowing power (collateral flag off) is fully withdrawable for a debit even
+    /// while the safe carries debt: removing it cannot lower the health factor, so Aave allows it.
+    function test_spend_debit_withdrawsNonCollateralSupplyWithDebt() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether); // backs the debt
         _supplyToGateway(address(safe), address(usdc), 100e6);
         _borrowOnGateway(address(safe), address(usdc), 40e6, recipient);
+        vm.prank(driver);
+        gw.setUsingAsCollateral(address(safe), address(usdc), false); // Aave allows it: weETH covers the debt
         deal(address(usdc), address(safe), 0);
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.ltv.selector, address(usdc)), abi.encode(uint256(0)));
 
+        uint256 dispatcherBefore = usdc.balanceOf(address(settlementDispatcherReap));
         vm.prank(etherFiWallet);
-        vm.expectRevert(ICashModule.InsufficientBalance.selector);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(50e6), _noCashback());
+
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBefore + 50e6, "spend routed to dispatcher");
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 50e6, 2, "withdrawn from the non-collateral supplied balance");
+    }
+
+    /// Debit quote/execution agreement under Cash/Aave price divergence: the quote executes exactly on
+    /// unchanged state and a cent past it is declined.
+    function test_spend_debit_quoteExecutesExactly_underDivergence() public {
+        _supplyToGateway(address(safe), address(usdc), 1000e6);
+        _borrowOnGateway(address(safe), address(usdc), 300e6, recipient);
+        deal(address(usdc), address(safe), 0);
+
+        // Cash overvalues USDC 1.5x against Aave: the old Cash-priced headroom would overquote
+        uint256 cashUsdcPrice = priceProvider.price(address(usdc));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(usdc)), abi.encode((cashUsdcPrice * 3) / 2));
+
+        uint256 quote = cashLens.getMaxSpendDebit(address(safe), _tokens(address(usdc))).totalSpendableInUsd;
+        assertGt(quote, 0, "position quotes debit capacity");
+
+        (bool okOver,) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(quote + 1e4));
+        assertFalse(okOver, "a cent past the quote is declined");
+
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(quote));
+        assertTrue(ok, reason);
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(quote), _noCashback());
+        assertTrue(cashModule.transactionCleared(address(safe), txId), "the quote executes exactly");
     }
 
     /// Over the borrow limit (zero headroom with debt), a loose-only spend is still allowed and does not touch Aave.
@@ -325,7 +354,7 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         deal(address(usdc), address(safe), 100e6);
         _enterCreditMode();
 
-        uint256 expected = _resupplyAmount(address(usdc), 80e18, 10e6);
+        uint256 expected = _resupplyAmount(address(usdc), 10e6);
         uint256 dispatcherBefore = usdc.balanceOf(address(settlementDispatcherReap));
 
         vm.expectEmit(true, true, true, true);
@@ -347,7 +376,7 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         _creditSpendUsdc(10e6);
 
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 50e6, "pending withdrawal survives");
-        assertEq(gw.suppliedOf(address(safe), address(usdc)), _resupplyAmount(address(usdc), 80e18, 10e6), "resupplied from the unreserved balance");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), _resupplyAmount(address(usdc), 10e6), "resupplied from the unreserved balance");
     }
 
     /// Covering the shortfall needs withdrawal-reserved balance: the request is cancelled and the dip is supplied.
@@ -359,9 +388,9 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
 
         // Unreserved is 5; pass one takes it, pass two cancels the request and supplies the residual.
-        uint256 fullNeeded = _resupplyAmount(address(usdc), 80e18, 10e6);
-        uint256 residualUsd = _residualUsd(10e6, 5e6, fullNeeded);
-        uint256 expected = 5e6 + _resupplyAmount(address(usdc), 80e18, residualUsd);
+        uint256 shortfallValue = _bufferedShortfallValue(10e6);
+        uint256 fullNeeded = gw.collateralForValue(address(usdc), shortfallValue);
+        uint256 expected = 5e6 + gw.collateralForValue(address(usdc), _residualValue(shortfallValue, 5e6, fullNeeded));
 
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.WithdrawalCancelled(address(safe), tokens, amounts, withdrawRecipient);
@@ -386,7 +415,38 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         _creditSpendUsdc(10e6);
 
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 50e6, "reserved USDC request survives");
-        assertEq(gw.suppliedOf(address(safe), address(weETH)), _resupplyAmount(address(weETH), 50e18, 10e6), "weETH covers the shortfall");
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), _resupplyAmount(address(weETH), 10e6), "weETH covers the shortfall");
+    }
+
+    /// Resupply sizes collateral with Aave prices: Cash overvaluing weETH must not shrink the supplied
+    /// amount (the old Cash-priced sizing would supply half of what Aave requires and the borrow would revert).
+    function test_spend_creditResupply_sizesWithAavePrices_whenCashOvervalues() public {
+        _setAaveCollateralFactor(address(weETH), 5000);
+        deal(address(weETH), address(safe), 1 ether);
+        _enterCreditMode();
+        uint256 expected = _resupplyAmount(address(weETH), 10e6); // Aave-priced, independent of the Cash skew
+
+        uint256 cashWeethPrice = priceProvider.price(address(weETH));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(weETH)), abi.encode(cashWeethPrice * 2));
+
+        _creditSpendUsdc(10e6);
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), expected, "supplied the Aave-priced amount despite the Cash skew");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
+    }
+
+    /// The mirror direction: Cash undervaluing weETH must not over-supply beyond the Aave-priced amount.
+    function test_spend_creditResupply_noOversupply_whenCashUndervalues() public {
+        _setAaveCollateralFactor(address(weETH), 5000);
+        deal(address(weETH), address(safe), 1 ether);
+        _enterCreditMode();
+        uint256 expected = _resupplyAmount(address(weETH), 10e6);
+
+        uint256 cashWeethPrice = priceProvider.price(address(weETH));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(weETH)), abi.encode(cashWeethPrice / 2));
+
+        _creditSpendUsdc(10e6);
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), expected, "supplied the Aave-priced amount, not the doubled Cash-priced one");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
     }
 
     /// With no eligible loose collateral, nothing is supplied and the failing borrow reverts the whole spend.
@@ -409,8 +469,9 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         deal(address(usdc), address(safe), 100e6);
         _enterCreditMode();
 
-        uint256 residualUsd = _residualUsd(10e6, 0.001 ether, _resupplyAmount(address(weETH), 50e18, 10e6));
-        uint256 expectedUsdc = _resupplyAmount(address(usdc), 80e18, residualUsd);
+        uint256 shortfallValue = _bufferedShortfallValue(10e6);
+        uint256 neededWeeth = gw.collateralForValue(address(weETH), shortfallValue);
+        uint256 expectedUsdc = gw.collateralForValue(address(usdc), _residualValue(shortfallValue, 0.001 ether, neededWeeth));
 
         _creditSpendUsdc(10e6);
 
@@ -436,16 +497,23 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         cashModule.spend(address(safe), spendTxId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(amountInUsd), _noCashback());
     }
 
-    /// @dev Mirrors CashLendLib._resupplyAmount: token amount whose LTV-weighted value covers neededUsd, ceil + buffer.
-    function _resupplyAmount(address token, uint256 tokenLtv, uint256 neededUsd) internal view returns (uint256) {
-        uint256 num = neededUsd * 100e18 * (10 ** IERC20Metadata(token).decimals()) * (10_000 + RESUPPLY_BUFFER_BPS);
-        uint256 den = tokenLtv * priceProvider.price(token) * 10_000;
-        return (num + den - 1) / den;
+    /// @dev Mirrors the Aave-priced resupply pipeline: the spend's USDC borrow amount (Cash-priced payment
+    ///      conversion, ceil), valued by the gateway at Aave prices (borrowValue) and buffered once at entry.
+    function _bufferedShortfallValue(uint256 spendUsd) internal view returns (uint256) {
+        uint256 price = priceProvider.price(address(usdc));
+        uint256 shortfallTokens = (spendUsd * 1e6 + price - 1) / price;
+        uint256 value = gw.borrowValue(address(usdc), shortfallTokens);
+        return (value * (10_000 + RESUPPLY_BUFFER_BPS) + 9999) / 10_000;
+    }
+
+    /// @dev Mirrors _sizeResupply's full-cover sizing when one token covers the whole spend's shortfall.
+    function _resupplyAmount(address token, uint256 spendUsd) internal view returns (uint256) {
+        return gw.collateralForValue(token, _bufferedShortfallValue(spendUsd));
     }
 
     /// @dev Mirrors the partial-cover remainder: taking `capacity` of `needed` covers the same fraction of the shortfall.
-    function _residualUsd(uint256 shortfallUsd, uint256 capacity, uint256 needed) internal pure returns (uint256) {
-        return shortfallUsd - (shortfallUsd * capacity) / needed;
+    function _residualValue(uint256 shortfallValue, uint256 capacity, uint256 needed) internal pure returns (uint256) {
+        return shortfallValue - (shortfallValue * capacity) / needed;
     }
 
     function _tokens(address token) internal pure returns (address[] memory) {

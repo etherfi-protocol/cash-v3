@@ -38,6 +38,9 @@ interface IAaveV4Hub {
     /// @notice Converts supplied shares to removable assets, rounding down.
     function previewRemoveByShares(uint256 assetId, uint256 shares) external view returns (uint256);
 
+    /// @notice Converts removable assets to the supplied shares they burn, rounding up.
+    function previewRemoveByAssets(uint256 assetId, uint256 assets) external view returns (uint256);
+
     /// @notice Converts drawn shares to borrowable assets, rounding down.
     function previewDrawByShares(uint256 assetId, uint256 shares) external view returns (uint256);
 
