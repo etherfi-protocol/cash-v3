@@ -155,9 +155,6 @@ interface IAaveV4Spoke {
     /// @notice The reserve's configuration flags (incl. `borrowable`).
     function getReserveConfig(uint256 reserveId) external view returns (ReserveConfig memory);
 
-    /// @notice Maximum number of reserves a user may borrow from, or uint16 max when unlimited.
-    function MAX_USER_RESERVES_LIMIT() external view returns (uint16);
-
     /// @notice The type hash for the SetUserPositionManagers EIP-712 intent.
     function SET_USER_POSITION_MANAGERS_TYPEHASH() external view returns (bytes32);
 

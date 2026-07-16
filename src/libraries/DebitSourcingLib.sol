@@ -98,11 +98,6 @@ library DebitSourcingLib {
         return (amount * priceProvider.price(token)) / (10 ** IERC20Metadata(token).decimals());
     }
 
-    /// @notice USD value of `amount` of `token` at its current price, rounding up
-    function toUsdUp(IPriceProvider priceProvider, address token, uint256 amount) public view returns (uint256) {
-        return Math.mulDiv(amount, priceProvider.price(token), 10 ** IERC20Metadata(token).decimals(), Math.Rounding.Ceil);
-    }
-
     /// @notice Amount of `token` worth no more than `usd` at its current price, rounding down
     function fromUsd(IPriceProvider priceProvider, address token, uint256 usd) public view returns (uint256) {
         return (usd * (10 ** IERC20Metadata(token).decimals())) / priceProvider.price(token);

@@ -126,8 +126,6 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     error HealthFactorBelowMinimum();
     /// @notice Thrown when setting a health-factor floor outside [1e18, 2e18] (0 disables)
     error InvalidMinHealthFactor();
-    /// @notice Thrown when the Spoke limits how many reserves a user may borrow from
-    error UnsupportedSpoke();
 
     /**
      * @param _etherFiDataProvider Address of the EtherFiDataProvider
