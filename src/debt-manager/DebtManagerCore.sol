@@ -24,6 +24,11 @@ contract DebtManagerCore is DebtManagerStorageContract {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using SafeERC20 for IERC20;
 
+    /// @dev Buffer (BPS) added to the migration re-borrow value so Aave's draw share rounding, which mints
+    ///      debt a hair above the exact asset amount, cannot let the LTV gate pass and then the borrow revert.
+    ///      Mirrors CashLendLib's resupply buffer.
+    uint256 private constant MIGRATION_REBORROW_BUFFER_BPS = 10;
+
     /**
      * @dev Constructor that initializes the base DebtManagerStorageContract
      * @param dataProvider Address of the EtherFi data provider
@@ -768,9 +773,11 @@ contract DebtManagerCore is DebtManagerStorageContract {
         emit MigratedToLendGateway(safe, totalDebtUsd);
     }
 
-    /// @dev Sum of the Aave-priced weighted-collateral value each re-borrow requires at Aave's 1.00 bound.
-    ///      borrowValue is additive in Aave's debt accumulator, so this is order-independent even though the
-    ///      borrows run one reserve at a time. In its own function to keep migrateToLendGateway off the stack limit.
+    /// @dev Sum of the Aave-priced weighted-collateral value each re-borrow requires at Aave's 1.00 bound,
+    ///      padded up so Aave's draw share rounding cannot let the gate pass and then the borrow revert (see
+    ///      MIGRATION_REBORROW_BUFFER_BPS). borrowValue is additive in Aave's debt accumulator, so the sum is
+    ///      order-independent even though the borrows run one reserve at a time. In its own function to keep
+    ///      migrateToLendGateway off the stack limit.
     function _reborrowValue(ILendGateway gateway, TokenData[] memory borrowings, uint256[] memory debtTokenAmts) internal view returns (uint256) {
         uint256 total;
         for (uint256 i = 0; i < borrowings.length;) {
@@ -779,7 +786,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
                 ++i;
             }
         }
-        return total;
+        return total.mulDiv(10_000 + MIGRATION_REBORROW_BUFFER_BPS, 10_000, Math.Rounding.Ceil);
     }
 
     /// @dev A Safe's balance of `token` minus what a pending withdrawal has reserved - the amount migration may supply
