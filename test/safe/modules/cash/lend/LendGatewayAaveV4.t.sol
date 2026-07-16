@@ -39,6 +39,30 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertGt(gw.rawBorrowCapacity(address(safe), address(usdc)), gw.borrowCapacity(address(safe), address(usdc)), "floor buffers the auth quote below raw");
     }
 
+    /// The premium-debt term in _borrowCapacity is live: with collateralRisk on the collateral reserve, the
+    /// safe's accrued premium counts toward debt exactly as Aave counts it. Omitting the term would overquote
+    /// (the exact-max borrow would revert); double-counting would underquote (the +1-unit borrow would succeed).
+    function test_borrowCapacity_countsAccruedPremiumDebt() public {
+        // weETH carries a 20% collateral risk; set before the borrow so it snapshots a non-zero riskPremium
+        vm.prank(aaveAdmin);
+        spoke.updateReserveConfig(weethReserveId, ISpoke.ReserveConfig({ paused: false, frozen: false, borrowable: false, receiveSharesEnabled: true, collateralRisk: 2000 }));
+
+        _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 400e6);
+        vm.warp(block.timestamp + 20 days); // accrue drawn interest and, through it, premium debt
+
+        uint256 premiumDebtRay = IAaveV4Spoke(address(spoke)).getUserPremiumDebtRay(usdcReserveId, address(safe));
+        assertGt(premiumDebtRay, 0, "premium debt accrued");
+
+        uint256 quote = gw.rawBorrowCapacity(address(safe), address(usdc));
+        assertEq(gw.borrowCapacity(address(safe), address(usdc)), quote, "no floor set: buffered == raw");
+
+        _borrowOnGateway(address(safe), address(usdc), quote, recipient);
+        assertGe(IAaveV4Spoke(address(spoke)).getUserAccountData(address(safe)).healthFactor, 1e18, "exact quote lands at/above 1.00");
+
+        vm.expectRevert();
+        _borrowOnGateway(address(safe), address(usdc), 1, recipient);
+    }
+
     // ----------------------------------------------------------------- registration & reads
 
     function test_registration_validatedAgainstSpoke() public {
