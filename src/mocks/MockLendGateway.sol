@@ -190,6 +190,11 @@ contract MockLendGateway is ILendGateway {
         return amount;
     }
 
+    /// @dev Inert 1:1 conversion, matching borrowValue
+    function repayValue(address, address, uint256 amount) external pure returns (uint256) {
+        return amount;
+    }
+
     /// @dev Inert 1:1 conversion
     function collateralForValue(address, uint256 value) external pure returns (uint256) {
         return value;

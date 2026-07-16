@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
+import { DebitSourcingLib } from "../../../../../src/libraries/DebitSourcingLib.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -157,6 +158,54 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         cashModule.repay(address(safe), address(usdc), debtUsd);
 
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 0, 2, "debt repaid from loose plus supplied while frozen");
+    }
+
+    // ----------------------------------------------------------------- freed-headroom credit (repayValue)
+
+    /// repayValue is an exact lower bound on the headroom an actual repay frees: Aave restores drawn shares
+    /// rounded down, so the ideal borrowValue credit can overstate the freed cover by a share — crediting it
+    /// would let an exact-boundary repay overshoot Aave's health check on its withdraw leg.
+    function testFuzz_repayValue_lowerBoundsActualFreedHeadroom(uint256 repayBps, uint256 accrual) public {
+        repayBps = bound(repayBps, 100, 9900);
+        accrual = bound(accrual, 1 hours, 20 days); // off round numbers, within oracle staleness
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), 2000e6);
+        vm.warp(block.timestamp + accrual);
+
+        uint256 repayAmt = (gw.debtOf(address(safe), address(usdc)) * repayBps) / 10_000;
+        uint256 credited = gw.repayValue(address(safe), address(usdc), repayAmt);
+        assertLe(credited, gw.borrowValue(address(usdc), repayAmt), "restore rounding can only lower the credit");
+
+        uint256 headroomBefore = gw.rawWithdrawHeadroom(address(safe));
+        deal(address(usdc), address(safe), repayAmt);
+        vm.prank(driver);
+        gw.repay(address(safe), address(usdc), repayAmt);
+        uint256 freed = gw.rawWithdrawHeadroom(address(safe)) - headroomBefore;
+
+        assertGe(freed, credited, "credit never exceeds the actually freed headroom");
+        assertLe(freed - credited, 1, "and is exact up to the required-cover ceil");
+    }
+
+    /// The exact max-sourcing quote (loose leg first, repayWithdrawable-sized withdraw leg) executes after
+    /// interest accrual: CashLendLib.repay's leg order with the sizing's own numbers, straight on Aave.
+    function testFuzz_repay_exactMaxSourcingQuoteExecutes(uint256 accrual) public {
+        accrual = bound(accrual, 1 hours, 20 days);
+        // Borrow near the position's power so the headroom cap, not the supplied balance, binds the quote
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        _supplyToGateway(address(safe), address(usdc), 3000e6);
+        _borrowOnGateway(address(safe), address(usdc), (gw.getAccountData(address(safe)).availableBorrowsUsd * 90) / 100, recipient);
+        vm.warp(block.timestamp + accrual);
+
+        uint256 fromLoose = 500e6;
+        uint256 quote = DebitSourcingLib.repayWithdrawable(gw, address(safe), address(usdc), fromLoose);
+        assertGt(quote, 0, "position quotes a supplied leg");
+        assertLt(quote, gw.suppliedOf(address(safe), address(usdc)), "the headroom cap binds the quote");
+
+        deal(address(usdc), address(safe), fromLoose);
+        vm.startPrank(driver);
+        gw.repay(address(safe), address(usdc), fromLoose);
+        gw.withdraw(address(safe), address(usdc), quote, address(safe));
+        vm.stopPrank();
+        assertGe(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "exact quote lands at or above Aave's bound");
     }
 
     function _uint1(uint256 a) internal pure returns (uint256[] memory) {

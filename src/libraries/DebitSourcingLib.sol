@@ -84,12 +84,14 @@ library DebitSourcingLib {
      * @notice Amount of `token` withdrawable from `safe`'s supplied balance to fund a repay whose loose leg
      *         repays `fromLoose` first
      * @dev Repaying the loose leg lowers the debt while the collateral is untouched, so the withdraw leg
-     *      sizes against the headroom that repay frees (borrowValue). Raw headroom: a repay de-risks the
-     *      position, so it is floor-exempt like spends. Callers only get here with debt remaining after
-     *      the loose leg, so the headroom cap always applies.
+     *      sizes against the headroom that repay frees (repayValue, exact against Aave's restore share
+     *      rounding — the ideal borrowValue can overstate the freed cover by a share and fail Aave's
+     *      health check at the exact boundary). Raw headroom: a repay de-risks the position, so it is
+     *      floor-exempt like spends. Callers only get here with debt remaining after the loose leg, so
+     *      the headroom cap always applies.
      */
     function repayWithdrawable(ILendGateway gateway, address safe, address token, uint256 fromLoose) public view returns (uint256) {
-        uint256 headroom = gateway.rawWithdrawHeadroom(safe) + gateway.borrowValue(token, fromLoose);
+        uint256 headroom = gateway.rawWithdrawHeadroom(safe) + gateway.repayValue(safe, token, fromLoose);
         return withdrawableSupplied(gateway, safe, token, headroom, true);
     }
 
