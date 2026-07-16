@@ -32,6 +32,15 @@ interface IAaveV4Hub {
     /// @notice Returns the current annual drawn (borrow) rate of the asset, in RAY.
     function getAssetDrawnRate(uint256 assetId) external view returns (uint256);
 
+    /// @notice Returns the current drawn index of the asset, in RAY.
+    function getAssetDrawnIndex(uint256 assetId) external view returns (uint256);
+
+    /// @notice Converts supplied shares to removable assets, rounding down.
+    function previewRemoveByShares(uint256 assetId, uint256 shares) external view returns (uint256);
+
+    /// @notice Converts drawn shares to borrowable assets, rounding down.
+    function previewDrawByShares(uint256 assetId, uint256 shares) external view returns (uint256);
+
     /// @notice Returns the asset configuration.
     function getAssetConfig(uint256 assetId) external view returns (AssetConfig memory);
 

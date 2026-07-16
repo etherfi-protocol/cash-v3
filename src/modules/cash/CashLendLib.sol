@@ -602,41 +602,65 @@ library CashLendLib {
         $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalSpendingInUsd, Mode.Credit);
     }
 
-    /// @dev LendGateway credit spend: the safe's position lives on Aave, so borrow there via the gateway (the
-    ///      CashModule is always a gateway driver) and send the borrowed token straight to the settlement
-    ///      dispatcher. The token check and USD conversion are gateway-native (isBorrowable plus the
-    ///      PriceProvider), so this path never touches the DebtManager. Aave enforces the
-    ///      borrowing-power/health check on the borrow itself; when the borrow no longer fits (an instant
-    ///      collateral withdrawal can land between the auth-time canSpend and the spend tx), loose collateral
-    ///      is first resupplied to cover the shortfall. Returns the borrowed token amount.
+    /**
+     * @dev Credit spend on the Aave engine: borrow the settlement token via the gateway and send it straight
+     *      to the settlement dispatcher. This path never touches the DebtManager. Aave enforces the health
+     *      check on the borrow itself; the configured floor is not enforced here, so an already-authorized
+     *      spend stays executable down to Aave's 1.00 boundary.
+     * @param $ The CashModule storage pointer
+     * @param dataProvider The EtherFiDataProvider
+     * @param safe The safe whose position takes on the debt
+     * @param binSponsor The bin sponsor selecting the settlement dispatcher
+     * @param token The settlement token to borrow
+     * @param amountInUsd The authorized payment amount, in 6-decimal payment USD
+     * @return The borrowed token amount sent to the settlement dispatcher
+     */
     function _spendGatewayCredit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, BinSponsor binSponsor, address token, uint256 amountInUsd) private returns (uint256) {
         ILendGateway gateway = $.gateway;
         if (address(gateway) == address(0)) revert LendGatewayNotSet();
-        // The drawn token settles the card, so it must be a card-settleable spend asset AND borrowable on
-        // Aave — a borrowable reserve the card cannot settle in must not fund a credit spend
+        // The drawn token settles the card, so it must be a card-settleable spend asset AND borrowable on Aave
         if (!gateway.isBorrowable(token) || !gateway.isSpendAsset(token)) revert UnsupportedToken();
-        uint256 amount = DebitSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountInUsd);
+        // Round the token amount up so it always covers the authorized payment USD
+        uint256 amount = DebitSourcingLib.fromUsdUp(IPriceProvider(dataProvider.getPriceProvider()), token, amountInUsd);
         if (amount == 0) revert AmountZero();
-        _resupplyCollateral($, dataProvider, gateway, safe, amountInUsd);
+        _resupplyForCreditShortfall($, dataProvider, gateway, safe, token, amount);
         gateway.borrow(safe, token, amount, settlementDispatcher($, binSponsor));
         return amount;
     }
 
     /**
-     * @dev Supplies loose collateral from the safe as Aave collateral to cover the part of a credit spend
-     *      that the position's borrowing power no longer covers. The first pass sizes only against balance
-     *      not reserved by the pending withdrawal request; the reserved remainder is taken only when the
-     *      spend cannot be funded otherwise, and then the spend wins the competing claim: the request is
-     *      cancelled before any supply executes (the debit path's rule). Sizing finishes before any supply,
-     *      so it does not depend on the gateway's transfer timing. If loose collateral cannot fully cover,
-     *      it supplies what fits and the caller's subsequent borrow reverts the spend. CashLens never
-     *      counts this capacity, so canSpend does not advertise it as headroom.
+     * @dev Resupplies loose collateral for the part of a pending borrow of `amount` that Aave's raw (1.00)
+     *      capacity cannot cover. Gating on the raw capacity, not the configured floor, is what lets an
+     *      authorized spend execute in the band between the floor and 1.00 without touching the safe's funds.
+     * @param $ The CashModule storage pointer
+     * @param dataProvider The EtherFiDataProvider
+     * @param gateway The LendGateway serving the safe
+     * @param safe The safe whose position takes on the debt
+     * @param token The settlement token being borrowed
+     * @param amount The token amount the pending borrow will draw
      */
-    function _resupplyCollateral(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, ILendGateway gateway, address safe, uint256 spendUsd) private {
-        uint256 availableUsd = gateway.getAccountData(safe).availableBorrowsUsd;
-        if (spendUsd <= availableUsd) return;
-        uint256 shortfallUsd = spendUsd - availableUsd;
+    function _resupplyForCreditShortfall(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, ILendGateway gateway, address safe, address token, uint256 amount) private {
+        uint256 rawCapacity = gateway.rawBorrowCapacity(safe, token);
+        if (rawCapacity >= amount) return;
+        // Round the shortfall USD up so a dust shortfall still sizes a supply
+        uint256 shortfallUsd = DebitSourcingLib.toUsdUp(IPriceProvider(dataProvider.getPriceProvider()), token, amount - rawCapacity);
+        _resupplyCollateral($, dataProvider, gateway, safe, shortfallUsd);
+    }
 
+    /**
+     * @dev Supplies loose collateral to cover the pre-measured shortfall. The first sizing pass uses only
+     *      balance not reserved by the pending withdrawal request; the reserved remainder is taken only when
+     *      the spend cannot be funded otherwise, and then the request is cancelled before any supply executes
+     *      (the debit path's rule). If loose collateral cannot fully cover, it supplies what fits and the
+     *      caller's borrow reverts the whole spend. CashLens never counts this capacity, so canSpend does not
+     *      advertise it as headroom.
+     * @param $ The CashModule storage pointer
+     * @param dataProvider The EtherFiDataProvider
+     * @param gateway The LendGateway serving the safe
+     * @param safe The safe whose position is topped up with collateral
+     * @param shortfallUsd The borrow shortfall to cover, in payment USD, measured against raw capacity
+     */
+    function _resupplyCollateral(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, ILendGateway gateway, address safe, uint256 shortfallUsd) private {
         IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
         address[] memory tokens = gateway.registeredAssets();
         uint256[] memory supplyAmounts = new uint256[](tokens.length);

@@ -48,6 +48,15 @@ interface IAaveV4Spoke {
         bool receiveSharesEnabled;
     }
 
+    /// @notice A user's shares and dynamic configuration for one reserve.
+    struct UserPosition {
+        uint120 drawnShares;
+        uint120 premiumShares;
+        int200 premiumOffsetRay;
+        uint120 suppliedShares;
+        uint32 dynamicConfigKey;
+    }
+
     /// @notice A user's aggregate position. `healthFactor`/`avgCollateralFactor` are WAD; value fields are Aave Value units.
     struct UserAccountData {
         uint256 riskPremium;
@@ -121,6 +130,12 @@ interface IAaveV4Spoke {
     /// @notice Total debt (drawn + premium) of `user` in the reserve, in asset units.
     function getUserTotalDebt(uint256 reserveId, address user) external view returns (uint256);
 
+    /// @notice Premium debt of `user` in the reserve, in asset units scaled by RAY.
+    function getUserPremiumDebtRay(uint256 reserveId, address user) external view returns (uint256);
+
+    /// @notice The user's share position in the reserve.
+    function getUserPosition(uint256 reserveId, address user) external view returns (UserPosition memory);
+
     /// @notice Total underlying supplied to the reserve, in asset units.
     function getReserveSuppliedAssets(uint256 reserveId) external view returns (uint256);
 
@@ -139,6 +154,9 @@ interface IAaveV4Spoke {
     /// @notice The reserve configuration flags.
     /// @notice The reserve's configuration flags (incl. `borrowable`).
     function getReserveConfig(uint256 reserveId) external view returns (ReserveConfig memory);
+
+    /// @notice Maximum number of reserves a user may borrow from, or uint16 max when unlimited.
+    function MAX_USER_RESERVES_LIMIT() external view returns (uint16);
 
     /// @notice The type hash for the SetUserPositionManagers EIP-712 intent.
     function SET_USER_POSITION_MANAGERS_TYPEHASH() external view returns (bytes32);

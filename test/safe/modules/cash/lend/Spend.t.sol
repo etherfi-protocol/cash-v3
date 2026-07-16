@@ -6,6 +6,7 @@ import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 
 import { BinSponsor, Cashback, ICashModule, Mode } from "../../../../../src/interfaces/ICashModule.sol";
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
+import { IPriceProvider } from "../../../../../src/interfaces/IPriceProvider.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -168,6 +169,139 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(10e6), _noCashback());
     }
 
+    // ================ credit authorization pricing ================
+
+    /// Cash must not approve more debt merely because its payment oracle values collateral above Aave's oracle.
+    function test_spend_credit_declinesWhenCashOvervaluesCollateralAgainstAave() public {
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        deal(address(weETH), address(safe), 0);
+        deal(address(usdc), address(safe), 0);
+        _enterCreditMode();
+
+        uint256 aaveCapacity = gw.borrowCapacity(address(safe), address(usdc));
+        uint256 cashWeethPrice = priceProvider.price(address(weETH));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(weETH)), abi.encode(cashWeethPrice * 2));
+
+        uint256 spendUsd = (aaveCapacity * 120) / 100;
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(spendUsd));
+        assertFalse(ok);
+        assertEq(reason, "Insufficient borrowing power");
+    }
+
+    /// Credit max-spend must remain bounded by Aave when Cash values collateral more highly.
+    function test_maxSpendCredit_usesAavePricedBorrowCapacity() public {
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        _enterCreditMode();
+
+        uint256 cashWeethPrice = priceProvider.price(address(weETH));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(weETH)), abi.encode(cashWeethPrice * 2));
+
+        uint256 capacity = gw.borrowCapacity(address(safe), address(usdc));
+        uint256 expectedUsd = (capacity * priceProvider.price(address(usdc))) / 1e6;
+        assertEq(cashLens.getMaxSpendCredit(address(safe)), expectedUsd);
+    }
+
+    /// The Aave-priced max is accepted and executes unchanged; one token unit above it is declined.
+    function test_spend_credit_executesAtAavePricedMax() public {
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        deal(address(weETH), address(safe), 0);
+        deal(address(usdc), address(safe), 0);
+        _enterCreditMode();
+
+        uint256 maxSpendUsd = cashLens.getMaxSpendCredit(address(safe));
+        (bool aboveOk, string memory aboveReason) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(maxSpendUsd + 1));
+        assertFalse(aboveOk);
+        assertEq(aboveReason, "Insufficient borrowing power");
+
+        (bool maxOk, string memory maxReason) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(maxSpendUsd));
+        assertTrue(maxOk, maxReason);
+        _creditSpendUsdc(maxSpendUsd);
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), maxSpendUsd, 2);
+    }
+
+    /// An accepted sub-token payment rounds the borrowed amount up, so unchanged-state execution cannot hit AmountZero.
+    function test_spend_credit_roundsBorrowAmountUp() public {
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        _enterCreditMode();
+
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(usdc)), abi.encode(2e6));
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(1));
+        assertTrue(ok, reason);
+
+        uint256 dispatcherBefore = usdc.balanceOf(address(settlementDispatcherReap));
+        _creditSpendUsdc(1);
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBefore + 1);
+    }
+
+    /// Aave-covered credit must not consume collateral reserved by a pending withdrawal because Cash prices it lower.
+    function test_spend_credit_preservesWithdrawalWhenAaveCapacityAlreadyCovers() public {
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _requestWithdrawal(_tokens(address(usdc)), _amounts(100e6), withdrawRecipient);
+        _enterCreditMode();
+
+        uint256 spendUsd = (gw.borrowCapacity(address(safe), address(usdc)) * 60) / 100;
+        uint256 cashWeethPrice = priceProvider.price(address(weETH));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(weETH)), abi.encode(cashWeethPrice / 2));
+
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(spendUsd));
+        assertTrue(ok, reason);
+        _creditSpendUsdc(spendUsd);
+
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 100e6);
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), 0);
+    }
+
+    /// Cash must check the actual token amount when its payment oracle values the borrowed token below Aave.
+    function test_spend_credit_declinesWhenCashUndervaluesBorrowTokenAgainstAave() public {
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        deal(address(weETH), address(safe), 0);
+        deal(address(usdc), address(safe), 0);
+        _enterCreditMode();
+
+        uint256 aaveCapacity = gw.borrowCapacity(address(safe), address(usdc));
+        uint256 cashUsdcPrice = priceProvider.price(address(usdc));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(usdc)), abi.encode(cashUsdcPrice / 2));
+
+        uint256 spendUsd = (aaveCapacity * 60) / 100;
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), txId, _tokens(address(usdc)), _amounts(spendUsd));
+        assertFalse(ok);
+        assertEq(reason, "Insufficient borrowing power");
+    }
+
+    /// With a 1.05 floor set, a new auth is declined at the floor while an already-authorized spend still executes
+    /// in the 1.00-1.05 band using Aave's raw bound, resupplying nothing and leaving a pending withdrawal intact.
+    function test_spend_credit_executesInFloorBandWithoutResupply() public {
+        vm.prank(owner);
+        gw.setMinHealthFactor(1.05e18);
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        deal(address(usdc), address(safe), 0);
+        _enterCreditMode();
+
+        // Spend to the buffered (1.05) max: health factor lands at the floor, so the buffered quote is exhausted
+        // but the raw (1.00) quote still leaves room.
+        _creditSpend(keccak256("band.max"), cashLens.getMaxSpendCredit(address(safe)));
+        uint256 rawRoom = gw.rawBorrowCapacity(address(safe), address(usdc));
+        assertGt(rawRoom, 0, "raw capacity remains between 1.05 and 1.00");
+        assertLt(gw.borrowCapacity(address(safe), address(usdc)), rawRoom, "buffered quote exhausted at the floor");
+
+        // A pending withdrawal of loose USDC: an unnecessary resupply would consume or cancel it.
+        deal(address(usdc), address(safe), 100e6);
+        _requestWithdrawal(_tokens(address(usdc)), _amounts(100e6), withdrawRecipient);
+
+        uint256 bandSpend = rawRoom / 2;
+        // A new auth for the band spend is declined at the 1.05 floor...
+        (bool ok, string memory reason) = cashLens.canSpend(address(safe), keccak256("band.auth"), _tokens(address(usdc)), _amounts(bandSpend));
+        assertFalse(ok);
+        assertEq(reason, "Insufficient borrowing power");
+
+        // ...but the already-authorized spend executes against Aave's raw bound, with no resupply or cancellation.
+        _creditSpend(keccak256("band.spend"), bandSpend);
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), 0, "no USDC resupplied");
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 1 ether, "collateral unchanged");
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 100e6, "pending withdrawal intact");
+    }
+
     // ================ credit resupply: supply loose collateral when the borrow doesn't fit ================
 
     /// Borrowing power already covers the spend, so nothing is resupplied and the borrow just goes through.
@@ -294,6 +428,12 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
     function _creditSpendUsdc(uint256 amountInUsd) internal {
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(amountInUsd), _noCashback());
+    }
+
+    /// @dev USDC credit spend under a caller-chosen txId, for tests that spend more than once.
+    function _creditSpend(bytes32 spendTxId, uint256 amountInUsd) internal {
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), spendTxId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(amountInUsd), _noCashback());
     }
 
     /// @dev Mirrors CashLendLib._resupplyAmount: token amount whose LTV-weighted value covers neededUsd, ceil + buffer.

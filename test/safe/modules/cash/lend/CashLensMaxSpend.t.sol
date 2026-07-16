@@ -451,7 +451,7 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         }
     }
 
-    /// A non-stable carrying the borrowing power: both supplied stables stay fully spendable, credit is the un-haircut headroom, and maxBorrow stays gross.
+    /// A non-stable carrying the borrowing power: both supplied stables stay fully spendable, credit uses Aave-priced capacity, and maxBorrow stays Cash-priced.
     function test_safeCashData_mixedCollateral_weEthCarriesPower() public {
         // weETH carries most of the borrowing power, so the headroom never binds and both stables are face-bound.
         _supplyToGateway(address(safe), address(weETH), 10 ether);
@@ -472,9 +472,12 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), pref);
         ILendGateway.AccountData memory account = gw.getAccountData(address(safe));
         assertApproxEqAbs(data.totalBorrow, 4000e6, 2, "totalBorrow is the debt");
-        assertEq(cashLens.getMaxSpendCredit(address(safe)), account.availableBorrowsUsd, "credit max spend is the un-haircut availableBorrowsUsd");
-        assertEq(data.maxBorrow, account.availableBorrowsUsd + account.debtUsd, "maxBorrow is gross power: headroom + debt");
-        assertEq(data.creditMaxSpend, account.availableBorrowsUsd, "creditMaxSpend is the net headroom");
+        uint256 usdcCapacity = gw.borrowCapacity(address(safe), address(usdc));
+        uint256 liquidUsdCapacity = gw.borrowCapacity(address(safe), address(liquidUsd));
+        uint256 expectedCreditMax = usdcCapacity > liquidUsdCapacity ? usdcCapacity : liquidUsdCapacity;
+        assertEq(cashLens.getMaxSpendCredit(address(safe)), expectedCreditMax, "credit max spend uses the best Aave-priced settlement token");
+        assertEq(data.maxBorrow, account.availableBorrowsUsd + account.debtUsd, "displayed maxBorrow remains Cash-priced gross power");
+        assertEq(data.creditMaxSpend, expectedCreditMax, "creditMaxSpend is Aave-priced");
         assertEq(data.totalCollateral, account.collateralUsd, "totalCollateral mirrors the gateway aggregate");
     }
 

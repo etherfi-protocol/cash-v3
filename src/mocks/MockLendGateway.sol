@@ -10,9 +10,9 @@ import { ILendGateway } from "../interfaces/ILendGateway.sol";
  *         call-order test drive it directly. Real gateway behavior is exercised against a live Aave v4 instance
  *         under the lend profile (test/safe/modules/cash/lend/**), so this mock no longer fabricates positions.
  *         Not for production.
- * @dev Records the last supply / withdraw call and the collateral flag for the sandwich test; the position
- *      aggregate (getAccountData) and reserve liquidity (withdrawalLiquidity) are settable for the guard tests. The
- *      remaining reads return empty defaults, matching the inert wiring.
+ * @dev Records the last supply / withdraw call and collateral flag for the sandwich test. AccountData,
+ *      withdrawal liquidity, and per-safe borrow capacity are settable for focused guard tests; remaining reads
+ *      return inert defaults.
  */
 contract MockLendGateway is ILendGateway {
     /// @notice Recorded arguments of a mutating gateway call (`to` is zero for supply)
@@ -28,6 +28,10 @@ contract MockLendGateway is ILendGateway {
     mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
     mapping(address safe => mapping(address asset => uint256)) internal _suppliedOf;
     mapping(address asset => uint256) internal _withdrawalLiquidity;
+    mapping(address safe => mapping(address asset => uint256)) internal _borrowCapacity;
+    mapping(address safe => mapping(address asset => bool)) internal _borrowCapacitySet;
+    mapping(address safe => mapping(address asset => uint256)) internal _rawBorrowCapacity;
+    mapping(address safe => mapping(address asset => bool)) internal _rawBorrowCapacitySet;
     /// @dev Whether an asset is a registered reserve; defaults to false
     mapping(address asset => bool) internal _registered;
     /// @dev Whether an asset's reserve allows borrowing; defaults to false
@@ -48,6 +52,18 @@ contract MockLendGateway is ILendGateway {
     /// @notice Sets the reserve liquidity a subsequent `withdrawalLiquidity(asset)` will return
     function setWithdrawalLiquidity(address asset, uint256 amount) external {
         _withdrawalLiquidity[asset] = amount;
+    }
+
+    /// @notice Sets the buffered Aave-priced borrowing capacity returned for a safe and asset
+    function setBorrowCapacity(address safe, address asset, uint256 amount) external {
+        _borrowCapacity[safe][asset] = amount;
+        _borrowCapacitySet[safe][asset] = true;
+    }
+
+    /// @notice Sets the raw (Aave 1.00) borrowing capacity returned for a safe and asset
+    function setRawBorrowCapacity(address safe, address asset, uint256 amount) external {
+        _rawBorrowCapacity[safe][asset] = amount;
+        _rawBorrowCapacitySet[safe][asset] = true;
     }
 
     /// @notice Sets whether an asset is a registered reserve (defaults to unregistered)
@@ -126,6 +142,16 @@ contract MockLendGateway is ILendGateway {
     /// @dev The mock models no borrow cap, so the borrowable liquidity equals withdrawalLiquidity
     function borrowLiquidity(address asset) external view returns (uint256) {
         return _withdrawalLiquidity[asset];
+    }
+
+    /// @dev Defaults to unlimited so existing tests can configure only their relevant gate.
+    function borrowCapacity(address safe, address asset) external view returns (uint256) {
+        return _borrowCapacitySet[safe][asset] ? _borrowCapacity[safe][asset] : type(uint256).max;
+    }
+
+    /// @dev Defaults to unlimited so existing tests can configure only their relevant gate.
+    function rawBorrowCapacity(address safe, address asset) external view returns (uint256) {
+        return _rawBorrowCapacitySet[safe][asset] ? _rawBorrowCapacity[safe][asset] : type(uint256).max;
     }
 
     function ltv(address) external pure returns (uint256) {

@@ -19,6 +19,26 @@ import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
  * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path test/safe/modules/cash/lend/LendGatewayAaveV4.t.sol
  */
 contract LendGatewayAaveV4Test is CashGatewayTestSetup {
+    function test_constructor_revertsForSpokeWithBorrowReserveLimit() public {
+        address limitedSpoke = makeAddr("limitedSpoke");
+        vm.mockCall(limitedSpoke, abi.encodeWithSelector(IAaveV4Spoke.MAX_USER_RESERVES_LIMIT.selector), abi.encode(uint16(10)));
+
+        vm.expectRevert(LendGateway.UnsupportedSpoke.selector);
+        new LendGateway(address(dataProvider), limitedSpoke);
+    }
+
+    /// rawBorrowCapacity ignores the configured floor: it matches borrowCapacity with no floor set, and exceeds
+    /// it once a 1.05 floor buffers the auth quote below Aave's raw 1.00 bound.
+    function test_rawBorrowCapacity_ignoresConfiguredFloor() public {
+        _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 100e6);
+
+        assertEq(gw.rawBorrowCapacity(address(safe), address(usdc)), gw.borrowCapacity(address(safe), address(usdc)), "equal with no floor");
+
+        vm.prank(owner);
+        gw.setMinHealthFactor(1.05e18);
+        assertGt(gw.rawBorrowCapacity(address(safe), address(usdc)), gw.borrowCapacity(address(safe), address(usdc)), "floor buffers the auth quote below raw");
+    }
+
     // ----------------------------------------------------------------- registration & reads
 
     function test_registration_validatedAgainstSpoke() public {

@@ -66,8 +66,8 @@ interface ILendGateway {
     function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external;
 
     /**
-     * @notice Returns `safe`'s Aave position summary
-     * @dev Source of truth for CashLens canSpend and EtherFiHook health checks
+     * @notice Returns `safe`'s Cash-priced position summary
+     * @dev Used for display and debit sizing; credit authorization uses borrowCapacity.
      * @param safe The safe to query
      * @return The safe's account data
      */
@@ -135,6 +135,27 @@ interface ILendGateway {
      * @return The borrowable amount, in asset units
      */
     function borrowLiquidity(address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns `safe`'s buffered Aave-priced borrowing capacity in units of `asset`
+     * @dev The auth quote: capacity holding the post-borrow health factor at or above the configured floor
+     *      (Aave's 1.00 bound while no floor is set). Uses Aave's current oracle, collateral factors, debt
+     *      indices, and premium. Capacity rounds down. Excludes Hub liquidity and draw caps (see borrowLiquidity).
+     * @param safe The Safe whose position backs the borrow
+     * @param asset The asset to borrow
+     * @return The maximum additional borrow in asset units
+     */
+    function borrowCapacity(address safe, address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns `safe`'s Aave-priced borrowing capacity in units of `asset` at Aave's 1.00 health factor
+     * @dev The execution quote: what an already-authorized card spend can still borrow, ignoring the configured
+     *      floor. Spend-time resupply gates on this so a spend authorized under borrowCapacity always lands.
+     * @param safe The Safe whose position backs the borrow
+     * @param asset The asset to borrow
+     * @return The maximum additional borrow in asset units
+     */
+    function rawBorrowCapacity(address safe, address asset) external view returns (uint256);
 
     /**
      * @notice Returns the loan-to-value of `asset`'s reserve, in the 100e18 = 100% scale (matching DebtManager's CollateralTokenConfig.ltv)
