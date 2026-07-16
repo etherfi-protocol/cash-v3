@@ -674,13 +674,13 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @dev The order (supply -> borrow -> repay) is load-bearing — the repayment is funded by the Aave borrow,
      *      which is only possible once the collateral is on Aave. The whole thing reverts (leaving the Safe
      *      untouched) if the Safe has no debt, the Aave reserve lacks liquidity, or the position does not fit
-     *      Aave's LTVs. Only callable by DEBT_MANAGER_ADMIN_ROLE (the migration runner). Exactly-once per
+     *      Aave's LTVs. Only callable by ETHER_FI_WALLET_ROLE (the migration runner). Exactly-once per
      *      Safe: reverts for a Safe already on the gateway engine, whether migrated or gateway-onboarded.
      *      Requires the gateway to be a default module on the Safe and DebtManager to be an authorized gateway
      *      driver; the gateway self-approves as the Safe's Aave position manager on its first op.
      * @param safe The Safe to migrate
      */
-    function migrateToLendGateway(address safe) external whenNotPaused nonReentrant onlyRole(DEBT_MANAGER_ADMIN_ROLE) {
+    function migrateToLendGateway(address safe) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) {
         _onlyEtherFiSafe(safe);
         _onlyLegacySafe(safe);
         DebtManagerStorage storage $ = _getDebtManagerStorage();

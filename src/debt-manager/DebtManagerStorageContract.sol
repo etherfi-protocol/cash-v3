@@ -85,6 +85,9 @@ contract DebtManagerStorageContract is UpgradeableProxy {
 
     /// @notice Role identifier for debt manager administrators
     bytes32 public constant DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
+
+    /// @notice Role identifier for the ether.fi wallet, which runs lend gateway migrations
+    bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
     
     /// @notice Constant representing 100% with 18 decimals precision (100e18)
     uint256 public constant HUNDRED_PERCENT = 100e18;

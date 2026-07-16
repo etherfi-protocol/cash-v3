@@ -33,7 +33,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
         vm.startPrank(owner);
         gw.setDriver(address(dm), true); // DebtManager drives the gateway during migration
-        roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, migrator); // authorize the migration runner
+        roleRegistry.grantRole(dm.ETHER_FI_WALLET_ROLE(), migrator); // authorize the migration runner
         vm.stopPrank();
 
         // The safes in this suite model the pre-gateway population: route them to the legacy engine so
@@ -196,7 +196,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         cashModule.markUsesLendGateway(address(safe));
     }
 
-    function test_migrateToLendGateway_onlyDebtManagerAdmin() public {
+    function test_migrateToLendGateway_onlyEtherFiWallet() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 10 ether);
         uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
