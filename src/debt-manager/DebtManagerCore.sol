@@ -748,7 +748,10 @@ contract DebtManagerCore is DebtManagerStorageContract {
         //      it — specific error so the runner can route positions that fit DebtManager's params but not Aave's —
         //      then borrow each debt from Aave into this contract, re-funding the debt cleared in step 2.
         if (totalDebtUsd != 0) {
-            if (_gateway.getAccountData(safe).availableBorrowsUsd < totalDebtUsd) revert PositionExceedsLendGatewayLtv();
+            // Gate on the Aave-priced headroom above Aave's raw 1.00 bound, which is exactly what the borrows
+            // below enforce (borrow takes no floor). getAccountData's availableBorrowsUsd is PriceProvider
+            // display data and would let the typed error disagree with whether the borrow actually fits.
+            if (_gateway.rawWithdrawHeadroom(safe) < _reborrowValue(_gateway, borrowings, debtTokenAmts)) revert PositionExceedsLendGatewayLtv();
 
             for (uint256 i = 0; i < bLen;) {
                 if (debtTokenAmts[i] != 0) _gateway.borrow(safe, borrowings[i].token, debtTokenAmts[i], address(this));
@@ -763,6 +766,20 @@ contract DebtManagerCore is DebtManagerStorageContract {
         // spend/repay/lens can never disagree about which engine serves the Safe.
         cashModule.markUsesLendGateway(safe);
         emit MigratedToLendGateway(safe, totalDebtUsd);
+    }
+
+    /// @dev Sum of the Aave-priced weighted-collateral value each re-borrow requires at Aave's 1.00 bound.
+    ///      borrowValue is additive in Aave's debt accumulator, so this is order-independent even though the
+    ///      borrows run one reserve at a time. In its own function to keep migrateToLendGateway off the stack limit.
+    function _reborrowValue(ILendGateway gateway, TokenData[] memory borrowings, uint256[] memory debtTokenAmts) internal view returns (uint256) {
+        uint256 total;
+        for (uint256 i = 0; i < borrowings.length;) {
+            if (debtTokenAmts[i] != 0) total += gateway.borrowValue(borrowings[i].token, debtTokenAmts[i]);
+            unchecked {
+                ++i;
+            }
+        }
+        return total;
     }
 
     /// @dev A Safe's balance of `token` minus what a pending withdrawal has reserved - the amount migration may supply
