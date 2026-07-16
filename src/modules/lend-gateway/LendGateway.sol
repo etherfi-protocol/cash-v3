@@ -136,7 +136,6 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     constructor(address _etherFiDataProvider, address _spoke) ModuleBase(_etherFiDataProvider) {
         if (_spoke == address(0)) revert ZeroAddress();
         spoke = IAaveV4Spoke(_spoke);
-        if (spoke.MAX_USER_RESERVES_LIMIT() != type(uint16).max) revert UnsupportedSpoke();
         _disableInitializers();
     }
 
