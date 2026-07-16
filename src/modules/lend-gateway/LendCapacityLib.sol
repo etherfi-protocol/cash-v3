@@ -20,6 +20,8 @@ import { IAaveV4Spoke } from "../../interfaces/IAaveV4Spoke.sol";
 library LendCapacityLib {
     /// @notice Converts collateral weighted by BPS into Aave Value units scaled by RAY, then applies a WAD health factor
     uint256 internal constant WEIGHTED_COLLATERAL_TO_DEBT_RAY = 1e41;
+    /// @notice Aave's RAY scale for debt share accounting
+    uint256 internal constant RAY = 1e27;
 
     struct BorrowCapacityData {
         uint256 weightedCollateralValueBps;
@@ -158,6 +160,45 @@ library LendCapacityLib {
         uint256 price = IAaveV4Oracle(spoke.ORACLE()).getReservePrice(targetReserveId);
         uint256 decimals = spoke.getReserve(targetReserveId).decimals;
         return amount * price * (10 ** (18 - decimals)) * 10_000;
+    }
+
+    /**
+     * @notice The weighted collateral value a repay of `amount` of `targetReserveId`'s asset frees at Aave's
+     *         1.00 health-factor bound
+     * @dev Exact against Aave's own restore math (Spoke.repay via calculateRestoreAmount): the payment
+     *      clears premium debt first — a sub-premium payment removes exactly amount * RAY of debt — and the
+     *      drawn remainder restores shares rounded down, so the debt actually removed can sit a share short
+     *      of the paid amount. Crediting the ideal borrowValue there would overstate the freed headroom and
+     *      let an exact-boundary repay quote fail Aave's health check on its withdraw leg. The final
+     *      conversion also rounds down, so the credit never exceeds what the repay actually frees.
+     * @param spoke The Aave Spoke holding the position
+     * @param safe The Safe whose debt is repaid
+     * @param targetReserveId The reserve being repaid
+     * @param amount The repay in asset units
+     * @return The freed weighted collateral value (see withdrawHeadroom for the unit)
+     */
+    function repayValue(IAaveV4Spoke spoke, address safe, uint256 targetReserveId, uint256 amount) external view returns (uint256) {
+        IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(targetReserveId);
+        uint256 drawnIndex = IAaveV4Hub(reserve.hub).getAssetDrawnIndex(reserve.assetId);
+        uint256 premiumDebtRay = spoke.getUserPremiumDebtRay(targetReserveId, safe);
+
+        // Mirrors UserPositionUtils.calculateRestoreAmount: premium (rounded up to asset units) is cleared
+        // first, the drawn remainder restores shares rounded down (Spoke.repay's rayDivDown), capped at the
+        // drawn shares held
+        uint256 premiumDebt = Math.ceilDiv(premiumDebtRay, RAY);
+        uint256 freedDebtRay;
+        if (amount < premiumDebt) {
+            freedDebtRay = amount * RAY;
+        } else {
+            uint256 restoredShares = ((amount - premiumDebt) * RAY) / drawnIndex;
+            uint256 drawnShares = spoke.getUserPosition(targetReserveId, safe).drawnShares;
+            if (restoredShares > drawnShares) restoredShares = drawnShares;
+            freedDebtRay = premiumDebtRay + restoredShares * drawnIndex;
+        }
+
+        uint256 valueFactor = IAaveV4Oracle(spoke.ORACLE()).getReservePrice(targetReserveId) * (10 ** (18 - reserve.decimals));
+        // The freed RAY debt Value over the 1.00-bound divisor (1e41 / 1e18 WAD), rounded down
+        return Math.mulDiv(freedDebtRay, valueFactor, WEIGHTED_COLLATERAL_TO_DEBT_RAY / 1e18);
     }
 
     /**

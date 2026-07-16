@@ -199,12 +199,24 @@ interface ILendGateway {
 
     /**
      * @notice The weighted collateral value a borrow of `amount` of `asset` requires at Aave's 1.00 bound
-     * @dev Also the value a repay of `amount` frees.
+     * @dev The value a repay frees is repayValue, which follows Aave's restore rounding instead.
      * @param asset The borrow asset (must be registered)
-     * @param amount The borrow or repay in asset units
+     * @param amount The borrow in asset units
      * @return The required weighted collateral value
      */
     function borrowValue(address asset, uint256 amount) external view returns (uint256);
+
+    /**
+     * @notice The weighted collateral value a repay of `amount` of `asset` frees at Aave's 1.00 bound
+     * @dev Exact against Aave's restore share rounding (premium clears first, drawn shares restore rounded
+     *      down), so repay sizing can credit it as headroom without overshooting Aave's post-withdraw
+     *      health check.
+     * @param safe The Safe whose debt is repaid
+     * @param asset The repaid asset (must be registered)
+     * @param amount The repay in asset units
+     * @return The freed weighted collateral value
+     */
+    function repayValue(address safe, address asset, uint256 amount) external view returns (uint256);
 
     /**
      * @notice Amount of `asset` to supply so the position gains `value` of weighted collateral value
