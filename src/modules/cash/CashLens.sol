@@ -200,16 +200,10 @@ contract CashLens is UpgradeableProxy, Constants {
     /// @notice Debit mode check: each token's spendable amount must cover its share of the spend, threading the borrowing headroom across tokens
     function _debitCheck(address safe, address[] memory tokens, uint256[] memory amountsInUsd, SafeData memory safeData) internal view returns (bool, string memory) {
         ILendGateway lendGateway = gateway();
-        bool hasDebt;
-        uint256 borrowHeadroom;
-        {
-            ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
-            // Raw per-asset debt, not the 6-decimal-floored debtUsd: dust debt must still cap withdrawals
-            hasDebt = lendGateway.hasDebt(safe);
-            // Buffered by the health-factor floor: quotes size collateral withdrawals so the position
-            // stays above the floor; debit execution keeps the raw bound (spends always settle)
-            borrowHeadroom = hasDebt ? DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account) : 0;
-        }
+        bool hasDebt = lendGateway.hasDebt(safe);
+        // Aave-priced and buffered by the health-factor floor: quotes size collateral withdrawals so the
+        // position stays above the floor; debit execution keeps the raw bound (spends always settle)
+        uint256 withdrawHeadroom = hasDebt ? lendGateway.withdrawHeadroom(safe) : 0;
 
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
@@ -220,7 +214,7 @@ contract CashLens is UpgradeableProxy, Constants {
             uint256 needed = _fromUsd(token, amountsInUsd[i]);
             uint256 raw = IERC20(token).balanceOf(safe);
             {
-                uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, borrowHeadroom, hasDebt);
+                uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, withdrawHeadroom, hasDebt);
                 if (raw + withdrawableSupplied < needed) {
                     return (false, "Insufficient token balance for debit mode spending");
                 }
@@ -234,8 +228,8 @@ contract CashLens is UpgradeableProxy, Constants {
             // Only the supplied portion (effective raw is spent first) consumes the borrowing headroom for later tokens
             if (hasDebt) {
                 uint256 usedSupplied = needed > raw ? needed - raw : 0;
-                uint256 used = _headroomConsumed(token, usedSupplied);
-                borrowHeadroom = borrowHeadroom > used ? borrowHeadroom - used : 0;
+                uint256 used = _headroomRemoved(safe, token, usedSupplied);
+                withdrawHeadroom = withdrawHeadroom > used ? withdrawHeadroom - used : 0;
             }
         }
 
@@ -357,17 +351,9 @@ contract CashLens is UpgradeableProxy, Constants {
         ILendGateway lendGateway = gateway();
         SafeData memory safeData = cashModule.getData(safe);
 
-        bool hasDebt;
-        uint256 borrowHeadroom;
-        {
-            ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
-            // Raw per-asset debt, not the 6-decimal-floored debtUsd: dust debt must still cap withdrawals
-            hasDebt = lendGateway.hasDebt(safe);
-            if (hasDebt) {
-                // Buffered by the health-factor floor, matching _debitCheck
-                borrowHeadroom = DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account);
-            }
-        }
+        bool hasDebt = lendGateway.hasDebt(safe);
+        // Aave-priced and buffered by the health-factor floor, matching _debitCheck
+        uint256 withdrawHeadroom = hasDebt ? lendGateway.withdrawHeadroom(safe) : 0;
 
         uint256[] memory spendableAmounts = new uint256[](len);
         uint256[] memory amountsInUsd = new uint256[](len);
@@ -377,8 +363,8 @@ contract CashLens is UpgradeableProxy, Constants {
             address token = debtServiceTokenPreference[i];
             if (!lendGateway.isSpendAsset(token)) revert NotABorrowToken();
 
-            (uint256 spendable, uint256 used) = _debitSpendable(safe, token, safeData, borrowHeadroom, hasDebt);
-            borrowHeadroom = borrowHeadroom > used ? borrowHeadroom - used : 0;
+            (uint256 spendable, uint256 used) = _debitSpendable(safe, token, safeData, withdrawHeadroom, hasDebt);
+            withdrawHeadroom = withdrawHeadroom > used ? withdrawHeadroom - used : 0;
 
             spendableAmounts[i] = spendable;
             if (spendable > 0) {
@@ -451,11 +437,9 @@ contract CashLens is UpgradeableProxy, Constants {
         }
 
         ILendGateway lendGateway = gateway();
-        ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
-        // Buffered by the health-factor floor: withdrawal sourcing enforces the floor at execution, so
-        // this quote is exactly what a request (or module sandwich) can actually pull. hasDebt reads raw
-        // per-asset debt, not the 6-decimal-floored debtUsd, so dust debt still caps the quote.
-        return looseAvailable + _withdrawableSupplied(safe, token, DebitSourcingLib.bufferedDebitHeadroom(lendGateway, account), lendGateway.hasDebt(safe));
+        // Aave-priced and buffered by the health-factor floor: withdrawal sourcing enforces the floor at
+        // execution, so this quote is exactly what a request (or module sandwich) can actually pull.
+        return looseAvailable + _withdrawableSupplied(safe, token, lendGateway.withdrawHeadroom(safe), lendGateway.hasDebt(safe));
     }
 
     /**
@@ -524,22 +508,22 @@ contract CashLens is UpgradeableProxy, Constants {
 
     /**
      * @notice Supplied amount of `token` withdrawable for a debit spend, in token units
-     * @dev min(supplied, reserve cash). When the Safe has debt, also capped by the borrowing headroom: how much
-     *      of this reserve can be withdrawn before the leftover debt exceeds its borrowing power, via its LTV.
+     * @dev min(supplied, reserve cash). When the Safe has debt, the supplied side is what the gateway's
+     *      Aave-priced collateral headroom allows.
      */
-    function _withdrawableSupplied(address safe, address token, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256) {
-        return DebitSourcingLib.withdrawableSupplied(gateway(), IPriceProvider(dataProvider.getPriceProvider()), safe, token, borrowHeadroomUsd, hasDebt);
+    function _withdrawableSupplied(address safe, address token, uint256 headroom, bool hasDebt) internal view returns (uint256) {
+        return DebitSourcingLib.withdrawableSupplied(gateway(), safe, token, headroom, hasDebt);
     }
 
-    /// @notice Borrowing headroom (USD) consumed by withdrawing `amount` of `token`: its USD value weighted by the LTV
-    function _headroomConsumed(address token, uint256 amount) internal view returns (uint256) {
-        return DebitSourcingLib.headroomConsumed(gateway(), IPriceProvider(dataProvider.getPriceProvider()), token, amount);
+    /// @notice The weighted collateral value withdrawing `amount` of `token` consumes (gateway view; helper keeps call-site stacks flat)
+    function _headroomRemoved(address safe, address token, uint256 amount) internal view returns (uint256) {
+        return gateway().headroomRemoved(safe, token, amount);
     }
 
     /// @notice Debit spendable for `token` (token units) given the running borrowing headroom, and the headroom that withdrawal consumes
-    function _debitSpendable(address safe, address token, SafeData memory safeData, uint256 borrowHeadroomUsd, bool hasDebt) internal view returns (uint256, uint256) {
-        uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, borrowHeadroomUsd, hasDebt);
-        uint256 headroomUsed = hasDebt ? _headroomConsumed(token, withdrawableSupplied) : 0;
+    function _debitSpendable(address safe, address token, SafeData memory safeData, uint256 withdrawHeadroom, bool hasDebt) internal view returns (uint256, uint256) {
+        uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, withdrawHeadroom, hasDebt);
+        uint256 headroomUsed = hasDebt ? _headroomRemoved(safe, token, withdrawableSupplied) : 0;
 
         uint256 raw = IERC20(token).balanceOf(safe);
         uint256 pending = _getPendingWithdrawalAmount(safeData, token);

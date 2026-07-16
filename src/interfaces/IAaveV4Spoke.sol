@@ -48,6 +48,15 @@ interface IAaveV4Spoke {
         bool receiveSharesEnabled;
     }
 
+    /// @notice A user's shares and dynamic configuration for one reserve.
+    struct UserPosition {
+        uint120 drawnShares;
+        uint120 premiumShares;
+        int200 premiumOffsetRay;
+        uint120 suppliedShares;
+        uint32 dynamicConfigKey;
+    }
+
     /// @notice A user's aggregate position. `healthFactor`/`avgCollateralFactor` are WAD; value fields are Aave Value units.
     struct UserAccountData {
         uint256 riskPremium;
@@ -120,6 +129,12 @@ interface IAaveV4Spoke {
 
     /// @notice Total debt (drawn + premium) of `user` in the reserve, in asset units.
     function getUserTotalDebt(uint256 reserveId, address user) external view returns (uint256);
+
+    /// @notice Premium debt of `user` in the reserve, in asset units scaled by RAY.
+    function getUserPremiumDebtRay(uint256 reserveId, address user) external view returns (uint256);
+
+    /// @notice The user's share position in the reserve.
+    function getUserPosition(uint256 reserveId, address user) external view returns (UserPosition memory);
 
     /// @notice Total underlying supplied to the reserve, in asset units.
     function getReserveSuppliedAssets(uint256 reserveId) external view returns (uint256);

@@ -45,7 +45,7 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
 
         // Real Aave v4 instance on the fork, weETH + USDC reserves priced by live Chainlink feeds
         _deployAaveV4();
-        address weethSource = address(new ChainlinkPriceFeed(IAggregatorV3(weEthWethOracle), IAaveV4PriceFeed(ethUsdcOracle), 8, 30 days, "weETH / USD"));
+        address weethSource = address(new ChainlinkPriceFeed(IAggregatorV3(weEthWethOracle), IAaveV4PriceFeed(ethUsdcOracle), 8, 30 days, false, "weETH / USD"));
         weethReserveId = _addAaveReserve(address(weETH), weethSource, _weethCollateralFactorBps(), _weethBorrowable());
         usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, _usdcCollateralFactorBps(), true);
         _seedInitialLiquidity();

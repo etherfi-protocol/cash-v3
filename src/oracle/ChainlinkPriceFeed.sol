@@ -6,6 +6,7 @@ import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IAaveV4PriceFeed } from "../interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../interfaces/IAggregatorV3.sol";
+import { StablePriceLib } from "./StablePriceLib.sol";
 
 /**
  * @title ChainlinkPriceFeed
@@ -38,6 +39,8 @@ contract ChainlinkPriceFeed is IAaveV4PriceFeed {
     uint8 public immutable feedDecimals;
     /// @notice The maximum age in seconds for the rate feed before it is rejected
     uint256 public immutable rateMaxStaleness;
+    /// @notice Whether the price snaps to exactly 1 USD when within 1% of it (USD stables only)
+    bool public immutable isStableToken;
 
     string private _description;
 
@@ -46,7 +49,7 @@ contract ChainlinkPriceFeed is IAaveV4PriceFeed {
     /// @notice Thrown when either leg's price is zero or negative
     error InvalidPrice();
 
-    constructor(IAggregatorV3 _rateFeed, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, string memory feedDescription) {
+    constructor(IAggregatorV3 _rateFeed, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) {
         rateFeed = _rateFeed;
         underlyingUsdFeed = _underlyingUsdFeed;
         rateDecimals = _rateFeed.decimals();
@@ -55,6 +58,7 @@ contract ChainlinkPriceFeed is IAaveV4PriceFeed {
         }
         feedDecimals = _feedDecimals;
         rateMaxStaleness = _rateMaxStaleness;
+        isStableToken = _isStableToken;
         _description = feedDescription;
     }
 
@@ -78,7 +82,7 @@ contract ChainlinkPriceFeed is IAaveV4PriceFeed {
 
         // USD-quoted feed: scale straight to feed decimals.
         if (address(underlyingUsdFeed) == address(0)) {
-            return rate.mulDiv(10 ** feedDecimals, 10 ** rateDecimals).toInt256();
+            return StablePriceLib.snap(rate.mulDiv(10 ** feedDecimals, 10 ** rateDecimals), isStableToken, feedDecimals).toInt256();
         }
 
         int256 underlyingAnswer = underlyingUsdFeed.latestAnswer();
@@ -88,7 +92,7 @@ contract ChainlinkPriceFeed is IAaveV4PriceFeed {
         // price = rate * underlyingPrice, normalized from (rateDecimals + underlyingDecimals) to feedDecimals
         uint256 price = rate.mulDiv(underlyingPrice * 10 ** feedDecimals, 10 ** (rateDecimals + underlyingDecimals));
 
-        return price.toInt256();
+        return StablePriceLib.snap(price, isStableToken, feedDecimals).toInt256();
     }
 
     /// @dev Reads a Chainlink feed, reverting if the price is non-positive or older than maxStaleness

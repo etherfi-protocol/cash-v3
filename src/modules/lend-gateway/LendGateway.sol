@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IAaveV4Hub } from "../../interfaces/IAaveV4Hub.sol";
@@ -12,8 +13,9 @@ import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
-import { ModuleBase } from "../ModuleBase.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
+import { ModuleBase } from "../ModuleBase.sol";
+import { LendCapacityLib } from "./LendCapacityLib.sol";
 
 /**
  * @title LendGateway
@@ -25,18 +27,18 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
  *         here) AND the safe must approve it (setUserPositionManager). If either is missing/revoked, every
  *         Spoke op reverts — so a revoked safe simply can no longer be operated (credit spend / auto-supply
  *         break until re-approved). This is enforced by Aave, not re-implemented here.
- *      2. Cash side: only an authorized driver may call the mutating ops. The CashModule is always a driver
- *         (resolved live from the data provider); further drivers (auto-supply, migration) are added by a
- *         LEND_GATEWAY_ADMIN_ROLE holder. A position manager can move user funds, so who may drive it is the most
- *         security-critical surface in this contract.
+ *      2. Cash side: mutating ops only target factory-registered Cash Safes and only an authorized driver may
+ *         call them. Public suppliers use the Aave Spoke directly. The CashModule is always a driver (resolved
+ *         live from the data provider); further drivers are added by a LEND_GATEWAY_ADMIN_ROLE holder. A position
+ *         manager can move user funds, so who may drive it is the most security-critical surface in this contract.
  *
  *      Aave v4 addresses reserves by a uint256 reserveId, not by asset address. The gateway keeps its own
  *      asset -> reserveId registry, each entry validated against the Spoke's getReserve at registration time.
  *
- *      USD reads: ILendGateway's collateralUsd/debtUsd/availableBorrowsUsd are 6-decimal USD (PriceProvider
- *      scale). Aave reports position value in opaque "units of Value"/RAY, so the gateway does NOT consume
- *      those; it re-derives USD from ether.fi's PriceProvider over the registered assets (matching CashLens),
- *      applying each reserve's LTV for the borrow headroom, and takes only healthFactor (WAD == 1e18) from Aave.
+ *      USD reads: ILendGateway's collateralUsd/debtUsd/availableBorrowsUsd remain 6-decimal PriceProvider
+ *      values for Cash display only. Capacity is Aave-priced (LendCapacityLib): credit uses borrowCapacity /
+ *      rawBorrowCapacity and debit sizing uses the withdrawHeadroom family, all rebuilding Aave's current
+ *      oracle-valued collateral and full-RAY debt before quoting.
  *
  *      Per-safe approval needs no user signature: the gateway is a DEFAULT module on every safe, which is the
  *      authorization. Approval is folded into ops (ensuresApproval modifier) — the gateway makes the safe call
@@ -60,6 +62,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     uint256 internal constant HUNDRED_PERCENT = 100e18;
     /// @notice Converts Aave's BPS collateralFactor to the 100e18 ltv scale (bps * 1e16; 10_000 * 1e16 == 100e18)
     uint256 internal constant BPS_TO_LTV_SCALE = 1e16;
+    /// @notice Aave's RAY scale for deficit accounting
+    uint256 internal constant RAY = 1e27;
+    /// @notice Aave's minimum executable health factor
+    uint256 internal constant MIN_HEALTH_FACTOR = 1e18;
 
     /// @custom:storage-location erc7201:etherfi.storage.LendGateway
     struct LendGatewayStorage {
@@ -114,7 +120,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     error ZeroAmount();
     /// @notice Thrown when a lend op is attempted for a safe that has opted out of lend
     error LendOptedOut();
-    /// @notice Thrown when de-registering a reserve that still has outstanding debt or supplied balance
+    /// @notice Thrown when changing or removing a reserve that still has outstanding debt or supplied balance
     error ReserveStillInUse();
     /// @notice Thrown when an operation would leave the safe's health factor below the configured floor
     error HealthFactorBelowMinimum();
@@ -143,7 +149,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // Access control
     // ---------------------------------------------------------------------
 
-    /// @dev Reverts unless the caller is the CashModule or an authorized driver
+    /// @dev Reverts unless the caller is the CashModule or an authorized driver.
     function _onlyDriver() internal view {
         if (msg.sender != etherFiDataProvider.getCashModule() && !_getLendGatewayStorage().isDriver[msg.sender]) revert OnlyDriver();
     }
@@ -165,19 +171,25 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // ---------------------------------------------------------------------
 
     /**
-     * @notice Registers (or updates) the reserveId for an asset, validated against the Spoke
-     * @dev Reverts unless the Spoke's reserve `reserveId` has `underlying == asset`
+     * @notice Registers or updates the reserveId for an asset, validated against the Spoke
+     * @dev Re-registering the same reserve is a no-op. Moving to another reserve requires the old reserve to
+     *      have zero aggregate supply and debt so existing positions cannot disappear from gateway accounting.
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId for the asset
-     * @dev Warning: do not re-point an asset safes already hold positions under; 
-     * the USD views then read the new reserve and miss the old, understating debt and 
-     * inflating borrow headroom.
      */
     function setReserveId(address asset, uint256 reserveId) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
         if (asset == address(0)) revert ZeroAddress();
         if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
 
         LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if ($.assets.contains(asset)) {
+            uint256 currentReserveId = $.reserveId[asset];
+            if (currentReserveId == reserveId) return;
+            if (spoke.getReserveTotalDebt(currentReserveId) != 0 || spoke.getReserveSuppliedAssets(currentReserveId) != 0) {
+                revert ReserveStillInUse();
+            }
+        }
+
         $.assets.add(asset);
         $.reserveId[asset] = reserveId;
 
@@ -301,7 +313,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function supply(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
+    function supply(address safe, address asset, uint256 amount) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         uint256 reserveId = _reserveIdOf(asset);
 
@@ -328,7 +340,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAddress if to is the zero address
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function withdraw(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
+    function withdraw(address safe, address asset, uint256 amount, address to) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert ZeroAddress();
         uint256 reserveId = _reserveIdOf(asset);
@@ -355,7 +367,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAddress if to is the zero address
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
+    function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
         if (to == address(0)) revert ZeroAddress();
         uint256 reserveId = _reserveIdOf(asset);
@@ -380,7 +392,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws ZeroAmount if the resolved repay amount is zero (e.g. max with no outstanding debt)
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function repay(address safe, address asset, uint256 amount) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) returns (uint256) {
+    function repay(address safe, address asset, uint256 amount) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant ensuresApproval(safe) returns (uint256) {
         uint256 reserveId = _reserveIdOf(asset);
 
         // type(uint256).max means "repay the full debt"; resolve it to the current debt so we pull the right amount.
@@ -410,7 +422,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws LendOptedOut if enabling collateral usage for a safe that has opted out of lend
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
-    function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver whenNotPaused nonReentrant ensuresApproval(safe) {
+    function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant ensuresApproval(safe) {
         // Gate only enabling (a lend op); disabling must stay open so an opted-out safe can drop a residual
         // supplied position from collateral (e.g. one left on Aave after processLendOptOut). It only de-risks.
         if (useAsCollateral && _isLendOptedOut(safe)) revert LendOptedOut();
@@ -468,11 +480,9 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @notice Returns `safe`'s Aave position summary (collateral, debt, borrow headroom, health factor)
-     * @dev Re-derives USD from ether.fi's PriceProvider over the registered assets (not from Aave's opaque
-     *      value units): sums supplied value into collateralUsd, weights collateral-enabled supply by each
-     *      reserve's LTV for the borrow headroom, sums debt into debtUsd, and takes healthFactor (WAD)
-     *      directly from Aave. Source of truth for CashLens canSpend and EtherFiHook health checks.
+     * @notice Returns `safe`'s Cash-priced position summary (collateral, debt, borrow headroom, health factor)
+     * @dev Re-derives the USD fields from PriceProvider for display only; capacity and sizing use the
+     *      Aave-priced borrowCapacity and withdrawHeadroom families. healthFactor (WAD) comes directly from Aave.
      * @param safe The safe to query
      * @return data The safe's account data (USD fields are 6-decimal; healthFactor is 1e18)
      */
@@ -536,45 +546,165 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @notice Returns the reserve's withdrawable liquidity (supplied minus borrowed)
-     * @dev The withdraw-side liquidity gate. A borrow is additionally bounded by the Hub's drawCap, so the
-     *      credit side reads availableToBorrow.
+     * @notice Returns the reserve-level Hub liquidity currently available for withdrawals
+     * @dev This is not a Safe's withdrawal limit. Returns zero while the reserve is paused or its Hub Spoke is
+     *      inactive or halted.
      * @param asset The reserve asset
      * @return The available liquidity in asset units, or 0 if the asset is not registered
      */
-    function availableCash(address asset) external view returns (uint256) {
+    function withdrawalLiquidity(address asset) external view returns (uint256) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
-        return _availableCash($.reserveId[asset]);
+        return _withdrawalLiquidity($.reserveId[asset]);
     }
 
     /**
-     * @notice Returns how much of `asset` a borrow can draw right now: min(withdrawable liquidity, remaining
-     *         Hub drawCap), or 0 if the asset is unregistered or the Hub spoke is inactive or halted
-     * @dev The credit-side liquidity gate. drawCap is enforced only in the Hub, so a borrow within
-     *      availableCash can still revert DrawCapExceeded; folding the cap in here keeps the auth decision
-     *      honest. The Hub also counts a reported deficit toward the cap, which this omits, so a nonzero
-     *      deficit makes this a slight overestimate.
+     * @notice Returns the reserve-level Hub liquidity currently available for borrowing
+     * @dev This is not a Safe's borrowing limit. Returns zero unless both the reserve and Hub Spoke accept a
+     *      borrow. Finite draw-cap usage includes drawn debt, premium, and reported deficit rounded up exactly
+     *      as Hub execution does.
      * @param asset The reserve asset
      * @return The borrowable amount in asset units
      */
-    function availableToBorrow(address asset) external view returns (uint256) {
+    function borrowLiquidity(address asset) external view returns (uint256) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) return 0;
 
         uint256 reserveId = $.reserveId[asset];
+        if (!_isBorrowable(reserveId)) return 0;
+
         IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(reserveId);
         IAaveV4Hub hub = IAaveV4Hub(reserve.hub);
         IAaveV4Hub.SpokeConfig memory config = hub.getSpokeConfig(reserve.assetId, address(spoke));
         if (!config.active || config.halted) return 0;
 
-        uint256 cash = _availableCash(reserveId);
+        uint256 cash = hub.getAssetLiquidity(reserve.assetId);
         if (config.drawCap == hub.MAX_ALLOWED_SPOKE_CAP()) return cash;
 
         uint256 capLimit = uint256(config.drawCap) * (10 ** reserve.decimals);
         uint256 owed = hub.getSpokeTotalOwed(reserve.assetId, address(spoke));
-        uint256 remainingCap = capLimit > owed ? capLimit - owed : 0;
+        if (owed >= capLimit) return 0;
+
+        uint256 remainingCap = capLimit - owed;
+        uint256 deficit = Math.ceilDiv(hub.getSpokeDeficitRay(reserve.assetId, address(spoke)), RAY);
+        if (deficit >= remainingCap) return 0;
+        remainingCap -= deficit;
         return cash < remainingCap ? cash : remainingCap;
+    }
+
+    /**
+     * @notice Returns `safe`'s buffered Aave-priced borrowing capacity in units of `asset`
+     * @dev The auth quote: capacity that keeps the post-borrow health factor at or above the configured floor
+     *      (Aave's 1.00 bound while no floor is set). New auth decisions and getMaxSpendCredit read this so an
+     *      approved spend settles with margin. Spend execution reads rawBorrowCapacity instead.
+     * @param safe The Safe whose position backs the borrow
+     * @param asset The asset to borrow
+     * @return The maximum additional borrow in asset units, or 0 if the asset is unregistered
+     */
+    function borrowCapacity(address safe, address asset) external view returns (uint256) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return 0;
+        uint256 floor = $.minHealthFactor;
+        return LendCapacityLib.borrowCapacity(spoke, safe, $.reserveId[asset], floor == 0 ? MIN_HEALTH_FACTOR : floor);
+    }
+
+    /**
+     * @notice Returns `safe`'s Aave-priced borrowing capacity in units of `asset` at Aave's 1.00 health factor
+     * @dev The execution quote: what an already-authorized card spend can still borrow, ignoring the configured
+     *      floor. Spend-time resupply gates on this so a spend authorized under the buffered quote always lands.
+     * @param safe The Safe whose position backs the borrow
+     * @param asset The asset to borrow
+     * @return The maximum additional borrow in asset units, or 0 if the asset is unregistered
+     */
+    function rawBorrowCapacity(address safe, address asset) external view returns (uint256) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return 0;
+        return LendCapacityLib.borrowCapacity(spoke, safe, $.reserveId[asset], MIN_HEALTH_FACTOR);
+    }
+
+    /**
+     * @notice The safe's Aave-priced collateral headroom above the configured health-factor floor
+     * @dev The auth quote for collateral withdrawals (debit sizing, max-sourceable), in the weighted
+     *      collateral value unit defined by LendCapacityLib.withdrawHeadroom. Execution reads
+     *      rawWithdrawHeadroom instead, mirroring the borrowCapacity/rawBorrowCapacity pair.
+     * @param safe The Safe whose position is measured
+     * @return The headroom in weighted collateral value units
+     */
+    function withdrawHeadroom(address safe) external view returns (uint256) {
+        uint256 floor = _getLendGatewayStorage().minHealthFactor;
+        return LendCapacityLib.withdrawHeadroom(spoke, safe, floor == 0 ? MIN_HEALTH_FACTOR : floor);
+    }
+
+    /**
+     * @notice The safe's Aave-priced collateral headroom above Aave's 1.00 health-factor bound
+     * @dev The execution quote: what an already-authorized debit settlement or repay sizing may consume,
+     *      ignoring the configured floor.
+     * @param safe The Safe whose position is measured
+     * @return The headroom in weighted collateral value units
+     */
+    function rawWithdrawHeadroom(address safe) external view returns (uint256) {
+        return LendCapacityLib.withdrawHeadroom(spoke, safe, MIN_HEALTH_FACTOR);
+    }
+
+    /**
+     * @notice Amount of `asset` the safe can withdraw from Aave while consuming at most `headroom`
+     * @dev Supply carrying no borrowing power (collateral flag off or zero collateral factor) is fully
+     *      withdrawable, matching Aave's own check.
+     * @param safe The Safe whose position is measured
+     * @param asset The supplied asset
+     * @param headroom The weighted collateral value the withdrawal may consume
+     * @return The withdrawable amount in asset units, or 0 if the asset is unregistered
+     */
+    function collateralForHeadroom(address safe, address asset, uint256 headroom) external view returns (uint256) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return 0;
+        return LendCapacityLib.collateralForHeadroom(spoke, safe, $.reserveId[asset], headroom);
+    }
+
+    /**
+     * @notice The weighted collateral value withdrawing `amount` of `asset` consumes
+     * @param safe The Safe whose position is measured
+     * @param asset The supplied asset (must be registered)
+     * @param amount The withdrawal in asset units
+     * @return The consumed weighted collateral value
+     */
+    function headroomRemoved(address safe, address asset, uint256 amount) external view returns (uint256) {
+        return LendCapacityLib.headroomRemoved(spoke, safe, _reserveIdOf(asset), amount);
+    }
+
+    /**
+     * @notice The weighted collateral value a borrow of `amount` of `asset` requires at Aave's 1.00 bound
+     * @dev The value a repay frees is repayValue, which follows Aave's restore rounding instead.
+     * @param asset The borrow asset (must be registered)
+     * @param amount The borrow in asset units
+     * @return The required weighted collateral value
+     */
+    function borrowValue(address asset, uint256 amount) external view returns (uint256) {
+        return LendCapacityLib.borrowValue(spoke, _reserveIdOf(asset), amount);
+    }
+
+    /**
+     * @notice The weighted collateral value a repay of `amount` of `asset` frees at Aave's 1.00 bound
+     * @dev Exact against Aave's restore share rounding, so repay sizing can credit it as headroom without
+     *      overshooting Aave's post-withdraw health check (see LendCapacityLib.repayValue).
+     * @param safe The Safe whose debt is repaid
+     * @param asset The repaid asset (must be registered)
+     * @param amount The repay in asset units
+     * @return The freed weighted collateral value
+     */
+    function repayValue(address safe, address asset, uint256 amount) external view returns (uint256) {
+        return LendCapacityLib.repayValue(spoke, safe, _reserveIdOf(asset), amount);
+    }
+
+    /**
+     * @notice Amount of `asset` to supply so the position gains `value` of weighted collateral value
+     * @dev Rounded up. Caller guarantees the reserve's collateral factor is nonzero (see ltv).
+     * @param asset The collateral asset (must be registered)
+     * @param value The weighted collateral value to gain
+     * @return The amount to supply in asset units
+     */
+    function collateralForValue(address asset, uint256 value) external view returns (uint256) {
+        return LendCapacityLib.collateralForValue(spoke, _reserveIdOf(asset), value);
     }
 
     /**
@@ -717,11 +847,15 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         return $.reserveId[asset];
     }
 
-    /// @dev The reserve's withdrawable liquidity (supplied minus borrowed), in asset units
-    function _availableCash(uint256 reserveId) internal view returns (uint256) {
-        uint256 supplied = spoke.getReserveSuppliedAssets(reserveId);
-        uint256 debt = spoke.getReserveTotalDebt(reserveId);
-        return supplied > debt ? supplied - debt : 0;
+    /// @dev The shared Hub liquidity currently available to this reserve for withdrawal.
+    function _withdrawalLiquidity(uint256 reserveId) internal view returns (uint256) {
+        if (spoke.getReserveConfig(reserveId).paused) return 0;
+
+        IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(reserveId);
+        IAaveV4Hub hub = IAaveV4Hub(reserve.hub);
+        IAaveV4Hub.SpokeConfig memory config = hub.getSpokeConfig(reserve.assetId, address(spoke));
+        if (!config.active || config.halted) return 0;
+        return hub.getAssetLiquidity(reserve.assetId);
     }
 
     /// @dev The reserve's LTV in the 100e18 scale, from its current dynamic collateralFactor (BPS)

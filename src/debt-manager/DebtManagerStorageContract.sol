@@ -85,6 +85,9 @@ contract DebtManagerStorageContract is UpgradeableProxy {
 
     /// @notice Role identifier for debt manager administrators
     bytes32 public constant DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
+
+    /// @notice Role identifier for the ether.fi wallet, which runs lend gateway migrations
+    bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
     
     /// @notice Constant representing 100% with 18 decimals precision (100e18)
     uint256 public constant HUNDRED_PERCENT = 100e18;
@@ -405,8 +408,8 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     /// @notice Thrown when migrating an opted-out Safe that still carries DebtManager debt (repay it first)
     error LendOptedOutSafeHasDebt();
 
-    /// @notice Thrown when a legacy DebtManager operation (borrow/repay) is attempted on a Safe already migrated to Aave
-    error AlreadyMigratedToLendGateway();
+    /// @notice Thrown when a legacy DebtManager operation or a migration is attempted on a Safe whose engine is the lend gateway
+    error SafeUsesLendGateway();
     
     /**
      * @notice Error thrown when user is still liquidatable

@@ -33,7 +33,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
         vm.startPrank(owner);
         gw.setDriver(address(dm), true); // DebtManager drives the gateway during migration
-        roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, migrator); // authorize the migration runner
+        roleRegistry.grantRole(dm.ETHER_FI_WALLET_ROLE(), migrator); // authorize the migration runner
         vm.stopPrank();
 
         // The safes in this suite model the pre-gateway population: route them to the legacy engine so
@@ -196,7 +196,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         cashModule.markUsesLendGateway(address(safe));
     }
 
-    function test_migrateToLendGateway_onlyDebtManagerAdmin() public {
+    function test_migrateToLendGateway_onlyEtherFiWallet() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 10 ether);
         uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
@@ -221,12 +221,60 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
         // Legacy borrow is frozen for a migrated Safe
         vm.prank(address(safe));
-        vm.expectRevert(DebtManagerStorageContract.AlreadyMigratedToLendGateway.selector);
+        vm.expectRevert(DebtManagerStorageContract.SafeUsesLendGateway.selector);
         debtManager.borrow(BinSponsor.Reap, address(usdc), 1e6);
 
         // Legacy repay is frozen for a migrated Safe
-        vm.expectRevert(DebtManagerStorageContract.AlreadyMigratedToLendGateway.selector);
+        vm.expectRevert(DebtManagerStorageContract.SafeUsesLendGateway.selector);
         debtManager.repay(address(safe), address(usdc), 1e6);
+    }
+
+    /// @dev A safe onboarded straight onto the gateway never migrates, so the migration latch alone would
+    ///      let it open legacy debt the Cash flows no longer look at. The engine flag must block it — and
+    ///      keep blocking it after an opt-out, which leaves the safe with no borrow engine at all.
+    function test_gatewayOnboardedSafe_cannotUseDebtManager() public {
+        _forceGatewayEngine(address(safe));
+        assertFalse(dm.hasMigratedToLendGateway(address(safe)), "gateway-onboarded safe never migrated");
+
+        vm.prank(address(safe));
+        vm.expectRevert(DebtManagerStorageContract.SafeUsesLendGateway.selector);
+        debtManager.borrow(BinSponsor.Reap, address(usdc), 1e6);
+
+        vm.expectRevert(DebtManagerStorageContract.SafeUsesLendGateway.selector);
+        debtManager.repay(address(safe), address(usdc), 1e6);
+
+        address[] memory pref = new address[](1);
+        pref[0] = address(weETH);
+        vm.expectRevert(DebtManagerStorageContract.SafeUsesLendGateway.selector);
+        debtManager.liquidate(address(safe), address(usdc), pref);
+
+        // Migration is meaningless for a safe already on the gateway; it must not sweep its loose funds
+        vm.prank(migrator);
+        vm.expectRevert(DebtManagerStorageContract.SafeUsesLendGateway.selector);
+        dm.migrateToLendGateway(address(safe));
+
+        // Opting out keeps the raw engine flag set, so the legacy engine stays closed
+        _optOutOfLend();
+        assertTrue(cashModule.usesLendGateway(address(safe)), "opt-out keeps the engine flag");
+        vm.prank(address(safe));
+        vm.expectRevert(DebtManagerStorageContract.SafeUsesLendGateway.selector);
+        debtManager.borrow(BinSponsor.Reap, address(usdc), 1e6);
+    }
+
+    /// @dev Migration is exactly-once: a repeat call must revert rather than silently sweep new loose
+    ///      balances into Aave and re-emit the migration event. Batch runners skip migrated safes.
+    function test_migrateToLendGateway_secondCall_reverts() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+        deal(address(weETH), address(safe), 10 ether);
+        vm.prank(migrator);
+        dm.migrateToLendGateway(address(safe));
+
+        // A balance arriving after migration must not be silently supplied by a re-run
+        deal(address(weETH), address(safe), 1 ether);
+        vm.prank(migrator);
+        vm.expectRevert(DebtManagerStorageContract.SafeUsesLendGateway.selector);
+        dm.migrateToLendGateway(address(safe));
+        assertEq(weETH.balanceOf(address(safe)), 1 ether, "post-migration balance stayed loose");
     }
 
     /// @dev After migration, a credit-mode spend must borrow from Aave (via the gateway), not the frozen

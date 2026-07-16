@@ -67,10 +67,11 @@ contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
         uint256[] memory amountsInUsd = new uint256[](1);
         amountsInUsd[0] = 100e6;
 
-        newGateway.setAvailableCash(address(usdc), type(uint128).max);
+        newGateway.setWithdrawalLiquidity(address(usdc), type(uint128).max);
         newGateway.setRegistered(address(usdc), true);
         newGateway.setBorrowable(address(usdc), true);
         newGateway.setSpendAsset(address(usdc), true);
+        newGateway.setBorrowCapacity(address(safe), address(usdc), amountsInUsd[0]);
         newGateway.setAccountData(address(safe), ILendGateway.AccountData({ collateralUsd: 200e6, debtUsd: 0, availableBorrowsUsd: amountsInUsd[0], healthFactor: type(uint256).max }));
 
         vm.prank(owner);

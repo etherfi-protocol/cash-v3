@@ -24,7 +24,7 @@ contract ChainlinkPriceFeedTest is Test {
     function setUp() public {
         vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
         // A raw Chainlink aggregator satisfies IAaveV4PriceFeed; any deployed feed can be the USD leg
-        feed = new ChainlinkPriceFeed(IAggregatorV3(rateFeed), IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, "weETH / USD");
+        feed = new ChainlinkPriceFeed(IAggregatorV3(rateFeed), IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, false, "weETH / USD");
     }
 
     /// @notice The reported price equals rate x underlying, and lands in a sane USD range.
@@ -75,14 +75,29 @@ contract ChainlinkPriceFeedTest is Test {
 
     /// @notice Without an underlying feed, the price is the USD-quoted Chainlink answer scaled to feed decimals.
     function test_noUnderlying_latestAnswer_isScaledAnswer() public {
-        ChainlinkPriceFeed usdFeed = new ChainlinkPriceFeed(IAggregatorV3(ethUsdOracle), IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, "ETH / USD");
+        ChainlinkPriceFeed usdFeed = new ChainlinkPriceFeed(IAggregatorV3(ethUsdOracle), IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, false, "ETH / USD");
         (, int256 raw,,,) = IAggregatorV3(ethUsdOracle).latestRoundData();
         assertEq(usdFeed.latestAnswer(), raw); // ETH/USD is already 8 decimals
     }
 
+    /// @notice A stable feed snaps to exactly 1 USD inside the 1% band and passes the raw price outside it.
+    function test_stable_snapsWithinOnePercent() public {
+        ChainlinkPriceFeed stableFeed = new ChainlinkPriceFeed(IAggregatorV3(ethUsdOracle), IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, true, "USDC / USD");
+        _mockAnswer(0.995e8);
+        assertEq(stableFeed.latestAnswer(), 1e8);
+        _mockAnswer(0.99e8); // the 1% band edge is exclusive
+        assertEq(stableFeed.latestAnswer(), 0.99e8);
+        _mockAnswer(1.02e8);
+        assertEq(stableFeed.latestAnswer(), 1.02e8);
+    }
+
+    function _mockAnswer(int256 answer) internal {
+        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(uint80(1), answer, block.timestamp, block.timestamp, uint80(1)));
+    }
+
     /// @notice The no-underlying mode still enforces staleness on the Chainlink feed.
     function test_noUnderlying_revertsOnStale() public {
-        ChainlinkPriceFeed usdFeed = new ChainlinkPriceFeed(IAggregatorV3(ethUsdOracle), IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, "ETH / USD");
+        ChainlinkPriceFeed usdFeed = new ChainlinkPriceFeed(IAggregatorV3(ethUsdOracle), IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, false, "ETH / USD");
         (uint80 roundId, int256 answer, uint256 startedAt,, uint80 answeredInRound) = IAggregatorV3(ethUsdOracle).latestRoundData();
         uint256 staleUpdatedAt = block.timestamp - RATE_MAX_STALENESS - 1;
         vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(roundId, answer, startedAt, staleUpdatedAt, answeredInRound));

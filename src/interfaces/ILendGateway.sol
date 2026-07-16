@@ -66,8 +66,8 @@ interface ILendGateway {
     function setUsingAsCollateral(address safe, address asset, bool useAsCollateral) external;
 
     /**
-     * @notice Returns `safe`'s Aave position summary
-     * @dev Source of truth for CashLens canSpend and EtherFiHook health checks
+     * @notice Returns `safe`'s Cash-priced position summary
+     * @dev Used for display and debit sizing; credit authorization uses borrowCapacity.
      * @param safe The safe to query
      * @return The safe's account data
      */
@@ -118,23 +118,114 @@ interface ILendGateway {
     function debtOf(address safe, address asset) external view returns (uint256);
 
     /**
-     * @notice Returns the reserve's withdrawable liquidity: supplied minus borrowed
-     * @dev Answers "how much can a withdraw pull". Not the borrow limit: a borrow is also bounded by the
-     *      Hub's drawCap, so use availableToBorrow for the credit side.
+     * @notice Returns the reserve-level Hub liquidity currently available for withdrawals
+     * @dev This is not a Safe's withdrawal limit, which also depends on its supply and position health. A
+     *      borrow is additionally bounded by the Hub's drawCap, so use borrowLiquidity for the credit side.
      * @param asset The reserve asset
      * @return The available liquidity, in asset units
      */
-    function availableCash(address asset) external view returns (uint256);
+    function withdrawalLiquidity(address asset) external view returns (uint256);
 
     /**
-     * @notice Returns how much of `asset` a borrow can actually draw right now
-     * @dev The lesser of the reserve's withdrawable liquidity and the Hub's remaining drawCap for this
-     *      spoke. Zero if the Hub spoke is inactive or halted. This is the credit-side liquidity gate;
-     *      availableCash is the withdraw-side one.
+     * @notice Returns the reserve-level Hub liquidity currently available for borrowing
+     * @dev This is not a Safe's borrowing limit, which also depends on its collateral and position health. It
+     *      is the lesser of shared Hub liquidity and remaining drawCap after debt, premium, and deficit, and is
+     *      zero unless the reserve and Hub Spoke accept borrowing.
      * @param asset The reserve asset
      * @return The borrowable amount, in asset units
      */
-    function availableToBorrow(address asset) external view returns (uint256);
+    function borrowLiquidity(address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns `safe`'s buffered Aave-priced borrowing capacity in units of `asset`
+     * @dev The auth quote: capacity holding the post-borrow health factor at or above the configured floor
+     *      (Aave's 1.00 bound while no floor is set). Uses Aave's current oracle, collateral factors, debt
+     *      indices, and premium. Capacity rounds down. Excludes Hub liquidity and draw caps (see borrowLiquidity).
+     * @param safe The Safe whose position backs the borrow
+     * @param asset The asset to borrow
+     * @return The maximum additional borrow in asset units
+     */
+    function borrowCapacity(address safe, address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns `safe`'s Aave-priced borrowing capacity in units of `asset` at Aave's 1.00 health factor
+     * @dev The execution quote: what an already-authorized card spend can still borrow, ignoring the configured
+     *      floor. Spend-time resupply gates on this so a spend authorized under borrowCapacity always lands.
+     * @param safe The Safe whose position backs the borrow
+     * @param asset The asset to borrow
+     * @return The maximum additional borrow in asset units
+     */
+    function rawBorrowCapacity(address safe, address asset) external view returns (uint256);
+
+    /**
+     * @notice Returns `safe`'s Aave-priced collateral headroom above the configured health-factor floor
+     * @dev The auth quote for collateral withdrawals, in the weighted collateral value unit
+     *      (amount * aavePrice * 10^(18 - decimals) * collateralFactorBps). Execution reads
+     *      rawWithdrawHeadroom, mirroring the borrowCapacity/rawBorrowCapacity pair.
+     * @param safe The Safe whose position is measured
+     * @return The headroom in weighted collateral value units
+     */
+    function withdrawHeadroom(address safe) external view returns (uint256);
+
+    /**
+     * @notice Returns `safe`'s Aave-priced collateral headroom above Aave's 1.00 health-factor bound
+     * @dev The execution quote: what an already-authorized debit settlement or repay sizing may consume.
+     * @param safe The Safe whose position is measured
+     * @return The headroom in weighted collateral value units
+     */
+    function rawWithdrawHeadroom(address safe) external view returns (uint256);
+
+    /**
+     * @notice Amount of `asset` the safe can withdraw from Aave while consuming at most `headroom`
+     * @dev Supply carrying no borrowing power (collateral flag off or zero collateral factor) is fully
+     *      withdrawable, matching Aave's own check. Rounds down, so withdrawing the quote never breaches
+     *      the headroom under Aave's own share rounding.
+     * @param safe The Safe whose position is measured
+     * @param asset The supplied asset
+     * @param headroom The weighted collateral value the withdrawal may consume
+     * @return The withdrawable amount in asset units, or 0 if the asset is unregistered
+     */
+    function collateralForHeadroom(address safe, address asset, uint256 headroom) external view returns (uint256);
+
+    /**
+     * @notice The weighted collateral value withdrawing `amount` of `asset` consumes
+     * @dev Exact against Aave's own share revaluation, so threading it across tokens never under-counts.
+     * @param safe The Safe whose position is measured
+     * @param asset The supplied asset (must be registered)
+     * @param amount The withdrawal in asset units
+     * @return The consumed weighted collateral value
+     */
+    function headroomRemoved(address safe, address asset, uint256 amount) external view returns (uint256);
+
+    /**
+     * @notice The weighted collateral value a borrow of `amount` of `asset` requires at Aave's 1.00 bound
+     * @dev The value a repay frees is repayValue, which follows Aave's restore rounding instead.
+     * @param asset The borrow asset (must be registered)
+     * @param amount The borrow in asset units
+     * @return The required weighted collateral value
+     */
+    function borrowValue(address asset, uint256 amount) external view returns (uint256);
+
+    /**
+     * @notice The weighted collateral value a repay of `amount` of `asset` frees at Aave's 1.00 bound
+     * @dev Exact against Aave's restore share rounding (premium clears first, drawn shares restore rounded
+     *      down), so repay sizing can credit it as headroom without overshooting Aave's post-withdraw
+     *      health check.
+     * @param safe The Safe whose debt is repaid
+     * @param asset The repaid asset (must be registered)
+     * @param amount The repay in asset units
+     * @return The freed weighted collateral value
+     */
+    function repayValue(address safe, address asset, uint256 amount) external view returns (uint256);
+
+    /**
+     * @notice Amount of `asset` to supply so the position gains `value` of weighted collateral value
+     * @dev Rounded up. Caller guarantees the reserve's collateral factor is nonzero (see ltv).
+     * @param asset The collateral asset (must be registered)
+     * @param value The weighted collateral value to gain
+     * @return The amount to supply in asset units
+     */
+    function collateralForValue(address asset, uint256 value) external view returns (uint256);
 
     /**
      * @notice Returns the loan-to-value of `asset`'s reserve, in the 100e18 = 100% scale (matching DebtManager's CollateralTokenConfig.ltv)

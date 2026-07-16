@@ -9,4 +9,7 @@ pragma solidity ^0.8.28;
 interface IAaveV4Oracle {
     /// @notice Returns the prices of the given reserves, in oracle base units (8-decimal USD).
     function getReservesPrices(uint256[] calldata reserveIds) external view returns (uint256[] memory);
+
+    /// @notice Returns one reserve's price, in oracle base units (8-decimal USD).
+    function getReservePrice(uint256 reserveId) external view returns (uint256);
 }

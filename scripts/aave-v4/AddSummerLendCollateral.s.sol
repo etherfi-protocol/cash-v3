@@ -137,12 +137,12 @@ contract AddSummerLendCollateral is Utils {
 
         // One staleness-checked ChainlinkPriceFeed per Chainlink oracle, shared as direct sources
         // and as underlying legs
-        address ethUsd = _chainlink(ETH_USD, address(0), CHAINLINK_MAX_STALENESS, "ETH / USD");
-        address btcUsd = _chainlink(BTC_USD, address(0), CHAINLINK_MAX_STALENESS, "BTC / USD");
-        address usdcUsd = _chainlink(USDC_USD, address(0), CHAINLINK_MAX_STALENESS, "USDC / USD");
-        address usdtUsd = _chainlink(USDT_USD, address(0), CHAINLINK_MAX_STALENESS, "USDT / USD");
-        address eurUsd = _chainlink(EUR_USD, address(0), CHAINLINK_MAX_STALENESS, "EUR / USD");
-        address opUsd = _chainlink(OP_USD, address(0), CHAINLINK_MAX_STALENESS, "OP / USD");
+        address ethUsd = _chainlink(ETH_USD, address(0), CHAINLINK_MAX_STALENESS, false, "ETH / USD");
+        address btcUsd = _chainlink(BTC_USD, address(0), CHAINLINK_MAX_STALENESS, false, "BTC / USD");
+        address usdcUsd = _chainlink(USDC_USD, address(0), CHAINLINK_MAX_STALENESS, true, "USDC / USD");
+        address usdtUsd = _chainlink(USDT_USD, address(0), CHAINLINK_MAX_STALENESS, true, "USDT / USD");
+        address eurUsd = _chainlink(EUR_USD, address(0), CHAINLINK_MAX_STALENESS, false, "EUR / USD");
+        address opUsd = _chainlink(OP_USD, address(0), CHAINLINK_MAX_STALENESS, false, "OP / USD");
 
         // Pyth-priced assets (ETHFI/USD is reused as sETHFI's underlying below)
         address ethfiUsd = _pyth(ETHFI_USD_PYTH, address(0), "ETHFI / USD");
@@ -160,9 +160,9 @@ contract AddSummerLendCollateral is Utils {
         _list(EUSD, _veda(EUSD_TELLER, usdcUsd, "eUSD / USD"), 80_00, 10_200);
 
         // Midas receipt tokens (proxy rate x composed USD leg)
-        _list(LIQUID_RESERVE, _chainlink(LIQUID_RESERVE_USD_PROXY, usdcUsd, MIDAS_RATE_MAX_STALENESS, "liquidRESERVE / USD"), 80_00, 10_100);
-        _list(WEEUR, _chainlink(WEEUR_EUR_PROXY, eurUsd, MIDAS_RATE_MAX_STALENESS, "weEUR / USD"), 70_00, 10_200);
-        _list(LIQUID_RWA, _chainlink(LIQUID_RWA_USD_PROXY, usdcUsd, MIDAS_RATE_MAX_STALENESS, "liquidRWA / USD"), 70_00, 10_400);
+        _list(LIQUID_RESERVE, _chainlink(LIQUID_RESERVE_USD_PROXY, usdcUsd, MIDAS_RATE_MAX_STALENESS, false, "liquidRESERVE / USD"), 80_00, 10_100);
+        _list(WEEUR, _chainlink(WEEUR_EUR_PROXY, eurUsd, MIDAS_RATE_MAX_STALENESS, false, "weEUR / USD"), 70_00, 10_200);
+        _list(LIQUID_RWA, _chainlink(LIQUID_RWA_USD_PROXY, usdcUsd, MIDAS_RATE_MAX_STALENESS, false, "liquidRWA / USD"), 70_00, 10_400);
 
         // Direct listings on the shared staleness-checked Chainlink feeds
         _list(USDT, usdtUsd, 90_00, 10_100);
@@ -173,7 +173,7 @@ contract AddSummerLendCollateral is Utils {
 
         // Migrate the two deploy-time reserves onto the new staleness-checked feeds:
         // USDC was listed on the raw usdcUsdOracle aggregator, weETH on the pre-refactor composite.
-        address weethUsd = _chainlink(WEETH_ETH_ORACLE, ethUsd, CHAINLINK_MAX_STALENESS, "weETH / USD");
+        address weethUsd = _chainlink(WEETH_ETH_ORACLE, ethUsd, CHAINLINK_MAX_STALENESS, false, "weETH / USD");
         spoke.updateReservePriceSource(weethReserveId, weethUsd);
         console.log("updated weETH reserve price source:", weethUsd);
         spoke.updateReservePriceSource(usdcReserveId, usdcUsd);
@@ -210,15 +210,15 @@ contract AddSummerLendCollateral is Utils {
     }
 
     /// @dev Deploys a ChainlinkPriceFeed over a Chainlink oracle, optionally composed on an underlying feed
-    function _chainlink(address oracle, address underlyingUsdFeed, uint256 maxStaleness, string memory desc) internal returns (address) {
-        ChainlinkPriceFeed feed = new ChainlinkPriceFeed(IAggregatorV3(oracle), IAaveV4PriceFeed(underlyingUsdFeed), FEED_DECIMALS, maxStaleness, desc);
+    function _chainlink(address oracle, address underlyingUsdFeed, uint256 maxStaleness, bool stable, string memory desc) internal returns (address) {
+        ChainlinkPriceFeed feed = new ChainlinkPriceFeed(IAggregatorV3(oracle), IAaveV4PriceFeed(underlyingUsdFeed), FEED_DECIMALS, maxStaleness, stable, desc);
         _requireLivePrice(address(feed), desc);
         return address(feed);
     }
 
     /// @dev Deploys a PythPriceFeed over a per-pair oracle, optionally composed on an underlying feed
     function _pyth(address pairOracle, address underlyingUsdFeed, string memory desc) internal returns (address) {
-        PythPriceFeed feed = new PythPriceFeed(IPythPairOracle(pairOracle), PYTH_ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(underlyingUsdFeed), PYTH_MAX_STALENESS, desc);
+        PythPriceFeed feed = new PythPriceFeed(IPythPairOracle(pairOracle), PYTH_ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(underlyingUsdFeed), PYTH_MAX_STALENESS, false, desc);
         _requireLivePrice(address(feed), desc);
         return address(feed);
     }
@@ -226,7 +226,7 @@ contract AddSummerLendCollateral is Utils {
     /// @dev Deploys a VedaAccountantPriceFeed, resolving the accountant from the teller on-chain
     function _veda(address teller, address underlyingUsdFeed, string memory desc) internal returns (address) {
         IVedaAccountant accountant = IVedaAccountant(address(ILayerZeroTeller(teller).accountant()));
-        VedaAccountantPriceFeed feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(underlyingUsdFeed), FEED_DECIMALS, VEDA_RATE_MAX_STALENESS, desc);
+        VedaAccountantPriceFeed feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(underlyingUsdFeed), FEED_DECIMALS, VEDA_RATE_MAX_STALENESS, false, desc);
         _requireLivePrice(address(feed), desc);
         return address(feed);
     }

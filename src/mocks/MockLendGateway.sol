@@ -10,9 +10,9 @@ import { ILendGateway } from "../interfaces/ILendGateway.sol";
  *         call-order test drive it directly. Real gateway behavior is exercised against a live Aave v4 instance
  *         under the lend profile (test/safe/modules/cash/lend/**), so this mock no longer fabricates positions.
  *         Not for production.
- * @dev Records the last supply / withdraw call and the collateral flag for the sandwich test; the position
- *      aggregate (getAccountData) and reserve liquidity (availableCash) are settable for the guard tests. The
- *      remaining reads return empty defaults, matching the inert wiring.
+ * @dev Records the last supply / withdraw call and collateral flag for the sandwich test. AccountData,
+ *      withdrawal liquidity, and per-safe borrow capacity are settable for focused guard tests; remaining reads
+ *      return inert defaults.
  */
 contract MockLendGateway is ILendGateway {
     /// @notice Recorded arguments of a mutating gateway call (`to` is zero for supply)
@@ -27,7 +27,11 @@ contract MockLendGateway is ILendGateway {
     mapping(address => mapping(address => bool)) public usingAsCollateral;
     mapping(address safe => mapping(address asset => uint256)) internal _debtOf;
     mapping(address safe => mapping(address asset => uint256)) internal _suppliedOf;
-    mapping(address asset => uint256) internal _availableCash;
+    mapping(address asset => uint256) internal _withdrawalLiquidity;
+    mapping(address safe => mapping(address asset => uint256)) internal _borrowCapacity;
+    mapping(address safe => mapping(address asset => bool)) internal _borrowCapacitySet;
+    mapping(address safe => mapping(address asset => uint256)) internal _rawBorrowCapacity;
+    mapping(address safe => mapping(address asset => bool)) internal _rawBorrowCapacitySet;
     /// @dev Whether an asset is a registered reserve; defaults to false
     mapping(address asset => bool) internal _registered;
     /// @dev Whether an asset's reserve allows borrowing; defaults to false
@@ -45,9 +49,21 @@ contract MockLendGateway is ILendGateway {
         _accountData[safe] = data;
     }
 
-    /// @notice Sets the reserve liquidity a subsequent `availableCash(asset)` will return
-    function setAvailableCash(address asset, uint256 amount) external {
-        _availableCash[asset] = amount;
+    /// @notice Sets the reserve liquidity a subsequent `withdrawalLiquidity(asset)` will return
+    function setWithdrawalLiquidity(address asset, uint256 amount) external {
+        _withdrawalLiquidity[asset] = amount;
+    }
+
+    /// @notice Sets the buffered Aave-priced borrowing capacity returned for a safe and asset
+    function setBorrowCapacity(address safe, address asset, uint256 amount) external {
+        _borrowCapacity[safe][asset] = amount;
+        _borrowCapacitySet[safe][asset] = true;
+    }
+
+    /// @notice Sets the raw (Aave 1.00) borrowing capacity returned for a safe and asset
+    function setRawBorrowCapacity(address safe, address asset, uint256 amount) external {
+        _rawBorrowCapacity[safe][asset] = amount;
+        _rawBorrowCapacitySet[safe][asset] = true;
     }
 
     /// @notice Sets whether an asset is a registered reserve (defaults to unregistered)
@@ -119,13 +135,69 @@ contract MockLendGateway is ILendGateway {
         return _debtOf[safe][asset];
     }
 
-    function availableCash(address asset) external view returns (uint256) {
-        return _availableCash[asset];
+    function withdrawalLiquidity(address asset) external view returns (uint256) {
+        return _withdrawalLiquidity[asset];
     }
 
-    /// @dev The mock models no borrow cap, so the borrowable liquidity equals availableCash
-    function availableToBorrow(address asset) external view returns (uint256) {
-        return _availableCash[asset];
+    /// @dev The mock models no borrow cap, so the borrowable liquidity equals withdrawalLiquidity
+    function borrowLiquidity(address asset) external view returns (uint256) {
+        return _withdrawalLiquidity[asset];
+    }
+
+    /// @dev Defaults to unlimited so existing tests can configure only their relevant gate.
+    function borrowCapacity(address safe, address asset) external view returns (uint256) {
+        return _borrowCapacitySet[safe][asset] ? _borrowCapacity[safe][asset] : type(uint256).max;
+    }
+
+    /// @dev Defaults to unlimited so existing tests can configure only their relevant gate.
+    function rawBorrowCapacity(address safe, address asset) external view returns (uint256) {
+        return _rawBorrowCapacitySet[safe][asset] ? _rawBorrowCapacity[safe][asset] : type(uint256).max;
+    }
+
+    mapping(address safe => uint256) internal _withdrawHeadroom;
+    mapping(address safe => uint256) internal _rawWithdrawHeadroom;
+
+    /// @notice Sets the buffered headroom a subsequent `withdrawHeadroom(safe)` will return
+    function setWithdrawHeadroom(address safe, uint256 value) external {
+        _withdrawHeadroom[safe] = value;
+    }
+
+    /// @notice Sets the raw headroom a subsequent `rawWithdrawHeadroom(safe)` will return
+    function setRawWithdrawHeadroom(address safe, uint256 value) external {
+        _rawWithdrawHeadroom[safe] = value;
+    }
+
+    function withdrawHeadroom(address safe) external view returns (uint256) {
+        return _withdrawHeadroom[safe];
+    }
+
+    function rawWithdrawHeadroom(address safe) external view returns (uint256) {
+        return _rawWithdrawHeadroom[safe];
+    }
+
+    /// @dev The mock models every asset as zero-weight (see ltv), so supply is fully withdrawable under debt
+    function collateralForHeadroom(address safe, address asset, uint256) external view returns (uint256) {
+        return _suppliedOf[safe][asset];
+    }
+
+    /// @dev Zero-weight supply consumes no headroom
+    function headroomRemoved(address, address, uint256) external pure returns (uint256) {
+        return 0;
+    }
+
+    /// @dev Inert 1:1 conversion
+    function borrowValue(address, uint256 amount) external pure returns (uint256) {
+        return amount;
+    }
+
+    /// @dev Inert 1:1 conversion, matching borrowValue
+    function repayValue(address, address, uint256 amount) external pure returns (uint256) {
+        return amount;
+    }
+
+    /// @dev Inert 1:1 conversion
+    function collateralForValue(address, uint256 value) external pure returns (uint256) {
+        return value;
     }
 
     function ltv(address) external pure returns (uint256) {

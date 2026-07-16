@@ -96,7 +96,7 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         // drained reserve on real Aave takes an unrelated whale borrow, so the borrowable read is mocked here
         // to isolate CashLens's liquidity gate (the branch under test).
         _supplyToGateway(address(safe), address(weETH), 1 ether);
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableToBorrow.selector, address(usdc)), abi.encode(amounts[0] - 1));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.borrowLiquidity.selector, address(usdc)), abi.encode(amounts[0] - 1));
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
@@ -104,7 +104,7 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
     }
 
     /// Credit spend is declined when borrowing power is ample and the pool holds cash, but the loan exceeds
-    /// the Hub's remaining drawCap: availableToBorrow folds the cap in, so the auth cannot approve a borrow
+    /// the Hub's remaining drawCap: borrowLiquidity folds the cap in, so the auth cannot approve a borrow
     /// the Hub would revert with DrawCapExceeded.
     function test_canSpend_fails_inCreditMode_whenBorrowExceedsDrawCap() public {
         _setMode(Mode.Credit);

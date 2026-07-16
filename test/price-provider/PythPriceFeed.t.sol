@@ -59,10 +59,10 @@ contract PythPriceFeedTest is Test {
         mockPyth = new MockPyth();
         mockOracle = new MockPythPairOracle(address(mockPyth), FEED_ID);
         mockPyth.setPublishTime(FEED_ID, block.timestamp);
-        feed = new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), MAX_STALENESS, "MOCK / USD");
+        feed = new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), MAX_STALENESS, false, "MOCK / USD");
 
         mockUnderlying = new MockUsdFeed(8);
-        compositeFeed = new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, mockUnderlying, MAX_STALENESS, "MOCK / USD via ETH");
+        compositeFeed = new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, mockUnderlying, MAX_STALENESS, false, "MOCK / USD via ETH");
     }
 
     function test_latestAnswer_scalesToFeedDecimals() public {
@@ -83,6 +83,15 @@ contract PythPriceFeedTest is Test {
         feed.latestAnswer();
     }
 
+    /// @notice A stable feed snaps to exactly 1 USD inside the 1% band and passes the raw price outside it.
+    function test_stable_snapsWithinOnePercent() public {
+        PythPriceFeed stableFeed = new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), MAX_STALENESS, true, "STABLE / USD");
+        mockOracle.setPrice(0.995e16);
+        assertEq(stableFeed.latestAnswer(), 1e8);
+        mockOracle.setPrice(1.02e16);
+        assertEq(stableFeed.latestAnswer(), 1.02e8);
+    }
+
     function test_constructor_readsPythWiringFromAdapter() public view {
         assertEq(address(feed.pyth()), address(mockPyth));
         assertEq(feed.feedId1(), FEED_ID);
@@ -92,12 +101,12 @@ contract PythPriceFeedTest is Test {
 
     function test_constructor_revertsOnUnsupportedDecimals() public {
         vm.expectRevert(PythPriceFeed.UnsupportedDecimals.selector);
-        new PythPriceFeed(mockOracle, 6, 8, IAaveV4PriceFeed(address(0)), MAX_STALENESS, "BAD / USD");
+        new PythPriceFeed(mockOracle, 6, 8, IAaveV4PriceFeed(address(0)), MAX_STALENESS, false, "BAD / USD");
     }
 
     function test_constructor_revertsOnZeroStaleness() public {
         vm.expectRevert(PythPriceFeed.InvalidMaxStaleness.selector);
-        new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), 0, "BAD / USD");
+        new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), 0, false, "BAD / USD");
     }
 
     function test_decimalsAndDescription() public view {
@@ -116,7 +125,7 @@ contract PythPriceFeedTest is Test {
 
     function test_underlying_normalizesUnderlyingDecimals() public {
         MockUsdFeed underlying18 = new MockUsdFeed(18);
-        PythPriceFeed composite18 = new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, underlying18, MAX_STALENESS, "MOCK / USD via 18-dec");
+        PythPriceFeed composite18 = new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, underlying18, MAX_STALENESS, false, "MOCK / USD via 18-dec");
         mockOracle.setPrice(0.05e16);
         underlying18.set(2000e18);
         assertEq(composite18.latestAnswer(), 100e8);
@@ -134,7 +143,7 @@ contract PythPriceFeedTest is Test {
     /// @notice Live adapter: wiring is discovered on-chain, price matches, staleness bound holds.
     function test_fork_latestAnswer_matchesLiveOracle() public {
         vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
-        PythPriceFeed liveFeed = new PythPriceFeed(IPythPairOracle(ETHFI_USD_ORACLE), ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), 1 days, "ETHFI / USD");
+        PythPriceFeed liveFeed = new PythPriceFeed(IPythPairOracle(ETHFI_USD_ORACLE), ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), 1 days, false, "ETHFI / USD");
 
         assertEq(address(liveFeed.pyth()), IPythPairOracle(ETHFI_USD_ORACLE).pyth());
         assertEq(liveFeed.feedId1(), IPythPairOracle(ETHFI_USD_ORACLE).BASE_FEED_1());

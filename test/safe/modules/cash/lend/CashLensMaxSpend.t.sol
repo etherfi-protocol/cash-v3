@@ -131,7 +131,7 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
 
         // A genuinely drained reserve on real Aave needs an unrelated whale borrow; mock the reserve read to
         // isolate the liquidity cap (the branch under test).
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableCash.selector, address(usdc)), abi.encode(uint256(400e6)));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.withdrawalLiquidity.selector, address(usdc)), abi.encode(uint256(400e6)));
 
         address[] memory pref = new address[](1);
         pref[0] = address(usdc);
@@ -247,19 +247,20 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(result.spendableAmounts[1], 600e6, 1e4, "liquidUSD is headroom-bound at its own 50% LTV, not USDC's 80%");
     }
 
-    /// With debt, a zero-LTV reserve cannot back a withdrawal, so only the raw balance of that reserve is spendable.
-    function test_debit_zeroLtvReserveWithDebt_onlyRaw() public {
-        // 1000 USDC supplied at 50% with 200 borrowed, so the safe carries debt. Aave rejects a 0 collateral factor,
-        // so the zero-LTV branch (defensive code, unreachable on real Aave) is exercised by mocking gw.ltv.
-        _buildDebtPosition(1000e6, 0, 200e6);
-        deal(address(usdc), address(safe), 300e6);
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.ltv.selector, address(usdc)), abi.encode(uint256(0)));
+    /// With debt, supply that carries no borrowing power (collateral flag off) is still fully spendable:
+    /// withdrawing it cannot lower the health factor, so Aave allows it and the quote matches.
+    function test_debit_nonCollateralSupplyWithDebt_fullySpendable() public {
+        // 1000 USDC (collateral) backs the 200 borrow; the 500 liquidUSD supply carries no borrowing power.
+        _buildDebtPosition(1000e6, 500e6, 200e6);
+        vm.prank(driver);
+        gw.setUsingAsCollateral(address(safe), address(liquidUsd), false);
+        deal(address(liquidUsd), address(safe), 300e6);
 
         address[] memory pref = new address[](1);
-        pref[0] = address(usdc);
+        pref[0] = address(liquidUsd);
 
         DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), pref);
-        assertEq(result.spendableAmounts[0], 300e6, "only the raw balance is spendable when LTV is zero and there is debt");
+        assertApproxEqAbs(result.spendableAmounts[0], 800e6, 2, "raw plus the full non-collateral supplied balance");
     }
 
     // ================ getMaxSpendDebit: pending withdrawals ================
@@ -373,8 +374,8 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         _supplyToGateway(address(safe), address(usdc), 2000e6); // ~$1000 borrowing power at 50%
 
         // Every borrow reserve can lend less than the borrowing power, so borrowable liquidity binds.
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableToBorrow.selector, address(usdc)), abi.encode(uint256(400e6)));
-        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.availableToBorrow.selector, address(liquidUsd)), abi.encode(uint256(0)));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.borrowLiquidity.selector, address(usdc)), abi.encode(uint256(400e6)));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.borrowLiquidity.selector, address(liquidUsd)), abi.encode(uint256(0)));
 
         assertEq(cashLens.getMaxSpendCredit(address(safe)), 400e6, "credit max spend capped by borrowable liquidity, not borrowing power");
     }
@@ -451,7 +452,7 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         }
     }
 
-    /// A non-stable carrying the borrowing power: both supplied stables stay fully spendable, credit is the un-haircut headroom, and maxBorrow stays gross.
+    /// A non-stable carrying the borrowing power: both supplied stables stay fully spendable, credit uses Aave-priced capacity, and maxBorrow stays Cash-priced.
     function test_safeCashData_mixedCollateral_weEthCarriesPower() public {
         // weETH carries most of the borrowing power, so the headroom never binds and both stables are face-bound.
         _supplyToGateway(address(safe), address(weETH), 10 ether);
@@ -472,9 +473,12 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         SafeCashData memory data = cashLens.getSafeCashData(address(safe), pref);
         ILendGateway.AccountData memory account = gw.getAccountData(address(safe));
         assertApproxEqAbs(data.totalBorrow, 4000e6, 2, "totalBorrow is the debt");
-        assertEq(cashLens.getMaxSpendCredit(address(safe)), account.availableBorrowsUsd, "credit max spend is the un-haircut availableBorrowsUsd");
-        assertEq(data.maxBorrow, account.availableBorrowsUsd + account.debtUsd, "maxBorrow is gross power: headroom + debt");
-        assertEq(data.creditMaxSpend, account.availableBorrowsUsd, "creditMaxSpend is the net headroom");
+        uint256 usdcCapacity = gw.borrowCapacity(address(safe), address(usdc));
+        uint256 liquidUsdCapacity = gw.borrowCapacity(address(safe), address(liquidUsd));
+        uint256 expectedCreditMax = usdcCapacity > liquidUsdCapacity ? usdcCapacity : liquidUsdCapacity;
+        assertEq(cashLens.getMaxSpendCredit(address(safe)), expectedCreditMax, "credit max spend uses the best Aave-priced settlement token");
+        assertEq(data.maxBorrow, account.availableBorrowsUsd + account.debtUsd, "displayed maxBorrow remains Cash-priced gross power");
+        assertEq(data.creditMaxSpend, expectedCreditMax, "creditMaxSpend is Aave-priced");
         assertEq(data.totalCollateral, account.collateralUsd, "totalCollateral mirrors the gateway aggregate");
     }
 
