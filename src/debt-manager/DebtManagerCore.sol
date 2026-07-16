@@ -459,7 +459,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param token Address of the token to borrow
      * @param amount Amount of tokens to borrow
      */
-    function borrow(BinSponsor binSponsor, address token, uint256 amount) public whenNotPaused nonReentrant onlyEtherFiSafe whenNotMigrated(msg.sender) {
+    function borrow(BinSponsor binSponsor, address token, uint256 amount) public whenNotPaused nonReentrant onlyEtherFiSafe onlyLegacySafe(msg.sender) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         if (!isBorrowToken(token)) revert UnsupportedBorrowToken();
@@ -489,7 +489,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param token Address of the token being repaid
      * @param amount Amount of tokens to repay
      */
-    function repay(address user, address token, uint256 amount) external whenNotPaused nonReentrant whenNotMigrated(user) {
+    function repay(address user, address token, uint256 amount) external whenNotPaused nonReentrant onlyLegacySafe(user) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         _onlyEtherFiSafe(user);
@@ -519,7 +519,7 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @param borrowToken Address of the borrow token to repay
      * @param collateralTokensPreference Order of preference for collateral tokens to liquidate
      */
-    function liquidate(address user, address borrowToken, address[] memory collateralTokensPreference) external whenNotPaused nonReentrant whenNotMigrated(user) {
+    function liquidate(address user, address borrowToken, address[] memory collateralTokensPreference) external whenNotPaused nonReentrant onlyLegacySafe(user) {
         if (collateralTokensPreference.length == 0) revert CollateralPreferenceIsEmpty();
         _updateInterestIndex(borrowToken);
         uint256 interestIndex = _getDebtManagerStorage().borrowTokenConfig[borrowToken].interestIndexSnapshot;
@@ -674,13 +674,15 @@ contract DebtManagerCore is DebtManagerStorageContract {
      * @dev The order (supply -> borrow -> repay) is load-bearing — the repayment is funded by the Aave borrow,
      *      which is only possible once the collateral is on Aave. The whole thing reverts (leaving the Safe
      *      untouched) if the Safe has no debt, the Aave reserve lacks liquidity, or the position does not fit
-     *      Aave's LTVs. Only callable by DEBT_MANAGER_ADMIN_ROLE (the migration runner).
+     *      Aave's LTVs. Only callable by DEBT_MANAGER_ADMIN_ROLE (the migration runner). Exactly-once per
+     *      Safe: reverts for a Safe already on the gateway engine, whether migrated or gateway-onboarded.
      *      Requires the gateway to be a default module on the Safe and DebtManager to be an authorized gateway
      *      driver; the gateway self-approves as the Safe's Aave position manager on its first op.
      * @param safe The Safe to migrate
      */
     function migrateToLendGateway(address safe) external whenNotPaused nonReentrant onlyRole(DEBT_MANAGER_ADMIN_ROLE) {
         _onlyEtherFiSafe(safe);
+        _onlyLegacySafe(safe);
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         // Single source of truth: the gateway lives on CashModule (this contract already reaches it for the
@@ -690,7 +692,9 @@ contract DebtManagerCore is DebtManagerStorageContract {
         if (address(_gateway) == address(0)) revert GatewayNotSet();
 
         // 1. Snapshot the outstanding DebtManager debt. A debt-free Safe still migrates its collateral (below),
-        //    so a batch runner can call this over every Safe without special-casing (and idempotently).
+        //    so a batch runner can call this over every legacy Safe without special-casing debt. Migration is
+        //    exactly-once: a repeat call reverts on the engine flag above (a silent re-run would sweep new
+        //    loose balances into Aave and re-emit the migration event), so the runner skips migrated Safes.
         (TokenData[] memory borrowings, uint256 totalDebtUsd) = borrowingOf(safe);
         uint256 bLen = borrowings.length;
 
@@ -862,13 +866,21 @@ contract DebtManagerCore is DebtManagerStorageContract {
     }
 
     /**
-     * @dev Blocks legacy DebtManager operations for a Safe once it has migrated to Aave
+     * @dev Restricts legacy DebtManager operations to Safes on the legacy engine. The engine flag covers
+     *      both ways a Safe leaves it: migration flips the flag in the same tx, and gateway-onboarded
+     *      Safes get it at setup (they never migrate, so the migration latch alone would let them open
+     *      legacy debt the Cash flows no longer look at).
      * @param safe The Safe to check
-     * @custom:throws AlreadyMigratedToLendGateway if the Safe has been migrated
+     * @custom:throws SafeUsesLendGateway if the Safe's engine is the lend gateway
      */
-    modifier whenNotMigrated(address safe) {
-        if (_getDebtManagerStorage().migratedToLendGateway[safe]) revert AlreadyMigratedToLendGateway();
+    modifier onlyLegacySafe(address safe) {
+        _onlyLegacySafe(safe);
         _;
+    }
+
+    /// @dev See onlyLegacySafe; a function keeps the modifier's stack footprint flat
+    function _onlyLegacySafe(address safe) internal view {
+        if (ICashModule(etherFiDataProvider.getCashModule()).usesLendGateway(safe)) revert SafeUsesLendGateway();
     }
 
     /**

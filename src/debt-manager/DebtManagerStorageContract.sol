@@ -405,8 +405,8 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     /// @notice Thrown when migrating an opted-out Safe that still carries DebtManager debt (repay it first)
     error LendOptedOutSafeHasDebt();
 
-    /// @notice Thrown when a legacy DebtManager operation (borrow/repay) is attempted on a Safe already migrated to Aave
-    error AlreadyMigratedToLendGateway();
+    /// @notice Thrown when a legacy DebtManager operation or a migration is attempted on a Safe whose engine is the lend gateway
+    error SafeUsesLendGateway();
     
     /**
      * @notice Error thrown when user is still liquidatable
