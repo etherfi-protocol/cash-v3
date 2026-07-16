@@ -70,23 +70,12 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Sets up a new Safe's Cash Module with initial configuration
-     * @dev Accepts the legacy three-field payload as DebtManager routing and the four-field payload with an
-     *      explicit LendGateway routing flag.
-     * @param data ABI-encoded spending limits, timezone, and optional useLendGateway flag
+     * @dev Creates default spending limits and sets initial mode to Debit with 50% cashback split. The backend
+     *      picks the engine per safe at deploy time via the useLendGateway flag in the setup data.
+     * @param data ABI-encoded (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset, bool useLendGateway)
      */
     function setupModule(bytes calldata data) external override onlyEtherFiSafe(msg.sender) {
-        uint256 dailyLimitInUsd;
-        uint256 monthlyLimitInUsd;
-        int256 timezoneOffset;
-        bool useLendGateway;
-
-        if (data.length == 3 * 32) {
-            (dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset) = abi.decode(data, (uint256, uint256, int256));
-        } else if (data.length == 4 * 32) {
-            (dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, useLendGateway) = abi.decode(data, (uint256, uint256, int256, bool));
-        } else {
-            revert InvalidInput();
-        }
+        (uint256 dailyLimitInUsd, uint256 monthlyLimitInUsd, int256 timezoneOffset, bool useLendGateway) = abi.decode(data, (uint256, uint256, int256, bool));
 
         CashModuleStorage storage cashStorage = _getCashModuleStorage();
         SafeCashConfig storage $ = cashStorage.safeCashConfig[msg.sender];
