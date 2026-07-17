@@ -6,6 +6,18 @@ admin (the Cash RoleRegistry owner, who is also the Aave test-instance admin).
 
 ## Run order
 
+First refresh the Aave test-instance price feeds if the feed code changed since they were
+last deployed (for example the USD-stable snap). The listing script is idempotent: on a
+re-run it redeploys every feed and repoints each existing reserve instead of re-listing.
+Afterwards, refresh the `details` oracle map in `aave-v4-test.json` by hand — the script
+does not rewrite it.
+
+```sh
+source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
+  scripts/aave-v4/AddSummerLendCollateral.s.sol:AddSummerLendCollateral \
+  --rpc-url $OPTIMISM_RPC --broadcast -vvvv
+```
+
 Deploy and check:
 
 ```sh
@@ -32,6 +44,10 @@ more than $100 of aggregate supply or debt; set `SKIP_FUND_CHECK=true` to overri
 out to an old liquid, liquidReferrer, or frax module would strand when the deploy replaces
 them. It scans all Safes in parallel in about a minute; the same scan inside the forge
 script took 20+ minutes, which is why it lives outside. Run it right before broadcasting.
+
+After the upgrade, new Safes must be set up with the four-field Cash setup payload that
+carries the explicit `useLendGateway` flag. Coordinate with cash-be before it deploys
+Safes against the upgraded dev stack, or Safe creation fails on the payload decode.
 
 ## If a broadcast dies partway
 

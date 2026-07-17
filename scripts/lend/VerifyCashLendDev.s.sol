@@ -181,6 +181,7 @@ contract VerifyCashLendDev is Utils {
         require(d.deployer == d.admin, "deployer is not dev admin");
         require(RoleRegistry(d.roleRegistry).owner() == d.admin, "dev admin mismatch");
         require(RoleRegistry(d.roleRegistry).hasRole(gateway.LEND_GATEWAY_ADMIN_ROLE(), d.admin), "gateway admin role missing");
+        require(RoleRegistry(d.roleRegistry).hasRole(DebtManagerCore(d.debtManager).ETHER_FI_WALLET_ROLE(), d.admin), "wallet role missing for migration");
 
         uint256 count = spoke.getReserveCount();
         require(gateway.registeredAssets().length == count, "registered reserve count mismatch");

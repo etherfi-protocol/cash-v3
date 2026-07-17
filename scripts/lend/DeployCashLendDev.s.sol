@@ -37,8 +37,9 @@ import { CashLendDevModules } from "./CashLendDevModules.sol";
  *      pending withdrawal paying out to an old module, which this deploy would strand. Doing that
  *      scan in-script takes 20+ minutes because forge fetches each Safe's state sequentially.
  *
- *      CashModuleCore, CashModuleSetters, and CashLens use dynamically linked libraries. Forge deploys
- *      and links those libraries as part of the script run; retain the broadcast artifact for verification.
+ *      CashModuleCore, CashModuleSetters, CashLens, and LendGateway use dynamically linked libraries.
+ *      Forge deploys and links those libraries as part of the script run; retain the broadcast artifact
+ *      for verification (the LendGateway impl needs the LendCapacityLib address to verify).
  *
  * Usage (drop --broadcast for simulation):
  *   source .env && ENV=dev forge script \
@@ -104,6 +105,11 @@ contract DeployCashLendDev is Utils {
 
         // Configure every gateway driver before enabling the new modules or routing Safes through Lend.
         _configureGateway(existing, IAaveV4Spoke(spokeAddress), gatewayProxy, modules);
+
+        // Migration (DebtManager.migrateToLendGateway) is gated on ETHER_FI_WALLET_ROLE; grant it so
+        // the dev admin can migrate Safes right after this deploy.
+        bytes32 walletRole = DebtManagerCore(existing.debtManager).ETHER_FI_WALLET_ROLE();
+        if (!RoleRegistry(existing.roleRegistry).hasRole(walletRole, tx.origin)) RoleRegistry(existing.roleRegistry).grantRole(walletRole, tx.origin);
 
         // Swap the new modules in, then activate Lend last so no Safe reaches a half-configured gateway.
         CashLendDevModules.activate(existing.dataProvider, existing.cashModule, existing.modules, modules);
