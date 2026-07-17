@@ -427,9 +427,11 @@ contract CashModuleSetters is CashModuleStorageContract {
         $$.pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
         $.cashEventEmitter.emitWithdrawalRequested(safe, tokens, amounts, recipient, finalTime);
 
-        // Deliberately unconditional: load-bearing for legacy safes (loose tokens are DebtManager collateral)
-        // and provably a no-op for gateway safes, whose DebtManager books are zero by construction.
-        _getDebtManager().ensureHealth(safe);
+        // Legacy safes only: their loose tokens are DebtManager collateral, so a withdrawal can worsen the
+        // legacy position. Gateway safes are health-gated by Aave on the pull in sourceWithdrawal; calling
+        // ensureHealth here would revert once getMaxBorrowAmount prices a supplied Aave asset that DebtManager
+        // does not list as collateral (the two registries diverge by design as DebtManager is retired).
+        if (!_usesLendGateway(safe)) _getDebtManager().ensureHealth(safe);
 
         if ($.withdrawalDelay == 0) _processWithdrawal(safe);
     }

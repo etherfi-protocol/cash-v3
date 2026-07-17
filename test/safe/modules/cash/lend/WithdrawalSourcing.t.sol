@@ -140,6 +140,42 @@ contract WithdrawalSourcingTest is CashGatewayTestSetup {
         assertEq(usdc.balanceOf(withdrawRecipient), max, "recipient paid the full quote");
     }
 
+    /// Regression: a gateway safe supplied in an Aave asset that DebtManager no longer lists as collateral
+    /// must still be able to withdraw. Both withdrawal paths call DebtManager.ensureHealth, whose
+    /// getMaxBorrowAmount walks the safe's Aave-supplied assets and reverts UnsupportedCollateralToken for
+    /// any asset missing from the (separate, shrinking) DebtManager collateral registry. The call is gated on
+    /// !usesLendGateway, so a gateway safe skips it entirely; Aave already health-checks the pull.
+    function test_requestWithdrawal_notBrickedWhenSuppliedAssetDelistedFromDebtManager() public {
+        _supplyToGateway(address(safe), address(weETH), 3 ether); // gateway-registered Aave collateral
+        deal(address(usdc), address(safe), 4000e6); // unrelated loose USDC the safe wants to withdraw
+
+        // DebtManager retires weETH as legacy collateral while the gateway safe still holds it on Aave: the
+        // two registries diverge, which is the intended end state as the legacy engine is wound down.
+        vm.prank(owner);
+        debtManager.unsupportCollateralToken(address(weETH));
+
+        // requestWithdrawal (the first gated ensureHealth) must not revert.
+        _requestWithdrawal(_addr1(address(usdc)), _uint1(4000e6), withdrawRecipient);
+
+        // processWithdrawal (the second gated ensureHealth) must also pay out.
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay + 1);
+        cashModule.processWithdrawal(address(safe));
+        assertEq(usdc.balanceOf(withdrawRecipient), 4000e6, "recipient paid despite the delisted supplied asset");
+    }
+
+    /// Catch-all: DebtManager.ensureHealth is a no-op for a gateway safe even when called directly, so any
+    /// future caller that forgets the !usesLendGateway guard stays safe. Without the internal guard this
+    /// reverts UnsupportedCollateralToken once weETH is delisted while the safe still holds it supplied on Aave.
+    function test_ensureHealth_isNoOpForGatewaySafeWithDelistedSuppliedAsset() public {
+        _supplyToGateway(address(safe), address(weETH), 3 ether);
+
+        vm.prank(owner);
+        debtManager.unsupportCollateralToken(address(weETH));
+
+        debtManager.ensureHealth(address(safe)); // must not revert
+    }
+
     /// Builds the owner signatures for a withdrawal request, so revert-path tests can place expectRevert
     /// immediately before the module call.
     function _signRequestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient_) internal view returns (address[] memory, bytes[] memory) {

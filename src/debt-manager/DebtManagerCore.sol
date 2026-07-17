@@ -217,10 +217,14 @@ contract DebtManagerCore is DebtManagerStorageContract {
 
     /**
      * @notice Verifies that a user's position is healthy (not liquidatable)
-     * @dev Reverts if total borrowing exceeds maximum borrowing based on LTV
+     * @dev Reverts if legacy borrowing exceeds max borrowing based on LTV. A no-op for gateway safes: they
+     *      carry no DebtManager debt and Aave enforces their health, so the check is skipped. Calling it for a
+     *      gateway safe would revert once getMaxBorrowAmount prices a supplied Aave asset that DebtManager does
+     *      not list as collateral. This is the catch-all behind the per-call-site guards.
      * @param user Address of the user to check
      */
     function ensureHealth(address user) public view {
+        if (ICashModule(etherFiDataProvider.getCashModule()).usesLendGateway(user)) return;
         (, uint256 totalBorrowings) = borrowingOf(user);
         if (totalBorrowings > getMaxBorrowAmount(user, true)) revert AccountUnhealthy();
     }
