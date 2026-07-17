@@ -164,6 +164,18 @@ contract WithdrawalSourcingTest is CashGatewayTestSetup {
         assertEq(usdc.balanceOf(withdrawRecipient), 4000e6, "recipient paid despite the delisted supplied asset");
     }
 
+    /// Catch-all: DebtManager.ensureHealth is a no-op for a gateway safe even when called directly, so any
+    /// future caller that forgets the !usesLendGateway guard stays safe. Without the internal guard this
+    /// reverts UnsupportedCollateralToken once weETH is delisted while the safe still holds it supplied on Aave.
+    function test_ensureHealth_isNoOpForGatewaySafeWithDelistedSuppliedAsset() public {
+        _supplyToGateway(address(safe), address(weETH), 3 ether);
+
+        vm.prank(owner);
+        debtManager.unsupportCollateralToken(address(weETH));
+
+        debtManager.ensureHealth(address(safe)); // must not revert
+    }
+
     /// Builds the owner signatures for a withdrawal request, so revert-path tests can place expectRevert
     /// immediately before the module call.
     function _signRequestWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient_) internal view returns (address[] memory, bytes[] memory) {
