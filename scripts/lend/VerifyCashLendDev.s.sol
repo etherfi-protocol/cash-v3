@@ -178,6 +178,7 @@ contract VerifyCashLendDev is Utils {
         require(gateway.isDriver(d.topUpDest), "TopUpDest not a driver");
         require(gateway.isDriver(d.liquifier), "liquifier not a driver");
         require(spoke.isPositionManagerActive(d.lendGateway), "gateway not active on Spoke");
+        require(EtherFiDataProvider(d.dataProvider).isDefaultModule(d.lendGateway), "gateway not a default module");
         require(d.deployer == d.admin, "deployer is not dev admin");
         require(RoleRegistry(d.roleRegistry).owner() == d.admin, "dev admin mismatch");
         require(RoleRegistry(d.roleRegistry).hasRole(gateway.LEND_GATEWAY_ADMIN_ROLE(), d.admin), "gateway admin role missing");
