@@ -39,9 +39,11 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
     error StalePrice();
     /// @notice Thrown when the rate or the underlying price is zero or negative
     error InvalidPrice();
+    /// @notice Thrown when the staleness bound is zero
+    error InvalidMaxStaleness();
 
     constructor(IVedaAccountant _accountant, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) {
-
+        require(_rateMaxStaleness > 0, InvalidMaxStaleness());
         accountant = _accountant;
         underlyingUsdFeed = _underlyingUsdFeed;
         rateDecimals = _accountant.decimals();

@@ -65,6 +65,12 @@ contract VedaAccountantPriceFeedTest is Test {
         feed.latestAnswer();
     }
 
+    /// @notice Reverts at construction when the staleness bound is zero.
+    function test_constructor_revertsOnZeroStaleness() public {
+        vm.expectRevert(VedaAccountantPriceFeed.InvalidMaxStaleness.selector);
+        new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, 0, false, "liquidETH / USD");
+    }
+
     /// @notice Reverts when the accountant has paused itself (getRateSafe reverts).
     function test_reverts_whenAccountantPaused() public {
         vm.mockCallRevert(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), "paused");
