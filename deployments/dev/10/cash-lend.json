@@ -1,7 +1,7 @@
 {
   "admin": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
   "cashEventEmitterImpl": "0x60C0F717EcC5f886915AFB1f4906ECc9CCE0bDbf",
-  "cashLensImpl": "0xe5C0d419f5baC8fc0992FB3Ab756169Cb496b785",
+  "cashLensImpl": "0x88A359fE20030Bf9e602E43e0DDd20cbEcA2F78a",
   "cashModuleCoreImpl": "0xebeA69A6A6FaF49939dbB4e7B8c17B4bF0643813",
   "cashModuleSettersImpl": "0x7d66823584Bd7C856De9bE96A8CeE092B585978c",
   "chainId": 10,
