@@ -300,8 +300,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
         delete $$.pendingWithdrawalRequest;
 
-        // Deliberately unconditional: load-bearing for legacy safes (loose tokens are DebtManager collateral)
-        // and provably a no-op for gateway safes, whose DebtManager books are zero by construction.
-        $.debtManager.ensureHealth(safe);
+        // Legacy safes only: see _requestWithdrawal. Gateway safes are health-gated by Aave at request time
+        // and would revert here if DebtManager cannot price a supplied Aave asset.
+        if (!_usesLendGateway(safe)) $.debtManager.ensureHealth(safe);
     }
 }
