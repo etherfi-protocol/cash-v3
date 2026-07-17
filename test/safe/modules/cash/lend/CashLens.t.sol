@@ -14,18 +14,56 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/CashLens.t.sol"
  */
 contract CashLensAaveTest is CashGatewayTestSetup {
-    /// A gateway safe's collateral is its Aave-supplied balance; loose funds don't count.
-    function test_getUserCollateralForToken_gatewaySafe_readsSuppliedBalance() public {
-        deal(address(weETH), address(safe), 5 ether); // loose, not collateral for a gateway safe
-        assertEq(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 0, "loose balance is not collateral");
+    /// A gateway safe's collateral is its Aave-supplied balance plus any idle loose balance.
+    function test_getUserCollateralForToken_gatewaySafe_countsSuppliedPlusIdle() public {
+        deal(address(weETH), address(safe), 5 ether); // idle funds count as collateral
+        assertEq(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 5 ether, "idle balance is collateral");
 
-        _supplyToGateway(address(safe), address(weETH), 3 ether);
-        assertApproxEqAbs(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 3 ether, 2, "supplied balance is the collateral");
+        _supplyToGateway(address(safe), address(weETH), 3 ether); // deals 3 more and supplies them, so the idle 5 stay put
+        assertApproxEqAbs(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 8 ether, 2, "supplied plus idle");
 
         IDebtManager.TokenData[] memory collateral = cashLens.getUserTotalCollateral(address(safe));
-        assertEq(collateral.length, 1, "only the supplied token shows up");
+        assertEq(collateral.length, 1, "only the weETH position shows up");
         assertEq(collateral[0].token, address(weETH));
-        assertApproxEqAbs(collateral[0].amount, 3 ether, 2);
+        assertApproxEqAbs(collateral[0].amount, 8 ether, 2);
+    }
+
+    /// A pending withdrawal reserves loose funds, so only the unreserved idle part counts as collateral.
+    function test_getUserCollateralForToken_pendingWithdrawalReservesIdle() public {
+        _supplyToGateway(address(safe), address(weETH), 3 ether);
+        deal(address(weETH), address(safe), 5 ether);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(weETH);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 2 ether;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // supplied 3, plus idle = 5 loose - 2 pending; the supplied side is never reserved
+        assertApproxEqAbs(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 6 ether, 2, "pending reserves the loose part only");
+    }
+
+    /// getSafeCashData's totalCollateral extends the gateway's Aave-priced aggregate with idle balances
+    /// priced by the PriceProvider, and the per-token breakdown lists idle-only positions.
+    function test_getSafeCashData_totalCollateralIncludesIdle() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        deal(address(usdc), address(safe), 3000e6); // idle, never supplied
+
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
+        ILendGateway.AccountData memory account = gw.getAccountData(address(safe));
+
+        uint256 idleUsd = (3000e6 * priceProvider.price(address(usdc))) / 1e6;
+        assertEq(data.totalCollateral, account.collateralUsd + idleUsd, "gateway aggregate plus idle USD");
+
+        assertEq(data.collateralBalances.length, 2, "supplied weETH and idle USDC both listed");
+        for (uint256 i = 0; i < data.collateralBalances.length; i++) {
+            if (data.collateralBalances[i].token == address(usdc)) {
+                assertEq(data.collateralBalances[i].amount, 3000e6, "idle-only USDC listed at its idle balance");
+            }
+        }
+
+        // Idle funds carry no borrowing power: maxBorrow stays the gateway's figure.
+        assertEq(data.maxBorrow, account.availableBorrowsUsd + account.debtUsd, "maxBorrow unaffected by idle funds");
     }
 
     /// getSafeCashData reports collateral entries, debit mode, and a pending withdrawal for a gateway safe with no borrows.
@@ -55,9 +93,10 @@ contract CashLensAaveTest is CashGatewayTestSetup {
         assertEq(data.withdrawalRequest.tokens[0], address(usdc), "Withdrawal token should be USDC");
         assertEq(data.withdrawalRequest.amounts[0], 5000e6, "Withdrawal amount should be 5000 USDC");
 
-        // Totals come straight from the gateway's account data, the same source CashLens reads.
+        // The 5000 loose USDC is fully reserved by the pending withdrawal, so idle is zero and the
+        // total is exactly the gateway's account data.
         ILendGateway.AccountData memory account = gw.getAccountData(address(safe));
-        assertEq(data.totalCollateral, account.collateralUsd, "Total collateral matches gateway");
+        assertEq(data.totalCollateral, account.collateralUsd, "Total collateral matches gateway when idle is fully reserved");
         assertEq(data.totalBorrow, 0, "Total borrow should be zero initially");
         assertEq(data.maxBorrow, account.availableBorrowsUsd + account.debtUsd, "Max borrow matches gateway headroom plus debt");
     }

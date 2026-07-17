@@ -40,8 +40,13 @@ import { CashLensLegacyLib } from "./CashLensLegacyLib.sol";
  *      spendable is exactly what a gateway withdraw allows; there is no separate module-side health gate.
  *
  *      A pending withdrawal sits against the loose Safe balance, not the supplied position. CashLens reserves
- *      it from the loose balance and uses the gateway's figures (collateral, maxBorrow, credit/debit headroom)
+ *      it from the loose balance and uses the gateway's figures (maxBorrow, credit/debit headroom)
  *      for the supplied position as-is.
+ *
+ *      Collateral views (getSafeCashData totals, getUserTotalCollateral, getUserCollateralForToken) report a
+ *      gateway safe's supplied position plus its idle balance of registered assets — loose funds net of any
+ *      pending-withdrawal reservation. Idle funds show as collateral but carry no borrowing power until
+ *      supplied, so maxBorrow and the spend ceilings stay gateway-derived.
  * @author ether.fi
  */
 contract CashLens is UpgradeableProxy, Constants {
@@ -280,12 +285,15 @@ contract CashLens is UpgradeableProxy, Constants {
             collateralTokens = lendGateway.registeredAssets();
             debitSpendTokens = lendGateway.spendAssets();
             ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
-            data.collateralBalances = _suppliedBalances(safe, collateralTokens);
+            uint256 idleUsd;
+            (data.collateralBalances, idleUsd) = _collateralBalances(safe, collateralTokens, safeData);
             // Debt can sit on any registered reserve, including one that stopped being borrowable after
             // the borrow (borrowable flag turned off, or the reserve frozen/paused), so walk all
             // registered assets here to match totalBorrow and hasOpenBorrows.
             data.borrows = _debtBalances(safe, collateralTokens);
-            data.totalCollateral = account.collateralUsd;
+            // Supplied position (the gateway's Aave-priced aggregate) plus idle registered assets
+            // (PriceProvider-priced, same 6-decimal scale). Idle funds add no borrowing power.
+            data.totalCollateral = account.collateralUsd + idleUsd;
             data.totalBorrow = account.debtUsd;
             // Gross borrowing power (collateral weighted by LTV): the gateway headroom plus current debt
             data.maxBorrow = account.availableBorrowsUsd + account.debtUsd;
@@ -467,8 +475,8 @@ contract CashLens is UpgradeableProxy, Constants {
 
     /**
      * @notice Gets the effective collateral amount for a specific token
-     * @dev A gateway safe's collateral is its Aave-supplied balance (pending withdrawals reserve loose funds,
-     *      not the supplied position). A legacy safe's collateral is its raw balance minus pending
+     * @dev A gateway safe's collateral is its Aave-supplied balance plus its idle balance (loose funds net
+     *      of any pending-withdrawal reservation). A legacy safe's collateral is its raw balance minus pending
      *      withdrawals — DebtManager reads this branch for its health and borrow checks, so it must keep the
      *      exact pre-gateway semantics until the legacy engine is retired.
      * @param safe Address of the safe
@@ -487,12 +495,13 @@ contract CashLens is UpgradeableProxy, Constants {
 
         ILendGateway lendGateway = gateway();
         if (!lendGateway.isRegistered(token)) revert NotACollateralToken();
-        return lendGateway.suppliedOf(safe, token);
+        return lendGateway.suppliedOf(safe, token) + _idleBalance(safe, token, cashModule.getData(safe));
     }
 
     /**
      * @notice Gets all effective collateral balances for a safe
-     * @dev A gateway safe's collateral is its Aave-supplied balances; a legacy safe's is its raw balances
+     * @dev A gateway safe's collateral is its Aave-supplied balances plus its idle balances of registered
+     *      assets (loose funds net of pending-withdrawal reservations); a legacy safe's is its raw balances
      *      minus pending withdrawals. DebtManager reads the legacy branch for its health and borrow checks,
      *      so that branch must keep the exact pre-gateway semantics until the legacy engine is retired.
      * @param safe Address of the safe
@@ -503,7 +512,8 @@ contract CashLens is UpgradeableProxy, Constants {
             return CashLensLegacyLib.userTotalCollateral(cashModule, safe, cashModule.getDebtManager().getCollateralTokens());
         }
 
-        return _suppliedBalances(safe, gateway().registeredAssets());
+        (IDebtManager.TokenData[] memory collateral,) = _collateralBalances(safe, gateway().registeredAssets(), cashModule.getData(safe));
+        return collateral;
     }
 
     /**
@@ -542,13 +552,19 @@ contract CashLens is UpgradeableProxy, Constants {
         return rawAfterPending + withdrawableSupplied;
     }
 
-    /// @notice Per-token supplied position in the Safe's Aave account, skipping zero balances
-    function _suppliedBalances(address safe, address[] memory tokens) internal view returns (IDebtManager.TokenData[] memory) {
+    /// @notice Per-token collateral of a gateway safe: the Aave-supplied position plus the idle Safe balance
+    ///         (loose funds net of any pending-withdrawal reservation), skipping zero balances. Also returns
+    ///         the idle part's total USD value (6 decimals) so getSafeCashData can extend the gateway's
+    ///         Aave-priced collateral aggregate in the same scale.
+    function _collateralBalances(address safe, address[] memory tokens, SafeData memory safeData) internal view returns (IDebtManager.TokenData[] memory, uint256) {
         ILendGateway lendGateway = cashModule.getLendGateway();
         IDebtManager.TokenData[] memory out = new IDebtManager.TokenData[](tokens.length);
+        uint256 idleUsd = 0;
         uint256 m = 0;
         for (uint256 i = 0; i < tokens.length;) {
-            uint256 amount = lendGateway.suppliedOf(safe, tokens[i]);
+            uint256 idle = _idleBalance(safe, tokens[i], safeData);
+            if (idle != 0) idleUsd += _toUsd(tokens[i], idle);
+            uint256 amount = lendGateway.suppliedOf(safe, tokens[i]) + idle;
             if (amount != 0) {
                 out[m] = IDebtManager.TokenData({ token: tokens[i], amount: amount });
                 unchecked {
@@ -564,7 +580,14 @@ contract CashLens is UpgradeableProxy, Constants {
             mstore(out, m)
         }
 
-        return out;
+        return (out, idleUsd);
+    }
+
+    /// @notice Idle balance of `token` in the Safe: the loose balance less any pending-withdrawal reservation
+    function _idleBalance(address safe, address token, SafeData memory safeData) internal view returns (uint256) {
+        uint256 loose = IERC20(token).balanceOf(safe);
+        uint256 pending = _getPendingWithdrawalAmount(safeData, token);
+        return loose > pending ? loose - pending : 0;
     }
 
     /// @notice Per-token debt in the Safe's Aave account, skipping zero balances
