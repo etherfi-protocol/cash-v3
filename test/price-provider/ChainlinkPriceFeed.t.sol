@@ -57,6 +57,12 @@ contract ChainlinkPriceFeedTest is Test {
         feed.latestAnswer();
     }
 
+    /// @notice Reverts at construction when the staleness bound is zero.
+    function test_constructor_revertsOnZeroStaleness() public {
+        vm.expectRevert(ChainlinkPriceFeed.InvalidMaxStaleness.selector);
+        new ChainlinkPriceFeed(IAggregatorV3(rateFeed), IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, 0, false, "weETH / USD");
+    }
+
     /// @notice Reverts when the rate feed price is zero or negative.
     function test_reverts_whenRateNotPositive() public {
         vm.mockCall(rateFeed, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(uint80(1), int256(0), block.timestamp, block.timestamp, uint80(1)));

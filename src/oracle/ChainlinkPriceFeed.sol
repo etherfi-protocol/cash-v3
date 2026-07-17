@@ -48,8 +48,11 @@ contract ChainlinkPriceFeed is IAaveV4PriceFeed {
     error StalePrice();
     /// @notice Thrown when either leg's price is zero or negative
     error InvalidPrice();
+    /// @notice Thrown when the staleness bound is zero
+    error InvalidMaxStaleness();
 
     constructor(IAggregatorV3 _rateFeed, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) {
+        require(_rateMaxStaleness > 0, InvalidMaxStaleness());
         rateFeed = _rateFeed;
         underlyingUsdFeed = _underlyingUsdFeed;
         rateDecimals = _rateFeed.decimals();

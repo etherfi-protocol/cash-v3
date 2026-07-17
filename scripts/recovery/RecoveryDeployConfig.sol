@@ -28,6 +28,8 @@ library RecoveryDeployConfig {
     bytes32 internal constant SALT_RECOVERY_MODULE           = keccak256("Recovery.RecoveryModule.v1");
     bytes32 internal constant SALT_RECOVERY_DISPATCHER_PROXY = keccak256("Recovery.RecoveryDispatcherProxy.v1");
     bytes32 internal constant SALT_TOPUP_V2_IMPL             = keccak256("Recovery.TopUpV2Impl.v1");
+    // Same-chain (OP) Safe asset recovery module. Non-upgradable, deployed directly via CREATE3.
+    bytes32 internal constant SALT_SAFE_RECOVERY_MODULE      = keccak256("Recovery.SafeAssetRecoveryModule.v1");
 
     uint32 internal constant OP_EID = 30_111;
 }
