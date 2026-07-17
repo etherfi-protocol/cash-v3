@@ -90,7 +90,7 @@ contract VerifyCashLendRollbackDev is Utils {
         require(stdJson.readUint(record, ".chainId") == block.chainid, "deployment record chain mismatch");
         d.lendGateway = stdJson.readAddress(record, ".lendGateway");
         d.lendGatewayImpl = stdJson.readAddress(record, ".lendGatewayImpl");
-        d.newModules = stdJson.readAddressArray(record, ".newModules");
+        d.newModules = CashLendDevModules.readNew(record);
 
         string memory baseline = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend-rollback-baseline.json"));
         require(stdJson.readUint(baseline, ".chainId") == block.chainid, "rollback baseline chain mismatch");

@@ -21,7 +21,6 @@ source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
 Deploy and check:
 
 ```sh
-source .env && scripts/lend/check-pending-withdrawals.sh "$OPTIMISM_RPC"
 source .env && ENV=dev forge script scripts/lend/DeployCashLendDev.s.sol:DeployCashLendDev \
   --rpc-url $OPTIMISM_RPC --broadcast -vvvv
 source .env && ENV=dev forge script scripts/lend/VerifyCashLendDev.s.sol:VerifyCashLendDev \
@@ -37,13 +36,17 @@ source .env && ENV=dev forge script scripts/lend/VerifyCashLendRollbackDev.s.sol
   --rpc-url $OPTIMISM_RPC -vvvv
 ```
 
-Drop `--broadcast` to simulate any script first. Rollback stops if the test Spoke holds
+Drop `--broadcast` to simulate any script first; a dry run skips writing
+`cash-lend.json`, so it never blocks the real run. Rollback stops if the test Spoke holds
 more than $100 of aggregate supply or debt; set `SKIP_FUND_CHECK=true` to override.
 
-`check-pending-withdrawals.sh` guards the module swap: a pending Cash withdrawal paying
-out to an old liquid, liquidReferrer, or frax module would strand when the deploy replaces
-them. It scans all Safes in parallel in about a minute; the same scan inside the forge
-script took 20+ minutes, which is why it lives outside. Run it right before broadcasting.
+The deploy leaves the old modules enabled (default, whitelisted, requesters) so existing
+Safes keep working while they migrate gradually; a later pass retires them.
+`check-pending-withdrawals.sh` guards that retirement, not this deploy: a pending Cash
+withdrawal paying out to an old liquid, liquidReferrer, or frax module would strand when
+the old modules are disabled. It scans all Safes in parallel in about a minute; the same
+scan inside the forge script took 20+ minutes, which is why it lives outside. Run it right
+before broadcasting the retirement.
 
 After the upgrade, new Safes must be set up with the four-field Cash setup payload that
 carries the explicit `useLendGateway` flag. Coordinate with cash-be before it deploys
@@ -51,7 +54,10 @@ Safes against the upgraded dev stack, or Safe creation fails on the payload deco
 
 ## If a broadcast dies partway
 
-Deploy only runs from a clean starting point, so do not rerun it directly. Instead:
+Forge writes `cash-lend.json` during the pre-broadcast simulation, before any transaction
+is sent. If the broadcast dies before its first transaction, the next deploy run detects
+the record as stale (no recorded address has code on-chain), discards it, and proceeds —
+just rerun the deploy. If transactions landed, deploy refuses to rerun directly. Instead:
 
 1. Run `RollbackCashLendDev` — it skips references that are already restored.
 2. Run `VerifyCashLendRollbackDev` to confirm the chain is back at the baseline.
@@ -75,8 +81,9 @@ reference survives rollback) and upgrades it to the freshly compiled implementat
 - **Old / new modules**: the seven immutable modules that move assets out of a Safe
   (openOcean, liquid, liquidReferrer, frax, stake, midas, beHype — always in that order).
   They cannot be upgraded, so Lend support means deploying new copies with the old
-  configuration and swapping them in. The liquifier is behind a UUPS proxy and only gets a
-  new implementation.
+  configuration and enabling them alongside the old ones. The old modules stay enabled
+  for gradual migration and are retired in a later pass. The liquifier is behind a UUPS
+  proxy and only gets a new implementation.
 - **Driver**: a contract allowed to call the LendGateway's sandwich operations
   (`setDriver` on the gateway).
 - **Sandwich**: the withdraw-from-Aave / act / re-supply-to-Aave wrapper the gateway puts

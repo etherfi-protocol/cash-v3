@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { stdJson } from "forge-std/StdJson.sol";
+import { VmSafe } from "forge-std/Vm.sol";
 import { console } from "forge-std/console.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -30,12 +31,14 @@ import { CashLendDevModules } from "./CashLendDevModules.sol";
  *      Aave test-instance admin. See scripts/lend/README.md for the full runbook and file glossary.
  *
  *      The script only runs from a clean starting point: every proxy must be at its rollback-baseline
- *      implementation and no deployment record may exist. If a broadcast dies partway, run
- *      RollbackCashLendDev (it skips already-restored references), delete cash-lend.json, and rerun.
+ *      implementation and no deployment record may exist. A record left by a broadcast that died
+ *      before its first transaction (forge writes the record during the pre-broadcast simulation) is
+ *      detected as stale and discarded automatically. If a broadcast dies after transactions landed,
+ *      run RollbackCashLendDev (it skips already-restored references), delete cash-lend.json, and rerun.
  *
- *      Run scripts/lend/check-pending-withdrawals.sh first. It scans every Safe in parallel for a
- *      pending withdrawal paying out to an old module, which this deploy would strand. Doing that
- *      scan in-script takes 20+ minutes because forge fetches each Safe's state sequentially.
+ *      The old modules stay enabled after this deploy (gradual migration), so pending withdrawals
+ *      to them keep working. Run scripts/lend/check-pending-withdrawals.sh before the later pass
+ *      that retires the old modules; retiring while such a withdrawal is pending would strand it.
  *
  *      CashModuleCore, CashModuleSetters, CashLens, and LendGateway use dynamically linked libraries.
  *      Forge deploys and links those libraries as part of the script run; retain the broadcast artifact
@@ -83,12 +86,13 @@ contract DeployCashLendDev is Utils {
         address spokeAddress = stdJson.readAddress(aaveJson, ".spoke");
 
         // Stop before broadcasting if the sender, chain state, or module configuration is unexpected.
-        _validateDevAdmin(existing, aaveJson, tx.origin);
+        _validateDevAdmin(existing, aaveJson, _deployer());
+        _discardStaleRecordOrRevert();
         CashLendDevModules.validateOld(existing.modules);
         CashLendDevModules.requireDevPolicy(existing.dataProvider, existing.cashModule, existing.modules);
         address previousLiquifierImplementation = _requireBaselineState(existing);
 
-        vm.startBroadcast();
+        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
 
         // Direct module storage cannot move to a new address, so deploy new copies with the old configuration.
         CashLendDevModules.NewModules memory modules = CashLendDevModules.deployNew(existing.modules, existing.dataProvider, existing.debtManager);
@@ -109,9 +113,10 @@ contract DeployCashLendDev is Utils {
         // Migration (DebtManager.migrateToLendGateway) is gated on ETHER_FI_WALLET_ROLE; grant it so
         // the dev admin can migrate Safes right after this deploy.
         bytes32 walletRole = DebtManagerCore(existing.debtManager).ETHER_FI_WALLET_ROLE();
-        if (!RoleRegistry(existing.roleRegistry).hasRole(walletRole, tx.origin)) RoleRegistry(existing.roleRegistry).grantRole(walletRole, tx.origin);
+        if (!RoleRegistry(existing.roleRegistry).hasRole(walletRole, _deployer())) RoleRegistry(existing.roleRegistry).grantRole(walletRole, _deployer());
 
-        // Swap the new modules in, then activate Lend last so no Safe reaches a half-configured gateway.
+        // Enable the new modules (the old ones stay active for gradual migration), then activate
+        // Lend last so no Safe reaches a half-configured gateway.
         CashLendDevModules.activate(existing.dataProvider, existing.cashModule, existing.modules, modules);
         if (!IAaveV4Spoke(spokeAddress).isPositionManagerActive(gatewayProxy)) IAaveV4Spoke(spokeAddress).updatePositionManager(gatewayProxy, true);
         if (address(ICashModule(existing.cashModule).getLendGateway()) == address(0)) ICashModule(existing.cashModule).setLendGateway(gatewayProxy);
@@ -160,10 +165,29 @@ contract DeployCashLendDev is Utils {
         return vm.readFile(path);
     }
 
-    /// @dev Requires a clean starting point: no deployment record, and every reference at its baseline value.
-    function _requireBaselineState(ExistingContracts memory c) internal view returns (address) {
-        require(!vm.exists(_deploymentRecordPath()), "cash-lend.json exists; roll back and delete it first");
+    /// @dev Forge runs the whole script, including the record write, before broadcasting anything, so a
+    ///      broadcast that dies before its first transaction leaves a record of contracts that never
+    ///      reached the chain. Such a record is provably stale (no recorded address has code) and is
+    ///      discarded so the deploy can rerun; a record with any live address still stops the run.
+    function _discardStaleRecordOrRevert() internal {
+        string memory path = _deploymentRecordPath();
+        if (!vm.exists(path)) return;
 
+        string memory record = vm.readFile(path);
+        require(stdJson.readUint(record, ".chainId") == block.chainid, "cash-lend.json is for another chain; roll back and delete it first");
+        bool live = stdJson.readAddress(record, ".lendGatewayImpl").code.length != 0 || stdJson.readAddress(record, ".cashModuleCoreImpl").code.length != 0 || stdJson.readAddress(record, ".liquifierImplementation").code.length != 0;
+        address[] memory newModules = CashLendDevModules.readNew(record);
+        for (uint256 i = 0; i < newModules.length; ++i) {
+            live = live || newModules[i].code.length != 0;
+        }
+        require(!live, "cash-lend.json records a live deployment; roll back and delete it first");
+
+        vm.removeFile(path);
+        console.log("Discarded stale cash-lend.json from an aborted broadcast; nothing it recorded reached the chain");
+    }
+
+    /// @dev Requires a clean starting point: every reference at its baseline value.
+    function _requireBaselineState(ExistingContracts memory c) internal view returns (address) {
         string memory baseline = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend-rollback-baseline.json"));
         require(stdJson.readUint(baseline, ".chainId") == block.chainid, "rollback baseline chain mismatch");
         require(_implementationOf(c.cashEventEmitter) == stdJson.readAddress(baseline, ".cashEventEmitterImpl"), "CashEventEmitter differs from baseline");
@@ -189,6 +213,11 @@ contract DeployCashLendDev is Utils {
     /// @dev Reads a UUPS proxy's implementation directly from its EIP-1967 storage slot.
     function _implementationOf(address proxy) internal view returns (address) {
         return address(uint160(uint256(vm.load(proxy, EIP1967_IMPLEMENTATION_SLOT))));
+    }
+
+    /// @dev The broadcast signer, derived from PRIVATE_KEY (tx.origin is unreliable outside the broadcast section).
+    function _deployer() internal view returns (address) {
+        return vm.addr(vm.envUint("PRIVATE_KEY"));
     }
 
     /// @dev Deploys a fresh gateway implementation, then either deploys a new proxy or upgrades the
@@ -261,11 +290,18 @@ contract DeployCashLendDev is Utils {
         return string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend.json");
     }
 
-    /// @dev Records everything this run deployed, for verification and rollback.
+    /// @dev Records everything this run deployed, for verification and rollback. Skipped on dry
+    ///      runs: file cheatcodes execute even without --broadcast, and a leftover record from a
+    ///      simulation would block the real run at the clean-start check.
     function _writeDeploymentRecord(ExistingContracts memory c, Implementations memory next, CashLendDevModules.NewModules memory modules, address previousLiquifierImplementation, address gatewayImpl, address gatewayProxy, address spoke) internal {
+        if (!vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) && !vm.isContext(VmSafe.ForgeContext.ScriptResume)) {
+            console.log("Dry run, not writing deployment record");
+            return;
+        }
+
         string memory object = "cash-lend-dev";
         vm.serializeUint(object, "chainId", block.chainid);
-        vm.serializeAddress(object, "deployer", tx.origin);
+        vm.serializeAddress(object, "deployer", _deployer());
         vm.serializeAddress(object, "admin", RoleRegistry(c.roleRegistry).owner());
         vm.serializeAddress(object, "spoke", spoke);
         vm.serializeAddress(object, "lendGateway", gatewayProxy);
@@ -278,7 +314,7 @@ contract DeployCashLendDev is Utils {
         vm.serializeAddress(object, "debtManagerAdminImpl", next.debtManagerAdmin);
         vm.serializeAddress(object, "etherFiHookImpl", next.hook);
         vm.serializeAddress(object, "topUpDestImpl", next.topUpDest);
-        vm.serializeAddress(object, "newModules", CashLendDevModules.newAddresses(modules));
+        vm.serializeString(object, "newModules", CashLendDevModules.serializeNew(modules));
         vm.serializeAddress(object, "previousLiquifierImplementation", previousLiquifierImplementation);
         string memory output = vm.serializeAddress(object, "liquifierImplementation", modules.liquifierImplementation);
 

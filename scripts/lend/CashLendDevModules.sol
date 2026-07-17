@@ -32,7 +32,9 @@ library CashLendDevModules {
     address internal constant EBTC = 0x657e8C867D8B37dCC18fA4Caead9C45EB088C642;
     address internal constant SETHFI = 0x86B5780b606940Eb59A062aA85a07959518c0161;
     address internal constant EUSD = 0x939778D83b46B456224A33Fb59630B11DEC56663;
-    address internal constant MIDAS_TOKEN = 0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898;
+    address internal constant LIQUID_RESERVE = 0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898;
+    address internal constant LIQUID_EUR = 0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13;
+    address internal constant LIQUID_RWA = 0x17bC8Ffd82b8a36e737Ca1141C025089589B915e;
 
     struct OldModules {
         address openOcean;
@@ -91,7 +93,7 @@ library CashLendDevModules {
         require(old.liquifier.code.length != 0, "old liquifier code missing");
         _requireConfiguredLiquidAssets(EtherFiLiquidModule(old.liquid), false);
         _requireConfiguredLiquidAssets(EtherFiLiquidModule(old.liquidReferrer), true);
-        (address deposit, address redemption) = MidasModule(old.midas).vaults(MIDAS_TOKEN);
+        (address deposit, address redemption) = MidasModule(old.midas).vaults(LIQUID_RESERVE);
         require(deposit != address(0) && redemption != address(0), "Midas config missing");
     }
 
@@ -114,11 +116,15 @@ library CashLendDevModules {
         // The Liquid and Midas contracts use non-enumerable mappings, so rebuild their constructor arrays first.
         (address[] memory baseAssets, address[] memory baseTellers) = _liquidConfig(EtherFiLiquidModule(old.liquid), false);
         (address[] memory referrerAssets, address[] memory referrerTellers) = _liquidConfig(EtherFiLiquidModule(old.liquidReferrer), true);
-        address[] memory midasTokens = new address[](1);
-        address[] memory deposits = new address[](1);
-        address[] memory redemptions = new address[](1);
-        midasTokens[0] = MIDAS_TOKEN;
-        (deposits[0], redemptions[0]) = MidasModule(old.midas).vaults(MIDAS_TOKEN);
+        address[] memory midasTokens = new address[](3);
+        address[] memory deposits = new address[](3);
+        address[] memory redemptions = new address[](3);
+        midasTokens[0] = LIQUID_RESERVE;
+        midasTokens[1] = LIQUID_EUR;
+        midasTokens[2] = LIQUID_RWA;
+        (deposits[0], redemptions[0]) = MidasModule(old.midas).vaults(LIQUID_RESERVE);
+        (deposits[1], redemptions[1]) = MidasModule(old.midas).vaults(LIQUID_EUR);
+        (deposits[2], redemptions[2]) = MidasModule(old.midas).vaults(LIQUID_RWA);
 
         NewModules memory next;
         next.openOcean = address(new OpenOceanSwapModule(OpenOceanSwapModule(old.openOcean).swapRouter(), dataProvider));
@@ -164,9 +170,15 @@ library CashLendDevModules {
         require(address(EtherFiStakeModule(next.stake).syncPool()) == address(EtherFiStakeModule(old.stake).syncPool()), "Stake pool mismatch");
         require(EtherFiStakeModule(next.stake).weth() == EtherFiStakeModule(old.stake).weth(), "Stake WETH mismatch");
         require(EtherFiStakeModule(next.stake).weETH() == EtherFiStakeModule(old.stake).weETH(), "Stake weETH mismatch");
-        (address deposit, address redemption) = MidasModule(next.midas).vaults(MIDAS_TOKEN);
-        (address oldDeposit, address oldRedemption) = MidasModule(old.midas).vaults(MIDAS_TOKEN);
-        require(deposit == oldDeposit && redemption == oldRedemption, "Midas mismatch");
+        (address deposit, address redemption) = MidasModule(next.midas).vaults(LIQUID_RESERVE);
+        (address oldDeposit, address oldRedemption) = MidasModule(old.midas).vaults(LIQUID_RESERVE);
+        require(deposit == oldDeposit && redemption == oldRedemption, "Midas mismatch for LIQUID_RESERVE");
+        (deposit, redemption) = MidasModule(next.midas).vaults(LIQUID_EUR);
+        (oldDeposit, oldRedemption) = MidasModule(old.midas).vaults(LIQUID_EUR);
+        require(deposit == oldDeposit && redemption == oldRedemption, "Midas mismatch for LIQUID_EUR");
+        (deposit, redemption) = MidasModule(next.midas).vaults(LIQUID_RWA);
+        (oldDeposit, oldRedemption) = MidasModule(old.midas).vaults(LIQUID_RWA);
+        require(deposit == oldDeposit && redemption == oldRedemption, "Midas mismatch for LIQUID_RWA");
         require(address(BeHYPEStakeModule(next.beHype).staker()) == address(BeHYPEStakeModule(old.beHype).staker()), "BeHYPE staker mismatch");
         require(BeHYPEStakeModule(next.beHype).whype() == BeHYPEStakeModule(old.beHype).whype(), "BeHYPE WHYPE mismatch");
         require(BeHYPEStakeModule(next.beHype).beHYPE() == BeHYPEStakeModule(old.beHype).beHYPE(), "BeHYPE asset mismatch");
@@ -175,20 +187,21 @@ library CashLendDevModules {
         _requireCopiedLiquidConfig(EtherFiLiquidModule(old.liquidReferrer), EtherFiLiquidModule(next.liquidReferrer), true);
     }
 
-    /// @dev Enables the new modules with the dev policy, then removes the old modules.
-    function activate(address dataProvider, address cashModule, OldModules memory old, NewModules memory next) internal {
-        address[] memory oldModules = oldAddresses(old);
+    /// @dev Enables the new modules with the dev policy. The old modules stay enabled (default,
+    ///      whitelisted, requesters) so existing Safes keep working during the gradual migration;
+    ///      a later pass retires them.
+    function activate(address dataProvider, address cashModule, OldModules memory, NewModules memory next) internal {
         address[] memory newModules = newAddresses(next);
         bool[] memory yes = _bools(7, true);
-        bool[] memory no = _bools(7, false);
 
-        // Enable the new modules before removing anything so default module coverage never has a gap.
+        // To retire the old modules later:
+        //   address[] memory oldModules = oldAddresses(old);
+        //   bool[] memory no = _bools(7, false);
+        //   ICashModule(cashModule).configureModulesCanRequestWithdraw(oldModules, no);
+        //   EtherFiDataProvider(dataProvider).configureDefaultModules(oldModules, no);
+        //   EtherFiDataProvider(dataProvider).configureModules(oldModules, no);
         EtherFiDataProvider(dataProvider).configureDefaultModules(newModules, yes);
         ICashModule(cashModule).configureModulesCanRequestWithdraw(newModules, requesterFlags());
-
-        ICashModule(cashModule).configureModulesCanRequestWithdraw(oldModules, no);
-        EtherFiDataProvider(dataProvider).configureDefaultModules(oldModules, no);
-        EtherFiDataProvider(dataProvider).configureModules(oldModules, no);
     }
 
     /// @dev Grants every active sandwich consumer permission to call the gateway.
@@ -219,7 +232,8 @@ library CashLendDevModules {
         EtherFiDataProvider(dataProvider).configureModules(newModules, no);
     }
 
-    /// @dev Confirms the new modules are live with the dev policy and the old ones are fully removed.
+    /// @dev Confirms the new modules are live with the dev policy and the old ones remain enabled
+    ///      with the same policy (kept active during the gradual migration) but without gateway access.
     function verifyActive(address dataProvider, address cashModule, LendGateway gateway, address[] memory oldModules, address[] memory newModules) internal view {
         require(oldModules.length == 7 && newModules.length == 7, "module list length mismatch");
         address[] memory requesters = ICashModule(cashModule).getWhitelistedModulesCanRequestWithdraw();
@@ -230,10 +244,10 @@ library CashLendDevModules {
             require(EtherFiDataProvider(dataProvider).isWhitelistedModule(newModules[i]), "new module not whitelisted");
             require(gateway.isDriver(newModules[i]), "new module not driver");
             require(_contains(requesters, newModules[i]) == expected[i], "new requester mismatch");
-            require(!EtherFiDataProvider(dataProvider).isDefaultModule(oldModules[i]), "old module still default");
-            require(!EtherFiDataProvider(dataProvider).isWhitelistedModule(oldModules[i]), "old module still whitelisted");
-            require(!gateway.isDriver(oldModules[i]), "old module still driver");
-            require(!_contains(requesters, oldModules[i]), "old requester remains");
+            require(EtherFiDataProvider(dataProvider).isDefaultModule(oldModules[i]), "old module no longer default");
+            require(EtherFiDataProvider(dataProvider).isWhitelistedModule(oldModules[i]), "old module no longer whitelisted");
+            require(!gateway.isDriver(oldModules[i]), "old module unexpectedly a driver");
+            require(_contains(requesters, oldModules[i]) == expected[i], "old requester mismatch");
         }
     }
 
@@ -277,6 +291,31 @@ library CashLendDevModules {
         addresses[4] = next.stake;
         addresses[5] = next.midas;
         addresses[6] = next.beHype;
+        return addresses;
+    }
+
+    /// @dev Serializes the new direct modules as a name-keyed JSON object for the deployment record.
+    function serializeNew(NewModules memory next) internal returns (string memory) {
+        string memory obj = "cash-lend-new-modules";
+        stdJson.serialize(obj, "openOcean", next.openOcean);
+        stdJson.serialize(obj, "liquid", next.liquid);
+        stdJson.serialize(obj, "liquidReferrer", next.liquidReferrer);
+        stdJson.serialize(obj, "frax", next.frax);
+        stdJson.serialize(obj, "stake", next.stake);
+        stdJson.serialize(obj, "midas", next.midas);
+        return stdJson.serialize(obj, "beHype", next.beHype);
+    }
+
+    /// @dev Reads the new direct modules from the deployment record in canonical order.
+    function readNew(string memory record) internal pure returns (address[] memory) {
+        address[] memory addresses = new address[](7);
+        addresses[0] = stdJson.readAddress(record, ".newModules.openOcean");
+        addresses[1] = stdJson.readAddress(record, ".newModules.liquid");
+        addresses[2] = stdJson.readAddress(record, ".newModules.liquidReferrer");
+        addresses[3] = stdJson.readAddress(record, ".newModules.frax");
+        addresses[4] = stdJson.readAddress(record, ".newModules.stake");
+        addresses[5] = stdJson.readAddress(record, ".newModules.midas");
+        addresses[6] = stdJson.readAddress(record, ".newModules.beHype");
         return addresses;
     }
 

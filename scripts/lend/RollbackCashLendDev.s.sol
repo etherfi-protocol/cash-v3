@@ -146,7 +146,7 @@ contract RollbackCashLendDev is Utils {
         d.lendGateway = stdJson.readAddress(record, ".lendGateway");
         d.lendGatewayImpl = stdJson.readAddress(record, ".lendGatewayImpl");
         d.spoke = stdJson.readAddress(record, ".spoke");
-        d.newModules = stdJson.readAddressArray(record, ".newModules");
+        d.newModules = CashLendDevModules.readNew(record);
         d.liquifierImplementation = stdJson.readAddress(record, ".liquifierImplementation");
 
         string memory baseline = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend-rollback-baseline.json"));

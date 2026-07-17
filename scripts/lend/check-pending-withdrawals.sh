@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Preflight for DeployCashLendDev. The deploy replaces the liquid, liquidReferrer, and
-# frax modules, so a pending Cash withdrawal paying out to one of them would strand.
-# This scans every Safe's getData in parallel (in-script the same scan takes 20+ min
-# because forge fetches each Safe's state sequentially).
+# Preflight for retiring the old modules (DeployCashLendDev leaves them enabled for
+# gradual migration). Disabling the old liquid, liquidReferrer, and frax modules would
+# strand any pending Cash withdrawal paying out to one of them, so run this right before
+# that retirement pass. Scans every Safe's getData in parallel (in-script the same scan
+# takes 20+ min because forge fetches each Safe's state sequentially).
 #
 # Usage: scripts/lend/check-pending-withdrawals.sh <rpc-url>
 set -euo pipefail

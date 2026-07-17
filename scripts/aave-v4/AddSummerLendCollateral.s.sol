@@ -74,6 +74,7 @@ contract AddSummerLendCollateral is Utils {
     address constant ETH_USD = 0x13e3Ee699D1909E989722E753853AE30b17e08c5;
     address constant USDC_USD = 0x16a9FA2FDa030272Ce99B29CF780dFA30361E0f3;
     address constant USDT_USD = 0xECef79E109e997bCA29c1c0897ec9d7b03647F5E;
+    address constant FRXUSD_USD = 0x8BF42811876e1B692d0E70F61b80e1fbc68Ef1bf;
     address constant BTC_USD = 0xD702DD976Fb76Fffc2D3963D037dfDae5b04E593;
     address constant EUR_USD = 0x3626369857A10CcC6cc3A6e4f5C2f5984a519F20;
     address constant OP_USD = 0x0D276FC14719f9292D5C1eA2198673d1f4269246;
@@ -114,19 +115,13 @@ contract AddSummerLendCollateral is Utils {
     IAccessManager accessManager;
     uint256 weethReserveId;
     uint256 usdcReserveId;
+    string jsonPath;
 
-    function run() public {
+    function run() public virtual {
         require(block.chainid == 10, "Must run on Optimism (10)");
         require(isEqualString(vm.envOr("FOUNDRY_PROFILE", string("default")), "aave-deploy"), "Run with FOUNDRY_PROFILE=aave-deploy");
 
-        string memory json = vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/aave-v4-test.json"));
-        hub = IHub(stdJson.readAddress(json, ".hub"));
-        spoke = ISpoke(stdJson.readAddress(json, ".spoke"));
-        irStrategy = AssetInterestRateStrategy(stdJson.readAddress(json, ".irStrategy"));
-        treasurySpoke = stdJson.readAddress(json, ".treasurySpoke");
-        accessManager = IAccessManager(stdJson.readAddress(json, ".accessManager"));
-        weethReserveId = stdJson.readUint(json, ".weethReserveId");
-        usdcReserveId = stdJson.readUint(json, ".usdcReserveId");
+        _loadInstance();
 
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
 
@@ -143,6 +138,7 @@ contract AddSummerLendCollateral is Utils {
         address usdtUsd = _chainlink(USDT_USD, address(0), CHAINLINK_MAX_STALENESS, true, "USDT / USD");
         address eurUsd = _chainlink(EUR_USD, address(0), CHAINLINK_MAX_STALENESS, false, "EUR / USD");
         address opUsd = _chainlink(OP_USD, address(0), CHAINLINK_MAX_STALENESS, false, "OP / USD");
+        address frxusdUsd = _chainlink(FRXUSD_USD, address(0), CHAINLINK_MAX_STALENESS, true, "frxUSD / USD");
 
         // Pyth-priced assets (ETHFI/USD is reused as sETHFI's underlying below)
         address ethfiUsd = _pyth(ETHFI_USD_PYTH, address(0), "ETHFI / USD");
@@ -169,7 +165,7 @@ contract AddSummerLendCollateral is Utils {
         _list(WETH, ethUsd, 55_00, 10_350);
         _list(OP, opUsd, 20_00, 10_500);
         // frxUSD: $1-stable like the DebtManager treats it; USDC/USD is the closest live $1 feed
-        _list(FRXUSD, usdcUsd, 90_00, 10_100);
+        _list(FRXUSD, frxusdUsd, 90_00, 10_100);
 
         // Migrate the two deploy-time reserves onto the new staleness-checked feeds:
         // USDC was listed on the raw usdcUsdOracle aggregator, weETH on the pre-refactor composite.
@@ -181,8 +177,21 @@ contract AddSummerLendCollateral is Utils {
 
         vm.stopBroadcast();
 
-        _recordReserveIds(json);
+        _recordReserveIds(vm.readFile(jsonPath));
         console.log("Done. Reserve count:", spoke.getReserveCount());
+    }
+
+    /// @dev Reads the instance addresses from deployments/<env>/<chain>/aave-v4-test.json
+    function _loadInstance() internal {
+        jsonPath = string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/aave-v4-test.json");
+        string memory json = vm.readFile(jsonPath);
+        hub = IHub(stdJson.readAddress(json, ".hub"));
+        spoke = ISpoke(stdJson.readAddress(json, ".spoke"));
+        irStrategy = AssetInterestRateStrategy(stdJson.readAddress(json, ".irStrategy"));
+        treasurySpoke = stdJson.readAddress(json, ".treasurySpoke");
+        accessManager = IAccessManager(stdJson.readAddress(json, ".accessManager"));
+        weethReserveId = stdJson.readUint(json, ".weethReserveId");
+        usdcReserveId = stdJson.readUint(json, ".usdcReserveId");
     }
 
     /// @dev Merges a symbol -> reserveId and symbol -> hub assetId map into aave-v4-test.json
@@ -204,9 +213,8 @@ contract AddSummerLendCollateral is Utils {
         vm.serializeString(root, "reserveIds", reserveIds);
         string memory merged = vm.serializeString(root, "assetIds", assetIds);
 
-        string memory path = string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/aave-v4-test.json");
-        vm.writeJson(merged, path);
-        console.log("Recorded reserveIds + assetIds for", count, "reserves:", path);
+        vm.writeJson(merged, jsonPath);
+        console.log("Recorded reserveIds + assetIds for", count, "reserves:", jsonPath);
     }
 
     /// @dev Deploys a ChainlinkPriceFeed over a Chainlink oracle, optionally composed on an underlying feed
