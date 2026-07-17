@@ -42,7 +42,7 @@ contract RefreshSummerLendOracles is AddSummerLendCollateral {
         address btcUsd = _chainlink(BTC_USD, address(0), CHAINLINK_MAX_STALENESS, false, "BTC / USD");
         address usdcUsd = _chainlink(USDC_USD, address(0), CHAINLINK_MAX_STALENESS, true, "USDC / USD");
         address usdtUsd = _chainlink(USDT_USD, address(0), CHAINLINK_MAX_STALENESS, true, "USDT / USD");
-        address frxUsdUsd = _chainlink(FRXUSD_USD, address(0), CHAINLINK_MAX_STALENESS, false, "frxUSD / USD");
+        address frxUsdUsd = _chainlink(FRXUSD_USD, address(0), CHAINLINK_MAX_STALENESS, true, "frxUSD / USD");
         address eurUsd = _chainlink(EUR_USD, address(0), CHAINLINK_MAX_STALENESS, false, "EUR / USD");
         address opUsd = _chainlink(OP_USD, address(0), CHAINLINK_MAX_STALENESS, false, "OP / USD");
 
