@@ -283,6 +283,16 @@ contract DeployCashLendDev is Utils {
         gateway.setDriver(c.debtManager, true);
         gateway.setDriver(c.topUpDest, true);
         CashLendDevModules.enableDrivers(gateway, c.modules, modules);
+
+        // The gateway self-approves as each safe's Aave position manager through
+        // execTransactionFromModule, which only a default module may call on every safe.
+        if (!EtherFiDataProvider(c.dataProvider).isDefaultModule(gatewayAddress)) {
+            address[] memory gatewayModule = new address[](1);
+            gatewayModule[0] = gatewayAddress;
+            bool[] memory yes = new bool[](1);
+            yes[0] = true;
+            EtherFiDataProvider(c.dataProvider).configureDefaultModules(gatewayModule, yes);
+        }
     }
 
     /// @dev Returns the deployment record path for the active dev chain.
