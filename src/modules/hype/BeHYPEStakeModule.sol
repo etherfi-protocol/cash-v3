@@ -140,8 +140,7 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
 
         // Pull any shortfall of the WHYPE input out of the safe's Aave position, then confirm the safe holds
         // the full amount loose.
-        _withdrawShortfall(safe, whype, amountToStake, _getAvailableAmount(safe, whype));
-        _checkAmountAvailable(safe, whype, amountToStake);
+        _pullAndRequire(safe, whype, amountToStake);
 
         uint256 quotedFee = staker.quoteStake(amountToStake, safe);
         if (msg.value < quotedFee) revert InsufficientFee();

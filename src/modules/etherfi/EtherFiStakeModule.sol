@@ -107,8 +107,7 @@ contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGateway
 
         // Pull any shortfall of the input out of the safe's Aave position (a no-op for ETH, which is not a
         // reserve), then confirm the safe holds the full amount loose.
-        _withdrawShortfall(safe, assetToDeposit, amountToDeposit, _getAvailableAmount(safe, assetToDeposit));
-        _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
+        _pullAndRequire(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
         bytes[] memory data;

@@ -80,6 +80,20 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     }
 
     /**
+     * @notice Front bookend: source `amount` of `asset` loose from Aave if short, then require it all present
+     * @dev The idiom every gateway consumer runs before acting: _withdrawShortfall to pull the missing part
+     *      out of the safe's Aave position, then the ModuleCheckBalance assertion that the full amount is now
+     *      loose.
+     * @param safe The safe whose input is sourced
+     * @param asset The input asset the operation needs loose
+     * @param amount The full amount the operation needs
+     */
+    function _pullAndRequire(address safe, address asset, uint256 amount) internal {
+        _withdrawShortfall(safe, asset, amount, _getAvailableAmount(safe, asset));
+        _checkAmountAvailable(safe, asset, amount);
+    }
+
+    /**
      * @notice Supplies an asset from the safe back into Aave and marks it as collateral, best-effort
      * @dev No-op for an unregistered asset. A rejected supply (frozen, paused, capped) is swallowed rather
      *      than reverting the action that already ran; the output stays loose and the next sweep restores it.

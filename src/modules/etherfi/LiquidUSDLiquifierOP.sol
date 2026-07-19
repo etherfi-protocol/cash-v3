@@ -165,8 +165,7 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
         // repayment is exactly the deleveraging that unblocks it). The flow is deliberately EXEMPT from
         // the gateway's health-factor floor (_ensureGatewayFloor): it swaps collateral for a matching
         // debt reduction, and de-risking must never be blocked by the floor.
-        _withdrawShortfall(user, address(LIQUID_USD), liquidUsdAmountRepaid, _getAvailableAmount(user, address(LIQUID_USD)));
-        _checkAmountAvailable(user, address(LIQUID_USD), liquidUsdAmountRepaid);
+        _pullAndRequire(user, address(LIQUID_USD), liquidUsdAmountRepaid);
 
         address[] memory to = new address[](1);
         bytes[] memory data = new bytes[](1);
