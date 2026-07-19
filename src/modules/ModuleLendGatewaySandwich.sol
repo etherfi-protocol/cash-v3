@@ -81,10 +81,9 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
 
     /**
      * @notice Front bookend: source `amount` of `asset` loose from Aave if short, then require it all present
-     * @dev The idiom every risk-increasing consumer runs before acting: _withdrawShortfall to pull the
-     *      missing part out of the safe's Aave position, then the ModuleCheckBalance assertion that the full
-     *      amount is now loose. Flows that tolerate a partial pull (the LiquidUSD repayment) skip this and
-     *      call _withdrawShortfall directly.
+     * @dev The idiom every gateway consumer runs before acting: _withdrawShortfall to pull the missing part
+     *      out of the safe's Aave position, then the ModuleCheckBalance assertion that the full amount is now
+     *      loose.
      * @param safe The safe whose input is sourced
      * @param asset The input asset the operation needs loose
      * @param amount The full amount the operation needs
