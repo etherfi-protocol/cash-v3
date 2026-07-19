@@ -308,7 +308,7 @@ library CashLendLib {
             uint256 pending = _pendingWithdrawalAmount($, safe, tokens[i]);
             amount = amount > pending ? amount - pending : 0;
             if (amount == 0) continue;
-            _supplyAsCollateral($, gateway, safe, tokens[i], amount);
+            _supplyAndTryEnableCollateral($, gateway, safe, tokens[i], amount);
         }
     }
 
@@ -347,7 +347,7 @@ library CashLendLib {
         if (amount == 0) revert AmountZero();
 
         gateway.borrow(safe, token, amount, safe);
-        _supplyAsCollateral($, gateway, safe, token, amount);
+        _supplyAndTryEnableCollateral($, gateway, safe, token, amount);
         // The borrow page takes the health-factor floor (post-resupply end state); card spends are exempt
         gateway.ensureMinHealthFactor(safe);
         $.cashEventEmitter.emitLendBorrowed(safe, token, amount, amountInUsd);
@@ -361,13 +361,11 @@ library CashLendLib {
         return gateway;
     }
 
-    /// @dev Best-effort supply of `amount` of `token` into the lend market as collateral. A supply the
-    ///      reserve rejects (frozen, paused, at its supply cap, or the Hub spoke halted) is swallowed so the
-    ///      funds stay loose for the next sweep. Used by the sweep and the borrow auto-supply, where leaving
-    ///      the funds loose is fine; callers that must not proceed without the supply do not use this.
-    function _supplyAsCollateral(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token, uint256 amount) private {
-        try gateway.supply(safe, token, amount) {
-            gateway.setUsingAsCollateral(safe, token, true);
+    /// @dev Best-effort supply of `amount` of `token` into the lend market with an attempted collateral toggle.
+    ///      A rejected supply is swallowed so the funds stay loose. If only the collateral toggle fails, the
+    ///      supply remains earning yield and the gateway emits CollateralEnablementFailed for monitoring.
+    function _supplyAndTryEnableCollateral(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token, uint256 amount) private {
+        try gateway.supplyAndTryEnableCollateral(safe, token, amount) returns (bool) {
             $.cashEventEmitter.emitLendSupplied(safe, token, amount);
         } catch { }
     }

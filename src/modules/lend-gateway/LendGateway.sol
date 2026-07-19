@@ -97,6 +97,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     event PositionManagerApproved(address indexed safe);
     /// @notice Emitted on a supply on a safe's behalf
     event Supplied(address indexed safe, address indexed asset, uint256 amount);
+    /// @notice Emitted when a supply succeeds but Aave rejects enabling the asset as collateral
+    event CollateralEnablementFailed(address indexed safe, address indexed asset, uint256 amount);
     /// @notice Emitted on a withdraw on a safe's behalf
     event Withdrawn(address indexed safe, address indexed asset, uint256 amount, address indexed to);
     /// @notice Emitted on a borrow on a safe's behalf
@@ -314,8 +316,36 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
     function supply(address safe, address asset, uint256 amount) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
+        _supply(safe, asset, amount);
+    }
+
+    /**
+     * @notice Supplies `amount` of `asset` and attempts to enable it as collateral
+     * @dev A collateral-toggle failure is swallowed after emitting CollateralEnablementFailed. The completed
+     *      supply remains on Aave and continues earning yield. A supply failure still reverts normally.
+     * @param safe The safe whose position is credited
+     * @param asset The asset being supplied (must be a registered reserve)
+     * @param amount The amount to supply
+     * @return collateralEnabled Whether Aave enabled the asset as collateral
+     * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
+     * @custom:throws LendOptedOut if the safe has opted out of lend
+     * @custom:throws ZeroAmount if amount is zero
+     * @custom:throws AssetNotRegistered if asset has no registered reserveId
+     */
+    function supplyAndTryEnableCollateral(address safe, address asset, uint256 amount) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) returns (bool collateralEnabled) {
+        uint256 reserveId = _supply(safe, asset, amount);
+        try spoke.setUsingAsCollateral(reserveId, true, safe) {
+            emit CollateralUsageSet(safe, asset, true);
+            return true;
+        } catch {
+            emit CollateralEnablementFailed(safe, asset, amount);
+            return false;
+        }
+    }
+
+    function _supply(address safe, address asset, uint256 amount) private returns (uint256 reserveId) {
         if (amount == 0) revert ZeroAmount();
-        uint256 reserveId = _reserveIdOf(asset);
+        reserveId = _reserveIdOf(asset);
 
         // Spoke pulls the asset from the caller (this gateway), so bring it in from the safe and approve.
         _pullFromSafe(safe, asset, amount);

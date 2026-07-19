@@ -237,8 +237,7 @@ contract TopUpDest is UpgradeableProxy {
         ILendGateway lendGateway = cashModule.getLendGateway();
         if (!lendGateway.isRegistered(token)) return;
 
-        lendGateway.supply(safe, token, amount);
-        lendGateway.setUsingAsCollateral(safe, token, true);
+        lendGateway.supplyAndTryEnableCollateral(safe, token, amount);
     }
 
     /**

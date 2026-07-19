@@ -31,6 +31,16 @@ interface ILendGateway {
     function supply(address safe, address asset, uint256 amount) external;
 
     /**
+     * @notice Supplies `asset` and then attempts to enable it as collateral
+     * @dev A failed collateral toggle does not revert the successful supply, so the asset still earns yield.
+     * @param safe The safe whose position is credited
+     * @param asset The asset being supplied
+     * @param amount The amount to supply
+     * @return collateralEnabled Whether the asset is enabled as collateral after the supply
+     */
+    function supplyAndTryEnableCollateral(address safe, address asset, uint256 amount) external returns (bool collateralEnabled);
+
+    /**
      * @notice Withdraws `amount` of `asset` from `safe`'s Aave position to `to`
      * @param safe The safe whose position is debited
      * @param asset The asset being withdrawn

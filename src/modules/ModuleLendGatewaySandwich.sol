@@ -80,9 +80,10 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     }
 
     /**
-     * @notice Supplies an asset from the safe back into Aave and marks it as collateral, best-effort
+     * @notice Supplies an asset from the safe back into Aave and tries to mark it as collateral, best-effort
      * @dev No-op for an unregistered asset. A rejected supply (frozen, paused, capped) is swallowed rather
-     *      than reverting the action that already ran; the output stays loose and the next sweep restores it.
+     *      than reverting the action that already ran. If only the collateral toggle fails, the supply remains
+     *      earning yield and the gateway emits CollateralEnablementFailed for monitoring.
      * @param safe The safe whose position is credited
      * @param asset The asset to supply
      * @param amount The amount to supply
@@ -91,9 +92,7 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
         if (!_lendActive(safe)) return;
         ILendGateway lendGateway = gateway();
         if (!lendGateway.isRegistered(asset)) return;
-        try lendGateway.supply(safe, asset, amount) {
-            lendGateway.setUsingAsCollateral(safe, asset, true);
-        } catch { }
+        try lendGateway.supplyAndTryEnableCollateral(safe, asset, amount) returns (bool) { } catch { }
     }
 
     /**

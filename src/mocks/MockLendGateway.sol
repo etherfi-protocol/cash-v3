@@ -91,6 +91,12 @@ contract MockLendGateway is ILendGateway {
         lastSupply = Call(safe, asset, amount, address(0));
     }
 
+    function supplyAndTryEnableCollateral(address safe, address asset, uint256 amount) external returns (bool collateralEnabled) {
+        lastSupply = Call(safe, asset, amount, address(0));
+        usingAsCollateral[safe][asset] = true;
+        return true;
+    }
+
     function withdraw(address safe, address asset, uint256 amount, address to) external {
         lastWithdraw = Call(safe, asset, amount, to);
     }

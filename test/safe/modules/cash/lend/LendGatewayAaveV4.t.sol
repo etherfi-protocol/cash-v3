@@ -414,6 +414,8 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
     function test_mutatingOps_onlyDriver() public {
         vm.startPrank(makeAddr("notADriver"));
         vm.expectRevert(LendGateway.OnlyDriver.selector);
+        gw.supplyAndTryEnableCollateral(address(safe), address(weETH), 1);
+        vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.withdraw(address(safe), address(weETH), 1, recipient);
         vm.expectRevert(LendGateway.OnlyDriver.selector);
         gw.borrow(address(safe), address(usdc), 1, recipient);
@@ -430,6 +432,8 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.startPrank(driver);
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
         gw.supply(notSafe, address(weETH), 1);
+        vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
+        gw.supplyAndTryEnableCollateral(notSafe, address(weETH), 1);
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
         gw.withdraw(notSafe, address(weETH), 1, notSafe);
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
@@ -448,6 +452,8 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.expectRevert(notRegistered);
         gw.supply(address(safe), unreg, 1e18);
         vm.expectRevert(notRegistered);
+        gw.supplyAndTryEnableCollateral(address(safe), unreg, 1e18);
+        vm.expectRevert(notRegistered);
         gw.withdraw(address(safe), unreg, 1e18, recipient);
         vm.expectRevert(notRegistered);
         gw.borrow(address(safe), unreg, 1e18, recipient);
@@ -462,6 +468,8 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.startPrank(driver);
         vm.expectRevert(LendGateway.ZeroAmount.selector);
         gw.supply(address(safe), address(weETH), 0);
+        vm.expectRevert(LendGateway.ZeroAmount.selector);
+        gw.supplyAndTryEnableCollateral(address(safe), address(weETH), 0);
         vm.expectRevert(LendGateway.ZeroAmount.selector);
         gw.withdraw(address(safe), address(weETH), 0, recipient);
         vm.expectRevert(LendGateway.ZeroAmount.selector);
@@ -533,6 +541,37 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         (bool disabled,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
         assertFalse(disabled, "collateral disabled");
         vm.stopPrank();
+    }
+
+    /// A successful combined supply reports and enables the asset as collateral.
+    function test_supplyAndTryEnableCollateral_enablesCollateral() public {
+        uint256 amount = 5 ether;
+        deal(address(weETH), address(safe), amount);
+
+        vm.prank(driver);
+        bool collateralEnabled = gw.supplyAndTryEnableCollateral(address(safe), address(weETH), amount);
+
+        assertTrue(collateralEnabled, "collateral enablement reported as successful");
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), amount, "asset supplied to Aave");
+        (bool enabled,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
+        assertTrue(enabled, "supplied asset is collateral");
+    }
+
+    /// A failed collateral toggle keeps the successful supply earning yield and emits a monitoring event.
+    function test_supplyAndTryEnableCollateral_keepsSupplyWhenCollateralEnableFails() public {
+        uint256 amount = 5 ether;
+        deal(address(weETH), address(safe), amount);
+        vm.mockCallRevert(address(spoke), abi.encodeCall(ISpoke.setUsingAsCollateral, (weethReserveId, true, address(safe))), abi.encodeWithSelector(ISpoke.MaximumUserReservesExceeded.selector));
+
+        vm.expectEmit(true, true, true, true, address(gw));
+        emit LendGateway.CollateralEnablementFailed(address(safe), address(weETH), amount);
+        vm.prank(driver);
+        bool collateralEnabled = gw.supplyAndTryEnableCollateral(address(safe), address(weETH), amount);
+
+        assertFalse(collateralEnabled, "collateral enablement reported as failed");
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), amount, "supply remains on Aave");
+        (bool enabled,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
+        assertFalse(enabled, "supplied asset is not collateral");
     }
 
     function test_isApprovedBy_reflectsApprovalState() public {
