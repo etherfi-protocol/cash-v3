@@ -8,6 +8,7 @@ import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { IVedaAccountant } from "../../src/interfaces/IVedaAccountant.sol";
 import { BaseAaveV4PriceFeed } from "../../src/oracle/BaseAaveV4PriceFeed.sol";
+import { ChainlinkPriceFeed } from "../../src/oracle/ChainlinkPriceFeed.sol";
 import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFeed.sol";
 
 /// @notice Fork tests on Optimism, using the live liquidETH accountant and ETH/USD feed.
@@ -23,10 +24,13 @@ contract VedaAccountantPriceFeedTest is Test {
     uint256 constant RATE_MAX_STALENESS = 2 days;
 
     VedaAccountantPriceFeed feed;
+    ChainlinkPriceFeed ethUsdFeed;
 
     function setUp() public {
         vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
-        feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / USD");
+        // The USD leg must be a staleness-checking feed, never a raw aggregator, so wrap ETH/USD in one.
+        ethUsdFeed = new ChainlinkPriceFeed(IAggregatorV3(ethUsdOracle), IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, false, "ETH / USD");
+        feed = new VedaAccountantPriceFeed(accountant, ethUsdFeed, FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / USD");
     }
 
     /// @notice The reported price equals rate x underlying, and lands in a sane USD range.
@@ -105,8 +109,17 @@ contract VedaAccountantPriceFeedTest is Test {
 
     /// @notice Reverts when the underlying price is zero or negative.
     function test_reverts_whenUnderlyingNotPositive() public {
-        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAaveV4PriceFeed.latestAnswer.selector), abi.encode(int256(0)));
+        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(uint80(1), int256(0), block.timestamp, block.timestamp, uint80(1)));
         vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
+        feed.latestAnswer();
+    }
+
+    /// @notice A stale underlying USD leg fails closed: the composite reverts even while the rate is fresh.
+    function test_reverts_whenUnderlyingStale() public {
+        (uint80 roundId, int256 answer, uint256 startedAt,, uint80 answeredInRound) = IAggregatorV3(ethUsdOracle).latestRoundData();
+        uint256 staleUpdatedAt = block.timestamp - RATE_MAX_STALENESS - 1;
+        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(roundId, answer, startedAt, staleUpdatedAt, answeredInRound));
+        vm.expectRevert(BaseAaveV4PriceFeed.StalePrice.selector);
         feed.latestAnswer();
     }
 }
