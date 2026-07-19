@@ -96,6 +96,14 @@ contract CashEventEmitter is UpgradeableProxy {
     event Repay(address indexed safe, address indexed token, uint256 debtAmount, uint256 debtAmountInUsd);
 
     /**
+     * @notice Emitted for an Aave repayment that intentionally avoids a USD oracle lookup.
+     * @param safe Address of the safe whose debt was repaid.
+     * @param token Address of the token used to repay.
+     * @param debtAmount Amount of token actually repaid.
+     */
+    event RepayLendTokenAmount(address indexed safe, address indexed token, uint256 debtAmount);
+
+    /**
      * @notice Emitted when a safe requests to opt out of lend (the Aave market)
      * @param safe Address of the safe
      * @param finalizeTime Timestamp after which the request can be executed
@@ -437,6 +445,17 @@ contract CashEventEmitter is UpgradeableProxy {
 
     function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external onlyCashModule {
         emit Repay(safe, token, amount, amountInUsd);
+    }
+
+    /**
+     * @notice Emits the token-denominated Aave repayment event.
+     * @dev Only callable by the Cash Module.
+     * @param safe Address of the safe whose debt was repaid.
+     * @param token Address of the token used to repay.
+     * @param amount Amount of token actually repaid.
+     */
+    function emitRepayLendTokenAmount(address safe, address token, uint256 amount) external onlyCashModule {
+        emit RepayLendTokenAmount(safe, token, amount);
     }
 
     /**

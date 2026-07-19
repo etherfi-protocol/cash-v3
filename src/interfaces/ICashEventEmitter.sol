@@ -137,6 +137,14 @@ interface ICashEventEmitter {
     function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external;
 
     /**
+     * @notice Emits an event when Aave debt is repaid using a token-denominated amount
+     * @param safe Address of the safe whose debt was repaid
+     * @param token Address of the token repaid
+     * @param amount Amount of token actually repaid
+     */
+    function emitRepayLendTokenAmount(address safe, address token, uint256 amount) external;
+
+    /**
      * @notice Emits an event when loose collateral is supplied to cover a credit spend's borrowing shortfall
      * @param safe Address of the safe
      * @param token Collateral token supplied

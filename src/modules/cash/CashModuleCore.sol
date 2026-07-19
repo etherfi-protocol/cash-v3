@@ -549,6 +549,23 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Repays Aave debt in token units without reading the Cash PriceProvider
+     * @dev This is intentionally restricted to safes on the lend gateway. Legacy DebtManager repayment
+     *      remains USD-denominated and unchanged.
+     * @param safe Address of the EtherFi Safe whose debt is repaid.
+     * @param token Address of the debt token.
+     * @param amount Maximum amount to repay in token units.
+     * @custom:throws OnlyLendGatewaySafe if the safe still uses DebtManager.
+     * @custom:throws OnlyBorrowToken if the token is not registered on the gateway.
+     * @custom:throws AmountZero if the amount or live debt is zero.
+     */
+    function repayLendTokenAmount(address safe, address token, uint256 amount) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        CashLendLib.repayLendTokenAmount($, etherFiDataProvider, safe, token, amount);
+        CashLendLib.processLendOptOutIfReady($, safe);
+    }
+
+    /**
      * @notice Supplies a safe's loose token balances into the Aave lend market (the auto-supply sweep)
      * @dev Only callable by the EtherFi wallet (the cash-be sweeper). Per token: supplies the loose balance
      *      net of any pending-withdrawal reservation and flags it as collateral; zero and unregistered
