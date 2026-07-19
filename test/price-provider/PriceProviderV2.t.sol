@@ -153,6 +153,7 @@ contract PriceProviderV2Test is Test {
         assertEq(priceProvider.price(eth), expected);
     }
 
+    /// @notice Price reads revert while the configured L2 sequencer is down.
     function test_price_revertsWhenSequencerIsDown() public {
         MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(1, block.timestamp - 1 hours);
         vm.prank(owner);
@@ -162,6 +163,7 @@ contract PriceProviderV2Test is Test {
         priceProvider.price(eth);
     }
 
+    /// @notice Price reads remain blocked during the recovery grace period.
     function test_price_revertsDuringSequencerRecoveryGracePeriod() public {
         MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(0, block.timestamp - 30 minutes);
         vm.prank(owner);
@@ -171,6 +173,7 @@ contract PriceProviderV2Test is Test {
         priceProvider.price(eth);
     }
 
+    /// @notice Price reads resume after the recovery grace period has elapsed.
     function test_price_worksAfterSequencerRecoveryGracePeriod() public {
         MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(0, block.timestamp - 1 hours - 1);
         vm.prank(owner);
@@ -179,6 +182,7 @@ contract PriceProviderV2Test is Test {
         assertGt(priceProvider.price(eth), 0);
     }
 
+    /// @notice The admin setter emits and stores the sequencer feed and grace period.
     function test_setSequencerConfig_emitsAndStoresConfig() public {
         MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(0, block.timestamp - 2 hours);
 
@@ -191,6 +195,7 @@ contract PriceProviderV2Test is Test {
         assertEq(priceProvider.sequencerGracePeriod(), 1 hours);
     }
 
+    /// @notice Accounts without the price-provider admin role cannot configure the sequencer guard.
     function test_setSequencerConfig_revertsForUnauthorizedCaller() public {
         MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(0, block.timestamp - 2 hours);
 
@@ -198,6 +203,7 @@ contract PriceProviderV2Test is Test {
         priceProvider.setSequencerConfig(address(sequencerFeed), 1 hours);
     }
 
+    /// @notice The sequencer guard rejects a zero feed or grace period.
     function test_setSequencerConfig_revertsForInvalidConfig() public {
         vm.prank(owner);
         vm.expectRevert(PriceProviderV2.InvalidSequencerConfig.selector);

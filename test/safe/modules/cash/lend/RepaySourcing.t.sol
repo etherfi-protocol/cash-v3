@@ -21,6 +21,7 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 contract RepaySourcingTest is CashGatewayTestSetup {
     using MessageHashUtils for bytes32;
 
+    /// @notice A migrated safe can repay Aave debt in token units while the price oracle is unavailable.
     function test_repayLendTokenAmount_worksWhenPriceOracleReverts() public {
         uint256 borrowedUsdc = 300e6;
         _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
@@ -38,6 +39,7 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         assertEq(gw.debtOf(address(safe), address(usdc)), 0, "full debt repaid without an oracle read");
     }
 
+    /// @notice Token-denominated repayment is unavailable to safes still using DebtManager.
     function test_repayLendTokenAmount_revertsForLegacySafe() public {
         _forceLegacyEngine(address(safe));
 

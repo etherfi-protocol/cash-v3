@@ -50,6 +50,7 @@ contract VedaAccountantPriceFeedTest is Test {
         assertEq(feed.description(), "liquidETH / USD");
     }
 
+    /// @notice A Veda-backed Aave feed rejects prices while the L2 sequencer is down.
     function test_latestAnswer_revertsWhenSequencerIsDown() public {
         address sequencer = makeAddr("sequencer");
         vm.mockCall(sequencer, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(uint80(1), int256(1), block.timestamp - 2 hours, block.timestamp, uint80(1)));
