@@ -77,6 +77,13 @@ contract PythPriceFeedTest is Test {
         feed.latestAnswer();
     }
 
+    /// @notice A positive price that floors to zero after scaling to feed decimals is rejected, not returned as 0.
+    function test_latestAnswer_revertsWhenScaledPriceFloorsToZero() public {
+        mockOracle.setPrice(1e7); // positive at 16 decimals, but < 10**(oracleDecimals-feedDecimals), so floors to 0
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
+        feed.latestAnswer();
+    }
+
     function test_latestAnswer_revertsOnStalePublishTime() public {
         mockOracle.setPrice(4.0918676e15);
         vm.warp(block.timestamp + MAX_STALENESS + 1);

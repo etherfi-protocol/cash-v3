@@ -21,11 +21,13 @@ contract ChainlinkPriceFeedTest is Test {
     uint256 constant RATE_MAX_STALENESS = 1 days;
 
     ChainlinkPriceFeed feed;
+    ChainlinkPriceFeed ethUsdFeed;
 
     function setUp() public {
         vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
-        // A raw Chainlink aggregator satisfies IAaveV4PriceFeed; any deployed feed can be the USD leg
-        feed = new ChainlinkPriceFeed(IAggregatorV3(rateFeed), IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, false, "weETH / USD");
+        // The USD leg must be a staleness-checking feed, never a raw aggregator, so wrap ETH/USD in one.
+        ethUsdFeed = new ChainlinkPriceFeed(IAggregatorV3(ethUsdOracle), IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, false, "ETH / USD");
+        feed = new ChainlinkPriceFeed(IAggregatorV3(rateFeed), ethUsdFeed, FEED_DECIMALS, RATE_MAX_STALENESS, false, "weETH / USD");
     }
 
     /// @notice The reported price equals rate x underlying, and lands in a sane USD range.
@@ -73,8 +75,17 @@ contract ChainlinkPriceFeedTest is Test {
 
     /// @notice Reverts when the underlying price is zero or negative.
     function test_reverts_whenUnderlyingNotPositive() public {
-        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAaveV4PriceFeed.latestAnswer.selector), abi.encode(int256(0)));
+        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(uint80(1), int256(0), block.timestamp, block.timestamp, uint80(1)));
         vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
+        feed.latestAnswer();
+    }
+
+    /// @notice A stale underlying USD leg fails closed: the composite reverts even while the rate leg is fresh.
+    function test_reverts_whenUnderlyingStale() public {
+        (uint80 roundId, int256 answer, uint256 startedAt,, uint80 answeredInRound) = IAggregatorV3(ethUsdOracle).latestRoundData();
+        uint256 staleUpdatedAt = block.timestamp - RATE_MAX_STALENESS - 1;
+        vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(roundId, answer, startedAt, staleUpdatedAt, answeredInRound));
+        vm.expectRevert(BaseAaveV4PriceFeed.StalePrice.selector);
         feed.latestAnswer();
     }
 
