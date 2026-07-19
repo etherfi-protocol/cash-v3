@@ -699,6 +699,16 @@ interface ICashModule {
     function repay(address safe, address token, uint256 amountInUsd) external;
 
     /**
+     * @notice Repays Aave debt using token units without reading the Cash PriceProvider
+     * @dev Only available to safes on the lend gateway. The amount is capped at the live debt.
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to repay
+     * @param amount Amount to repay in token units
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function repayLendTokenAmount(address safe, address token, uint256 amount) external;
+
+    /**
      * @notice Supplies a safe's loose token balances into the Aave lend market (the auto-supply sweep)
      * @dev Per token: supplies the loose balance net of any pending-withdrawal reservation and flags it
      *      as collateral; zero and unregistered tokens are skipped. No-op for an opted-out safe; reverts

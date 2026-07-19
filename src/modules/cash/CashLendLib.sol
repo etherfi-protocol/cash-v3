@@ -177,25 +177,61 @@ library CashLendLib {
         }
         if (amount == 0) revert AmountZero();
 
-        (uint256 fromLoose, uint256 fromSupplied, bool cancelWithdrawal) = _sourceRepay($, gateway, safe, token, amount);
-        if (cancelWithdrawal) cancelOldWithdrawal($, dataProvider, safe);
-
-        // A full repay passes the max sentinel on its last leg so no interest dust survives the
-        // exact-amount rounding.
-        uint256 repaid;
-        if (fromSupplied == 0) {
-            // Loose covers the whole amount
-            repaid = gateway.repay(safe, token, amount == debt ? type(uint256).max : amount);
-        } else {
-            if (fromLoose != 0) repaid = gateway.repay(safe, token, fromLoose);
-            gateway.withdraw(safe, token, fromSupplied, safe);
-            repaid += gateway.repay(safe, token, amount == debt ? type(uint256).max : fromSupplied);
-        }
+        uint256 repaid = _executeGatewayRepay($, dataProvider, gateway, safe, token, amount, debt);
 
         // The gateway may repay less than requested (dust refund, or the live Aave debt being smaller than
         // the quote), so report the USD value of what was actually repaid, not the requested amount.
         uint256 repaidInUsd = repaid == amount ? amountInUsd : LendSourcingLib.toUsd(priceProvider, token, repaid);
         $.cashEventEmitter.emitRepay(safe, token, repaid, repaidInUsd);
+    }
+
+    /**
+     * @notice Repays gateway debt using token units, without reading the price provider
+     * @dev Restricted to migrated Aave safes by _requireGateway. A max amount repays the full live debt.
+     * @param $ Cash Module storage.
+     * @param dataProvider Data provider used if a competing withdrawal must be cancelled.
+     * @param safe Address of the safe whose debt is repaid.
+     * @param token Address of the debt token.
+     * @param amount Maximum amount to repay in token units.
+     * @custom:throws OnlyLendGatewaySafe if the safe still uses DebtManager.
+     * @custom:throws OnlyBorrowToken if the token is not registered on the gateway.
+     * @custom:throws AmountZero if the amount or live debt is zero.
+     */
+    function repayLendTokenAmount(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, address token, uint256 amount) external {
+        ILendGateway gateway = _requireGateway($, safe);
+        if (!gateway.isRegistered(token)) revert OnlyBorrowToken();
+
+        uint256 debt = gateway.debtOf(safe, token);
+        if (amount > debt) amount = debt;
+        if (amount == 0) revert AmountZero();
+
+        uint256 repaid = _executeGatewayRepay($, dataProvider, gateway, safe, token, amount, debt);
+        $.cashEventEmitter.emitRepayLendTokenAmount(safe, token, repaid);
+    }
+
+    /**
+     * @notice Sources and executes a token-denominated gateway repayment.
+     * @dev Uses the max sentinel for a full repayment so accrued interest dust is cleared.
+     * @param $ Cash Module storage.
+     * @param dataProvider Data provider used if a competing withdrawal must be cancelled.
+     * @param gateway Lend gateway that owns the Aave position.
+     * @param safe Address of the safe whose debt is repaid.
+     * @param token Address of the debt token.
+     * @param amount Capped amount to repay in token units.
+     * @param debt Live token debt before repayment.
+     * @return repaid Amount of token actually repaid.
+     */
+    function _executeGatewayRepay(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, ILendGateway gateway, address safe, address token, uint256 amount, uint256 debt) private returns (uint256 repaid) {
+        (uint256 fromLoose, uint256 fromSupplied, bool cancelWithdrawal) = _sourceRepay($, gateway, safe, token, amount);
+        if (cancelWithdrawal) cancelOldWithdrawal($, dataProvider, safe);
+
+        if (fromSupplied == 0) {
+            return gateway.repay(safe, token, amount == debt ? type(uint256).max : amount);
+        }
+
+        if (fromLoose != 0) repaid = gateway.repay(safe, token, fromLoose);
+        gateway.withdraw(safe, token, fromSupplied, safe);
+        repaid += gateway.repay(safe, token, amount == debt ? type(uint256).max : fromSupplied);
     }
 
     /**
