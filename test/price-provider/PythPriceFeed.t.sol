@@ -5,6 +5,7 @@ import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
+import { BaseAaveV4PriceFeed } from "../../src/oracle/BaseAaveV4PriceFeed.sol";
 import { IPyth, IPythPairOracle, PythPriceFeed } from "../../src/oracle/PythPriceFeed.sol";
 
 contract MockPyth {
@@ -72,14 +73,14 @@ contract PythPriceFeedTest is Test {
 
     function test_latestAnswer_revertsOnZeroPrice() public {
         mockOracle.setPrice(0);
-        vm.expectRevert(PythPriceFeed.InvalidPrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
 
     function test_latestAnswer_revertsOnStalePublishTime() public {
         mockOracle.setPrice(4.0918676e15);
         vm.warp(block.timestamp + MAX_STALENESS + 1);
-        vm.expectRevert(PythPriceFeed.StalePrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.StalePrice.selector);
         feed.latestAnswer();
     }
 
@@ -105,7 +106,7 @@ contract PythPriceFeedTest is Test {
     }
 
     function test_constructor_revertsOnZeroStaleness() public {
-        vm.expectRevert(PythPriceFeed.InvalidMaxStaleness.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidMaxStaleness.selector);
         new PythPriceFeed(mockOracle, ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), 0, false, "BAD / USD");
     }
 
@@ -134,7 +135,7 @@ contract PythPriceFeedTest is Test {
     function test_underlying_revertsOnNonPositiveUnderlying() public {
         mockOracle.setPrice(0.05e16);
         mockUnderlying.set(0);
-        vm.expectRevert(PythPriceFeed.InvalidPrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         compositeFeed.latestAnswer();
     }
 

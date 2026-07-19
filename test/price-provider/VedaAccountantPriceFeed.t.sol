@@ -7,6 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { IVedaAccountant } from "../../src/interfaces/IVedaAccountant.sol";
+import { BaseAaveV4PriceFeed } from "../../src/oracle/BaseAaveV4PriceFeed.sol";
 import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFeed.sol";
 
 /// @notice Fork tests on Optimism, using the live liquidETH accountant and ETH/USD feed.
@@ -61,13 +62,13 @@ contract VedaAccountantPriceFeedTest is Test {
 
         vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.accountantState.selector), abi.encode(state));
 
-        vm.expectRevert(VedaAccountantPriceFeed.StalePrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.StalePrice.selector);
         feed.latestAnswer();
     }
 
     /// @notice Reverts at construction when the staleness bound is zero.
     function test_constructor_revertsOnZeroStaleness() public {
-        vm.expectRevert(VedaAccountantPriceFeed.InvalidMaxStaleness.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidMaxStaleness.selector);
         new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, 0, false, "liquidETH / USD");
     }
 
@@ -81,7 +82,7 @@ contract VedaAccountantPriceFeedTest is Test {
     /// @notice Reverts when the rate is zero.
     function test_reverts_whenRateZero() public {
         vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), abi.encode(uint256(0)));
-        vm.expectRevert(VedaAccountantPriceFeed.InvalidPrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
 
@@ -105,7 +106,7 @@ contract VedaAccountantPriceFeedTest is Test {
     /// @notice Reverts when the underlying price is zero or negative.
     function test_reverts_whenUnderlyingNotPositive() public {
         vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAaveV4PriceFeed.latestAnswer.selector), abi.encode(int256(0)));
-        vm.expectRevert(VedaAccountantPriceFeed.InvalidPrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
 }
