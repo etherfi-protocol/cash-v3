@@ -170,8 +170,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
         // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
         // full amount loose.
-        _withdrawShortfall(safe, assetToDeposit, amountToDeposit, _getAvailableAmount(safe, assetToDeposit));
-        _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
+        _pullAndRequire(safe, assetToDeposit, amountToDeposit);
 
         // Validate that custodian has sufficient balance for synchronous deposit
         // The custodian needs at least minReturnAmount of fraxusd tokens to fulfill the deposit synchronously
@@ -250,8 +249,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
         // Pull any shortfall of the fraxUSD input out of the safe's Aave position, then confirm the safe holds
         // the full amount loose.
-        _withdrawShortfall(safe, fraxusd, amountToWithdraw, _getAvailableAmount(safe, fraxusd));
-        _checkAmountAvailable(safe, fraxusd, amountToWithdraw);
+        _pullAndRequire(safe, fraxusd, amountToWithdraw);
 
         address[] memory to = new address[](2);
         bytes[] memory data = new bytes[](2);

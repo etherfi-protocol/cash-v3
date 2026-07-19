@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import { DebitModeMaxSpend, ICashModule, Mode, SafeCashData, SafeData } from "../../interfaces/ICashModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
@@ -216,7 +215,7 @@ contract CashLens is UpgradeableProxy, Constants {
                 return (false, "Not a supported spend token");
             }
 
-            uint256 needed = _fromUsd(token, amountsInUsd[i]);
+            uint256 needed = LendSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountsInUsd[i]);
             uint256 raw = IERC20(token).balanceOf(safe);
             {
                 uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, withdrawHeadroom, hasDebt);
@@ -376,7 +375,7 @@ contract CashLens is UpgradeableProxy, Constants {
 
             spendableAmounts[i] = spendable;
             if (spendable > 0) {
-                amountsInUsd[i] = _toUsd(token, spendable);
+                amountsInUsd[i] = LendSourcingLib.toUsd(IPriceProvider(dataProvider.getPriceProvider()), token, spendable);
                 totalSpendableInUsd += amountsInUsd[i];
             }
 
@@ -558,12 +557,13 @@ contract CashLens is UpgradeableProxy, Constants {
     ///         Aave-priced collateral aggregate in the same scale.
     function _collateralBalances(address safe, address[] memory tokens, SafeData memory safeData) internal view returns (IDebtManager.TokenData[] memory, uint256) {
         ILendGateway lendGateway = cashModule.getLendGateway();
+        IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
         IDebtManager.TokenData[] memory out = new IDebtManager.TokenData[](tokens.length);
         uint256 idleUsd = 0;
         uint256 m = 0;
         for (uint256 i = 0; i < tokens.length;) {
             uint256 idle = _idleBalance(safe, tokens[i], safeData);
-            if (idle != 0) idleUsd += _toUsd(tokens[i], idle);
+            if (idle != 0) idleUsd += LendSourcingLib.toUsd(priceProvider, tokens[i], idle);
             uint256 amount = lendGateway.suppliedOf(safe, tokens[i]) + idle;
             if (amount != 0) {
                 out[m] = IDebtManager.TokenData({ token: tokens[i], amount: amount });
@@ -613,15 +613,5 @@ contract CashLens is UpgradeableProxy, Constants {
         }
 
         return out;
-    }
-
-    /// @notice Converts a token amount to USD (6 decimals), mirroring DebtManager's conversion
-    function _toUsd(address token, uint256 amount) internal view returns (uint256) {
-        return (amount * IPriceProvider(dataProvider.getPriceProvider()).price(token)) / (10 ** IERC20Metadata(token).decimals());
-    }
-
-    /// @notice Converts a USD amount (6 decimals) to token units, mirroring DebtManager's conversion
-    function _fromUsd(address token, uint256 usd) internal view returns (uint256) {
-        return (usd * (10 ** IERC20Metadata(token).decimals())) / IPriceProvider(dataProvider.getPriceProvider()).price(token);
     }
 }

@@ -173,8 +173,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
 
         // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
         // full amount loose.
-        _withdrawShortfall(safe, asset, amount, _getAvailableAmount(safe, asset));
-        _checkAmountAvailable(safe, asset, amount);
+        _pullAndRequire(safe, asset, amount);
 
         uint256 midasTokenBefore = ERC20(midasToken).balanceOf(safe);
 
@@ -251,8 +250,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         // Pull any shortfall of the Midas token out of the safe's Aave position, then confirm the safe holds
         // the full amount loose. No re-supply bookend: the asset output arrives asynchronously via the
         // redemption vault, not in this call.
-        _withdrawShortfall(safe, midasToken, amount, _getAvailableAmount(safe, midasToken));
-        _checkAmountAvailable(safe, midasToken, amount);
+        _pullAndRequire(safe, midasToken, amount);
 
         address[] memory to = new address[](2);
         bytes[] memory data = new bytes[](2);
