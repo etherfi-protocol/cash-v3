@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
-import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
-
 import { IAaveV4PriceFeed } from "../interfaces/IAaveV4PriceFeed.sol";
-import { StablePriceLib } from "./StablePriceLib.sol";
+import { BaseAaveV4PriceFeed } from "./BaseAaveV4PriceFeed.sol";
 
 /// @notice The slice of the MorphoPythOracle adapters (deployed per pair on OP) the feed reads: the
 ///         fixed-decimals price, plus the Pyth contract and feed ids baked into the adapter, so the
@@ -48,10 +45,7 @@ interface IPyth {
  *      Fails closed: latestAnswer reverts on a stale Pyth publish time, or a zero/reverting price.
  * @author ether.fi
  */
-contract PythPriceFeed is IAaveV4PriceFeed {
-    using Math for uint256;
-    using SafeCast for uint256;
-
+contract PythPriceFeed is BaseAaveV4PriceFeed {
     /// @notice The MorphoPythOracle pair adapter supplying the price
     IPythPairOracle public immutable oracle;
     /// @notice The Pyth core contract, discovered from the adapter
@@ -65,41 +59,13 @@ contract PythPriceFeed is IAaveV4PriceFeed {
     uint256 public immutable maxStaleness;
     /// @notice The decimals of the oracle's price
     uint8 public immutable oracleDecimals;
-    /// @notice The decimals of the price this feed reports
-    uint8 public immutable feedDecimals;
-    /// @notice USD feed for the pair's underlying; address(0) when the pair is USD-quoted
-    IAaveV4PriceFeed public immutable underlyingUsdFeed;
-    /// @notice The decimals of the underlying feed (0 when unset)
-    uint8 public immutable underlyingDecimals;
-    /// @notice Whether the price snaps to exactly 1 USD when within 1% of it (USD stables only)
-    bool public immutable isStableToken;
 
-    string private _description;
-
-    /// @notice Thrown when the oracle or the underlying reports a zero or negative price
-    error InvalidPrice();
-    /// @notice Thrown when a Pyth feed's publish time is older than maxStaleness
-    error StalePrice();
     /// @notice Thrown when a USD-quoted oracle's decimals are lower than the feed decimals
     error UnsupportedDecimals();
-    /// @notice Thrown when the staleness bound is zero
-    error InvalidMaxStaleness();
 
-    constructor(
-        IPythPairOracle _oracle,
-        uint8 _oracleDecimals,
-        uint8 _feedDecimals,
-        IAaveV4PriceFeed _underlyingUsdFeed,
-        uint256 _maxStaleness,
-        bool _isStableToken,
-        string memory feedDescription
-    ) {
-        if (address(_underlyingUsdFeed) == address(0)) {
-            // USD-quoted pair: scaling is a plain division, so the oracle must be at least as precise
-            require(_oracleDecimals >= _feedDecimals, UnsupportedDecimals());
-        } else {
-            underlyingDecimals = _underlyingUsdFeed.decimals();
-        }
+    constructor(IPythPairOracle _oracle, uint8 _oracleDecimals, uint8 _feedDecimals, IAaveV4PriceFeed _underlyingUsdFeed, uint256 _maxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _isStableToken, feedDescription) {
+        // USD-quoted pair: the oracle must be at least as precise as the reported feed decimals
+        if (address(_underlyingUsdFeed) == address(0)) require(_oracleDecimals >= _feedDecimals, UnsupportedDecimals());
         require(_maxStaleness > 0, InvalidMaxStaleness());
 
         oracle = _oracle;
@@ -110,20 +76,6 @@ contract PythPriceFeed is IAaveV4PriceFeed {
         feedId4 = _oracle.QUOTE_FEED_2();
         maxStaleness = _maxStaleness;
         oracleDecimals = _oracleDecimals;
-        feedDecimals = _feedDecimals;
-        underlyingUsdFeed = _underlyingUsdFeed;
-        isStableToken = _isStableToken;
-        _description = feedDescription;
-    }
-
-    /// @notice The number of decimals used to represent the price
-    function decimals() external view returns (uint8) {
-        return feedDecimals;
-    }
-
-    /// @notice A human-readable description of the feed
-    function description() external view returns (string memory) {
-        return _description;
     }
 
     /// @notice The latest USD price: the pair price, times the underlying USD price when configured
@@ -136,15 +88,7 @@ contract PythPriceFeed is IAaveV4PriceFeed {
         uint256 price = oracle.price();
         require(price > 0, InvalidPrice());
 
-        if (address(underlyingUsdFeed) == address(0)) {
-            return StablePriceLib.snap(price / 10 ** (oracleDecimals - feedDecimals), isStableToken, feedDecimals).toInt256();
-        }
-
-        int256 underlyingPrice = underlyingUsdFeed.latestAnswer();
-        require(underlyingPrice > 0, InvalidPrice());
-
-        // price = pair rate * underlying USD, normalized from (oracleDecimals + underlyingDecimals) to feedDecimals
-        return StablePriceLib.snap(price.mulDiv(uint256(underlyingPrice) * 10 ** feedDecimals, 10 ** (oracleDecimals + underlyingDecimals)), isStableToken, feedDecimals).toInt256();
+        return _composeUsd(price, oracleDecimals);
     }
 
     /// @dev Enforces the feed's own staleness bound against the Pyth publish time; zero ids are unused slots

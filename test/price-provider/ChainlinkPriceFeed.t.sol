@@ -6,6 +6,7 @@ import { Test } from "forge-std/Test.sol";
 
 import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
+import { BaseAaveV4PriceFeed } from "../../src/oracle/BaseAaveV4PriceFeed.sol";
 import { ChainlinkPriceFeed } from "../../src/oracle/ChainlinkPriceFeed.sol";
 
 /// @notice Fork tests on Optimism, using the live weETH/ETH rate feed and ETH/USD feed.
@@ -53,27 +54,27 @@ contract ChainlinkPriceFeedTest is Test {
         (uint80 roundId, int256 rate, uint256 startedAt,, uint80 answeredInRound) = IAggregatorV3(rateFeed).latestRoundData();
         uint256 staleUpdatedAt = block.timestamp - RATE_MAX_STALENESS - 1;
         vm.mockCall(rateFeed, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(roundId, rate, startedAt, staleUpdatedAt, answeredInRound));
-        vm.expectRevert(ChainlinkPriceFeed.StalePrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.StalePrice.selector);
         feed.latestAnswer();
     }
 
     /// @notice Reverts at construction when the staleness bound is zero.
     function test_constructor_revertsOnZeroStaleness() public {
-        vm.expectRevert(ChainlinkPriceFeed.InvalidMaxStaleness.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidMaxStaleness.selector);
         new ChainlinkPriceFeed(IAggregatorV3(rateFeed), IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, 0, false, "weETH / USD");
     }
 
     /// @notice Reverts when the rate feed price is zero or negative.
     function test_reverts_whenRateNotPositive() public {
         vm.mockCall(rateFeed, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(uint80(1), int256(0), block.timestamp, block.timestamp, uint80(1)));
-        vm.expectRevert(ChainlinkPriceFeed.InvalidPrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
 
     /// @notice Reverts when the underlying price is zero or negative.
     function test_reverts_whenUnderlyingNotPositive() public {
         vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAaveV4PriceFeed.latestAnswer.selector), abi.encode(int256(0)));
-        vm.expectRevert(ChainlinkPriceFeed.InvalidPrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
 
@@ -107,7 +108,7 @@ contract ChainlinkPriceFeedTest is Test {
         (uint80 roundId, int256 answer, uint256 startedAt,, uint80 answeredInRound) = IAggregatorV3(ethUsdOracle).latestRoundData();
         uint256 staleUpdatedAt = block.timestamp - RATE_MAX_STALENESS - 1;
         vm.mockCall(ethUsdOracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(roundId, answer, startedAt, staleUpdatedAt, answeredInRound));
-        vm.expectRevert(ChainlinkPriceFeed.StalePrice.selector);
+        vm.expectRevert(BaseAaveV4PriceFeed.StalePrice.selector);
         usdFeed.latestAnswer();
     }
 }
