@@ -74,6 +74,8 @@ contract DeployAaveV4TestInstance is Utils {
     // Chainlink staleness bounds for the composite weETH/USD feed: the weETH/WETH exchange-rate feed
     // has a 24h heartbeat, ETH/USD updates far more often; 2 days keeps a quiet dev instance usable.
     uint256 constant RATE_FEED_MAX_STALENESS = 1 days;
+    address constant SEQUENCER_UPTIME_FEED = 0x371EAD81c9102C9BF4874A9075FFFf170F2Ee389;
+    uint256 constant SEQUENCER_GRACE_PERIOD = 1 hours;
 
     IAccessManager accessManager;
     IHub hub;
@@ -108,9 +110,11 @@ contract DeployAaveV4TestInstance is Utils {
         spoke.updateLiquidationConfig(ISpoke.LiquidationConfig({ targetHealthFactor: 1.05e18, healthFactorForMaxBonus: 0.7e18, liquidationBonusFactor: 2000 }));
 
         // weETH priced via weETH/WETH exchange rate x ETH/USD (8-decimal USD), USDC via its direct feed
-        weethUsdFeed = new ChainlinkPriceFeed(IAggregatorV3(cfg.weEthWethOracle), IAaveV4PriceFeed(cfg.ethUsdcOracle), 8, RATE_FEED_MAX_STALENESS, false, "weETH / USD");
+        ChainlinkPriceFeed ethUsdFeed = _chainlinkFeed(cfg.ethUsdcOracle, address(0), "ETH / USD");
+        weethUsdFeed = _chainlinkFeed(cfg.weEthWethOracle, address(ethUsdFeed), "weETH / USD");
+        ChainlinkPriceFeed usdcUsdFeed = _chainlinkFeed(cfg.usdcUsdOracle, address(0), "USDC / USD");
         weethReserveId = _addReserve(cfg.weETH, address(weethUsdFeed), WEETH_COLLATERAL_FACTOR_BPS, false);
-        usdcReserveId = _addReserve(cfg.usdc, cfg.usdcUsdOracle, USDC_COLLATERAL_FACTOR_BPS, true);
+        usdcReserveId = _addReserve(cfg.usdc, address(usdcUsdFeed), USDC_COLLATERAL_FACTOR_BPS, true);
 
         address positionManager = vm.envOr("POSITION_MANAGER", address(0));
         if (positionManager != address(0)) {
@@ -128,6 +132,10 @@ contract DeployAaveV4TestInstance is Utils {
         vm.stopBroadcast();
 
         _logAndRecord();
+    }
+
+    function _chainlinkFeed(address rateFeed, address underlyingUsdFeed, string memory description) internal returns (ChainlinkPriceFeed) {
+        return new ChainlinkPriceFeed(IAggregatorV3(rateFeed), IAaveV4PriceFeed(underlyingUsdFeed), 8, RATE_FEED_MAX_STALENESS, false, description, IAggregatorV3(SEQUENCER_UPTIME_FEED), SEQUENCER_GRACE_PERIOD);
     }
 
     /// @dev Deploys LiquidationLogic to its pinned CREATE2 address (no-op if already there). Reads the

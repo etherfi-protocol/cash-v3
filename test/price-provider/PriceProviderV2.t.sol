@@ -10,6 +10,7 @@ import {IWeETH} from "../../src/interfaces/IWeETH.sol";
 import {UUPSProxy} from "../../src/UUPSProxy.sol";
 import {RoleRegistry} from "../../src/role-registry/RoleRegistry.sol";
 import {UpgradeableProxy} from "../../src/utils/UpgradeableProxy.sol";
+import {L2SequencerGuardLib} from "../../src/libraries/L2SequencerGuardLib.sol";
 
 contract PriceProviderV2Test is Test {
     PriceProviderV2 priceProvider;
@@ -150,6 +151,57 @@ contract PriceProviderV2Test is Test {
         uint256 oracleDecimals = IAggregatorV3(ethUsdOracle).decimals();
         uint256 expected = (uint256(ethAns) * 10 ** priceProvider.decimals()) / 10 ** oracleDecimals;
         assertEq(priceProvider.price(eth), expected);
+    }
+
+    function test_price_revertsWhenSequencerIsDown() public {
+        MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(1, block.timestamp - 1 hours);
+        vm.prank(owner);
+        priceProvider.setSequencerConfig(address(sequencerFeed), 1 hours);
+
+        vm.expectRevert(L2SequencerGuardLib.SequencerDown.selector);
+        priceProvider.price(eth);
+    }
+
+    function test_price_revertsDuringSequencerRecoveryGracePeriod() public {
+        MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(0, block.timestamp - 30 minutes);
+        vm.prank(owner);
+        priceProvider.setSequencerConfig(address(sequencerFeed), 1 hours);
+
+        vm.expectRevert(L2SequencerGuardLib.GracePeriodNotOver.selector);
+        priceProvider.price(eth);
+    }
+
+    function test_price_worksAfterSequencerRecoveryGracePeriod() public {
+        MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(0, block.timestamp - 1 hours - 1);
+        vm.prank(owner);
+        priceProvider.setSequencerConfig(address(sequencerFeed), 1 hours);
+
+        assertGt(priceProvider.price(eth), 0);
+    }
+
+    function test_setSequencerConfig_emitsAndStoresConfig() public {
+        MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(0, block.timestamp - 2 hours);
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit PriceProviderV2.SequencerConfigSet(address(sequencerFeed), 1 hours);
+        priceProvider.setSequencerConfig(address(sequencerFeed), 1 hours);
+
+        assertEq(priceProvider.sequencerUptimeFeed(), address(sequencerFeed));
+        assertEq(priceProvider.sequencerGracePeriod(), 1 hours);
+    }
+
+    function test_setSequencerConfig_revertsForUnauthorizedCaller() public {
+        MockSequencerUptimeFeed sequencerFeed = new MockSequencerUptimeFeed(0, block.timestamp - 2 hours);
+
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        priceProvider.setSequencerConfig(address(sequencerFeed), 1 hours);
+    }
+
+    function test_setSequencerConfig_revertsForInvalidConfig() public {
+        vm.prank(owner);
+        vm.expectRevert(PriceProviderV2.InvalidSequencerConfig.selector);
+        priceProvider.setSequencerConfig(address(0), 1 hours);
     }
 
     function test_price_directUsd_btc() public view {
@@ -1112,6 +1164,20 @@ contract MockChainlinkOracle {
 
     function decimals() external view returns (uint8) {
         return _decimals;
+    }
+}
+
+contract MockSequencerUptimeFeed {
+    int256 private immutable _answer;
+    uint256 private immutable _startedAt;
+
+    constructor(int256 answer_, uint256 startedAt_) {
+        _answer = answer_;
+        _startedAt = startedAt_;
+    }
+
+    function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80) {
+        return (0, _answer, _startedAt, block.timestamp, 0);
     }
 }
 

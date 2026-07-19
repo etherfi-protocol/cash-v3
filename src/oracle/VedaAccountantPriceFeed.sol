@@ -5,7 +5,9 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IAaveV4PriceFeed } from "../interfaces/IAaveV4PriceFeed.sol";
+import { IAggregatorV3 } from "../interfaces/IAggregatorV3.sol";
 import { IVedaAccountant } from "../interfaces/IVedaAccountant.sol";
+import { L2SequencerGuard } from "./L2SequencerGuard.sol";
 import { StablePriceLib } from "./StablePriceLib.sol";
 
 /**
@@ -14,7 +16,7 @@ import { StablePriceLib } from "./StablePriceLib.sol";
  *      or stale accountant, a non-positive or reverting underlying, or a zero rate.
  * @author ether.fi
  */
-contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
+contract VedaAccountantPriceFeed is IAaveV4PriceFeed, L2SequencerGuard {
     using Math for uint256;
     using SafeCast for uint256;
     using SafeCast for int256;
@@ -42,7 +44,7 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
     /// @notice Thrown when the staleness bound is zero
     error InvalidMaxStaleness();
 
-    constructor(IVedaAccountant _accountant, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) {
+    constructor(IVedaAccountant _accountant, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription, IAggregatorV3 _sequencerUptimeFeed, uint256 _sequencerGracePeriod) L2SequencerGuard(_sequencerUptimeFeed, _sequencerGracePeriod) {
         require(_rateMaxStaleness > 0, InvalidMaxStaleness());
         accountant = _accountant;
         underlyingUsdFeed = _underlyingUsdFeed;
@@ -72,6 +74,7 @@ contract VedaAccountantPriceFeed is IAaveV4PriceFeed {
      *      or the rate is zero
      */
     function latestAnswer() external view returns (int256) {
+        _validateSequencer();
         IVedaAccountant.AccountantState memory state = accountant.accountantState();
         if (block.timestamp > state.lastUpdateTimestamp + rateMaxStaleness) revert StalePrice();
 

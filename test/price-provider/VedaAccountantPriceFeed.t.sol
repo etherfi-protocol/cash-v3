@@ -7,6 +7,7 @@ import { Test } from "forge-std/Test.sol";
 import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { IVedaAccountant } from "../../src/interfaces/IVedaAccountant.sol";
+import { L2SequencerGuardLib } from "../../src/libraries/L2SequencerGuardLib.sol";
 import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFeed.sol";
 
 /// @notice Fork tests on Optimism, using the live liquidETH accountant and ETH/USD feed.
@@ -25,7 +26,7 @@ contract VedaAccountantPriceFeedTest is Test {
 
     function setUp() public {
         vm.createSelectFork(vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
-        feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / USD");
+        feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / USD", IAggregatorV3(address(0)), 0);
     }
 
     /// @notice The reported price equals rate x underlying, and lands in a sane USD range.
@@ -49,6 +50,15 @@ contract VedaAccountantPriceFeedTest is Test {
         assertEq(feed.description(), "liquidETH / USD");
     }
 
+    function test_latestAnswer_revertsWhenSequencerIsDown() public {
+        address sequencer = makeAddr("sequencer");
+        vm.mockCall(sequencer, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(uint80(1), int256(1), block.timestamp - 2 hours, block.timestamp, uint80(1)));
+        VedaAccountantPriceFeed guardedFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / USD", IAggregatorV3(sequencer), 1 hours);
+
+        vm.expectRevert(L2SequencerGuardLib.SequencerDown.selector);
+        guardedFeed.latestAnswer();
+    }
+
     /// @notice Reverts when the Veda accountant rate is older than the staleness limit.
     function test_reverts_whenRateStale() public {
         uint64 staleLastUpdateTimestamp = (block.timestamp - RATE_MAX_STALENESS - 1).toUint64();
@@ -68,7 +78,7 @@ contract VedaAccountantPriceFeedTest is Test {
     /// @notice Reverts at construction when the staleness bound is zero.
     function test_constructor_revertsOnZeroStaleness() public {
         vm.expectRevert(VedaAccountantPriceFeed.InvalidMaxStaleness.selector);
-        new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, 0, false, "liquidETH / USD");
+        new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, 0, false, "liquidETH / USD", IAggregatorV3(address(0)), 0);
     }
 
     /// @notice Reverts when the accountant has paused itself (getRateSafe reverts).
@@ -87,7 +97,7 @@ contract VedaAccountantPriceFeedTest is Test {
 
     /// @notice Without an underlying feed, the price is the accountant rate scaled to feed decimals.
     function test_noUnderlying_latestAnswer_isScaledRate() public {
-        VedaAccountantPriceFeed usdFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / ETH");
+        VedaAccountantPriceFeed usdFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / ETH", IAggregatorV3(address(0)), 0);
         uint256 rate = accountant.getRateSafe();
         uint256 expected = rate * (10 ** FEED_DECIMALS) / (10 ** usdFeed.rateDecimals());
         assertEq(usdFeed.latestAnswer().toUint256(), expected);
@@ -95,7 +105,7 @@ contract VedaAccountantPriceFeedTest is Test {
 
     /// @notice A stable feed snaps to exactly 1 USD inside the 1% band and passes the raw price outside it.
     function test_stable_snapsWithinOnePercent() public {
-        VedaAccountantPriceFeed stableFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, true, "STABLE / USD");
+        VedaAccountantPriceFeed stableFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, true, "STABLE / USD", IAggregatorV3(address(0)), 0);
         vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), abi.encode(uint256(0.995e18)));
         assertEq(stableFeed.latestAnswer(), 1e8);
         vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), abi.encode(uint256(1.02e18)));

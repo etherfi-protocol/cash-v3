@@ -78,6 +78,7 @@ contract AddSummerLendCollateral is Utils {
     address constant BTC_USD = 0xD702DD976Fb76Fffc2D3963D037dfDae5b04E593;
     address constant EUR_USD = 0x3626369857A10CcC6cc3A6e4f5C2f5984a519F20;
     address constant OP_USD = 0x0D276FC14719f9292D5C1eA2198673d1f4269246;
+    address constant SEQUENCER_UPTIME_FEED = 0x371EAD81c9102C9BF4874A9075FFFf170F2Ee389;
 
     // --- Pyth per-pair oracles (OP, 16-dec price(); see scripts/gnosis-txs/SetPythOraclesOP.s.sol) ---
     uint8 constant PYTH_ORACLE_DECIMALS = 16;
@@ -107,6 +108,7 @@ contract AddSummerLendCollateral is Utils {
     uint256 constant VEDA_RATE_MAX_STALENESS = 2 days;
     // The Midas proxies update roughly weekly (the PriceProvider config allows 7 days)
     uint256 constant MIDAS_RATE_MAX_STALENESS = 7 days;
+    uint256 constant SEQUENCER_GRACE_PERIOD = 1 hours;
 
     IHub hub;
     ISpoke spoke;
@@ -219,14 +221,14 @@ contract AddSummerLendCollateral is Utils {
 
     /// @dev Deploys a ChainlinkPriceFeed over a Chainlink oracle, optionally composed on an underlying feed
     function _chainlink(address oracle, address underlyingUsdFeed, uint256 maxStaleness, bool stable, string memory desc) internal returns (address) {
-        ChainlinkPriceFeed feed = new ChainlinkPriceFeed(IAggregatorV3(oracle), IAaveV4PriceFeed(underlyingUsdFeed), FEED_DECIMALS, maxStaleness, stable, desc);
+        ChainlinkPriceFeed feed = new ChainlinkPriceFeed(IAggregatorV3(oracle), IAaveV4PriceFeed(underlyingUsdFeed), FEED_DECIMALS, maxStaleness, stable, desc, IAggregatorV3(SEQUENCER_UPTIME_FEED), SEQUENCER_GRACE_PERIOD);
         _requireLivePrice(address(feed), desc);
         return address(feed);
     }
 
     /// @dev Deploys a PythPriceFeed over a per-pair oracle, optionally composed on an underlying feed
     function _pyth(address pairOracle, address underlyingUsdFeed, string memory desc) internal returns (address) {
-        PythPriceFeed feed = new PythPriceFeed(IPythPairOracle(pairOracle), PYTH_ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(underlyingUsdFeed), PYTH_MAX_STALENESS, false, desc);
+        PythPriceFeed feed = new PythPriceFeed(IPythPairOracle(pairOracle), PYTH_ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(underlyingUsdFeed), PYTH_MAX_STALENESS, false, desc, IAggregatorV3(SEQUENCER_UPTIME_FEED), SEQUENCER_GRACE_PERIOD);
         _requireLivePrice(address(feed), desc);
         return address(feed);
     }
@@ -234,7 +236,7 @@ contract AddSummerLendCollateral is Utils {
     /// @dev Deploys a VedaAccountantPriceFeed, resolving the accountant from the teller on-chain
     function _veda(address teller, address underlyingUsdFeed, string memory desc) internal returns (address) {
         IVedaAccountant accountant = IVedaAccountant(address(ILayerZeroTeller(teller).accountant()));
-        VedaAccountantPriceFeed feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(underlyingUsdFeed), FEED_DECIMALS, VEDA_RATE_MAX_STALENESS, false, desc);
+        VedaAccountantPriceFeed feed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(underlyingUsdFeed), FEED_DECIMALS, VEDA_RATE_MAX_STALENESS, false, desc, IAggregatorV3(SEQUENCER_UPTIME_FEED), SEQUENCER_GRACE_PERIOD);
         _requireLivePrice(address(feed), desc);
         return address(feed);
     }

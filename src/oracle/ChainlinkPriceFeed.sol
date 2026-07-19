@@ -6,6 +6,7 @@ import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IAaveV4PriceFeed } from "../interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../interfaces/IAggregatorV3.sol";
+import { L2SequencerGuard } from "./L2SequencerGuard.sol";
 import { StablePriceLib } from "./StablePriceLib.sol";
 
 /**
@@ -22,7 +23,7 @@ import { StablePriceLib } from "./StablePriceLib.sol";
  *      Chainlink feed is stale, or either leg is non-positive or reverts.
  * @author ether.fi
  */
-contract ChainlinkPriceFeed is IAaveV4PriceFeed {
+contract ChainlinkPriceFeed is IAaveV4PriceFeed, L2SequencerGuard {
     using Math for uint256;
     using SafeCast for uint256;
     using SafeCast for int256;
@@ -51,7 +52,7 @@ contract ChainlinkPriceFeed is IAaveV4PriceFeed {
     /// @notice Thrown when the staleness bound is zero
     error InvalidMaxStaleness();
 
-    constructor(IAggregatorV3 _rateFeed, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) {
+    constructor(IAggregatorV3 _rateFeed, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription, IAggregatorV3 _sequencerUptimeFeed, uint256 _sequencerGracePeriod) L2SequencerGuard(_sequencerUptimeFeed, _sequencerGracePeriod) {
         require(_rateMaxStaleness > 0, InvalidMaxStaleness());
         rateFeed = _rateFeed;
         underlyingUsdFeed = _underlyingUsdFeed;
@@ -81,6 +82,7 @@ contract ChainlinkPriceFeed is IAaveV4PriceFeed {
      *      underlying leg enforces its own staleness.
      */
     function latestAnswer() external view returns (int256) {
+        _validateSequencer();
         uint256 rate = _readFeed(rateFeed, rateMaxStaleness);
 
         // USD-quoted feed: scale straight to feed decimals.

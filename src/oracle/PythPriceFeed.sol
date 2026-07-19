@@ -5,6 +5,8 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { SafeCast } from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import { IAaveV4PriceFeed } from "../interfaces/IAaveV4PriceFeed.sol";
+import { IAggregatorV3 } from "../interfaces/IAggregatorV3.sol";
+import { L2SequencerGuard } from "./L2SequencerGuard.sol";
 import { StablePriceLib } from "./StablePriceLib.sol";
 
 /// @notice The slice of the MorphoPythOracle adapters (deployed per pair on OP) the feed reads: the
@@ -48,7 +50,7 @@ interface IPyth {
  *      Fails closed: latestAnswer reverts on a stale Pyth publish time, or a zero/reverting price.
  * @author ether.fi
  */
-contract PythPriceFeed is IAaveV4PriceFeed {
+contract PythPriceFeed is IAaveV4PriceFeed, L2SequencerGuard {
     using Math for uint256;
     using SafeCast for uint256;
 
@@ -85,15 +87,7 @@ contract PythPriceFeed is IAaveV4PriceFeed {
     /// @notice Thrown when the staleness bound is zero
     error InvalidMaxStaleness();
 
-    constructor(
-        IPythPairOracle _oracle,
-        uint8 _oracleDecimals,
-        uint8 _feedDecimals,
-        IAaveV4PriceFeed _underlyingUsdFeed,
-        uint256 _maxStaleness,
-        bool _isStableToken,
-        string memory feedDescription
-    ) {
+    constructor(IPythPairOracle _oracle, uint8 _oracleDecimals, uint8 _feedDecimals, IAaveV4PriceFeed _underlyingUsdFeed, uint256 _maxStaleness, bool _isStableToken, string memory feedDescription, IAggregatorV3 _sequencerUptimeFeed, uint256 _sequencerGracePeriod) L2SequencerGuard(_sequencerUptimeFeed, _sequencerGracePeriod) {
         if (address(_underlyingUsdFeed) == address(0)) {
             // USD-quoted pair: scaling is a plain division, so the oracle must be at least as precise
             require(_oracleDecimals >= _feedDecimals, UnsupportedDecimals());
@@ -128,6 +122,7 @@ contract PythPriceFeed is IAaveV4PriceFeed {
 
     /// @notice The latest USD price: the pair price, times the underlying USD price when configured
     function latestAnswer() external view returns (int256) {
+        _validateSequencer();
         _requireFresh(feedId1);
         _requireFresh(feedId2);
         _requireFresh(feedId3);

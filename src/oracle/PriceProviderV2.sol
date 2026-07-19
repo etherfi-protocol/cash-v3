@@ -6,6 +6,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IPriceProvider} from "../interfaces/IPriceProvider.sol";
 import {IAggregatorV3} from "../interfaces/IAggregatorV3.sol";
 import {UpgradeableProxy} from "../utils/UpgradeableProxy.sol";
+import {L2SequencerGuardLib} from "../libraries/L2SequencerGuardLib.sol";
 
 /**
  * @title PriceProviderV2
@@ -65,6 +66,12 @@ contract PriceProviderV2 is UpgradeableProxy {
 
         /// @notice Mapping of token addresses to whether they are base assets
         mapping(address token => bool isBaseAsset) isBaseAsset;
+
+        /// @notice L2 sequencer uptime feed. Zero disables the guard for non-L2 deployments.
+        IAggregatorV3 sequencerUptimeFeed;
+
+        /// @notice Time prices remain unavailable after the sequencer reports recovery.
+        uint256 sequencerGracePeriod;
     }
 
     /**
@@ -112,6 +119,8 @@ contract PriceProviderV2 is UpgradeableProxy {
      * @param isBaseAsset Whether the base asset is set to true or false
      */
     event BaseAssetSet(address baseAsset, bool isBaseAsset);
+
+    event SequencerConfigSet(address sequencerUptimeFeed, uint256 gracePeriod);
 
     /**
      * @notice Thrown when trying to get a price for a token with no configured oracle
@@ -161,6 +170,7 @@ contract PriceProviderV2 is UpgradeableProxy {
      * @notice Thrown when a base asset is removed
      */
     error BaseAssetCannotBeRemoved();
+    error InvalidSequencerConfig();
 
     /**
      * @notice Constructor that disables initializers
@@ -206,6 +216,14 @@ contract PriceProviderV2 is UpgradeableProxy {
         return _getPriceProviderV2Storage().isBaseAsset[token];
     }
 
+    function sequencerUptimeFeed() external view returns (address) {
+        return address(_getPriceProviderV2Storage().sequencerUptimeFeed);
+    }
+
+    function sequencerGracePeriod() external view returns (uint256) {
+        return _getPriceProviderV2Storage().sequencerGracePeriod;
+    }
+
     /**
      * @notice Updates the price oracle configurations for multiple tokens
      * @dev Only callable by addresses with PRICE_PROVIDER_ADMIN_ROLE
@@ -240,6 +258,15 @@ contract PriceProviderV2 is UpgradeableProxy {
         emit BaseAssetSet(_baseAsset, _isBaseAsset);
     }
 
+    /// @notice Configures the L2 sequencer uptime guard used by every price read.
+    function setSequencerConfig(address _sequencerUptimeFeed, uint256 _gracePeriod) external onlyRole(PRICE_PROVIDER_ADMIN_ROLE) {
+        if (_sequencerUptimeFeed == address(0) || _gracePeriod == 0) revert InvalidSequencerConfig();
+        PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
+        $.sequencerUptimeFeed = IAggregatorV3(_sequencerUptimeFeed);
+        $.sequencerGracePeriod = _gracePeriod;
+        emit SequencerConfigSet(_sequencerUptimeFeed, _gracePeriod);
+    }
+
     /**
      * @notice Gets the normalized USD price for a token with standard decimal precision
      * @dev If the token has a base asset configured, the raw oracle price is multiplied
@@ -248,7 +275,10 @@ contract PriceProviderV2 is UpgradeableProxy {
      * @return Price in USD with DECIMALS decimal places
      */
     function price(address token) external view returns (uint256) {
-        Config memory config = _getPriceProviderV2Storage().tokenConfig[token];
+        PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
+        L2SequencerGuardLib.validate($.sequencerUptimeFeed, $.sequencerGracePeriod);
+
+        Config memory config = $.tokenConfig[token];
         if (config.oracle == address(0)) revert TokenOracleNotSet();
 
         uint256 rawPrice = _fetchRawPrice(config);
@@ -258,7 +288,7 @@ contract PriceProviderV2 is UpgradeableProxy {
         }
 
         if (config.baseAsset != address(0)) {
-            Config memory baseConfig = _getPriceProviderV2Storage().tokenConfig[config.baseAsset];
+            Config memory baseConfig = $.tokenConfig[config.baseAsset];
             if (baseConfig.oracle == address(0)) revert TokenOracleNotSet();
             if (baseConfig.baseAsset != address(0)) revert InvalidBaseAsset();
 

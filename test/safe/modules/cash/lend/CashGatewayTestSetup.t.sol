@@ -8,8 +8,8 @@ import { IAaveV4PriceFeed } from "../../../../../src/interfaces/IAaveV4PriceFeed
 import { IAggregatorV3 } from "../../../../../src/interfaces/IAggregatorV3.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { ChainlinkPriceFeed } from "../../../../../src/oracle/ChainlinkPriceFeed.sol";
-import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
+import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 
 /**
  * @title CashGatewayTestSetup
@@ -32,6 +32,7 @@ import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
  *         spend agree, so the check side and the execution side never diverge.
  */
 abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
+    address internal constant SEQUENCER_UPTIME_FEED = 0x371EAD81c9102C9BF4874A9075FFFf170F2Ee389;
     LendGateway internal gw;
     address internal driver = makeAddr("gwDriver"); // arranges Aave positions directly in tests
     address internal recipient = makeAddr("gwRecipient");
@@ -45,9 +46,11 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
 
         // Real Aave v4 instance on the fork, weETH + USDC reserves priced by live Chainlink feeds
         _deployAaveV4();
-        address weethSource = address(new ChainlinkPriceFeed(IAggregatorV3(weEthWethOracle), IAaveV4PriceFeed(ethUsdcOracle), 8, 30 days, false, "weETH / USD"));
+        address ethSource = address(new ChainlinkPriceFeed(IAggregatorV3(ethUsdcOracle), IAaveV4PriceFeed(address(0)), 8, 30 days, false, "ETH / USD", IAggregatorV3(SEQUENCER_UPTIME_FEED), 1 hours));
+        address weethSource = address(new ChainlinkPriceFeed(IAggregatorV3(weEthWethOracle), IAaveV4PriceFeed(ethSource), 8, 30 days, false, "weETH / USD", IAggregatorV3(SEQUENCER_UPTIME_FEED), 1 hours));
+        address usdcSource = address(new ChainlinkPriceFeed(IAggregatorV3(usdcUsdOracle), IAaveV4PriceFeed(address(0)), 8, 30 days, true, "USDC / USD", IAggregatorV3(SEQUENCER_UPTIME_FEED), 1 hours));
         weethReserveId = _addAaveReserve(address(weETH), weethSource, _weethCollateralFactorBps(), _weethBorrowable());
-        usdcReserveId = _addAaveReserve(address(usdc), usdcUsdOracle, _usdcCollateralFactorBps(), true);
+        usdcReserveId = _addAaveReserve(address(usdc), usdcSource, _usdcCollateralFactorBps(), true);
         _seedInitialLiquidity();
 
         // LendGateway proxy pointing at the fresh spoke, wired as the CashModule's live lend engine
