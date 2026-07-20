@@ -86,8 +86,22 @@ interface IOwnershipBridgeReceiver {
         uint8 kind
     );
 
+    /**
+     * @notice Emitted when an ownership message is older than one already applied.
+     */
+    event StaleOwnershipMessageSkipped(
+        address indexed sourceSafe,
+        address indexed tradingSafe,
+        bytes32 indexed guid,
+        uint8 kind,
+        uint256 sourceNonce,
+        uint256 lastAppliedSourceNonce
+    );
+
     /// @notice Reverts when the LZ packet's source EID doesn't match the configured `SOURCE_EID`.
     error WrongSrcEid();
+    /// @notice Reverts when the ownership envelope uses an unsupported encoding version.
+    error UnsupportedEnvelopeVersion(uint8 version);
 
     /**
      * @notice Reverts when the envelope's `OpKind` discriminator is outside the known set.

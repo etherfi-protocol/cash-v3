@@ -218,7 +218,8 @@ abstract contract RecoveryManager is EtherFiSafeBase {
 
         recoverySigners.checkDuplicates();
 
-        bytes32 structHash = keccak256(abi.encode(RECOVER_SAFE_TYPEHASH, newOwner, _useNonce()));
+        uint256 sourceNonce = _useNonce();
+        bytes32 structHash = keccak256(abi.encode(RECOVER_SAFE_TYPEHASH, newOwner, sourceNonce));
         bytes32 digestHash = _hashTypedDataV4(structHash);
         uint256 validSignatures = 0;
 
@@ -238,7 +239,7 @@ abstract contract RecoveryManager is EtherFiSafeBase {
         _setIncomingOwner(newOwner, incomingOwnerStartTime);
 
         emit Recovery(newOwner, incomingOwnerStartTime);
-        _publishRecover(newOwner, incomingOwnerStartTime);
+        _publishRecover(newOwner, incomingOwnerStartTime, sourceNonce);
     }
 
     /**
@@ -270,14 +271,15 @@ abstract contract RecoveryManager is EtherFiSafeBase {
      */
     function cancelRecovery(address[] calldata signers, bytes[] calldata signatures) external payable {
         _currentOwner();
-        bytes32 structHash = keccak256(abi.encode(CANCEL_RECOVERY_TYPEHASH, _useNonce()));
+        uint256 sourceNonce = _useNonce();
+        bytes32 structHash = keccak256(abi.encode(CANCEL_RECOVERY_TYPEHASH, sourceNonce));
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
 
         _removeIncomingOwner();
 
         emit RecoveryCancelled();
-        _publishCancelRecovery();
+        _publishCancelRecovery(sourceNonce);
     }
 
     /**

@@ -37,19 +37,20 @@ contract RoleRegistryStub {
 /// @dev Helper to call the sender as if we were a safe. The sender requires `msg.sender == safe`.
 contract SafeCaller {
     OwnershipBridgeSender public immutable sender;
+    uint256 public nextNonce;
     constructor(OwnershipBridgeSender _sender) { sender = _sender; }
 
     function publishConfigureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold) external payable {
-        sender.publishConfigureOwners{value: msg.value}(address(this), owners, shouldAdd, threshold);
+        sender.publishConfigureOwners{value: msg.value}(address(this), owners, shouldAdd, threshold, nextNonce++);
     }
     function publishSetThreshold(uint8 threshold) external payable {
-        sender.publishSetThreshold{value: msg.value}(address(this), threshold);
+        sender.publishSetThreshold{value: msg.value}(address(this), threshold, nextNonce++);
     }
     function publishRecover(address newOwner, uint256 incomingOwnerEffectiveAt) external payable {
-        sender.publishRecover{value: msg.value}(address(this), newOwner, incomingOwnerEffectiveAt);
+        sender.publishRecover{value: msg.value}(address(this), newOwner, incomingOwnerEffectiveAt, nextNonce++);
     }
     function publishCancelRecovery() external payable {
-        sender.publishCancelRecovery{value: msg.value}(address(this));
+        sender.publishCancelRecovery{value: msg.value}(address(this), nextNonce++);
     }
 
     receive() external payable {}
@@ -110,16 +111,19 @@ contract OwnershipBridgeSenderTest is Test {
         (uint32 dstEid, bytes memory message) = endpoint.lastSendArgs();
         assertEq(uint256(dstEid), uint256(MAINNET_EID));
 
-        (uint8 kind, address envSafe, ) = abi.decode(message, (uint8, address, bytes));
+        (uint8 version, uint8 kind, address envSafe, uint256 sourceNonce,) =
+            abi.decode(message, (uint8, uint8, address, uint256, bytes));
+        assertEq(version, OwnershipBridgeMessageLib.ENVELOPE_VERSION);
         assertEq(kind, uint8(OwnershipBridgeMessageLib.OpKind.ConfigureOwners));
         assertEq(envSafe, address(safeCaller));
+        assertEq(sourceNonce, 0);
     }
 
     function test_publishSetThreshold_happyPath() public {
         safeCaller.publishSetThreshold(3);
         (uint32 dstEid, bytes memory message) = endpoint.lastSendArgs();
         assertEq(uint256(dstEid), uint256(MAINNET_EID));
-        (uint8 kind, , ) = abi.decode(message, (uint8, address, bytes));
+        (, uint8 kind,,, ) = abi.decode(message, (uint8, uint8, address, uint256, bytes));
         assertEq(kind, uint8(OwnershipBridgeMessageLib.OpKind.SetThreshold));
     }
 
@@ -127,7 +131,8 @@ contract OwnershipBridgeSenderTest is Test {
         address newOwner = makeAddr("newOwner");
         uint256 effectiveAt = block.timestamp + 7 days;
         safeCaller.publishRecover(newOwner, effectiveAt);
-        (uint8 kind, , bytes memory opData) = abi.decode(endpoint.lastMessage(), (uint8, address, bytes));
+        (, uint8 kind,,, bytes memory opData) =
+            abi.decode(endpoint.lastMessage(), (uint8, uint8, address, uint256, bytes));
         assertEq(kind, uint8(OwnershipBridgeMessageLib.OpKind.Recover));
         (address decodedOwner, uint256 decodedEffectiveAt) = abi.decode(opData, (address, uint256));
         assertEq(decodedOwner, newOwner);
@@ -136,7 +141,8 @@ contract OwnershipBridgeSenderTest is Test {
 
     function test_publishCancelRecovery_happyPath() public {
         safeCaller.publishCancelRecovery();
-        (uint8 kind, , ) = abi.decode(endpoint.lastMessage(), (uint8, address, bytes));
+        (, uint8 kind,,, ) =
+            abi.decode(endpoint.lastMessage(), (uint8, uint8, address, uint256, bytes));
         assertEq(kind, uint8(OwnershipBridgeMessageLib.OpKind.CancelRecovery));
     }
 
@@ -147,7 +153,7 @@ contract OwnershipBridgeSenderTest is Test {
         (address[] memory owners, bool[] memory shouldAdd) = _owners();
         vm.expectRevert(IOwnershipBridgeSender.CallerNotSafe.selector);
         vm.prank(notSafe);
-        sender.publishConfigureOwners(address(safeCaller), owners, shouldAdd, 2);
+        sender.publishConfigureOwners(address(safeCaller), owners, shouldAdd, 2, 0);
     }
 
     function test_publish_revertsWhen_safeNotRegistered() public {

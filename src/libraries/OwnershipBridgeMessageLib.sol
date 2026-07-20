@@ -6,11 +6,13 @@ pragma solidity 0.8.28;
  * @author ether.fi
  * @notice Encode / decode for the cross-chain ownership-bridge envelope and per-kind payloads.
  * @dev Each safe owner-mutating operation on the source chain is published as one envelope.
- *      The envelope carries an `OpKind` discriminator + source safe address + ABI-encoded
- *      per-kind payload. The receiver decodes by kind and dispatches to the matching
- *      `applyBridge*` function on the destination TradingSafe.
+ *      The envelope carries a version, `OpKind`, source safe address, source operation nonce,
+ *      and ABI-encoded per-kind payload. The receiver uses the nonce for freshness, then
+ *      decodes by kind and dispatches to the matching destination `applyBridge*` function.
  */
 library OwnershipBridgeMessageLib {
+    uint8 internal constant ENVELOPE_VERSION = 1;
+
     /**
      * @notice Identifies which owner-mutating operation an envelope carries.
      * @dev The receiver decodes `opData` against the matching kind-specific struct below.
@@ -24,13 +26,17 @@ library OwnershipBridgeMessageLib {
 
     /**
      * @notice Top-level envelope sent over LayerZero.
+     * @param version Encoding version for forward-compatible decoding.
      * @param kind Discriminator for the operation type.
      * @param safe Source-chain safe address whose state is changing.
+     * @param sourceNonce Nonce consumed by the source safe for this authorized operation.
      * @param opData ABI-encoded kind-specific payload (see per-kind structs).
      */
     struct Envelope {
+        uint8 version;
         OpKind kind;
         address safe;
+        uint256 sourceNonce;
         bytes opData;
     }
 
@@ -74,7 +80,7 @@ library OwnershipBridgeMessageLib {
      * @return The encoded bytes ready to be passed as the LZ message payload.
      */
     function encodeEnvelope(Envelope memory e) internal pure returns (bytes memory) {
-        return abi.encode(uint8(e.kind), e.safe, e.opData);
+        return abi.encode(e.version, uint8(e.kind), e.safe, e.sourceNonce, e.opData);
     }
 
     /**
@@ -84,7 +90,8 @@ library OwnershipBridgeMessageLib {
      */
     function decodeEnvelope(bytes calldata data) internal pure returns (Envelope memory e) {
         uint8 k;
-        (k, e.safe, e.opData) = abi.decode(data, (uint8, address, bytes));
+        (e.version, k, e.safe, e.sourceNonce, e.opData) =
+            abi.decode(data, (uint8, uint8, address, uint256, bytes));
         e.kind = OpKind(k);
     }
 

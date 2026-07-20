@@ -21,20 +21,34 @@ contract EtherFiSafe is EtherFiSafeCore, OwnerBridgePublisher {
     ///      `EtherFiSafeBase`. Each override resolves the multi-inheritance ambiguity and
     ///      delegates to `OwnerBridgePublisher`'s concrete implementation.
 
-    function _publishConfigureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold) internal override(EtherFiSafeBase, OwnerBridgePublisher) {
-        OwnerBridgePublisher._publishConfigureOwners(owners, shouldAdd, threshold);
+    function _publishConfigureOwners(
+        address[] calldata owners,
+        bool[] calldata shouldAdd,
+        uint8 threshold,
+        uint256 sourceNonce
+    ) internal override(EtherFiSafeBase, OwnerBridgePublisher) {
+        OwnerBridgePublisher._publishConfigureOwners(owners, shouldAdd, threshold, sourceNonce);
     }
 
-    function _publishSetThreshold(uint8 threshold) internal override(EtherFiSafeBase, OwnerBridgePublisher) {
-        OwnerBridgePublisher._publishSetThreshold(threshold);
+    function _publishSetThreshold(
+        uint8 threshold,
+        uint256 sourceNonce
+    ) internal override(EtherFiSafeBase, OwnerBridgePublisher) {
+        OwnerBridgePublisher._publishSetThreshold(threshold, sourceNonce);
     }
 
-    function _publishRecover(address newOwner, uint256 incomingOwnerEffectiveAt) internal override(EtherFiSafeBase, OwnerBridgePublisher) {
-        OwnerBridgePublisher._publishRecover(newOwner, incomingOwnerEffectiveAt);
+    function _publishRecover(
+        address newOwner,
+        uint256 incomingOwnerEffectiveAt,
+        uint256 sourceNonce
+    ) internal override(EtherFiSafeBase, OwnerBridgePublisher) {
+        OwnerBridgePublisher._publishRecover(newOwner, incomingOwnerEffectiveAt, sourceNonce);
     }
 
-    function _publishCancelRecovery() internal override(EtherFiSafeBase, OwnerBridgePublisher) {
-        OwnerBridgePublisher._publishCancelRecovery();
+    function _publishCancelRecovery(
+        uint256 sourceNonce
+    ) internal override(EtherFiSafeBase, OwnerBridgePublisher) {
+        OwnerBridgePublisher._publishCancelRecovery(sourceNonce);
     }
 
     /// @inheritdoc OwnerBridgePublisher

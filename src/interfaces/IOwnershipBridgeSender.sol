@@ -152,6 +152,7 @@ interface IOwnershipBridgeSender {
      * @param owners Owners to add or remove.
      * @param shouldAdd Per-owner add (true) / remove (false) flag.
      * @param threshold New signature threshold after the change is applied locally.
+     * @param sourceNonce Nonce consumed by the source safe for this operation.
      * @custom:throws CallerNotSafe If `msg.sender != safe`.
      * @custom:throws NotEtherFiSafe If `safe` isn't registered.
      * @custom:throws ArrayLengthMismatch If `owners.length != shouldAdd.length`.
@@ -163,7 +164,8 @@ interface IOwnershipBridgeSender {
         address safe,
         address[] calldata owners,
         bool[] calldata shouldAdd,
-        uint8 threshold
+        uint8 threshold,
+        uint256 sourceNonce
     ) external payable;
 
     /**
@@ -171,13 +173,14 @@ interface IOwnershipBridgeSender {
      * @dev Per-destination EIDs and resulting LZ GUIDs are surfaced via `SetThresholdPublished`.
      * @param safe Source-chain safe.
      * @param threshold New signature threshold.
+     * @param sourceNonce Nonce consumed by the source safe for this operation.
      * @custom:throws CallerNotSafe If `msg.sender != safe`.
      * @custom:throws NotEtherFiSafe If `safe` isn't registered.
      * @custom:throws DestinationNotConfigured If an enabled destEid was later removed from the global config.
      * @custom:throws PeerNotConfigured If an enabled destination has no LZ peer set.
      * @custom:throws InsufficientFee If `msg.value` is below the total LZ fee.
      */
-    function publishSetThreshold(address safe, uint8 threshold) external payable;
+    function publishSetThreshold(address safe, uint8 threshold, uint256 sourceNonce) external payable;
 
     /**
      * @notice Publishes a `recover` operation (timelocked owner replacement) to every destination.
@@ -187,25 +190,32 @@ interface IOwnershipBridgeSender {
      * @param safe Source-chain safe.
      * @param newOwner Incoming owner that will take effect after the destination's timelock.
      * @param incomingOwnerEffectiveAt Source-chain UNIX timestamp at which `newOwner` activates on destinations.
+     * @param sourceNonce Nonce consumed by the source safe for this operation.
      * @custom:throws CallerNotSafe If `msg.sender != safe`.
      * @custom:throws NotEtherFiSafe If `safe` isn't registered.
      * @custom:throws DestinationNotConfigured If an enabled destEid was later removed from the global config.
      * @custom:throws PeerNotConfigured If an enabled destination has no LZ peer set.
      * @custom:throws InsufficientFee If `msg.value` is below the total LZ fee.
      */
-    function publishRecover(address safe, address newOwner, uint256 incomingOwnerEffectiveAt) external payable;
+    function publishRecover(
+        address safe,
+        address newOwner,
+        uint256 incomingOwnerEffectiveAt,
+        uint256 sourceNonce
+    ) external payable;
 
     /**
      * @notice Publishes a `cancelRecovery` operation to every destination.
      * @dev Per-destination EIDs and resulting LZ GUIDs are surfaced via `CancelRecoveryPublished`.
      * @param safe Source-chain safe.
+     * @param sourceNonce Nonce consumed by the source safe for this operation.
      * @custom:throws CallerNotSafe If `msg.sender != safe`.
      * @custom:throws NotEtherFiSafe If `safe` isn't registered.
      * @custom:throws DestinationNotConfigured If an enabled destEid was later removed from the global config.
      * @custom:throws PeerNotConfigured If an enabled destination has no LZ peer set.
      * @custom:throws InsufficientFee If `msg.value` is below the total LZ fee.
      */
-    function publishCancelRecovery(address safe) external payable;
+    function publishCancelRecovery(address safe, uint256 sourceNonce) external payable;
 
     /**
      * @notice Adds, updates, or removes a destination chain.

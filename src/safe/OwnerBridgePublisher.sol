@@ -38,43 +38,52 @@ abstract contract OwnerBridgePublisher {
      *      any leftover (the sender may return unused fee if a per-destination quote
      *      shifted between our quote and dispatch).
      */
-    function _publishConfigureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold) internal virtual {
+    function _publishConfigureOwners(
+        address[] calldata owners,
+        bool[] calldata shouldAdd,
+        uint8 threshold,
+        uint256 sourceNonce
+    ) internal virtual {
         IOwnershipBridgeSender sender = _resolveLiveBridgeSender();
         if (address(sender) == address(0)) return;
         uint256 fee = sender.quoteConfigureOwners(address(this), owners, shouldAdd, threshold);
         uint256 preCallBalance = _validateFeeAndSnapshot(fee);
-        sender.publishConfigureOwners{ value: fee }(address(this), owners, shouldAdd, threshold);
+        sender.publishConfigureOwners{ value: fee }(address(this), owners, shouldAdd, threshold, sourceNonce);
         _refundLeftover(preCallBalance);
     }
 
     /// @dev See `_publishConfigureOwners`. Refund semantics are identical.
-    function _publishSetThreshold(uint8 threshold) internal virtual {
+    function _publishSetThreshold(uint8 threshold, uint256 sourceNonce) internal virtual {
         IOwnershipBridgeSender sender = _resolveLiveBridgeSender();
         if (address(sender) == address(0)) return;
         uint256 fee = sender.quoteSetThreshold(address(this), threshold);
         uint256 preCallBalance = _validateFeeAndSnapshot(fee);
-        sender.publishSetThreshold{ value: fee }(address(this), threshold);
+        sender.publishSetThreshold{ value: fee }(address(this), threshold, sourceNonce);
         _refundLeftover(preCallBalance);
     }
 
     /// @dev Publishes a `recover`. The local timelock target is passed through so the
     ///      destination mirrors the same wall-clock activation moment.
-    function _publishRecover(address newOwner, uint256 incomingOwnerEffectiveAt) internal virtual {
+    function _publishRecover(
+        address newOwner,
+        uint256 incomingOwnerEffectiveAt,
+        uint256 sourceNonce
+    ) internal virtual {
         IOwnershipBridgeSender sender = _resolveLiveBridgeSender();
         if (address(sender) == address(0)) return;
         uint256 fee = sender.quoteRecover(address(this), newOwner, incomingOwnerEffectiveAt);
         uint256 preCallBalance = _validateFeeAndSnapshot(fee);
-        sender.publishRecover{ value: fee }(address(this), newOwner, incomingOwnerEffectiveAt);
+        sender.publishRecover{ value: fee }(address(this), newOwner, incomingOwnerEffectiveAt, sourceNonce);
         _refundLeftover(preCallBalance);
     }
 
     /// @dev See `_publishConfigureOwners`. Refund semantics are identical.
-    function _publishCancelRecovery() internal virtual {
+    function _publishCancelRecovery(uint256 sourceNonce) internal virtual {
         IOwnershipBridgeSender sender = _resolveLiveBridgeSender();
         if (address(sender) == address(0)) return;
         uint256 fee = sender.quoteCancelRecovery(address(this));
         uint256 preCallBalance = _validateFeeAndSnapshot(fee);
-        sender.publishCancelRecovery{ value: fee }(address(this));
+        sender.publishCancelRecovery{ value: fee }(address(this), sourceNonce);
         _refundLeftover(preCallBalance);
     }
 

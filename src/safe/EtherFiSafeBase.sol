@@ -226,8 +226,8 @@ abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
     // leave them as no-ops, which keeps the publisher's bytecode out of those builds.
     // ------------------------------------------------------------------
 
-    function _publishConfigureOwners(address[] calldata, bool[] calldata, uint8) internal virtual {}
-    function _publishSetThreshold(uint8) internal virtual {}
-    function _publishRecover(address, uint256) internal virtual {}
-    function _publishCancelRecovery() internal virtual {}
+    function _publishConfigureOwners(address[] calldata, bool[] calldata, uint8, uint256) internal virtual {}
+    function _publishSetThreshold(uint8, uint256) internal virtual {}
+    function _publishRecover(address, uint256, uint256) internal virtual {}
+    function _publishCancelRecovery(uint256) internal virtual {}
 }

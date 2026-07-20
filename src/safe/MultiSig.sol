@@ -112,12 +112,13 @@ abstract contract MultiSig is EtherFiSafeBase {
      */
     function setThreshold(uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external payable {
         _currentOwner();
-        bytes32 structHash = keccak256(abi.encode(SET_THRESHOLD_TYPEHASH, threshold, _useNonce()));
+        uint256 sourceNonce = _useNonce();
+        bytes32 structHash = keccak256(abi.encode(SET_THRESHOLD_TYPEHASH, threshold, sourceNonce));
 
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _setThreshold(threshold);
-        _publishSetThreshold(threshold);
+        _publishSetThreshold(threshold, sourceNonce);
     }
 
     /**
@@ -137,13 +138,14 @@ abstract contract MultiSig is EtherFiSafeBase {
      */
     function configureOwners(address[] calldata owners, bool[] calldata shouldAdd, uint8 threshold, address[] calldata signers, bytes[] calldata signatures) external payable {
         _currentOwner();
-        bytes32 structHash = keccak256(abi.encode(CONFIGURE_OWNERS_TYPEHASH, keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), threshold, _useNonce()));
+        uint256 sourceNonce = _useNonce();
+        bytes32 structHash = keccak256(abi.encode(CONFIGURE_OWNERS_TYPEHASH, keccak256(abi.encodePacked(owners)), keccak256(abi.encodePacked(shouldAdd)), threshold, sourceNonce));
 
         bytes32 digestHash = _hashTypedDataV4(structHash);
         if (!checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _configureOwners(owners, shouldAdd, threshold);
         _configureAdmin(owners, shouldAdd);
-        _publishConfigureOwners(owners, shouldAdd, threshold);
+        _publishConfigureOwners(owners, shouldAdd, threshold, sourceNonce);
     }
 
     /**

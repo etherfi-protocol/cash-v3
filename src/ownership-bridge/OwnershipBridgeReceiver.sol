@@ -19,15 +19,26 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @dev Holds a privileged role on every TradingSafe — TradingSafe gates its
  *      `applyBridge*` functions to this contract's address.
  *
- *      LayerZero v2's default ordered-delivery + GUID-based replay protection are relied on;
- *      no application-level nonce is tracked here. `srcEid` is checked as defence-in-depth
- *      against peer misconfiguration.
+ *      In addition to LayerZero's transport authentication and GUID replay protection, the
+ *      receiver tracks the last applied source-safe nonce. Older or duplicate operations are
+ *      consumed without application so delayed messages cannot overwrite newer owner state.
+ *      `srcEid` is checked as defence-in-depth against peer misconfiguration.
  *
  *      If a message arrives for a TradingSafe that hasn't been deployed yet, we emit
  *      `OwnershipApplyDeferred` and exit cleanly. The eventual lazy-deploy reads the current
  *      source-chain owner state, so the missed bridge update is a no-op in practice.
  */
 contract OwnershipBridgeReceiver is IOwnershipBridgeReceiver, OAppReceiverUpgradeable, UpgradeableProxy {
+    /// @custom:storage-location erc7201:etherfi.storage.OwnershipBridgeReceiver
+    struct OwnershipBridgeReceiverStorage {
+        mapping(address sourceSafe => uint256 nonce) lastAppliedSourceNonce;
+        mapping(address sourceSafe => bool initialized) hasAppliedSourceNonce;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.OwnershipBridgeReceiver")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant OwnershipBridgeReceiverStorageLocation =
+        0x0837cfcd8214934b45c9229c8defc12d69d66511b675670079b781633d90bb00;
+
     /// @notice Trusted source EID. Pinned at deploy.
     uint32 public immutable SOURCE_EID;
     /// @notice Mainnet TradingSafe factory used to resolve `sourceSafe → tradingSafe`.
@@ -75,12 +86,17 @@ contract OwnershipBridgeReceiver is IOwnershipBridgeReceiver, OAppReceiverUpgrad
         if (_origin.srcEid != SOURCE_EID) revert WrongSrcEid();
 
         OwnershipBridgeMessageLib.Envelope memory env = OwnershipBridgeMessageLib.decodeEnvelope(_message);
+        if (env.version != OwnershipBridgeMessageLib.ENVELOPE_VERSION) {
+            revert UnsupportedEnvelopeVersion(env.version);
+        }
         address tradingSafe = TRADING_SAFE_FACTORY.getDeterministicAddress(env.safe);
 
         if (tradingSafe.code.length == 0) {
             emit OwnershipApplyDeferred(env.safe, tradingSafe, _guid, uint8(env.kind));
             return;
         }
+
+        if (!_recordSourceNonce(env.safe, tradingSafe, _guid, env.kind, env.sourceNonce)) return;
 
         if (env.kind == OwnershipBridgeMessageLib.OpKind.ConfigureOwners) {
             _applyConfigureOwners(env.safe, tradingSafe, _guid, env.opData);
@@ -143,5 +159,48 @@ contract OwnershipBridgeReceiver is IOwnershipBridgeReceiver, OAppReceiverUpgrad
     function _applyCancelRecovery(address sourceSafe, address tradingSafe, bytes32 guid) internal {
         ITradingSafeBridgeReceiver(tradingSafe).applyBridgeCancelRecovery();
         emit CancelRecoveryApplied(sourceSafe, tradingSafe, guid);
+    }
+
+    function lastAppliedSourceNonce(address sourceSafe) external view returns (uint256 nonce, bool initialized) {
+        OwnershipBridgeReceiverStorage storage $ = _getOwnershipBridgeReceiverStorage();
+        return ($.lastAppliedSourceNonce[sourceSafe], $.hasAppliedSourceNonce[sourceSafe]);
+    }
+
+    function _recordSourceNonce(
+        address sourceSafe,
+        address tradingSafe,
+        bytes32 guid,
+        OwnershipBridgeMessageLib.OpKind kind,
+        uint256 sourceNonce
+    ) internal returns (bool) {
+        OwnershipBridgeReceiverStorage storage $ = _getOwnershipBridgeReceiverStorage();
+        if (
+            $.hasAppliedSourceNonce[sourceSafe] &&
+            sourceNonce <= $.lastAppliedSourceNonce[sourceSafe]
+        ) {
+            emit StaleOwnershipMessageSkipped(
+                sourceSafe,
+                tradingSafe,
+                guid,
+                uint8(kind),
+                sourceNonce,
+                $.lastAppliedSourceNonce[sourceSafe]
+            );
+            return false;
+        }
+
+        $.lastAppliedSourceNonce[sourceSafe] = sourceNonce;
+        $.hasAppliedSourceNonce[sourceSafe] = true;
+        return true;
+    }
+
+    function _getOwnershipBridgeReceiverStorage()
+        private
+        pure
+        returns (OwnershipBridgeReceiverStorage storage $)
+    {
+        assembly {
+            $.slot := OwnershipBridgeReceiverStorageLocation
+        }
     }
 }

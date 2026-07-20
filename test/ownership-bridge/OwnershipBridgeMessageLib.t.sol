@@ -33,8 +33,10 @@ contract OwnershipBridgeMessageLibTest is Test {
         bytes memory opData = OwnershipBridgeMessageLib.encodeConfigureOwners(owners, shouldAdd, threshold);
         bytes memory encoded = OwnershipBridgeMessageLib.encodeEnvelope(
             OwnershipBridgeMessageLib.Envelope({
+                version: OwnershipBridgeMessageLib.ENVELOPE_VERSION,
                 kind: OwnershipBridgeMessageLib.OpKind.ConfigureOwners,
                 safe: safe,
+                sourceNonce: 7,
                 opData: opData
             })
         );
@@ -42,6 +44,7 @@ contract OwnershipBridgeMessageLibTest is Test {
         OwnershipBridgeMessageLib.Envelope memory env = harness.decodeEnvelope(encoded);
         assertEq(uint8(env.kind), uint8(OwnershipBridgeMessageLib.OpKind.ConfigureOwners));
         assertEq(env.safe, safe);
+        assertEq(env.sourceNonce, 7);
 
         OwnershipBridgeMessageLib.ConfigureOwnersData memory d = OwnershipBridgeMessageLib.decodeConfigureOwners(env.opData);
         assertEq(d.owners.length, 2);
@@ -57,8 +60,10 @@ contract OwnershipBridgeMessageLibTest is Test {
         bytes memory opData = OwnershipBridgeMessageLib.encodeSetThreshold(3);
         bytes memory encoded = OwnershipBridgeMessageLib.encodeEnvelope(
             OwnershipBridgeMessageLib.Envelope({
+                version: OwnershipBridgeMessageLib.ENVELOPE_VERSION,
                 kind: OwnershipBridgeMessageLib.OpKind.SetThreshold,
                 safe: address(0x1234),
+                sourceNonce: 8,
                 opData: opData
             })
         );
@@ -76,8 +81,10 @@ contract OwnershipBridgeMessageLibTest is Test {
         bytes memory opData = OwnershipBridgeMessageLib.encodeRecover(newOwner, effectiveAt);
         bytes memory encoded = OwnershipBridgeMessageLib.encodeEnvelope(
             OwnershipBridgeMessageLib.Envelope({
+                version: OwnershipBridgeMessageLib.ENVELOPE_VERSION,
                 kind: OwnershipBridgeMessageLib.OpKind.Recover,
                 safe: address(0xBEEF),
+                sourceNonce: 9,
                 opData: opData
             })
         );
@@ -95,8 +102,10 @@ contract OwnershipBridgeMessageLibTest is Test {
         bytes memory opData = OwnershipBridgeMessageLib.encodeCancelRecovery();
         bytes memory encoded = OwnershipBridgeMessageLib.encodeEnvelope(
             OwnershipBridgeMessageLib.Envelope({
+                version: OwnershipBridgeMessageLib.ENVELOPE_VERSION,
                 kind: OwnershipBridgeMessageLib.OpKind.CancelRecovery,
                 safe: address(0xC0DE),
+                sourceNonce: 10,
                 opData: opData
             })
         );

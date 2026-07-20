@@ -68,9 +68,11 @@ contract OwnershipBridgeTest is SafeTestSetup {
         assertEq(safe.getThreshold(), newThreshold, "local threshold updated");
         (uint32 dstEid, bytes memory message) = lzEndpoint.lastSendArgs();
         assertEq(uint256(dstEid), uint256(MAINNET_EID));
-        (uint8 kind, address envSafe, ) = abi.decode(message, (uint8, address, bytes));
+        (, uint8 kind, address envSafe, uint256 publishedNonce,) =
+            abi.decode(message, (uint8, uint8, address, uint256, bytes));
         assertEq(kind, uint8(OwnershipBridgeMessageLib.OpKind.SetThreshold));
         assertEq(envSafe, address(safe));
+        assertEq(publishedNonce + 1, safe.nonce());
     }
 
     function test_configureOwners_publishesToLZ_whenSenderWired() public {
@@ -81,7 +83,8 @@ contract OwnershipBridgeTest is SafeTestSetup {
         assertTrue(safe.isOwner(newOwner), "local owner added");
         (uint32 dstEid, bytes memory message) = lzEndpoint.lastSendArgs();
         assertEq(uint256(dstEid), uint256(MAINNET_EID));
-        (uint8 kind, address envSafe, ) = abi.decode(message, (uint8, address, bytes));
+        (, uint8 kind, address envSafe,,) =
+            abi.decode(message, (uint8, uint8, address, uint256, bytes));
         assertEq(kind, uint8(OwnershipBridgeMessageLib.OpKind.ConfigureOwners));
         assertEq(envSafe, address(safe));
     }
@@ -129,15 +132,18 @@ contract OwnershipBridgeTest is SafeTestSetup {
         recoverySigners[0] = etherFiRecoverySigner;
         recoverySigners[1] = thirdPartyRecoverySigner;
 
+        uint256 sourceNonce = safe.nonce();
         _recoverSafeWithSigners(newOwner, recoverySigners);
 
         uint256 expectedEffectiveAt = block.timestamp + dataProvider.getRecoveryDelayPeriod();
         assertEq(safe.getIncomingOwner(), newOwner, "local incoming owner");
         assertEq(safe.getIncomingOwnerStartTime(), expectedEffectiveAt, "local start time");
 
-        (uint8 kind, address envSafe, bytes memory opData) = abi.decode(lzEndpoint.lastMessage(), (uint8, address, bytes));
+        (, uint8 kind, address envSafe, uint256 publishedNonce, bytes memory opData) =
+            abi.decode(lzEndpoint.lastMessage(), (uint8, uint8, address, uint256, bytes));
         assertEq(kind, uint8(OwnershipBridgeMessageLib.OpKind.Recover));
         assertEq(envSafe, address(safe));
+        assertEq(publishedNonce, sourceNonce);
         (address publishedOwner, uint256 publishedEffectiveAt) = abi.decode(opData, (address, uint256));
         assertEq(publishedOwner, newOwner);
         assertEq(publishedEffectiveAt, expectedEffectiveAt, "destination timelock target matches source");
@@ -153,12 +159,15 @@ contract OwnershipBridgeTest is SafeTestSetup {
         recoverySigners[1] = thirdPartyRecoverySigner;
         _recoverSafeWithSigners(newOwner, recoverySigners);
 
+        uint256 sourceNonce = safe.nonce();
         _cancelRecovery();
 
         assertEq(safe.getIncomingOwner(), address(0), "local cancellation applied");
-        (uint8 kind, address envSafe, ) = abi.decode(lzEndpoint.lastMessage(), (uint8, address, bytes));
+        (, uint8 kind, address envSafe, uint256 publishedNonce,) =
+            abi.decode(lzEndpoint.lastMessage(), (uint8, uint8, address, uint256, bytes));
         assertEq(kind, uint8(OwnershipBridgeMessageLib.OpKind.CancelRecovery));
         assertEq(envSafe, address(safe));
+        assertEq(publishedNonce, sourceNonce);
     }
 
     // ---- Insufficient fee revert ----

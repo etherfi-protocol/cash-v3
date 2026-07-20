@@ -79,6 +79,7 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
      * @param owners Owners to add or remove.
      * @param shouldAdd Per-owner add (true) / remove (false) flag.
      * @param threshold New signature threshold after the change is applied locally.
+     * @param sourceNonce Nonce consumed by the source safe for this operation.
      * @custom:throws CallerNotSafe If `msg.sender != safe`.
      * @custom:throws NotEtherFiSafe If `safe` isn't registered.
      * @custom:throws ArrayLengthMismatch If `owners.length != shouldAdd.length`.
@@ -90,13 +91,15 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
         address safe,
         address[] calldata owners,
         bool[] calldata shouldAdd,
-        uint8 threshold
+        uint8 threshold,
+        uint256 sourceNonce
     ) external payable whenNotPaused onlyEtherFiSafe(safe) {
         if (_skipIfNotEnabled(safe, OwnershipBridgeMessageLib.OpKind.ConfigureOwners)) return;
         if (owners.length != shouldAdd.length) revert ArrayLengthMismatch();
 
         bytes memory opData = OwnershipBridgeMessageLib.encodeConfigureOwners(owners, shouldAdd, threshold);
-        (bytes32[] memory guids, uint32[] memory destEids) = _dispatch(safe, OwnershipBridgeMessageLib.OpKind.ConfigureOwners, opData);
+        (bytes32[] memory guids, uint32[] memory destEids) =
+            _dispatch(safe, OwnershipBridgeMessageLib.OpKind.ConfigureOwners, sourceNonce, opData);
 
         emit ConfigureOwnersPublished(safe, owners, shouldAdd, threshold, destEids, guids);
     }
@@ -107,17 +110,19 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
      *      enabled destinations.
      * @param safe Source-chain safe.
      * @param threshold New signature threshold.
+     * @param sourceNonce Nonce consumed by the source safe for this operation.
      * @custom:throws CallerNotSafe If `msg.sender != safe`.
      * @custom:throws NotEtherFiSafe If `safe` isn't registered.
      * @custom:throws DestinationNotConfigured If an enabled destEid was later removed from the global config.
      * @custom:throws PeerNotConfigured If an enabled destination has no LZ peer set.
      * @custom:throws InsufficientFee If `msg.value` is below the total LZ fee.
      */
-    function publishSetThreshold(address safe, uint8 threshold) external payable whenNotPaused onlyEtherFiSafe(safe) {
+    function publishSetThreshold(address safe, uint8 threshold, uint256 sourceNonce) external payable whenNotPaused onlyEtherFiSafe(safe) {
         if (_skipIfNotEnabled(safe, OwnershipBridgeMessageLib.OpKind.SetThreshold)) return;
 
         bytes memory opData = OwnershipBridgeMessageLib.encodeSetThreshold(threshold);
-        (bytes32[] memory guids, uint32[] memory destEids) = _dispatch(safe, OwnershipBridgeMessageLib.OpKind.SetThreshold, opData);
+        (bytes32[] memory guids, uint32[] memory destEids) =
+            _dispatch(safe, OwnershipBridgeMessageLib.OpKind.SetThreshold, sourceNonce, opData);
 
         emit SetThresholdPublished(safe, threshold, destEids, guids);
     }
@@ -129,17 +134,24 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
      * @param safe Source-chain safe.
      * @param newOwner Incoming owner that will take effect after the destination's timelock.
      * @param incomingOwnerEffectiveAt Source-chain UNIX timestamp at which `newOwner` activates on destinations.
+     * @param sourceNonce Nonce consumed by the source safe for this operation.
      * @custom:throws CallerNotSafe If `msg.sender != safe`.
      * @custom:throws NotEtherFiSafe If `safe` isn't registered.
      * @custom:throws DestinationNotConfigured If an enabled destEid was later removed from the global config.
      * @custom:throws PeerNotConfigured If an enabled destination has no LZ peer set.
      * @custom:throws InsufficientFee If `msg.value` is below the total LZ fee.
      */
-    function publishRecover(address safe, address newOwner, uint256 incomingOwnerEffectiveAt) external payable whenNotPaused onlyEtherFiSafe(safe) {
+    function publishRecover(
+        address safe,
+        address newOwner,
+        uint256 incomingOwnerEffectiveAt,
+        uint256 sourceNonce
+    ) external payable whenNotPaused onlyEtherFiSafe(safe) {
         if (_skipIfNotEnabled(safe, OwnershipBridgeMessageLib.OpKind.Recover)) return;
 
         bytes memory opData = OwnershipBridgeMessageLib.encodeRecover(newOwner, incomingOwnerEffectiveAt);
-        (bytes32[] memory guids, uint32[] memory destEids) = _dispatch(safe, OwnershipBridgeMessageLib.OpKind.Recover, opData);
+        (bytes32[] memory guids, uint32[] memory destEids) =
+            _dispatch(safe, OwnershipBridgeMessageLib.OpKind.Recover, sourceNonce, opData);
 
         emit RecoverPublished(safe, newOwner, incomingOwnerEffectiveAt, destEids, guids);
     }
@@ -149,17 +161,19 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
      * @dev Callable only by the safe itself; short-circuits with refund if the safe has no
      *      enabled destinations.
      * @param safe Source-chain safe.
+     * @param sourceNonce Nonce consumed by the source safe for this operation.
      * @custom:throws CallerNotSafe If `msg.sender != safe`.
      * @custom:throws NotEtherFiSafe If `safe` isn't registered.
      * @custom:throws DestinationNotConfigured If an enabled destEid was later removed from the global config.
      * @custom:throws PeerNotConfigured If an enabled destination has no LZ peer set.
      * @custom:throws InsufficientFee If `msg.value` is below the total LZ fee.
      */
-    function publishCancelRecovery(address safe) external payable whenNotPaused onlyEtherFiSafe(safe) {
+    function publishCancelRecovery(address safe, uint256 sourceNonce) external payable whenNotPaused onlyEtherFiSafe(safe) {
         if (_skipIfNotEnabled(safe, OwnershipBridgeMessageLib.OpKind.CancelRecovery)) return;
 
         bytes memory opData = OwnershipBridgeMessageLib.encodeCancelRecovery();
-        (bytes32[] memory guids, uint32[] memory destEids) = _dispatch(safe, OwnershipBridgeMessageLib.OpKind.CancelRecovery, opData);
+        (bytes32[] memory guids, uint32[] memory destEids) =
+            _dispatch(safe, OwnershipBridgeMessageLib.OpKind.CancelRecovery, sourceNonce, opData);
 
         emit CancelRecoveryPublished(safe, destEids, guids);
     }
@@ -444,6 +458,7 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
     function _dispatch(
         address safe,
         OwnershipBridgeMessageLib.OpKind kind,
+        uint256 sourceNonce,
         bytes memory opData
     ) internal returns (bytes32[] memory guids, uint32[] memory destEids) {
         OwnershipBridgeSenderStorage storage $ = _getOwnershipBridgeSenderStorage();
@@ -451,7 +466,13 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
         uint256 destCount = liveEids.length;
 
         bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(
-            OwnershipBridgeMessageLib.Envelope({ kind: kind, safe: safe, opData: opData })
+            OwnershipBridgeMessageLib.Envelope({
+                version: OwnershipBridgeMessageLib.ENVELOPE_VERSION,
+                kind: kind,
+                safe: safe,
+                sourceNonce: sourceNonce,
+                opData: opData
+            })
         );
 
         guids = new bytes32[](destCount);
@@ -499,7 +520,13 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
         if (destCount == 0) return 0;
 
         bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(
-            OwnershipBridgeMessageLib.Envelope({ kind: kind, safe: safe, opData: opData })
+            OwnershipBridgeMessageLib.Envelope({
+                version: OwnershipBridgeMessageLib.ENVELOPE_VERSION,
+                kind: kind,
+                safe: safe,
+                sourceNonce: 0,
+                opData: opData
+            })
         );
 
         for (uint256 i = 0; i < destCount;) {

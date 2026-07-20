@@ -83,6 +83,29 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
         receiver.lzReceive(origin, GUID, message, address(0), "");
     }
 
+    function _envelope(
+        OwnershipBridgeMessageLib.OpKind kind,
+        uint256 sourceNonce,
+        bytes memory opData
+    ) internal view returns (bytes memory) {
+        return _envelopeFor(sourceSafe, kind, sourceNonce, opData);
+    }
+
+    function _envelopeFor(
+        address safe,
+        OwnershipBridgeMessageLib.OpKind kind,
+        uint256 sourceNonce,
+        bytes memory opData
+    ) internal pure returns (bytes memory) {
+        return OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
+            version: OwnershipBridgeMessageLib.ENVELOPE_VERSION,
+            kind: kind,
+            safe: safe,
+            sourceNonce: sourceNonce,
+            opData: opData
+        }));
+    }
+
     // ---- Each op kind: applied to the real TradingSafe ----
 
     function test_lzReceive_configureOwners_appliesToTradingSafe() public {
@@ -92,11 +115,11 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
         bool[] memory shouldAdd = new bool[](1);
         shouldAdd[0] = true;
 
-        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.ConfigureOwners,
-            safe: sourceSafe,
-            opData: OwnershipBridgeMessageLib.encodeConfigureOwners(owners, shouldAdd, 2)
-        }));
+        bytes memory message = _envelope(
+            OwnershipBridgeMessageLib.OpKind.ConfigureOwners,
+            0,
+            OwnershipBridgeMessageLib.encodeConfigureOwners(owners, shouldAdd, 2)
+        );
 
         _send(_origin(), message);
 
@@ -113,18 +136,18 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
         addOwners[0] = secondOwner;
         bool[] memory addFlags = new bool[](1);
         addFlags[0] = true;
-        bytes memory addMsg = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.ConfigureOwners,
-            safe: sourceSafe,
-            opData: OwnershipBridgeMessageLib.encodeConfigureOwners(addOwners, addFlags, 1)
-        }));
+        bytes memory addMsg = _envelope(
+            OwnershipBridgeMessageLib.OpKind.ConfigureOwners,
+            0,
+            OwnershipBridgeMessageLib.encodeConfigureOwners(addOwners, addFlags, 1)
+        );
         _send(_origin(), addMsg);
 
-        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.SetThreshold,
-            safe: sourceSafe,
-            opData: OwnershipBridgeMessageLib.encodeSetThreshold(2)
-        }));
+        bytes memory message = _envelope(
+            OwnershipBridgeMessageLib.OpKind.SetThreshold,
+            1,
+            OwnershipBridgeMessageLib.encodeSetThreshold(2)
+        );
         _send(_origin(), message);
 
         assertEq(tradingSafe.getThreshold(), 2);
@@ -133,11 +156,11 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
     function test_lzReceive_recover_appliesToTradingSafe() public {
         address newOwner = makeAddr("recoveryOwner");
         uint256 effectiveAt = block.timestamp + 7 days;
-        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.Recover,
-            safe: sourceSafe,
-            opData: OwnershipBridgeMessageLib.encodeRecover(newOwner, effectiveAt)
-        }));
+        bytes memory message = _envelope(
+            OwnershipBridgeMessageLib.OpKind.Recover,
+            0,
+            OwnershipBridgeMessageLib.encodeRecover(newOwner, effectiveAt)
+        );
 
         _send(_origin(), message);
 
@@ -148,23 +171,88 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
     function test_lzReceive_cancelRecovery_appliesToTradingSafe() public {
         // Seed an incoming owner first.
         address newOwner = makeAddr("recoveryOwner");
-        bytes memory recoverMsg = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.Recover,
-            safe: sourceSafe,
-            opData: OwnershipBridgeMessageLib.encodeRecover(newOwner, block.timestamp + 7 days)
-        }));
+        bytes memory recoverMsg = _envelope(
+            OwnershipBridgeMessageLib.OpKind.Recover,
+            0,
+            OwnershipBridgeMessageLib.encodeRecover(newOwner, block.timestamp + 7 days)
+        );
         _send(_origin(), recoverMsg);
         assertEq(tradingSafe.getIncomingOwner(), newOwner);
 
-        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.CancelRecovery,
-            safe: sourceSafe,
-            opData: OwnershipBridgeMessageLib.encodeCancelRecovery()
-        }));
+        bytes memory message = _envelope(
+            OwnershipBridgeMessageLib.OpKind.CancelRecovery,
+            1,
+            OwnershipBridgeMessageLib.encodeCancelRecovery()
+        );
         _send(_origin(), message);
 
         assertEq(tradingSafe.getIncomingOwner(), address(0));
         assertEq(tradingSafe.getIncomingOwnerStartTime(), 0);
+    }
+
+    function test_lzReceive_cancelBeforeDelayedRecover_doesNotResurrectRecovery() public {
+        bytes memory cancelMessage = _envelope(
+            OwnershipBridgeMessageLib.OpKind.CancelRecovery,
+            6,
+            OwnershipBridgeMessageLib.encodeCancelRecovery()
+        );
+        _send(_origin(), cancelMessage);
+
+        address staleOwner = makeAddr("staleRecoveryOwner");
+        bytes memory staleRecover = _envelope(
+            OwnershipBridgeMessageLib.OpKind.Recover,
+            5,
+            OwnershipBridgeMessageLib.encodeRecover(staleOwner, block.timestamp + 7 days)
+        );
+
+        vm.expectEmit(true, true, true, true);
+        emit IOwnershipBridgeReceiver.StaleOwnershipMessageSkipped(
+            sourceSafe,
+            address(tradingSafe),
+            GUID,
+            uint8(OwnershipBridgeMessageLib.OpKind.Recover),
+            5,
+            6
+        );
+        _send(_origin(), staleRecover);
+
+        assertEq(tradingSafe.getIncomingOwner(), address(0));
+        assertEq(tradingSafe.getIncomingOwnerStartTime(), 0);
+    }
+
+    function test_lzReceive_staleOwnerMutation_isSkipped() public {
+        address secondOwner = makeAddr("secondOwner");
+        address[] memory owners = new address[](1);
+        owners[0] = secondOwner;
+        bool[] memory shouldAdd = new bool[](1);
+        shouldAdd[0] = true;
+        _send(
+            _origin(),
+            _envelope(
+                OwnershipBridgeMessageLib.OpKind.ConfigureOwners,
+                3,
+                OwnershipBridgeMessageLib.encodeConfigureOwners(owners, shouldAdd, 1)
+            )
+        );
+        _send(
+            _origin(),
+            _envelope(
+                OwnershipBridgeMessageLib.OpKind.SetThreshold,
+                5,
+                OwnershipBridgeMessageLib.encodeSetThreshold(2)
+            )
+        );
+
+        _send(
+            _origin(),
+            _envelope(
+                OwnershipBridgeMessageLib.OpKind.SetThreshold,
+                4,
+                OwnershipBridgeMessageLib.encodeSetThreshold(1)
+            )
+        );
+
+        assertEq(tradingSafe.getThreshold(), 2);
     }
 
     // ---- Deferred when TradingSafe not deployed ----
@@ -176,11 +264,12 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
         address predicted = factory.getDeterministicAddress(undeployedSource);
         assertEq(predicted.code.length, 0, "predicted address should be empty");
 
-        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.SetThreshold,
-            safe: undeployedSource,
-            opData: OwnershipBridgeMessageLib.encodeSetThreshold(5)
-        }));
+        bytes memory message = _envelopeFor(
+            undeployedSource,
+            OwnershipBridgeMessageLib.OpKind.SetThreshold,
+            0,
+            OwnershipBridgeMessageLib.encodeSetThreshold(5)
+        );
 
         vm.expectEmit(true, true, true, true);
         emit IOwnershipBridgeReceiver.OwnershipApplyDeferred(undeployedSource, predicted, GUID, uint8(OwnershipBridgeMessageLib.OpKind.SetThreshold));
@@ -189,16 +278,38 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
 
         // Deployed TradingSafe (for `sourceSafe`) is untouched — threshold still 1.
         assertEq(tradingSafe.getThreshold(), 1);
+        (, bool initialized) = receiver.lastAppliedSourceNonce(undeployedSource);
+        assertFalse(initialized, "deferred message must not advance nonce");
     }
 
     // ---- Source EID validation ----
 
+    function test_lzReceive_revertsWhen_envelopeVersionUnsupported() public {
+        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(
+            OwnershipBridgeMessageLib.Envelope({
+                version: OwnershipBridgeMessageLib.ENVELOPE_VERSION + 1,
+                kind: OwnershipBridgeMessageLib.OpKind.SetThreshold,
+                safe: sourceSafe,
+                sourceNonce: 0,
+                opData: OwnershipBridgeMessageLib.encodeSetThreshold(1)
+            })
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IOwnershipBridgeReceiver.UnsupportedEnvelopeVersion.selector,
+                OwnershipBridgeMessageLib.ENVELOPE_VERSION + 1
+            )
+        );
+        _send(_origin(), message);
+    }
+
     function test_lzReceive_revertsWhen_wrongSrcEid() public {
-        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.SetThreshold,
-            safe: sourceSafe,
-            opData: OwnershipBridgeMessageLib.encodeSetThreshold(2)
-        }));
+        bytes memory message = _envelope(
+            OwnershipBridgeMessageLib.OpKind.SetThreshold,
+            0,
+            OwnershipBridgeMessageLib.encodeSetThreshold(2)
+        );
 
         // Peer for src 9999 isn't set; OAppReceiver's peer check fails first with OnlyPeer.
         vm.expectRevert();
@@ -220,11 +331,11 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
         vm.prank(pauser);
         receiver.pause();
 
-        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
-            kind: OwnershipBridgeMessageLib.OpKind.SetThreshold,
-            safe: sourceSafe,
-            opData: OwnershipBridgeMessageLib.encodeSetThreshold(2)
-        }));
+        bytes memory message = _envelope(
+            OwnershipBridgeMessageLib.OpKind.SetThreshold,
+            0,
+            OwnershipBridgeMessageLib.encodeSetThreshold(2)
+        );
 
         vm.expectRevert();
         vm.prank(address(endpoint));
