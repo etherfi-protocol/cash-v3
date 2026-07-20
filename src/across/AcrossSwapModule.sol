@@ -144,6 +144,8 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     error WithdrawalDelayNotElapsed();
     /// @notice Reverts when the order expires before the CashModule withdrawal delay elapses.
     error DeadlineBeforeWithdrawalDelay();
+    /// @notice Reverts when CashModule would process the withdrawal immediately.
+    error ZeroWithdrawalDelay();
     /// @notice Reverts when an origin-swap request is made before the periphery is configured.
     error PeripheryNotAllowlisted();
 
@@ -279,6 +281,7 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         if ($.spokePool == address(0) || $.multicallHandler == address(0)) revert MissingConfig();
         if (address(cashModule) != address(0)) {
             (uint64 withdrawalDelay,,) = cashModule.getDelays();
+            if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
             if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
         }
     }

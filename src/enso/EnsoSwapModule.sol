@@ -133,6 +133,8 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     error WithdrawalDelayNotElapsed();
     /// @notice Reverts when the order expires before the CashModule withdrawal delay elapses.
     error DeadlineBeforeWithdrawalDelay();
+    /// @notice Reverts when CashModule would process the withdrawal immediately.
+    error ZeroWithdrawalDelay();
     /// @notice Reverts when the BE-supplied Enso calldata is empty.
     error EmptySwapData();
     /// @notice Reverts when a same-chain swap delivers less than the signed minimum output.
@@ -223,6 +225,7 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         if ($.ensoRouter == address(0)) revert MissingConfig();
         if (address(cashModule) != address(0)) {
             (uint64 withdrawalDelay,,) = cashModule.getDelays();
+            if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
             if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
         }
     }
