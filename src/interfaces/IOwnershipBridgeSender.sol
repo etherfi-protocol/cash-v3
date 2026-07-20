@@ -120,9 +120,6 @@ interface IOwnershipBridgeSender {
     /// @notice Reverts when the safe address isn't recognised by `EtherFiDataProvider`.
     error NotEtherFiSafe();
 
-    /// @notice Reverts when `configureDestination(eid, _, false)` is called for a destination that isn't present.
-    error DestinationAlreadyInState();
-
     /**
      * @notice Reverts when an enabled destination has no LayerZero peer configured.
      * @param destEid The destination EID that is missing a peer.
@@ -213,7 +210,7 @@ interface IOwnershipBridgeSender {
      * @param destEid LayerZero EID of the destination chain.
      * @param options Per-destination LZ options (executor gas, msg type, etc.). Ignored when removing.
      * @param enabled True to add or update; false to remove.
-     * @custom:throws DestinationAlreadyInState If removing a destination that isn't present.
+     * @custom:throws DestinationNotConfigured If removing a destination that isn't present.
      */
     function configureDestination(uint32 destEid, bytes calldata options, bool enabled) external;
 

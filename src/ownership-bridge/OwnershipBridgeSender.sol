@@ -230,7 +230,7 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
      * @param destEid LayerZero EID of the destination chain.
      * @param options Per-destination LZ options (executor gas, msg type, etc.). Ignored when removing.
      * @param enabled True to add or update; false to remove.
-     * @custom:throws DestinationAlreadyInState If removing a destination that isn't present.
+     * @custom:throws DestinationNotConfigured If removing a destination that isn't present.
      */
     function configureDestination(uint32 destEid, bytes calldata options, bool enabled) external onlyOwner {
         OwnershipBridgeSenderStorage storage $ = _getOwnershipBridgeSenderStorage();
@@ -240,7 +240,7 @@ contract OwnershipBridgeSender is IOwnershipBridgeSender, OAppSender, Pausable {
             $.destinations.add(uint256(destEid));
             emit DestinationConfigured(destEid, options, true);
         } else {
-            if (!$.destinations.remove(uint256(destEid))) revert DestinationAlreadyInState();
+            if (!$.destinations.remove(uint256(destEid))) revert DestinationNotConfigured(destEid);
             delete $.destOptions[destEid];
             emit DestinationRemoved(destEid);
         }

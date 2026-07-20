@@ -341,6 +341,14 @@ contract OwnershipBridgeSenderTest is Test {
         sender.configureDestination(MAINNET_EID, "", false);
     }
 
+    function test_configureDestination_revertsWhenRemovingUnconfiguredDestination() public {
+        uint32 unconfiguredEid = 42_424;
+
+        vm.expectRevert(abi.encodeWithSelector(IOwnershipBridgeSender.DestinationNotConfigured.selector, unconfiguredEid));
+        vm.prank(delegate);
+        sender.configureDestination(unconfiguredEid, "", false);
+    }
+
     // ---- Enable / disabled-safe short-circuit ----
 
     function test_enable_revertsWhen_callerLacksRole() public {
