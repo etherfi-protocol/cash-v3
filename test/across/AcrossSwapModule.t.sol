@@ -188,7 +188,7 @@ contract AcrossSwapModuleTest is SafeTestSetup {
 
     // ---- executeSwap ----
 
-    function test_executeSwap_dispatchesApproveAndDepositV3() public {
+    function test_executeSwap_dispatchesApproveDepositAndReset() public {
         AcrossSwapModule.Order memory order = _baseOrder();
         _request(order);
         _warpPastDelay();
@@ -198,7 +198,7 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         assertEq(spokePool.callCount(), 1);
         assertEq(module.getOrder(address(safe)).srcToken, address(0));
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
-        assertEq(usdc.allowance(address(safe), address(spokePool)), SRC_AMOUNT);
+        assertEq(usdc.allowance(address(safe), address(spokePool)), 0);
         _checkDepositV3Args(order);
     }
 

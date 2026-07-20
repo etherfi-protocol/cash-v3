@@ -364,14 +364,16 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         bytes memory depositData = _encodeDepositV3(safe, $.multicallHandler, order, depositArgs, message);
         address spokePool = $.spokePool;
 
-        address[] memory to = new address[](2);
-        uint256[] memory values = new uint256[](2);
-        bytes[] memory data = new bytes[](2);
+        address[] memory to = new address[](3);
+        uint256[] memory values = new uint256[](3);
+        bytes[] memory data = new bytes[](3);
 
         to[0] = order.srcToken;
         data[0] = abi.encodeCall(IERC20.approve, (spokePool, order.srcAmount));
         to[1] = spokePool;
         data[1] = depositData;
+        to[2] = order.srcToken;
+        data[2] = abi.encodeCall(IERC20.approve, (spokePool, 0));
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
