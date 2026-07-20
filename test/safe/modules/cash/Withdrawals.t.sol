@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+
 import { Mode, BinSponsor, Cashback } from "../../../../src/interfaces/ICashModule.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
@@ -180,6 +182,46 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
 
         // Verify pending withdrawal is 0
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0);
+    }
+
+    /// A zero-amount withdrawal must not issue a zero-value ERC-20 transfer.
+    function test_processWithdrawals_skipsZeroAmount() external {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (withdrawRecipient, 0)), 0);
+        cashModule.processWithdrawal(address(safe));
+
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
+    }
+
+    /// A mixed withdrawal must compact zero amounts without misaligning the remaining transfers.
+    function test_processWithdrawals_compactsMixedZeroAmounts() external {
+        uint256 weETHAmount = 1 ether;
+        deal(address(weETH), address(safe), weETHAmount);
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[1] = weETHAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (withdrawRecipient, 0)), 0);
+        vm.expectCall(address(weETH), abi.encodeCall(IERC20.transfer, (withdrawRecipient, weETHAmount)), 1);
+        cashModule.processWithdrawal(address(safe));
+
+        assertEq(weETH.balanceOf(withdrawRecipient), weETHAmount);
     }
 
     function test_processWithdrawals_fails_whenAssetIsNotWhitelistedWithdrawAsset() external {

@@ -285,17 +285,30 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
         address[] memory to = new address[](len);
         bytes[] memory data = new bytes[](len);
+        uint256 counter;
 
         for (uint256 i = 0; i < len;) {
-            to[i] = $$.pendingWithdrawalRequest.tokens[i];
-            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, recipient, $$.pendingWithdrawalRequest.amounts[i]);
+            uint256 amount = $$.pendingWithdrawalRequest.amounts[i];
+            if (amount != 0) {
+                to[counter] = $$.pendingWithdrawalRequest.tokens[i];
+                data[counter] = abi.encodeWithSelector(IERC20.transfer.selector, recipient, amount);
+                unchecked {
+                    ++counter;
+                }
+            }
 
             unchecked {
                 ++i;
             }
         }
 
-        IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](len), data);
+        if (counter != 0) {
+            assembly ("memory-safe") {
+                mstore(to, counter)
+                mstore(data, counter)
+            }
+            IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](counter), data);
+        }
         _getCashModuleStorage().cashEventEmitter.emitWithdrawalProcessed(safe, $$.pendingWithdrawalRequest.tokens, $$.pendingWithdrawalRequest.amounts, recipient);
 
         delete $$.pendingWithdrawalRequest;
