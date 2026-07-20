@@ -444,10 +444,17 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         module.setPeriphery(makeAddr("periphery"));
     }
 
-    function test_setPeriphery_revertsForZero() public {
-        vm.prank(moduleAdmin);
-        vm.expectRevert(ModuleBase.InvalidInput.selector);
+    function test_setPeriphery_allowsZeroToDisable() public {
+        address periphery = makeAddr("periphery");
+        vm.startPrank(moduleAdmin);
+        module.setPeriphery(periphery);
+
+        vm.expectEmit(false, false, false, true, address(module));
+        emit AcrossSwapModule.PeripherySet(periphery, address(0));
         module.setPeriphery(address(0));
+        vm.stopPrank();
+
+        assertEq(module.getPeriphery(), address(0));
     }
 
     function test_setPeriphery_storesAndEmits() public {
@@ -483,6 +490,32 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         assertEq(periphery.pulled(), SRC_AMOUNT);
         assertEq(periphery.lastCaller(), address(safe));
         assertEq(IERC20(address(usdc)).allowance(address(safe), address(periphery)), 0);
+    }
+
+    function test_originSwap_revertsWhenPeripheryDisabledBeforeExecution() public {
+        PeripheryStub periphery = new PeripheryStub();
+        vm.prank(moduleAdmin);
+        module.setPeriphery(address(periphery));
+
+        AcrossSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _originSwapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signOriginRequest(order, swapData);
+        module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, swapData, signers, sigs);
+
+        vm.prank(moduleAdmin);
+        module.setPeriphery(address(0));
+        _warpPastDelay();
+
+        vm.prank(keeper);
+        vm.expectRevert(AcrossSwapModule.PeripheryNotAllowlisted.selector);
+        module.executeSwap(address(safe));
+
+        assertEq(module.getOrder(address(safe)).srcToken, address(usdc), "order should remain active");
+        assertEq(
+            cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient,
+            address(module),
+            "hold should remain active"
+        );
     }
 
     /// @dev Origin path swapData the mock periphery understands: pull `amount` of usdc from the safe.

@@ -191,7 +191,6 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     ///         routes on this chain. Zero means origin-swaps are not enabled here.
     function setPeriphery(address _periphery) external {
         _onlyAdmin();
-        if (_periphery == address(0)) revert InvalidInput();
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         emit PeripherySet($.peripheryAddress, _periphery);
         $.peripheryAddress = _periphery;
@@ -383,6 +382,7 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     ///      and bridges to the destination.
     function _dispatchOriginSwap(address safe, StoredSwap memory swap) internal {
         address periphery = _getAcrossSwapModuleStorage().peripheryAddress;
+        if (periphery == address(0)) revert PeripheryNotAllowlisted();
 
         address[] memory to = new address[](3);
         uint256[] memory values = new uint256[](3);
