@@ -16,7 +16,7 @@ dynamic_test_linking = true
 # The lend tests deploy a real Aave v4 instance (Hub/Spoke from the aave-v4 source) on an Optimism fork,
 # and scripts/aave-v4/** deploys one for real. Keep both out of the default profile so the default build
 # stays small and free of the aave-v4 dependency; run them under FOUNDRY_PROFILE=lend / aave-deploy (below).
-skip = ["test/safe/modules/cash/lend/**", "scripts/aave-v4/**"]
+skip = ["test/safe/modules/cash/lend/**", "scripts/aave-v4/**", "src/aave-v4/**"]
 
 # Profile for the lend (Aave v4) tests: un-skips them and links aave-v4's external LiquidationLogic library.
 # SpokeInstance links LiquidationLogic via an aave-rooted `src/` import forge can't resolve to an artifact,
