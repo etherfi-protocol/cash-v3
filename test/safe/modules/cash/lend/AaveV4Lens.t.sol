@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 
 import { IAaveV4Spoke } from "../../../../../src/interfaces/IAaveV4Spoke.sol";
+import { IEtherFiDataProvider } from "../../../../../src/interfaces/IEtherFiDataProvider.sol";
 import { AaveV4Lens } from "../../../../../src/lens/AaveV4Lens.sol";
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
@@ -40,7 +41,10 @@ contract AaveV4LensTest is AaveV4Fixture {
     address internal lensRoleRegistry = makeAddr("lensRoleRegistry");
 
     function setUp() public {
-        _deployAaveV4();
+        // Lens tests exercise read paths, not gating: a blanket everyone-is-a-safe mock keeps direct borrows working
+        address dataProviderMock = makeAddr("etherFiDataProvider");
+        vm.mockCall(dataProviderMock, abi.encodeWithSelector(IEtherFiDataProvider.isEtherFiSafe.selector), abi.encode(true));
+        _deployAaveV4(dataProviderMock);
 
         weeth = new MockERC20("Wrapped eETH", "weETH", 18);
         usdc = new MockERC20("USD Coin", "USDC", 6);

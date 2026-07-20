@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
+import { IEtherFiDataProvider } from "../../../../../src/interfaces/IEtherFiDataProvider.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -116,8 +117,10 @@ contract WithdrawalSourcingTest is CashGatewayTestSetup {
     function test_requestWithdrawal_fullExitAtQuoteAfterAccrual() public {
         _supplyToGateway(address(safe), address(usdc), 5000e6);
 
-        // An independent borrower drives USDC utilization so the supplied balance accrues interest
+        // An independent borrower drives USDC utilization so the supplied balance accrues interest.
+        // On the gated instance it models a second safe's borrow pressure, so mark it as a safe.
         address borrower = makeAddr("dustBorrower");
+        vm.mockCall(address(dataProvider), abi.encodeWithSelector(IEtherFiDataProvider.isEtherFiSafe.selector, borrower), abi.encode(true));
         deal(address(weETH), borrower, 400 ether);
         vm.startPrank(borrower);
         weETH.approve(address(spoke), 400 ether);

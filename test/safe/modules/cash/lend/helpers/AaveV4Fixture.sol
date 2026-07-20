@@ -14,11 +14,12 @@ import { IAssetInterestRateStrategy } from "aave-v4/hub/interfaces/IAssetInteres
 import { IHub } from "aave-v4/hub/interfaces/IHub.sol";
 import { Roles } from "aave-v4/libraries/types/Roles.sol";
 import { AaveOracle } from "aave-v4/spoke/AaveOracle.sol";
-import { SpokeInstance } from "aave-v4/spoke/instances/SpokeInstance.sol";
 import { TreasurySpokeInstance } from "aave-v4/spoke/instances/TreasurySpokeInstance.sol";
 import { IAaveOracle } from "aave-v4/spoke/interfaces/IAaveOracle.sol";
 import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 import { ITreasurySpoke } from "aave-v4/spoke/interfaces/ITreasurySpoke.sol";
+
+import { EtherFiSpokeInstance } from "../../../../../../src/aave-v4/EtherFiSpokeInstance.sol";
 
 /// @dev Minimal init interface shared by the hub/spoke/treasury proxy implementations
 interface IProxyInit {
@@ -28,9 +29,11 @@ interface IProxyInit {
 /**
  * @title AaveV4Fixture
  * @notice Deploys a real, self-owned Aave v4 instance inside a Foundry test (works on any fork), so the
- *         LendGateway can be exercised against genuine Aave v4 code rather than a mock. This test contract
- *         holds every admin role, so it can list reserves, set collateral factors, and activate position
- *         managers freely. Mirrors aave-v4 v0.5.11 `tests/Base.t.sol` deployFixtures/setUpRoles.
+ *         LendGateway can be exercised against genuine Aave v4 code rather than a mock. The spoke is the
+ *         gated EtherFiSpokeInstance (borrow restricted to ether.fi safes), matching the planned whitelabel
+ *         instance. This test contract holds every admin role, so it can list reserves, set collateral
+ *         factors, and activate position managers freely. Mirrors aave-v4 v0.5.11 `tests/Base.t.sol`
+ *         deployFixtures/setUpRoles.
  * @dev SpokeInstance links the external LiquidationLogic library. forge can't resolve that aave-rooted
  *      `src/` import to an artifact, so foundry.toml `[profile.lend]` libraries pins it to a fixed address and
  *      `_deployAaveV4` etches the library code there before deploying the spoke.
@@ -49,8 +52,9 @@ abstract contract AaveV4Fixture is Test {
     /// @notice Fixed link address for LiquidationLogic (see foundry.toml `[profile.lend]` libraries)
     address internal constant LIQUIDATION_LOGIC = 0x0000000000000000000000000000000000000a01;
 
-    /// @notice Deploys and wires a full Aave v4 instance (access manager, hub, spoke, oracle, treasury)
-    function _deployAaveV4() internal {
+    /// @notice Deploys and wires a full Aave v4 instance (access manager, hub, spoke, oracle, treasury).
+    ///         `etherFiDataProvider` feeds the gated spoke's isEtherFiSafe borrow check.
+    function _deployAaveV4(address etherFiDataProvider) internal {
         // Put LiquidationLogic's runtime code at the address SpokeInstance was linked against. Read it
         // straight from the compiled artifact (the library has no link deps), avoiding a getDeployedCode
         // re-resolution pass that noisily mis-resolves aave-v4's `src/`-rooted imports.
@@ -68,7 +72,7 @@ abstract contract AaveV4Fixture is Test {
 
         // Oracle (8-decimal USD) + Spoke (proxy over SpokeInstance); the oracle deployer wires the spoke
         oracle = IAaveOracle(address(new AaveOracle(8)));
-        address spokeImpl = address(new SpokeInstance(address(oracle), type(uint16).max));
+        address spokeImpl = address(new EtherFiSpokeInstance(address(oracle), type(uint16).max, etherFiDataProvider));
         spoke = ISpoke(_proxify(spokeImpl, abi.encodeCall(IProxyInit.initialize, (address(accessManager)))));
         oracle.setSpoke(address(spoke));
 
