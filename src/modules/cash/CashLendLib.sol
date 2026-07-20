@@ -968,17 +968,26 @@ library CashLendLib {
         s.fromLoose[i] = fromLoose;
     }
 
-    /// @dev Transfers each token's loose amount from the safe to the dispatcher in one batched module call.
+    /// @dev Transfers each non-zero loose amount from the safe to the dispatcher in one batched module call.
     function _transferLoose(address safe, address dispatcher, address[] calldata tokens, uint256[] memory amounts) internal {
-        address[] memory to = new address[](tokens.length);
-        bytes[] memory data = new bytes[](tokens.length);
-        uint256[] memory values = new uint256[](tokens.length);
+        uint256 len = tokens.length;
+        address[] memory to = new address[](len);
+        bytes[] memory data = new bytes[](len);
+        uint256 counter;
 
-        for (uint256 i = 0; i < tokens.length; i++) {
-            to[i] = tokens[i];
-            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, dispatcher, amounts[i]);
+        for (uint256 i = 0; i < len; i++) {
+            if (amounts[i] == 0) continue;
+            to[counter] = tokens[i];
+            data[counter] = abi.encodeWithSelector(IERC20.transfer.selector, dispatcher, amounts[i]);
+            counter++;
         }
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        if (counter == 0) return;
+        assembly ("memory-safe") {
+            mstore(to, counter)
+            mstore(data, counter)
+        }
+        IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](counter), data);
     }
 
     /// @dev The amount of `token` reserved by the safe's pending withdrawal request, or 0 if none holds it.
