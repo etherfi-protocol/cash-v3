@@ -6,6 +6,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Vm } from "forge-std/Vm.sol";
 
 import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
+import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -25,6 +26,36 @@ contract EnsoRouterStub {
         pulled = amount;
         callCount++;
     }
+
+    function swapTo(
+        address srcToken,
+        uint256 srcAmount,
+        address dstToken,
+        address recipient,
+        uint256 dstAmount
+    ) external {
+        lastCaller = msg.sender;
+        IERC20(srcToken).transferFrom(msg.sender, address(this), srcAmount);
+        IERC20(dstToken).transfer(recipient, dstAmount);
+        pulled = srcAmount;
+        callCount++;
+    }
+
+    function swapToNative(
+        address srcToken,
+        uint256 srcAmount,
+        address payable recipient,
+        uint256 dstAmount
+    ) external {
+        lastCaller = msg.sender;
+        IERC20(srcToken).transferFrom(msg.sender, address(this), srcAmount);
+        (bool success,) = recipient.call{ value: dstAmount }("");
+        require(success, "native transfer failed");
+        pulled = srcAmount;
+        callCount++;
+    }
+
+    receive() external payable {}
 }
 
 contract EnsoSwapModuleTest is SafeTestSetup {
@@ -39,6 +70,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     uint256 internal constant DST_CHAIN = 1;
     uint256 internal constant SRC_AMOUNT = 1_000e6;
     uint256 internal constant MIN_OUT = 990_000_000_000_000;
+    address internal constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     function setUp() public override {
         super.setUp();
@@ -178,6 +210,93 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
         // Approval is reset to zero after forwarding the swap.
         assertEq(usdc.allowance(address(safe), address(ensoRouter)), 0);
+    }
+
+    function test_executeSwap_sameChainEnforcesRecipientTokenAndMinOut() public {
+        MockERC20 dstToken = new MockERC20("Output", "OUT", 18);
+        uint256 outputAmount = MIN_OUT + 1;
+        dstToken.mint(address(ensoRouter), outputAmount);
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.dstChainId = block.chainid;
+        order.dstToken = address(dstToken);
+        bytes memory swapData = abi.encodeCall(
+            EnsoRouterStub.swapTo,
+            (address(usdc), SRC_AMOUNT, address(dstToken), recipient, outputAmount)
+        );
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+        _warpPastDelay();
+
+        _executeAsKeeper();
+
+        assertEq(dstToken.balanceOf(recipient), outputAmount);
+    }
+
+    function test_executeSwap_sameChainRevertsWhenOutputBelowMinOut() public {
+        MockERC20 dstToken = new MockERC20("Output", "OUT", 18);
+        uint256 outputAmount = MIN_OUT - 1;
+        dstToken.mint(address(ensoRouter), outputAmount);
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.dstChainId = block.chainid;
+        order.dstToken = address(dstToken);
+        bytes memory swapData = abi.encodeCall(
+            EnsoRouterStub.swapTo,
+            (address(usdc), SRC_AMOUNT, address(dstToken), recipient, outputAmount)
+        );
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+        _warpPastDelay();
+
+        vm.prank(keeper);
+        vm.expectRevert(EnsoSwapModule.InsufficientOutputAmount.selector);
+        module.executeSwap(address(safe));
+
+        assertEq(module.getOrder(address(safe)).srcToken, address(usdc), "order should remain active");
+        assertEq(dstToken.balanceOf(recipient), 0, "router execution should roll back");
+    }
+
+    function test_executeSwap_sameChainRevertsWhenRouterPaysDifferentRecipient() public {
+        MockERC20 dstToken = new MockERC20("Output", "OUT", 18);
+        address wrongRecipient = makeAddr("wrongRecipient");
+        dstToken.mint(address(ensoRouter), MIN_OUT);
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.dstChainId = block.chainid;
+        order.dstToken = address(dstToken);
+        bytes memory swapData = abi.encodeCall(
+            EnsoRouterStub.swapTo,
+            (address(usdc), SRC_AMOUNT, address(dstToken), wrongRecipient, MIN_OUT)
+        );
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+        _warpPastDelay();
+
+        vm.prank(keeper);
+        vm.expectRevert(EnsoSwapModule.InsufficientOutputAmount.selector);
+        module.executeSwap(address(safe));
+
+        assertEq(dstToken.balanceOf(wrongRecipient), 0, "wrong-recipient transfer should roll back");
+    }
+
+    function test_executeSwap_sameChainEnforcesNativeOutput() public {
+        deal(address(ensoRouter), MIN_OUT);
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.dstChainId = block.chainid;
+        order.dstToken = NATIVE_TOKEN;
+        bytes memory swapData = abi.encodeCall(
+            EnsoRouterStub.swapToNative,
+            (address(usdc), SRC_AMOUNT, payable(recipient), MIN_OUT)
+        );
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+        _warpPastDelay();
+
+        _executeAsKeeper();
+
+        assertEq(recipient.balance, MIN_OUT);
     }
 
     function test_executeSwap_permissionless_anyCallerCanExecute() public {

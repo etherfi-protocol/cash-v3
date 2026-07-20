@@ -45,9 +45,10 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     using MessageHashUtils for bytes32;
 
     /// @notice User-signed swap intent. One per safe at a time.
-    /// @dev `dstChainId`, `dstToken` and `minOut` are carried for the signed intent and
-    ///      events only; they are not enforced on-chain (the Enso calldata owns slippage and
-    ///      routing). For a same-chain swap `dstChainId == block.chainid`.
+    /// @dev For a same-chain swap (`dstChainId == block.chainid`), `dstToken`, `recipient`
+    ///      and `minOut` are enforced with a recipient balance-delta check. For cross-chain
+    ///      swaps they are carried for the signed intent and events only because settlement
+    ///      is non-atomic.
     struct Order {
         address srcToken;
         uint256 srcAmount;
@@ -86,6 +87,7 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("EnsoSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("EnsoSwapModule.cancelSwap");
+    address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @notice CashModule on the same chain. Zero where there is no card spending.
     ICashModule public immutable cashModule;
@@ -131,6 +133,8 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     error WithdrawalDelayNotElapsed();
     /// @notice Reverts when the BE-supplied Enso calldata is empty.
     error EmptySwapData();
+    /// @notice Reverts when a same-chain swap delivers less than the signed minimum output.
+    error InsufficientOutputAmount();
 
     /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's
     ///      code — every upgrade impl must be constructed with the same data provider.
@@ -210,6 +214,9 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
             order.srcToken == address(0) || order.srcAmount == 0 ||
             order.recipient == address(0) || order.deadline <= block.timestamp
         ) revert InvalidInput();
+        if (order.dstChainId == block.chainid && (order.dstToken == address(0) || order.minOut == 0)) {
+            revert InvalidInput();
+        }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
         if ($.ensoRouter == address(0)) revert MissingConfig();
     }
@@ -280,6 +287,11 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     ///      bridges to the recipient encoded in the calldata.
     function _dispatchSwap(address safe, StoredSwap memory swap) internal {
         address ensoRouter = _getEnsoSwapModuleStorage().ensoRouter;
+        bool validateOutput = swap.order.dstChainId == block.chainid;
+        uint256 balanceBefore;
+        if (validateOutput) {
+            balanceBefore = _balanceOf(swap.order.dstToken, swap.order.recipient);
+        }
 
         address[] memory to = new address[](3);
         uint256[] memory values = new uint256[](3);
@@ -293,6 +305,19 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         data[2] = abi.encodeCall(IERC20.approve, (ensoRouter, 0));
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        if (validateOutput) {
+            uint256 balanceAfter = _balanceOf(swap.order.dstToken, swap.order.recipient);
+            if (
+                balanceAfter < balanceBefore ||
+                balanceAfter - balanceBefore < swap.order.minOut
+            ) revert InsufficientOutputAmount();
+        }
+    }
+
+    function _balanceOf(address token, address account) internal view returns (uint256) {
+        if (token == NATIVE_TOKEN) return account.balance;
+        return IERC20(token).balanceOf(account);
     }
 
     /**
