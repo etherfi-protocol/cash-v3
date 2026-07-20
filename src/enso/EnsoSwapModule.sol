@@ -306,9 +306,8 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
         if ($.swaps[safe].order.srcToken == address(0)) revert NoActiveOrder();
 
-        bytes32 digest = keccak256(
-            abi.encodePacked(CANCEL_SWAP_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)
-        ).toEthSignedMessageHash();
+        uint256 nonce = IEtherFiSafe(safe).useNonce();
+        bytes32 digest = _cancelDigest(safe, nonce);
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
 
         bytes32 swapId = $.swaps[safe].swapId;
@@ -391,6 +390,13 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
                 abi.encode(order),
                 keccak256(swapData)
             )
+        ).toEthSignedMessageHash();
+    }
+
+    /// @dev Digest the safe owners sign to cancel the active swap, bound to the safe nonce.
+    function _cancelDigest(address safe, uint256 nonce) internal view returns (bytes32) {
+        return keccak256(
+            abi.encodePacked(CANCEL_SWAP_SIG, block.chainid, address(this), nonce, safe)
         ).toEthSignedMessageHash();
     }
 
