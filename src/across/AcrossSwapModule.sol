@@ -142,6 +142,8 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     error MissingConfig();
     /// @notice Reverts when `executeSwap` runs before the CashModule withdrawal hold matures.
     error WithdrawalDelayNotElapsed();
+    /// @notice Reverts when CashModule would process the withdrawal immediately.
+    error ZeroWithdrawalDelay();
     /// @notice Reverts when an origin-swap request is made before the periphery is configured.
     error PeripheryNotAllowlisted();
 
@@ -276,6 +278,10 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
         if ($.spokePool == address(0) || $.multicallHandler == address(0)) revert MissingConfig();
+        if (address(cashModule) != address(0)) {
+            (uint64 withdrawalDelay,,) = cashModule.getDelays();
+            if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
+        }
     }
 
     /// @dev Stores the verified swap and either places the CashModule hold (OP) or executes

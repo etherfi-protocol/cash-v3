@@ -159,6 +159,20 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
     }
 
+    function test_requestSwap_revertsWhenWithdrawalDelayIsZero() public {
+        vm.prank(owner);
+        cashModule.setDelays(0, 0, 0);
+
+        AcrossSwapModule.Order memory order = _baseOrder();
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
+
+        vm.expectRevert(AcrossSwapModule.ZeroWithdrawalDelay.selector);
+        module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
+
+        assertEq(module.getOrder(address(safe)).srcToken, address(0));
+        assertEq(usdc.balanceOf(address(module)), 0);
+    }
+
     function test_requestSwap_revertsWhenOutputBelowMinOut() public {
         // The deposit-args validation moved to request time: the stored relayer commitment
         // must clear the user's signed minOut.
