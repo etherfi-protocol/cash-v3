@@ -129,6 +129,8 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     error MissingConfig();
     /// @notice Reverts when `executeSwap` runs before the CashModule withdrawal hold matures.
     error WithdrawalDelayNotElapsed();
+    /// @notice Reverts when the order expires before the CashModule withdrawal delay elapses.
+    error DeadlineBeforeWithdrawalDelay();
     /// @notice Reverts when the BE-supplied Enso calldata is empty.
     error EmptySwapData();
 
@@ -212,6 +214,10 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         ) revert InvalidInput();
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
         if ($.ensoRouter == address(0)) revert MissingConfig();
+        if (address(cashModule) != address(0)) {
+            (uint64 withdrawalDelay,,) = cashModule.getDelays();
+            if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
+        }
     }
 
     /// @dev Stores the verified swap and either places the CashModule hold (OP) or executes

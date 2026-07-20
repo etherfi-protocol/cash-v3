@@ -142,6 +142,17 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         module.requestSwap(address(safe), order, swapData, signers, sigs);
     }
 
+    function test_requestSwap_revertsWhenDeadlineDoesNotOutlastWithdrawalDelay() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        order.deadline = block.timestamp + withdrawalDelay;
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        vm.expectRevert(EnsoSwapModule.DeadlineBeforeWithdrawalDelay.selector);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+    }
+
     function test_requestSwap_revertsForBadSignature() public {
         EnsoSwapModule.Order memory order = _baseOrder();
         EnsoSwapModule.Order memory tampered = _baseOrder();
