@@ -9,7 +9,6 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
 import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
-import { OwnershipBridgeReceiver } from "../../src/ownership-bridge/OwnershipBridgeReceiver.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
@@ -20,14 +19,14 @@ import { EtherFiDeployer } from "../../src/utils/EtherFiDeployer.sol";
 
 /**
  * @title DeployTradingAccountMainnet
- * @notice Dev/testnet deploy of the destination-chain (Ethereum) trading-account stack,
+ * @notice Dev/testnet deploy of the mainnet (Ethereum) trading-account stack,
  *         routed entirely through our cross-chain `EtherFiDeployer` (CREATE3). Same salt
  *         on any chain ⇒ same address, since the deployer itself lives at the same
  *         address everywhere.
  *
  *         EVERY proxy is deployed with its initialize calldata in the deployment tx —
  *         a deploy-then-initialize split is front-runnable (ownership takeover) between
- *         the two transactions. Circular references (receiver -> factory -> safe-impl,
+ *         the two transactions. Circular references (factory -> safe-impl,
  *         InitParams -> module/factory -> DataProvider) are broken with CREATE3 address
  *         prediction: constructors STORE predicted addresses before the code exists, and
  *         each deploy asserts it landed on its prediction. AcrossSwapModule deploys last
@@ -40,11 +39,6 @@ import { EtherFiDeployer } from "../../src/utils/EtherFiDeployer.sol";
 contract DeployTradingAccountMainnet is Utils {
     // Our cross-chain CREATE3 deployer — same address on every chain.
     EtherFiDeployer constant DEPLOYER = EtherFiDeployer(0xFCD957b5913d607BF2222280093421B1e2Af6f30);
-
-    // LayerZero v2 endpoint — same address on Ethereum and Optimism.
-    address constant LZ_ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
-    // LZ EID of the source chain (Optimism) the receiver trusts.
-    uint32 constant OP_EID = 30111;
 
     // Across V3 on Ethereum mainnet.
     address constant SPOKE_POOL = 0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5;
@@ -69,7 +63,6 @@ contract DeployTradingAccountMainnet is Utils {
     address internal predictedEnsoModule;
     RoleRegistry internal roleRegistry;
     PriceProviderV2 internal priceProvider;
-    OwnershipBridgeReceiver internal receiver;
     address internal tradingSafeImpl;
     TradingSafeFactory internal factory;
     TradingLens internal lens;
@@ -98,7 +91,7 @@ contract DeployTradingAccountMainnet is Utils {
         predictedEnsoModule = DEPLOYER.getDeterministicAddress(getSalt("EnsoSwapModuleDev"));
 
         _deployCore();
-        _deployBridgeAndFactory();
+        _deployFactory();
         _deployDataProviderAndModule();
         _configureRolesAndAcross();
 
@@ -131,23 +124,11 @@ contract DeployTradingAccountMainnet is Utils {
         ));
     }
 
-    /// @dev OwnershipBridgeReceiver pins the PREDICTED factory (peer to the OP sender is
-    ///      set by the wire script); TradingSafe impl stores the predicted DataProvider;
-    ///      the factory proxy then initialises atomically at exactly the predicted address.
-    function _deployBridgeAndFactory() internal {
-        address receiverImpl = _deploy(
-            "OwnershipBridgeReceiverImplDev",
-            type(OwnershipBridgeReceiver).creationCode,
-            abi.encode(LZ_ENDPOINT, OP_EID, predictedFactory)
-        );
-        receiver = OwnershipBridgeReceiver(_deployProxy(
-            "OwnershipBridgeReceiverProxyDev",
-            receiverImpl,
-            abi.encodeWithSelector(OwnershipBridgeReceiver.initialize.selector, deployer, address(roleRegistry))
-        ));
-
+    /// @dev TradingSafe impl stores the predicted DataProvider; the factory proxy then
+    ///      initialises atomically at exactly the predicted address.
+    function _deployFactory() internal {
         tradingSafeImpl = _deploy(
-            "TradingSafeImplDev", type(TradingSafe).creationCode, abi.encode(predictedDataProvider, address(receiver))
+            "TradingSafeImplDev", type(TradingSafe).creationCode, abi.encode(predictedDataProvider)
         );
         address factoryImpl = _deploy("TradingSafeFactoryImplDev", type(TradingSafeFactory).creationCode, "");
         factory = TradingSafeFactory(_deployProxy(
@@ -275,7 +256,6 @@ contract DeployTradingAccountMainnet is Utils {
         vm.serializeAddress(out, "PriceProvider", address(priceProvider));
         vm.serializeAddress(out, "TradingSafeFactory", address(factory));
         vm.serializeAddress(out, "TradingSafeImpl", tradingSafeImpl);
-        vm.serializeAddress(out, "OwnershipBridgeReceiver", address(receiver));
         vm.serializeAddress(out, "AcrossSwapModule", address(acrossModule));
         vm.serializeAddress(out, "EnsoSwapModule", address(ensoModule));
         vm.serializeAddress(out, "TopUpFactory", topUpFactory);
@@ -289,7 +269,6 @@ contract DeployTradingAccountMainnet is Utils {
         console.log("PriceProvider:          ", address(priceProvider));
         console.log("TradingSafeFactory:     ", address(factory));
         console.log("TradingSafeImpl:        ", tradingSafeImpl);
-        console.log("OwnershipBridgeReceiver:", address(receiver));
         console.log("AcrossSwapModule:       ", address(acrossModule));
         console.log("EnsoSwapModule:         ", address(ensoModule));
         console.log("TradingLens:            ", address(lens));

@@ -4,17 +4,16 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import { TradingOwnerBridgeReceiver } from "./TradingOwnerBridgeReceiver.sol";
+import { EtherFiSafeCore } from "../safe/EtherFiSafeCore.sol";
 
 /**
  * @title TradingSafe
  * @author ether.fi
  * @notice Mainnet trading-account safe. Same shape as `EtherFiSafe` — passkey + recovery
- *         model, module-enabled — with `applyBridge*` functions (in
- *         `TradingOwnerBridgeReceiver`) that mirror owner-mutating operations from the
- *         source-chain (OP) safe.
+ *         model, module-enabled. Ownership and recovery are managed locally on this chain;
+ *         there is no cross-chain owner synchronization.
  */
-contract TradingSafe is TradingOwnerBridgeReceiver {
+contract TradingSafe is EtherFiSafeCore {
     using SafeERC20 for IERC20;
 
     /// @notice Reverts when `redirectToTopUp` is called by an address other than this safe's
@@ -23,10 +22,8 @@ contract TradingSafe is TradingOwnerBridgeReceiver {
 
     /**
      * @param _dataProvider Address of the `EtherFiDataProvider` on this chain.
-     * @param _bridgeReceiver Address of the `OwnershipBridgeReceiver` permitted to call
-     *        `applyBridge*` functions on instances of this safe.
      */
-    constructor(address _dataProvider, address _bridgeReceiver) payable TradingOwnerBridgeReceiver(_dataProvider, _bridgeReceiver) {}
+    constructor(address _dataProvider) payable EtherFiSafeCore(_dataProvider) {}
 
     /**
      * @notice Transfers `amount` of `token` to this safe's `topUp` address. The mirror of

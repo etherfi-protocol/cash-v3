@@ -18,7 +18,6 @@ contract TradingSafeRedirectToTopUpTest is TradingSafeTestBase {
     TradingSafe public safe;
     MockERC20 public token;
 
-    address public bridgeReceiver = makeAddr("bridgeReceiver");
     address public ownerA = makeAddr("ownerA");
     address public backend = makeAddr("backend");
     address public stranger = makeAddr("stranger");
@@ -32,7 +31,7 @@ contract TradingSafeRedirectToTopUpTest is TradingSafeTestBase {
         _setupCore();
 
         vm.startPrank(owner);
-        factory = _deployFactory(bridgeReceiver);
+        factory = _deployFactory();
         _initDataProvider(address(factory));
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(factory.TRADING_SAFE_REDIRECT_ROLE(), backend);
@@ -103,7 +102,7 @@ contract TradingSafeRedirectToTopUpTest is TradingSafeTestBase {
         // checked after the safe-existence check, so the safe must be a registered one.
         _setupCore();
         vm.startPrank(owner);
-        TradingSafeFactory bareFactory = _deployFactory(bridgeReceiver);
+        TradingSafeFactory bareFactory = _deployFactory();
         _initDataProvider(address(bareFactory));
         roleRegistry.grantRole(bareFactory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(bareFactory.TRADING_SAFE_REDIRECT_ROLE(), backend);

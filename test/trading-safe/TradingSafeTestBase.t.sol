@@ -21,13 +21,9 @@ import { TradingSafeFactory } from "../../src/trading-safe/TradingSafeFactory.so
  *        1. dataProvider proxy — uninitialised (we need its address to construct the role
  *           registry, which binds the data-provider address as immutable);
  *        2. role registry — proxy + initialise;
- *        3. TradingSafe impl (takes data-provider + bridge receiver);
+ *        3. TradingSafe impl (takes data-provider);
  *        4. TradingSafeFactory — proxy + initialise (takes role registry + TradingSafe impl);
  *        5. dataProvider.initialize — now we have the safe-factory address.
- *
- *      Concrete tests bring their own `bridgeReceiver` address (a placeholder for the
- *      TradingSafe unit tests; the real OwnershipBridgeReceiver address for the receiver
- *      end-to-end tests, computed via `vm.computeCreateAddress`).
  */
 abstract contract TradingSafeTestBase is Test {
     EtherFiDataProvider public dataProvider;
@@ -74,11 +70,11 @@ abstract contract TradingSafeTestBase is Test {
         dataProvider.initialize(params);
     }
 
-    /// @dev Deploys a TradingSafe impl with the given `bridgeReceiver` and a factory proxy
-    ///      pointing at it. Does NOT initialise the data provider — caller must do so via
+    /// @dev Deploys a TradingSafe impl and a factory proxy pointing at it. Does NOT
+    ///      initialise the data provider — caller must do so via
     ///      `_initDataProvider(address(factory))` before deploying any TradingSafe.
-    function _deployFactory(address bridgeReceiver) internal returns (TradingSafeFactory factory) {
-        address tradingSafeImpl = address(new TradingSafe(address(dataProvider), bridgeReceiver));
+    function _deployFactory() internal returns (TradingSafeFactory factory) {
+        address tradingSafeImpl = address(new TradingSafe(address(dataProvider)));
         address factoryImpl = address(new TradingSafeFactory());
         factory = TradingSafeFactory(address(new UUPSProxy(
             factoryImpl,
