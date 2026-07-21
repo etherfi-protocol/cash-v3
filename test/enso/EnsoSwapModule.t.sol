@@ -146,6 +146,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         assertEq(module.getOrder(address(safe)).srcAmount, SRC_AMOUNT);
         // The Enso calldata is captured at request for executeSwap to replay verbatim.
         assertEq(module.getSwap(address(safe)).swapData, swapData);
+        assertEq(module.getSwap(address(safe)).target, address(ensoRouter));
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(module));
     }
 
@@ -236,6 +237,33 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
         // Approval is reset to zero after forwarding the swap.
         assertEq(usdc.allowance(address(safe), address(ensoRouter)), 0);
+    }
+
+    function test_executeSwap_usesRouterSnapshottedAtRequest() public {
+        _request(_baseOrder());
+
+        EnsoRouterStub newRouter = new EnsoRouterStub();
+        vm.prank(moduleAdmin);
+        module.setEnsoRouter(address(newRouter));
+        _warpPastDelay();
+
+        _executeAsKeeper();
+
+        assertEq(ensoRouter.callCount(), 1);
+        assertEq(newRouter.callCount(), 0);
+    }
+
+    function test_requestSwap_revertsWhenRouterChangesAfterSigning() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        EnsoRouterStub newRouter = new EnsoRouterStub();
+        vm.prank(moduleAdmin);
+        module.setEnsoRouter(address(newRouter));
+
+        vm.expectRevert(EnsoSwapModule.InvalidSignatures.selector);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
     }
 
     function test_executeSwap_sameChainEnforcesRecipientTokenAndMinOut() public {
@@ -548,7 +576,8 @@ contract EnsoSwapModuleTest is SafeTestSetup {
             safe.nonce(),
             address(safe),
             abi.encode(order),
-            keccak256(swapData)
+            keccak256(swapData),
+            module.getEnsoRouter()
         )).toEthSignedMessageHash();
         return _twoSig(digest);
     }

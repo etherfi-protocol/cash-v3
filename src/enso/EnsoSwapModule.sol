@@ -68,6 +68,7 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         Order order;
         bytes swapData;
         bytes32 swapId;
+        address target;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.EnsoSwapModule
@@ -235,7 +236,12 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     function _storeAndDispatch(address safe, Order calldata order, bytes calldata swapData, uint256 nonce) internal {
         EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
         bytes32 swapId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
-        $.swaps[safe] = StoredSwap({ order: order, swapData: swapData, swapId: swapId });
+        $.swaps[safe] = StoredSwap({
+            order: order,
+            swapData: swapData,
+            swapId: swapId,
+            target: $.ensoRouter
+        });
 
         _emitSwapRequested(safe, swapId, order);
 
@@ -274,7 +280,7 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         StoredSwap memory swap = $.swaps[safe];
         if (swap.order.srcToken == address(0)) revert NoActiveOrder();
         if (block.timestamp > swap.order.deadline) revert OrderExpired();
-        if ($.ensoRouter == address(0)) revert MissingConfig();
+        if (swap.target == address(0)) revert MissingConfig();
 
         if (address(cashModule) != address(0)) {
             if (block.timestamp < cashModule.getData(safe).pendingWithdrawalRequest.finalizeTime) {
@@ -290,12 +296,12 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.order.minOut);
     }
 
-    /// @dev Approve the pinned Enso Router for the input token, forward the signed Enso calldata
+    /// @dev Approve the signed and snapshotted Enso Router for the input token, forward the signed Enso calldata
     ///      verbatim, then reset the approval to zero. The safe is the router's caller, so it
     ///      pulls the input token from the safe and (per the BE-built `swapData`) swaps and/or
     ///      bridges to the recipient encoded in the calldata.
     function _dispatchSwap(address safe, StoredSwap memory swap) internal {
-        address ensoRouter = _getEnsoSwapModuleStorage().ensoRouter;
+        address ensoRouter = swap.target;
         bool validateOutput = swap.order.dstChainId == block.chainid;
         uint256 balanceBefore;
         if (validateOutput) {
@@ -412,8 +418,9 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
     }
 
-    /// @dev Digest the safe owners sign over the FULL request (order + swapData), bound to the safe nonce.
+    /// @dev Digest the safe owners sign over the FULL request (order + swapData + target), bound to the safe nonce.
     function _requestDigest(address safe, Order calldata order, bytes calldata swapData, uint256 nonce) internal view returns (bytes32) {
+        address target = _getEnsoSwapModuleStorage().ensoRouter;
         return keccak256(
             abi.encodePacked(
                 REQUEST_SWAP_SIG,
@@ -422,7 +429,8 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
                 nonce,
                 safe,
                 abi.encode(order),
-                keccak256(swapData)
+                keccak256(swapData),
+                target
             )
         ).toEthSignedMessageHash();
     }

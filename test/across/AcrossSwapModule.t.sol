@@ -140,6 +140,8 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         // The deposit args + message are captured at request for executeSwap to replay.
         assertEq(module.getSwap(address(safe)).depositArgs.outputAmount, MIN_OUT);
         assertEq(module.getSwap(address(safe)).message, FAKE_MESSAGE);
+        assertEq(module.getSwap(address(safe)).target, address(spokePool));
+        assertEq(module.getSwap(address(safe)).multicallHandler, multicallHandler);
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(module));
     }
 
@@ -224,6 +226,36 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
         assertEq(usdc.allowance(address(safe), address(spokePool)), 0);
         _checkDepositV3Args(order);
+    }
+
+    function test_executeSwap_usesSpokePoolAndHandlerSnapshottedAtRequest() public {
+        AcrossSwapModule.Order memory order = _baseOrder();
+        _request(order);
+
+        SpokePoolStub newSpokePool = new SpokePoolStub();
+        vm.startPrank(moduleAdmin);
+        module.setSpokePool(address(newSpokePool));
+        module.setMulticallHandler(makeAddr("newMulticallHandler"));
+        vm.stopPrank();
+        _warpPastDelay();
+
+        _executeAsKeeper();
+
+        assertEq(spokePool.callCount(), 1);
+        assertEq(newSpokePool.callCount(), 0);
+        _checkDepositV3Args(order);
+    }
+
+    function test_requestSwap_revertsWhenRouteConfigChangesAfterSigning() public {
+        AcrossSwapModule.Order memory order = _baseOrder();
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
+
+        SpokePoolStub newSpokePool = new SpokePoolStub();
+        vm.prank(moduleAdmin);
+        module.setSpokePool(address(newSpokePool));
+
+        vm.expectRevert(AcrossSwapModule.InvalidSignatures.selector);
+        module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
     }
 
     function test_executeSwap_permissionless_anyCallerCanExecute() public {
@@ -456,7 +488,9 @@ contract AcrossSwapModuleTest is SafeTestSetup {
             abi.encode(order),
             keccak256(abi.encode(_baseDepositArgs(MIN_OUT))),
             keccak256(FAKE_MESSAGE),
-            keccak256("")
+            keccak256(""),
+            module.getSpokePool(),
+            module.getMulticallHandler()
         )).toEthSignedMessageHash();
         return _twoSig(digest);
     }
@@ -516,7 +550,7 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         assertEq(IERC20(address(usdc)).allowance(address(safe), address(periphery)), 0);
     }
 
-    function test_originSwap_revertsWhenPeripheryDisabledBeforeExecution() public {
+    function test_originSwap_usesPeripherySnapshottedAtRequest() public {
         PeripheryStub periphery = new PeripheryStub();
         vm.prank(moduleAdmin);
         module.setPeriphery(address(periphery));
@@ -526,20 +560,14 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory sigs) = _signOriginRequest(order, swapData);
         module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, swapData, signers, sigs);
 
+        PeripheryStub newPeriphery = new PeripheryStub();
         vm.prank(moduleAdmin);
-        module.setPeriphery(address(0));
+        module.setPeriphery(address(newPeriphery));
         _warpPastDelay();
+        _executeAsKeeper();
 
-        vm.prank(keeper);
-        vm.expectRevert(AcrossSwapModule.PeripheryNotAllowlisted.selector);
-        module.executeSwap(address(safe));
-
-        assertEq(module.getOrder(address(safe)).srcToken, address(usdc), "order should remain active");
-        assertEq(
-            cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient,
-            address(module),
-            "hold should remain active"
-        );
+        assertEq(periphery.pulled(), SRC_AMOUNT);
+        assertEq(newPeriphery.pulled(), 0);
     }
 
     /// @dev Origin path swapData the mock periphery understands: pull `amount` of usdc from the safe.
@@ -559,7 +587,9 @@ contract AcrossSwapModuleTest is SafeTestSetup {
             abi.encode(order),
             keccak256(abi.encode(_baseDepositArgs(MIN_OUT))),
             keccak256(FAKE_MESSAGE),
-            keccak256(swapData)
+            keccak256(swapData),
+            module.getPeriphery(),
+            address(0)
         )).toEthSignedMessageHash();
         return _twoSig(digest);
     }
