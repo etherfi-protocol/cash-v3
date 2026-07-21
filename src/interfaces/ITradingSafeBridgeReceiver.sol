@@ -31,8 +31,9 @@ interface ITradingSafeBridgeReceiver {
      * @param incomingOwnerEffectiveAt Source-chain UNIX timestamp at which `newOwner` should activate.
      *        The TradingSafe MUST adopt this exact activation time rather than computing a local one,
      *        so the source and destination timelocks stay synchronized.
+     * @return applied True when recovery was enabled and the incoming owner was staged.
      */
-    function applyBridgeRecover(address newOwner, uint256 incomingOwnerEffectiveAt) external;
+    function applyBridgeRecover(address newOwner, uint256 incomingOwnerEffectiveAt) external returns (bool applied);
 
     /// @notice Apply a bridged `cancelRecovery` on the TradingSafe (clears pending incoming-owner state).
     function applyBridgeCancelRecovery() external;

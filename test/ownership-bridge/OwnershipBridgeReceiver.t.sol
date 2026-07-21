@@ -28,7 +28,8 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
 
     address public senderPeer = makeAddr("senderPeer");
     address public sourceSafe = makeAddr("sourceSafe");
-    address public tradingSafeOwner = makeAddr("tradingSafeOwner");
+    uint256 public tradingSafeOwnerPk = 0xA11CE;
+    address public tradingSafeOwner;
     address public pauser = makeAddr("pauser");
     address public unpauser = makeAddr("unpauser");
 
@@ -38,6 +39,7 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
 
     function setUp() public {
         _setupCore();
+        tradingSafeOwner = vm.addr(tradingSafeOwnerPk);
         endpoint = new LZEndpointMock();
 
         address predictedReceiver = CREATE3.predictDeterministicAddress(RECEIVER_PROXY_SALT);
@@ -81,6 +83,18 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
     function _send(Origin memory origin, bytes memory message) internal {
         vm.prank(address(endpoint));
         receiver.lzReceive(origin, GUID, message, address(0), "");
+    }
+
+    function _toggleRecovery(bool shouldEnable) internal {
+        bytes32 structHash = keccak256(abi.encode(tradingSafe.TOGGLE_RECOVERY_ENABLED_TYPEHASH(), shouldEnable, tradingSafe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", tradingSafe.getDomainSeparator(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(tradingSafeOwnerPk, digestHash);
+
+        address[] memory signers = new address[](1);
+        signers[0] = tradingSafeOwner;
+        bytes[] memory signatures = new bytes[](1);
+        signatures[0] = abi.encodePacked(r, s, v);
+        tradingSafe.toggleRecoveryEnabled(shouldEnable, signers, signatures);
     }
 
     // ---- Each op kind: applied to the real TradingSafe ----
@@ -143,6 +157,25 @@ contract OwnershipBridgeReceiverTest is TradingSafeTestBase {
 
         assertEq(tradingSafe.getIncomingOwner(), newOwner);
         assertEq(tradingSafe.getIncomingOwnerStartTime(), effectiveAt);
+    }
+
+    function test_lzReceive_recover_skipsWhenRecoveryDisabled() public {
+        _toggleRecovery(false);
+
+        address newOwner = makeAddr("recoveryOwner");
+        uint256 effectiveAt = block.timestamp + 7 days;
+        bytes memory message = OwnershipBridgeMessageLib.encodeEnvelope(OwnershipBridgeMessageLib.Envelope({
+            kind: OwnershipBridgeMessageLib.OpKind.Recover,
+            safe: sourceSafe,
+            opData: OwnershipBridgeMessageLib.encodeRecover(newOwner, effectiveAt)
+        }));
+
+        vm.expectEmit(true, true, true, true);
+        emit IOwnershipBridgeReceiver.RecoveryApplySkipped(sourceSafe, address(tradingSafe), GUID, newOwner, effectiveAt);
+        _send(_origin(), message);
+
+        assertEq(tradingSafe.getIncomingOwner(), address(0));
+        assertEq(tradingSafe.getIncomingOwnerStartTime(), 0);
     }
 
     function test_lzReceive_cancelRecovery_appliesToTradingSafe() public {

@@ -130,8 +130,12 @@ contract OwnershipBridgeReceiver is IOwnershipBridgeReceiver, OAppReceiverUpgrad
      */
     function _applyRecover(address sourceSafe, address tradingSafe, bytes32 guid, bytes memory opData) internal {
         OwnershipBridgeMessageLib.RecoverData memory d = OwnershipBridgeMessageLib.decodeRecover(opData);
-        ITradingSafeBridgeReceiver(tradingSafe).applyBridgeRecover(d.newOwner, d.incomingOwnerEffectiveAt);
-        emit RecoverApplied(sourceSafe, tradingSafe, guid, d.newOwner, d.incomingOwnerEffectiveAt);
+        bool applied = ITradingSafeBridgeReceiver(tradingSafe).applyBridgeRecover(d.newOwner, d.incomingOwnerEffectiveAt);
+        if (applied) {
+            emit RecoverApplied(sourceSafe, tradingSafe, guid, d.newOwner, d.incomingOwnerEffectiveAt);
+        } else {
+            emit RecoveryApplySkipped(sourceSafe, tradingSafe, guid, d.newOwner, d.incomingOwnerEffectiveAt);
+        }
     }
 
     /**

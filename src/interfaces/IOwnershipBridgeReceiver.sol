@@ -58,6 +58,18 @@ interface IOwnershipBridgeReceiver {
     );
 
     /**
+     * @notice Emitted when a bridged recovery is consumed but not applied because recovery
+     *         is disabled on the destination TradingSafe.
+     */
+    event RecoveryApplySkipped(
+        address indexed sourceSafe,
+        address indexed tradingSafe,
+        bytes32 indexed guid,
+        address newOwner,
+        uint256 incomingOwnerEffectiveAt
+    );
+
+    /**
      * @notice Emitted when a `cancelRecovery` operation is applied.
      * @param sourceSafe Source-chain safe.
      * @param tradingSafe Destination TradingSafe.

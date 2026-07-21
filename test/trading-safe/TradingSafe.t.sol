@@ -10,12 +10,14 @@ contract TradingSafeTest is TradingSafeTestBase {
     TradingSafeFactory public factory;
     TradingSafe public safe;
     address public bridgeReceiver = makeAddr("bridgeReceiver");
-    address public ownerA = makeAddr("ownerA");
+    uint256 public ownerAPk = 0xA11CE;
+    address public ownerA;
     address public ownerB = makeAddr("ownerB");
     address public stranger = makeAddr("stranger");
 
     function setUp() public {
         _setupCore();
+        ownerA = vm.addr(ownerAPk);
 
         vm.startPrank(owner);
         factory = _deployFactory(bridgeReceiver);
@@ -116,10 +118,22 @@ contract TradingSafeTest is TradingSafeTestBase {
         uint256 effectiveAt = block.timestamp + 7 days;
 
         vm.prank(bridgeReceiver);
-        safe.applyBridgeRecover(newOwner, effectiveAt);
+        bool applied = safe.applyBridgeRecover(newOwner, effectiveAt);
 
+        assertTrue(applied);
         assertEq(safe.getIncomingOwner(), newOwner);
         assertEq(safe.getIncomingOwnerStartTime(), effectiveAt);
+    }
+
+    function test_applyBridgeRecover_skipsWhenRecoveryDisabled() public {
+        _toggleRecovery(false);
+
+        vm.prank(bridgeReceiver);
+        bool applied = safe.applyBridgeRecover(makeAddr("newOwner"), block.timestamp + 7 days);
+
+        assertFalse(applied);
+        assertEq(safe.getIncomingOwner(), address(0));
+        assertEq(safe.getIncomingOwnerStartTime(), 0);
     }
 
     function test_applyBridgeRecover_revertsWhen_notBridgeReceiver() public {
@@ -148,5 +162,17 @@ contract TradingSafeTest is TradingSafeTestBase {
         vm.expectRevert(TradingOwnerBridgeReceiver.OnlyBridgeReceiver.selector);
         vm.prank(stranger);
         safe.applyBridgeCancelRecovery();
+    }
+
+    function _toggleRecovery(bool shouldEnable) internal {
+        bytes32 structHash = keccak256(abi.encode(safe.TOGGLE_RECOVERY_ENABLED_TYPEHASH(), shouldEnable, safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerAPk, digestHash);
+
+        address[] memory signers = new address[](1);
+        signers[0] = ownerA;
+        bytes[] memory signatures = new bytes[](1);
+        signatures[0] = abi.encodePacked(r, s, v);
+        safe.toggleRecoveryEnabled(shouldEnable, signers, signatures);
     }
 }

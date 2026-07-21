@@ -71,8 +71,10 @@ abstract contract TradingOwnerBridgeReceiver is EtherFiSafeCore, ITradingSafeBri
      * @param incomingOwnerEffectiveAt Timestamp (matching the source-chain timelock) at
      *        which `newOwner` becomes the active owner.
      */
-    function applyBridgeRecover(address newOwner, uint256 incomingOwnerEffectiveAt) external override onlyBridgeReceiver {
+    function applyBridgeRecover(address newOwner, uint256 incomingOwnerEffectiveAt) external override onlyBridgeReceiver returns (bool applied) {
+        if (!isRecoveryEnabled()) return false;
         _setIncomingOwner(newOwner, incomingOwnerEffectiveAt);
+        return true;
     }
 
     /**
