@@ -525,6 +525,13 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
 
+        (bool enabledBySupply,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
+        assertTrue(enabledBySupply, "supply enabled collateral");
+
+        gw.setUsingAsCollateral(address(safe), address(weETH), false);
+        (bool disabledBeforeEnable,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
+        assertFalse(disabledBeforeEnable, "collateral disabled before re-enable");
+
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
         (bool enabled,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
         assertTrue(enabled, "collateral enabled");
