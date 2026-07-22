@@ -301,10 +301,11 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // ---------------------------------------------------------------------
 
     /**
-     * @notice Supplies `amount` of `asset` to Aave on behalf of `safe`
+     * @notice Supplies `amount` of `asset` to Aave on behalf of `safe` and enables it as collateral
      * @dev Driver-only. The Spoke debits the caller, so the gateway first pulls the asset from the safe and
-     *      approves the Spoke, then supplies into the safe's position. Rejected if the safe has opted out of
-     *      lend, or while the gateway is paused.
+     *      approves the Spoke, then supplies into the safe's position and enables the reserve as collateral.
+     *      Both Spoke operations are atomic: if collateral enablement fails, the supply is rolled back.
+     *      Rejected if the safe has opted out of lend, or while the gateway is paused.
      * @param safe The safe whose position is credited
      * @param asset The asset being supplied (must be a registered reserve)
      * @param amount The amount to supply
@@ -321,8 +322,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         _pullFromSafe(safe, asset, amount);
         IERC20(asset).forceApprove(address(spoke), amount);
         spoke.supply(reserveId, amount, safe);
+        spoke.setUsingAsCollateral(reserveId, true, safe);
 
         emit Supplied(safe, asset, amount);
+        emit CollateralUsageSet(safe, asset, true);
     }
 
     /**

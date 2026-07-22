@@ -257,7 +257,6 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         // supply weETH and enable it as collateral
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
 
         // borrow USDC to a recipient
         gw.borrow(address(safe), address(usdc), 1000e6, recipient);
@@ -376,7 +375,6 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 5 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         gw.borrow(address(safe), address(usdc), 1000e6, recipient);
         vm.stopPrank();
 
@@ -508,7 +506,6 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 10 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         gw.borrow(address(safe), address(usdc), 1000e6, recipient);
         vm.stopPrank();
 
@@ -520,10 +517,25 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 600e6, 2, "remaining debt");
     }
 
-    function test_setUsingAsCollateral_enableThenDisable() public {
+    /// A gateway supply always enables the supplied reserve as collateral in the same operation.
+    function test_supply_enablesCollateral() public {
+        deal(address(weETH), address(safe), 1 ether);
+
+        vm.prank(driver);
+        gw.supply(address(safe), address(weETH), 1 ether);
+
+        (bool enabled,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
+        assertTrue(enabled, "supplied reserve enabled as collateral");
+    }
+
+    function test_setUsingAsCollateral_disableThenEnableThenDisable() public {
         deal(address(weETH), address(safe), 5 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
+
+        gw.setUsingAsCollateral(address(safe), address(weETH), false);
+        (bool initiallyDisabled,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
+        assertFalse(initiallyDisabled, "collateral initially disabled");
 
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
         (bool enabled,) = spoke.getUserReserveStatus(weethReserveId, address(safe));
@@ -556,7 +568,6 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 1 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 1 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         // Pinned to the health gate (not a bare revert): with 1M USDC seeded, a $50k borrow can only fail
         // Aave's borrowing-power / health check, not liquidity.
         vm.expectRevert(ISpoke.HealthFactorBelowThreshold.selector);
@@ -569,7 +580,6 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 5 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         gw.borrow(address(safe), address(usdc), 1000e6, recipient);
 
         // Pulling all the collateral while $1000 of debt is open must trip Aave's liquidation-threshold gate.
@@ -586,7 +596,6 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 5 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         gw.borrow(address(safe), address(usdc), 1000e6, recipient);
         vm.stopPrank();
 
@@ -636,7 +645,6 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 10 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         gw.borrow(address(safe), address(usdc), 1000e6, recipient);
         vm.stopPrank();
 

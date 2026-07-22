@@ -60,7 +60,6 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 5 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         vm.stopPrank();
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(weETH)), 5 ether, 2, "collateral on Aave");
 
@@ -159,7 +158,6 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 5 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         gw.borrow(address(safe), address(usdc), 1000e6, driver);
         vm.stopPrank();
 
@@ -245,7 +243,6 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         deal(address(weETH), address(safe), 5 ether);
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
         gw.borrow(address(safe), address(usdc), 1000e6, driver);
         vm.stopPrank();
 

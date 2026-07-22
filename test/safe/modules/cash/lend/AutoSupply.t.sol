@@ -8,6 +8,7 @@ import { CashVerificationLib } from "../../../../../src/libraries/CashVerificati
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
 import { EtherFiSafeErrors } from "../../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
+import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 
 /**
  * @title AutoSupplyTest
@@ -77,6 +78,30 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(usdc)), 0, "frozen reserve skipped, nothing supplied");
         assertEq(usdc.balanceOf(address(safe)), looseUsdc, "blocked token stays loose for the next sweep");
         assertEq(gw.suppliedOf(address(safe), address(weETH)), looseWeeth, "healthy token still swept");
+    }
+
+    /// A collateral-toggle failure rolls back only that token, emits the reason, and does not brick the batch.
+    function test_supplyToLend_skipsCollateralEnablementFailure() public {
+        uint256 looseWeeth = 2 ether;
+        uint256 looseUsdc = 1000e6;
+        deal(address(weETH), address(safe), looseWeeth);
+        deal(address(usdc), address(safe), looseUsdc);
+
+        bytes memory reason = abi.encodeWithSelector(ISpoke.MaximumUserReservesExceeded.selector);
+        vm.mockCallRevert(address(spoke), abi.encodeCall(ISpoke.setUsingAsCollateral, (weethReserveId, true, address(safe))), reason);
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(weETH);
+        tokens[1] = address(usdc);
+
+        vm.expectEmit(true, true, false, true, address(cashEventEmitter));
+        emit CashEventEmitter.LendSupplyFailed(address(safe), address(weETH), looseWeeth, reason);
+        vm.prank(etherFiWallet);
+        cashModule.supplyToLend(address(safe), tokens);
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "failed token was not left supplied");
+        assertEq(weETH.balanceOf(address(safe)), looseWeeth, "failed token stays loose");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), looseUsdc, "healthy token still swept");
     }
 
     /// An opted-out safe is a no-op sweep (the keeper legitimately races an opt-out); its funds stay loose.

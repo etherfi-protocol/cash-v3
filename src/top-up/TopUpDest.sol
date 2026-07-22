@@ -68,6 +68,9 @@ contract TopUpDest is UpgradeableProxy {
      */
     event TopUp(bytes32 indexed txId, address indexed user, address indexed token, bytes32 sourceTxHash, uint256 chainId, uint256 amount);
 
+    /// @notice Emitted when a best-effort top-up supply to the lend gateway fails
+    event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
+
     /// @notice Error thrown when the contract has insufficient token balance
     error BalanceTooLow();
 
@@ -141,7 +144,7 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws AmountCannotBeZero if amount is zero
      * @custom:throws AmountGreaterThanDeposit if amount exceeds available deposit
      */
-    function withdraw(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner() {
+    function withdraw(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
         if (amount == 0) revert AmountCannotBeZero();
@@ -167,7 +170,7 @@ contract TopUpDest is UpgradeableProxy {
     function topUpUserSafeBatch(bytes32[] memory txHashes, address[] memory users, uint256[] memory chainIds, address[] memory tokens, uint256[] memory amounts) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
         uint256 len = txHashes.length;
         if (len != users.length || len != chainIds.length || len != tokens.length || len != amounts.length) revert ArrayLengthMismatch();
-            
+
         for (uint256 i = 0; i < len;) {
             _topUp(txHashes[i], users[i], chainIds[i], tokens[i], amounts[i]);
             unchecked {
@@ -212,7 +215,10 @@ contract TopUpDest is UpgradeableProxy {
         $.transactionCompleted[txId] = true;
         _transfer(user, token, amount);
 
-        try this.supplyTopUpToLend(user, token, amount) { } catch { }
+        try this.supplyTopUpToLend(user, token, amount) { }
+        catch (bytes memory reason) {
+            emit LendSupplyFailed(user, token, amount, reason);
+        }
 
         emit TopUp(txId, user, token, txHash, chainId, amount);
     }
@@ -220,9 +226,9 @@ contract TopUpDest is UpgradeableProxy {
     /**
      * @notice Supplies a topped-up amount into the lend gateway on behalf of the safe
      * @dev External + self-call only: try/catch needs an external call, so _topUp invokes this via
-     *      this.supplyTopUpToLend(...) to isolate any failure and fall back to a loose topup. The
-     *      msg.sender guard keeps it a private helper. No-op unless the safe is lend-active and the
-     *      token is registered.
+     *      this.supplyTopUpToLend(...) to isolate any failure and fall back to a loose topup while emitting
+     *      LendSupplyFailed with the reason. The msg.sender guard keeps it a private helper. No-op unless the
+     *      safe is lend-active and the token is registered.
      * @param safe Address of the safe that was topped up
      * @param token Address of the topped-up token
      * @param amount Amount of tokens to supply
@@ -238,7 +244,6 @@ contract TopUpDest is UpgradeableProxy {
         if (!lendGateway.isRegistered(token)) return;
 
         lendGateway.supply(safe, token, amount);
-        lendGateway.setUsingAsCollateral(safe, token, true);
     }
 
     /**
@@ -285,7 +290,7 @@ contract TopUpDest is UpgradeableProxy {
     }
 
     receive() external payable {
-        weth.deposit{value: msg.value}();
+        weth.deposit{ value: msg.value }();
     }
 
     /**

@@ -397,15 +397,16 @@ library CashLendLib {
         return gateway;
     }
 
-    /// @dev Best-effort supply of `amount` of `token` into the lend market as collateral. A supply the
-    ///      reserve rejects (frozen, paused, at its supply cap, or the Hub spoke halted) is swallowed so the
-    ///      funds stay loose for the next sweep. Used by the sweep and the borrow auto-supply, where leaving
-    ///      the funds loose is fine; callers that must not proceed without the supply do not use this.
+    /// @dev Best-effort atomic supply of `amount` of `token` into the lend market as collateral. A call the
+    ///      gateway rejects (frozen, paused, capped, halted, or failed collateral enablement) is swallowed and
+    ///      reported through LendSupplyFailed, so the funds stay loose for the next sweep. Used by the sweep and
+    ///      borrow auto-supply, where leaving funds loose is fine; callers that require supply do not use this.
     function _supplyAsCollateral(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token, uint256 amount) private {
         try gateway.supply(safe, token, amount) {
-            gateway.setUsingAsCollateral(safe, token, true);
             $.cashEventEmitter.emitLendSupplied(safe, token, amount);
-        } catch { }
+        } catch (bytes memory reason) {
+            $.cashEventEmitter.emitLendSupplyFailed(safe, token, amount, reason);
+        }
     }
 
     /**
@@ -713,7 +714,6 @@ library CashLendLib {
         for (uint256 i = 0; i < tokens.length; i++) {
             if (supplyAmounts[i] != 0) {
                 gateway.supply(safe, tokens[i], supplyAmounts[i]);
-                gateway.setUsingAsCollateral(safe, tokens[i], true);
                 $.cashEventEmitter.emitCollateralResupplied(safe, tokens[i], supplyAmounts[i]);
             }
         }

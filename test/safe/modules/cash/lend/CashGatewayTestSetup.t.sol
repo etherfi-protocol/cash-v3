@@ -8,8 +8,8 @@ import { IAaveV4PriceFeed } from "../../../../../src/interfaces/IAaveV4PriceFeed
 import { IAggregatorV3 } from "../../../../../src/interfaces/IAggregatorV3.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { ChainlinkPriceFeed } from "../../../../../src/oracle/ChainlinkPriceFeed.sol";
-import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
+import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 
 /**
  * @title CashGatewayTestSetup
@@ -112,7 +112,6 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
         deal(token, safe_, IERC20(token).balanceOf(safe_) + amount);
         vm.startPrank(driver);
         gw.supply(safe_, token, amount);
-        gw.setUsingAsCollateral(safe_, token, true);
         vm.stopPrank();
     }
 

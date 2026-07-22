@@ -5,10 +5,12 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
+import { BoringVault, ILayerZeroTeller } from "../../../../../src/interfaces/ILayerZeroTeller.sol";
+import { ModuleLendGatewaySandwich } from "../../../../../src/modules/ModuleLendGatewaySandwich.sol";
 import { EtherFiLiquidModule } from "../../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
-import { ILayerZeroTeller, BoringVault } from "../../../../../src/interfaces/ILayerZeroTeller.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
+import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 
 /// @dev Vault and teller in one: an ERC20 receipt whose deposit pulls the underlying (approved to this
 ///      contract, as the module approves the liquid asset) and mints receipt shares 1:1.
@@ -140,6 +142,9 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
         // Freeze the receipt's reserve so Aave rejects the sandwich's re-supply of the minted receipt
         _setAaveReserveFrozen(gw.reserveIdOf(address(liquidVault)), true);
 
+        bytes memory reason = abi.encodeWithSelector(ISpoke.ReserveFrozen.selector);
+        vm.expectEmit(true, true, false, true, address(liquidModule));
+        emit ModuleLendGatewaySandwich.LendSupplyFailed(address(safe), address(liquidVault), amount, reason);
         liquidModule.deposit(address(safe), address(usdc), address(liquidVault), amount, amount, owner1, _depositSig(address(usdc), amount, amount));
 
         assertEq(liquidVault.balanceOf(address(safe)), amount, "receipt stays loose when the re-supply is rejected");
@@ -170,17 +175,13 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
     }
 
     function _depositSig(address assetToDeposit, uint256 amount, uint256 minReturn) internal view returns (bytes memory) {
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(liquidModule.DEPOSIT_SIG(), block.chainid, address(liquidModule), liquidModule.getNonce(address(safe)), address(safe), abi.encode(assetToDeposit, address(liquidVault), amount, minReturn))
-        ).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(liquidModule.DEPOSIT_SIG(), block.chainid, address(liquidModule), liquidModule.getNonce(address(safe)), address(safe), abi.encode(assetToDeposit, address(liquidVault), amount, minReturn))).toEthSignedMessageHash();
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         return abi.encodePacked(r, s, v);
     }
 
     function _withdrawSig(uint128 amount, uint128 minReturn, uint16 discount, uint24 secondsToDeadline) internal view returns (bytes memory) {
-        bytes32 digestHash = keccak256(
-            abi.encodePacked(liquidModule.WITHDRAW_SIG(), block.chainid, address(liquidModule), liquidModule.getNonce(address(safe)), address(safe), abi.encode(address(liquidVault), address(usdc), amount, minReturn, discount, secondsToDeadline))
-        ).toEthSignedMessageHash();
+        bytes32 digestHash = keccak256(abi.encodePacked(liquidModule.WITHDRAW_SIG(), block.chainid, address(liquidModule), liquidModule.getNonce(address(safe)), address(safe), abi.encode(address(liquidVault), address(usdc), amount, minReturn, discount, secondsToDeadline))).toEthSignedMessageHash();
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digestHash);
         return abi.encodePacked(r, s, v);
     }
