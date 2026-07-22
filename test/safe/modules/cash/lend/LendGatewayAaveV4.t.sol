@@ -62,25 +62,26 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertTrue(gw.isRegistered(address(usdc)));
         assertEq(gw.reserveIdOf(address(usdc)), usdcReserveId);
 
-        // A reserveId whose underlying != the asset is rejected
+        // A reserveId whose underlying != an unregistered asset is rejected
         vm.prank(owner);
         vm.expectRevert(LendGateway.ReserveAssetMismatch.selector);
-        gw.setReserveId(address(weETH), usdcReserveId);
+        gw.setReserveId(address(usdt), usdcReserveId);
     }
 
-    /// An asset can move to another matching reserve while its current reserve is empty.
-    function test_setReserveId_repointsEmptyReserve() public {
+    /// A registered asset keeps its original reserve even while that reserve is empty.
+    function test_setReserveId_rejectsRepointingEmptyReserve() public {
         IAaveV4Spoke.Reserve memory replacement = IAaveV4Spoke(address(spoke)).getReserve(usdcReserveId);
         replacement.underlying = address(weETH);
         vm.mockCall(address(spoke), abi.encodeWithSelector(IAaveV4Spoke.getReserve.selector, usdcReserveId), abi.encode(replacement));
 
         vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(LendGateway.ReserveAlreadyRegistered.selector, address(weETH), weethReserveId));
         gw.setReserveId(address(weETH), usdcReserveId);
-        assertEq(gw.reserveIdOf(address(weETH)), usdcReserveId);
+        assertEq(gw.reserveIdOf(address(weETH)), weethReserveId);
     }
 
-    /// Re-registering the same reserve is harmless, but a live position prevents moving the asset to another reserve.
-    function test_setReserveId_repointRequiresOldReserveEmpty() public {
+    /// Re-registering the same reserve is harmless, but a live reserve cannot be replaced.
+    function test_setReserveId_rejectsRepointingLiveReserve() public {
         deal(address(weETH), address(safe), 1 ether);
         vm.prank(driver);
         gw.supply(address(safe), address(weETH), 1 ether);
@@ -95,7 +96,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.mockCall(address(spoke), abi.encodeWithSelector(IAaveV4Spoke.getReserve.selector, usdcReserveId), abi.encode(replacement));
 
         vm.prank(owner);
-        vm.expectRevert(LendGateway.ReserveStillInUse.selector);
+        vm.expectRevert(abi.encodeWithSelector(LendGateway.ReserveAlreadyRegistered.selector, address(weETH), weethReserveId));
         gw.setReserveId(address(weETH), usdcReserveId);
     }
 
@@ -206,8 +207,8 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertTrue(gw.isSpendAsset(address(usdc)), "still a debit-spend asset");
     }
 
-    /// setSpendAsset is admin-gated, requires a registered reserve, and removeReserve drops spend membership.
-    function test_setSpendAsset_guardsAndRemovalDropsMembership() public {
+    /// setSpendAsset is admin-gated, requires a registered reserve, and can disable a reserve with outside LP supply.
+    function test_setSpendAsset_guardsAndDisablesSuppliedReserve() public {
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(LendGateway.AssetNotRegistered.selector, address(0xdead)));
         gw.setSpendAsset(address(0xdead), true);
@@ -215,16 +216,13 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.expectRevert(); // caller lacks LEND_GATEWAY_ADMIN_ROLE
         gw.setSpendAsset(address(usdc), false);
 
-        // _addAaveReserve manages its own aaveAdmin prank, so list the idle USDT reserve before pranking owner
-        uint256 usdtReserveId = _addAaveReserve(address(usdt), usdcUsdOracle, _usdcCollateralFactorBps(), true);
+        assertGt(spoke.getReserveSuppliedAssets(usdcReserveId), 0, "outside LP liquidity exists");
+        vm.prank(owner);
+        gw.setSpendAsset(address(usdc), false);
 
-        vm.startPrank(owner);
-        gw.setReserveId(address(usdt), usdtReserveId);
-        gw.setSpendAsset(address(usdt), true);
-        assertTrue(gw.isSpendAsset(address(usdt)));
-        gw.removeReserve(address(usdt)); // idle reserve: no debt, no supplied balance
-        vm.stopPrank();
-        assertFalse(gw.isSpendAsset(address(usdt)), "removeReserve drops spend membership");
+        assertFalse(gw.isSpendAsset(address(usdc)), "admin disabled debit spending");
+        assertTrue(gw.isRegistered(address(usdc)), "reserve stays registered for accounting and exits");
+        assertEq(gw.reserveIdOf(address(usdc)), usdcReserveId, "original reserve mapping is retained");
     }
 
     function test_getAccountData_freshSafeIsEmptyAndHealthy() public view {
@@ -333,59 +331,6 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.prank(owner);
         vm.expectRevert(LendGateway.ZeroAddress.selector);
         gw.setReserveId(address(0), 0);
-    }
-
-    /// An empty reserve (no supply, no debt) removes cleanly and its reads zero out. weETH is used because the
-    /// USDC reserve carries seeded liquidity, which the in-use guard (below) blocks.
-    function test_removeReserve_unregistersAndZeroesReads() public {
-        assertEq(spoke.getReserveSuppliedAssets(weethReserveId), 0, "weETH reserve empty at setup");
-
-        vm.prank(owner);
-        gw.removeReserve(address(weETH));
-
-        assertFalse(gw.isRegistered(address(weETH)));
-        assertEq(gw.ltv(address(weETH)), 0);
-        assertEq(gw.withdrawalLiquidity(address(weETH)), 0);
-        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0);
-        assertEq(gw.debtOf(address(safe), address(weETH)), 0);
-
-        vm.expectRevert(abi.encodeWithSelector(LendGateway.AssetNotRegistered.selector, address(weETH)));
-        gw.reserveIdOf(address(weETH));
-    }
-
-    function test_removeReserve_guards() public {
-        address never = makeAddr("neverRegistered");
-        vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(LendGateway.AssetNotRegistered.selector, never));
-        gw.removeReserve(never);
-
-        vm.prank(makeAddr("notAdmin"));
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
-        gw.removeReserve(address(weETH));
-    }
-
-    /// removeReserve refuses while the reserve still has supply or debt, so a delisting cannot strand positions
-    /// or corrupt the USD views (mirrors the legacy DebtManager unsupportBorrowToken guard).
-    function test_removeReserve_revertsWhileReserveInUse() public {
-        // USDC carries seeded LP liquidity (supplied != 0), so it cannot be pulled
-        vm.prank(owner);
-        vm.expectRevert(LendGateway.ReserveStillInUse.selector);
-        gw.removeReserve(address(usdc));
-
-        // Supplying weETH puts its reserve in use too; a safe borrow then adds USDC debt on top
-        deal(address(weETH), address(safe), 5 ether);
-        vm.startPrank(driver);
-        gw.supply(address(safe), address(weETH), 5 ether);
-        gw.setUsingAsCollateral(address(safe), address(weETH), true);
-        gw.borrow(address(safe), address(usdc), 1000e6, recipient);
-        vm.stopPrank();
-
-        vm.startPrank(owner);
-        vm.expectRevert(LendGateway.ReserveStillInUse.selector);
-        gw.removeReserve(address(weETH));
-        vm.expectRevert(LendGateway.ReserveStillInUse.selector);
-        gw.removeReserve(address(usdc));
-        vm.stopPrank();
     }
 
     // ----------------------------------------------------------------- driver management

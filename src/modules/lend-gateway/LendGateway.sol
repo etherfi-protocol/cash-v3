@@ -71,7 +71,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     struct LendGatewayStorage {
         /// @notice asset -> Aave reserveId (membership is tracked by `assets`, since reserveId 0 is valid)
         mapping(address asset => uint256 reserveId) reserveId;
-        /// @notice The registered assets; membership doubles as the "is registered" check
+        /// @notice The append-only registered assets; membership doubles as the "is registered" check
         EnumerableSetLib.AddressSet assets;
         /// @notice Extra authorized drivers beyond the CashModule (auto-supply / migration paths)
         mapping(address driver => bool authorized) isDriver;
@@ -85,10 +85,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.LendGateway")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant LendGatewayStorageLocation = 0x08cdfbb611f2a1b86b361fad47cf7e3d848e6642121a10c5da4ae64fe25c9800;
 
-    /// @notice Emitted when an asset's reserveId is registered or updated
+    /// @notice Emitted when an asset's reserveId is first registered
     event ReserveRegistered(address indexed asset, uint256 indexed reserveId);
-    /// @notice Emitted when an asset is de-registered
-    event ReserveDeregistered(address indexed asset);
     /// @notice Emitted when a driver is authorized or de-authorized
     event DriverSet(address indexed driver, bool authorized);
     /// @notice Emitted when an asset is added to or removed from the debit-spend set
@@ -120,8 +118,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     error ZeroAmount();
     /// @notice Thrown when a lend op is attempted for a safe that has opted out of lend
     error LendOptedOut();
-    /// @notice Thrown when changing or removing a reserve that still has outstanding debt or supplied balance
-    error ReserveStillInUse();
+    /// @notice Thrown when changing the reserveId of an already registered asset
+    error ReserveAlreadyRegistered(address asset, uint256 reserveId);
     /// @notice Thrown when an operation would leave the safe's health factor below the configured floor
     error HealthFactorBelowMinimum();
     /// @notice Thrown when setting a health-factor floor outside [1e18, 2e18] (0 disables)
@@ -171,53 +169,27 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // ---------------------------------------------------------------------
 
     /**
-     * @notice Registers or updates the reserveId for an asset, validated against the Spoke
-     * @dev Re-registering the same reserve is a no-op. Moving to another reserve requires the old reserve to
-     *      have zero aggregate supply and debt so existing positions cannot disappear from gateway accounting.
+     * @notice Registers the reserveId for an asset, validated against the Spoke
+     * @dev Reserve registrations are append-only. Re-registering the same reserve is a no-op, while changing
+     *      an existing mapping reverts so positions can never disappear from gateway accounting.
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId for the asset
      */
     function setReserveId(address asset, uint256 reserveId) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
         if (asset == address(0)) revert ZeroAddress();
-        if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
 
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if ($.assets.contains(asset)) {
             uint256 currentReserveId = $.reserveId[asset];
             if (currentReserveId == reserveId) return;
-            if (spoke.getReserveTotalDebt(currentReserveId) != 0 || spoke.getReserveSuppliedAssets(currentReserveId) != 0) {
-                revert ReserveStillInUse();
-            }
+            revert ReserveAlreadyRegistered(asset, currentReserveId);
         }
+        if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
 
         $.assets.add(asset);
         $.reserveId[asset] = reserveId;
 
         emit ReserveRegistered(asset, reserveId);
-    }
-
-    /**
-     * @notice De-registers an asset
-     * @dev Reverts while the reserve still has outstanding debt or supplied balance. Removing a
-     * held asset would drop it from the USD views (debt reads 0, understating debt and inflating
-     * borrow headroom) and strand supplied funds behind AssetNotRegistered on the withdraw paths.
-     * Our whitelabel Spoke serves only our safes, so the reserve aggregates gate on our positions.
-     * @param asset The asset to remove from the registry
-     */
-    function removeReserve(address asset) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
-        LendGatewayStorage storage $ = _getLendGatewayStorage();
-        if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
-
-        uint256 reserveId = $.reserveId[asset];
-        if (spoke.getReserveTotalDebt(reserveId) != 0 || spoke.getReserveSuppliedAssets(reserveId) != 0) {
-            revert ReserveStillInUse();
-        }
-
-        $.assets.remove(asset);
-        $.spendAssets.remove(asset);
-        delete $.reserveId[asset];
-
-        emit ReserveDeregistered(asset);
     }
 
     /**
