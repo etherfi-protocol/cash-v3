@@ -68,6 +68,9 @@ contract TopUpDest is UpgradeableProxy {
      */
     event TopUp(bytes32 indexed txId, address indexed user, address indexed token, bytes32 sourceTxHash, uint256 chainId, uint256 amount);
 
+    /// @notice Emitted when a best-effort top-up supply to the lend gateway fails
+    event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
+
     /// @notice Error thrown when the contract has insufficient token balance
     error BalanceTooLow();
 
@@ -212,7 +215,9 @@ contract TopUpDest is UpgradeableProxy {
         $.transactionCompleted[txId] = true;
         _transfer(user, token, amount);
 
-        try this.supplyTopUpToLend(user, token, amount) { } catch { }
+        try this.supplyTopUpToLend(user, token, amount) { } catch (bytes memory reason) {
+            emit LendSupplyFailed(user, token, amount, reason);
+        }
 
         emit TopUp(txId, user, token, txHash, chainId, amount);
     }
@@ -238,7 +243,6 @@ contract TopUpDest is UpgradeableProxy {
         if (!lendGateway.isRegistered(token)) return;
 
         lendGateway.supply(safe, token, amount);
-        lendGateway.setUsingAsCollateral(safe, token, true);
     }
 
     /**

@@ -402,10 +402,9 @@ library CashLendLib {
     ///      funds stay loose for the next sweep. Used by the sweep and the borrow auto-supply, where leaving
     ///      the funds loose is fine; callers that must not proceed without the supply do not use this.
     function _supplyAsCollateral(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token, uint256 amount) private {
-        try gateway.supply(safe, token, amount) {
-            gateway.setUsingAsCollateral(safe, token, true);
-            $.cashEventEmitter.emitLendSupplied(safe, token, amount);
-        } catch { }
+        try gateway.supply(safe, token, amount) { } catch (bytes memory reason) {
+            $.cashEventEmitter.emitLendSupplyFailed(safe, token, amount, reason);
+        }
     }
 
     /**
@@ -713,7 +712,6 @@ library CashLendLib {
         for (uint256 i = 0; i < tokens.length; i++) {
             if (supplyAmounts[i] != 0) {
                 gateway.supply(safe, tokens[i], supplyAmounts[i]);
-                gateway.setUsingAsCollateral(safe, tokens[i], true);
                 $.cashEventEmitter.emitCollateralResupplied(safe, tokens[i], supplyAmounts[i]);
             }
         }

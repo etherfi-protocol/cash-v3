@@ -6,8 +6,10 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
+import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { EtherFiSafeErrors } from "../../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
+import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 
 /**
  * @title AutoSupplyTest
@@ -33,8 +35,8 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
 
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.LendSupplied(address(safe), address(usdc), looseUsdc - reservedUsdc);
+        vm.expectEmit(true, true, false, true, address(gw));
+        emit LendGateway.Supplied(address(safe), address(usdc), looseUsdc - reservedUsdc);
         vm.prank(etherFiWallet);
         cashModule.supplyToLend(address(safe), tokens);
 
@@ -79,6 +81,30 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(weETH)), looseWeeth, "healthy token still swept");
     }
 
+    /// A collateral-toggle failure rolls back only that token, emits the reason, and does not brick the batch.
+    function test_supplyToLend_skipsCollateralEnablementFailure() public {
+        uint256 looseWeeth = 2 ether;
+        uint256 looseUsdc = 1000e6;
+        deal(address(weETH), address(safe), looseWeeth);
+        deal(address(usdc), address(safe), looseUsdc);
+
+        bytes memory reason = abi.encodeWithSelector(ISpoke.MaximumUserReservesExceeded.selector);
+        vm.mockCallRevert(address(spoke), abi.encodeCall(ISpoke.setUsingAsCollateral, (weethReserveId, true, address(safe))), reason);
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(weETH);
+        tokens[1] = address(usdc);
+
+        vm.expectEmit(true, true, false, true, address(cashEventEmitter));
+        emit CashEventEmitter.LendSupplyFailed(address(safe), address(weETH), looseWeeth, reason);
+        vm.prank(etherFiWallet);
+        cashModule.supplyToLend(address(safe), tokens);
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "failed token was not left supplied");
+        assertEq(weETH.balanceOf(address(safe)), looseWeeth, "failed token stays loose");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), looseUsdc, "healthy token still swept");
+    }
+
     /// An opted-out safe is a no-op sweep (the keeper legitimately races an opt-out); its funds stay loose.
     function test_supplyToLend_noopWhenOptedOut() public {
         uint256 looseUsdc = 500e6;
@@ -110,8 +136,8 @@ contract AutoSupplyTest is CashGatewayTestSetup {
 
         uint256 borrowAmt = debtManager.convertUsdToCollateralToken(address(usdc), borrowUsd);
         (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), borrowUsd);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.LendSupplied(address(safe), address(usdc), borrowAmt);
+        vm.expectEmit(true, true, false, true, address(gw));
+        emit LendGateway.Supplied(address(safe), address(usdc), borrowAmt);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.LendBorrowed(address(safe), address(usdc), borrowAmt, borrowUsd);
         cashModule.borrow(address(safe), address(usdc), borrowUsd, signers, signatures);

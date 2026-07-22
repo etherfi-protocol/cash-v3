@@ -153,12 +153,13 @@ interface ICashEventEmitter {
     function emitCollateralResupplied(address safe, address token, uint256 amount) external;
 
     /**
-     * @notice Emits an event when a safe's loose balance is supplied into the lend market (auto-supply)
+     * @notice Emits an event when a best-effort lend supply fails
      * @param safe Address of the safe
-     * @param token Token supplied
-     * @param amount Token amount supplied
+     * @param token Token that could not be supplied as collateral
+     * @param amount Amount that remained loose in the safe
+     * @param reason Raw revert data from the lend gateway
      */
-    function emitLendSupplied(address safe, address token, uint256 amount) external;
+    function emitLendSupplyFailed(address safe, address token, uint256 amount, bytes calldata reason) external;
 
     /**
      * @notice Emits an event when a safe borrows from the lend market to itself (a borrow-page borrow)

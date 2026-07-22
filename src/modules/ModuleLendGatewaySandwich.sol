@@ -27,6 +27,9 @@ import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
  * @author ether.fi
  */
 abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
+    /// @notice Emitted when a best-effort post-operation supply to the lend gateway fails
+    event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
+
     /**
      * @notice The lend gateway the bookends drive, resolved live from the CashModule
      * @dev Virtual only for the test harness, which pins a mock
@@ -105,9 +108,9 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
         if (!_lendActive(safe)) return;
         ILendGateway lendGateway = gateway();
         if (!lendGateway.isRegistered(asset)) return;
-        try lendGateway.supply(safe, asset, amount) {
-            lendGateway.setUsingAsCollateral(safe, asset, true);
-        } catch { }
+        try lendGateway.supply(safe, asset, amount) { } catch (bytes memory reason) {
+            emit LendSupplyFailed(safe, asset, amount, reason);
+        }
     }
 
     /**

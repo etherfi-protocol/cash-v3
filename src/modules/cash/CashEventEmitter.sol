@@ -157,12 +157,13 @@ contract CashEventEmitter is UpgradeableProxy {
     event CollateralResupplied(address indexed safe, address indexed token, uint256 amount);
 
     /**
-     * @notice Emitted when a safe's loose balance is supplied into the lend market (auto-supply)
+     * @notice Emitted when a best-effort lend supply fails
      * @param safe Address of the safe
-     * @param token Token supplied
-     * @param amount Token amount supplied
+     * @param token Token that could not be supplied as collateral
+     * @param amount Amount that remained loose in the safe
+     * @param reason Raw revert data from the lend gateway
      */
-    event LendSupplied(address indexed safe, address indexed token, uint256 amount);
+    event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
 
     /**
      * @notice Emitted when a safe borrows from the lend market to itself (a borrow-page borrow)
@@ -470,14 +471,15 @@ contract CashEventEmitter is UpgradeableProxy {
     }
 
     /**
-     * @notice Emits the LendSupplied event
+     * @notice Emits the LendSupplyFailed event
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
-     * @param token Token supplied
-     * @param amount Token amount supplied
+     * @param token Token that could not be supplied as collateral
+     * @param amount Amount that remained loose in the safe
+     * @param reason Raw revert data from the lend gateway
      */
-    function emitLendSupplied(address safe, address token, uint256 amount) external onlyCashModule {
-        emit LendSupplied(safe, token, amount);
+    function emitLendSupplyFailed(address safe, address token, uint256 amount, bytes calldata reason) external onlyCashModule {
+        emit LendSupplyFailed(safe, token, amount, reason);
     }
 
     /**
