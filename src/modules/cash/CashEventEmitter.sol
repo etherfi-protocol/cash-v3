@@ -157,14 +157,6 @@ contract CashEventEmitter is UpgradeableProxy {
     event CollateralResupplied(address indexed safe, address indexed token, uint256 amount);
 
     /**
-     * @notice Emitted when a safe's loose balance is supplied into the lend market (auto-supply)
-     * @param safe Address of the safe
-     * @param token Token supplied
-     * @param amount Token amount supplied
-     */
-    event LendSupplied(address indexed safe, address indexed token, uint256 amount);
-
-    /**
      * @notice Emitted when a best-effort lend supply fails
      * @param safe Address of the safe
      * @param token Token that could not be supplied as collateral
@@ -476,17 +468,6 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitCollateralResupplied(address safe, address token, uint256 amount) external onlyCashModule {
         emit CollateralResupplied(safe, token, amount);
-    }
-
-    /**
-     * @notice Emits the LendSupplied event
-     * @dev Can only be called by the Cash Module
-     * @param safe Address of the safe
-     * @param token Token supplied
-     * @param amount Token amount supplied
-     */
-    function emitLendSupplied(address safe, address token, uint256 amount) external onlyCashModule {
-        emit LendSupplied(safe, token, amount);
     }
 
     /**

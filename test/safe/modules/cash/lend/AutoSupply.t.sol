@@ -6,6 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
+import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { EtherFiSafeErrors } from "../../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
@@ -34,8 +35,14 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);
 
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.LendSupplied(address(safe), address(usdc), looseUsdc - reservedUsdc);
+        vm.expectEmit(true, true, false, true, address(gw));
+        emit LendGateway.Supplied(address(safe), address(usdc), looseUsdc - reservedUsdc);
+        vm.expectEmit(true, true, false, true, address(gw));
+        emit LendGateway.CollateralUsageSet(address(safe), address(usdc), true);
+        vm.expectEmit(true, true, false, true, address(gw));
+        emit LendGateway.Supplied(address(safe), address(weETH), looseWeeth);
+        vm.expectEmit(true, true, false, true, address(gw));
+        emit LendGateway.CollateralUsageSet(address(safe), address(weETH), true);
         vm.prank(etherFiWallet);
         cashModule.supplyToLend(address(safe), tokens);
 
@@ -135,8 +142,10 @@ contract AutoSupplyTest is CashGatewayTestSetup {
 
         uint256 borrowAmt = debtManager.convertUsdToCollateralToken(address(usdc), borrowUsd);
         (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), borrowUsd);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.LendSupplied(address(safe), address(usdc), borrowAmt);
+        vm.expectEmit(true, true, false, true, address(gw));
+        emit LendGateway.Supplied(address(safe), address(usdc), borrowAmt);
+        vm.expectEmit(true, true, false, true, address(gw));
+        emit LendGateway.CollateralUsageSet(address(safe), address(usdc), true);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.LendBorrowed(address(safe), address(usdc), borrowAmt, borrowUsd);
         cashModule.borrow(address(safe), address(usdc), borrowUsd, signers, signatures);

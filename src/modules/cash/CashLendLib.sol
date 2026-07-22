@@ -402,9 +402,8 @@ library CashLendLib {
     ///      reported through LendSupplyFailed, so the funds stay loose for the next sweep. Used by the sweep and
     ///      borrow auto-supply, where leaving funds loose is fine; callers that require supply do not use this.
     function _supplyAsCollateral(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token, uint256 amount) private {
-        try gateway.supply(safe, token, amount) {
-            $.cashEventEmitter.emitLendSupplied(safe, token, amount);
-        } catch (bytes memory reason) {
+        try gateway.supply(safe, token, amount) { }
+        catch (bytes memory reason) {
             $.cashEventEmitter.emitLendSupplyFailed(safe, token, amount, reason);
         }
     }
