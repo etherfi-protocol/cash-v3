@@ -37,12 +37,6 @@ contract AutoSupplyTest is CashGatewayTestSetup {
 
         vm.expectEmit(true, true, false, true, address(gw));
         emit LendGateway.Supplied(address(safe), address(usdc), looseUsdc - reservedUsdc);
-        vm.expectEmit(true, true, false, true, address(gw));
-        emit LendGateway.CollateralUsageSet(address(safe), address(usdc), true);
-        vm.expectEmit(true, true, false, true, address(gw));
-        emit LendGateway.Supplied(address(safe), address(weETH), looseWeeth);
-        vm.expectEmit(true, true, false, true, address(gw));
-        emit LendGateway.CollateralUsageSet(address(safe), address(weETH), true);
         vm.prank(etherFiWallet);
         cashModule.supplyToLend(address(safe), tokens);
 
@@ -144,8 +138,6 @@ contract AutoSupplyTest is CashGatewayTestSetup {
         (address[] memory signers, bytes[] memory signatures) = _borrowSig(address(usdc), borrowUsd);
         vm.expectEmit(true, true, false, true, address(gw));
         emit LendGateway.Supplied(address(safe), address(usdc), borrowAmt);
-        vm.expectEmit(true, true, false, true, address(gw));
-        emit LendGateway.CollateralUsageSet(address(safe), address(usdc), true);
         vm.expectEmit(true, true, true, true);
         emit CashEventEmitter.LendBorrowed(address(safe), address(usdc), borrowAmt, borrowUsd);
         cashModule.borrow(address(safe), address(usdc), borrowUsd, signers, signatures);

@@ -36,6 +36,7 @@ contract LendGatewayHandler is Test {
         amt = bound(amt, 0.1 ether, 50 ether);
         deal(address(weeth), safe, weeth.balanceOf(safe) + amt);
         gw.supply(safe, address(weeth), amt);
+        gw.setUsingAsCollateral(safe, address(weeth), true);
         opsExecuted++;
     }
 

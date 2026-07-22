@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { BinSponsor, Mode, SafeTiers } from "../../interfaces/ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor } from "../../interfaces/ICashModule.sol";
 import { SpendingLimit } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
@@ -50,7 +50,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param finalizeTimestamp Timestamp when the withdrawal can be finalized
      */
     event WithdrawalRequested(address indexed safe, address[] tokens, uint256[] amounts, address indexed recipient, uint256 finalizeTimestamp);
-
+    
     /**
      * @notice Emitted when a withdrawal amount is updated
      * @param safe Address of the safe updating the withdrawal
@@ -58,7 +58,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param amount New withdrawal amount
      */
     event WithdrawalAmountUpdated(address indexed safe, address indexed token, uint256 amount);
-
+    
     /**
      * @notice Emitted when a withdrawal is cancelled
      * @param safe Address of the safe cancelling the withdrawal
@@ -67,7 +67,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param recipient Address that was to receive the withdrawn tokens
      */
     event WithdrawalCancelled(address indexed safe, address[] tokens, uint256[] amounts, address indexed recipient);
-
+    
     /**
      * @notice Emitted when a withdrawal is processed
      * @param safe Address of the safe processing the withdrawal
@@ -76,7 +76,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param recipient Address receiving the withdrawn tokens
      */
     event WithdrawalProcessed(address indexed safe, address[] tokens, uint256[] amounts, address indexed recipient);
-
+    
     /**
      * @notice Emitted when debt is repaid to the debt manager
      * @param safe Address of the safe repaying the debt
@@ -125,7 +125,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param newLimit New spending limit configuration
      */
     event SpendingLimitChanged(address indexed safe, SpendingLimit oldLimit, SpendingLimit newLimit);
-
+    
     /**
      * @notice Emitted when the operational mode of a safe is changed
      * @param safe Address of the safe changing modes
@@ -134,7 +134,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param incomingModeStartTime Timestamp when the new mode takes effect
      */
     event ModeSet(address indexed safe, Mode prevMode, Mode newMode, uint256 incomingModeStartTime);
-
+    
     /**
      * @notice Emitted when tokens are spent from a safe
      * @param safe Address of the safe spending the tokens
@@ -176,7 +176,7 @@ contract CashEventEmitter is UpgradeableProxy {
 
     /**
      * @notice Emitted when cashback is calculated and potentially distributed
-     * @param safe Address of the safe
+     * @param safe Address of the safe 
      * @param spendingInUsd USD value of the spending that generated the cashback
      * @param recipient Address of the recipient who will receive cashback
      * @param cashbackToken Address of the token used for cashback
@@ -186,7 +186,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param paid Whether the cashback was successfully paid
      */
     event Cashback(address indexed safe, uint256 spendingInUsd, address indexed recipient, address cashbackToken, uint256 cashbackAmountInToken, uint256 cashbackInUsd, uint256 cashbackType, bool indexed paid);
-
+        
     /**
      * @notice Emitted when pending cashback is cleared
      * @param recipient Address receiving the cashback
@@ -195,21 +195,21 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param cashbackInUsd USD value of the cashback paid
      */
     event PendingCashbackCleared(address indexed recipient, address cashbackToken, uint256 cashbackAmount, uint256 cashbackInUsd);
-
+    
     /**
      * @notice Emitted when safe tiers are set for multiple safes
      * @param safes Array of safe addresses
      * @param tiers Array of tier configurations corresponding to each safe
      */
     event SafeTiersSet(address[] safes, SafeTiers[] tiers);
-
+    
     /**
      * @notice Emitted when cashback percentages for tiers are set
      * @param tiers Array of tiers being configured
      * @param cashbackPercentages Array of cashback percentages corresponding to each tier
      */
     event TierCashbackPercentageSet(SafeTiers[] tiers, uint256[] cashbackPercentages);
-
+    
     /**
      * @notice Emitted when the cashback split percentage for a safe is set
      * @param safe Address of the safe
@@ -217,7 +217,7 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param newSplitInBps New split percentage in basis points
      */
     event CashbackSplitToSafeBpsSet(address indexed safe, uint256 oldSplitInBps, uint256 newSplitInBps);
-
+    
     /**
      * @notice Emitted when system delays are set
      * @param withdrawalDelay Delay period for withdrawals
@@ -236,7 +236,7 @@ contract CashEventEmitter is UpgradeableProxy {
 
     /// @notice Emitted when the gateway is set during the one-time Lend bootstrap
     event LendGatewaySet(address indexed gateway);
-
+    
     /**
      * @notice Emitted when the withdrawal tokens are updated
      * @param tokens Address of the tokens
@@ -347,8 +347,8 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param spendingInUsd USD value of the spending
      * @param recipient Address of the recipient of cashback
      * @param cashbackToken Address of the cashback token
-     * @param cashbackAmountInToken Cashback token amount to the recipient
-     * @param cashbackInUsd Cashback token amount in USD value to the recipient
+     * @param cashbackAmountInToken Cashback token amount to the recipient 
+     * @param cashbackInUsd Cashback token amount in USD value to the recipient 
      * @param cashbackType Type of cashback
      * @param paid Whether the cashback was paid
      */

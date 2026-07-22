@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { SpendingLimit } from "../libraries/SpendingLimitLib.sol";
-import { BinSponsor, Mode, SafeTiers } from "./ICashModule.sol";
+import { Mode, SafeTiers, BinSponsor } from "./ICashModule.sol";
 
 /**
  * @title ICashEventEmitter
@@ -16,7 +16,7 @@ interface ICashEventEmitter {
      * @param shouldWhitelist Array of boolean values indicating if the module should be whitelisted for withdrawal
      */
     function emitModulesCanRequestWithdrawConfigured(address[] calldata modules, bool[] calldata shouldWhitelist) external;
-
+    
     /**
      * @notice Emits the SettlementDispatcheUpdated event
      * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
@@ -44,8 +44,8 @@ interface ICashEventEmitter {
      * @param spendingInUsd USD value of the spending
      * @param recipient Address of the recipient of cashback
      * @param cashbackToken Address of the cashback token
-     * @param cashbackAmountInToken Cashback token amount to the recipient
-     * @param cashbackInUsd Cashback token amount in USD value to the recipient
+     * @param cashbackAmountInToken Cashback token amount to the recipient 
+     * @param cashbackInUsd Cashback token amount in USD value to the recipient 
      * @param cashbackType Type of cashback
      * @param paid Whether the cashback was paid
      */
@@ -64,7 +64,7 @@ interface ICashEventEmitter {
      * @param mode Operational mode
      */
     function emitSpend(address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external;
-
+    
     /**
      * @notice Emits an event when the mode is changed
      * @param prevMode Previous mode
@@ -193,7 +193,7 @@ interface ICashEventEmitter {
      * @param safeTiers Array of tier configurations
      */
     function emitSetSafeTiers(address[] memory safes, SafeTiers[] memory safeTiers) external;
-
+    
     /**
      * @notice Emits the TierCashbackPercentageSet event
      * @dev Can only be called by the Cash Module
@@ -201,7 +201,7 @@ interface ICashEventEmitter {
      * @param cashbackPercentages Array of cashback percentages
      */
     function emitSetTierCashbackPercentage(SafeTiers[] memory safeTiers, uint256[] memory cashbackPercentages) external;
-
+    
     /**
      * @notice Emits the CashbackSplitToSafeBpsSet event
      * @dev Can only be called by the Cash Module
@@ -210,7 +210,7 @@ interface ICashEventEmitter {
      * @param newSplitInBps New split percentage
      */
     function emitSetCashbackSplitToSafeBps(address safe, uint256 oldSplitInBps, uint256 newSplitInBps) external;
-
+    
     /**
      * @notice Emits the DelaysSet event
      * @dev Can only be called by the Cash Module
