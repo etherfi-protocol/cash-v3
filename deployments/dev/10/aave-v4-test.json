@@ -88,7 +88,8 @@
     },
     "iwSPYx": {
       "oracle": "0x35A128DBD92ef6B5C017F8D09E306ab74e8e2ae2",
-      "spyUsdLeg": "0xf97dDF4c57Bd9d635253Ac759944Df96e039D40E"
+      "spyUsdLeg": "0xf97dDF4c57Bd9d635253Ac759944Df96e039D40E",
+      "assetId": 20
     }
   }
 }
