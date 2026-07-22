@@ -15,8 +15,8 @@ import { TradingSafe } from "./TradingSafe.sol";
  * @author ether.fi
  * @notice Beacon-factory for the mainnet `TradingSafe`. Each user's TradingSafe address is
  *         derived deterministically from their source-chain (OP) safe address via CREATE3 —
- *         so the destination-chain receiver can pre-compute the address before deployment
- *         and the lazy-deploy service can deploy on first need.
+ *         so its address can be pre-computed before deployment and the lazy-deploy service
+ *         can deploy on first need.
  */
 contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     using EnumerableSetLib for EnumerableSetLib.AddressSet;

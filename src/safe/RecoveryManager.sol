@@ -205,7 +205,7 @@ abstract contract RecoveryManager is EtherFiSafeBase {
      * @custom:throws InvalidRecoverySigner If any of the provided signers is not a valid recovery signer
      * @custom:throws InvalidRecoverySignatures If not enough valid signatures are provided
      */
-    function recoverSafe(address newOwner, address[] calldata recoverySigners, bytes[] calldata signatures) external payable {
+    function recoverSafe(address newOwner, address[] calldata recoverySigners, bytes[] calldata signatures) external {
         _currentOwner();
 
         RecoveryManagerStorage storage $ = _getRecoveryManagerStorage();
@@ -238,7 +238,6 @@ abstract contract RecoveryManager is EtherFiSafeBase {
         _setIncomingOwner(newOwner, incomingOwnerStartTime);
 
         emit Recovery(newOwner, incomingOwnerStartTime);
-        _publishRecover(newOwner, incomingOwnerStartTime);
     }
 
     /**
@@ -268,7 +267,7 @@ abstract contract RecoveryManager is EtherFiSafeBase {
      * @dev Reverts an in-progress recovery with proper owner authorization
      * @custom:throws InvalidSignatures If the provided signatures are invalid
      */
-    function cancelRecovery(address[] calldata signers, bytes[] calldata signatures) external payable {
+    function cancelRecovery(address[] calldata signers, bytes[] calldata signatures) external {
         _currentOwner();
         bytes32 structHash = keccak256(abi.encode(CANCEL_RECOVERY_TYPEHASH, _useNonce()));
         bytes32 digestHash = _hashTypedDataV4(structHash);
@@ -277,7 +276,6 @@ abstract contract RecoveryManager is EtherFiSafeBase {
         _removeIncomingOwner();
 
         emit RecoveryCancelled();
-        _publishCancelRecovery();
     }
 
     /**

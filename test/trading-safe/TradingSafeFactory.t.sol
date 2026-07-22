@@ -9,14 +9,13 @@ import { TradingSafeTestBase } from "./TradingSafeTestBase.t.sol";
 
 contract TradingSafeFactoryTest is TradingSafeTestBase {
     TradingSafeFactory public factory;
-    address public bridgeReceiver = makeAddr("bridgeReceiver");
     address public ownerA = makeAddr("ownerA");
 
     function setUp() public {
         _setupCore();
 
         vm.startPrank(owner);
-        factory = _deployFactory(bridgeReceiver);
+        factory = _deployFactory();
         _initDataProvider(address(factory));
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), owner);
         vm.stopPrank();
