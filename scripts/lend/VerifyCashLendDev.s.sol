@@ -175,6 +175,7 @@ contract VerifyCashLendDev is Utils {
         require(address(gateway.spoke()) == d.spoke, "gateway Spoke mismatch");
         require(address(gateway.roleRegistry()) == d.roleRegistry, "gateway role registry mismatch");
         require(address(ICashModule(d.cashModule).getLendGateway()) == d.lendGateway, "CashModule gateway mismatch");
+        require(EtherFiDataProvider(d.dataProvider).isDefaultModule(d.lendGateway), "gateway not default module");
         require(gateway.minHealthFactor() == MIN_HEALTH_FACTOR, "minimum health factor mismatch");
         require(gateway.isSpendAsset(usdc), "USDC not spendable");
         require(gateway.isDriver(d.debtManager), "DebtManager not a driver");
