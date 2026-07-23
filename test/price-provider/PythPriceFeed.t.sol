@@ -79,7 +79,7 @@ contract PythPriceFeedTest is Test {
 
     /// @notice A positive price that floors to zero after scaling to feed decimals is rejected, not returned as 0.
     function test_latestAnswer_revertsWhenScaledPriceFloorsToZero() public {
-        mockOracle.setPrice(1e7); // positive at 16 decimals, but < 10**(oracleDecimals-feedDecimals), so floors to 0
+        mockOracle.setPrice(1e7); // positive at 16 decimals, but < 10**(rateDecimals-feedDecimals), so floors to 0
         vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
@@ -102,8 +102,8 @@ contract PythPriceFeedTest is Test {
 
     function test_constructor_readsPythWiringFromAdapter() public view {
         assertEq(address(feed.pyth()), address(mockPyth));
-        assertEq(feed.feedId1(), FEED_ID);
-        assertEq(feed.feedId2(), bytes32(0));
+        assertEq(feed.baseFeedId1(), FEED_ID);
+        assertEq(feed.baseFeedId2(), bytes32(0));
         assertEq(feed.maxStaleness(), MAX_STALENESS);
     }
 
@@ -154,7 +154,7 @@ contract PythPriceFeedTest is Test {
         PythPriceFeed liveFeed = new PythPriceFeed(IPythPairOracle(ETHFI_USD_ORACLE), ORACLE_DECIMALS, FEED_DECIMALS, IAaveV4PriceFeed(address(0)), 1 days, false, "ETHFI / USD");
 
         assertEq(address(liveFeed.pyth()), IPythPairOracle(ETHFI_USD_ORACLE).pyth());
-        assertEq(liveFeed.feedId1(), IPythPairOracle(ETHFI_USD_ORACLE).BASE_FEED_1());
+        assertEq(liveFeed.baseFeedId1(), IPythPairOracle(ETHFI_USD_ORACLE).BASE_FEED_1());
 
         uint256 raw = IPythPairOracle(ETHFI_USD_ORACLE).price();
         uint256 price = liveFeed.latestAnswer().toUint256();
