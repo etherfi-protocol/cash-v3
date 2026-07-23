@@ -16,9 +16,16 @@ import { EtherFiDeployer } from "../../src/utils/EtherFiDeployer.sol";
 import { Utils } from "../utils/Utils.sol";
 import { TradingAccountProdConfig as Prod } from "./TradingAccountProdConfig.sol";
 
-/// @notice Fresh DevV2 OP module deployment plus removal of the active ownership bridge.
-/// @dev Upgrades the existing dev DataProvider and EtherFiSafe beacon to the current
-///      chain-local implementations, then deploys and configures fresh swap modules.
+/// @notice Optimism dev rollout: removes the cross-chain ownership bridge and registers the
+///         Across/Enso swap modules on the existing Cash stack.
+/// @dev Upgrades the existing dev DataProvider and EtherFiSafe beacon to the chain-local
+///      (bridge-free) implementations, then deploys and configures the swap modules against
+///      the existing DataProvider / RoleRegistry / CashModule. Every step is idempotent:
+///      deployments reuse the deterministic CREATE3 address when it already holds code and
+///      upgrades are skipped when the target implementation is already live, so the script can
+///      be re-simulated against the current chain state. Module registration is purely
+///      additive — pre-existing modules keep their whitelist / default / withdraw status so a
+///      backend cutover can drain them before they are retired in a separate step.
 contract DeployTradingAccountOptimismDevV2 is Utils {
     using stdJson for string;
 
@@ -59,19 +66,19 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
     }
 
     function _removeOwnershipBridge() private {
-        dataProviderImpl = _deploy("Cash.DevV2.EtherFiDataProviderImpl.NoBridge", type(EtherFiDataProvider).creationCode, "");
-        dataProvider.upgradeToAndCall(dataProviderImpl, "");
+        dataProviderImpl = _deployOrReuse("Cash.DevV2.EtherFiDataProviderImpl.NoBridge", type(EtherFiDataProvider).creationCode, "");
+        if (_implOf(address(dataProvider)) != dataProviderImpl) dataProvider.upgradeToAndCall(dataProviderImpl, "");
 
-        safeImpl = _deploy("Cash.DevV2.EtherFiSafeImpl.NoBridge", type(EtherFiSafe).creationCode, abi.encode(address(dataProvider)));
-        safeFactory.upgradeBeaconImplementation(safeImpl);
+        safeImpl = _deployOrReuse("Cash.DevV2.EtherFiSafeImpl.NoBridge", type(EtherFiSafe).creationCode, abi.encode(address(dataProvider)));
+        if (UpgradeableBeaconLike(safeFactory.beacon()).implementation() != safeImpl) safeFactory.upgradeBeaconImplementation(safeImpl);
     }
 
     function _deployAndConfigureModules() private {
-        address acrossImpl = _deploy("TradingAccount.DevV2.AcrossSwapModuleImpl", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider)));
-        acrossProxy = _deploy("TradingAccount.DevV2.AcrossSwapModuleProxy", type(UUPSProxy).creationCode, abi.encode(acrossImpl, abi.encodeWithSelector(AcrossSwapModule.initialize.selector, address(roleRegistry), Prod.OP_SPOKE_POOL, Prod.MULTICALL_HANDLER)));
+        address acrossImpl = _deployOrReuse("TradingAccount.DevV2.AcrossSwapModuleImpl", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider)));
+        acrossProxy = _deployOrReuse("TradingAccount.DevV2.AcrossSwapModuleProxy", type(UUPSProxy).creationCode, abi.encode(acrossImpl, abi.encodeWithSelector(AcrossSwapModule.initialize.selector, address(roleRegistry), Prod.OP_SPOKE_POOL, Prod.MULTICALL_HANDLER)));
 
-        address ensoImpl = _deploy("TradingAccount.DevV2.EnsoSwapModuleImpl", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider)));
-        ensoProxy = _deploy("TradingAccount.DevV2.EnsoSwapModuleProxy", type(UUPSProxy).creationCode, abi.encode(ensoImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), Prod.ENSO_ROUTER)));
+        address ensoImpl = _deployOrReuse("TradingAccount.DevV2.EnsoSwapModuleImpl", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider)));
+        ensoProxy = _deployOrReuse("TradingAccount.DevV2.EnsoSwapModuleProxy", type(UUPSProxy).creationCode, abi.encode(ensoImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), Prod.ENSO_ROUTER)));
 
         address[] memory modules = new address[](2);
         modules[0] = acrossProxy;
@@ -80,6 +87,8 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
         enable[0] = true;
         enable[1] = true;
 
+        // Additive: configureDefaultModules / configureModulesCanRequestWithdraw only add the
+        // new modules. Pre-existing modules are never touched here.
         dataProvider.configureDefaultModules(modules, enable);
         cashModule.configureModulesCanRequestWithdraw(modules, enable);
         roleRegistry.grantRole(AcrossSwapModule(acrossProxy).ACROSS_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN);
@@ -88,17 +97,38 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
     }
 
     function _assertConfigured() private view {
-        require(address(uint160(uint256(vm.load(address(dataProvider), EIP1967_IMPL_SLOT)))) == dataProviderImpl, "DataProvider implementation mismatch");
+        // Bridge removal: implementation swapped in place and the bridge API is gone.
+        require(_implOf(address(dataProvider)) == dataProviderImpl, "DataProvider implementation mismatch");
         (bool bridgeGetterExists,) = address(dataProvider).staticcall(abi.encodeWithSignature("getOwnershipBridgeSender()"));
         require(!bridgeGetterExists, "ownership bridge API still active");
+        require(UpgradeableBeaconLike(safeFactory.beacon()).implementation() == safeImpl, "EtherFiSafe implementation mismatch");
 
-        address beacon = safeFactory.beacon();
-        require(UpgradeableBeaconLike(beacon).implementation() == safeImpl, "EtherFiSafe implementation mismatch");
+        AcrossSwapModule across = AcrossSwapModule(acrossProxy);
+        EnsoSwapModule enso = EnsoSwapModule(ensoProxy);
+
+        // Deterministic addresses match the recorded salts.
+        require(DEPLOYER.getDeterministicAddress(getSalt("TradingAccount.DevV2.AcrossSwapModuleProxy")) == acrossProxy, "Across address prediction mismatch");
+        require(DEPLOYER.getDeterministicAddress(getSalt("TradingAccount.DevV2.EnsoSwapModuleProxy")) == ensoProxy, "Enso address prediction mismatch");
+
+        // Immutable bindings resolve to the existing Cash stack.
+        require(address(across.etherFiDataProvider()) == address(dataProvider), "Across data provider binding mismatch");
+        require(address(enso.etherFiDataProvider()) == address(dataProvider), "Enso data provider binding mismatch");
+        require(address(across.cashModule()) == address(cashModule), "Across cash module binding mismatch");
+        require(address(enso.cashModule()) == address(cashModule), "Enso cash module binding mismatch");
+        require(address(dataProvider.roleRegistry()) == address(roleRegistry), "DataProvider role registry mismatch");
+        require(dataProvider.getCashModule() == address(cashModule), "DataProvider cash module mismatch");
+
+        // Init constants pinned to the OP Across / Enso configuration.
+        require(across.getSpokePool() == Prod.OP_SPOKE_POOL, "Across spoke pool mismatch");
+        require(across.getMulticallHandler() == Prod.MULTICALL_HANDLER, "Across multicall handler mismatch");
+        require(across.getPeriphery() == Prod.ACROSS_PERIPHERY, "Across periphery mismatch");
+        require(enso.getEnsoRouter() == Prod.ENSO_ROUTER, "Enso router mismatch");
+
+        // Module registration + roles.
         require(dataProvider.isDefaultModule(acrossProxy), "Across not default");
         require(dataProvider.isDefaultModule(ensoProxy), "Enso not default");
-        require(roleRegistry.hasRole(AcrossSwapModule(acrossProxy).ACROSS_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN), "missing Across admin role");
-        require(roleRegistry.hasRole(EnsoSwapModule(ensoProxy).ENSO_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN), "missing Enso admin role");
-        require(AcrossSwapModule(acrossProxy).getPeriphery() == Prod.ACROSS_PERIPHERY, "Across periphery mismatch");
+        require(roleRegistry.hasRole(across.ACROSS_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN), "missing Across admin role");
+        require(roleRegistry.hasRole(enso.ENSO_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN), "missing Enso admin role");
 
         address[] memory withdrawModules = cashModule.getWhitelistedModulesCanRequestWithdraw();
         require(_contains(withdrawModules, acrossProxy), "Across cannot request withdrawals");
@@ -126,8 +156,16 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
         }
     }
 
-    function _deploy(string memory saltName, bytes memory creationCode, bytes memory constructorArgs) private returns (address) {
+    /// @dev CREATE3-deploys under `saltName`, or returns the existing deterministic address
+    ///      when it already holds code — making the script safe to re-run.
+    function _deployOrReuse(string memory saltName, bytes memory creationCode, bytes memory constructorArgs) private returns (address) {
+        address predicted = DEPLOYER.getDeterministicAddress(getSalt(saltName));
+        if (predicted.code.length > 0) return predicted;
         return DEPLOYER.deploy(getSalt(saltName), abi.encodePacked(creationCode, constructorArgs));
+    }
+
+    function _implOf(address proxy) private view returns (address) {
+        return address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
     }
 
     function _contains(address[] memory values, address needle) private pure returns (bool) {
