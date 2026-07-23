@@ -14,11 +14,11 @@ import { TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { TradingLens } from "../../src/trading-safe/TradingLens.sol";
 import { TradingSafeFactory } from "../../src/trading-safe/TradingSafeFactory.sol";
 import { TradingAccountCreate3, TradingAccountProdConfig as C } from "../trading-account/TradingAccountProdConfig.sol";
-import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
+import { TradingAccountGnosisHelpers } from "./TradingAccountGnosisHelpers.sol";
 
 /// @notice Generates and fork-simulates the Ethereum Safe bundle after all CREATE3 deployments exist.
-contract ConfigureTradingAccountEthereum is GnosisHelpers, Utils, TradingAccountCreate3 {
+contract ConfigureTradingAccountEthereum is TradingAccountGnosisHelpers, Utils, TradingAccountCreate3 {
     using stdJson for string;
 
     bytes32 private constant ACROSS_ADMIN_ROLE = keccak256("ACROSS_SWAP_MODULE_ADMIN_ROLE");
@@ -102,14 +102,6 @@ contract ConfigureTradingAccountEthereum is GnosisHelpers, Utils, TradingAccount
             require(TradingLens(tradingLens).isSupportedToken(tokens[i]), "supported token missing");
             require(PriceProviderV2(priceProvider).tokenConfig(tokens[i]).oracle == address(0), "unexpected oracle");
         }
-    }
-
-    function _append(string memory txs, address to, bytes memory data) private pure returns (string memory) {
-        return string.concat(txs, _getGnosisTransaction(addressToHex(to), iToHex(data), "0", false));
-    }
-
-    function _appendRole(string memory txs, address registry, bytes32 role, address account) private pure returns (string memory) {
-        return _append(txs, registry, abi.encodeWithSelector(RoleRegistry.grantRole.selector, role, account));
     }
 
     function _requireDeployed(address target) private view {

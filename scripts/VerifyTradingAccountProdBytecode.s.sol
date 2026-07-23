@@ -56,6 +56,10 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
         _requireProxyImpl(C.SALT_ACROSS_PROXY, C.SALT_ACROSS_IMPL);
         _requireProxyImpl(C.SALT_ENSO_PROXY, C.SALT_ENSO_IMPL);
 
+        address tradingFactory = _predict(C.SALT_TRADING_SAFE_FACTORY_PROXY);
+        address tradingSafeBeacon = TradingSafeFactory(tradingFactory).beacon();
+        require(UpgradeableBeacon(tradingSafeBeacon).implementation() == _predict(C.SALT_TRADING_SAFE_IMPL), "TradingSafe implementation mismatch");
+
         string memory deployments = readTopUpSourceDeployment();
         address topUpFactory = deployments.readAddress(".addresses.TopUpSourceFactory");
         if (_proxyImpl(topUpFactory) != _predict(C.SALT_TOPUP_FACTORY_IMPL)) {
