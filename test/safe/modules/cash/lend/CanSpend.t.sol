@@ -45,6 +45,63 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         assertEq(reason, "");
     }
 
+    /// Debit spend is declined with an Aave-specific reason when the safe's supplied balance covers the spend
+    /// but the Hub's withdrawal liquidity cannot pay it out (utilization spike / drained reserve).
+    function test_canSpend_fails_inDebitMode_whenAaveWithdrawalLiquidityDrained() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        _supplyToGateway(address(safe), address(usdc), 1000e6); // plenty supplied, nothing loose
+
+        // Draining real Aave takes an unrelated whale borrow, so the reserve-cash read is mocked to isolate
+        // the attribution branch: the safe has the funds, the Hub cannot pay them out.
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.withdrawalLiquidity.selector, address(usdc)), abi.encode(uint256(50e6)));
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Insufficient Lend withdrawal liquidity, please try again later");
+    }
+
+    /// The user-side decline is unchanged: when the supplied balance itself cannot cover the spend, the
+    /// reason stays the balance message even while reserve liquidity is also short.
+    function test_canSpend_fails_inDebitMode_userShortfallKeepsBalanceMessage() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        _supplyToGateway(address(safe), address(usdc), 50e6); // not enough even if the Hub had cash
+
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.withdrawalLiquidity.selector, address(usdc)), abi.encode(uint256(10e6)));
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Insufficient token balance for debit mode spending");
+    }
+
+    /// Pending-withdrawal variant: the loose balance is reserved by a withdrawal request and the supplied
+    /// balance could cover the spend, but the Hub cash cannot — attributed to Aave, not the user.
+    function test_canSpend_fails_inDebitMode_withPendingWithdrawal_whenAaveWithdrawalLiquidityDrained() public {
+        _supplyToGateway(address(safe), address(usdc), 1000e6);
+        deal(address(usdc), address(safe), 200e6);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 200e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.withdrawalLiquidity.selector, address(usdc)), abi.encode(uint256(50e6)));
+
+        // Loose 200 is fully reserved; supplied 1000 covers the 100 spend but the Hub can only pay 50.
+        amounts[0] = 100e6;
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Insufficient Lend withdrawal liquidity, please try again later");
+    }
+
     /// Credit spend succeeds when the supplied collateral gives enough borrowing power to cover the amount.
     function test_canSpend_succeeds_inCreditMode_whenCollateralAvailable() public {
         _setMode(Mode.Credit);
@@ -93,14 +150,16 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         amounts[0] = 100e6;
 
         // Ample borrowing power, but the reserve holds less cash than the loan needs. Reaching a genuinely
-        // drained reserve on real Aave takes an unrelated whale borrow, so the borrowable read is mocked here
-        // to isolate CashLens's liquidity gate (the branch under test).
+        // drained reserve on real Aave takes an unrelated whale borrow, so both liquidity reads are mocked
+        // here to isolate CashLens's liquidity gate (the branch under test): cash itself is short, so the
+        // decline names Aave liquidity rather than the draw cap.
         _supplyToGateway(address(safe), address(weETH), 1 ether);
         vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.borrowLiquidity.selector, address(usdc)), abi.encode(amounts[0] - 1));
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.withdrawalLiquidity.selector, address(usdc)), abi.encode(amounts[0] - 1));
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
-        assertEq(reason, "Insufficient liquidity to cover the loan");
+        assertEq(reason, "Insufficient Lend liquidity to cover the loan");
     }
 
     /// Credit spend is declined when borrowing power is ample and the pool holds cash, but the loan exceeds
@@ -117,12 +176,13 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
 
         _supplyToGateway(address(safe), address(weETH), 1 ether); // ample borrowing power
 
-        // drawCap of 50 whole USDC ($50), well under the $100 spend, though the pool holds ~1M cash
+        // drawCap of 50 whole USDC ($50), well under the $100 spend, though the pool holds ~1M cash.
+        // The pool could fund the loan, so the decline names the cap, not liquidity.
         _setAaveSpokeCaps(usdcReserveId, type(uint40).max, 50);
 
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
-        assertEq(reason, "Insufficient liquidity to cover the loan");
+        assertEq(reason, "Lend borrow cap reached, please try again later");
     }
 
     /// Credit spend succeeds when a pending withdrawal sits against loose funds and the borrow stays within the supplied position's power.

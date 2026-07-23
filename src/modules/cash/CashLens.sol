@@ -62,6 +62,18 @@ contract CashLens is UpgradeableProxy, Constants {
     /// @notice Error thrown when trying to use a token that is not on the borrow whitelist
     error NotABorrowToken();
 
+    /// @dev Working variables of _debitCheck's per-token loop, held in memory to keep the stack flat
+    struct DebitCheckVars {
+        bool hasDebt;
+        uint256 withdrawHeadroom;
+        uint256 needed;
+        uint256 raw;
+        uint256 supplied;
+        uint256 withdrawableSupplied;
+        uint256 pending;
+        uint256 used;
+    }
+
     /**
      * @notice Initializes the CashLens contract with its dependencies
      * @param _cashModule Address of the deployed CashModule contract
@@ -204,10 +216,11 @@ contract CashLens is UpgradeableProxy, Constants {
     /// @notice Debit mode check: each token's spendable amount must cover its share of the spend, threading the borrowing headroom across tokens
     function _debitCheck(address safe, address[] memory tokens, uint256[] memory amountsInUsd, SafeData memory safeData) internal view returns (bool, string memory) {
         ILendGateway lendGateway = gateway();
-        bool hasDebt = lendGateway.hasDebt(safe);
+        DebitCheckVars memory v;
+        v.hasDebt = lendGateway.hasDebt(safe);
         // Aave-priced and buffered by the health-factor floor: quotes size collateral withdrawals so the
         // position stays above the floor; debit execution keeps the raw bound (spends always settle)
-        uint256 withdrawHeadroom = hasDebt ? lendGateway.withdrawHeadroom(safe) : 0;
+        v.withdrawHeadroom = v.hasDebt ? lendGateway.withdrawHeadroom(safe) : 0;
 
         for (uint256 i = 0; i < tokens.length; i++) {
             address token = tokens[i];
@@ -215,25 +228,27 @@ contract CashLens is UpgradeableProxy, Constants {
                 return (false, "Not a supported spend token");
             }
 
-            uint256 needed = LendSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountsInUsd[i]);
-            uint256 raw = IERC20(token).balanceOf(safe);
-            {
-                uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, withdrawHeadroom, hasDebt);
-                if (raw + withdrawableSupplied < needed) {
-                    return (false, "Insufficient token balance for debit mode spending");
-                }
-                uint256 pending = _getPendingWithdrawalAmount(safeData, token);
-                raw = raw > pending ? raw - pending : 0;
-                if (raw + withdrawableSupplied < needed) {
-                    return (false, "Insufficient effective balance after withdrawal to spend with debit mode");
-                }
+            v.needed = LendSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountsInUsd[i]);
+            v.raw = IERC20(token).balanceOf(safe);
+            // supplied is the safe-side leg (headroom-capped when in debt); withdrawableSupplied further caps
+            // it by reserve cash. A shortfall the supplied leg would have covered is the Hub's liquidity
+            // failing the user, not the user's balance — the decline says so.
+            (v.supplied, v.withdrawableSupplied) = LendSourcingLib.suppliedParts(lendGateway, safe, token, v.withdrawHeadroom, v.hasDebt);
+            if (v.raw + v.withdrawableSupplied < v.needed) {
+                if (v.raw + v.supplied >= v.needed) return (false, "Insufficient Lend withdrawal liquidity, please try again later");
+                return (false, "Insufficient token balance for debit mode spending");
+            }
+            v.pending = _getPendingWithdrawalAmount(safeData, token);
+            v.raw = v.raw > v.pending ? v.raw - v.pending : 0;
+            if (v.raw + v.withdrawableSupplied < v.needed) {
+                if (v.raw + v.supplied >= v.needed) return (false, "Insufficient Lend withdrawal liquidity, please try again later");
+                return (false, "Insufficient effective balance after withdrawal to spend with debit mode");
             }
 
             // Only the supplied portion (effective raw is spent first) consumes the borrowing headroom for later tokens
-            if (hasDebt) {
-                uint256 usedSupplied = needed > raw ? needed - raw : 0;
-                uint256 used = _headroomRemoved(safe, token, usedSupplied);
-                withdrawHeadroom = withdrawHeadroom > used ? withdrawHeadroom - used : 0;
+            if (v.hasDebt) {
+                v.used = _headroomRemoved(safe, token, v.needed > v.raw ? v.needed - v.raw : 0);
+                v.withdrawHeadroom = v.withdrawHeadroom > v.used ? v.withdrawHeadroom - v.used : 0;
             }
         }
 

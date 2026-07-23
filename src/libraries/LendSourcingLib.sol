@@ -24,9 +24,20 @@ library LendSourcingLib {
      *      which Aave lets go freely.
      */
     function withdrawableSupplied(ILendGateway gateway, address safe, address token, uint256 headroom, bool hasDebt) public view returns (uint256) {
-        uint256 supplied = hasDebt ? gateway.collateralForHeadroom(safe, token, headroom) : gateway.suppliedOf(safe, token);
+        (, uint256 withdrawable) = suppliedParts(gateway, safe, token, headroom, hasDebt);
+        return withdrawable;
+    }
+
+    /**
+     * @notice The two legs of withdrawableSupplied: the safe-side supplied amount (headroom-capped when the
+     *         safe carries debt) and the amount actually withdrawable once reserve cash is applied
+     * @dev Callers that decline a spend use the pair to attribute the shortfall: supplied covering the need
+     *      while withdrawable does not means the Hub's cash, not the user's balance, is the binding constraint.
+     */
+    function suppliedParts(ILendGateway gateway, address safe, address token, uint256 headroom, bool hasDebt) public view returns (uint256 supplied, uint256 withdrawable) {
+        supplied = hasDebt ? gateway.collateralForHeadroom(safe, token, headroom) : gateway.suppliedOf(safe, token);
         uint256 cash = gateway.withdrawalLiquidity(token);
-        return supplied < cash ? supplied : cash;
+        withdrawable = supplied < cash ? supplied : cash;
     }
 
     /**
@@ -71,7 +82,13 @@ library LendSourcingLib {
 
         uint256 borrowAmount = fromUsdUp(priceProvider, token, totalSpendingInUsd);
         if (gateway.borrowLiquidity(token) < borrowAmount) {
-            return (false, "Insufficient liquidity to cover the loan");
+            // borrowLiquidity folds Hub cash and the spoke's draw cap into one bound; withdrawalLiquidity is
+            // the cash alone (zero under the same pause/halt gates), so cash covering the loan means the draw
+            // cap (or reported deficit) is what blocks the borrow.
+            if (gateway.withdrawalLiquidity(token) >= borrowAmount) {
+                return (false, "Lend borrow cap reached, please try again later");
+            }
+            return (false, "Insufficient Lend liquidity to cover the loan");
         }
 
         if (gateway.borrowCapacity(safe, token) < borrowAmount) {
