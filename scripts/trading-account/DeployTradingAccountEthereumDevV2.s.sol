@@ -98,7 +98,7 @@ contract DeployTradingAccountEthereumDevV2 is Utils {
         vm.stopBroadcast();
 
         _assertConfigured();
-        _writeManifest(trading);
+        _writeManifest();
     }
 
     /// @dev Implementations are deployed with the CANONICAL proxy addresses as immutable
@@ -248,7 +248,7 @@ contract DeployTradingAccountEthereumDevV2 is Utils {
         }
     }
 
-    function _writeManifest(string memory trading) private {
+    function _writeManifest() private {
         string memory key = "trading-account-dev";
         // Canonical proxies (unchanged) recorded as the backend identities.
         vm.serializeAddress(key, "RoleRegistry", roleRegistryProxy);
@@ -259,8 +259,6 @@ contract DeployTradingAccountEthereumDevV2 is Utils {
         // New module proxies the backend should route to after cutover.
         vm.serializeAddress(key, "AcrossSwapModule", acrossProxy);
         vm.serializeAddress(key, "EnsoSwapModule", ensoProxy);
-        // Preserve the previously recorded module addresses so a cutover can still reach them.
-        vm.serializeAddress(key, "PreviousAcrossSwapModule", trading.readAddress(".AcrossSwapModule"));
         // Freshly deployed implementations for auditing.
         vm.serializeAddress(key, "RoleRegistryImpl", roleRegistryImpl);
         vm.serializeAddress(key, "PriceProviderImpl", priceProviderImpl);
