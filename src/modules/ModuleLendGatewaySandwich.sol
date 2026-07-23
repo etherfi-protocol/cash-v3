@@ -27,6 +27,9 @@ import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
  * @author ether.fi
  */
 abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
+    /// @notice Emitted when a best-effort post-operation supply to the lend gateway fails
+    event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
+
     /**
      * @notice The lend gateway the bookends drive, resolved live from the CashModule
      * @dev Virtual only for the test harness, which pins a mock
@@ -80,6 +83,20 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     }
 
     /**
+     * @notice Front bookend: source `amount` of `asset` loose from Aave if short, then require it all present
+     * @dev The idiom every gateway consumer runs before acting: _withdrawShortfall to pull the missing part
+     *      out of the safe's Aave position, then the ModuleCheckBalance assertion that the full amount is now
+     *      loose.
+     * @param safe The safe whose input is sourced
+     * @param asset The input asset the operation needs loose
+     * @param amount The full amount the operation needs
+     */
+    function _pullAndRequire(address safe, address asset, uint256 amount) internal {
+        _withdrawShortfall(safe, asset, amount, _getAvailableAmount(safe, asset));
+        _checkAmountAvailable(safe, asset, amount);
+    }
+
+    /**
      * @notice Supplies an asset from the safe back into Aave and marks it as collateral, best-effort
      * @dev No-op for an unregistered asset. A rejected supply (frozen, paused, capped) is swallowed rather
      *      than reverting the action that already ran; the output stays loose and the next sweep restores it.
@@ -91,9 +108,9 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
         if (!_lendActive(safe)) return;
         ILendGateway lendGateway = gateway();
         if (!lendGateway.isRegistered(asset)) return;
-        try lendGateway.supply(safe, asset, amount) {
-            lendGateway.setUsingAsCollateral(safe, asset, true);
-        } catch { }
+        try lendGateway.supply(safe, asset, amount) { } catch (bytes memory reason) {
+            emit LendSupplyFailed(safe, asset, amount, reason);
+        }
     }
 
     /**

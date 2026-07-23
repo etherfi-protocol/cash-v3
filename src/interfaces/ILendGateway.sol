@@ -23,7 +23,8 @@ interface ILendGateway {
     }
 
     /**
-     * @notice Supplies `amount` of `asset` to Aave on behalf of `safe`
+     * @notice Supplies `amount` of `asset` to Aave on behalf of `safe` and enables it as collateral
+     * @dev Supply and collateral enablement are atomic: either both succeed or neither does.
      * @param safe The safe whose position is credited
      * @param asset The asset being supplied
      * @param amount The amount to supply

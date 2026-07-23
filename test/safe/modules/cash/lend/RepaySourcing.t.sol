@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
+import { IPriceProvider } from "../../../../../src/interfaces/IPriceProvider.sol";
 import { LendSourcingLib } from "../../../../../src/libraries/LendSourcingLib.sol";
 import { CashEventEmitter } from "../../../../../src/modules/cash/CashEventEmitter.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
@@ -19,6 +20,48 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
  */
 contract RepaySourcingTest is CashGatewayTestSetup {
     using MessageHashUtils for bytes32;
+
+    /// @notice A gateway safe can repay Aave debt in token units while the Cash PriceProvider is unavailable.
+    function test_repayLendTokenAmount_worksWhenPriceOracleReverts() public {
+        uint256 borrowedUsdc = 300e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        deal(address(usdc), address(safe), borrowedUsdc);
+
+        address priceProvider = dataProvider.getPriceProvider();
+        vm.mockCallRevert(priceProvider, abi.encodeWithSelector(IPriceProvider.price.selector, address(usdc)), "oracle unavailable");
+
+        uint256 debt = gw.debtOf(address(safe), address(usdc));
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.RepayLendTokenAmount(address(safe), address(usdc), debt);
+        vm.prank(etherFiWallet);
+        cashModule.repayLendTokenAmount(address(safe), address(usdc), type(uint256).max);
+
+        assertEq(gw.debtOf(address(safe), address(usdc)), 0, "full debt repaid without an oracle read");
+    }
+
+    /// @notice Token repayment can source supplied funds while the Cash PriceProvider is unavailable.
+    function test_repayLendTokenAmount_worksFromSuppliedWhenPriceProviderReverts() public {
+        uint256 borrowedUsdc = 300e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        _supplyToGateway(address(safe), address(usdc), borrowedUsdc);
+
+        address priceProvider = dataProvider.getPriceProvider();
+        vm.mockCallRevert(priceProvider, abi.encodeWithSelector(IPriceProvider.price.selector, address(usdc)), "oracle unavailable");
+
+        vm.prank(etherFiWallet);
+        cashModule.repayLendTokenAmount(address(safe), address(usdc), type(uint256).max);
+
+        assertEq(gw.debtOf(address(safe), address(usdc)), 0, "full debt repaid from supplied funds");
+    }
+
+    /// @notice Token-denominated repayment is unavailable to safes still using DebtManager.
+    function test_repayLendTokenAmount_revertsForLegacySafe() public {
+        _forceLegacyEngine(address(safe));
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.OnlyLendGatewaySafe.selector);
+        cashModule.repayLendTokenAmount(address(safe), address(usdc), 1);
+    }
 
     /// A fully swept safe (borrowed USDC auto-supplied, zero loose) repays its whole debt from the
     /// supplied balance; the sentinel path leaves no dust.

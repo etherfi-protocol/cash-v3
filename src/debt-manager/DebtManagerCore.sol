@@ -745,7 +745,6 @@ contract DebtManagerCore is DebtManagerStorageContract {
                 uint256 bal = _suppliableBalance(cashModule, safe, collateralTokens[i]);
                 if (bal != 0) {
                     _gateway.supply(safe, collateralTokens[i], bal);
-                    _gateway.setUsingAsCollateral(safe, collateralTokens[i], true);
                 }
                 unchecked {
                     ++i;

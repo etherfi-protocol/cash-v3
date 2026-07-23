@@ -45,15 +45,7 @@ library LendCapacityLib {
     function borrowCapacity(IAaveV4Spoke spoke, address safe, uint256 targetReserveId, uint256 floor) external view returns (uint256) {
         // Health factor is a whole-position number and the Safe can hold positions outside the gateway
         // registry, so sum collateral and debt across every Spoke reserve, priced by Aave's oracle.
-        uint256 len = spoke.getReserveCount();
-        uint256[] memory reserveIds = new uint256[](len);
-        for (uint256 i = 0; i < len;) {
-            reserveIds[i] = i;
-            unchecked {
-                ++i;
-            }
-        }
-        uint256[] memory prices = IAaveV4Oracle(spoke.ORACLE()).getReservesPrices(reserveIds);
+        (uint256[] memory reserveIds, uint256[] memory prices) = _allReservesAndPrices(spoke);
         BorrowCapacityData memory data = _borrowCapacityData(spoke, safe, targetReserveId, reserveIds, prices);
 
         // Invert HF >= floor into the max debt Value the position may carry (1e41 = Aave's bpsToWad * RAY)
@@ -232,6 +224,12 @@ library LendCapacityLib {
 
     /// @dev The whole-position accumulators without a borrow target
     function _accountData(IAaveV4Spoke spoke, address safe) private view returns (BorrowCapacityData memory) {
+        (uint256[] memory reserveIds, uint256[] memory prices) = _allReservesAndPrices(spoke);
+        return _borrowCapacityData(spoke, safe, type(uint256).max, reserveIds, prices);
+    }
+
+    /// @dev Every reserve id in the Spoke paired with its Aave oracle price
+    function _allReservesAndPrices(IAaveV4Spoke spoke) private view returns (uint256[] memory, uint256[] memory) {
         uint256 len = spoke.getReserveCount();
         uint256[] memory reserveIds = new uint256[](len);
         for (uint256 i = 0; i < len;) {
@@ -241,7 +239,7 @@ library LendCapacityLib {
             }
         }
         uint256[] memory prices = IAaveV4Oracle(spoke.ORACLE()).getReservesPrices(reserveIds);
-        return _borrowCapacityData(spoke, safe, type(uint256).max, reserveIds, prices);
+        return (reserveIds, prices);
     }
 
     /// @dev Rebuilds the Aave values used by borrow health validation with current reserve configuration.

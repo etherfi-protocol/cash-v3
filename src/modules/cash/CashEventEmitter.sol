@@ -96,6 +96,14 @@ contract CashEventEmitter is UpgradeableProxy {
     event Repay(address indexed safe, address indexed token, uint256 debtAmount, uint256 debtAmountInUsd);
 
     /**
+     * @notice Emitted for an Aave repayment that intentionally avoids a USD oracle lookup.
+     * @param safe Address of the safe whose debt was repaid.
+     * @param token Address of the token used to repay.
+     * @param debtAmount Amount of token actually repaid.
+     */
+    event RepayLendTokenAmount(address indexed safe, address indexed token, uint256 debtAmount);
+
+    /**
      * @notice Emitted when a safe requests to opt out of lend (the Aave market)
      * @param safe Address of the safe
      * @param finalizeTime Timestamp after which the request can be executed
@@ -149,12 +157,13 @@ contract CashEventEmitter is UpgradeableProxy {
     event CollateralResupplied(address indexed safe, address indexed token, uint256 amount);
 
     /**
-     * @notice Emitted when a safe's loose balance is supplied into the lend market (auto-supply)
+     * @notice Emitted when a best-effort lend supply fails
      * @param safe Address of the safe
-     * @param token Token supplied
-     * @param amount Token amount supplied
+     * @param token Token that could not be supplied as collateral
+     * @param amount Amount that remained loose in the safe
+     * @param reason Raw revert data from the lend gateway
      */
-    event LendSupplied(address indexed safe, address indexed token, uint256 amount);
+    event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
 
     /**
      * @notice Emitted when a safe borrows from the lend market to itself (a borrow-page borrow)
@@ -440,6 +449,17 @@ contract CashEventEmitter is UpgradeableProxy {
     }
 
     /**
+     * @notice Emits the token-denominated Aave repayment event.
+     * @dev Only callable by the Cash Module.
+     * @param safe Address of the safe whose debt was repaid.
+     * @param token Address of the token used to repay.
+     * @param amount Amount of token actually repaid.
+     */
+    function emitRepayLendTokenAmount(address safe, address token, uint256 amount) external onlyCashModule {
+        emit RepayLendTokenAmount(safe, token, amount);
+    }
+
+    /**
      * @notice Emits the CollateralResupplied event
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
@@ -451,14 +471,15 @@ contract CashEventEmitter is UpgradeableProxy {
     }
 
     /**
-     * @notice Emits the LendSupplied event
+     * @notice Emits the LendSupplyFailed event
      * @dev Can only be called by the Cash Module
      * @param safe Address of the safe
-     * @param token Token supplied
-     * @param amount Token amount supplied
+     * @param token Token that could not be supplied as collateral
+     * @param amount Amount that remained loose in the safe
+     * @param reason Raw revert data from the lend gateway
      */
-    function emitLendSupplied(address safe, address token, uint256 amount) external onlyCashModule {
-        emit LendSupplied(safe, token, amount);
+    function emitLendSupplyFailed(address safe, address token, uint256 amount, bytes calldata reason) external onlyCashModule {
+        emit LendSupplyFailed(safe, token, amount, reason);
     }
 
     /**

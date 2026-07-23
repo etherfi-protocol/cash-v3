@@ -177,25 +177,61 @@ library CashLendLib {
         }
         if (amount == 0) revert AmountZero();
 
-        (uint256 fromLoose, uint256 fromSupplied, bool cancelWithdrawal) = _sourceRepay($, gateway, safe, token, amount);
-        if (cancelWithdrawal) cancelOldWithdrawal($, dataProvider, safe);
-
-        // A full repay passes the max sentinel on its last leg so no interest dust survives the
-        // exact-amount rounding.
-        uint256 repaid;
-        if (fromSupplied == 0) {
-            // Loose covers the whole amount
-            repaid = gateway.repay(safe, token, amount == debt ? type(uint256).max : amount);
-        } else {
-            if (fromLoose != 0) repaid = gateway.repay(safe, token, fromLoose);
-            gateway.withdraw(safe, token, fromSupplied, safe);
-            repaid += gateway.repay(safe, token, amount == debt ? type(uint256).max : fromSupplied);
-        }
+        uint256 repaid = _executeGatewayRepay($, dataProvider, gateway, safe, token, amount, debt);
 
         // The gateway may repay less than requested (dust refund, or the live Aave debt being smaller than
         // the quote), so report the USD value of what was actually repaid, not the requested amount.
         uint256 repaidInUsd = repaid == amount ? amountInUsd : LendSourcingLib.toUsd(priceProvider, token, repaid);
         $.cashEventEmitter.emitRepay(safe, token, repaid, repaidInUsd);
+    }
+
+    /**
+     * @notice Repays gateway debt using token units, without reading the price provider
+     * @dev Restricted to migrated Aave safes by _requireGateway. A max amount repays the full live debt.
+     * @param $ Cash Module storage.
+     * @param dataProvider Data provider used if a competing withdrawal must be cancelled.
+     * @param safe Address of the safe whose debt is repaid.
+     * @param token Address of the debt token.
+     * @param amount Maximum amount to repay in token units.
+     * @custom:throws OnlyLendGatewaySafe if the safe still uses DebtManager.
+     * @custom:throws OnlyBorrowToken if the token is not registered on the gateway.
+     * @custom:throws AmountZero if the amount or live debt is zero.
+     */
+    function repayLendTokenAmount(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, address token, uint256 amount) external {
+        ILendGateway gateway = _requireGateway($, safe);
+        if (!gateway.isRegistered(token)) revert OnlyBorrowToken();
+
+        uint256 debt = gateway.debtOf(safe, token);
+        if (amount > debt) amount = debt;
+        if (amount == 0) revert AmountZero();
+
+        uint256 repaid = _executeGatewayRepay($, dataProvider, gateway, safe, token, amount, debt);
+        $.cashEventEmitter.emitRepayLendTokenAmount(safe, token, repaid);
+    }
+
+    /**
+     * @notice Sources and executes a token-denominated gateway repayment.
+     * @dev Uses the max sentinel for a full repayment so accrued interest dust is cleared.
+     * @param $ Cash Module storage.
+     * @param dataProvider Data provider used if a competing withdrawal must be cancelled.
+     * @param gateway Lend gateway that owns the Aave position.
+     * @param safe Address of the safe whose debt is repaid.
+     * @param token Address of the debt token.
+     * @param amount Capped amount to repay in token units.
+     * @param debt Live token debt before repayment.
+     * @return repaid Amount of token actually repaid.
+     */
+    function _executeGatewayRepay(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, ILendGateway gateway, address safe, address token, uint256 amount, uint256 debt) private returns (uint256 repaid) {
+        (uint256 fromLoose, uint256 fromSupplied, bool cancelWithdrawal) = _sourceRepay($, gateway, safe, token, amount);
+        if (cancelWithdrawal) cancelOldWithdrawal($, dataProvider, safe);
+
+        if (fromSupplied == 0) {
+            return gateway.repay(safe, token, amount == debt ? type(uint256).max : amount);
+        }
+
+        if (fromLoose != 0) repaid = gateway.repay(safe, token, fromLoose);
+        gateway.withdraw(safe, token, fromSupplied, safe);
+        repaid += gateway.repay(safe, token, amount == debt ? type(uint256).max : fromSupplied);
     }
 
     /**
@@ -366,10 +402,9 @@ library CashLendLib {
     ///      funds stay loose for the next sweep. Used by the sweep and the borrow auto-supply, where leaving
     ///      the funds loose is fine; callers that must not proceed without the supply do not use this.
     function _supplyAsCollateral(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token, uint256 amount) private {
-        try gateway.supply(safe, token, amount) {
-            gateway.setUsingAsCollateral(safe, token, true);
-            $.cashEventEmitter.emitLendSupplied(safe, token, amount);
-        } catch { }
+        try gateway.supply(safe, token, amount) { } catch (bytes memory reason) {
+            $.cashEventEmitter.emitLendSupplyFailed(safe, token, amount, reason);
+        }
     }
 
     /**
@@ -677,7 +712,6 @@ library CashLendLib {
         for (uint256 i = 0; i < tokens.length; i++) {
             if (supplyAmounts[i] != 0) {
                 gateway.supply(safe, tokens[i], supplyAmounts[i]);
-                gateway.setUsingAsCollateral(safe, tokens[i], true);
                 $.cashEventEmitter.emitCollateralResupplied(safe, tokens[i], supplyAmounts[i]);
             }
         }
@@ -932,17 +966,26 @@ library CashLendLib {
         s.fromLoose[i] = fromLoose;
     }
 
-    /// @dev Transfers each token's loose amount from the safe to the dispatcher in one batched module call.
+    /// @dev Transfers each non-zero loose amount from the safe to the dispatcher in one batched module call.
     function _transferLoose(address safe, address dispatcher, address[] calldata tokens, uint256[] memory amounts) internal {
-        address[] memory to = new address[](tokens.length);
-        bytes[] memory data = new bytes[](tokens.length);
-        uint256[] memory values = new uint256[](tokens.length);
+        uint256 len = tokens.length;
+        address[] memory to = new address[](len);
+        bytes[] memory data = new bytes[](len);
+        uint256 counter;
 
-        for (uint256 i = 0; i < tokens.length; i++) {
-            to[i] = tokens[i];
-            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, dispatcher, amounts[i]);
+        for (uint256 i = 0; i < len; i++) {
+            if (amounts[i] == 0) continue;
+            to[counter] = tokens[i];
+            data[counter] = abi.encodeWithSelector(IERC20.transfer.selector, dispatcher, amounts[i]);
+            counter++;
         }
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        if (counter == 0) return;
+        assembly ("memory-safe") {
+            mstore(to, counter)
+            mstore(data, counter)
+        }
+        IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](counter), data);
     }
 
     /// @dev The amount of `token` reserved by the safe's pending withdrawal request, or 0 if none holds it.

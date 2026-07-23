@@ -45,6 +45,91 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + amount);
     }
 
+    /// A gateway-only debit spend must not issue a zero-value loose transfer.
+    function test_spend_debit_gatewaySkipsTransferWhenLooseBalanceIsZero() public {
+        uint256 amount = 100e6;
+        gateway.setSuppliedOf(address(safe), address(usdc), amount);
+        gateway.setWithdrawalLiquidity(address(usdc), amount);
+        deal(address(usdc), address(safe), 0);
+
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (address(settlementDispatcherReap), 0)), 0);
+        vm.prank(etherFiWallet);
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+        Cashback[] memory cashbacks;
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        (address withdrawnSafe, address withdrawnAsset, uint256 withdrawnAmount, address withdrawnTo) = gateway.lastWithdraw();
+        assertEq(withdrawnSafe, address(safe));
+        assertEq(withdrawnAsset, address(usdc));
+        assertEq(withdrawnAmount, amount);
+        assertEq(withdrawnTo, address(settlementDispatcherReap));
+    }
+
+    /// Fully reserved loose balance must not produce a zero-value transfer.
+    function test_spend_debit_gatewaySkipsTransferWhenLooseBalanceIsFullyReserved() public {
+        uint256 reserved = 100e6;
+        uint256 amount = 50e6;
+        deal(address(usdc), address(safe), reserved);
+        _requestWithdrawal(_singleAddress(address(usdc)), _singleUint(reserved), withdrawRecipient);
+        gateway.setSuppliedOf(address(safe), address(usdc), amount);
+        gateway.setWithdrawalLiquidity(address(usdc), amount);
+
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (address(settlementDispatcherReap), 0)), 0);
+        vm.prank(etherFiWallet);
+        Cashback[] memory cashbacks;
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _singleAddress(address(usdc)), _singleUint(amount), cashbacks);
+
+        assertEq(usdc.balanceOf(address(safe)), reserved);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), reserved);
+        (,, uint256 withdrawnAmount,) = gateway.lastWithdraw();
+        assertEq(withdrawnAmount, amount);
+    }
+
+    /// A mixed-token spend must compact zero loose legs without misaligning the batch.
+    function test_spend_debit_gatewayCompactsMixedLooseTransfers() public {
+        uint256 amountInUsd = 100e6;
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), amountInUsd);
+        gateway.setSpendAsset(address(weETH), true);
+        gateway.setSuppliedOf(address(safe), address(usdc), amountInUsd);
+        gateway.setWithdrawalLiquidity(address(usdc), amountInUsd);
+        deal(address(usdc), address(safe), 0);
+        deal(address(weETH), address(safe), weETHAmount);
+
+        address[] memory spendTokens = new address[](2);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
+        uint256[] memory spendAmounts = new uint256[](2);
+        spendAmounts[0] = amountInUsd;
+        spendAmounts[1] = amountInUsd;
+        Cashback[] memory cashbacks;
+
+        uint256 dispatcherWeETHBefore = weETH.balanceOf(address(settlementDispatcherReap));
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (address(settlementDispatcherReap), 0)), 0);
+        vm.expectCall(address(weETH), abi.encodeCall(IERC20.transfer, (address(settlementDispatcherReap), weETHAmount)), 1);
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        assertEq(weETH.balanceOf(address(settlementDispatcherReap)), dispatcherWeETHBefore + weETHAmount);
+        (address withdrawnSafe, address withdrawnAsset, uint256 withdrawnAmount, address withdrawnTo) = gateway.lastWithdraw();
+        assertEq(withdrawnSafe, address(safe));
+        assertEq(withdrawnAsset, address(usdc));
+        assertEq(withdrawnAmount, amountInUsd);
+        assertEq(withdrawnTo, address(settlementDispatcherReap));
+    }
+
+    function _singleAddress(address value) private pure returns (address[] memory values) {
+        values = new address[](1);
+        values[0] = value;
+    }
+
+    function _singleUint(uint256 value) private pure returns (uint256[] memory values) {
+        values = new uint256[](1);
+        values[0] = value;
+    }
+
     function test_spend_worksWithMultipleToken_inDebitMode() public {
         vm.prank(owner);
         debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);

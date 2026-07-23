@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
@@ -107,6 +108,9 @@ contract TopUpAutoSupplyTest is CashGatewayTestSetup {
         gw.pause();
         deal(address(usdc), address(topUpDest), TOP_UP_USDC);
 
+        bytes memory reason = abi.encodeWithSelector(PausableUpgradeable.EnforcedPause.selector);
+        vm.expectEmit(true, true, false, true, address(topUpDest));
+        emit TopUpDest.LendSupplyFailed(address(safe), address(usdc), TOP_UP_USDC, reason);
         vm.prank(topUpKeeper);
         topUpDest.topUpUserSafe(SRC_TX_HASH, address(safe), SRC_CHAIN_ID, address(usdc), TOP_UP_USDC);
 

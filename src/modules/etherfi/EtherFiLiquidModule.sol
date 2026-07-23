@@ -230,8 +230,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
 
         // Pull any shortfall of the deposit asset out of the safe's Aave position (no-op for ETH), then
         // confirm the safe holds the full amount loose (net of any pending-withdrawal reservation).
-        _withdrawShortfall(safe, assetToDeposit, amountToDeposit, _getAvailableAmount(safe, assetToDeposit));
-        _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
+        _pullAndRequire(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
         bytes[] memory data;
@@ -340,8 +339,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
 
         // Pull any shortfall of the liquid token out of the safe's Aave position. Only this front bookend
         // applies: the queued withdrawal's output arrives later, loose in the safe.
-        _withdrawShortfall(safe, liquidAsset, amountToWithdraw, _getAvailableAmount(safe, liquidAsset));
-        _checkAmountAvailable(safe, liquidAsset, amountToWithdraw);
+        _pullAndRequire(safe, liquidAsset, amountToWithdraw);
 
         uint128 amountOutFromQueue = boringQueue.previewAssetsOut(assetOut, amountToWithdraw, discount);
         if (amountOutFromQueue < minReturn) revert InsufficientReturnAmount();

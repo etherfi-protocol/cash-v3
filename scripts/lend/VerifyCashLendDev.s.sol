@@ -35,6 +35,9 @@ import { CashLendDevModules } from "./CashLendDevModules.sol";
 contract VerifyCashLendDev is Utils {
     bytes32 internal constant EIP1967_IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     uint256 internal constant MIN_HEALTH_FACTOR = 1.05e18;
+    /// @dev The legacy liquidRESERVE OFT remains listed on the test Spoke at reserve 12 but is
+    ///      not registered in LendGateway. Its migration target is the active Midas token.
+    address internal constant UNREGISTERED_LEGACY_LIQUID_RESERVE = 0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a;
 
     struct Deployment {
         address admin;
@@ -172,6 +175,7 @@ contract VerifyCashLendDev is Utils {
         require(address(gateway.spoke()) == d.spoke, "gateway Spoke mismatch");
         require(address(gateway.roleRegistry()) == d.roleRegistry, "gateway role registry mismatch");
         require(address(ICashModule(d.cashModule).getLendGateway()) == d.lendGateway, "CashModule gateway mismatch");
+        require(EtherFiDataProvider(d.dataProvider).isDefaultModule(d.lendGateway), "gateway not default module");
         require(gateway.minHealthFactor() == MIN_HEALTH_FACTOR, "minimum health factor mismatch");
         require(gateway.isSpendAsset(usdc), "USDC not spendable");
         require(gateway.isDriver(d.debtManager), "DebtManager not a driver");
@@ -185,9 +189,13 @@ contract VerifyCashLendDev is Utils {
         require(RoleRegistry(d.roleRegistry).hasRole(DebtManagerCore(d.debtManager).ETHER_FI_WALLET_ROLE(), d.admin), "wallet role missing for migration");
 
         uint256 count = spoke.getReserveCount();
-        require(gateway.registeredAssets().length == count, "registered reserve count mismatch");
+        require(gateway.registeredAssets().length + 1 == count, "registered reserve count mismatch");
         for (uint256 reserveId = 0; reserveId < count; ++reserveId) {
             address asset = spoke.getReserve(reserveId).underlying;
+            if (asset == UNREGISTERED_LEGACY_LIQUID_RESERVE) {
+                require(!gateway.isRegistered(asset), "legacy liquidRESERVE unexpectedly registered");
+                continue;
+            }
             require(gateway.isRegistered(asset), "reserve asset not registered");
             require(gateway.reserveIdOf(asset) == reserveId, "reserve ID mismatch");
         }

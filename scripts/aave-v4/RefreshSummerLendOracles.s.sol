@@ -25,7 +25,7 @@ import { AddSummerLendCollateral } from "./AddSummerLendCollateral.s.sol";
  * Usage (simulate by dropping --broadcast; the broadcast wallet must hold SPOKE_ADMIN_ROLE):
  *   source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
  *     scripts/aave-v4/RefreshSummerLendOracles.s.sol:RefreshSummerLendOracles \
- *     --rpc-url $OPTIMISM_RPC --broadcast -vvvv
+ *     --rpc-url $OPTIMISM_RPC --broadcast --verify --etherscan-api-key $ETHERSCAN_KEY -vvvv
  */
 contract RefreshSummerLendOracles is AddSummerLendCollateral {
     function run() public override {

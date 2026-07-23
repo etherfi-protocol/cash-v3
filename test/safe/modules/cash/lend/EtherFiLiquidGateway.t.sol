@@ -8,7 +8,9 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { EtherFiLiquidModule } from "../../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { ILayerZeroTeller, BoringVault } from "../../../../../src/interfaces/ILayerZeroTeller.sol";
+import { ModuleLendGatewaySandwich } from "../../../../../src/modules/ModuleLendGatewaySandwich.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
+import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 
 /// @dev Vault and teller in one: an ERC20 receipt whose deposit pulls the underlying (approved to this
 ///      contract, as the module approves the liquid asset) and mints receipt shares 1:1.
@@ -140,6 +142,9 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
         // Freeze the receipt's reserve so Aave rejects the sandwich's re-supply of the minted receipt
         _setAaveReserveFrozen(gw.reserveIdOf(address(liquidVault)), true);
 
+        bytes memory reason = abi.encodeWithSelector(ISpoke.ReserveFrozen.selector);
+        vm.expectEmit(true, true, false, true, address(liquidModule));
+        emit ModuleLendGatewaySandwich.LendSupplyFailed(address(safe), address(liquidVault), amount, reason);
         liquidModule.deposit(address(safe), address(usdc), address(liquidVault), amount, amount, owner1, _depositSig(address(usdc), amount, amount));
 
         assertEq(liquidVault.balanceOf(address(safe)), amount, "receipt stays loose when the re-supply is rejected");

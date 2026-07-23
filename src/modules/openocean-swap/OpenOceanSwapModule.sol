@@ -165,8 +165,7 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewa
 
         // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
         // full amount loose (net of any pending-withdrawal reservation).
-        _withdrawShortfall(safe, fromAsset, fromAssetAmount, _getAvailableAmount(safe, fromAsset));
-        _checkAmountAvailable(safe, fromAsset, fromAssetAmount);
+        _pullAndRequire(safe, fromAsset, fromAssetAmount);
 
         uint256 balBefore;
         if (toAsset == ETH) balBefore = address(safe).balance;

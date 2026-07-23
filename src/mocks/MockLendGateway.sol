@@ -89,6 +89,7 @@ contract MockLendGateway is ILendGateway {
 
     function supply(address safe, address asset, uint256 amount) external {
         lastSupply = Call(safe, asset, amount, address(0));
+        usingAsCollateral[safe][asset] = true;
     }
 
     function withdraw(address safe, address asset, uint256 amount, address to) external {
