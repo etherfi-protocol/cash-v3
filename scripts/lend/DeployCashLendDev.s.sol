@@ -270,6 +270,14 @@ contract DeployCashLendDev is Utils {
         bytes32 adminRole = gateway.LEND_GATEWAY_ADMIN_ROLE();
         if (!registry.hasRole(adminRole, admin)) registry.grantRole(adminRole, admin);
 
+        // The gateway executes Safe calls when pulling funds and granting Aave position-manager
+        // approval, so every Safe must recognize it as an enabled default module.
+        address[] memory defaultModules = new address[](1);
+        defaultModules[0] = gatewayAddress;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        EtherFiDataProvider(c.dataProvider).configureDefaultModules(defaultModules, shouldWhitelist);
+
         // Mirror every Aave Spoke reserve ID into the gateway's asset registry.
         uint256 reserveCount = spoke.getReserveCount();
         for (uint256 reserveId = 0; reserveId < reserveCount; ++reserveId) {
