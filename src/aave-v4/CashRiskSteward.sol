@@ -42,6 +42,9 @@ interface IAaveV4HubConfigurator {
  * @author ether.fi
  */
 contract CashRiskSteward is Ownable2Step {
+    /// @notice Basis-points denominator (100%).
+    uint256 public constant MAX_BPS = 10_000;
+
     /// @notice The Aave v4 HubConfigurator the steward calls (holds the AccessManager drawCap role)
     IAaveV4HubConfigurator public immutable hubConfigurator;
     /// @notice The Hub whose per-spoke cap is being tuned
@@ -58,8 +61,11 @@ contract CashRiskSteward is Ownable2Step {
     uint256 public maxDrawCapCeiling;
     /// @notice Hard lower bound on `drawCap` (whole tokens). A value > 0 prevents a borrow-freeze grief.
     uint256 public minDrawCapFloor;
-    /// @notice Max change in `drawCap` a single keeper update may make (whole tokens).
-    uint256 public maxStep;
+    /// @notice Max change per keeper update, as a percentage (in BPS) of the CURRENT cap. Scales with
+    ///         volume: e.g. 500 = the keeper may move drawCap by at most ±5% of its current value per
+    ///         update. Bounded to <= MAX_BPS (100%), so one update can at most double the cap upward or
+    ///         move it to zero downward (the floor still binds the result).
+    uint256 public maxStepBps;
     /// @notice Minimum seconds between keeper updates.
     uint256 public cooldown;
 
@@ -71,7 +77,7 @@ contract CashRiskSteward is Ownable2Step {
     bool public paused;
 
     event DrawCapAdjusted(uint256 oldCap, uint256 newCap, address indexed by);
-    event BoundsUpdated(uint256 floor, uint256 ceiling, uint256 maxStep, uint256 cooldown);
+    event BoundsUpdated(uint256 floor, uint256 ceiling, uint256 maxStepBps, uint256 cooldown);
     event KeeperUpdated(address indexed oldKeeper, address indexed newKeeper);
     event PausedSet(bool paused);
 
@@ -81,7 +87,7 @@ contract CashRiskSteward is Ownable2Step {
     error CooldownActive(uint256 readyAt);
     error BelowFloor(uint256 floor);
     error AboveCeiling(uint256 ceiling);
-    error StepTooLarge(uint256 maxStep, uint256 requested);
+    error StepTooLarge(uint256 maxDelta, uint256 requestedDelta);
     error InvalidBounds();
 
     modifier onlyKeeper() {
@@ -89,7 +95,7 @@ contract CashRiskSteward is Ownable2Step {
         _;
     }
 
-    constructor(address hubConfigurator_, address hub_, uint256 assetId_, address spoke_, address governance_, address keeper_, uint256 floor_, uint256 ceiling_, uint256 maxStep_, uint256 cooldown_) Ownable(governance_) {
+    constructor(address hubConfigurator_, address hub_, uint256 assetId_, address spoke_, address governance_, address keeper_, uint256 floor_, uint256 ceiling_, uint256 maxStepBps_, uint256 cooldown_) Ownable(governance_) {
         if (hubConfigurator_ == address(0) || hub_ == address(0) || spoke_ == address(0) || keeper_ == address(0)) {
             revert ZeroAddress();
         }
@@ -101,7 +107,7 @@ contract CashRiskSteward is Ownable2Step {
         maxAllowedSpokeCap = IAaveV4Hub(hub_).MAX_ALLOWED_SPOKE_CAP();
 
         keeper = keeper_;
-        _setBounds(floor_, ceiling_, maxStep_, cooldown_);
+        _setBounds(floor_, ceiling_, maxStepBps_, cooldown_);
     }
 
     /// @notice Move the spoke's `drawCap` to `newDrawCap`, subject to all bounds. The keeper's only
@@ -120,9 +126,12 @@ contract CashRiskSteward is Ownable2Step {
         if (newDrawCap < minDrawCapFloor) revert BelowFloor(minDrawCapFloor);
         if (newDrawCap > maxDrawCapCeiling) revert AboveCeiling(maxDrawCapCeiling);
 
-        // Per-update step bounds the blast radius of a single rogue or buggy keeper call.
+        // Per-update step, as a percentage of the CURRENT cap: bounds the blast radius of a single
+        // rogue or buggy keeper call, and scales with volume as the cap grows. Large or emergency
+        // corrections are governance's job via governanceSetDrawCap (which skips this throttle).
         uint256 delta = newDrawCap > currentCap ? newDrawCap - currentCap : currentCap - newDrawCap;
-        if (delta > maxStep) revert StepTooLarge(maxStep, delta);
+        uint256 maxDelta = currentCap * maxStepBps / MAX_BPS;
+        if (delta > maxDelta) revert StepTooLarge(maxDelta, delta);
 
         lastUpdateTime = block.timestamp;
         hubConfigurator.updateSpokeDrawCap(hub, assetId, spoke, newDrawCap);
@@ -142,8 +151,8 @@ contract CashRiskSteward is Ownable2Step {
     }
 
     /// @notice Governance: update the bounds the keeper operates within.
-    function setBounds(uint256 floor_, uint256 ceiling_, uint256 maxStep_, uint256 cooldown_) external onlyOwner {
-        _setBounds(floor_, ceiling_, maxStep_, cooldown_);
+    function setBounds(uint256 floor_, uint256 ceiling_, uint256 maxStepBps_, uint256 cooldown_) external onlyOwner {
+        _setBounds(floor_, ceiling_, maxStepBps_, cooldown_);
     }
 
     /// @notice Governance: rotate the keeper key.
@@ -172,17 +181,18 @@ contract CashRiskSteward is Ownable2Step {
     }
 
     /// @dev floor <= ceiling, ceiling strictly below Aave's uncapped sentinel (so the steward can never
-    ///      widen the spoke to unlimited), and maxStep > 0 (else the keeper is bricked).
-    function _setBounds(uint256 floor_, uint256 ceiling_, uint256 maxStep_, uint256 cooldown_) internal {
+    ///      widen the spoke to unlimited), and maxStepBps in (0, MAX_BPS] (0 would brick the keeper;
+    ///      capping at 100% stops a single update doubling the cap in one step).
+    function _setBounds(uint256 floor_, uint256 ceiling_, uint256 maxStepBps_, uint256 cooldown_) internal {
         if (floor_ > ceiling_) revert InvalidBounds();
         if (ceiling_ >= uint256(maxAllowedSpokeCap)) revert InvalidBounds();
-        if (maxStep_ == 0) revert InvalidBounds();
+        if (maxStepBps_ == 0 || maxStepBps_ > MAX_BPS) revert InvalidBounds();
 
         minDrawCapFloor = floor_;
         maxDrawCapCeiling = ceiling_;
-        maxStep = maxStep_;
+        maxStepBps = maxStepBps_;
         cooldown = cooldown_;
 
-        emit BoundsUpdated(floor_, ceiling_, maxStep_, cooldown_);
+        emit BoundsUpdated(floor_, ceiling_, maxStepBps_, cooldown_);
     }
 }

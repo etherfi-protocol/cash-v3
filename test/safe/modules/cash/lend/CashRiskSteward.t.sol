@@ -27,9 +27,9 @@ contract CashRiskStewardBase is Test {
     // whole-token bounds (USDC), matching Aave's whole-asset cap units
     uint256 internal constant FLOOR = 1_000_000; //  1M USDC minimum borrow cap (no freeze)
     uint256 internal constant CEILING = 90_000_000; // 90M USDC hard ceiling (no uncap)
-    uint256 internal constant MAX_STEP = 10_000_000; // 10M per update
+    uint256 internal constant MAX_STEP_BPS = 2000; // 20% of current cap per update
     uint256 internal constant COOLDOWN = 1 hours;
-    uint256 internal constant INIT_CAP = 50_000_000; // 50M starting cap
+    uint256 internal constant INIT_CAP = 50_000_000; // 50M starting cap (20% => 10M max delta)
 
     function setUp() public virtual {
         vm.warp(1_700_000_000); // realistic epoch: block.timestamp >> cooldown, so the first call is ready
@@ -40,7 +40,7 @@ contract CashRiskStewardBase is Test {
 
         hub.seedConfig(ASSET_ID, spoke, IAaveV4Hub.SpokeConfig({ addCap: type(uint40).max, drawCap: uint40(INIT_CAP), riskPremiumThreshold: 0, active: true, halted: false }));
 
-        steward = new CashRiskSteward(address(configurator), address(hub), ASSET_ID, spoke, governance, keeper, FLOOR, CEILING, MAX_STEP, COOLDOWN);
+        steward = new CashRiskSteward(address(configurator), address(hub), ASSET_ID, spoke, governance, keeper, FLOOR, CEILING, MAX_STEP_BPS, COOLDOWN);
 
         // AccessManager: the drawCap role goes to the STEWARD, never the keeper.
         configurator.grantDrawCapRole(address(steward));
@@ -110,10 +110,32 @@ contract CashRiskStewardTest is CashRiskStewardBase {
     }
 
     function test_Keeper_StepLimited() public {
-        // current = 50M, step limit 10M -> 65M is a 15M jump -> revert
+        // current = 50M, step limit 20% => 10M max delta -> 65M is a 15M jump -> revert
         vm.prank(keeper);
-        vm.expectRevert(abi.encodeWithSelector(CashRiskSteward.StepTooLarge.selector, MAX_STEP, 15_000_000));
+        vm.expectRevert(abi.encodeWithSelector(CashRiskSteward.StepTooLarge.selector, 10_000_000, 15_000_000));
         steward.adjustDrawCap(65_000_000);
+    }
+
+    /// @notice The step limit is a PERCENTAGE of the current cap, so the allowed absolute move scales
+    ///         with volume: the same 20% bps permits a 10M move at a 50M cap but only a ~2M move at a
+    ///         10M cap. This is the whole point of the bps form over a fixed absolute step.
+    function test_Keeper_StepScalesWithCap() public {
+        // At the seeded 50M cap, +10M (exactly 20%) is allowed; +10M + 1 is not.
+        vm.prank(keeper);
+        steward.adjustDrawCap(60_000_000);
+        assertEq(steward.currentDrawCap(), 60_000_000);
+
+        // Reseed to a small 10M cap: now 20% is only 2M, so a +5M move (fine at 50M) reverts here.
+        _reseed(10_000_000);
+        vm.warp(block.timestamp + COOLDOWN + 1);
+        vm.prank(keeper);
+        vm.expectRevert(abi.encodeWithSelector(CashRiskSteward.StepTooLarge.selector, 2_000_000, 5_000_000));
+        steward.adjustDrawCap(15_000_000);
+
+        // A +2M move (exactly 20% of 10M) is allowed.
+        vm.prank(keeper);
+        steward.adjustDrawCap(12_000_000);
+        assertEq(steward.currentDrawCap(), 12_000_000);
     }
 
     function test_Cooldown_Enforced() public {
@@ -139,13 +161,13 @@ contract CashRiskStewardTest is CashRiskStewardBase {
     function test_OnlyGovernance_SetBounds() public {
         vm.prank(attacker);
         vm.expectRevert();
-        steward.setBounds(FLOOR, CEILING, MAX_STEP, COOLDOWN);
+        steward.setBounds(FLOOR, CEILING, MAX_STEP_BPS, COOLDOWN);
     }
 
     function test_Governance_RejectsCeilingAtOrAboveMax() public {
         vm.prank(governance);
         vm.expectRevert(CashRiskSteward.InvalidBounds.selector);
-        steward.setBounds(FLOOR, uint256(type(uint40).max), MAX_STEP, COOLDOWN);
+        steward.setBounds(FLOOR, uint256(type(uint40).max), MAX_STEP_BPS, COOLDOWN);
     }
 
     function test_Governance_EmergencyBypassesCooldownButNotBounds() public {

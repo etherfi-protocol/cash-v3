@@ -25,7 +25,8 @@ contract CashRiskStewardHandler is Test {
 
     uint256 internal constant FLOOR = 1_000_000;
     uint256 internal constant CEILING = 90_000_000;
-    uint256 internal constant MAX_STEP = 10_000_000;
+    uint256 internal constant MAX_STEP_BPS = 2000; // 20% of current cap per update
+    uint256 internal constant MAX_BPS = 10_000;
 
     constructor(CashRiskSteward steward_, MockAaveV4Hub hub_, MockAaveV4HubConfigurator configurator_, uint256 assetId_, address spoke_, address keeper_, address attacker_) {
         steward = steward_;
@@ -42,10 +43,13 @@ contract CashRiskStewardHandler is Test {
     ///      asserted per-call, which is what makes the campaign non-vacuous.
     function keeperAdjustInBand(uint256 seed) external {
         uint256 cur = steward.currentDrawCap();
-        uint256 lo = cur > MAX_STEP ? cur - MAX_STEP : 0;
+        uint256 maxDelta = cur * MAX_STEP_BPS / MAX_BPS; // step is now % of current cap
+        uint256 lo = cur > maxDelta ? cur - maxDelta : 0;
         if (lo < FLOOR) lo = FLOOR;
-        uint256 hi = cur + MAX_STEP;
+        uint256 hi = cur + maxDelta;
         if (hi > CEILING) hi = CEILING;
+        // When cur sits at the floor, maxDelta may round the window below FLOOR; clamp so lo <= hi.
+        if (lo > hi) lo = hi;
         uint256 target = bound(seed, lo, hi);
 
         vm.warp(block.timestamp + 1 hours + 1);
@@ -64,10 +68,12 @@ contract CashRiskStewardHandler is Test {
     }
 
     /// @dev Adversarial ratchet: a compromised keeper's real play — push the cap UP by the max step
-    ///      every cooldown, climbing toward the ceiling. Each step is individually step-valid, so only
-    ///      the CEILING check can stop the climb. This is what makes the ceiling invariant bite.
+    ///      (% of current) every cooldown, climbing toward the ceiling. Each step is individually
+    ///      step-valid, so only the CEILING check can stop the climb. This makes the ceiling invariant
+    ///      bite: percentage compounding still climbs, just geometrically instead of linearly.
     function keeperRatchetUp() external {
-        uint256 target = steward.currentDrawCap() + MAX_STEP;
+        uint256 cur = steward.currentDrawCap();
+        uint256 target = cur + (cur * MAX_STEP_BPS / MAX_BPS);
         vm.warp(block.timestamp + 1 hours + 1);
         vm.prank(keeper);
         try steward.adjustDrawCap(target) { } catch { }
@@ -106,7 +112,7 @@ contract CashRiskStewardInvariant is Test {
 
     uint256 internal constant FLOOR = 1_000_000;
     uint256 internal constant CEILING = 90_000_000;
-    uint256 internal constant MAX_STEP = 10_000_000;
+    uint256 internal constant MAX_STEP_BPS = 2000;
     uint256 internal constant COOLDOWN = 1 hours;
     uint256 internal constant INIT_CAP = 50_000_000;
 
@@ -117,7 +123,7 @@ contract CashRiskStewardInvariant is Test {
         configurator = new MockAaveV4HubConfigurator(hub);
         hub.setConfigurator(address(configurator));
         hub.seedConfig(ASSET_ID, spoke, IAaveV4Hub.SpokeConfig({ addCap: type(uint40).max, drawCap: uint40(INIT_CAP), riskPremiumThreshold: 0, active: true, halted: false }));
-        steward = new CashRiskSteward(address(configurator), address(hub), ASSET_ID, spoke, governance, keeper, FLOOR, CEILING, MAX_STEP, COOLDOWN);
+        steward = new CashRiskSteward(address(configurator), address(hub), ASSET_ID, spoke, governance, keeper, FLOOR, CEILING, MAX_STEP_BPS, COOLDOWN);
         configurator.grantDrawCapRole(address(steward)); // only the steward holds the role
 
         handler = new CashRiskStewardHandler(steward, hub, configurator, ASSET_ID, spoke, keeper, attacker);
