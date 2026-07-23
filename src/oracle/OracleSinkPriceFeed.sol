@@ -34,20 +34,17 @@ contract OracleSinkPriceFeed is BaseAaveV4PriceFeed {
     IOracleSink public immutable sink;
     /// @notice The token this feed prices, baked in because the sink is token-keyed
     address public immutable token;
-    /// @notice The decimals of the sink's prices
-    uint8 public immutable rateDecimals;
     /// @notice The maximum age in seconds of the relay's source-chain read before the price is rejected
     uint256 public immutable rateMaxStaleness;
 
     /// @notice Thrown when the priced token is the zero address
     error InvalidToken();
 
-    constructor(IOracleSink _sink, address _token, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _isStableToken, feedDescription) {
+    constructor(IOracleSink _sink, address _token, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _sink.decimals(), _isStableToken, feedDescription) {
         require(_rateMaxStaleness > 0, InvalidMaxStaleness());
         require(_token != address(0), InvalidToken());
         sink = _sink;
         token = _token;
-        rateDecimals = _sink.decimals();
         rateMaxStaleness = _rateMaxStaleness;
     }
 
@@ -60,6 +57,6 @@ contract OracleSinkPriceFeed is BaseAaveV4PriceFeed {
         (, int256 answer,, uint256 updatedAt,) = sink.latestRoundData(token);
         if (answer <= 0) revert InvalidPrice();
         if (block.timestamp > updatedAt + rateMaxStaleness) revert StalePrice();
-        return _composeUsd(answer.toUint256(), rateDecimals);
+        return _composeUsd(answer.toUint256());
     }
 }
