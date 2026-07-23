@@ -12,9 +12,9 @@ import { StablePriceLib } from "./StablePriceLib.sol";
  * @notice Shared state and math for the Aave v4 receipt-token price feeds. Every feed reports a
  *         feedDecimals-scaled USD price in one of two modes: a USD-quoted source scaled straight to feed
  *         decimals, or a rate in an underlying asset multiplied by that underlying's USD price (any
- *         IAaveV4PriceFeed, which enforces its own staleness). A derived feed supplies only the raw rate
- *         and its decimals from its own source; this base owns the two-mode compose, the stable snap,
- *         decimals(), description(), and the shared errors.
+ *         IAaveV4PriceFeed, which enforces its own staleness). A derived feed supplies its rate decimals
+ *         at construction and the raw rate per read; this base owns the two-mode compose, the stable
+ *         snap, decimals(), description(), and the shared errors.
  * @author ether.fi
  */
 abstract contract BaseAaveV4PriceFeed is IAaveV4PriceFeed {
@@ -32,8 +32,17 @@ abstract contract BaseAaveV4PriceFeed is IAaveV4PriceFeed {
     uint8 public immutable underlyingDecimals;
     /// @notice The decimals of the price this feed reports
     uint8 public immutable feedDecimals;
+    /// @notice The decimals of the raw rate the derived feed reads from its source
+    uint8 public immutable rateDecimals;
     /// @notice Whether the price snaps to exactly 1 USD when within 1% of it (USD stables only)
     bool public immutable isStableToken;
+
+    /// @dev 10 ** feedDecimals; also exactly 1 USD in feed units
+    uint256 private immutable feedScale;
+    /// @dev 10 ** rateDecimals
+    uint256 private immutable rateScale;
+    /// @dev 10 ** (rateDecimals + underlyingDecimals)
+    uint256 private immutable composeScale;
 
     string private _description;
 
@@ -44,12 +53,18 @@ abstract contract BaseAaveV4PriceFeed is IAaveV4PriceFeed {
     /// @notice Thrown when the staleness bound is zero
     error InvalidMaxStaleness();
 
-    constructor(IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, bool _isStableToken, string memory feedDescription) {
+    constructor(IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint8 _rateDecimals, bool _isStableToken, string memory feedDescription) {
         underlyingUsdFeed = _underlyingUsdFeed;
+        uint8 _underlyingDecimals;
         if (address(_underlyingUsdFeed) != address(0)) {
-            underlyingDecimals = _underlyingUsdFeed.decimals();
+            _underlyingDecimals = _underlyingUsdFeed.decimals();
         }
+        underlyingDecimals = _underlyingDecimals;
         feedDecimals = _feedDecimals;
+        rateDecimals = _rateDecimals;
+        feedScale = 10 ** _feedDecimals;
+        rateScale = 10 ** _rateDecimals;
+        composeScale = 10 ** (uint256(_rateDecimals) + _underlyingDecimals);
         isStableToken = _isStableToken;
         _description = feedDescription;
     }
@@ -71,17 +86,17 @@ abstract contract BaseAaveV4PriceFeed is IAaveV4PriceFeed {
      *      the underlying leg is non-positive, or when the scaled price floors to zero (a tiny rate lost
      *      to integer division), so the feed never reports a zero collateral price.
      */
-    function _composeUsd(uint256 rate, uint8 rateDecimals) internal view returns (int256) {
+    function _composeUsd(uint256 rate) internal view returns (int256) {
         uint256 price;
         if (address(underlyingUsdFeed) == address(0)) {
-            price = rate.mulDiv(10 ** feedDecimals, 10 ** rateDecimals);
+            price = rate.mulDiv(feedScale, rateScale);
         } else {
             int256 underlyingAnswer = underlyingUsdFeed.latestAnswer();
             if (underlyingAnswer <= 0) revert InvalidPrice();
-            price = rate.mulDiv(underlyingAnswer.toUint256() * 10 ** feedDecimals, 10 ** (rateDecimals + underlyingDecimals));
+            price = rate.mulDiv(underlyingAnswer.toUint256() * feedScale, composeScale);
         }
 
-        price = StablePriceLib.snap(price, isStableToken, feedDecimals);
+        price = StablePriceLib.snap(price, isStableToken, feedScale);
         if (price == 0) revert InvalidPrice();
         return price.toInt256();
     }
