@@ -102,6 +102,28 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         assertEq(reason, "Insufficient Lend withdrawal liquidity, please try again later");
     }
 
+    /// A drained Hub must not mask a pending-withdrawal shortfall: when the spend could not clear even with
+    /// full withdrawal liquidity (the reserved loose balance is the real blocker), the decline stays the
+    /// user-side balance message rather than promising a retry that can never succeed.
+    function test_canSpend_fails_inDebitMode_pendingShortfallNotAttributedToLendLiquidity() public {
+        _supplyToGateway(address(safe), address(usdc), 100e6);
+        deal(address(usdc), address(safe), 200e6);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 200e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        vm.mockCall(address(gw), abi.encodeWithSelector(ILendGateway.withdrawalLiquidity.selector, address(usdc)), abi.encode(uint256(10e6)));
+
+        // Loose 200 is fully reserved; even with full Hub liquidity only supplied 100 backs the 250 spend.
+        amounts[0] = 250e6;
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Insufficient token balance for debit mode spending");
+    }
+
     /// Credit spend succeeds when the supplied collateral gives enough borrowing power to cover the amount.
     function test_canSpend_succeeds_inCreditMode_whenCollateralAvailable() public {
         _setMode(Mode.Credit);
