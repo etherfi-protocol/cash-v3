@@ -43,7 +43,7 @@ library TradingAccountProdConfig {
     function supportedTokens() internal pure returns (address[] memory tokens) {
         tokens = new address[](25);
         tokens[0] = 0xdAC17F958D2ee523a2206206994597C13D831ec7; // USDT
-        tokens[1] = 0x90A2a4c76b5D8c0bc892A69EA28Aa775a8f2dD48; // SPYx
+        tokens[1] = 0xE7E553Cd128F0011777323A0b44a7b96EA1CB540; // wSPYx
         tokens[2] = 0x45804880De22913dAFE09f4980848ECE6EcbAf78; // PAXG
         tokens[3] = 0xD31a59c85aE9D8edEFeC411D448f90841571b89c; // SOL
         tokens[4] = 0x232CE3bd40fCd6f80f3d55A522d03f25Df784Ee2; // LIT
@@ -53,19 +53,19 @@ library TradingAccountProdConfig {
         tokens[8] = 0x58D97B57BB95320F9a05dC918Aef65434969c2B2; // MORPHO
         tokens[9] = 0x163f8C2467924be0ae7B5347228CABF260318753; // WLD
         tokens[10] = 0x643C4E15d7d62Ad0aBeC4a9BD4b001aA3Ef52d66; // SYRUP
-        tokens[11] = 0xa753A7395cAe905Cd615Da0B82A53E0560f250af; // QQQx
-        tokens[12] = 0x8aD3c73F833d3F9A523aB01476625F269aEB7Cf0; // TSLAx
-        tokens[13] = 0xc845b2894dBddd03858fd2D643B4eF725fE0849d; // NVDAx
-        tokens[14] = 0x3522513E5F146a2006e2901b05f16B2821485E19; // AMDx
-        tokens[15] = 0x5621737f42dAE558b81269FcB9E9E70c19Aa6b35; // MSFTx
-        tokens[16] = 0x96702be57Cd9777f835117a809C7124fe4ec989A; // METAx
-        tokens[17] = 0xAE2f842EF90C0d5213259Ab82639D5BBF649b08E; // MSTRx
-        tokens[18] = 0xfEbDEd1B0986a8ee107f5AB1a1c5a813491DeCEB; // CRCLx
-        tokens[19] = 0xE1385FDd5ffB10081Cd52C56584F25EFa9084015; // HOODx
-        tokens[20] = 0xf6a873BAe4Ba1B304e45dF52A4b7D176E1C6a8c4; // MUx
-        tokens[21] = 0xf8A80D1cb9cFD70D03D655D9dF42339846F3B3C8; // INTCx
-        tokens[22] = 0xeAAd46F4146Ded5a47B55AA7F6c48c191dEAEC88; // MRVLx
-        tokens[23] = 0xb63EFBc28860c8097e341DE1fCF59456161E9D98; // SNDKx
+        tokens[11] = 0x4C1AE29c159838fC1b224636E28E086EB69101f7; // wQQQx
+        tokens[12] = 0xc3FdBe3A68EE5dE461D30415a8165cf9Aefe1171; // wTSLAx
+        tokens[13] = 0xa8ddb5Cd96b5222AFe198316E9A57CAA642850D5; // wNVDAx
+        tokens[14] = 0xEe7CcB0d37A12862e7f92F6C92a93d9c2d304266; // wAMDx
+        tokens[15] = 0x166Fbe68274b6a47e025F4ba17388c539f1fa1d0; // wMSFTx
+        tokens[16] = 0xe840946FfEBCd66B7C4E95095effaFaDfa0D0e56; // wMETAx
+        tokens[17] = 0x30987adF0B11dc698438a99BA04ec3a1AB2c7EaB; // wMSTRx
+        tokens[18] = 0xb11134F14d5B94DB60d4599DfdC3bF1bbA2150e8; // wCRCLx
+        tokens[19] = 0x59801175a9b2248F9bf4Ba7f82E17045C4672ec8; // wHOODx
+        tokens[20] = 0xe2047ee3bdDb5C99ae428AB83df63f8730698e30; // wMUx
+        tokens[21] = 0x33AA35B0271FFfE2048Cc093aB7fE60931786719; // wINTCx
+        tokens[22] = 0xB4eE60B6B817ca7386422Ef1A0F45EaddEa13275; // wMRVLx
+        tokens[23] = 0x75e82E2884Ea10f72FCA777449B73377f4646219; // wSNDKx
         tokens[24] = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599; // WBTC
     }
 }
