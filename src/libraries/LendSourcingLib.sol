@@ -41,6 +41,29 @@ library LendSourcingLib {
     }
 
     /**
+     * @notice Sourcing gate for one debit token: loose balance plus the withdrawable supplied amount must
+     *         cover `needed`, before and after reserving the `pending` withdrawal against the loose balance
+     * @dev The supplied leg is headroom-capped when the safe carries debt; withdrawable further caps it by
+     *      reserve cash. A shortfall the supplied leg would have covered is the Hub's liquidity failing the
+     *      user, not the user's balance — the decline says so. On success `raw` is the loose balance net of
+     *      its pending-withdrawal reservation, for the caller's headroom accounting.
+     */
+    function debitTokenCheck(ILendGateway gateway, address safe, address token, uint256 needed, uint256 pending, uint256 headroom, bool hasDebt) public view returns (bool ok, string memory reason, uint256 raw) {
+        raw = IERC20Metadata(token).balanceOf(safe);
+        (uint256 supplied, uint256 withdrawable) = suppliedParts(gateway, safe, token, headroom, hasDebt);
+        if (raw + withdrawable < needed) {
+            if (raw + supplied >= needed) return (false, "Insufficient Lend withdrawal liquidity, please try again later", 0);
+            return (false, "Insufficient token balance for debit mode spending", 0);
+        }
+        raw = raw > pending ? raw - pending : 0;
+        if (raw + withdrawable < needed) {
+            if (raw + supplied >= needed) return (false, "Insufficient Lend withdrawal liquidity, please try again later", 0);
+            return (false, "Insufficient effective balance after withdrawal to spend with debit mode", 0);
+        }
+        return (true, "", raw);
+    }
+
+    /**
      * @notice Max credit-mode spend in 6-decimal payment USD
      * @dev For each settlement token, converts min(Aave-priced user capacity, Hub liquidity) through
      *      PriceProvider, rounding payment USD down; returns the largest executable candidate.

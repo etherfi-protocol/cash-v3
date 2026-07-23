@@ -67,10 +67,8 @@ contract CashLens is UpgradeableProxy, Constants {
         bool hasDebt;
         uint256 withdrawHeadroom;
         uint256 needed;
-        uint256 raw;
-        uint256 supplied;
-        uint256 withdrawableSupplied;
         uint256 pending;
+        uint256 raw;
         uint256 used;
     }
 
@@ -229,21 +227,13 @@ contract CashLens is UpgradeableProxy, Constants {
             }
 
             v.needed = LendSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountsInUsd[i]);
-            v.raw = IERC20(token).balanceOf(safe);
-            // supplied is the safe-side leg (headroom-capped when in debt); withdrawableSupplied further caps
-            // it by reserve cash. A shortfall the supplied leg would have covered is the Hub's liquidity
-            // failing the user, not the user's balance — the decline says so.
-            (v.supplied, v.withdrawableSupplied) = LendSourcingLib.suppliedParts(lendGateway, safe, token, v.withdrawHeadroom, v.hasDebt);
-            if (v.raw + v.withdrawableSupplied < v.needed) {
-                if (v.raw + v.supplied >= v.needed) return (false, "Insufficient Lend withdrawal liquidity, please try again later");
-                return (false, "Insufficient token balance for debit mode spending");
-            }
+            // The sourcing gate and its decline reasons (including the Lend-liquidity attribution) live in the
+            // linked LendSourcingLib (code size); on success it returns the loose balance net of the pending
+            // reservation for the headroom accounting below.
             v.pending = _getPendingWithdrawalAmount(safeData, token);
-            v.raw = v.raw > v.pending ? v.raw - v.pending : 0;
-            if (v.raw + v.withdrawableSupplied < v.needed) {
-                if (v.raw + v.supplied >= v.needed) return (false, "Insufficient Lend withdrawal liquidity, please try again later");
-                return (false, "Insufficient effective balance after withdrawal to spend with debit mode");
-            }
+            (bool ok, string memory reason, uint256 rawNet) = LendSourcingLib.debitTokenCheck(lendGateway, safe, token, v.needed, v.pending, v.withdrawHeadroom, v.hasDebt);
+            if (!ok) return (false, reason);
+            v.raw = rawNet;
 
             // Only the supplied portion (effective raw is spent first) consumes the borrowing headroom for later tokens
             if (v.hasDebt) {
