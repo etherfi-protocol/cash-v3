@@ -77,7 +77,9 @@ abstract contract TradingAccountCreate3 {
 
     function _deployCreate3(bytes memory creationCode, bytes32 salt) internal returns (address deployed) {
         deployed = _predict(salt);
-        require(deployed.code.length == 0, "code already exists at predicted address");
+        // Idempotent: CREATE3 addresses are deterministic, so an already-populated address means this
+        // contract was deployed by a prior (possibly partial) run. Reuse it instead of reverting.
+        if (deployed.code.length > 0) return deployed;
 
         address proxy = address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", TradingAccountProdConfig.NICKS_FACTORY, salt, CREATE3.PROXY_INITCODE_HASH)))));
 
