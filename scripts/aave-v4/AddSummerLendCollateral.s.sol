@@ -20,7 +20,7 @@ import { IVedaAccountant } from "../../src/interfaces/IVedaAccountant.sol";
 import { ChainlinkPriceFeed } from "../../src/oracle/ChainlinkPriceFeed.sol";
 import { IPythPairOracle, PythPriceFeed } from "../../src/oracle/PythPriceFeed.sol";
 import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFeed.sol";
-import { Utils } from "../utils/Utils.sol";
+import { ChainConfig, Utils } from "../utils/Utils.sol";
 
 /**
  * @title AddSummerLendCollateral
@@ -190,8 +190,11 @@ contract AddSummerLendCollateral is Utils {
         irStrategy = AssetInterestRateStrategy(stdJson.readAddress(json, ".irStrategy"));
         treasurySpoke = stdJson.readAddress(json, ".treasurySpoke");
         accessManager = IAccessManager(stdJson.readAddress(json, ".accessManager"));
-        weethReserveId = stdJson.readUint(json, ".weethReserveId");
-        usdcReserveId = stdJson.readUint(json, ".usdcReserveId");
+        // The manifest no longer carries the deploy-time reserve ids; resolve them on-chain from
+        // the same chain config DeployAaveV4TestInstance listed them with.
+        ChainConfig memory cfg = getChainConfig(vm.toString(block.chainid));
+        weethReserveId = _reserveIdOf(cfg.weETH);
+        usdcReserveId = _reserveIdOf(cfg.usdc);
     }
 
     /// @dev Merges a symbol -> reserveId and symbol -> hub assetId map into aave-v4-test.json
