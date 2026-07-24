@@ -243,13 +243,16 @@ contract LendDevModulesTest is LendDevTestBase {
         deal(whype, safe, 1 ether);
         vm.prank(devAdmin);
         cashModule.supplyToLend(safe, _addr1(whype));
-        assertApproxEqAbs(gw.suppliedOf(safe, whype), 1 ether, 2, "WHYPE starts supplied");
+        // Stake what actually sits supplied: once WHYPE accrues, suppliedOf can round a wei under
+        // the dealt amount and a hard-coded 1 ether would overdraw the withdraw leg
+        uint256 staked = gw.suppliedOf(safe, whype);
+        assertApproxEqAbs(staked, 1 ether, 2, "WHYPE starts supplied");
 
-        bytes memory sig = _moduleOpSig(address(stakeModule), stakeModule.STAKE_SIG(), safe, abi.encode(uint256(1 ether)));
-        stakeModule.stake(safe, 1 ether, ownerA, sig);
+        bytes memory sig = _moduleOpSig(address(stakeModule), stakeModule.STAKE_SIG(), safe, abi.encode(staked));
+        stakeModule.stake(safe, staked, ownerA, sig);
 
         assertApproxEqAbs(gw.suppliedOf(safe, whype), 0, 2, "WHYPE withdrawn from Aave");
-        assertEq(IERC20(whype).balanceOf(staker), 1 ether, "WHYPE staked with the staker");
+        assertEq(IERC20(whype).balanceOf(staker), staked, "WHYPE staked with the staker");
     }
 
     /// A swap sources its input from Aave, swaps through the (stubbed) OpenOcean router, and re-supplies
