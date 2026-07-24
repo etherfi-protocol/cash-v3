@@ -14,15 +14,15 @@ import { BaseAaveV4PriceFeed } from "./BaseAaveV4PriceFeed.sol";
 contract VedaAccountantPriceFeed is BaseAaveV4PriceFeed {
     /// @notice The Veda accountant that provides the vault exchange rate
     IVedaAccountant public immutable accountant;
-    /// @notice The decimals of the exchange rate from the accountant
-    uint8 public immutable rateDecimals;
     /// @notice The maximum age in seconds for the Veda rate before it is rejected
     uint256 public immutable rateMaxStaleness;
 
-    constructor(IVedaAccountant _accountant, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _isStableToken, feedDescription) {
+    /// @notice Thrown when the accountant has paused itself
+    error AccountantPaused();
+
+    constructor(IVedaAccountant _accountant, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _accountant.decimals(), _isStableToken, feedDescription) {
         require(_rateMaxStaleness > 0, InvalidMaxStaleness());
         accountant = _accountant;
-        rateDecimals = _accountant.decimals();
         rateMaxStaleness = _rateMaxStaleness;
     }
 
@@ -33,12 +33,12 @@ contract VedaAccountantPriceFeed is BaseAaveV4PriceFeed {
      */
     function latestAnswer() external view returns (int256) {
         IVedaAccountant.AccountantState memory state = accountant.accountantState();
+        if (state.isPaused) revert AccountantPaused();
         if (block.timestamp > state.lastUpdateTimestamp + rateMaxStaleness) revert StalePrice();
 
-        // Vault rate; reverts if the accountant paused itself.
-        uint256 rate = accountant.getRateSafe();
+        uint256 rate = state.exchangeRate;
         if (rate == 0) revert InvalidPrice();
 
-        return _composeUsd(rate, rateDecimals);
+        return _composeUsd(rate);
     }
 }

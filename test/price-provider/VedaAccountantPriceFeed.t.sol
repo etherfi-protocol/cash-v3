@@ -35,7 +35,7 @@ contract VedaAccountantPriceFeedTest is Test {
 
     /// @notice The reported price equals rate x underlying, and lands in a sane USD range.
     function test_latestAnswer_matchesRateTimesUnderlying() public view {
-        uint256 rate = accountant.getRateSafe();
+        uint256 rate = accountant.accountantState().exchangeRate;
         (, int256 ethUsd,,,) = IAggregatorV3(ethUsdOracle).latestRoundData();
 
         uint256 expected = rate * ethUsd.toUint256() * (10 ** FEED_DECIMALS) / (10 ** (feed.rateDecimals() + feed.underlyingDecimals()));
@@ -76,16 +76,20 @@ contract VedaAccountantPriceFeedTest is Test {
         new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(ethUsdOracle), FEED_DECIMALS, 0, false, "liquidETH / USD");
     }
 
-    /// @notice Reverts when the accountant has paused itself (getRateSafe reverts).
+    /// @notice Reverts when the accountant has paused itself.
     function test_reverts_whenAccountantPaused() public {
-        vm.mockCallRevert(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), "paused");
-        vm.expectRevert();
+        IVedaAccountant.AccountantState memory state = accountant.accountantState();
+        state.isPaused = true;
+        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.accountantState.selector), abi.encode(state));
+        vm.expectRevert(VedaAccountantPriceFeed.AccountantPaused.selector);
         feed.latestAnswer();
     }
 
     /// @notice Reverts when the rate is zero.
     function test_reverts_whenRateZero() public {
-        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), abi.encode(uint256(0)));
+        IVedaAccountant.AccountantState memory state = accountant.accountantState();
+        state.exchangeRate = 0;
+        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.accountantState.selector), abi.encode(state));
         vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
@@ -93,7 +97,7 @@ contract VedaAccountantPriceFeedTest is Test {
     /// @notice Without an underlying feed, the price is the accountant rate scaled to feed decimals.
     function test_noUnderlying_latestAnswer_isScaledRate() public {
         VedaAccountantPriceFeed usdFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, false, "liquidETH / ETH");
-        uint256 rate = accountant.getRateSafe();
+        uint256 rate = accountant.accountantState().exchangeRate;
         uint256 expected = rate * (10 ** FEED_DECIMALS) / (10 ** usdFeed.rateDecimals());
         assertEq(usdFeed.latestAnswer().toUint256(), expected);
     }
@@ -101,9 +105,12 @@ contract VedaAccountantPriceFeedTest is Test {
     /// @notice A stable feed snaps to exactly 1 USD inside the 1% band and passes the raw price outside it.
     function test_stable_snapsWithinOnePercent() public {
         VedaAccountantPriceFeed stableFeed = new VedaAccountantPriceFeed(accountant, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, RATE_MAX_STALENESS, true, "STABLE / USD");
-        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), abi.encode(uint256(0.995e18)));
+        IVedaAccountant.AccountantState memory state = accountant.accountantState();
+        state.exchangeRate = 0.995e18;
+        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.accountantState.selector), abi.encode(state));
         assertEq(stableFeed.latestAnswer(), 1e8);
-        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.getRateSafe.selector), abi.encode(uint256(1.02e18)));
+        state.exchangeRate = 1.02e18;
+        vm.mockCall(address(accountant), abi.encodeWithSelector(IVedaAccountant.accountantState.selector), abi.encode(state));
         assertEq(stableFeed.latestAnswer(), 1.02e8);
     }
 

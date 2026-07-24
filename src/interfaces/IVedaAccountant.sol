@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 /**
  * @title IVedaAccountant
- * @notice The part of a Veda accountant the feed reads. getRateSafe returns the vault rate and
- *         reverts when the accountant is paused.
+ * @notice The part of a Veda accountant the feed reads. accountantState carries the vault exchange
+ *         rate, the pause flag, and the last update timestamp.
  * @dev MIT mirror of Veda's AccountantWithRateProviders (Se7en-Seas/boring-vault), only what we call.
  * @author ether.fi
  */
@@ -24,10 +24,7 @@ interface IVedaAccountant {
         uint16 performanceFee;
     }
 
-    /// @notice The exchange rate in the base asset; reverts if the accountant is paused
-    function getRateSafe() external view returns (uint256);
-
-    /// @notice The accountant state, including the last exchange-rate update timestamp
+    /// @notice The accountant state, including the exchange rate, pause flag, and last update timestamp
     function accountantState() external view returns (AccountantState memory);
 
     /// @notice The decimals of the exchange rate

@@ -114,7 +114,7 @@ contract DeploySummerLendProdFeeds is Utils {
         vm.stopBroadcast();
 
         string memory path = string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/summer-lend-feeds.json");
-        vm.writeJson(json, path);
+        vm.writeJson(vm.serializeString("summer-lend-prod-root", "details", json), path);
         console.log("Feed addresses written to:", path);
     }
 
@@ -141,7 +141,22 @@ contract DeploySummerLendProdFeeds is Utils {
         uint256 usd = answer.toUint256();
         uint256 cents = (usd % 1e8) / 1e6;
         console.log(string.concat("  ", desc, ": $", vm.toString(usd / 1e8), cents < 10 ? ".0" : ".", vm.toString(cents), " at ", vm.toString(feed)));
-        json = vm.serializeAddress("summer-lend-prod-feeds", desc, feed);
+        // Nested like the dev manifest: .details.<symbol>.oracle
+        json = vm.serializeString("summer-lend-prod-feeds", _symbol(desc), vm.serializeAddress(string.concat("feed-", desc), "oracle", feed));
         return feed;
+    }
+
+    /// @dev The token symbol: the description prefix before " / USD"
+    function _symbol(string memory desc) internal pure returns (string memory) {
+        bytes memory b = bytes(desc);
+        uint256 end;
+        while (end < b.length && b[end] != " ") {
+            end++;
+        }
+        bytes memory out = new bytes(end);
+        for (uint256 i; i < end; ++i) {
+            out[i] = b[i];
+        }
+        return string(out);
     }
 }

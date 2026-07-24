@@ -26,15 +26,12 @@ contract ChainlinkPriceFeed is BaseAaveV4PriceFeed {
 
     /// @notice The Chainlink feed: a USD price (no underlying) or a rate in the underlying asset
     IAggregatorV3 public immutable rateFeed;
-    /// @notice The decimals of the rate feed
-    uint8 public immutable rateDecimals;
     /// @notice The maximum age in seconds for the rate feed before it is rejected
     uint256 public immutable rateMaxStaleness;
 
-    constructor(IAggregatorV3 _rateFeed, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _isStableToken, feedDescription) {
+    constructor(IAggregatorV3 _rateFeed, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, uint256 _rateMaxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _rateFeed.decimals(), _isStableToken, feedDescription) {
         require(_rateMaxStaleness > 0, InvalidMaxStaleness());
         rateFeed = _rateFeed;
-        rateDecimals = _rateFeed.decimals();
         rateMaxStaleness = _rateMaxStaleness;
     }
 
@@ -44,7 +41,7 @@ contract ChainlinkPriceFeed is BaseAaveV4PriceFeed {
      *      underlying leg enforces its own staleness.
      */
     function latestAnswer() external view returns (int256) {
-        return _composeUsd(_readFeed(rateFeed, rateMaxStaleness), rateDecimals);
+        return _composeUsd(_readFeed(rateFeed, rateMaxStaleness));
     }
 
     /// @dev Reads a Chainlink feed, reverting if the price is non-positive or older than maxStaleness
