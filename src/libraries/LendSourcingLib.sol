@@ -24,9 +24,45 @@ library LendSourcingLib {
      *      which Aave lets go freely.
      */
     function withdrawableSupplied(ILendGateway gateway, address safe, address token, uint256 headroom, bool hasDebt) public view returns (uint256) {
-        uint256 supplied = hasDebt ? gateway.collateralForHeadroom(safe, token, headroom) : gateway.suppliedOf(safe, token);
+        (, uint256 withdrawable) = suppliedParts(gateway, safe, token, headroom, hasDebt);
+        return withdrawable;
+    }
+
+    /**
+     * @notice The two legs of withdrawableSupplied: the safe-side supplied amount (headroom-capped when the
+     *         safe carries debt) and the amount actually withdrawable once reserve cash is applied
+     * @dev Callers that decline a spend use the pair to attribute the shortfall: supplied covering the need
+     *      while withdrawable does not means the Hub's cash, not the user's balance, is the binding constraint.
+     */
+    function suppliedParts(ILendGateway gateway, address safe, address token, uint256 headroom, bool hasDebt) public view returns (uint256 supplied, uint256 withdrawable) {
+        supplied = hasDebt ? gateway.collateralForHeadroom(safe, token, headroom) : gateway.suppliedOf(safe, token);
         uint256 cash = gateway.withdrawalLiquidity(token);
-        return supplied < cash ? supplied : cash;
+        withdrawable = supplied < cash ? supplied : cash;
+    }
+
+    /**
+     * @notice Sourcing gate for one debit token: loose balance plus the withdrawable supplied amount must
+     *         cover `needed`, before and after reserving the `pending` withdrawal against the loose balance
+     * @dev The supplied leg is headroom-capped when the safe carries debt; withdrawable further caps it by
+     *      reserve cash. A shortfall is the Hub's liquidity failing the user only if the spend would clear
+     *      all gates with the cash cap lifted — i.e. the pending-net loose balance plus the full supplied leg
+     *      covers the need; both branches attribute against that same predicate, so a spend also blocked by
+     *      its pending reservation keeps a user-side reason. On success `raw` is the loose balance net of its
+     *      pending-withdrawal reservation, for the caller's headroom accounting.
+     */
+    function debitTokenCheck(ILendGateway gateway, address safe, address token, uint256 needed, uint256 pending, uint256 headroom, bool hasDebt) public view returns (bool ok, string memory reason, uint256 raw) {
+        raw = IERC20Metadata(token).balanceOf(safe);
+        (uint256 supplied, uint256 withdrawable) = suppliedParts(gateway, safe, token, headroom, hasDebt);
+        uint256 rawNet = raw > pending ? raw - pending : 0;
+        if (raw + withdrawable < needed) {
+            if (rawNet + supplied >= needed) return (false, "Insufficient Lend withdrawal liquidity, please try again later", 0);
+            return (false, "Insufficient token balance for debit mode spending", 0);
+        }
+        if (rawNet + withdrawable < needed) {
+            if (rawNet + supplied >= needed) return (false, "Insufficient Lend withdrawal liquidity, please try again later", 0);
+            return (false, "Insufficient effective balance after withdrawal to spend with debit mode", 0);
+        }
+        return (true, "", rawNet);
     }
 
     /**
@@ -71,7 +107,13 @@ library LendSourcingLib {
 
         uint256 borrowAmount = fromUsdUp(priceProvider, token, totalSpendingInUsd);
         if (gateway.borrowLiquidity(token) < borrowAmount) {
-            return (false, "Insufficient liquidity to cover the loan");
+            // borrowLiquidity folds Hub cash and the spoke's draw cap into one bound; withdrawalLiquidity is
+            // the cash alone (zero under the same pause/halt gates), so cash covering the loan means the draw
+            // cap (or reported deficit) is what blocks the borrow.
+            if (gateway.withdrawalLiquidity(token) >= borrowAmount) {
+                return (false, "Lend borrow cap reached, please try again later");
+            }
+            return (false, "Insufficient Lend liquidity to cover the loan");
         }
 
         if (gateway.borrowCapacity(safe, token) < borrowAmount) {
