@@ -173,13 +173,16 @@ contract LendDevModulesTest is LendDevTestBase {
         deal(weth, safe, 1 ether);
         vm.prank(devAdmin);
         cashModule.supplyToLend(safe, _addr1(weth));
-        assertApproxEqAbs(gw.suppliedOf(safe, weth), 1 ether, 2, "WETH starts supplied");
+        // Stake what actually sits supplied: WETH accrues on dev, so suppliedOf can round a wei
+        // under the dealt amount and a hard-coded 1 ether would overdraw the sandwich's withdraw leg
+        uint256 staked = gw.suppliedOf(safe, weth);
+        assertApproxEqAbs(staked, 1 ether, 2, "WETH starts supplied");
 
-        bytes memory sig = _moduleOpSig(address(stakeModule), stakeModule.DEPOSIT_SIG(), safe, abi.encode(weth, uint256(1 ether), uint256(1 ether)));
-        stakeModule.deposit(safe, weth, 1 ether, 1 ether, ownerA, sig);
+        bytes memory sig = _moduleOpSig(address(stakeModule), stakeModule.DEPOSIT_SIG(), safe, abi.encode(weth, staked, staked));
+        stakeModule.deposit(safe, weth, staked, staked, ownerA, sig);
 
         assertApproxEqAbs(gw.suppliedOf(safe, weth), 0, 2, "WETH withdrawn from Aave");
-        assertApproxEqAbs(gw.suppliedOf(safe, address(weETH)), 1 ether, 2, "weETH re-supplied to Aave");
+        assertApproxEqAbs(gw.suppliedOf(safe, address(weETH)), staked, 2, "weETH re-supplied to Aave");
     }
 
     /// A frax deposit sources USDC from Aave, mints through the (stubbed) custodian, and re-supplies the
@@ -328,10 +331,16 @@ contract LendDevModulesTest is LendDevTestBase {
     }
 
     /// @dev Etches the vault stub over the real liquidUSD token and wires it as its own teller on `module`.
+    ///      The Aave hub checks its token balance against its internal ledger on every supply, and the etch
+    ///      replaces the token's storage view, so the hub's real balance is mirrored onto the stub first —
+    ///      otherwise every resupply reverts once anyone has really supplied liquidUSD on dev.
     function _etchLiquidVaultStub(EtherFiLiquidModule module) internal returns (address) {
         address liquidUsd = _findReserveByAssetId(liquidUsdAssetId);
         require(spoke.getReserve(gw.reserveIdOf(liquidUsd)).underlying == liquidUsd, "liquidUSD not registered on the gateway");
+        address hub = spoke.getReserve(gw.reserveIdOf(liquidUsd)).hub;
+        uint256 hubBalance = IERC20(liquidUsd).balanceOf(hub);
         vm.etch(liquidUsd, address(new LiquidVaultStub(IERC20Metadata(liquidUsd).decimals())).code);
+        deal(liquidUsd, hub, hubBalance);
         if (address(module.liquidAssetToTeller(liquidUsd)) != liquidUsd) {
             bytes32 adminRole = module.ETHERFI_LIQUID_MODULE_ADMIN();
             vm.startPrank(devAdmin);

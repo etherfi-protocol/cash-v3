@@ -28,6 +28,24 @@ contract LendDevFlowsTest is LendDevTestBase {
         assertTrue(gatewayWasDefaultModule, "LendGateway is not a default module on the live dataProvider");
     }
 
+    /// The dev debit-spend set (SetSpendAssetsDev) is live on the gateway: all six assets registered
+    /// as reserves and flagged spendable.
+    function test_deployedConfig_spendAssets() public view {
+        address[6] memory assets = [
+            0x94b008aA00579c1307B0EF2c499aD98a8ce58e58, // USDT
+            0x80Eede496655FB9047dd39d9f418d5483ED600df, // frxUSD
+            0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C, // liquidUSD
+            0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898, // liquidRESERVE
+            0xDCB612005417Dc906fF72c87DF732e5a90D49e11, // EURC
+            0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13 // liquidEUR
+        ];
+        string[6] memory names = ["USDT", "frxUSD", "liquidUSD", "liquidRESERVE", "EURC", "liquidEUR"];
+        for (uint256 i = 0; i < assets.length; ++i) {
+            assertTrue(gw.isRegistered(assets[i]), string.concat(names[i], " is not a registered gateway reserve"));
+            assertTrue(gw.isSpendAsset(assets[i]), string.concat(names[i], " is not a spend asset on the live gateway"));
+        }
+    }
+
     // ----------------------------------------------------------------- 1. unmigrated safe keeps working
 
     /// An unmigrated safe still works as before: canSpend passes, a debit spend settles to the dispatcher,
@@ -300,6 +318,41 @@ contract LendDevFlowsTest is LendDevTestBase {
         assertApproxEqAbs(gw.debtOf(safe, address(usdc)), debtBefore + capacity / 2, 2, "credit spend borrowed on Aave");
     }
 
+    /// A two-token debit spend on a gateway safe sources each leg independently — loose USDC plus
+    /// Aave-supplied USDT — and settles both to the Rain dispatcher (covering the suite's other bin sponsor).
+    function test_spend_multiTokenDebitMixedSourcing() public {
+        address safe = _deploySafe("lend-dev-gw-multi", true);
+        IERC20 usdt = IERC20(_reserveBySymbol("USDT"));
+        _ensureSpendAsset(address(usdt));
+
+        // USDT sits supplied on Aave, USDC sits loose
+        deal(address(usdt), safe, 100e6);
+        vm.prank(devAdmin);
+        cashModule.supplyToLend(safe, _addr1(address(usdt)));
+        deal(address(usdc), safe, 50e6);
+
+        address dispatcher = cashModule.getSettlementDispatcher(BinSponsor.Rain);
+        uint256 dispatcherUsdcBefore = usdc.balanceOf(dispatcher);
+        uint256 dispatcherUsdtBefore = usdt.balanceOf(dispatcher);
+        uint256 suppliedUsdtBefore = gw.suppliedOf(safe, address(usdt));
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(usdt);
+        uint256[] memory amountsInUsd = new uint256[](2);
+        amountsInUsd[0] = 20e6;
+        amountsInUsd[1] = 30e6;
+
+        vm.prank(devAdmin);
+        cashModule.spend(safe, keccak256("gw-multi"), BinSponsor.Rain, tokens, amountsInUsd, _noCashback());
+
+        assertEq(usdc.balanceOf(dispatcher), dispatcherUsdcBefore + 20e6, "USDC leg settled to the Rain dispatcher");
+        assertGt(usdt.balanceOf(dispatcher), dispatcherUsdtBefore, "USDT leg settled to the Rain dispatcher");
+        assertEq(usdc.balanceOf(safe), 30e6, "USDC leg spent the loose balance");
+        assertEq(gw.suppliedOf(safe, address(usdc)), 0, "USDC leg never touched Aave");
+        assertApproxEqAbs(gw.suppliedOf(safe, address(usdt)), suppliedUsdtBefore - 30e6, 1e6, "USDT leg sourced from Aave supply");
+    }
+
     /// A spend carrying a cashback entry settles and routes the cashback through the CashbackDispatcher
     /// to the safe.
     function test_spend_withCashback() public {
@@ -438,6 +491,36 @@ contract LendDevFlowsTest is LendDevTestBase {
         cashModule.setMode(safe, Mode.Credit, ownerA, modeSig);
     }
 
+    /// A matured-but-unprocessed opt-out is executed lazily by the next spend: the spend itself unwinds
+    /// the Aave collateral, settles from the freed loose balance, and Credit mode stays blocked afterwards.
+    function test_optOut_lazyProcessingOnSpend() public {
+        vm.skip(modeDelay == 0);
+        address safe = _deploySafe("lend-dev-optout-lazy", true);
+        deal(address(usdc), safe, 100e6);
+        vm.prank(devAdmin);
+        cashModule.supplyToLend(safe, _addr1(address(usdc)));
+
+        _toggleLend(safe, false);
+        vm.warp(block.timestamp + modeDelay + 1);
+        // matured but not processed: the views already report the opt-out, the collateral is still on Aave
+        assertTrue(cashModule.isLendOptedOut(safe), "matured opt-out reported before processing");
+        assertGt(gw.suppliedOf(safe, address(usdc)), 0, "collateral still on Aave");
+
+        address dispatcher = cashModule.getSettlementDispatcher(BinSponsor.Reap);
+        uint256 dispatcherBefore = usdc.balanceOf(dispatcher);
+        vm.prank(devAdmin);
+        cashModule.spend(safe, keccak256("optout-lazy"), BinSponsor.Reap, _addr1(address(usdc)), _uint1(10e6), _noCashback());
+
+        assertEq(usdc.balanceOf(dispatcher), dispatcherBefore + 10e6, "spend settled");
+        assertApproxEqAbs(gw.suppliedOf(safe, address(usdc)), 0, 1, "the spend lazily unwound the collateral");
+        assertApproxEqAbs(usdc.balanceOf(safe), 90e6, 2, "the rest was left loose");
+
+        // an opted-out safe cannot re-enter Credit mode
+        bytes memory modeSig = _setModeSig(safe, Mode.Credit);
+        vm.expectRevert();
+        cashModule.setMode(safe, Mode.Credit, ownerA, modeSig);
+    }
+
     /// Opting back in is instant (no delay): the pending request clears and the next sweep supplies again.
     /// The matured opt-out first unwound the safe's Aave collateral back to the safe.
     function test_optOut_optBackInIsInstant() public {
@@ -492,5 +575,32 @@ contract LendDevFlowsTest is LendDevTestBase {
         EtherFiHook hook = EtherFiHook(stdJson.readAddress(baseJson, ".addresses.EtherFiHook"));
         vm.prank(safe);
         hook.postOpHook(address(liquidModule));
+    }
+
+    // ----------------------------------------------------------------- helpers
+
+    /// @dev If the live gateway is missing a spend asset (SetSpendAssetsDev not yet broadcast), patch it on
+    ///      the fork so the flow test still validates everything downstream; test_deployedConfig_spendAssets
+    ///      stays red until the live chain is fixed. Mirrors the default-module patch in the base.
+    function _ensureSpendAsset(address token) internal {
+        if (gw.isSpendAsset(token)) return;
+        console.log("WARNING: not a spend asset on the live gateway; patching on the fork:", token);
+        bytes32 adminRole = gw.LEND_GATEWAY_ADMIN_ROLE();
+        if (!registry.hasRole(adminRole, devAdmin)) {
+            vm.prank(devAdmin);
+            registry.grantRole(adminRole, devAdmin);
+        }
+        if (!gw.isRegistered(token)) {
+            uint256 count = spoke.getReserveCount();
+            for (uint256 reserveId = 0; reserveId < count; ++reserveId) {
+                if (spoke.getReserve(reserveId).underlying == token) {
+                    vm.prank(devAdmin);
+                    gw.setReserveId(token, reserveId);
+                    break;
+                }
+            }
+        }
+        vm.prank(devAdmin);
+        gw.setSpendAsset(token, true);
     }
 }

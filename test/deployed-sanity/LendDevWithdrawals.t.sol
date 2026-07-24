@@ -18,8 +18,9 @@ contract RetireHarness is RetireOldModulesDev {
 /**
  * @title LendDevWithdrawalsTest
  * @notice Withdrawal edges of the Lend dev deployment against the LIVE Optimism dev contracts on a fork:
- *         reservation accounting, cancellation, module-requested withdrawals, and a rehearsal of the
- *         future retire pass showing why the pending-withdrawal scan must run first.
+ *         reservation accounting, cancellation, repay sourcing across the reservation, module-requested
+ *         withdrawals, and a rehearsal of the future retire pass showing why the pending-withdrawal scan
+ *         must run first.
  */
 contract LendDevWithdrawalsTest is LendDevTestBase {
     /// A pending withdrawal reserves its amount: the sweep only supplies the unreserved remainder, and the
@@ -72,6 +73,43 @@ contract LendDevWithdrawalsTest is LendDevTestBase {
         cashModule.supplyToLend(safe, _addr1(address(usdc)));
         assertApproxEqAbs(gw.suppliedOf(safe, address(usdc)), 100e6, 2, "freed balance fully supplied");
         assertEq(usdc.balanceOf(safe), 0, "nothing left loose");
+    }
+
+    /// A gateway repay sources across all three pots — unreserved loose balance, then the Aave-supplied
+    /// balance, then the withdrawal-reserved loose balance — where the repay outranks the pending
+    /// withdrawal and cancels it.
+    function test_repay_sourcesAllPotsAndCancelsWithdrawal() public {
+        _seedAaveUsdcLiquidity();
+        address safe = _deploySafe("lend-dev-repay-pots", true);
+        deal(address(weETH), safe, 1 ether);
+        vm.prank(devAdmin);
+        cashModule.supplyToLend(safe, _addr1(address(weETH)));
+
+        uint256 borrowUsd = gw.getAccountData(safe).availableBorrowsUsd / 4;
+        cashModule.borrow(safe, address(usdc), borrowUsd, _signers(), _borrowSigs(safe, address(usdc), borrowUsd));
+        uint256 debt = gw.debtOf(safe, address(usdc));
+        assertGt(debt, 0, "borrow created Aave debt");
+
+        // A withdrawal request pulls most of the re-supplied borrow proceeds loose, where they sit
+        // reserved: a supplied sliver of ~2e6 remains, and the whole loose balance belongs to the request.
+        deal(address(usdc), safe, 10e6);
+        uint256 supplied = gw.suppliedOf(safe, address(usdc));
+        _requestWithdrawal(safe, address(usdc), 10e6 + supplied - 2e6);
+        assertApproxEqAbs(gw.suppliedOf(safe, address(usdc)), 2e6, 2, "a sliver stays supplied");
+
+        // A full repay: pot 1 is empty (all loose reserved), pot 2 draws the supplied sliver, and pot 3
+        // takes the reserved balance, cancelling the request.
+        vm.prank(devAdmin);
+        cashModule.repay(safe, address(usdc), borrowUsd * 2);
+
+        assertApproxEqAbs(gw.debtOf(safe, address(usdc)), 0, 1, "debt fully repaid");
+        assertApproxEqAbs(gw.suppliedOf(safe, address(usdc)), 0, 2, "the supplied sliver was drawn (pot 2)");
+        assertApproxEqAbs(usdc.balanceOf(safe), 10e6, 1e6, "the reserved leg funded the rest (pot 3)");
+
+        // the withdrawal request is gone: nothing left to process after the delay
+        vm.warp(block.timestamp + withdrawalDelay + 1);
+        vm.expectRevert();
+        cashModule.processWithdrawal(safe);
     }
 
     /// A module-requested withdrawal pays out to the requesting module, and the requester policy holds:
