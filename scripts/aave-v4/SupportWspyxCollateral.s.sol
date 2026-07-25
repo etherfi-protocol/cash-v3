@@ -33,8 +33,6 @@ import { AddSummerLendCollateral } from "./AddSummerLendCollateral.s.sol";
 contract SupportWspyxCollateral is AddSummerLendCollateral {
     /// @dev iwSPYx ShadowOFT on Optimism (cash-mainnet-asset-listing deployments/dev/10)
     address constant IWSPYX = 0xc83305D859EAc5E34B6aa00b4a45bDC13b2F3869;
-    /// @dev OracleSinkPriceFeed "iwSPYx / USD" (deployments/dev/10/aave-v4-test.json .details.iwSPYx.oracle)
-    address constant IWSPYX_USD_FEED = 0x35A128DBD92ef6B5C017F8D09E306ab74e8e2ae2;
 
     uint16 constant COLLATERAL_FACTOR_BPS = 73_00;
     uint32 constant MAX_LIQUIDATION_BONUS_BPS = 10_750; // collateral paid out per unit of debt: 100% + 7.5%
@@ -56,12 +54,14 @@ contract SupportWspyxCollateral is AddSummerLendCollateral {
         string memory cashLendJson = vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/cash-lend.json"));
         LendGateway gateway = LendGateway(stdJson.readAddress(cashLendJson, ".lendGateway"));
 
-        _requireLivePrice(IWSPYX_USD_FEED, "iwSPYx / USD");
+        // The current "iwSPYx / USD" OracleSinkPriceFeed, kept fresh by RefreshSummerLendOracles
+        address iwspyxUsdFeed = stdJson.readAddress(vm.readFile(jsonPath), ".details.iwSPYx.oracle");
+        _requireLivePrice(iwspyxUsdFeed, "iwSPYx / USD");
 
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
 
         // 1. Aave v4: collateral-only reserve on the OracleSink feed
-        _list(IWSPYX, IWSPYX_USD_FEED, COLLATERAL_FACTOR_BPS, MAX_LIQUIDATION_BONUS_BPS);
+        _list(IWSPYX, iwspyxUsdFeed, COLLATERAL_FACTOR_BPS, MAX_LIQUIDATION_BONUS_BPS);
         uint256 reserveId = _reserveIdOf(IWSPYX);
 
         // 2. LendGateway: mirror the reserve into the gateway registry (no-op when unchanged)

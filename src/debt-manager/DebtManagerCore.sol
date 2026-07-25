@@ -815,7 +815,8 @@ contract DebtManagerCore is DebtManagerStorageContract {
         uint256 debtTokenAmt = convertUsdToCollateralToken(token, debtUsd);
 
         $.userNormalizedBorrowings[safe][token] = 0;
-        $.borrowTokenConfig[token].totalNormalizedBorrowingAmount -= normalizedAmount;
+        $.borrowTokenConfig[token].totalNormalizedBorrowingAmount = 
+            $.borrowTokenConfig[token].totalNormalizedBorrowingAmount > normalizedAmount ? $.borrowTokenConfig[token].totalNormalizedBorrowingAmount - normalizedAmount : 0; 
 
         emit Repaid(safe, address(this), token, debtUsd);
         return debtTokenAmt;
