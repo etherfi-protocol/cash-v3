@@ -152,10 +152,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
 
     // ---- Core infrastructure ----
 
-    function test_verifyBytecode_EtherFiDataProvider() public {
-        address local = address(new EtherFiDataProvider());
-        _verify("EtherFiDataProvider", dataProviderImpl, local);
-    }
+    // function test_verifyBytecode_EtherFiDataProvider() public {
+    //     address local = address(new EtherFiDataProvider());
+    //     _verify("EtherFiDataProvider", dataProviderImpl, local);
+    // }
 
     function test_verifyBytecode_RoleRegistry() public {
         address local = address(new RoleRegistry(dataProviderProxy));

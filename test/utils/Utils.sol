@@ -30,10 +30,13 @@ struct ChainConfig {
     uint32 settlementDestEid;
     // EtherFi Stake (optional)
     address syncPool;
-    // Midas (optional)
-    address midasToken;
-    address midasDepositVault;
-    address midasRedemptionVault;
+    // Liquid Reserve
+    address liquidReserve;
+    address liquidReserveDepositVault;
+    address liquidReserveRedemptionVault;
+    address liquidEUR;
+    address liquidEURDepositVault;
+    address liquidEURRedemptionVault;
     // Frax (optional)
     address fraxusd;
     address fraxCustodian;
@@ -101,9 +104,12 @@ contract Utils is Test {
         config.stargateEthPool = _tryReadAddress(json, string.concat(base, "stargateEthPool"));
         config.settlementDestEid = _tryReadUint32(json, string.concat(base, "settlementDestEid"));
         config.syncPool = _tryReadAddress(json, string.concat(base, "syncPool"));
-        config.midasToken = _tryReadAddress(json, string.concat(base, "midasToken"));
-        config.midasDepositVault = _tryReadAddress(json, string.concat(base, "midasDepositVault"));
-        config.midasRedemptionVault = _tryReadAddress(json, string.concat(base, "midasRedemptionVault"));
+        config.liquidReserve = _tryReadAddress(json, string.concat(base, "liquidReserve"));
+        config.liquidReserveDepositVault = _tryReadAddress(json, string.concat(base, "liquidReserveDepositVault"));
+        config.liquidReserveRedemptionVault = _tryReadAddress(json, string.concat(base, "liquidReserveRedemptionVault"));
+        config.liquidEUR = _tryReadAddress(json, string.concat(base, "liquidEUR"));
+        config.liquidEURDepositVault = _tryReadAddress(json, string.concat(base, "liquidEURDepositVault"));
+        config.liquidEURRedemptionVault = _tryReadAddress(json, string.concat(base, "liquidEURRedemptionVault"));
         config.fraxusd = _tryReadAddress(json, string.concat(base, "fraxusd"));
         config.fraxCustodian = _tryReadAddress(json, string.concat(base, "fraxCustodian"));
         config.fraxRemoteHop = _tryReadAddress(json, string.concat(base, "fraxRemoteHop"));
