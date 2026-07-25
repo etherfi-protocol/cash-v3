@@ -5,14 +5,18 @@ import { console } from "forge-std/console.sol";
 
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
+import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
+import { IOracleSink } from "../../src/interfaces/IOracleSink.sol";
+import { OracleSinkPriceFeed } from "../../src/oracle/OracleSinkPriceFeed.sol";
 import { AddSummerLendCollateral } from "./AddSummerLendCollateral.s.sol";
 
 /**
  * @title RefreshSummerLendOracles
  * @notice Redeploys the entire Summer Lend price feed set (same composition as
  *         AddSummerLendCollateral: shared staleness-checked Chainlink legs, Pyth per-pair feeds,
- *         Veda accountant feeds, Midas composed feeds) and repoints every listed reserve on the
- *         Aave v4 TEST instance at the fresh feeds via `updateReservePriceSource`.
+ *         Veda accountant feeds, Midas composed feeds, plus the dev-only iwSPYx OracleSink feed)
+ *         and repoints every listed reserve on the Aave v4 TEST instance at the fresh feeds via
+ *         `updateReservePriceSource`.
  *
  *         Expects all reserves to already be listed (AddSummerLendCollateral has run) and the
  *         `updateReservePriceSource` selector to already be mapped to SPOKE_ADMIN_ROLE (that
@@ -22,19 +26,32 @@ import { AddSummerLendCollateral } from "./AddSummerLendCollateral.s.sol";
  *         deployments/<env>/<chain>/aave-v4-test.json; a symbol missing from `details` fails the
  *         dry run before anything is broadcast.
  *
- * Usage (simulate by dropping --broadcast; the broadcast wallet must hold SPOKE_ADMIN_ROLE):
+ * Usage (simulate by dropping --broadcast; the sender must hold SPOKE_ADMIN_ROLE, i.e. the dev admin):
  *   source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
  *     scripts/aave-v4/RefreshSummerLendOracles.s.sol:RefreshSummerLendOracles \
- *     --rpc-url $OPTIMISM_RPC --broadcast --verify --etherscan-api-key $ETHERSCAN_KEY -vvvv
+ *     --rpc-url $OPTIMISM_RPC --account dev-admin --sender <dev admin> \
+ *     --broadcast --verify --etherscan-api-key $ETHERSCAN_KEY -vvvv
  */
 contract RefreshSummerLendOracles is AddSummerLendCollateral {
+    /// @dev Dev OracleSink on Optimism (cash-mainnet-asset-listing deployments/dev/10)
+    address constant ORACLE_SINK = 0x83Ba7f354B705C34935437526Cf318c77d9093Aa;
+    /// @dev Mainnet wSPYx, the OracleSink price key (the relay ships mainnet token addresses)
+    address constant WSPYX_MAINNET = 0xc88FcD8B874fDb3256E8B55b3decB8c24EAb4c02;
+    /// @dev iwSPYx ShadowOFT on Optimism (cash-mainnet-asset-listing deployments/dev/10)
+    address constant IWSPYX = 0xc83305D859EAc5E34B6aa00b4a45bDC13b2F3869;
+    /// @dev Chainlink SPY/USD (24/5) aggregator on Optimism; staleness spans the weekend close gap
+    address constant SPY_USD_FEED = 0x5F77134CfAA7DB2906649Ca21C50dA54daE9291d;
+    uint256 constant SPY_USD_MAX_STALENESS = 78 hours;
+    /// @dev Max age of the relay's source-chain read; matches the sink's own dev window
+    uint256 constant SINK_RATE_MAX_STALENESS = 7 days;
+
     function run() public override {
         require(block.chainid == 10, "Must run on Optimism (10)");
         require(isEqualString(vm.envOr("FOUNDRY_PROFILE", string("default")), "aave-deploy"), "Run with FOUNDRY_PROFILE=aave-deploy");
 
         _loadInstance();
 
-        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
+        vm.startBroadcast();
 
         // One staleness-checked ChainlinkPriceFeed per Chainlink oracle, shared as direct sources
         // and as underlying legs
@@ -71,6 +88,16 @@ contract RefreshSummerLendOracles is AddSummerLendCollateral {
         _update(WETH, ethUsd);
         _update(OP, opUsd);
         _update(FRXUSD, frxUsdUsd);
+
+        // iwSPYx: relayed wSPYx -> SPYx rate from the OracleSink x SPY/USD (see
+        // DeployWspyxOracleSinkFeed). Dev-only: the OracleSink address is the dev deployment.
+        if (isEqualString(getEnv(), "dev")) {
+            address spyUsd = _chainlink(SPY_USD_FEED, address(0), SPY_USD_MAX_STALENESS, false, "SPY / USD");
+            OracleSinkPriceFeed iwspyxUsd = new OracleSinkPriceFeed(IOracleSink(ORACLE_SINK), WSPYX_MAINNET, IAaveV4PriceFeed(spyUsd), FEED_DECIMALS, SINK_RATE_MAX_STALENESS, false, "iwSPYx / USD");
+            _requireLivePrice(address(iwspyxUsd), "iwSPYx / USD");
+            _update(IWSPYX, address(iwspyxUsd));
+            vm.writeJson(vm.toString(spyUsd), jsonPath, ".details.iwSPYx.spyUsdLeg");
+        }
 
         // Deploy-time reserves (their ids come from the deployment json, not a token scan)
         address weethUsd = _chainlink(WEETH_ETH_ORACLE, ethUsd, CHAINLINK_MAX_STALENESS, false, "weETH / USD");

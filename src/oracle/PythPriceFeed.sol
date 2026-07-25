@@ -51,50 +51,49 @@ contract PythPriceFeed is BaseAaveV4PriceFeed {
     /// @notice The Pyth core contract, discovered from the adapter
     IPyth public immutable pyth;
     /// @notice The Pyth feed ids the adapter prices with (zero = unused slot), discovered from the adapter
-    bytes32 public immutable feedId1;
-    bytes32 public immutable feedId2;
-    bytes32 public immutable feedId3;
-    bytes32 public immutable feedId4;
+    bytes32 public immutable baseFeedId1;
+    bytes32 public immutable baseFeedId2;
+    bytes32 public immutable quoteFeedId1;
+    bytes32 public immutable quoteFeedId2;
     /// @notice The maximum age in seconds for every Pyth publish time before the price is rejected
     uint256 public immutable maxStaleness;
-    /// @notice The decimals of the oracle's price
-    uint8 public immutable oracleDecimals;
 
     /// @notice Thrown when a USD-quoted oracle's decimals are lower than the feed decimals
     error UnsupportedDecimals();
 
-    constructor(IPythPairOracle _oracle, uint8 _oracleDecimals, uint8 _feedDecimals, IAaveV4PriceFeed _underlyingUsdFeed, uint256 _maxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _isStableToken, feedDescription) {
+    constructor(IPythPairOracle _oracle, uint8 _rateDecimals, uint8 _feedDecimals, IAaveV4PriceFeed _underlyingUsdFeed, uint256 _maxStaleness, bool _isStableToken, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, _rateDecimals, _isStableToken, feedDescription) {
         // USD-quoted pair: the oracle must be at least as precise as the reported feed decimals
-        if (address(_underlyingUsdFeed) == address(0)) require(_oracleDecimals >= _feedDecimals, UnsupportedDecimals());
+        if (address(_underlyingUsdFeed) == address(0)) {
+            require(_rateDecimals >= _feedDecimals, UnsupportedDecimals());
+        }
         require(_maxStaleness > 0, InvalidMaxStaleness());
 
         oracle = _oracle;
         pyth = IPyth(_oracle.pyth());
-        feedId1 = _oracle.BASE_FEED_1();
-        feedId2 = _oracle.BASE_FEED_2();
-        feedId3 = _oracle.QUOTE_FEED_1();
-        feedId4 = _oracle.QUOTE_FEED_2();
+        baseFeedId1 = _oracle.BASE_FEED_1();
+        baseFeedId2 = _oracle.BASE_FEED_2();
+        quoteFeedId1 = _oracle.QUOTE_FEED_1();
+        quoteFeedId2 = _oracle.QUOTE_FEED_2();
         maxStaleness = _maxStaleness;
-        oracleDecimals = _oracleDecimals;
     }
 
     /// @notice The latest USD price: the pair price, times the underlying USD price when configured
     function latestAnswer() external view returns (int256) {
-        _requireFresh(feedId1);
-        _requireFresh(feedId2);
-        _requireFresh(feedId3);
-        _requireFresh(feedId4);
+        _requireFresh(baseFeedId1);
+        _requireFresh(baseFeedId2);
+        _requireFresh(quoteFeedId1);
+        _requireFresh(quoteFeedId2);
 
         uint256 price = oracle.price();
-        require(price > 0, InvalidPrice());
+        if (price == 0) revert InvalidPrice();
 
-        return _composeUsd(price, oracleDecimals);
+        return _composeUsd(price);
     }
 
     /// @dev Enforces the feed's own staleness bound against the Pyth publish time; zero ids are unused slots
     function _requireFresh(bytes32 feedId) private view {
         if (feedId == bytes32(0)) return;
         uint256 publishTime = pyth.getPriceUnsafe(feedId).publishTime;
-        require(block.timestamp <= publishTime + maxStaleness, StalePrice());
+        if (block.timestamp > publishTime + maxStaleness) revert StalePrice();
     }
 }
