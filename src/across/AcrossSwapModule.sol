@@ -4,12 +4,12 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-import { ICashModule } from "../interfaces/ICashModule.sol";
-import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ISpokePool } from "../interfaces/ISpokePool.sol";
 import { ModuleBase } from "../modules/ModuleBase.sol";
+import { ModuleCheckBalance } from "../modules/ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../modules/ModuleLendGatewaySandwich.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
@@ -34,8 +34,14 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *
  *      Per-chain config (SpokePool, MulticallHandler) is admin-set; the module is otherwise
  *      stateless across safes apart from the one-active-swap-per-safe map.
+ *
+ *      A gateway safe's input may be supplied to Aave, so `executeSwap` runs the lend-gateway
+ *      sandwich's front bookend (withdraw any input shortfall from the safe's Aave position)
+ *      and takes the health-factor floor at the end. Every route bridges the output away from
+ *      this chain, so there is no resupply half. Every bookend is skipped where `cashModule`
+ *      is zero (no card spending, no gateway).
  */
-contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
+contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySandwich, UpgradeableProxy {
     using MessageHashUtils for bytes32;
 
     /// @notice User-signed swap intent. One per safe at a time.
@@ -97,9 +103,6 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("AcrossSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("AcrossSwapModule.cancelSwap");
 
-    /// @notice CashModule on the same chain. Zero where there is no card spending.
-    ICashModule public immutable cashModule;
-
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id. `srcToken` / `dstChainId` are no longer
     ///      indexed to stay within the 3-topic limit; both remain in the event data.
@@ -151,11 +154,11 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
     /// @notice Reverts when an origin-swap request is made before the periphery is configured.
     error PeripheryNotAllowlisted();
 
-    /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's
-    ///      code — every upgrade impl must be constructed with the same data provider.
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
+    ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
+    ///      `cashModule` is zero where there is no card spending (and therefore no lend gateway).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
-        cashModule = ICashModule(IEtherFiDataProvider(_etherFiDataProvider).getCashModule());
+    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         _disableInitializers();
     }
 
@@ -360,10 +363,22 @@ contract AcrossSwapModule is ModuleBase, UpgradeableProxy {
         }
 
         delete $.swaps[safe];
-        if (address(cashModule) != address(0)) cashModule.cancelWithdrawalByModule(safe);
+        if (address(cashModule) != address(0)) {
+            cashModule.cancelWithdrawalByModule(safe);
+            // Front bookend: request-time sourcing normally leaves the input loose through the delay;
+            // this re-pulls any shortfall from the safe's Aave position and asserts the full input is
+            // present before the safe approves the target. Runs after the cancel so the released
+            // reservation no longer masks the loose balance.
+            _pullAndRequire(safe, swap.order.srcToken, swap.order.srcAmount);
+        }
 
         if (swap.swapData.length != 0) _dispatchOriginSwap(safe, swap);
         else _dispatchDeposit(safe, swap);
+
+        // The input was collateral pulled out of Aave (at request or just above) and every route
+        // bridges it away from this chain, so the end state must sit at or above the gateway's
+        // health-factor floor. Nothing lands back at the safe here, hence no resupply half.
+        if (address(cashModule) != address(0)) _ensureGatewayFloor(safe);
 
         emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.depositArgs.outputAmount);
     }
