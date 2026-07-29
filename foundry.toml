@@ -23,7 +23,12 @@ skip = ["test/safe/modules/cash/lend/**", "scripts/aave-v4/**", "src/aave-v4/**"
 # so pin it to a fixed address; AaveV4Fixture etches the library's runtime code there before deploying.
 [profile.lend]
 skip = []
-libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x0000000000000000000000000000000000000A01"]
+# Linked at LiquidationLogic's real deterministic CREATE2 address (Safe Singleton Factory, salt 0,
+# current aave-v4 bytecode) so the compiled EtherFiSpokeInstance artifact is byte-identical to the
+# whitelabel instance deployment from the aave-v4 launch branch; AaveV4Fixture etches the library's
+# runtime code there before deploying.
+libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x818E84198224535FAeaEc1b583d3Ff6b812A5AF3"]
+
 
 # Modest bounds: each handler call drives real Aave ops on the fork, so keep the campaign small.
 [profile.lend.invariant]

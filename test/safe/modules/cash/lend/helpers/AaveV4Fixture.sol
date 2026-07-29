@@ -20,6 +20,7 @@ import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 import { ITreasurySpoke } from "aave-v4/spoke/interfaces/ITreasurySpoke.sol";
 
 import { EtherFiSpokeInstance } from "../../../../../../src/aave-v4/EtherFiSpokeInstance.sol";
+import { IEtherFiDataProvider } from "../../../../../../src/interfaces/IEtherFiDataProvider.sol";
 
 /// @dev Minimal init interface shared by the hub/spoke/treasury proxy implementations
 interface IProxyInit {
@@ -49,8 +50,10 @@ abstract contract AaveV4Fixture is Test {
     AssetInterestRateStrategy internal irStrategy;
     ITreasurySpoke internal treasurySpoke;
 
-    /// @notice Fixed link address for LiquidationLogic (see foundry.toml `[profile.lend]` libraries)
-    address internal constant LIQUIDATION_LOGIC = 0x0000000000000000000000000000000000000a01;
+    /// @notice Fixed link address for LiquidationLogic (see foundry.toml `[profile.lend]` libraries):
+    ///         the library's real deterministic CREATE2 address (Safe Singleton Factory, salt 0), so
+    ///         the spoke artifact matches the whitelabel deployment byte for byte.
+    address internal constant LIQUIDATION_LOGIC = 0x818E84198224535FAeaEc1b583d3Ff6b812A5AF3;
 
     /// @notice Deploys and wires a full Aave v4 instance (access manager, hub, spoke, oracle, treasury).
     ///         `etherFiDataProvider` feeds the gated spoke's isEtherFiSafe borrow check.
@@ -72,7 +75,15 @@ abstract contract AaveV4Fixture is Test {
 
         // Oracle (8-decimal USD) + Spoke (proxy over SpokeInstance); the oracle deployer wires the spoke
         oracle = IAaveOracle(address(new AaveOracle(8)));
-        address spokeImpl = address(new EtherFiSpokeInstance(address(oracle), type(uint16).max, etherFiDataProvider));
+        address spokeImpl = address(new EtherFiSpokeInstance(address(oracle), type(uint16).max));
+        // The gated spoke reads the prod EtherFiDataProvider address baked into its bytecode
+        // (audit-identical to the whitelabel deployment); etch a forwarder there that staticcalls
+        // this environment's provider, so its per-account state AND any vm.mockCall interceptors
+        // registered on the provider keep working.
+        vm.etch(
+            EtherFiSpokeInstance(spokeImpl).ETHERFI_DATA_PROVIDER(),
+            address(new DataProviderForwarder(etherFiDataProvider)).code
+        );
         spoke = ISpoke(_proxify(spokeImpl, abi.encodeCall(IProxyInit.initialize, (address(accessManager)))));
         oracle.setSpoke(address(spoke));
 
@@ -210,5 +221,26 @@ abstract contract AaveV4Fixture is Test {
 
     function _proxify(address impl, bytes memory initData) private returns (address) {
         return address(new TransparentUpgradeableProxy(impl, aaveAdmin, initData));
+    }
+}
+
+/// @dev Etched at the gated spoke's baked prod EtherFiDataProvider address in tests: forwards every
+///      call (isEtherFiSafe is view, hence staticcall) to the test environment's provider. The
+///      target rides in the runtime code as an immutable, so the etched copy keeps it.
+contract DataProviderForwarder {
+    address private immutable target;
+
+    constructor(address target_) {
+        target = target_;
+    }
+
+    fallback(bytes calldata data) external returns (bytes memory) {
+        (bool ok, bytes memory ret) = target.staticcall(data);
+        if (!ok) {
+            assembly {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
+        return ret;
     }
 }
