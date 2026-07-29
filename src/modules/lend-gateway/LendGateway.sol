@@ -32,6 +32,13 @@ import { LendCapacityLib } from "./LendCapacityLib.sol";
  *         live from the data provider); further drivers are added by a LEND_GATEWAY_ADMIN_ROLE holder. A position
  *         manager can move user funds, so who may drive it is the most security-critical surface in this contract.
  *
+ *      Invariant: assets only leave a safe's position through this gateway, so every exit lands in the safe
+ *      (behind the Cash withdrawal delay) or card settlement (behind spend checks); liquidation at HF < 1 is
+ *      the only exception. Two conditions keep it: no position manager other than this gateway is ever
+ *      activated on the Spoke (spoke admin controlled), and EtherFiSafe never implements ERC-1271
+ *      isValidSignature. Breaking either arms the Spoke's setUserPositionManagersWithSig, letting safe owners
+ *      hand the position to another manager by signature alone and withdraw collateral with no delay.
+ *
  *      Aave v4 addresses reserves by a uint256 reserveId, not by asset address. The gateway keeps its own
  *      asset -> reserveId registry, each entry validated against the Spoke's getReserve at registration time.
  *
