@@ -744,6 +744,9 @@ contract DebtManagerCore is DebtManagerStorageContract {
             for (uint256 i = 0; i < cLen;) {
                 uint256 bal = _suppliableBalance(cashModule, safe, collateralTokens[i]);
                 if (bal != 0) {
+                    // Typed pre-check mirroring the borrow side, so a reserve that cannot take the
+                    // supply surfaces as a routable error for the runner, not a raw Aave revert
+                    if (_gateway.supplyHeadroom(collateralTokens[i]) < bal) revert LendGatewayCannotAcceptSupply(collateralTokens[i]);
                     _gateway.supply(safe, collateralTokens[i], bal);
                 }
                 unchecked {

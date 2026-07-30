@@ -51,6 +51,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- happy path
 
+    /// @dev The happy path: legacy debt clears, collateral and debt re-home to Aave atomically, nothing strands.
     function test_migrateToLendGateway_atomic_noFlashLoan() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
@@ -84,6 +85,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- reverts
 
+    /// @dev A position that fits DebtManager's LTV but not Aave's reverts with the typed LTV-fit error.
     function test_migrateToLendGateway_revertsWhenExceedsAaveLtv() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
@@ -98,6 +100,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         dm.migrateToLendGateway(address(safe));
     }
 
+    /// @dev An Aave reserve that cannot fund the re-borrow reverts with the typed liquidity error.
     function test_migrateToLendGateway_revertsWhenInsufficientLendGatewayLiquidity() public {
         // No Aave liquidity seeded → the reserve cannot fund the borrow
         deal(address(weETH), address(safe), 10 ether);
@@ -110,6 +113,18 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         dm.migrateToLendGateway(address(safe));
     }
 
+    /// @dev An Aave reserve that cannot take the collateral supply (here: at its addCap) reverts with the
+    ///      typed error instead of Aave's raw AddCapExceeded, so a batch runner can route the Safe.
+    function test_migrateToLendGateway_revertsWhenReserveCannotAcceptSupply() public {
+        deal(address(weETH), address(safe), 10 ether);
+        _setAaveSpokeCaps(weethReserveId, 1, type(uint40).max);
+
+        vm.prank(migrator);
+        vm.expectRevert(abi.encodeWithSelector(DebtManagerStorageContract.LendGatewayCannotAcceptSupply.selector, address(weETH)));
+        dm.migrateToLendGateway(address(safe));
+    }
+
+    /// @dev A debt-free safe still migrates: its collateral moves to Aave so post-migration credit spends work.
     function test_migrateToLendGateway_noDebt_suppliesCollateralAndMarksMigrated() public {
         deal(address(weETH), address(safe), 10 ether); // collateral but no debt
         assertFalse(dm.hasMigratedToLendGateway(address(safe)));
@@ -190,12 +205,14 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         assertEq(weETH.balanceOf(address(safe)), 0, "safe holds nothing loose afterwards");
     }
 
+    /// @dev Only the DebtManager may flip the CashModule's engine routing flag.
     function test_markUsesLendGateway_onlyDebtManager() public {
         vm.prank(makeAddr("rando"));
         vm.expectRevert(ICashModule.OnlyDebtManager.selector);
         cashModule.markUsesLendGateway(address(safe));
     }
 
+    /// @dev Migration is gated to the EtherFi wallet role; anyone else is rejected.
     function test_migrateToLendGateway_onlyEtherFiWallet() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 10 ether);
@@ -208,6 +225,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         dm.migrateToLendGateway(address(safe));
     }
 
+    /// @dev After migration the legacy engine is frozen: DebtManager borrow and repay both reject the safe.
     function test_migratedSafe_cannotBorrowOrRepayOnDebtManager() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
         deal(address(weETH), address(safe), 10 ether);

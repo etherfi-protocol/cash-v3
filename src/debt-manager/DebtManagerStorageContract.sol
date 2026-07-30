@@ -399,6 +399,9 @@ contract DebtManagerStorageContract is UpgradeableProxy {
     /// @notice Thrown when the Aave reserve lacks the liquidity to fund the migration borrow
     error InsufficientLendGatewayLiquidity(address token);
 
+    /// @notice Thrown when an Aave reserve cannot take the migration supply (paused, frozen, halted, or past its cap)
+    error LendGatewayCannotAcceptSupply(address token);
+
     /// @notice Thrown when, after supplying its collateral, the Safe's debt does not fit Aave's LTVs
     error PositionExceedsLendGatewayLtv();
 
