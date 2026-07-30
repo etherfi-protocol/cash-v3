@@ -215,7 +215,10 @@ library CashLensLegacyLib {
             address token = tokens[i];
             if (!debtManager.isBorrowToken(token)) revert NotABorrowToken();
 
-            effectiveBalances[i] = IERC20(token).balanceOf(safe) - _pendingWithdrawalAmount(safeData, token);
+            uint256 balance = IERC20(token).balanceOf(safe);
+            uint256 pending = _pendingWithdrawalAmount(safeData, token);
+            // The balance can drop below the reservation after the request; clamp instead of underflowing
+            effectiveBalances[i] = balance > pending ? balance - pending : 0;
 
             if (effectiveBalances[i] > 0) {
                 tokenValuesInUsd[i] = debtManager.convertCollateralTokenToUsd(token, effectiveBalances[i]);
@@ -332,7 +335,8 @@ library CashLensLegacyLib {
             uint256 pendingWithdrawalAmount = _pendingWithdrawalAmount(safeData, collateralTokens[i]);
 
             if (balance != 0) {
-                balance = balance - pendingWithdrawalAmount;
+                // The balance can drop below the reservation after the request; clamp instead of underflowing
+                balance = balance > pendingWithdrawalAmount ? balance - pendingWithdrawalAmount : 0;
 
                 if (mode == Mode.Debit) {
                     // Subtract the spend amount when this collateral token is being spent
