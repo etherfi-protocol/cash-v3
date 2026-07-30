@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
-import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { BeaconFactory, UpgradeableBeacon } from "../../src/beacon-factory/BeaconFactory.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
@@ -14,6 +13,7 @@ import { CashModuleCore } from "../../src/modules/cash/CashModuleCore.sol";
 import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { Utils } from "../utils/Utils.sol";
+import { CashLendProdConfig } from "./CashLendProdConfig.sol";
 
 /**
  * @title VerifyCashLendProd
@@ -25,20 +25,23 @@ import { Utils } from "../utils/Utils.sol";
  *         not read from a mutable record — so this catches a swapped-in impl at an unexpected
  *         address (hijack detection), stale pointers, and missing configuration.
  *
+ *         The salts resolve through the protocol's permissioned deployer (EtherFiDeployer), so an
+ *         address matching here could only have been deployed by a registered deployer. Under a
+ *         public factory this check would be far weaker: anyone can occupy a known-salt CREATE3
+ *         address, so "impl slot holds the predicted address" would not imply "impl holds our code".
+ *
  * Usage:
  *   source .env && ENV=mainnet forge script scripts/lend/VerifyCashLendProd.s.sol:VerifyCashLendProd \
  *     --rpc-url $OPTIMISM_RPC -vvvv
  */
-contract VerifyCashLendProd is Utils {
-    bytes32 internal constant EIP1967_IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-    // roleRegistry slot of UpgradeableProxy's ERC-7201 namespaced storage (hijack detection).
-    bytes32 internal constant UPGRADEABLE_PROXY_ROLE_REGISTRY_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
-    address internal constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-    address internal constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-
+contract VerifyCashLendProd is Utils, CashLendProdConfig {
     function run() public view {
         require(block.chainid == 10, "Optimism only");
         require(isEqualString(getEnv(), "mainnet"), "ENV must be mainnet");
+        require(
+            stdJson.readAddress(vm.readFile(string.concat(vm.projectRoot(), DEPLOYER_RECORD_PATH)), ".EtherFiDeployer") == ETHERFI_DEPLOYER,
+            "ETHERFI_DEPLOYER does not match deployments/deployer/etherfi-deployer.json"
+        );
 
         string memory json = readDeploymentFile();
         address cashModule = _addr(json, "CashModule");
@@ -84,14 +87,14 @@ contract VerifyCashLendProd is Utils {
         for (uint256 reserveId = 0; reserveId < reserveCount; ++reserveId) {
             require(gateway.isRegistered(spoke.getReserve(reserveId).underlying), "reserve not mirrored");
         }
-        require(gateway.isSpendAsset(_fixtureAsset("usdc")), "USDC not a spend asset");
-        require(gateway.isSpendAsset(_fixtureAsset("usdt")), "USDC not a spend asset");
-        require(gateway.isSpendAsset(_fixtureAsset("eurc")), "USDC not a spend asset");
-        require(gateway.isSpendAsset(_fixtureAsset("liquidUsd")), "USDC not a spend asset");
-        require(gateway.isSpendAsset(_fixtureAsset("liquidReserve")), "USDC not a spend asset");
-        require(gateway.isSpendAsset(_fixtureAsset("liquidEUR")), "USDC not a spend asset");
-        require(gateway.isSpendAsset(_fixtureAsset("fraxusd")), "USDC not a spend asset");
-        
+        string[7] memory spendAssetKeys = _spendAssetKeys();
+        for (uint256 i = 0; i < spendAssetKeys.length; ++i) {
+            require(gateway.isSpendAsset(_fixtureAsset(spendAssetKeys[i])), string.concat(spendAssetKeys[i], " not a spend asset"));
+        }
+        // 0 is a valid value that DISABLES the floor (LendGateway.ensureMinHealthFactor no-ops), so
+        // never accept "non-zero" here — assert the exact configured buffer.
+        require(gateway.minHealthFactor() == MIN_HEALTH_FACTOR, "minHealthFactor mismatch");
+
         require(gateway.isDriver(debtManager), "DebtManager not a driver");
         require(gateway.isDriver(_addr(json, "TopUpDest")), "TopUpDest not a driver");
         require(gateway.isDriver(_addr(json, "LiquidUSDLiquifierModule")), "Liquifier not a driver");
@@ -114,8 +117,8 @@ contract VerifyCashLendProd is Utils {
     }
 
     function _verifyModules(string memory json, address cashModule, address dataProvider, LendGateway gateway) internal view {
-        string[7] memory names = ["OpenOceanModule", "LiquidModule", "LiquidReferrerModule", "FraxModule", "StakeModule", "MidasModule", "BeHYPEModule"];
-        string[7] memory oldKeys = ["OpenOceanSwapModule", "EtherFiLiquidModule", "EtherFiLiquidModuleWithReferrer", "FraxModule", "EtherFiStakeModule", "MidasModule", "BeHYPEStakeModule"];
+        string[7] memory names = _moduleSaltNames();
+        string[7] memory oldKeys = _oldModuleKeys();
         address[] memory requesters = ICashModule(cashModule).getWhitelistedModulesCanRequestWithdraw();
 
         for (uint256 i = 0; i < 7; ++i) {
@@ -145,10 +148,6 @@ contract VerifyCashLendProd is Utils {
         address expected = _predicted(saltName);
         require(_implementationOf(proxy) == expected, string.concat(label, " impl mismatch - possible hijack"));
         require(expected.code.length != 0, string.concat(label, " impl has no code"));
-    }
-
-    function _predicted(string memory name) internal pure returns (address) {
-        return CREATE3.predictDeterministicAddress(keccak256(bytes(string.concat("CashLendProd.", name))), NICKS_FACTORY);
     }
 
     function _implementationOf(address proxy) internal view returns (address) {

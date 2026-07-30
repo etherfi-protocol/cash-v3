@@ -5,7 +5,6 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { stdJson } from "forge-std/StdJson.sol";
 import { VmSafe } from "forge-std/Vm.sol";
 import { console } from "forge-std/console.sol";
-import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { BeaconFactory, UpgradeableBeacon } from "../../src/beacon-factory/BeaconFactory.sol";
@@ -35,8 +34,10 @@ import { OpenOceanSwapModule } from "../../src/modules/openocean-swap/OpenOceanS
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { EtherFiSafe } from "../../src/safe/EtherFiSafe.sol";
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
+import { EtherFiDeployer } from "../../src/utils/EtherFiDeployer.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
+import { CashLendProdConfig } from "./CashLendProdConfig.sol";
 
 /**
  * @title DeployCashLendProd
@@ -46,7 +47,10 @@ import { Utils } from "../utils/Utils.sol";
  *         1. The deployer EOA broadcasts only unprivileged CREATE3 deployments: every new
  *            implementation, the seven replacement modules (immutable, so new copies carry the old
  *            on-chain configuration), and the LendGateway proxy (initialized atomically in its
- *            constructor — never deploy-then-init).
+ *            constructor — never deploy-then-init). All of it goes through the protocol's
+ *            permissioned CREATE3 deployer (EtherFiDeployer), never a public factory, so nobody can
+ *            squat a `CashLendProd.*` address ahead of us — see _create3. The broadcaster must be in
+ *            that deployer's registry; the script asserts this before broadcasting anything.
  *         2. Every privileged call (proxy upgrades, safe-beacon upgrade, module policy, gateway
  *            config, activation) is written to output/CashLendProd-10.json for the prod Safe
  *            (0xA6cf...AAC4) to execute via the Gnosis tx builder. The script simulates the full
@@ -57,6 +61,8 @@ import { Utils } from "../utils/Utils.sol";
  *         `spoke.updatePositionManager(gateway, true)`; if the Safe does not hold the Spoke admin
  *         role on the prod instance, the simulation fails there — remove that tx and have the
  *         Spoke admin (or the AIP payload) activate the CREATE3-deterministic gateway address.
+ *         NOTE: that address derives from EtherFiDeployer, not Nick's factory — re-derive it (run
+ *         this script without --broadcast and read the summary) before handing it to anyone.
  *
  *         Module policy (default / whitelisted / withdraw-requester) is mirrored per module from
  *         the live chain rather than hardcoded, so prod-only differences (e.g. Stargate as a
@@ -73,25 +79,7 @@ import { Utils } from "../utils/Utils.sol";
  *   source .env && ENV=mainnet forge script scripts/lend/VerifyCashLendProd.s.sol \
  *     --rpc-url $OPTIMISM_RPC -vvvv
  */
-contract DeployCashLendProd is Utils, GnosisHelpers {
-    bytes32 internal constant EIP1967_IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-    address internal constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-    address internal constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-    uint256 internal constant MIN_HEALTH_FACTOR = 1.05e18;
-
-    // Candidate liquid assets on Optimism. Constructor tellers and withdraw queues are copied for
-    // whichever of these the live module has configured, so dev/prod drift is absorbed here — a
-    // NEW asset listed on prod after this script was written must be appended before running.
-    address internal constant LIQUID_ETH = 0xf0bb20865277aBd641a307eCe5Ee04E79073416C;
-    address internal constant LIQUID_USD = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
-    address internal constant LIQUID_BTC = 0x5f46d540b6eD704C3c8789105F30E075AA900726;
-    address internal constant EBTC = 0x657e8C867D8B37dCC18fA4Caead9C45EB088C642;
-    address internal constant SETHFI = 0x86B5780b606940Eb59A062aA85a07959518c0161;
-    address internal constant EUSD = 0x939778D83b46B456224A33Fb59630B11DEC56663;
-    address internal constant LIQUID_RESERVE = 0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898;
-    address internal constant LIQUID_EUR = 0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13;
-    address internal constant LIQUID_RWA = 0x17bC8Ffd82b8a36e737Ca1141C025089589B915e;
-
+contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
     struct Existing {
         address cashEventEmitter;
         address cashLens;
@@ -152,6 +140,7 @@ contract DeployCashLendProd is Utils, GnosisHelpers {
         Policy memory policy = _readPolicy(existing);
         _validateExisting(existing);
         require(RoleRegistry(existing.roleRegistry).owner() == SAFE, "RoleRegistry owner is not the prod Safe");
+        _requireDeployer(msg.sender);
 
         // ── 1. Deployer EOA: unprivileged CREATE3 deployments only ──
         vm.startBroadcast();
@@ -320,31 +309,45 @@ contract DeployCashLendProd is Utils, GnosisHelpers {
         return _create3("BeHYPEModule", abi.encodePacked(type(BeHYPEStakeModule).creationCode, args));
     }
 
-    /// @dev Idempotent CREATE3 through Nick's factory; the salt (not the initcode) fixes the address,
-    ///      so verification scripts can predict and require every deployed address exactly.
+    /// @dev Idempotent CREATE3 through the protocol's OWN permissioned deployer. The salt (not the
+    ///      initcode) fixes the address, so verification scripts can predict and require every
+    ///      deployed address exactly.
+    ///
+    ///      Why not Nick's factory: CREATE3 through a PUBLIC factory derives the address from the
+    ///      salt alone, and the intermediate CREATE3 proxy accepts a call from anybody. Our salts are
+    ///      public (this repo is public), so anyone could occupy every `CashLendProd.*` address with
+    ///      bytecode of their choosing before we broadcast. The skip-if-code-exists branch below
+    ///      would then hand that foreign address straight into the Safe bundle as an implementation.
+    ///      EtherFiDeployer.deploy is registry-gated and creates + consumes its CREATE3 proxy in one
+    ///      call, so no outsider can ever place code at these addresses. That makes the skip safe:
+    ///      code here can only have come from a registered deployer, i.e. from us.
     function _create3(string memory name, bytes memory creationCode) internal returns (address deployed) {
-        bytes32 salt = _salt(name);
-        deployed = CREATE3.predictDeterministicAddress(salt, NICKS_FACTORY);
+        deployed = _predicted(name);
 
         if (deployed.code.length > 0) {
             console.log("  [SKIP]", name, "already deployed at", deployed);
             return deployed;
         }
 
-        address proxy = address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", NICKS_FACTORY, salt, CREATE3.PROXY_INITCODE_HASH)))));
-        bool ok;
-        if (proxy.code.length == 0) {
-            (ok,) = NICKS_FACTORY.call(abi.encodePacked(salt, hex"67363d3d37363d34f03d5260086018f3"));
-            require(ok, "CREATE3 proxy deploy failed");
-        }
-        (ok,) = proxy.call(creationCode);
-        require(ok, string.concat("CREATE3 deploy failed: ", name));
+        address actual = EtherFiDeployer(ETHERFI_DEPLOYER).deploy(_salt(name), creationCode);
+        require(actual == deployed, string.concat("CREATE3 address mismatch: ", name));
         require(deployed.code.length > 0, string.concat("CREATE3 verification failed: ", name));
         console.log(string.concat("  ", name, ":"), deployed);
     }
 
-    function _salt(string memory name) internal pure returns (bytes32) {
-        return keccak256(bytes(string.concat("CashLendProd.", name)));
+    /// @dev Fails before any broadcast if the deployer isn't the recorded one, isn't live on this
+    ///      chain, or hasn't authorised the broadcaster — the whole no-squatting guarantee rests on
+    ///      deploying through this contract, so it is not allowed to silently drift.
+    function _requireDeployer(address broadcaster) internal view {
+        address recorded = stdJson.readAddress(
+            vm.readFile(string.concat(vm.projectRoot(), DEPLOYER_RECORD_PATH)), ".EtherFiDeployer"
+        );
+        require(recorded == ETHERFI_DEPLOYER, "ETHERFI_DEPLOYER does not match deployments/deployer/etherfi-deployer.json");
+        require(ETHERFI_DEPLOYER.code.length != 0, "EtherFiDeployer not deployed on this chain");
+        require(
+            EtherFiDeployer(ETHERFI_DEPLOYER).isDeployer(broadcaster),
+            "broadcaster is not a registered EtherFiDeployer deployer; owner must call configureDeployers first"
+        );
     }
 
     // ─────────────────────────────── gnosis bundle ───────────────────────────────
@@ -374,13 +377,10 @@ contract DeployCashLendProd is Utils, GnosisHelpers {
         for (uint256 reserveId = 0; reserveId < reserveCount; ++reserveId) {
             _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setReserveId.selector, spoke.getReserve(reserveId).underlying, reserveId));
         }
-        _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setSpendAsset.selector, _fixtureAsset("usdc"), true));
-        _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setSpendAsset.selector, _fixtureAsset("usdt"), true));
-        _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setSpendAsset.selector, _fixtureAsset("eurc"), true));
-        _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setSpendAsset.selector, _fixtureAsset("liquidUsd"), true));
-        _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setSpendAsset.selector, _fixtureAsset("liquidReserve"), true));
-        _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setSpendAsset.selector, _fixtureAsset("liquidEUR"), true));
-        _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setSpendAsset.selector, _fixtureAsset("fraxusd"), true));
+        string[7] memory spendAssetKeys = _spendAssetKeys();
+        for (uint256 i = 0; i < spendAssetKeys.length; ++i) {
+            _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setSpendAsset.selector, _fixtureAsset(spendAssetKeys[i]), true));
+        }
         _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setMinHealthFactor.selector, MIN_HEALTH_FACTOR));
 
         // Drivers: everything that runs the lend sandwich or migration against the gateway.
@@ -477,7 +477,13 @@ contract DeployCashLendProd is Utils, GnosisHelpers {
         LendGateway gateway = LendGateway(d.gatewayProxy);
         require(gateway.isDriver(c.debtManager) && gateway.isDriver(c.topUpDest), "core drivers missing");
         require(gateway.isDriver(c.liquifier) && gateway.isDriver(c.enso) && gateway.isDriver(c.across), "proxy module drivers missing");
-        require(gateway.isSpendAsset(_fixtureAsset("usdc")), "USDC not a spend asset");
+        // 0 is a valid value that DISABLES the floor (LendGateway.ensureMinHealthFactor no-ops), so a
+        // dropped or edited setMinHealthFactor tx must fail here rather than ship without the buffer.
+        require(gateway.minHealthFactor() == MIN_HEALTH_FACTOR, "minHealthFactor not set");
+        string[7] memory spendAssetKeys = _spendAssetKeys();
+        for (uint256 i = 0; i < spendAssetKeys.length; ++i) {
+            require(gateway.isSpendAsset(_fixtureAsset(spendAssetKeys[i])), string.concat(spendAssetKeys[i], " not a spend asset"));
+        }
         if (skipPositionManagerTx) {
             if (!spoke.isPositionManagerActive(d.gatewayProxy)) {
                 console.log("WARNING: gateway is not yet an active position manager; the Spoke admin must activate it before any Safe migrates");
@@ -528,6 +534,7 @@ contract DeployCashLendProd is Utils, GnosisHelpers {
         string memory object = "cash-lend-prod";
         vm.serializeUint(object, "chainId", block.chainid);
         vm.serializeAddress(object, "safe", SAFE);
+        vm.serializeAddress(object, "create3Deployer", ETHERFI_DEPLOYER);
         vm.serializeAddress(object, "spoke", spoke);
         vm.serializeAddress(object, "lendGateway", d.gatewayProxy);
         vm.serializeAddress(object, "lendGatewayImpl", d.gatewayImpl);
@@ -599,10 +606,6 @@ contract DeployCashLendProd is Utils, GnosisHelpers {
     function _fixtureAsset(string memory key) internal view returns (address) {
         string memory fixtures = vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/fixtures/fixtures.json"));
         return stdJson.readAddress(fixtures, string.concat(".", vm.toString(block.chainid), ".", key));
-    }
-
-    function _liquidAssetCandidates() internal pure returns (address[9] memory) {
-        return [LIQUID_ETH, LIQUID_USD, LIQUID_BTC, EBTC, SETHFI, EUSD, LIQUID_RESERVE, LIQUID_EUR, LIQUID_RWA];
     }
 
     /// @dev Constructor assets/tellers for a replacement liquid module: every candidate the live
