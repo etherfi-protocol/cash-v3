@@ -35,6 +35,9 @@ interface IAaveV4Hub {
     /// @notice Returns the current drawn index of the asset, in RAY.
     function getAssetDrawnIndex(uint256 assetId) external view returns (uint256);
 
+    /// @notice Converts supplied shares to added assets, rounding up: the Hub's addCap usage figure.
+    function previewAddByShares(uint256 assetId, uint256 shares) external view returns (uint256);
+
     /// @notice Converts supplied shares to removable assets, rounding down.
     function previewRemoveByShares(uint256 assetId, uint256 shares) external view returns (uint256);
 

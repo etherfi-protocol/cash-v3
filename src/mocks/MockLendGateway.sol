@@ -145,6 +145,11 @@ contract MockLendGateway is ILendGateway {
         return _withdrawalLiquidity[asset];
     }
 
+    /// @dev The mock models no supply cap or reserve flags, so the headroom is unlimited
+    function supplyHeadroom(address) external pure returns (uint256) {
+        return type(uint256).max;
+    }
+
     /// @dev Defaults to unlimited so existing tests can configure only their relevant gate.
     function borrowCapacity(address safe, address asset) external view returns (uint256) {
         return _borrowCapacitySet[safe][asset] ? _borrowCapacity[safe][asset] : type(uint256).max;

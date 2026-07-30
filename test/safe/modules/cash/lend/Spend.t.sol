@@ -479,6 +479,77 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(usdc)), expectedUsdc, "USDC covers the proportional remainder");
     }
 
+    /// A frozen reserve would revert the whole spend at supply time: sizing skips it (headroom zero) and the
+    /// next registered token covers the shortfall, even though the frozen one is first and could fully cover.
+    function test_spend_creditResupply_skipsFrozenReserve_nextTokenCovers() public {
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        _setAaveReserveFrozen(weethReserveId, true);
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "frozen weETH skipped");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), _resupplyAmount(address(usdc), 10e6), "USDC covers the whole shortfall");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
+    }
+
+    /// The paused sibling: a paused reserve is skipped the same way.
+    function test_spend_creditResupply_skipsPausedReserve_nextTokenCovers() public {
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        _setAaveReservePaused(weethReserveId, true);
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "paused weETH skipped");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), _resupplyAmount(address(usdc), 10e6), "USDC covers the whole shortfall");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
+    }
+
+    /// A reserve near its addCap contributes exactly its remaining cap room (not skipped outright, not
+    /// oversized into an AddCapExceeded revert) and the next token covers the proportional remainder.
+    function test_spend_creditResupply_atCapUsesPartialHeadroom_thenNextToken() public {
+        // Someone else's supply fills most of a 1-token weETH addCap without giving the safe any capacity
+        _seedAaveLiquidity(weethReserveId, address(weETH), 0.999 ether);
+        _setAaveSpokeCaps(weethReserveId, 1, type(uint40).max);
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+
+        uint256 headroom = gw.supplyHeadroom(address(weETH));
+        uint256 shortfallValue = _bufferedShortfallValue(10e6);
+        uint256 neededWeeth = gw.collateralForValue(address(weETH), shortfallValue);
+        assertLt(headroom, neededWeeth, "cap room must be the binding limit for this test to bite");
+        uint256 expectedUsdc = gw.collateralForValue(address(usdc), _residualValue(shortfallValue, headroom, neededWeeth));
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), headroom, "weETH fills exactly its remaining cap room");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), expectedUsdc, "USDC covers the proportional remainder");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
+    }
+
+    /// Every candidate unsuppliable (weETH frozen, USDC at its addCap): nothing is supplied and the failing
+    /// borrow reverts the whole spend, same terminal error as the no-eligible-collateral case.
+    function test_spend_creditResupply_allUnsuppliable_borrowReverts() public {
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        _setAaveReserveFrozen(weethReserveId, true);
+        // The seeded 1M USDC liquidity fills a 1M-token addCap exactly; USDC stays borrowable and spendable
+        _setAaveSpokeCaps(usdcReserveId, 1_000_000, type(uint40).max);
+        assertEq(gw.supplyHeadroom(address(usdc)), 0, "USDC reserve at its cap");
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ISpoke.HealthFactorBelowThreshold.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(10e6), _noCashback());
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "nothing supplied on the reverted spend");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), 0, "nothing supplied on the reverted spend");
+    }
+
     // ================ helpers ================
 
     function _enterCreditMode() internal {
