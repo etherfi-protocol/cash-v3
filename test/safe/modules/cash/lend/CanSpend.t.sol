@@ -269,6 +269,25 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         assertEq(reason, "Insufficient borrowing power");
     }
 
+    /// A user-level shortfall takes precedence over a shared draw-cap shortfall so market-side declines
+    /// safely prove that the Safe itself had enough borrowing power for the requested spend.
+    function test_canSpend_failsInCreditMode_withInsufficientBorrowingPowerBeforeDrawCap() public {
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        // No collateral leaves the Safe with zero borrowing power, while the shared draw cap is also short.
+        _setAaveSpokeCaps(usdcReserveId, type(uint40).max, 50);
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Insufficient borrowing power");
+    }
+
     /// canSpendSingleToken picks credit mode and USDC when supplied collateral covers the amount.
     function test_canSpendSingleToken_creditMode_works() public {
         _setMode(Mode.Credit);

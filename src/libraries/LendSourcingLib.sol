@@ -106,6 +106,13 @@ library LendSourcingLib {
         }
 
         uint256 borrowAmount = fromUsdUp(priceProvider, token, totalSpendingInUsd);
+        // Check the Safe-specific constraint first. A shared-market decline therefore guarantees this Safe
+        // had sufficient borrowing power for the quote, which lets downstream systems distinguish a user
+        // shortfall from a temporary Hub-side availability problem.
+        if (gateway.borrowCapacity(safe, token) < borrowAmount) {
+            return (false, "Insufficient borrowing power");
+        }
+
         if (gateway.borrowLiquidity(token) < borrowAmount) {
             // borrowLiquidity folds Hub cash and the spoke's draw cap into one bound; withdrawalLiquidity is
             // the cash alone (zero under the same pause/halt gates), so cash covering the loan means the draw
@@ -114,10 +121,6 @@ library LendSourcingLib {
                 return (false, "Lend borrow cap reached, please try again later");
             }
             return (false, "Insufficient Lend liquidity to cover the loan");
-        }
-
-        if (gateway.borrowCapacity(safe, token) < borrowAmount) {
-            return (false, "Insufficient borrowing power");
         }
 
         return (true, "");
