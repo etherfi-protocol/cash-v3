@@ -19,6 +19,9 @@ interface ILendGateway {
         uint256 debtUsd;
         // borrowing headroom: collateral weighted by each reserve's LTV, minus debt
         uint256 availableBorrowsUsd;
+        // gross borrowing power: collateral weighted by each reserve's LTV, NOT reduced by debt and never
+        // clamped, so a value below debtUsd both signals and measures an over-LTV position
+        uint256 maxBorrowUsd;
         uint256 healthFactor;
     }
 

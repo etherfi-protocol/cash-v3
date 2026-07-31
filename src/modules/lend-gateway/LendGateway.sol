@@ -531,6 +531,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
             }
         }
 
+        // Gross power is reported unclamped alongside the clamped headroom: once debt passes gross power the
+        // headroom floors at zero, which cannot distinguish an over-LTV position from one sitting exactly at
+        // its limit, and nothing else here recovers the gap.
+        data.maxBorrowUsd = maxBorrowUsd;
         data.availableBorrowsUsd = maxBorrowUsd > data.debtUsd ? maxBorrowUsd - data.debtUsd : 0;
         // healthFactor is WAD (1e18) on Aave, matching ILendGateway's 1e18 scale.
         data.healthFactor = spoke.getUserAccountData(safe).healthFactor;
