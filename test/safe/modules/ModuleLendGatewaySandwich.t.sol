@@ -56,6 +56,10 @@ contract SandwichHarness is ModuleLendGatewaySandwich {
     function resupplyToGateway(address safe, address asset, uint256 amount) external {
         _resupplyToGateway(safe, asset, amount);
     }
+
+    function ensureGatewayFloor(address safe) external view {
+        _ensureGatewayFloor(safe);
+    }
 }
 
 contract ModuleLendGatewaySandwichTest is Test {
@@ -163,5 +167,39 @@ contract ModuleLendGatewaySandwichTest is Test {
         assertEq(s, address(0), "no supply call recorded");
         assertEq(amount, 0);
         assertFalse(gateway.usingAsCollateral(safe, asset), "collateral flag untouched");
+    }
+
+    // ----------------------------------------------------------------- floor check gating (audit L-03)
+
+    /// @dev Simulates the gateway judging the safe below the configured floor.
+    function _mockFloorViolated() internal {
+        vm.mockCallRevert(address(gateway), abi.encodeWithSelector(ILendGateway.ensureMinHealthFactor.selector, safe), "below floor");
+    }
+
+    // The floor check runs for a fully active gateway safe: a below-floor end state reverts the operation.
+    function test_floor_revertsForActiveSafeBelowFloor() public {
+        _mockFloorViolated();
+        vm.expectRevert("below floor");
+        harness.ensureGatewayFloor(safe);
+    }
+
+    // Audit L-03: the floor check is ENGINE-gated like the withdraw bookend, not lend-active-gated. An
+    // opted-out safe with a live Aave position (a matured opt-out whose unwind open borrows still block)
+    // can pull collateral through the front bookend with no resupply behind it; the floor must still bind
+    // that extraction, or the position can be parked at Aave's raw 1.0 boundary. Repayment flows never
+    // call this check, so the safe can always still repay its way out of the blocked opt-out.
+    function test_floor_revertsForOptedOutSafeOnEngine() public {
+        harness.setLendActive(false); // opted out, but still on the gateway engine with a live position
+        _mockFloorViolated();
+        vm.expectRevert("below floor");
+        harness.ensureGatewayFloor(safe);
+    }
+
+    // Off the gateway engine (legacy safe) there is no Aave position to protect: the check is a no-op
+    // even when the gateway would judge the safe below floor.
+    function test_floor_noOpOffGatewayEngine() public {
+        harness.setOnGatewayEngine(false);
+        _mockFloorViolated();
+        harness.ensureGatewayFloor(safe); // must not revert
     }
 }

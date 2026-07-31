@@ -14,11 +14,12 @@ import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
  *      end state must sit at or above the gateway's configured health-factor floor (a failed or
  *      unregistered resupply otherwise leaves the health factor between Aave's 1.0 limit and the floor).
  *      Repayment flows (the LiquidUSD liquifier) are deliberately exempt: de-risking must never be
- *      blocked. Gating is asymmetric by design: the WITHDRAW bookend runs for any gateway-engine safe —
+ *      blocked. Gating: the WITHDRAW bookend and the FLOOR check run for any gateway-engine safe —
  *      an opted-out safe (including a matured opt-out whose unwind open borrows still block) can hold
  *      funds supplied on Aave, and pulling them loose is an exit op the repayment/exit paths depend on
- *      (repayUsingLiquidUSD sourcing supplied LiquidUSD). The RESUPPLY bookend and the floor check stay
- *      on _lendActive, so no new supply reaches Aave for a legacy or opted-out safe.
+ *      (repayUsingLiquidUSD sourcing supplied LiquidUSD); the floor must bind those pulls exactly
+ *      because the resupply behind them is off (audit L-03). Only the RESUPPLY bookend stays on
+ *      _lendActive, so no new supply reaches Aave for a legacy or opted-out safe.
  *
  *      Inherits ModuleCheckBalance because the bookends extend its balance model (the front bookend
  *      sources what _getAvailableAmount found missing) and it holds the cashModule reference every
@@ -119,12 +120,16 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
      *      module's signed amount is not bound to the lens quote, and a failed or unregistered resupply
      *      can leave the health factor between Aave's 1.0 limit and the configured floor — this makes the
      *      end state take the floor. Repayment flows are deliberately exempt (de-risking must never be
-     *      blocked). No-op for legacy or opted-out safes (their ops only touch loose, non-collateral
-     *      funds) and while the floor is disabled.
+     *      blocked). Engine-gated like the withdraw bookend, NOT _lendActive: an opted-out safe can still
+     *      hold a live Aave position (a matured opt-out whose unwind open borrows block), and the floor
+     *      must bind its extractions too — otherwise the withdraw bookend could park that position at
+     *      Aave's raw 1.0 boundary with no check. A cleanly opted-out safe has no debt, so
+     *      an unbounded health factor passes and the check stays a no-op for it. No-op for legacy safes
+     *      and while the floor is disabled.
      * @param safe The safe to check
      */
     function _ensureGatewayFloor(address safe) internal view {
-        if (!_lendActive(safe)) return;
+        if (!_onGatewayEngine(safe)) return;
         gateway().ensureMinHealthFactor(safe);
     }
 }
