@@ -5,7 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Test } from "forge-std/Test.sol";
 
-import { BinSponsor, Cashback, ICashModule, Mode, WithdrawalRequest } from "../../../../../src/interfaces/ICashModule.sol";
+import { BinSponsor, Cashback, ICashModule, Mode, SafeData, WithdrawalRequest } from "../../../../../src/interfaces/ICashModule.sol";
 import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { CashLens } from "../../../../../src/modules/cash/CashLens.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
@@ -157,7 +157,11 @@ contract CashFlowsHandler is Test {
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = amountUsd;
         (bool ok,) = cashLens.canSpend(safe, txId, tokens, amounts);
-        bool windowPending = cashModule.incomingModeStartTime(safe) != 0;
+        // Open only while the pending mode has not matured: the start time stays in storage after
+        // maturity until a write syncs it, and by then canSpend and spend agree again, so treating
+        // any non-zero start time as a window would mute this check for the rest of the campaign
+        SafeData memory data = cashModule.getData(safe);
+        bool windowOpen = data.incomingModeStartTime != 0 && block.timestamp <= data.incomingModeStartTime && data.incomingMode != data.mode;
 
         uint256 debtBefore = gw.debtOf(safe, address(usdc));
         uint256 dispatcherBefore = usdc.balanceOf(dispatcher);
@@ -166,7 +170,7 @@ contract CashFlowsHandler is Test {
             spent = true;
         } catch { }
 
-        if (ok && !spent && !windowPending) {
+        if (ok && !spent && !windowOpen) {
             ghost_parityViolations++;
         }
         if (spent) {
@@ -327,10 +331,12 @@ contract CashFlowsInvariantTest is CashGatewayTestSetup {
         return true;
     }
 
-    /// Signs a switch to the opposite of the stored mode, optionally warping past the delay.
+    /// Signs a switch to the opposite of the effective mode, optionally warping past the delay.
+    /// @dev Reads getMode, not stored mode: storage lags a matured pending change, and setMode syncs
+    ///      it before its ModeAlreadySet check, so toggling off stale storage would silently revert.
     function wrapSetModeOpposite(bool warpPastStart) external {
-        Mode stored = cashModule.getData(address(safe)).mode;
-        _setMode(stored == Mode.Debit ? Mode.Credit : Mode.Debit);
+        Mode effective = cashModule.getMode(address(safe));
+        _setMode(effective == Mode.Debit ? Mode.Credit : Mode.Debit);
         if (warpPastStart) {
             vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
         }
@@ -402,13 +408,15 @@ contract CashFlowsInvariantTest is CashGatewayTestSetup {
         handler.borrowUsdc(100e6);
         handler.repayUsdc(50e6);
         handler.withdrawWeeth(1);
-        handler.toggleMode(true); // to credit, matured
+        handler.toggleMode(true); // to credit, matured; storage now lags the effective mode
+        handler.toggleMode(true); // to debit, through stale storage (reverted ModeAlreadySet off the stored mode)
+        handler.toggleMode(true); // back to credit
         handler.spendCard(5000); // credit
 
         assertEq(handler.opsGateway(), 4, "gateway ops executed");
         assertEq(handler.opsSpend(), 2, "debit and credit spends settled");
         assertEq(handler.opsWithdrawalFlow(), 4, "requests, cancel, and process executed");
-        assertEq(handler.opsModeToggle(), 1, "mode toggle executed");
+        assertEq(handler.opsModeToggle(), 3, "mode toggles executed, including one off a matured pending");
         assertEq(handler.opsOptOutToggle(), 2, "opt-out toggles executed");
         assertEq(handler.opsWarp(), 1, "accrual warp executed");
         assertEq(handler.ghost_parityViolations(), 0, "no parity violations");
