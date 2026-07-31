@@ -810,37 +810,25 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @notice Whether `asset` can fund a debit spend: an admin-declared spend asset whose reserve is not paused
-     * @dev Membership is declared via setSpendAsset (always a subset of registered reserves), so "is this a
-     *      card settlement token" no longer keys on Aave's borrowable flag and a supply-only reserve can be
-     *      spendable. A debit spend transfers loose balance and withdraws supplied balance, which Aave allows
-     *      while frozen, so frozen is tolerated; paused blocks the withdraw leg, so a paused reserve is not
-     *      spendable. New debt takes the full isBorrowable gate instead.
+     * @notice Whether `asset` is an admin-declared card settlement token
+     * @dev Static membership only, declared via setSpendAsset (always a subset of registered reserves), so
+     *      "is this a card settlement token" keys on neither Aave's borrowable flag (a supply-only reserve
+     *      can be spendable) nor its execution state. Aave's state is deliberately NOT folded in (audit
+     *      I-02): a debit spend transfers loose balance and withdraws supplied balance, so a spend funded
+     *      entirely from loose balance needs nothing from Aave, and folding a pause in here blocked such
+     *      settlements outright — worst for a lend-opted-out safe, which is forced into Debit and holds
+     *      everything loose. A pause costs only the supplied leg, which withdrawalLiquidity already reports
+     *      as zero, so the sourcing gate declines exactly the spends that truly need the withdraw. New debt
+     *      takes the full isBorrowable gate, which reads the pause itself.
      * @param asset The asset to query
      */
     function isSpendAsset(address asset) external view returns (bool) {
-        LendGatewayStorage storage $ = _getLendGatewayStorage();
-        if (!$.spendAssets.contains(asset)) return false;
-        return !spoke.getReserveConfig($.reserveId[asset]).paused;
+        return _getLendGatewayStorage().spendAssets.contains(asset);
     }
 
-    /// @notice The spend-set assets that can currently fund a debit spend (see isSpendAsset)
+    /// @notice The admin-declared card settlement tokens (see isSpendAsset: membership, not Aave state)
     function spendAssets() external view returns (address[] memory) {
-        LendGatewayStorage storage $ = _getLendGatewayStorage();
-        address[] memory assets = $.spendAssets.values();
-        uint256 count = 0;
-        for (uint256 i = 0; i < assets.length; i++) {
-            if (!spoke.getReserveConfig($.reserveId[assets[i]]).paused) {
-                assets[count] = assets[i];
-                unchecked {
-                    ++count;
-                }
-            }
-        }
-        assembly ("memory-safe") {
-            mstore(assets, count)
-        }
-        return assets;
+        return _getLendGatewayStorage().spendAssets.values();
     }
 
     /// @notice Whether `account` may drive the gateway (CashModule or an authorized driver)

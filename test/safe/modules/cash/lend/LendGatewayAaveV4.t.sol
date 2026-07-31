@@ -227,10 +227,12 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertTrue(gw.isBorrowable(address(usdc)), "borrowable again after unpause");
     }
 
-    /// isSpendAsset (the debit gate) reads the admin spend set, not Aave's borrowable flag: USDC is a declared
-    /// spend asset, weETH is a registered reserve that was never declared spendable, and the set tolerates a
-    /// freeze (a debit only transfers and withdraws) while a pause blocks it.
-    function test_reads_spendAsset_readsAdminSetToleratesFreezeNotPause() public {
+    /// isSpendAsset (the debit gate) is pure admin-set membership: USDC is a declared spend asset, weETH is a
+    /// registered reserve that was never declared spendable. Aave's execution state is deliberately NOT folded
+    /// in (audit I-02) — a debit spend only transfers loose balance and withdraws supplied balance, so a freeze
+    /// is irrelevant and a pause only costs the supplied leg, which the withdrawalLiquidity cap already
+    /// enforces. Folding a pause in here rejected loose-funded settlements that never touch Aave.
+    function test_reads_spendAsset_readsAdminSetOnly() public {
         assertTrue(gw.isSpendAsset(address(usdc)));
         assertFalse(gw.isSpendAsset(address(weETH)), "registered but not a declared spend asset");
         assertFalse(gw.isSpendAsset(address(0xdead)));
@@ -241,8 +243,9 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         _setAaveReserveFrozen(usdcReserveId, false);
 
         _setAaveReservePaused(usdcReserveId, true);
-        assertFalse(gw.isSpendAsset(address(usdc)), "paused reserve not spendable");
-        assertEq(gw.spendAssets().length, 0, "dropped from spendAssets while paused");
+        assertTrue(gw.isSpendAsset(address(usdc)), "membership survives a pause: loose balance still settles");
+        assertEq(gw.spendAssets().length, 1, "stays in spendAssets while paused");
+        assertEq(gw.withdrawalLiquidity(address(usdc)), 0, "the pause is enforced on the supplied leg instead");
     }
 
     /// Membership is decoupled from Aave's borrowable flag: turning USDC's borrowable flag off (so it is no

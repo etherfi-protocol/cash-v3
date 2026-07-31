@@ -184,6 +184,44 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 100e6 - 60e6, 2, "shortfall withdrawn from the supply-only reserve");
     }
 
+    /// Audit I-02: a paused reserve must not block a debit spend the safe can fund entirely from loose
+    /// balance — no Aave interaction is needed, and an opted-out safe (forced into Debit, everything loose)
+    /// would otherwise have card settlement blocked by an Aave pause it does not depend on.
+    function test_spend_debit_succeeds_fromLooseWhileReservePaused() public {
+        deal(address(usdc), address(safe), 100e6);
+        _setAaveReservePaused(usdcReserveId, true);
+        uint256 dispatcherBefore = usdc.balanceOf(address(settlementDispatcherReap));
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(100e6), _noCashback());
+
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBefore + 100e6, "loose balance settled the spend during the pause");
+    }
+
+    /// The pause still binds the part a debit spend cannot fund loose: withdrawalLiquidity reads zero for a
+    /// paused reserve, so the supplied leg is unavailable and the spend declines on balance, not membership.
+    function test_spend_debit_revertsWhenPausedAndNeedsSuppliedLeg() public {
+        _supplyToGateway(address(safe), address(usdc), 100e6);
+        deal(address(usdc), address(safe), 40e6);
+        _setAaveReservePaused(usdcReserveId, true);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(100e6), _noCashback());
+    }
+
+    /// A paused reserve cannot fund a CREDIT spend: the borrow gate (isBorrowable) reads the pause itself, so
+    /// the typed rejection survives making the debit gate pause-agnostic.
+    function test_spend_credit_reverts_whenReservePaused() public {
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        _enterCreditMode();
+        _setAaveReservePaused(usdcReserveId, true);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.UnsupportedToken.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(10e6), _noCashback());
+    }
+
     /// The auth-vs-freeze race: an auth approved while the reserve was borrowable cannot settle once the
     /// reserve is frozen. The spend reverts on the module's gate — the same predicate the auth now declines
     /// on — instead of deep inside Aave.

@@ -290,21 +290,21 @@ interface ILendGateway {
     function borrowableAssets() external view returns (address[] memory);
 
     /**
-     * @notice Returns whether `asset` can fund a debit spend
-     * @dev An admin-declared spend asset (via setSpendAsset, always a registered reserve) whose reserve is
-     *      not paused. Membership is declared, not read from Aave's borrowable flag, so a supply-only
-     *      reserve can be spendable. Frozen is tolerated: a debit spend only transfers loose balance and
-     *      withdraws supplied balance, both of which Aave allows while frozen. Paused blocks the withdraw
-     *      leg, so a paused reserve is not spendable.
+     * @notice Returns whether `asset` is an admin-declared card settlement token
+     * @dev Static membership (via setSpendAsset, always a registered reserve), read from neither Aave's
+     *      borrowable flag — so a supply-only reserve can be spendable — nor its execution state. A debit
+     *      spend transfers loose balance and withdraws supplied balance, so one funded entirely from loose
+     *      balance needs nothing from Aave; a freeze is irrelevant and a pause costs only the supplied leg,
+     *      which withdrawalLiquidity already reports as zero (audit I-02). Credit gates on isBorrowable.
      * @param asset The asset to query
-     * @return True if the asset can fund a debit spend
+     * @return True if the asset is a declared card settlement token
      */
     function isSpendAsset(address asset) external view returns (bool);
 
     /**
-     * @notice Returns the spend-set assets that can currently fund a debit spend
-     * @dev See isSpendAsset.
-     * @return The spendable asset addresses
+     * @notice Returns the admin-declared card settlement tokens
+     * @dev See isSpendAsset: membership, not Aave state.
+     * @return The declared spend asset addresses
      */
     function spendAssets() external view returns (address[] memory);
 }
