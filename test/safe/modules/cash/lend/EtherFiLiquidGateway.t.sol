@@ -174,6 +174,46 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
         assertGe(spoke.getUserAccountData(address(safe)).healthFactor, 1.05e18, "end state above the floor");
     }
 
+    // A safe parked between Aave's 1.00 bound and the floor is not frozen out of the sandwiched modules: an
+    // operation that leaves its health no worse off still runs, because the floor is there to stop extraction
+    // approaching the liquidation line, not to block a safe from improving. A deposit funded from loose
+    // balance re-supplies the receipt as collateral, so it lifts health even while staying under the floor.
+    function test_deposit_belowFloor_allowedWhenHealthImproves() public {
+        _supplyToGateway(address(safe), address(liquidVault), 10_000e6);
+        _borrowOnGateway(address(safe), address(usdc), 7800e6, recipient); // HF ~1.026
+        vm.prank(owner);
+        gw.setMinHealthFactor(1.05e18);
+
+        uint256 hfBefore = gw.healthFactor(address(safe));
+        assertLt(hfBefore, 1.05e18, "safe starts below the floor");
+        assertGt(hfBefore, 1e18, "and above Aave's bound");
+
+        // Loose USDC in, receipt back as collateral: strictly more collateral, same debt
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+        liquidModule.deposit(address(safe), address(usdc), address(liquidVault), amount, amount, owner1, _depositSig(address(usdc), amount, amount));
+
+        uint256 hfAfter = gw.healthFactor(address(safe));
+        assertGt(hfAfter, hfBefore, "the deposit improved health");
+        assertLt(hfAfter, 1.05e18, "while still under the floor, which no longer blocks it");
+        assertEq(gw.suppliedOf(address(safe), address(liquidVault)), 10_100e6, "receipt supplied as collateral");
+    }
+
+    // The other half: from the same below-floor start, an operation that degrades health is still rejected.
+    // Withdrawing escrows the receipt away with no resupply, so it strictly worsens the position.
+    function test_withdraw_belowFloor_stillRejectedWhenHealthWorsens() public {
+        _supplyToGateway(address(safe), address(liquidVault), 10_000e6);
+        _borrowOnGateway(address(safe), address(usdc), 7800e6, recipient);
+        vm.prank(owner);
+        gw.setMinHealthFactor(1.05e18);
+        assertLt(gw.healthFactor(address(safe)), 1.05e18, "safe starts below the floor");
+
+        uint128 amount = 100e6;
+        bytes memory sig = _withdrawSig(amount, amount, 0, 1 days);
+        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        liquidModule.withdraw(address(safe), address(liquidVault), address(usdc), amount, amount, 0, 1 days, owner1, sig);
+    }
+
     function _depositSig(address assetToDeposit, uint256 amount, uint256 minReturn) internal view returns (bytes memory) {
         bytes32 digestHash = keccak256(
             abi.encodePacked(liquidModule.DEPOSIT_SIG(), block.chainid, address(liquidModule), liquidModule.getNonce(address(safe)), address(safe), abi.encode(assetToDeposit, address(liquidVault), amount, minReturn))

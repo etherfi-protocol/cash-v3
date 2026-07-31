@@ -113,6 +113,21 @@ contract MockLendGateway is ILendGateway {
 
     function ensureMinHealthFactor(address safe) external view { }
 
+    mapping(address safe => uint256) internal _healthFactor;
+
+    /// @notice Sets the health factor a subsequent `healthFactor(safe)` will return
+    function setHealthFactor(address safe, uint256 value) external {
+        _healthFactor[safe] = value;
+    }
+
+    /// @dev Defaults to unbounded, matching a safe with no debt
+    function healthFactor(address safe) external view returns (uint256) {
+        return _healthFactor[safe] == 0 ? type(uint256).max : _healthFactor[safe];
+    }
+
+    /// @dev The mock's floor check is inert, so this only models the not-worsened short-circuit
+    function ensureMinHealthFactorNotWorsened(address safe, uint256 healthFactorBefore) external view { }
+
     function repay(address safe, address asset, uint256 amount) external returns (uint256) {
         uint256 debt = _debtOf[safe][asset];
         uint256 repaid = amount < debt ? amount : debt;

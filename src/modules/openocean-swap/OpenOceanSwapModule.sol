@@ -165,7 +165,7 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewa
 
         // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
         // full amount loose (net of any pending-withdrawal reservation).
-        _pullAndRequire(safe, fromAsset, fromAssetAmount);
+        uint256 healthFactorBefore = _pullAndRequire(safe, fromAsset, fromAssetAmount);
 
         uint256 balBefore;
         if (toAsset == ETH) balBefore = address(safe).balance;
@@ -191,7 +191,7 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewa
         // Re-supply the output as collateral when the gateway lists it; an unlisted output (or ETH) stays loose.
         _resupplyToGateway(safe, toAsset, receivedAmt);
 
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit SwapOnOpenOcean(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, receivedAmt);
     }

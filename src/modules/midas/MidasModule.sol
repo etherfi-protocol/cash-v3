@@ -173,7 +173,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
 
         // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
         // full amount loose.
-        _pullAndRequire(safe, asset, amount);
+        uint256 healthFactorBefore = _pullAndRequire(safe, asset, amount);
 
         uint256 midasTokenBefore = ERC20(midasToken).balanceOf(safe);
 
@@ -194,7 +194,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         // Re-supply the Midas-token output as collateral when the gateway lists it; an unlisted output stays loose.
         _resupplyToGateway(safe, midasToken, midasTokenReceived);
 
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit Deposit(safe, asset, amount, midasToken, midasTokenReceived);
     }
@@ -250,7 +250,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         // Pull any shortfall of the Midas token out of the safe's Aave position, then confirm the safe holds
         // the full amount loose. No re-supply bookend: the asset output arrives asynchronously via the
         // redemption vault, not in this call.
-        _pullAndRequire(safe, midasToken, amount);
+        uint256 healthFactorBefore = _pullAndRequire(safe, midasToken, amount);
 
         address[] memory to = new address[](2);
         bytes[] memory data = new bytes[](2);
@@ -266,7 +266,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
 
         // Risk-increasing flow with no resupply (the redemption output arrives later, loose): the end
         // state takes the gateway's health-factor floor
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit Withdrawal(safe, amount, asset, midasToken);
     }

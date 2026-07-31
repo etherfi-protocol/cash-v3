@@ -57,8 +57,12 @@ contract SandwichHarness is ModuleLendGatewaySandwich {
         _resupplyToGateway(safe, asset, amount);
     }
 
-    function ensureGatewayFloor(address safe) external view {
-        _ensureGatewayFloor(safe);
+    function ensureGatewayFloor(address safe, uint256 healthFactorBefore) external view {
+        _ensureGatewayFloor(safe, healthFactorBefore);
+    }
+
+    function gatewayHealthFactor(address safe) external view returns (uint256) {
+        return _gatewayHealthFactor(safe);
     }
 }
 
@@ -169,37 +173,49 @@ contract ModuleLendGatewaySandwichTest is Test {
         assertFalse(gateway.usingAsCollateral(safe, asset), "collateral flag untouched");
     }
 
-    // ----------------------------------------------------------------- floor check gating (audit L-03)
+    // ----------------------------------------------------------------- floor check gating
 
-    /// @dev Simulates the gateway judging the safe below the configured floor.
+    uint256 constant HF_BEFORE = 1.02e18;
+
+    /// @dev Simulates the gateway rejecting the end state, whatever rule it applies internally.
     function _mockFloorViolated() internal {
-        vm.mockCallRevert(address(gateway), abi.encodeWithSelector(ILendGateway.ensureMinHealthFactor.selector, safe), "below floor");
+        vm.mockCallRevert(address(gateway), abi.encodeWithSelector(ILendGateway.ensureMinHealthFactorNotWorsened.selector, safe, HF_BEFORE), "below floor");
     }
 
-    // The floor check runs for a fully active gateway safe: a below-floor end state reverts the operation.
+    // The floor check runs for a fully active gateway safe: a rejected end state reverts the operation.
     function test_floor_revertsForActiveSafeBelowFloor() public {
         _mockFloorViolated();
         vm.expectRevert("below floor");
-        harness.ensureGatewayFloor(safe);
+        harness.ensureGatewayFloor(safe, HF_BEFORE);
     }
 
-    // Audit L-03: the floor check is ENGINE-gated like the withdraw bookend, not lend-active-gated. An
-    // opted-out safe with a live Aave position (a matured opt-out whose unwind open borrows still block)
-    // can pull collateral through the front bookend with no resupply behind it; the floor must still bind
-    // that extraction, or the position can be parked at Aave's raw 1.0 boundary. Repayment flows never
-    // call this check, so the safe can always still repay its way out of the blocked opt-out.
+    // The floor check is ENGINE-gated like the withdraw bookend, not lend-active-gated. An opted-out safe
+    // with a live Aave position (a matured opt-out whose unwind open borrows still block) can pull collateral
+    // through the front bookend with no resupply behind it; the floor must still bind that extraction, or the
+    // position can be parked at Aave's raw 1.0 boundary. Repayment flows never call this check, so the safe
+    // can always still repay its way out of the blocked opt-out.
     function test_floor_revertsForOptedOutSafeOnEngine() public {
         harness.setLendActive(false); // opted out, but still on the gateway engine with a live position
         _mockFloorViolated();
         vm.expectRevert("below floor");
-        harness.ensureGatewayFloor(safe);
+        harness.ensureGatewayFloor(safe, HF_BEFORE);
     }
 
     // Off the gateway engine (legacy safe) there is no Aave position to protect: the check is a no-op
-    // even when the gateway would judge the safe below floor.
+    // even when the gateway would reject the end state.
     function test_floor_noOpOffGatewayEngine() public {
         harness.setOnGatewayEngine(false);
         _mockFloorViolated();
-        harness.ensureGatewayFloor(safe); // must not revert
+        harness.ensureGatewayFloor(safe, HF_BEFORE); // must not revert
+    }
+
+    // The pre-operation snapshot the floor check compares against is read for a gateway safe and inert
+    // (zero) off the engine, where a snapshot could only ever tighten a check that does not run.
+    function test_floor_snapshotReadsGatewayHealthOnEngineOnly() public {
+        gateway.setHealthFactor(safe, HF_BEFORE);
+        assertEq(harness.gatewayHealthFactor(safe), HF_BEFORE, "snapshot reads the gateway health factor");
+
+        harness.setOnGatewayEngine(false);
+        assertEq(harness.gatewayHealthFactor(safe), 0, "inert off the gateway engine");
     }
 }

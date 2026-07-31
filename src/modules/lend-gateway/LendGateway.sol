@@ -495,6 +495,35 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
+     * @notice `safe`'s current Aave health factor in WAD (1e18), unbounded when it carries no debt
+     * @dev Read straight from the Spoke, like the floor check itself: getAccountData's healthFactor is the
+     *      same number but reached through the PriceProvider-derived USD fields, which revert for a supplied
+     *      asset Cash cannot price.
+     * @param safe The safe to query
+     * @return The health factor in WAD
+     */
+    function healthFactor(address safe) external view returns (uint256) {
+        return spoke.getUserAccountData(safe).healthFactor;
+    }
+
+    /**
+     * @notice Enforces the floor as "no worse off": passes when the position did not degrade, otherwise
+     *         requires the end state to hold the configured floor
+     * @dev The floor exists to stop ether.fi-initiated operations from parking a position near Aave's
+     *      liquidation line, so it has nothing to say about an operation that holds or improves health. A
+     *      plain floor check cannot express that: comparing only the end state traps a safe sitting between
+     *      Aave's 1.00 bound and the floor, blocking even the de-risking operations that would lift it out.
+     *      An operation that degrades health still takes the full floor, so nothing may cross down through it.
+     * @param safe The safe to check
+     * @param healthFactorBefore The safe's health factor captured before the operation ran
+     * @custom:throws HealthFactorBelowMinimum if the operation degraded health and the end state is below the floor
+     */
+    function ensureMinHealthFactorNotWorsened(address safe, uint256 healthFactorBefore) external view {
+        if (spoke.getUserAccountData(safe).healthFactor >= healthFactorBefore) return;
+        ensureMinHealthFactor(safe);
+    }
+
+    /**
      * @notice Returns `safe`'s Cash-priced position summary (collateral, debt, borrow headroom, health factor)
      * @dev Re-derives the USD fields from PriceProvider for display only; capacity and sizing use the
      *      Aave-priced borrowCapacity and withdrawHeadroom families. healthFactor (WAD) comes directly from Aave.
