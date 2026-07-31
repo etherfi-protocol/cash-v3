@@ -798,13 +798,11 @@ library CashLendLib {
      * @param tokens Addresses of the tokens to spend
      * @param amountsInUsd Amounts to spend in USD
      * @return actualSpendInUsd The USD the settlement actually moved. It is below the requested total only
-     *         when the safe was under-funded AND the holds registry is configured to carry the shortfall as
-     *         on-chain debt; with no registry the spend reverts instead of settling short.
+     *         when the safe was under-funded AND partial settlement is enabled, in which case the caller
+     *         leaves the shortfall as the transaction's hold; otherwise the settlement reverts.
      */
     function spendDebit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd) external returns (uint256 actualSpendInUsd) {
-        // The holds registry is the only carrier for an unpaid remainder, so partial settlement is allowed
-        // exactly when it is wired up.
-        bool allowPartial = $.pendingHoldsModule != address(0);
+        bool allowPartial = $.partialSettlementEnabled;
 
         if (!_usesLendGateway($, safe)) {
             return _spendLegacyDebit($, dataProvider, safe, txId, binSponsor, tokens, amountsInUsd, allowPartial);

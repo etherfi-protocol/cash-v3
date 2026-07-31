@@ -20,7 +20,6 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashLendLib } from "./CashLendLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
-import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
 
 /**
  * @title CashModule
@@ -417,9 +416,9 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
         if (tokens.length > 1) tokens.checkDuplicates();
 
-        // Block withdrawals while pending holds exist — the safe's balance is committed to unsettled card txns
-        address phm = $.pendingHoldsModule;
-        if (phm != address(0) && IPendingHoldsModule(phm).totalPendingHolds(safe) > 0) revert WithdrawalBlockedByPendingHolds();
+        // The safe's funds are committed while a card transaction is authorized but unsettled, so a
+        // withdrawal cannot be requested against them.
+        if ($.totalHolds[safe] != 0) revert WithdrawalBlockedByPendingHolds();
 
         _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
@@ -442,102 +441,39 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     // -------------------------------------------------------------------------
-    // PendingHoldsModule integration
+    // CashModuleHolds routing (second fallback hop)
     // -------------------------------------------------------------------------
 
     /**
-     * @notice Returns the remaining spendable capacity for a safe based on its spending limits
-     * @dev Returns min(remainingDailyLimit, remainingMonthlyLimit) in USD (1e6).
-     *      When PendingHoldsModule is active, holds are charged to spentToday/spentThisMonth at
-     *      addHold() time, so this value already reflects in-flight hold consumption.
-     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
-     *      Routed transparently via Core's fallback() delegatecall.
-     * @param safe Address of the EtherFi Safe
-     * @return Spendable amount in USD (1e6)
+     * @notice Points the module at the CashModuleHolds implementation
+     * @dev Only callable by CASH_MODULE_CONTROLLER_ROLE. Must be wired before any hold function is called.
+     * @param _cashModuleHolds Address of the deployed CashModuleHolds implementation
      */
-    function rawSpendable(address safe) external view returns (uint256) {
-        return _getCashModuleStorage().safeCashConfig[safe].spendingLimit.maxCanSpend();
-    }
-
-    /**
-     * @notice Consumes amountUsd from the safe's daily and monthly spending limits
-     * @dev Called by PendingHoldsModule at addHold() and updateHold() (increase) so that
-     *      the limit reflects the user's authorized spend immediately at auth-ack time.
-     *      Reverts with ExceededDailySpendingLimit or ExceededMonthlySpendingLimit if the
-     *      amount would breach the limit — identical validation to the settlement-time spend().
-     *      Only callable by the registered PendingHoldsModule.
-     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
-     * @param safe Address of the EtherFi Safe
-     * @param amountUsd Amount to consume from limits in USD (1e6)
-     */
-    function consumeSpendingLimit(address safe, uint256 amountUsd) external {
-        if (msg.sender != _getCashModuleStorage().pendingHoldsModule) revert InvalidInput();
-        _getCashModuleStorage().safeCashConfig[safe].spendingLimit.spend(amountUsd);
-    }
-
-    /**
-     * @notice Credits amountUsd back to the safe's daily and monthly spending limits
-     * @dev Called by PendingHoldsModule at releaseHold() and updateHold() (decrease) to
-     *      return limit headroom when an authorized transaction is reversed or downsized.
-     *      Applies a floor at 0 on each counter — safe for day/month-boundary crossings where
-     *      the counter already reset to 0 before the credit arrives.
-     *      Only callable by the registered PendingHoldsModule.
-     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
-     * @param safe Address of the EtherFi Safe
-     * @param amountUsd Amount to release from limits in USD (1e6)
-     */
-    function releaseSpendingLimit(address safe, uint256 amountUsd) external {
-        if (msg.sender != _getCashModuleStorage().pendingHoldsModule) revert InvalidInput();
-        _getCashModuleStorage().safeCashConfig[safe].spendingLimit.release(amountUsd);
-    }
-
-    /**
-     * @notice Sets the PendingHoldsModule address
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE.
-     * @param _pendingHoldsModule Address of the deployed PendingHoldsModule proxy
-     */
-    function setPendingHoldsModule(address _pendingHoldsModule) external {
+    function setCashModuleHolds(address _cashModuleHolds) external {
         if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
-        if (_pendingHoldsModule == address(0)) revert InvalidInput();
-        _getCashModuleStorage().pendingHoldsModule = _pendingHoldsModule;
+        if (_cashModuleHolds == address(0)) revert InvalidInput();
+        _getCashModuleStorage().cashModuleHolds = _cashModuleHolds;
     }
 
-    // -------------------------------------------------------------------------
-    // CashModuleSettersExt routing (second overflow hop)
-    // -------------------------------------------------------------------------
-
-    /**
-     * @notice Sets the CashModuleSettersExt address — the second fallback-hop overflow contract.
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE. Functions not found in Core
-     *      or Setters are delegatecalled here (e.g. repay, collectRemaining).
-     * @param _cashModuleSettersExt Address of the deployed CashModuleSettersExt
-     */
-    function setCashModuleSettersExt(address _cashModuleSettersExt) external {
-        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
-        if (_cashModuleSettersExt == address(0)) revert InvalidInput();
-        _getCashModuleStorage().cashModuleSettersExt = _cashModuleSettersExt;
+    /// @notice The CashModuleHolds implementation the module routes hold calls to
+    function getCashModuleHolds() public view returns (address) {
+        return _getCashModuleStorage().cashModuleHolds;
     }
 
     /**
-     * @notice Returns the CashModuleSettersExt address.
-     */
-    function getCashModuleSettersExt() public view returns (address) {
-        return _getCashModuleStorage().cashModuleSettersExt;
-    }
-
-    /**
-     * @dev Second fallback hop. Core delegatecalls Setters for any selector not in Core; if the
-     *      selector is not in Setters either, this forwards (still by delegatecall, so Core's storage
-     *      and the original msg.sender are preserved) to CashModuleSettersExt.
+     * @dev The module's second fallback hop. Core delegatecalls Setters for any selector it does not have;
+     *      if Setters does not have it either, this forwards to CashModuleHolds — still by delegatecall, so
+     *      the module's storage and the original msg.sender are preserved. Core and Setters are both at the
+     *      EIP-170 ceiling, which is why the hold entrypoints live one hop further out.
      */
     // solhint-disable-next-line no-complex-fallback
     fallback() external {
-        address extImpl = _getCashModuleStorage().cashModuleSettersExt;
-        if (extImpl == address(0)) revert InvalidInput();
+        address holdsImpl = _getCashModuleStorage().cashModuleHolds;
+        if (holdsImpl == address(0)) revert InvalidInput();
         // solhint-disable-next-line no-inline-assembly
         assembly ("memory-safe") {
             calldatacopy(0, 0, calldatasize())
-            let result := delegatecall(gas(), extImpl, 0, calldatasize(), 0, 0)
+            let result := delegatecall(gas(), holdsImpl, 0, calldatasize(), 0, 0)
             returndatacopy(0, 0, returndatasize())
             switch result
             case 0 { revert(0, returndatasize()) }

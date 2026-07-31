@@ -22,7 +22,7 @@ import { CashLens } from "../../src/modules/cash/CashLens.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
 import { CashModuleCore } from "../../src/modules/cash/CashModuleCore.sol";
 import { CashModuleSetters } from "../../src/modules/cash/CashModuleSetters.sol";
-import { CashModuleSettersExt } from "../../src/modules/cash/CashModuleSettersExt.sol";
+import { CashModuleHolds } from "../../src/modules/cash/CashModuleHolds.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { ArrayDeDupLib, EtherFiSafe, EtherFiSafeBase, EtherFiSafeErrors } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiSafeFactory } from "../../src/safe/EtherFiSafeFactory.sol";
@@ -212,9 +212,8 @@ contract SafeTestSetup is Utils {
 
         _wireDefaultGateway();
 
-        // Wire the second-hop overflow contract (collectRemaining lives here).
-        address cashModuleSettersExtImpl = address(new CashModuleSettersExt(address(dataProvider)));
-        CashModuleSetters(address(cashModule)).setCashModuleSettersExt(cashModuleSettersExtImpl);
+        // Wire the hold entrypoints (one fallback hop out from Setters — see CashModuleHolds).
+        CashModuleSetters(address(cashModule)).setCashModuleHolds(address(new CashModuleHolds(address(dataProvider))));
 
         _setupWithdrawTokenWhitelist();
 

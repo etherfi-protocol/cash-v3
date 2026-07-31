@@ -14,12 +14,12 @@ import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol"
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
+import { CashHoldsLib } from "../../libraries/CashHoldsLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
-import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
 import { CashLendLib } from "./CashLendLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
 
@@ -414,32 +414,34 @@ contract CashModuleCore is CashModuleStorageContract {
         // Aave position), so this must run before _validateSpend reads the mode.
         CashLendLib.processLendOptOutIfReady($, safe);
 
-        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
+        uint256 actualSpendInUsd = _settleSpend($, safe, txId, binSponsor, tokens, amountsInUsd);
 
-        // Sync hold to settlement amount (or create forced hold). Handle limit delta in Core to
-        // avoid a PHM->Core callback re-entering the nonReentrant spend() context.
-        _phmSettleHold($, safe, binSponsor, txId, totalSpendingInUsd);
-
-        uint256 actualSpendInUsd = _routeSpend($, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-
-        _phmFinalize($, safe, binSponsor, txId, totalSpendingInUsd, actualSpendInUsd);
         _cashback($, safe, actualSpendInUsd, cashbacks);
     }
 
     /**
-     * @dev Routes the settlement by mode and returns the USD it actually moved. Its own stack frame keeps
-     *      spend() clear of the legacy stack limit.
+     * @dev Runs the settlement and returns the USD it actually moved. Its own stack frame keeps spend()
+     *      clear of the legacy stack limit.
      *
      *      CashLendLib routes each mode by engine (Aave gateway vs legacy DebtManager) and emits Spend.
-     *      A debit may settle partially when the safe is under-funded and the holds registry can carry the
-     *      remainder as on-chain debt; with no registry configured a debit must still settle in full.
+     *      A debit settles short of the requested amount only when the safe is under-funded and partial
+     *      settlement is enabled; otherwise it must settle in full.
+     *
+     *      Afterwards CashHoldsLib.settle reconciles the transaction's hold and the spending limit against
+     *      what actually settled: it charges a tip, credits back an unused authorization, charges in full
+     *      when no hold existed, and keeps any unpaid remainder as the hold.
      */
-    function _routeSpend(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) private returns (uint256) {
+    function _settleSpend(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd) private returns (uint256 actualSpendInUsd) {
+        uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
+
         if ($.safeCashConfig[safe].mode == Mode.Credit) {
             CashLendLib.spendCredit($, etherFiDataProvider, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-            return totalSpendingInUsd;
+            actualSpendInUsd = totalSpendingInUsd;
+        } else {
+            actualSpendInUsd = CashLendLib.spendDebit($, etherFiDataProvider, safe, txId, binSponsor, tokens, amountsInUsd);
         }
-        return CashLendLib.spendDebit($, etherFiDataProvider, safe, txId, binSponsor, tokens, amountsInUsd);
+
+        CashHoldsLib.settle($, safe, binSponsor, txId, totalSpendingInUsd, actualSpendInUsd);
     }
 
     function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256) {
@@ -465,62 +467,10 @@ contract CashModuleCore is CashModuleStorageContract {
         if (totalSpendingInUsd == 0) revert AmountZero();
 
         $$.transactionCleared[txId] = true;
-        // NOTE: spendingLimit.spend() is NOT called here. Callers are responsible:
-        //   - spend():      skips if hold was non-forced (limit already consumed at addHold time)
-        //   - forceSpend(): skips if hold was non-forced; always charges otherwise
-        //   - No-PHM path: always calls spendingLimit.spend() at settlement
+        // The spending limit is NOT charged here. CashHoldsLib.settle() owns it: an authorized transaction
+        // was already charged when its hold was recorded, so settlement only reconciles the difference.
 
         return totalSpendingInUsd;
-    }
-
-    /**
-     * @dev Syncs/creates a hold via PHM and handles spending-limit accounting for spend().
-     *      Extracted to its own stack frame to avoid stack-too-deep in callers.
-     *
-     *      Limit accounting rules after settlementSyncHold() returns:
-     *        - No hold existed (Settlement is KING): charge full settlement to limit now (the
-     *                                               forced hold created at sync bypassed it).
-     *        - Forced hold (forceAddHold path):     charge full settlement to limit now,
-     *                                               since limit was bypassed at forceAddHold.
-     *        - Non-forced hold, settlement > old:   charge delta to limit.
-     *        - Non-forced hold, settlement < old:   release delta from limit.
-     *        - Non-forced hold, settlement == old:  no-op.
-     *        - No PHM:                              charge spendingLimit.spend(amount) directly.
-     *
-     *      Limit adjustments are performed in Core — NOT via a PHM→Core callback — to avoid
-     *      re-entering the nonReentrant spend() context through CashModuleSetters.
-     */
-    function _phmSettleHold(CashModuleStorage storage $, address safe, BinSponsor binSponsor, bytes32 txId, uint256 amount) private {
-        address phm = $.pendingHoldsModule;
-        if (phm == address(0)) {
-            $.safeCashConfig[safe].spendingLimit.spend(amount);
-            return;
-        }
-        (bool existed, bool wasForced, uint256 oldAmount) =
-            IPendingHoldsModule(phm).settlementSyncHold(safe, binSponsor, txId, amount);
-        // The limit already reflects `oldCharged` for this obligation; make it reflect `amount`.
-        //   - non-forced hold: limit was pre-charged at addHold for oldAmount → reconcile the delta.
-        //   - forced hold / no prior hold ("Settlement is KING"): limit was bypassed at creation
-        //     (oldCharged = 0) → reconcileLimit charges the full settlement amount now.
-        uint256 oldCharged = (existed && !wasForced) ? oldAmount : 0;
-        $.safeCashConfig[safe].spendingLimit.reconcileLimit(oldCharged, amount);
-    }
-
-    /**
-     * @dev Finalizes the hold state after spend() executes the token transfer.
-     *      - remaining == 0: removeHold() — fully settled.
-     *      - remaining  > 0: settlementSetRemainingHold(remaining) — partial settlement; the
-     *        remaining hold tracks outstanding debt for the special-function clearance path.
-     */
-    function _phmFinalize(CashModuleStorage storage $, address safe, BinSponsor binSponsor, bytes32 txId, uint256 total, uint256 actual) private {
-        address phm = $.pendingHoldsModule;
-        if (phm == address(0)) return;
-        uint256 remaining = total - actual;
-        if (remaining == 0) {
-            IPendingHoldsModule(phm).removeHold(safe, binSponsor, txId);
-        } else {
-            IPendingHoldsModule(phm).settlementSetRemainingHold(safe, binSponsor, txId, remaining);
-        }
     }
 
     /**
