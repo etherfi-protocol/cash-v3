@@ -181,6 +181,18 @@ contract MockLendGateway is ILendGateway {
         return _rawWithdrawHeadroom[safe];
     }
 
+    mapping(address safe => uint256) internal _deficitValue;
+
+    /// @notice Sets the deficit a subsequent `deficitValue(safe)` will return
+    function setDeficitValue(address safe, uint256 value) external {
+        _deficitValue[safe] = value;
+    }
+
+    /// @dev Defaults to zero: the mock models a healthy position unless a test sets a deficit
+    function deficitValue(address safe) external view returns (uint256) {
+        return _deficitValue[safe];
+    }
+
     /// @dev The mock models every asset as zero-weight (see ltv), so supply is fully withdrawable under debt
     function collateralForHeadroom(address safe, address asset, uint256) external view returns (uint256) {
         return _suppliedOf[safe][asset];

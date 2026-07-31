@@ -531,6 +531,29 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
     }
 
+    /// Audit L-08: a pre-existing deficit (a price crash parked the position under Aave's 1.00 before
+    /// liquidation caught it) is invisible to the clamped rawBorrowCapacity, so resupply used to size
+    /// collateral for the new borrow only and the settlement borrow reverted on Aave's whole-position
+    /// health check — with ample loose collateral sitting in the safe. Sizing now adds deficitValue:
+    /// the spend settles and the resupply incidentally restores the position to at or above 1.00.
+    function test_spend_creditResupply_coversPreexistingDeficit() public {
+        _enterCreditMode();
+        // Lever an existing position to ~98% of raw capacity, then crash weETH 15%
+        _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 0);
+        _borrowOnGateway(address(safe), address(usdc), (gw.rawBorrowCapacity(address(safe), address(usdc)) * 98) / 100, recipient);
+        _crashWeethAavePrice(8500);
+        assertLt(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "underwater before the spend");
+        uint256 debtBefore = gw.debtOf(address(safe), address(usdc));
+
+        // Ample loose collateral: enough for the deficit and the new borrow's cover
+        deal(address(weETH), address(safe), 1 ether);
+
+        _creditSpendUsdc(10e6);
+
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)) - debtBefore, 10e6, 2, "settlement borrow landed");
+        assertGe(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "resupply covered the deficit too");
+    }
+
     /// Every candidate unsuppliable (weETH frozen, USDC at its addCap): nothing is supplied and the failing
     /// borrow reverts the whole spend, same terminal error as the no-eligible-collateral case.
     function test_spend_creditResupply_allUnsuppliable_borrowReverts() public {

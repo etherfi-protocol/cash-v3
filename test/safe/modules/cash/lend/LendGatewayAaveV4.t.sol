@@ -179,6 +179,24 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertEq(gw.supplyHeadroom(address(usdc)), 0, "halted Hub Spoke accepts no supply");
     }
 
+    /// deficitValue is the unclamped complement of rawWithdrawHeadroom at Aave's 1.00 bound: zero for a
+    /// debt-free or healthy position, and the weighted-value gap once a price move parks the position
+    /// under 1.00 — the state every clamped capacity view hides (audit L-08).
+    function test_reads_deficitValue_surfacesUnderwaterGap() public {
+        assertEq(gw.deficitValue(address(safe)), 0, "no position: no deficit");
+
+        _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 100e6);
+        assertEq(gw.deficitValue(address(safe)), 0, "healthy position: no deficit");
+
+        // Lever to ~98% of raw capacity, then crash weETH 15%: the position lands under 1.00
+        _borrowOnGateway(address(safe), address(usdc), (gw.rawBorrowCapacity(address(safe), address(usdc)) * 98) / 100, recipient);
+        _crashWeethAavePrice(8500);
+
+        assertLt(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "underwater");
+        assertEq(gw.rawWithdrawHeadroom(address(safe)), 0, "clamped headroom hides the gap");
+        assertGt(gw.deficitValue(address(safe)), 0, "deficitValue surfaces it");
+    }
+
     /// isBorrowable/borrowableAssets read the reserve's borrowable flag on the Spoke: USDC's reserve allows
     /// borrowing, weETH's is collateral-only, and unregistered assets are never borrowable.
     function test_reads_borrowable() public view {

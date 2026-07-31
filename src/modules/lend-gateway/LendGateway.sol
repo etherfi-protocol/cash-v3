@@ -690,6 +690,19 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
+     * @notice The weighted collateral value the safe's position is short of Aave's 1.00 bound, 0 while healthy
+     * @dev The unclamped complement of rawWithdrawHeadroom (audit L-08): the capacity views clamp at zero
+     *      once a price move parks the position under 1.00, hiding how deep. Sizing paths that must pass
+     *      Aave's whole-position check (credit resupply, the repay-withdraw leg) add this so a pre-existing
+     *      deficit is covered up front rather than resurfacing as an opaque Aave revert.
+     * @param safe The Safe whose position is measured
+     * @return The deficit in weighted collateral value units
+     */
+    function deficitValue(address safe) external view returns (uint256) {
+        return LendCapacityLib.deficitValue(spoke, safe);
+    }
+
+    /**
      * @notice Amount of `asset` the safe can withdraw from Aave while consuming at most `headroom`
      * @dev Supply carrying no borrowing power (collateral flag off or zero collateral factor) is fully
      *      withdrawable, matching Aave's own check.

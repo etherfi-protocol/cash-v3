@@ -186,6 +186,16 @@ interface ILendGateway {
     function rawWithdrawHeadroom(address safe) external view returns (uint256);
 
     /**
+     * @notice Returns the weighted collateral value `safe`'s position is short of Aave's 1.00 bound
+     * @dev The unclamped complement of rawWithdrawHeadroom: non-zero only while a price move holds the
+     *      position under 1.00 pre-liquidation. Sizing paths that must pass Aave's whole-position check
+     *      (credit resupply, the repay-withdraw leg) add this so an existing deficit is covered up front.
+     * @param safe The Safe whose position is measured
+     * @return The deficit in weighted collateral value units, 0 while healthy
+     */
+    function deficitValue(address safe) external view returns (uint256);
+
+    /**
      * @notice Amount of `asset` the safe can withdraw from Aave while consuming at most `headroom`
      * @dev Supply carrying no borrowing power (collateral flag off or zero collateral factor) is fully
      *      withdrawable, matching Aave's own check. Rounds down, so withdrawing the quote never breaches

@@ -82,6 +82,25 @@ library LendCapacityLib {
     }
 
     /**
+     * @notice The weighted collateral value the position is short of Aave's raw 1.00 bound, 0 while healthy
+     * @dev The unclamped complement of withdrawHeadroom at the 1.00 floor (audit L-08): the capacity views
+     *      clamp to zero once a price move parks the position under 1.00, discarding how deep. Sizing paths
+     *      that must pass Aave's whole-position check (credit resupply, the repay-withdraw leg) add this so
+     *      an existing deficit is covered up front instead of resurfacing as an opaque Aave revert. The
+     *      requirement rounds up, mirroring withdrawHeadroom, so covering the returned value always restores
+     *      the position to at least 1.00.
+     * @param spoke The Aave Spoke holding the position
+     * @param safe The Safe whose position is measured
+     * @return The deficit in weighted-collateral value units, 0 when the position holds at or above 1.00
+     */
+    function deficitValue(IAaveV4Spoke spoke, address safe) external view returns (uint256) {
+        BorrowCapacityData memory data = _accountData(spoke, safe);
+        if (data.totalDebtValueRay == 0) return 0;
+        uint256 required = Math.mulDiv(data.totalDebtValueRay, 1e18, WEIGHTED_COLLATERAL_TO_DEBT_RAY, Math.Rounding.Ceil);
+        return required > data.weightedCollateralValueBps ? required - data.weightedCollateralValueBps : 0;
+    }
+
+    /**
      * @notice Amount of `targetReserveId`'s asset the safe can withdraw while consuming at most `headroom`
      *         of weighted collateral value
      * @dev Supply that carries no borrowing power (collateral flag off, or a zero collateral factor) is

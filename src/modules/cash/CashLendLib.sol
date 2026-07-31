@@ -667,6 +667,9 @@ library CashLendLib {
      * @dev Resupplies loose collateral for the part of a pending borrow of `amount` that Aave's raw (1.00)
      *      capacity cannot cover. Gating on the raw capacity, not the configured floor, is what lets an
      *      authorized spend execute in the band between the floor and 1.00 without touching the safe's funds.
+     *      Any existing deficit is added on top: rawBorrowCapacity clamps to zero for an underwater
+     *      position, so sizing the new borrow alone would still leave the borrow failing Aave's
+     *      whole-position check (audit L-08).
      * @param $ The CashModule storage pointer
      * @param dataProvider The EtherFiDataProvider
      * @param gateway The LendGateway serving the safe
@@ -676,9 +679,12 @@ library CashLendLib {
      */
     function _resupplyForCreditShortfall(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, ILendGateway gateway, address safe, address token, uint256 amount) private {
         uint256 rawCapacity = gateway.rawBorrowCapacity(safe, token);
-        if (rawCapacity >= amount) return;
-        // Aave-priced: the collateral the shortfall's borrow requires at Aave's own 1.00 bound
-        uint256 shortfallValue = gateway.borrowValue(token, amount - rawCapacity);
+        uint256 deficit = gateway.deficitValue(safe);
+        if (rawCapacity >= amount && deficit == 0) return;
+        // Aave-priced: the collateral the shortfall's borrow requires at Aave's own 1.00 bound, plus the
+        // value the position is already short of it
+        uint256 shortfallValue = deficit;
+        if (amount > rawCapacity) shortfallValue += gateway.borrowValue(token, amount - rawCapacity);
         _resupplyCollateral($, dataProvider, gateway, safe, shortfallValue);
     }
 
