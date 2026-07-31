@@ -186,7 +186,9 @@ contract CashLens is UpgradeableProxy, Constants {
         // In Credit mode, only one token is allowed
         if (mode == Mode.Credit && tokens.length > 1) return (false, "Only one token allowed in Credit mode");
 
-        // Check spending limit
+        // Check spending limit. When PendingHoldsModule is active, holds are charged to
+        // spentToday/spentThisMonth at addHold() time, so the limit already reflects in-flight
+        // hold consumption — no manual deduction needed here.
         (bool withinLimit, string memory limitMessage) = safeData.spendingLimit.canSpend(totalSpendingInUsd);
         if (!withinLimit) {
             return (false, limitMessage);

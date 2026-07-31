@@ -20,6 +20,7 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashLendLib } from "./CashLendLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
+import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
 
 /**
  * @title CashModule
@@ -416,6 +417,10 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
         if (tokens.length > 1) tokens.checkDuplicates();
 
+        // Block withdrawals while pending holds exist — the safe's balance is committed to unsettled card txns
+        address phm = $.pendingHoldsModule;
+        if (phm != address(0) && IPendingHoldsModule(phm).totalPendingHolds(safe) > 0) revert WithdrawalBlockedByPendingHolds();
+
         _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 
@@ -434,5 +439,109 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (!_usesLendGateway(safe)) _getDebtManager().ensureHealth(safe);
 
         if ($.withdrawalDelay == 0) _processWithdrawal(safe);
+    }
+
+    // -------------------------------------------------------------------------
+    // PendingHoldsModule integration
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Returns the remaining spendable capacity for a safe based on its spending limits
+     * @dev Returns min(remainingDailyLimit, remainingMonthlyLimit) in USD (1e6).
+     *      When PendingHoldsModule is active, holds are charged to spentToday/spentThisMonth at
+     *      addHold() time, so this value already reflects in-flight hold consumption.
+     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
+     *      Routed transparently via Core's fallback() delegatecall.
+     * @param safe Address of the EtherFi Safe
+     * @return Spendable amount in USD (1e6)
+     */
+    function rawSpendable(address safe) external view returns (uint256) {
+        return _getCashModuleStorage().safeCashConfig[safe].spendingLimit.maxCanSpend();
+    }
+
+    /**
+     * @notice Consumes amountUsd from the safe's daily and monthly spending limits
+     * @dev Called by PendingHoldsModule at addHold() and updateHold() (increase) so that
+     *      the limit reflects the user's authorized spend immediately at auth-ack time.
+     *      Reverts with ExceededDailySpendingLimit or ExceededMonthlySpendingLimit if the
+     *      amount would breach the limit — identical validation to the settlement-time spend().
+     *      Only callable by the registered PendingHoldsModule.
+     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
+     * @param safe Address of the EtherFi Safe
+     * @param amountUsd Amount to consume from limits in USD (1e6)
+     */
+    function consumeSpendingLimit(address safe, uint256 amountUsd) external {
+        if (msg.sender != _getCashModuleStorage().pendingHoldsModule) revert InvalidInput();
+        _getCashModuleStorage().safeCashConfig[safe].spendingLimit.spend(amountUsd);
+    }
+
+    /**
+     * @notice Credits amountUsd back to the safe's daily and monthly spending limits
+     * @dev Called by PendingHoldsModule at releaseHold() and updateHold() (decrease) to
+     *      return limit headroom when an authorized transaction is reversed or downsized.
+     *      Applies a floor at 0 on each counter — safe for day/month-boundary crossings where
+     *      the counter already reset to 0 before the credit arrives.
+     *      Only callable by the registered PendingHoldsModule.
+     *      Lives here (not in Core) to preserve Core's EVM 24KB bytecode ceiling.
+     * @param safe Address of the EtherFi Safe
+     * @param amountUsd Amount to release from limits in USD (1e6)
+     */
+    function releaseSpendingLimit(address safe, uint256 amountUsd) external {
+        if (msg.sender != _getCashModuleStorage().pendingHoldsModule) revert InvalidInput();
+        _getCashModuleStorage().safeCashConfig[safe].spendingLimit.release(amountUsd);
+    }
+
+    /**
+     * @notice Sets the PendingHoldsModule address
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE.
+     * @param _pendingHoldsModule Address of the deployed PendingHoldsModule proxy
+     */
+    function setPendingHoldsModule(address _pendingHoldsModule) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (_pendingHoldsModule == address(0)) revert InvalidInput();
+        _getCashModuleStorage().pendingHoldsModule = _pendingHoldsModule;
+    }
+
+    // -------------------------------------------------------------------------
+    // CashModuleSettersExt routing (second overflow hop)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Sets the CashModuleSettersExt address — the second fallback-hop overflow contract.
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE. Functions not found in Core
+     *      or Setters are delegatecalled here (e.g. repay, collectRemaining).
+     * @param _cashModuleSettersExt Address of the deployed CashModuleSettersExt
+     */
+    function setCashModuleSettersExt(address _cashModuleSettersExt) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (_cashModuleSettersExt == address(0)) revert InvalidInput();
+        _getCashModuleStorage().cashModuleSettersExt = _cashModuleSettersExt;
+    }
+
+    /**
+     * @notice Returns the CashModuleSettersExt address.
+     */
+    function getCashModuleSettersExt() public view returns (address) {
+        return _getCashModuleStorage().cashModuleSettersExt;
+    }
+
+    /**
+     * @dev Second fallback hop. Core delegatecalls Setters for any selector not in Core; if the
+     *      selector is not in Setters either, this forwards (still by delegatecall, so Core's storage
+     *      and the original msg.sender are preserved) to CashModuleSettersExt.
+     */
+    // solhint-disable-next-line no-complex-fallback
+    fallback() external {
+        address extImpl = _getCashModuleStorage().cashModuleSettersExt;
+        if (extImpl == address(0)) revert InvalidInput();
+        // solhint-disable-next-line no-inline-assembly
+        assembly ("memory-safe") {
+            calldatacopy(0, 0, calldatasize())
+            let result := delegatecall(gas(), extImpl, 0, calldatasize(), 0, 0)
+            returndatacopy(0, 0, returndatasize())
+            switch result
+            case 0 { revert(0, returndatasize()) }
+            default { return(0, returndatasize()) }
+        }
     }
 }

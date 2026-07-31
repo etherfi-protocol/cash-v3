@@ -9,6 +9,7 @@ import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
+import { IPendingHoldsModule } from "../../interfaces/IPendingHoldsModule.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
@@ -73,6 +74,11 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address settlementDispatcherCardOrder;
         /// @notice The Aave gateway that runs position operations (borrow/withdraw/repay) on a safe's behalf
         ILendGateway gateway;
+        /// @notice Address of the PendingHoldsModule registry contract
+        address pendingHoldsModule;
+        /// @notice Address of the CashModuleSettersExt overflow contract (second fallback hop).
+        ///         Holds functions that no longer fit in Core or Setters under the EIP-170 24KB cap.
+        address cashModuleSettersExt;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -181,6 +187,9 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when the lend gateway has not been configured
     error LendGatewayNotSet();
 
+    /// @notice Error thrown when a withdrawal would exceed spendable balance after pending holds are deducted
+    error WithdrawalBlockedByPendingHolds();
+
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         _disableInitializers();
     }
@@ -274,6 +283,12 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
 
         if ($$.pendingWithdrawalRequest.finalizeTime > block.timestamp) revert CannotWithdrawYet();
+
+        // Re-check pending holds at finalize, not only at request time. A hold may have been added
+        // during the withdrawal delay window; processing anyway would drain funds the hold reserves.
+        address phm = $.pendingHoldsModule;
+        if (phm != address(0) && IPendingHoldsModule(phm).totalPendingHolds(safe) > 0) revert WithdrawalBlockedByPendingHolds();
+
         // Ensure that if the recipient of withdrawal is a whitelisted withdrawal module, only that module can process the withdrawal
         if ($.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) {
             if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanWithdraw();
