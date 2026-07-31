@@ -30,6 +30,17 @@ libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x000000
 runs = 12
 depth = 10
 
+# Opt-in local soak for the lend invariant campaigns (profiles don't inherit, so the lend profile's
+# skip and library pin are restated). Not run in CI; use for longer local runs:
+#   FOUNDRY_PROFILE=soak TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/*Invariant*"
+[profile.soak]
+skip = []
+libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x0000000000000000000000000000000000000A01"]
+
+[profile.soak.invariant]
+runs = 100
+depth = 25
+
 # Profile for scripts/aave-v4/** (real Aave v4 deployments). Forge can't resolve LiquidationLogic's
 # aave-rooted `src/` import to an artifact (same issue as [profile.lend]), so auto-link/auto-deploy fails;
 # instead pin it to its deterministic CREATE2 address (Nick's factory, salt keccak256("ether.fi/aave-v4-test/LiquidationLogic"),
