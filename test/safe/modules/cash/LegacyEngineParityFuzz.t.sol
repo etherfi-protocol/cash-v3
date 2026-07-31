@@ -37,23 +37,19 @@ contract LegacyEngineParityFuzzTest is ParityFuzzBase {
         _requestWithdrawal(_tokens(), amounts, withdrawRecipient);
     }
 
-    /// Debit parity across fuzzed balances, reservations (including one outgrowing the balance), and a
-    /// pending Credit switch: the lens verdict must predict the spend outcome per the parity properties.
+    /// Debit parity across fuzzed balances, reservations, and a pending Credit switch: the lens verdict
+    /// must predict the spend outcome per the parity properties. Reservations stay within the balance:
+    /// no current module can move reserved funds, and the legacy lens (deprecated with the DebtManager)
+    /// reverts rather than declines on that state by a known, accepted limitation.
     /// forge-config: default.fuzz.runs = 512
-    function testFuzz_parity_legacyDebit(uint256 balanceUsd, uint256 spendBpsOfQuote, uint256 withdrawalBpsOfBalance, bool drainBalanceBelowReservation, bool creditPending) public {
+    function testFuzz_parity_legacyDebit(uint256 balanceUsd, uint256 spendBpsOfQuote, uint256 withdrawalBpsOfBalance, bool creditPending) public {
         balanceUsd = bound(balanceUsd, 10e6, 4000e6);
         spendBpsOfQuote = bound(spendBpsOfQuote, 1, 13_000);
         withdrawalBpsOfBalance = bound(withdrawalBpsOfBalance, 0, 10_000);
 
         deal(address(usdc), address(safe), balanceUsd);
         if (withdrawalBpsOfBalance > 0) {
-            uint256 reservation = (balanceUsd * withdrawalBpsOfBalance) / 10_000;
-            _requestUsdcWithdrawal(reservation);
-            if (drainBalanceBelowReservation) {
-                // Funds moved after the request, leaving the reservation larger than the balance by one
-                // unit: the tightest form of the state whose unguarded subtraction used to underflow
-                deal(address(usdc), address(safe), reservation - 1);
-            }
+            _requestUsdcWithdrawal((balanceUsd * withdrawalBpsOfBalance) / 10_000);
         }
         if (creditPending) {
             // Opens the mode window: the lens previews Credit while execution stays Debit

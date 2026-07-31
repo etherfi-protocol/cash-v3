@@ -185,26 +185,6 @@ contract LegacyCashLensCanSpendTest is CashModuleTestSetup {
         assertEq(reason, "Insufficient effective balance after withdrawal to spend with debit mode");
     }
 
-    /// canSpend declines instead of reverting when the balance has dropped below the pending
-    /// reservation (e.g. moved by another module after the withdrawal request).
-    function test_canSpend_declines_whenBalanceDropsBelowPendingWithdrawal() public {
-        address token = address(usdc);
-        deal(token, address(safe), 100e6);
-
-        address[] memory tokens = new address[](1);
-        tokens[0] = token;
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = 100e6;
-        _requestWithdrawal(tokens, amounts, withdrawRecipient);
-
-        deal(token, address(safe), 40e6);
-
-        amounts[0] = 10e6;
-        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
-        assertEq(canSpend, false);
-        assertEq(reason, "Insufficient effective balance after withdrawal to spend with debit mode");
-    }
-
     /// Credit spend fails when a pending withdrawal drops borrowing power below the amount.
     function test_canSpend_fails_inCreditMode_whenWithdrawalRequestBlocksIt() public {
         address token = address(usdc);

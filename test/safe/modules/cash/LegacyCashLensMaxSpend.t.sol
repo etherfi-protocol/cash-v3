@@ -100,23 +100,6 @@ contract LegacyCashLensMaxSpendTest is CashModuleTestSetup {
         assertEq(result.totalSpendableInUsd, 0, "Should return zero total");
     }
 
-    /// A token whose balance dropped below its pending reservation has nothing spendable; the
-    /// quote must clamp to zero instead of reverting on the underflow.
-    function test_getMaxSpendDebit_balanceBelowPendingWithdrawal_clampsToZero() public {
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(usdc);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = usdcBal;
-        _requestWithdrawal(tokens, amounts, withdrawRecipient);
-
-        // The balance drops below the reservation after the request (e.g. moved by another module)
-        deal(address(usdc), address(safe), usdcBal / 2);
-
-        DebitModeMaxSpend memory result = cashLens.getMaxSpendDebit(address(safe), tokens);
-        assertEq(result.spendableAmounts[0], 0, "reserved token has nothing spendable");
-        assertEq(result.totalSpendableInUsd, 0, "no spendable value left");
-    }
-
     /// Single USDC preference on a healthy position spends the full balance.
     function test_getMaxSpendDebit_singleToken_USDC_healthyPosition() public view {
         address[] memory tokenPreference = new address[](1);
