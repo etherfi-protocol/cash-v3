@@ -150,6 +150,35 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertEq(gw.borrowLiquidity(address(usdc)), 0, "halted spoke cannot borrow");
     }
 
+    /// supplyHeadroom is the resupply gate: uncapped it is unlimited, a finite addCap leaves the remaining
+    /// room counted with the Hub's round-up (so filling exactly to it is accepted), and a paused or frozen
+    /// reserve or a halted Hub Spoke drives it to zero.
+    function test_reads_supplyHeadroom_boundedByAddCap() public {
+        // Uncapped (fixture default)
+        assertEq(gw.supplyHeadroom(address(usdc)), type(uint256).max);
+        assertEq(gw.supplyHeadroom(address(0xdead)), 0, "unregistered asset has no headroom");
+
+        // 1M tokens seeded at setup: a 1.2M addCap leaves 200k of room
+        _setAaveSpokeCaps(usdcReserveId, 1_200_000, type(uint40).max);
+        assertEq(gw.supplyHeadroom(address(usdc)), 200_000e6, "remaining addCap room");
+
+        // Filling exactly to the reported headroom passes the Hub's cap check and lands at zero room
+        _supplyToGateway(address(safe), address(usdc), 200_000e6);
+        assertEq(gw.supplyHeadroom(address(usdc)), 0, "at cap");
+
+        _setAaveSpokeCaps(usdcReserveId, type(uint40).max, type(uint40).max);
+        _setAaveReserveFrozen(usdcReserveId, true);
+        assertEq(gw.supplyHeadroom(address(usdc)), 0, "frozen reserve accepts no supply");
+        _setAaveReserveFrozen(usdcReserveId, false);
+
+        _setAaveReservePaused(usdcReserveId, true);
+        assertEq(gw.supplyHeadroom(address(usdc)), 0, "paused reserve accepts no supply");
+        _setAaveReservePaused(usdcReserveId, false);
+
+        _setAaveSpokeHalted(usdcReserveId, true);
+        assertEq(gw.supplyHeadroom(address(usdc)), 0, "halted Hub Spoke accepts no supply");
+    }
+
     /// isBorrowable/borrowableAssets read the reserve's borrowable flag on the Spoke: USDC's reserve allows
     /// borrowing, weETH's is collateral-only, and unregistered assets are never borrowable.
     function test_reads_borrowable() public view {

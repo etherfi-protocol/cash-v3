@@ -138,6 +138,15 @@ interface ILendGateway {
     function borrowLiquidity(address asset) external view returns (uint256);
 
     /**
+     * @notice Returns the amount of `asset` the Spoke can currently accept as new supply
+     * @dev Zero while the reserve is paused or frozen or its Hub Spoke is inactive or halted;
+     *      type(uint256).max when the addCap is the uncapped sentinel, otherwise the remaining cap room.
+     * @param asset The reserve asset
+     * @return The suppliable amount in asset units, or 0 if the asset is not registered
+     */
+    function supplyHeadroom(address asset) external view returns (uint256);
+
+    /**
      * @notice Returns `safe`'s buffered Aave-priced borrowing capacity in units of `asset`
      * @dev The auth quote: capacity holding the post-borrow health factor at or above the configured floor
      *      (Aave's 1.00 bound while no floor is set). Uses Aave's current oracle, collateral factors, debt

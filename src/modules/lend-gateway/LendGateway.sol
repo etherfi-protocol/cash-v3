@@ -603,6 +603,34 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
+     * @notice Returns the amount of `asset` the Spoke can currently accept as new supply
+     * @dev Zero while the reserve is paused or frozen or its Hub Spoke is inactive or halted (the states
+     *      where Aave rejects a supply outright); type(uint256).max when the addCap is the uncapped
+     *      sentinel. Finite cap usage counts the spoke's added shares rounded up exactly as Hub execution
+     *      does, so filling to this headroom never trips AddCapExceeded.
+     * @param asset The reserve asset
+     * @return The suppliable amount in asset units, or 0 if the asset is not registered
+     */
+    function supplyHeadroom(address asset) external view returns (uint256) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return 0;
+
+        uint256 reserveId = $.reserveId[asset];
+        IAaveV4Spoke.ReserveConfig memory reserveConfig = spoke.getReserveConfig(reserveId);
+        if (reserveConfig.paused || reserveConfig.frozen) return 0;
+
+        IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(reserveId);
+        IAaveV4Hub hub = IAaveV4Hub(reserve.hub);
+        IAaveV4Hub.SpokeConfig memory config = hub.getSpokeConfig(reserve.assetId, address(spoke));
+        if (!config.active || config.halted) return 0;
+        if (config.addCap == hub.MAX_ALLOWED_SPOKE_CAP()) return type(uint256).max;
+
+        uint256 capLimit = uint256(config.addCap) * (10 ** reserve.decimals);
+        uint256 supplied = hub.previewAddByShares(reserve.assetId, spoke.getReserveSuppliedShares(reserveId));
+        return supplied >= capLimit ? 0 : capLimit - supplied;
+    }
+
+    /**
      * @notice Returns `safe`'s buffered Aave-priced borrowing capacity in units of `asset`
      * @dev The auth quote: capacity that keeps the post-borrow health factor at or above the configured floor
      *      (Aave's 1.00 bound while no floor is set). New auth decisions and getMaxSpendCredit read this so an
