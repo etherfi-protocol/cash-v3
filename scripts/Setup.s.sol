@@ -114,7 +114,7 @@ contract Setup is Utils {
         _setupPriceProvider();
         _setupCashbackDispatcher();
 
-        address cashLensImpl = deployWithCreate3(abi.encodePacked(type(CashLens).creationCode, abi.encode(address(cashModule), address(dataProvider))), getSalt(CASH_LENS_IMPL));
+        address cashLensImpl = deployWithCreate3(abi.encodePacked(type(CashLens).creationCode, abi.encode(address(cashModule), address(dataProvider), address(0))), getSalt(CASH_LENS_IMPL));
         cashLens = CashLens(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(cashLensImpl, "")), getSalt(CASH_LENS_PROXY)));
         cashLens.initialize(address(roleRegistry));
 

@@ -62,9 +62,12 @@ library CashLendLib {
     struct DebitSpendState {
         uint256[] amounts; // token amount sourced per token
         uint256[] fromLoose; // portion of each amount taken from the safe's loose balance
+        uint256[] actualUsd; // USD actually sourced per token; below the requested USD only on a partial settlement
+        uint256 actualUsdTotal; // sum of actualUsd, i.e. the USD the settlement actually moves
         uint256 withdrawHeadroom; // remaining Aave-priced collateral headroom (weighted Value), consumed as supplied balance is drawn
         bool hasDebt; // whether the safe carries debt (the headroom cap only applies then)
         bool cancelWithdrawal; // sizing needs withdrawal-reserved balance: the spend cancels the request, and later tokens treat all loose balance as unreserved
+        bool allowPartial; // when the holds registry can carry the shortfall as on-chain debt, source what is available instead of reverting
     }
 
     /// @dev The canonical engine check: true routes the safe to the Aave gateway, false to the legacy DebtManager.
@@ -794,35 +797,41 @@ library CashLendLib {
      * @param binSponsor Bin sponsor used for spending
      * @param tokens Addresses of the tokens to spend
      * @param amountsInUsd Amounts to spend in USD
-     * @param totalSpendingInUsd Total spend in USD, for the emitted event
+     * @return actualSpendInUsd The USD the settlement actually moved. It is below the requested total only
+     *         when the safe was under-funded AND partial settlement is enabled, in which case the caller
+     *         leaves the shortfall as the transaction's hold; otherwise the settlement reverts.
      */
-    function spendDebit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) external {
+    function spendDebit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd) external returns (uint256 actualSpendInUsd) {
+        bool allowPartial = $.partialSettlementEnabled;
+
         if (!_usesLendGateway($, safe)) {
-            _spendLegacyDebit($, dataProvider, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
-            return;
+            return _spendLegacyDebit($, dataProvider, safe, txId, binSponsor, tokens, amountsInUsd, allowPartial);
         }
 
-        DebitSpendState memory s = _sourceDebits($, dataProvider, safe, tokens, amountsInUsd);
+        DebitSpendState memory s = _sourceDebits($, dataProvider, safe, tokens, amountsInUsd, allowPartial);
         if (s.cancelWithdrawal) cancelOldWithdrawal($, dataProvider, safe);
         _executeDebits($, safe, settlementDispatcher($, binSponsor), tokens, s.amounts, s.fromLoose);
-        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, s.amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
+        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, s.amounts, s.actualUsd, s.actualUsdTotal, Mode.Debit);
+        return s.actualUsdTotal;
     }
 
     /// @dev Legacy debit spend: every token comes from the loose balance (so _executeDebits performs pure
     ///      transfers), reproducing the pre-gateway behavior exactly. Loose tokens are the legacy engine's
     ///      collateral, so if the position is unhealthy after the spend, the pending withdrawal request
     ///      loses the competing claim: cancel it and check again.
-    function _spendLegacyDebit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, uint256 totalSpendingInUsd) private {
-        DebitSpendState memory s = _sourceLegacyDebits($, safe, tokens, amountsInUsd);
+    function _spendLegacyDebit(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amountsInUsd, bool allowPartial) private returns (uint256) {
+        DebitSpendState memory s = _sourceLegacyDebits($, safe, tokens, amountsInUsd, allowPartial);
         if (s.cancelWithdrawal) cancelOldWithdrawal($, dataProvider, safe);
         _executeDebits($, safe, settlementDispatcher($, binSponsor), tokens, s.amounts, s.fromLoose);
-        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, s.amounts, amountsInUsd, totalSpendingInUsd, Mode.Debit);
+        $.cashEventEmitter.emitSpend(safe, txId, binSponsor, tokens, s.amounts, s.actualUsd, s.actualUsdTotal, Mode.Debit);
 
         try $.debtManager.ensureHealth(safe) { }
         catch {
             cancelOldWithdrawal($, dataProvider, safe);
             $.debtManager.ensureHealth(safe);
         }
+
+        return s.actualUsdTotal;
     }
 
     /**
@@ -832,10 +841,12 @@ library CashLendLib {
      *      safe past its LTV max borrow. Pure sizing: the returned flag tells the caller to cancel the
      *      pending withdrawal request before executing.
      */
-    function _sourceDebits(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, address[] calldata tokens, uint256[] calldata amountsInUsd) private view returns (DebitSpendState memory) {
+    function _sourceDebits(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, address safe, address[] memory tokens, uint256[] memory amountsInUsd, bool allowPartial) private view returns (DebitSpendState memory) {
         DebitSpendState memory s;
         s.amounts = new uint256[](tokens.length);
         s.fromLoose = new uint256[](tokens.length);
+        s.actualUsd = new uint256[](tokens.length);
+        s.allowPartial = allowPartial;
         s.hasDebt = $.gateway.hasDebt(safe);
         // Aave-priced at the raw 1.00 bound: an authorized debit settles to Aave's own boundary, not the
         // configured floor (the lens buffers its quotes with withdrawHeadroom instead)
@@ -891,18 +902,22 @@ library CashLendLib {
      *      spend plus its withdrawal reservation exceeds the loose balance (the spend wins the competing
      *      claim); once set, later tokens treat the reservation as already void.
      */
-    function _sourceLegacyDebits(CashModuleStorageContract.CashModuleStorage storage $, address safe, address[] calldata tokens, uint256[] calldata amountsInUsd) private view returns (DebitSpendState memory) {
+    function _sourceLegacyDebits(CashModuleStorageContract.CashModuleStorage storage $, address safe, address[] memory tokens, uint256[] memory amountsInUsd, bool allowPartial) private view returns (DebitSpendState memory) {
         DebitSpendState memory s;
         s.amounts = new uint256[](tokens.length);
+        s.actualUsd = new uint256[](tokens.length);
+        s.allowPartial = allowPartial;
         // Every token comes from the loose balance, so the execution pass performs pure transfers.
         s.fromLoose = s.amounts;
 
         for (uint256 i = 0; i < tokens.length; i++) {
             if (!$.debtManager.isBorrowToken(tokens[i])) revert UnsupportedToken();
-            s.amounts[i] = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
-
+            uint256 required = $.debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
             uint256 balance = IERC20(tokens[i]).balanceOf(safe);
-            if (balance < s.amounts[i]) revert InsufficientBalance();
+            // Partial settlement: source what the safe has and scale the settled USD down with it, so the
+            // caller can park the shortfall in a hold. Without that carrier the spend must settle in full.
+            (s.amounts[i], s.actualUsd[i]) = _sizeAgainstBalance(s.allowPartial, required, balance, amountsInUsd[i]);
+            s.actualUsdTotal += s.actualUsd[i];
 
             if (!s.cancelWithdrawal && s.amounts[i] + _pendingWithdrawalAmount($, safe, tokens[i]) > balance) {
                 s.cancelWithdrawal = true;
@@ -910,6 +925,22 @@ library CashLendLib {
         }
 
         return s;
+    }
+
+    /**
+     * @dev Sizes one token against what the safe can actually cover.
+     *      Full settlement (allowPartial == false): the balance must cover the requested amount or the whole
+     *      spend reverts, exactly as before holds existed.
+     *      Partial settlement (allowPartial == true): transfer the available balance and scale the settled
+     *      USD down in the same proportion, rounding down so the recorded shortfall never favors the safe.
+     * @return amount Token amount to move
+     * @return actualUsd USD the moved amount settles
+     */
+    function _sizeAgainstBalance(bool allowPartial, uint256 required, uint256 balance, uint256 requestedUsd) private pure returns (uint256 amount, uint256 actualUsd) {
+        if (balance >= required) return (required, requestedUsd);
+        if (!allowPartial) revert InsufficientBalance();
+        // required > balance and required > 0 here, so the scaled USD is strictly below the requested USD
+        return (balance, required == 0 ? 0 : requestedUsd * balance / required);
     }
 
     /**
@@ -922,7 +953,7 @@ library CashLendLib {
      * @param amounts Token amounts to spend, as sized by the sourcing pass
      * @param fromLoose Portion of each amount taken from the safe's loose balance
      */
-    function _executeDebits(CashModuleStorageContract.CashModuleStorage storage $, address safe, address dispatcher, address[] calldata tokens, uint256[] memory amounts, uint256[] memory fromLoose) private {
+    function _executeDebits(CashModuleStorageContract.CashModuleStorage storage $, address safe, address dispatcher, address[] memory tokens, uint256[] memory amounts, uint256[] memory fromLoose) private {
         _transferLoose(safe, dispatcher, tokens, fromLoose);
 
         // The headroom cap in the sizing pass already bounds the supplied withdrawals; no post-withdrawal health check is needed.
@@ -943,13 +974,13 @@ library CashLendLib {
     function _sourceDebitToken(CashModuleStorageContract.CashModuleStorage storage $, DebitSpendState memory s, IPriceProvider priceProvider, address safe, address token, uint256 amountInUsd, uint256 i) internal view {
         // The debit-spend gate, not the borrow gate: a debit only transfers and withdraws, so frozen is fine
         if (!$.gateway.isSpendAsset(token)) revert UnsupportedToken();
-        uint256 amount = LendSourcingLib.fromUsd(priceProvider, token, amountInUsd);
+        uint256 required = LendSourcingLib.fromUsd(priceProvider, token, amountInUsd);
 
         uint256 loose = IERC20(token).balanceOf(safe);
         uint256 withdrawable = LendSourcingLib.withdrawableSupplied($.gateway, safe, token, s.withdrawHeadroom, s.hasDebt);
-        if (loose + withdrawable < amount) {
-            revert InsufficientBalance();
-        }
+        // Partial settlement sources what the position can cover and scales the settled USD with it; the
+        // caller records the shortfall as a hold. Without that carrier the spend must settle in full.
+        (uint256 amount, uint256 actualUsd) = _sizeAgainstBalance(s.allowPartial, required, loose + withdrawable, amountInUsd);
 
         // A pending withdrawal reserves loose balance. Prefer the unreserved portion plus the supplied
         // withdrawal so the request survives (matching CashLens). Only when that cannot fund the spend is
@@ -974,10 +1005,12 @@ library CashLendLib {
 
         s.amounts[i] = amount;
         s.fromLoose[i] = fromLoose;
+        s.actualUsd[i] = actualUsd;
+        s.actualUsdTotal += actualUsd;
     }
 
     /// @dev Transfers each non-zero loose amount from the safe to the dispatcher in one batched module call.
-    function _transferLoose(address safe, address dispatcher, address[] calldata tokens, uint256[] memory amounts) internal {
+    function _transferLoose(address safe, address dispatcher, address[] memory tokens, uint256[] memory amounts) internal {
         uint256 len = tokens.length;
         address[] memory to = new address[](len);
         bytes[] memory data = new bytes[](len);

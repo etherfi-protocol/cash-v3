@@ -416,6 +416,10 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
         if (tokens.length > 1) tokens.checkDuplicates();
 
+        // The safe's funds are committed while a card transaction is authorized but unsettled, so a
+        // withdrawal cannot be requested against them.
+        if ($.totalHolds[safe] != 0) revert WithdrawalBlockedByPendingHolds();
+
         _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 
@@ -434,5 +438,46 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (!_usesLendGateway(safe)) _getDebtManager().ensureHealth(safe);
 
         if ($.withdrawalDelay == 0) _processWithdrawal(safe);
+    }
+
+    // -------------------------------------------------------------------------
+    // CashModuleHolds routing (second fallback hop)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @notice Points the module at the CashModuleHolds implementation
+     * @dev Only callable by CASH_MODULE_CONTROLLER_ROLE. Must be wired before any hold function is called.
+     * @param _cashModuleHolds Address of the deployed CashModuleHolds implementation
+     */
+    function setCashModuleHolds(address _cashModuleHolds) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (_cashModuleHolds == address(0)) revert InvalidInput();
+        _getCashModuleStorage().cashModuleHolds = _cashModuleHolds;
+    }
+
+    /// @notice The CashModuleHolds implementation the module routes hold calls to
+    function getCashModuleHolds() public view returns (address) {
+        return _getCashModuleStorage().cashModuleHolds;
+    }
+
+    /**
+     * @dev The module's second fallback hop. Core delegatecalls Setters for any selector it does not have;
+     *      if Setters does not have it either, this forwards to CashModuleHolds — still by delegatecall, so
+     *      the module's storage and the original msg.sender are preserved. Core and Setters are both at the
+     *      EIP-170 ceiling, which is why the hold entrypoints live one hop further out.
+     */
+    // solhint-disable-next-line no-complex-fallback
+    fallback() external {
+        address holdsImpl = _getCashModuleStorage().cashModuleHolds;
+        if (holdsImpl == address(0)) revert InvalidInput();
+        // solhint-disable-next-line no-inline-assembly
+        assembly ("memory-safe") {
+            calldatacopy(0, 0, calldatasize())
+            let result := delegatecall(gas(), holdsImpl, 0, calldatasize(), 0, 0)
+            returndatacopy(0, 0, returndatasize())
+            switch result
+            case 0 { revert(0, returndatasize()) }
+            default { return(0, returndatasize()) }
+        }
     }
 }

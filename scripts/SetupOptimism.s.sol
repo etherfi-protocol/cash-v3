@@ -234,7 +234,7 @@ contract SetupOptimism is Utils {
         _setupCashbackDispatcher(p.roleRegistry, p.cashModule, p.priceProvider);
 
         console.log("Deploying CashLens...");
-        address cashLensImpl = deployCreate3(abi.encodePacked(type(CashLens).creationCode, abi.encode(p.cashModule, p.dataProvider)), SALT_CASH_LENS_IMPL);
+        address cashLensImpl = deployCreate3(abi.encodePacked(type(CashLens).creationCode, abi.encode(p.cashModule, p.dataProvider, address(0))), SALT_CASH_LENS_IMPL);
         cashLens = CashLens(deployCreate3(
             abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(cashLensImpl, abi.encodeCall(CashLens.initialize, (p.roleRegistry)))),
             SALT_CASH_LENS_PROXY

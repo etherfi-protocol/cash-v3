@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Mode, SafeTiers, BinSponsor } from "../../interfaces/ICashModule.sol";
+import { BinSponsor, Mode, SafeTiers } from "../../interfaces/ICashModule.sol";
 import { SpendingLimit } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 
@@ -147,6 +147,46 @@ contract CashEventEmitter is UpgradeableProxy {
      * @param mode Operational mode in which the spending occurs
      */
     event Spend(address indexed safe, bytes32 indexed txId, BinSponsor indexed binSponsor, address[] tokens, uint256[] amounts, uint256[] amountInUsd, uint256 totalUsdAmt, Mode mode);
+
+    /**
+     * @notice Emitted when a card transaction's hold is recorded
+     * @param safe Address of the safe
+     * @param binSponsor Bin sponsor of the card transaction
+     * @param txId Provider transaction identifier
+     * @param amountUsd What the transaction owes, in USD (1e6)
+     * @param chargedUsd How much of that was charged to the spending limit; 0 for an operator-forced hold
+     */
+    event HoldAdded(address indexed safe, BinSponsor indexed binSponsor, bytes32 indexed txId, uint256 amountUsd, uint256 chargedUsd);
+
+    /**
+     * @notice Emitted when a card transaction's hold amount changes (an incremental authorization)
+     * @param safe Address of the safe
+     * @param binSponsor Bin sponsor of the card transaction
+     * @param txId Provider transaction identifier
+     * @param oldAmountUsd What it owed before, in USD (1e6)
+     * @param newAmountUsd What it owes now, in USD (1e6)
+     */
+    event HoldUpdated(address indexed safe, BinSponsor indexed binSponsor, bytes32 indexed txId, uint256 oldAmountUsd, uint256 newAmountUsd);
+
+    /**
+     * @notice Emitted when a hold is dropped because the transaction will never settle
+     * @param safe Address of the safe
+     * @param binSponsor Bin sponsor of the card transaction
+     * @param txId Provider transaction identifier
+     * @param amountUsd What it owed when dropped, in USD (1e6)
+     */
+    event HoldReleased(address indexed safe, BinSponsor indexed binSponsor, bytes32 indexed txId, uint256 amountUsd);
+
+    /**
+     * @notice Emitted when a card transaction settles and its hold is reconciled
+     * @param safe Address of the safe
+     * @param binSponsor Bin sponsor of the card transaction
+     * @param txId Provider transaction identifier
+     * @param owedUsd What the settlement said it owes, in USD (1e6)
+     * @param paidUsd What the safe actually paid, in USD (1e6)
+     * @param remainingUsd What is still owed and stays held, in USD (1e6); 0 when fully paid
+     */
+    event HoldSettled(address indexed safe, BinSponsor indexed binSponsor, bytes32 indexed txId, uint256 owedUsd, uint256 paidUsd, uint256 remainingUsd);
 
     /**
      * @notice Emitted when loose collateral is supplied to cover a credit spend's borrowing shortfall
@@ -370,6 +410,26 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitSpend(address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external onlyCashModule {
         emit Spend(safe, txId, binSponsor, tokens, amounts, amountsInUsd, totalUsdAmt, mode);
+    }
+
+    /// @notice Emits HoldAdded; can only be called by the Cash Module
+    function emitHoldAdded(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd, uint256 chargedUsd) external onlyCashModule {
+        emit HoldAdded(safe, binSponsor, txId, amountUsd, chargedUsd);
+    }
+
+    /// @notice Emits HoldUpdated; can only be called by the Cash Module
+    function emitHoldUpdated(address safe, BinSponsor binSponsor, bytes32 txId, uint256 oldAmountUsd, uint256 newAmountUsd) external onlyCashModule {
+        emit HoldUpdated(safe, binSponsor, txId, oldAmountUsd, newAmountUsd);
+    }
+
+    /// @notice Emits HoldReleased; can only be called by the Cash Module
+    function emitHoldReleased(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd) external onlyCashModule {
+        emit HoldReleased(safe, binSponsor, txId, amountUsd);
+    }
+
+    /// @notice Emits HoldSettled; can only be called by the Cash Module
+    function emitHoldSettled(address safe, BinSponsor binSponsor, bytes32 txId, uint256 owedUsd, uint256 paidUsd, uint256 remainingUsd) external onlyCashModule {
+        emit HoldSettled(safe, binSponsor, txId, owedUsd, paidUsd, remainingUsd);
     }
 
     /**

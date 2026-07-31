@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { SpendingLimit } from "../libraries/SpendingLimitLib.sol";
-import { Mode, SafeTiers, BinSponsor } from "./ICashModule.sol";
+import { BinSponsor, Mode, SafeTiers } from "./ICashModule.sol";
 
 /**
  * @title ICashEventEmitter
@@ -64,6 +64,18 @@ interface ICashEventEmitter {
      * @param mode Operational mode
      */
     function emitSpend(address safe, bytes32 txId, BinSponsor binSponsor, address[] memory tokens, uint256[] memory amounts, uint256[] memory amountsInUsd, uint256 totalUsdAmt, Mode mode) external;
+
+    /// @notice Emits HoldAdded when a card transaction's hold is recorded
+    function emitHoldAdded(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd, uint256 chargedUsd) external;
+
+    /// @notice Emits HoldUpdated when a card transaction's hold amount changes
+    function emitHoldUpdated(address safe, BinSponsor binSponsor, bytes32 txId, uint256 oldAmountUsd, uint256 newAmountUsd) external;
+
+    /// @notice Emits HoldReleased when a hold is dropped because the transaction will never settle
+    function emitHoldReleased(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd) external;
+
+    /// @notice Emits HoldSettled when a card transaction settles and its hold is reconciled
+    function emitHoldSettled(address safe, BinSponsor binSponsor, bytes32 txId, uint256 owedUsd, uint256 paidUsd, uint256 remainingUsd) external;
     
     /**
      * @notice Emits an event when the mode is changed

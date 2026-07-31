@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { HoldRecord, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
@@ -73,6 +73,17 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address settlementDispatcherCardOrder;
         /// @notice The Aave gateway that runs position operations (borrow/withdraw/repay) on a safe's behalf
         ILendGateway gateway;
+        /// @notice Card-transaction holds, keyed by CashHoldsLib.holdKey(safe, binSponsor, txId)
+        mapping(bytes32 holdKey => HoldRecord hold) holds;
+        /// @notice Per-safe sum of what its unsettled card transactions still owe, in USD (1e6). This is
+        ///         the figure that blocks withdrawals.
+        mapping(address safe => uint256 totalHolds) totalHolds;
+        /// @notice When true, a settlement the safe cannot fully cover pays what it can and leaves the rest
+        ///         as the transaction's hold, for ops to sweep once the safe is funded. When false (the
+        ///         default, and the behavior before holds existed) such a settlement reverts instead.
+        bool partialSettlementEnabled;
+        /// @notice The CashModuleHolds implementation the module routes hold calls to (second fallback hop)
+        address cashModuleHolds;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -181,6 +192,10 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when the lend gateway has not been configured
     error LendGatewayNotSet();
 
+    /// @notice Error thrown when a withdrawal is attempted while the safe has unsettled card transactions
+    ///         whose holds have a claim on its funds
+    error WithdrawalBlockedByPendingHolds();
+
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         _disableInitializers();
     }
@@ -274,6 +289,12 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
 
         if ($$.pendingWithdrawalRequest.finalizeTime > block.timestamp) revert CannotWithdrawYet();
+
+        // Re-check the holds at finalize, not only at request time: a card transaction authorized during
+        // the withdrawal delay window has a claim on these funds, and paying the withdrawal out anyway
+        // would leave that settlement short.
+        if ($.totalHolds[safe] != 0) revert WithdrawalBlockedByPendingHolds();
+
         // Ensure that if the recipient of withdrawal is a whitelisted withdrawal module, only that module can process the withdrawal
         if ($.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) {
             if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanWithdraw();

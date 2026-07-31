@@ -70,6 +70,38 @@ enum Mode {
 }
 
 /**
+ * @title HoldAction
+ * @notice The change being applied to a card transaction's hold
+ */
+enum HoldAction {
+    /// @notice The card network authorized a swipe: record what it owes and charge it to the spending limit
+    AUTHORIZE,
+    /// @notice The provider already committed us to the transaction: record what it owes WITHOUT charging
+    ///         the spending limit, because refusing would not undo the obligation. Charged at settlement.
+    FORCE_AUTHORIZE,
+    /// @notice An incremental authorization changed what the transaction owes
+    REAUTHORIZE,
+    /// @notice The transaction will never settle (a network reversal, or an operator clearing a stuck
+    ///         authorization): drop the hold and credit its charge back. Moves no funds.
+    RELEASE
+}
+
+/**
+ * @title HoldRecord
+ * @notice A card transaction's on-chain hold: what it owes, and how much of that the safe's spending
+ *         limit already reflects
+ * @dev `amountUsd == 0` means there is no hold: holds are never stored with a zero amount.
+ */
+struct HoldRecord {
+    /// @notice What the transaction currently owes, in USD (1e6, the USDC scale)
+    uint256 amountUsd;
+    /// @notice How much of amountUsd is already reflected in the safe's spending limit, in USD (1e6)
+    uint256 chargedUsd;
+    /// @notice When the hold was first recorded
+    uint40 createdAt;
+}
+
+/**
  * @title WithdrawalRequest
  * @notice Structure representing a pending withdrawal of tokens
  * @dev Includes tokens, amounts, recipient, and finalization timestamp
@@ -643,7 +675,19 @@ interface ICashModule {
 
     /**
      * @notice Processes a spending transaction with multiple tokens
-     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
+     * @dev Unified settlement path — handles both normal holds and recovery (no-hold) cases.
+     *      Only callable by EtherFi wallet for valid EtherFi Safe addresses.
+     *
+     *      Limit accounting:
+     *        - Hold exists, non-forced: charge/release delta between settlement and hold amount.
+     *        - Hold exists, forced:     no limit adjustment (forced holds bypass limits).
+     *        - No hold:                 no limit charge (Settlement is KING — bypass).
+     *        - No PHM module set:       charge spendingLimit directly (legacy path).
+     *
+     *      Partial settlement: if the safe has insufficient balance, the Spend event reflects the
+     *      actually transferred amount. The remainder is tracked as a forced hold for later
+     *      clearance by a dedicated special function.
+     *
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
      * @param binSponsor Bin sponsor used for spending
@@ -652,12 +696,69 @@ interface ICashModule {
      * @param cashbacks Struct of Cashback to be given
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
      * @custom:throws UnsupportedToken if any token is not supported
-     * @custom:throws AmountZero if any converted amount is zero
+     * @custom:throws AmountZero if total amounts are zero
      * @custom:throws ArrayLengthMismatch if token and amount arrays have different lengths
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
-     * @custom:throws If spending would exceed limits or balances
      */
     function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external;
+
+    /**
+     * @notice Applies one change to a card transaction's hold
+     * @dev One entrypoint for the whole authorization lifecycle — see HoldAction for what each does.
+     *      Only callable by the EtherFi wallet. `amountUsd` is ignored by RELEASE.
+     * @param safe Address of the EtherFi Safe
+     * @param binSponsor Bin sponsor of the card transaction; it namespaces the provider's transaction id
+     * @param txId Provider transaction identifier
+     * @param amountUsd The amount the transaction owes after this change, in USD (1e6)
+     * @param action Which change to apply
+     */
+    function applyHold(address safe, BinSponsor binSponsor, bytes32 txId, uint256 amountUsd, HoldAction action) external;
+
+    /**
+     * @notice Collects what an under-funded settlement still owes, once the safe has been funded
+     * @dev When a settlement could not be paid in full, the unpaid part stays as the transaction's hold and
+     *      keeps withdrawals blocked. This sweeps it through the same debit path a settlement uses and
+     *      clears the hold once fully paid. The spending limit is not charged again — the whole settlement
+     *      was charged when it first settled.
+     * @param safe Address of the EtherFi Safe
+     * @param binSponsor Bin sponsor the settlement was made under
+     * @param txId Provider transaction identifier
+     * @param token Token to collect from
+     */
+    function collectRemaining(address safe, BinSponsor binSponsor, bytes32 txId, address token) external;
+
+    /**
+     * @notice A safe's card-hold state: this transaction's hold, the safe's total held, and what it can
+     *         still spend
+     * @dev `hold` is a zero record when the transaction has no hold. `totalHeldUsd` is the figure that
+     *      blocks withdrawals. `spendableUsd` is min(remaining daily, remaining monthly): an authorized
+     *      transaction is charged to the limit when its hold is recorded, so this already accounts for
+     *      money in flight — do NOT subtract totalHeldUsd from it as well.
+     */
+    function holdsOf(address safe, BinSponsor binSponsor, bytes32 txId) external view returns (HoldRecord memory hold, uint256 totalHeldUsd, uint256 spendableUsd);
+
+    /**
+     * @notice Turns partial settlement on or off
+     * @dev When on, a settlement the safe cannot fully cover pays what it can and leaves the rest as the
+     *      transaction's hold for ops to sweep with collectRemaining. When off — the default, and the
+     *      behavior before holds existed — such a settlement reverts.
+     */
+    function setPartialSettlementEnabled(bool enabled) external;
+
+    /// @notice Whether an under-funded settlement may settle short and leave the rest as a hold
+    function partialSettlementEnabled() external view returns (bool);
+
+    /**
+     * @notice Points the module at the CashModuleHolds implementation
+     * @dev Only callable by CASH_MODULE_CONTROLLER_ROLE. CashModuleHolds carries the hold entrypoints one
+     *      fallback hop out from Setters, because Core and Setters are both at the EIP-170 ceiling. It must
+     *      be wired before any hold function is called.
+     */
+    function setCashModuleHolds(address _cashModuleHolds) external;
+
+    /// @notice The CashModuleHolds implementation the module routes hold calls to
+    function getCashModuleHolds() external view returns (address);
+
 
     /**
      * @notice Prepares a safe for liquidation by canceling any pending withdrawals
@@ -785,4 +886,5 @@ interface ICashModule {
      * @return SafeTiers Tier of the safe
      */
     function getSafeTier(address safe) external view returns (SafeTiers);
+
 }

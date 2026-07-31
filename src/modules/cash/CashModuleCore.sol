@@ -14,6 +14,7 @@ import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol"
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
+import { CashHoldsLib } from "../../libraries/CashHoldsLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
@@ -374,7 +375,26 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Processes a spending transaction with multiple tokens
-     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
+     * @dev Unified settlement path — handles both normal (hold exists) and recovery (no hold) cases.
+     *
+     *      Hold-sync step (before token transfer):
+     *        - Hold exists, non-forced: update hold to settlement amount; charge/release limit delta.
+     *        - Hold exists, forced:     update hold to settlement amount; no limit adjustment.
+     *        - No hold:                 create forced hold; bypass limit ("Settlement is KING").
+     *        - No PHM:                  charge spendingLimit.spend() directly (legacy path).
+     *
+     *      Spend step:
+     *        - Credit mode: borrow full settlement amount; all-or-nothing.
+     *        - Debit mode:  transfer min(required, available) per token; partial spend supported.
+     *
+     *      Finalize step (after token transfer):
+     *        - Fully spent (remaining == 0): removeHold().
+     *        - Partially spent (remaining > 0): settlementSetRemainingHold(remaining) — hold
+     *          tracks outstanding debt; a separate special function handles clearance.
+     *
+     *      Emits Spend with the ACTUALLY spent amount, not the settlement amount if partial.
+     *
+     *      Only callable by EtherFi wallet for valid EtherFi Safe addresses.
      * @param safe Address of the EtherFi Safe
      * @param txId Transaction identifier
      * @param binSponsor Bin sponsor used for spending
@@ -383,10 +403,9 @@ contract CashModuleCore is CashModuleStorageContract {
      * @param cashbacks Struct of Cashback to be given
      * @custom:throws TransactionAlreadyCleared if the transaction was already processed
      * @custom:throws UnsupportedToken if any token is not supported
-     * @custom:throws AmountZero if any converted amount is zero
+     * @custom:throws AmountZero if total amounts are zero
      * @custom:throws ArrayLengthMismatch if token and amount arrays have different lengths
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
-     * @custom:throws If spending would exceed limits or balances
      */
     function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external whenNotPaused nonReentrant onlyEtherFiWallet onlyEtherFiSafe(safe) {
         CashModuleStorage storage $ = _getCashModuleStorage();
@@ -395,15 +414,34 @@ contract CashModuleCore is CashModuleStorageContract {
         // Aave position), so this must run before _validateSpend reads the mode.
         CashLendLib.processLendOptOutIfReady($, safe);
 
+        uint256 actualSpendInUsd = _settleSpend($, safe, txId, binSponsor, tokens, amountsInUsd);
+
+        _cashback($, safe, actualSpendInUsd, cashbacks);
+    }
+
+    /**
+     * @dev Runs the settlement and returns the USD it actually moved. Its own stack frame keeps spend()
+     *      clear of the legacy stack limit.
+     *
+     *      CashLendLib routes each mode by engine (Aave gateway vs legacy DebtManager) and emits Spend.
+     *      A debit settles short of the requested amount only when the safe is under-funded and partial
+     *      settlement is enabled; otherwise it must settle in full.
+     *
+     *      Afterwards CashHoldsLib.settle reconciles the transaction's hold and the spending limit against
+     *      what actually settled: it charges a tip, credits back an unused authorization, charges in full
+     *      when no hold existed, and keeps any unpaid remainder as the hold.
+     */
+    function _settleSpend(CashModuleStorage storage $, address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd) private returns (uint256 actualSpendInUsd) {
         uint256 totalSpendingInUsd = _validateSpend($.safeCashConfig[safe], txId, tokens, amountsInUsd);
 
-        // CashLendLib routes each mode by engine (gateway vs legacy DebtManager) and emits Spend.
         if ($.safeCashConfig[safe].mode == Mode.Credit) {
             CashLendLib.spendCredit($, etherFiDataProvider, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+            actualSpendInUsd = totalSpendingInUsd;
         } else {
-            CashLendLib.spendDebit($, etherFiDataProvider, safe, txId, binSponsor, tokens, amountsInUsd, totalSpendingInUsd);
+            actualSpendInUsd = CashLendLib.spendDebit($, etherFiDataProvider, safe, txId, binSponsor, tokens, amountsInUsd);
         }
-        _cashback($, safe, totalSpendingInUsd, cashbacks);
+
+        CashHoldsLib.settle($, safe, binSponsor, txId, totalSpendingInUsd, actualSpendInUsd);
     }
 
     function _validateSpend(SafeCashConfig storage $$, bytes32 txId, address[] calldata tokens, uint256[] calldata amountsInUsd) internal returns (uint256) {
@@ -428,9 +466,9 @@ contract CashModuleCore is CashModuleStorageContract {
 
         if (totalSpendingInUsd == 0) revert AmountZero();
 
-        // Update spending limit
         $$.transactionCleared[txId] = true;
-        $$.spendingLimit.spend(totalSpendingInUsd);
+        // The spending limit is NOT charged here. CashHoldsLib.settle() owns it: an authorized transaction
+        // was already charged when its hold was recorded, so settlement only reconciles the difference.
 
         return totalSpendingInUsd;
     }
