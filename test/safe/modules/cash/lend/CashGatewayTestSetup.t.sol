@@ -74,11 +74,11 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
     }
 
     /// @dev Empty on purpose: skips the base mock-gateway wiring so this suite's one-time setLendGateway(gw) is the first and only set.
-    function _wireDefaultGateway() internal override { }
+    function _wireDefaultGateway() internal virtual override { }
 
     /// @dev The default safe deploys in super.setUp() before the real gateway exists, so onboarding it with the
     ///      lend flag would revert LendGatewayNotSet. It onboards legacy, then _forceGatewayEngine flips it.
-    function _newSafeUsesLend() internal pure override returns (bool) {
+    function _newSafeUsesLend() internal pure virtual override returns (bool) {
         return false;
     }
 
