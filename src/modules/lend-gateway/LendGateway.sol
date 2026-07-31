@@ -208,7 +208,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @dev Reverts while the reserve still has outstanding debt or supplied balance. Removing a
      * held asset would drop it from the USD views (debt reads 0, understating debt and inflating
      * borrow headroom) and strand supplied funds behind AssetNotRegistered on the withdraw paths.
-     * Our whitelabel Spoke serves only our safes, so the reserve aggregates gate on our positions.
+     * The gate reads spoke-wide aggregates, which any outside address can hold non-zero forever with a
+     * dust self-supply (Spoke.supply is permissionless for self-positions, and a debt-free position can
+     * be neither liquidated nor force-withdrawn). A reserve pinned that way stays registered by design:
+     * freezing it on the Spoke is the deprecation path (no new supply or borrows, exits stay open, every
+     * gateway supply flow skips or tolerates a frozen reserve), so removal is never operationally
+     * required and the pin is harmless. See audit L-01.
      * @param asset The asset to remove from the registry
      */
     function removeReserve(address asset) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {

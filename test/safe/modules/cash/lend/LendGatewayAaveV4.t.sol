@@ -417,6 +417,45 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.stopPrank();
     }
 
+    /// Audit L-01, accepted: the in-use gate reads spoke-wide aggregates, which any outsider can pin non-zero
+    /// forever by parking a dust self-supply (Spoke.supply is permissionless when user == onBehalfOf, and a
+    /// debt-free position can be neither liquidated nor withdrawn by anyone else). The reserve then stays
+    /// registered by design — freezing it on the Spoke is the deprecation path, and this asserts the frozen
+    /// state is harmless: the griefer cannot borrow against the dust, safes still exit, and gateway supply
+    /// sizing skips the reserve.
+    function test_removeReserve_outsiderDustPinsGate_freezeIsTheMitigation() public {
+        // A safe holds a real position first, so the exit path below is exercised on genuine state
+        deal(address(weETH), address(safe), 1 ether);
+        vm.startPrank(driver);
+        gw.supply(address(safe), address(weETH), 1 ether);
+        vm.stopPrank();
+
+        address griefer = makeAddr("griefer");
+        deal(address(weETH), griefer, 1e12);
+        vm.startPrank(griefer);
+        weETH.approve(address(spoke), 1e12);
+        spoke.supply(weethReserveId, 1e12, griefer);
+        vm.stopPrank();
+
+        // The dust pins the spoke aggregate: delisting (and setReserveId re-pointing) is blocked for good
+        vm.prank(owner);
+        vm.expectRevert(LendGateway.ReserveStillInUse.selector);
+        gw.removeReserve(address(weETH));
+
+        // Mitigation: freeze the reserve. New supplies and borrows stop, so the pin cannot be leveraged...
+        _setAaveReserveFrozen(weethReserveId, true);
+        assertEq(gw.supplyHeadroom(address(weETH)), 0, "frozen reserve is skipped by every supply sizing path");
+        vm.startPrank(griefer);
+        vm.expectRevert();
+        spoke.borrow(weethReserveId, 1, griefer);
+        vm.stopPrank();
+
+        // ...while exits stay open: the safe withdraws its full position out of the frozen reserve
+        vm.prank(driver);
+        gw.withdraw(address(safe), address(weETH), 1 ether, address(safe));
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "safe exits a frozen reserve freely");
+    }
+
     // ----------------------------------------------------------------- driver management
 
     function test_setDriver_guardsAndDeauthorization() public {
