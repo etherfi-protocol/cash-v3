@@ -230,7 +230,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
 
         // Pull any shortfall of the deposit asset out of the safe's Aave position (no-op for ETH), then
         // confirm the safe holds the full amount loose (net of any pending-withdrawal reservation).
-        _pullAndRequire(safe, assetToDeposit, amountToDeposit);
+        uint256 healthFactorBefore = _pullAndRequire(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
         bytes[] memory data;
@@ -276,7 +276,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         // Re-supply the receipt token as collateral when the gateway lists it; an unlisted receipt stays loose.
         _resupplyToGateway(safe, liquidAsset, liquidTokenReceived);
 
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit LiquidDeposit(safe, assetToDeposit, liquidAsset, amountToDeposit, liquidTokenReceived);
     }
@@ -339,7 +339,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
 
         // Pull any shortfall of the liquid token out of the safe's Aave position. Only this front bookend
         // applies: the queued withdrawal's output arrives later, loose in the safe.
-        _pullAndRequire(safe, liquidAsset, amountToWithdraw);
+        uint256 healthFactorBefore = _pullAndRequire(safe, liquidAsset, amountToWithdraw);
 
         uint128 amountOutFromQueue = boringQueue.previewAssetsOut(assetOut, amountToWithdraw, discount);
         if (amountOutFromQueue < minReturn) revert InsufficientReturnAmount();
@@ -358,7 +358,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
 
         // Risk-increasing flow with no resupply (the queued output arrives later, loose): the end state
         // takes the gateway's health-factor floor
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
         
         emit LiquidWithdrawal(safe, liquidAsset, amountToWithdraw, amountOutFromQueue);
     }

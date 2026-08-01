@@ -299,8 +299,11 @@ contract CashLens is UpgradeableProxy, Constants {
             // (PriceProvider-priced, same 6-decimal scale). Idle funds add no borrowing power.
             data.totalCollateral = account.collateralUsd + idleUsd;
             data.totalBorrow = account.debtUsd;
-            // Gross borrowing power (collateral weighted by LTV): the gateway headroom plus current debt
-            data.maxBorrow = account.availableBorrowsUsd + account.debtUsd;
+            // Gross borrowing power (collateral weighted by LTV), read unclamped rather than reconstructed
+            // from the headroom: headroom + debt collapses to exactly the debt once the headroom floors at
+            // zero, so an over-LTV position would read as one sitting precisely at its limit. Taken direct,
+            // this can fall below totalBorrow and measure the breach.
+            data.maxBorrow = account.maxBorrowUsd;
         }
 
         uint256 len = collateralTokens.length;

@@ -140,7 +140,7 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
 
         // Pull any shortfall of the WHYPE input out of the safe's Aave position, then confirm the safe holds
         // the full amount loose.
-        _pullAndRequire(safe, whype, amountToStake);
+        uint256 healthFactorBefore = _pullAndRequire(safe, whype, amountToStake);
 
         uint256 quotedFee = staker.quoteStake(amountToStake, safe);
         if (msg.value < quotedFee) revert InsufficientFee();
@@ -170,7 +170,7 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
 
         // Risk-increasing flow with no resupply (the beHYPE output arrives later, loose): the end state
         // takes the gateway's health-factor floor
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit StakeDeposit(safe, whype, beHYPE, amountToStake);
     }

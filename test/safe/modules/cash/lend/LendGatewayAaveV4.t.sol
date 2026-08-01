@@ -179,6 +179,57 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertEq(gw.supplyHeadroom(address(usdc)), 0, "halted Hub Spoke accepts no supply");
     }
 
+    /// deficitValue is the unclamped complement of rawWithdrawHeadroom at Aave's 1.00 bound: zero for a
+    /// debt-free or healthy position, and the weighted-value gap once a price move parks the position
+    /// under 1.00 — the state every clamped capacity view hides (audit L-08).
+    function test_reads_deficitValue_surfacesUnderwaterGap() public {
+        assertEq(gw.deficitValue(address(safe)), 0, "no position: no deficit");
+
+        _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 100e6);
+        assertEq(gw.deficitValue(address(safe)), 0, "healthy position: no deficit");
+
+        // Lever to ~98% of raw capacity, then crash weETH 15%: the position lands under 1.00
+        _borrowOnGateway(address(safe), address(usdc), (gw.rawBorrowCapacity(address(safe), address(usdc)) * 98) / 100, recipient);
+        _crashWeethAavePrice(8500);
+
+        assertLt(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "underwater");
+        assertEq(gw.rawWithdrawHeadroom(address(safe)), 0, "clamped headroom hides the gap");
+        assertGt(gw.deficitValue(address(safe)), 0, "deficitValue surfaces it");
+    }
+
+    /// The floor is enforced as "no worse off": a position already under the floor may still run operations
+    /// that hold or improve its health, and only an operation that worsens it must clear the floor. Without
+    /// that, a safe parked between Aave's 1.00 bound and the floor could not even de-risk, because the check
+    /// compared the end state to the floor alone and ignored where the position started.
+    function test_ensureMinHealthFactorNotWorsened_allowsImprovementBelowFloor() public {
+        // Lever to ~98% of raw capacity, then park the safe between 1.00 and a 1.05 floor
+        _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 0);
+        _borrowOnGateway(address(safe), address(usdc), (gw.rawBorrowCapacity(address(safe), address(usdc)) * 98) / 100, recipient);
+        vm.prank(owner);
+        gw.setMinHealthFactor(1.05e18);
+
+        uint256 hfBefore = gw.healthFactor(address(safe));
+        assertLt(hfBefore, 1.05e18, "safe sits below the floor");
+        assertGt(hfBefore, 1e18, "but above Aave's own bound");
+
+        // Unchanged position: not worsened, so it passes even though it is still under the floor
+        gw.ensureMinHealthFactorNotWorsened(address(safe), hfBefore);
+        // The plain floor check still rejects the same state, which is what used to block de-risking
+        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        gw.ensureMinHealthFactor(address(safe));
+
+        // Improved but still under the floor: allowed
+        _supplyToGateway(address(safe), address(weETH), 0.02 ether);
+        uint256 hfImproved = gw.healthFactor(address(safe));
+        assertGt(hfImproved, hfBefore, "supply improved health");
+        assertLt(hfImproved, 1.05e18, "still under the floor");
+        gw.ensureMinHealthFactorNotWorsened(address(safe), hfBefore);
+
+        // Worsened while under the floor: rejected
+        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        gw.ensureMinHealthFactorNotWorsened(address(safe), hfImproved + 1);
+    }
+
     /// isBorrowable/borrowableAssets read the reserve's borrowable flag on the Spoke: USDC's reserve allows
     /// borrowing, weETH's is collateral-only, and unregistered assets are never borrowable.
     function test_reads_borrowable() public view {
@@ -209,10 +260,12 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertTrue(gw.isBorrowable(address(usdc)), "borrowable again after unpause");
     }
 
-    /// isSpendAsset (the debit gate) reads the admin spend set, not Aave's borrowable flag: USDC is a declared
-    /// spend asset, weETH is a registered reserve that was never declared spendable, and the set tolerates a
-    /// freeze (a debit only transfers and withdraws) while a pause blocks it.
-    function test_reads_spendAsset_readsAdminSetToleratesFreezeNotPause() public {
+    /// isSpendAsset (the debit gate) is pure admin-set membership: USDC is a declared spend asset, weETH is a
+    /// registered reserve that was never declared spendable. Aave's execution state is deliberately NOT folded
+    /// in (audit I-02) — a debit spend only transfers loose balance and withdraws supplied balance, so a freeze
+    /// is irrelevant and a pause only costs the supplied leg, which the withdrawalLiquidity cap already
+    /// enforces. Folding a pause in here rejected loose-funded settlements that never touch Aave.
+    function test_reads_spendAsset_readsAdminSetOnly() public {
         assertTrue(gw.isSpendAsset(address(usdc)));
         assertFalse(gw.isSpendAsset(address(weETH)), "registered but not a declared spend asset");
         assertFalse(gw.isSpendAsset(address(0xdead)));
@@ -223,8 +276,9 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         _setAaveReserveFrozen(usdcReserveId, false);
 
         _setAaveReservePaused(usdcReserveId, true);
-        assertFalse(gw.isSpendAsset(address(usdc)), "paused reserve not spendable");
-        assertEq(gw.spendAssets().length, 0, "dropped from spendAssets while paused");
+        assertTrue(gw.isSpendAsset(address(usdc)), "membership survives a pause: loose balance still settles");
+        assertEq(gw.spendAssets().length, 1, "stays in spendAssets while paused");
+        assertEq(gw.withdrawalLiquidity(address(usdc)), 0, "the pause is enforced on the supplied leg instead");
     }
 
     /// Membership is decoupled from Aave's borrowable flag: turning USDC's borrowable flag off (so it is no
@@ -415,6 +469,45 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.expectRevert(LendGateway.ReserveStillInUse.selector);
         gw.removeReserve(address(usdc));
         vm.stopPrank();
+    }
+
+    /// Audit L-01, accepted: the in-use gate reads spoke-wide aggregates, which any outsider can pin non-zero
+    /// forever by parking a dust self-supply (Spoke.supply is permissionless when user == onBehalfOf, and a
+    /// debt-free position can be neither liquidated nor withdrawn by anyone else). The reserve then stays
+    /// registered by design — freezing it on the Spoke is the deprecation path, and this asserts the frozen
+    /// state is harmless: the griefer cannot borrow against the dust, safes still exit, and gateway supply
+    /// sizing skips the reserve.
+    function test_removeReserve_outsiderDustPinsGate_freezeIsTheMitigation() public {
+        // A safe holds a real position first, so the exit path below is exercised on genuine state
+        deal(address(weETH), address(safe), 1 ether);
+        vm.startPrank(driver);
+        gw.supply(address(safe), address(weETH), 1 ether);
+        vm.stopPrank();
+
+        address griefer = makeAddr("griefer");
+        deal(address(weETH), griefer, 1e12);
+        vm.startPrank(griefer);
+        weETH.approve(address(spoke), 1e12);
+        spoke.supply(weethReserveId, 1e12, griefer);
+        vm.stopPrank();
+
+        // The dust pins the spoke aggregate: delisting (and setReserveId re-pointing) is blocked for good
+        vm.prank(owner);
+        vm.expectRevert(LendGateway.ReserveStillInUse.selector);
+        gw.removeReserve(address(weETH));
+
+        // Mitigation: freeze the reserve. New supplies and borrows stop, so the pin cannot be leveraged...
+        _setAaveReserveFrozen(weethReserveId, true);
+        assertEq(gw.supplyHeadroom(address(weETH)), 0, "frozen reserve is skipped by every supply sizing path");
+        vm.startPrank(griefer);
+        vm.expectRevert();
+        spoke.borrow(weethReserveId, 1, griefer);
+        vm.stopPrank();
+
+        // ...while exits stay open: the safe withdraws its full position out of the frozen reserve
+        vm.prank(driver);
+        gw.withdraw(address(safe), address(weETH), 1 ether, address(safe));
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "safe exits a frozen reserve freely");
     }
 
     // ----------------------------------------------------------------- driver management

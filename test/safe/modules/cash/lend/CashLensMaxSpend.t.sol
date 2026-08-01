@@ -7,6 +7,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadat
 import { DebitModeMaxSpend, Mode, SafeCashData } from "../../../../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
+import { IPriceProvider } from "../../../../../src/interfaces/IPriceProvider.sol";
 import { ArrayDeDupLib } from "../../../../../src/libraries/ArrayDeDupLib.sol";
 import { CashLens } from "../../../../../src/modules/cash/CashLens.sol";
 import { IAggregatorV3, PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
@@ -395,6 +396,28 @@ contract CashLensMaxSpendAaveTest is CashGatewayTestSetup {
         assertEq(data.creditMaxSpend, account.availableBorrowsUsd, "creditMaxSpend is the net headroom (liquidity ample)");
         assertEq(data.maxBorrow, data.totalBorrow + data.creditMaxSpend, "gross == debt + net headroom");
         assertGt(data.maxBorrow, data.creditMaxSpend, "gross exceeds net once there is debt");
+    }
+
+    /// maxBorrow is documented as gross borrowing power, but reconstructing it as headroom + debt collapses
+    /// to exactly the debt once availableBorrowsUsd clamps at zero — an over-LTV position then reads
+    /// identically to a healthy one sitting precisely at its limit, and nothing in SafeCashData recovers the
+    /// gap. Gross power is reported directly, so it can fall below totalBorrow and quantify the breach.
+    function test_safeCashData_maxBorrowGoesBelowTotalBorrowWhenOverLtv() public {
+        // 2000 liquidUSD collateral at 50% backing 800 USDC of debt: gross power $1000 against $800
+        _supplyToGateway(address(safe), address(liquidUsd), 2000e6);
+        _borrowOnGateway(address(safe), address(usdc), 800e6, recipient);
+
+        // Quartering the collateral's Cash price alone drops gross power to ~$250, well under the debt
+        uint256 cashLiquidPrice = priceProvider.price(address(liquidUsd));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(IPriceProvider.price.selector, address(liquidUsd)), abi.encode(cashLiquidPrice / 4));
+
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
+        ILendGateway.AccountData memory account = gw.getAccountData(address(safe));
+
+        assertEq(account.availableBorrowsUsd, 0, "headroom clamps to zero once debt exceeds gross power");
+        assertApproxEqAbs(data.totalBorrow, 800e6, 2, "debt unchanged");
+        assertLt(data.maxBorrow, data.totalBorrow, "gross power reads below the debt, exposing the breach");
+        assertApproxEqAbs(data.maxBorrow, 250e6, 2e6, "gross power quantifies the shortfall");
     }
 
     /// getSafeCashData honors the token preference order and populates the position fields.

@@ -19,6 +19,9 @@ interface ILendGateway {
         uint256 debtUsd;
         // borrowing headroom: collateral weighted by each reserve's LTV, minus debt
         uint256 availableBorrowsUsd;
+        // gross borrowing power: collateral weighted by each reserve's LTV, NOT reduced by debt and never
+        // clamped, so a value below debtUsd both signals and measures an over-LTV position
+        uint256 maxBorrowUsd;
         uint256 healthFactor;
     }
 
@@ -95,6 +98,23 @@ interface ILendGateway {
      * @param safe The safe to check
      */
     function ensureMinHealthFactor(address safe) external view;
+
+    /**
+     * @notice Returns `safe`'s current Aave health factor in WAD (1e18), unbounded when it carries no debt
+     * @param safe The safe to query
+     * @return The health factor in WAD
+     */
+    function healthFactor(address safe) external view returns (uint256);
+
+    /**
+     * @notice Enforces the floor as "no worse off": passes when the operation did not degrade `safe`'s health,
+     *         otherwise requires the end state to hold the configured floor
+     * @dev Lets a position already below the floor still run health-neutral or de-risking operations, which a
+     *      plain end-state floor check would block. Callers capture the health factor before the operation.
+     * @param safe The safe to check
+     * @param healthFactorBefore The safe's health factor captured before the operation ran
+     */
+    function ensureMinHealthFactorNotWorsened(address safe, uint256 healthFactorBefore) external view;
 
     /**
      * @notice Sets the post-op health-factor floor
@@ -184,6 +204,16 @@ interface ILendGateway {
      * @return The headroom in weighted collateral value units
      */
     function rawWithdrawHeadroom(address safe) external view returns (uint256);
+
+    /**
+     * @notice Returns the weighted collateral value `safe`'s position is short of Aave's 1.00 bound
+     * @dev The unclamped complement of rawWithdrawHeadroom: non-zero only while a price move holds the
+     *      position under 1.00 pre-liquidation. Sizing paths that must pass Aave's whole-position check
+     *      (credit resupply, the repay-withdraw leg) add this so an existing deficit is covered up front.
+     * @param safe The Safe whose position is measured
+     * @return The deficit in weighted collateral value units, 0 while healthy
+     */
+    function deficitValue(address safe) external view returns (uint256);
 
     /**
      * @notice Amount of `asset` the safe can withdraw from Aave while consuming at most `headroom`
@@ -280,21 +310,21 @@ interface ILendGateway {
     function borrowableAssets() external view returns (address[] memory);
 
     /**
-     * @notice Returns whether `asset` can fund a debit spend
-     * @dev An admin-declared spend asset (via setSpendAsset, always a registered reserve) whose reserve is
-     *      not paused. Membership is declared, not read from Aave's borrowable flag, so a supply-only
-     *      reserve can be spendable. Frozen is tolerated: a debit spend only transfers loose balance and
-     *      withdraws supplied balance, both of which Aave allows while frozen. Paused blocks the withdraw
-     *      leg, so a paused reserve is not spendable.
+     * @notice Returns whether `asset` is an admin-declared card settlement token
+     * @dev Static membership (via setSpendAsset, always a registered reserve), read from neither Aave's
+     *      borrowable flag — so a supply-only reserve can be spendable — nor its execution state. A debit
+     *      spend transfers loose balance and withdraws supplied balance, so one funded entirely from loose
+     *      balance needs nothing from Aave; a freeze is irrelevant and a pause costs only the supplied leg,
+     *      which withdrawalLiquidity already reports as zero (audit I-02). Credit gates on isBorrowable.
      * @param asset The asset to query
-     * @return True if the asset can fund a debit spend
+     * @return True if the asset is a declared card settlement token
      */
     function isSpendAsset(address asset) external view returns (bool);
 
     /**
-     * @notice Returns the spend-set assets that can currently fund a debit spend
-     * @dev See isSpendAsset.
-     * @return The spendable asset addresses
+     * @notice Returns the admin-declared card settlement tokens
+     * @dev See isSpendAsset: membership, not Aave state.
+     * @return The declared spend asset addresses
      */
     function spendAssets() external view returns (address[] memory);
 }

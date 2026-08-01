@@ -120,6 +120,34 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         assertApproxEqAbs(suppliedBefore - gw.suppliedOf(address(safe), address(usdc)), repayAmt - looseUsdc, 3, "only the shortfall left the supplied pot");
     }
 
+    /// Audit L-08: repayWithdrawable credited the repay's freed headroom on top of the CLAMPED raw
+    /// headroom, over-crediting by the deficit while the position sits under 1.00 — the sized withdraw
+    /// then failed Aave's own health check, bricking the de-risking path exactly when it is needed.
+    /// The quote's contract is that it is executable: repay the loose leg, then withdraw the quote, in
+    /// the exact order the repay flow runs them.
+    function test_repayWithdrawable_quoteExecutableWhileUnderwater() public {
+        // weETH collateral plus a supplied USDC pot for the withdraw leg to draw on, levered to ~98% of
+        // raw capacity; a 15% weETH crash then parks the position under Aave's 1.00 bound.
+        _supplyToGateway(address(safe), address(weETH), 0.2 ether);
+        _supplyToGateway(address(safe), address(usdc), 500e6);
+        _borrowOnGateway(address(safe), address(usdc), (gw.rawBorrowCapacity(address(safe), address(usdc)) * 98) / 100, recipient);
+        _crashWeethAavePrice(8500);
+        assertLt(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "underwater");
+
+        // A loose repay larger than the deficit frees real headroom, so the quote must be non-zero
+        uint256 fromLoose = 200e6;
+        uint256 quote = LendSourcingLib.repayWithdrawable(gw, address(safe), address(usdc), fromLoose);
+        assertGt(quote, 0, "freed headroom beyond the deficit is quotable");
+
+        deal(address(usdc), address(safe), fromLoose);
+        vm.startPrank(driver);
+        gw.repay(address(safe), address(usdc), fromLoose);
+        gw.withdraw(address(safe), address(usdc), quote, address(safe));
+        vm.stopPrank();
+
+        assertGe(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "executed quote respects Aave's bound");
+    }
+
     /// At max leverage the supplied pot alone cannot fund a repay (Aave's health check caps the withdraw),
     /// but topping up loose unlocks more: the loose leg repays first and frees headroom for the withdraw.
     function test_repay_unloopsAtMaxLeverageWithLooseTopUp() public {

@@ -408,12 +408,20 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param amounts Array of token amounts to withdraw
      * @param recipient Address to receive the withdrawn tokens
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
+     * @custom:throws InvalidInput if tokens is empty
+     * @custom:throws AmountZero if every amount is zero
      */
     function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
+        // A request that withdraws nothing still cancels the live request (and its in-flight bridge) and
+        // occupies the slot, while reading as non-existent to every other function — they all key existence
+        // off tokens.length. Individual zero entries stay legal: _processWithdrawal skips and
+        // compacts them by design, so a caller may pass a token list with some legs sized to zero.
+        if (tokens.length == 0) revert InvalidInput();
+        if (!_hasNonZeroAmount(amounts)) revert AmountZero();
         if (tokens.length > 1) tokens.checkDuplicates();
 
         _areAssetsWithdrawable($, tokens);
@@ -434,5 +442,17 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (!_usesLendGateway(safe)) _getDebtManager().ensureHealth(safe);
 
         if ($.withdrawalDelay == 0) _processWithdrawal(safe);
+    }
+
+    /// @dev Whether the request moves anything at all (see _requestWithdrawal's zero-amount rule)
+    function _hasNonZeroAmount(uint256[] memory amounts) private pure returns (bool) {
+        uint256 len = amounts.length;
+        for (uint256 i = 0; i < len;) {
+            if (amounts[i] != 0) return true;
+            unchecked {
+                ++i;
+            }
+        }
+        return false;
     }
 }

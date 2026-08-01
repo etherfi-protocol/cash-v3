@@ -10,6 +10,7 @@ import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway
 import { ChainlinkPriceFeed } from "../../../../../src/oracle/ChainlinkPriceFeed.sol";
 import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
 import { CashModuleTestSetup } from "../CashModuleTestSetup.t.sol";
+import { IPriceFeed } from "aave-v4/spoke/interfaces/IPriceFeed.sol";
 
 /**
  * @title CashGatewayTestSetup
@@ -133,6 +134,15 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
     /// @dev Sets a registered asset's Aave collateral factor (BPS), i.e. its LTV, for the whole reserve.
     function _setAaveCollateralFactor(address token, uint16 cfBps) internal {
         _setAaveReserveCollateralFactor(gw.reserveIdOf(token), cfBps);
+    }
+
+    /// @dev Reprices the weETH Aave reserve to `factorBps` of its current value by mocking its price
+    ///      source. Aave's own health check and the gateway's capacity math read the same source, so a
+    ///      crash makes the position genuinely underwater for every consumer at once.
+    function _crashWeethAavePrice(uint256 factorBps) internal {
+        address source = oracle.getReserveSource(weethReserveId);
+        int256 price = IPriceFeed(source).latestAnswer();
+        vm.mockCall(source, abi.encodeWithSelector(IPriceFeed.latestAnswer.selector), abi.encode(int256(uint256(price) * factorBps / 10_000)));
     }
 
     // ----------------------------------------------------------------- module wiring helpers
