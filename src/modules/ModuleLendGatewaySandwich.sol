@@ -87,14 +87,32 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
      * @notice Front bookend: source `amount` of `asset` loose from Aave if short, then require it all present
      * @dev The idiom every gateway consumer runs before acting: _withdrawShortfall to pull the missing part
      *      out of the safe's Aave position, then the ModuleCheckBalance assertion that the full amount is now
-     *      loose.
+     *      loose. Returns the health factor read BEFORE the pull, which is what _ensureGatewayFloor compares
+     *      against — the pull itself lowers health, so a snapshot taken any later would measure the operation
+     *      against its own first step.
      * @param safe The safe whose input is sourced
      * @param asset The input asset the operation needs loose
      * @param amount The full amount the operation needs
+     * @return healthFactorBefore The safe's pre-operation health factor, to pass to _ensureGatewayFloor
      */
-    function _pullAndRequire(address safe, address asset, uint256 amount) internal {
+    function _pullAndRequire(address safe, address asset, uint256 amount) internal returns (uint256 healthFactorBefore) {
+        healthFactorBefore = _gatewayHealthFactor(safe);
         _withdrawShortfall(safe, asset, amount, _getAvailableAmount(safe, asset));
         _checkAmountAvailable(safe, asset, amount);
+    }
+
+    /**
+     * @notice The safe's current health factor, or 0 for a safe with no gateway position to protect
+     * @dev Zero is the inert value: _ensureGatewayFloor no-ops off the gateway engine, and a zero snapshot
+     *      elsewhere can only ever read as "not worsened", never as a tightened bound.
+     * @param safe The safe to read
+     * @return The health factor in WAD, or 0 when the safe is not on the gateway engine
+     */
+    function _gatewayHealthFactor(address safe) internal view returns (uint256) {
+        if (!_onGatewayEngine(safe)) return 0;
+        ILendGateway lendGateway = gateway();
+        if (address(lendGateway) == address(0)) return 0;
+        return lendGateway.healthFactor(safe);
     }
 
     /**
@@ -126,10 +144,16 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
      *      Aave's raw 1.0 boundary with no check. A cleanly opted-out safe has no debt, so
      *      an unbounded health factor passes and the check stays a no-op for it. No-op for legacy safes
      *      and while the floor is disabled.
+     *
+     *      Enforced as "no worse off" against the pre-operation snapshot from _pullAndRequire: a position
+     *      already under the floor may still run operations that hold or improve its health, since the floor
+     *      exists to stop extraction from approaching the liquidation line, not to freeze a safe out of
+     *      de-risking. Anything that degrades health still takes the full floor.
      * @param safe The safe to check
+     * @param healthFactorBefore The health factor _pullAndRequire captured before the operation ran
      */
-    function _ensureGatewayFloor(address safe) internal view {
+    function _ensureGatewayFloor(address safe, uint256 healthFactorBefore) internal view {
         if (!_onGatewayEngine(safe)) return;
-        gateway().ensureMinHealthFactor(safe);
+        gateway().ensureMinHealthFactorNotWorsened(safe, healthFactorBefore);
     }
 }

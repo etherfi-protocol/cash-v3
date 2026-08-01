@@ -291,20 +291,21 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         }
 
         delete $.swaps[safe];
+        uint256 healthFactorBefore;
         if (address(cashModule) != address(0)) {
             cashModule.cancelWithdrawalByModule(safe);
             // Front bookend: request-time sourcing normally leaves the input loose through the delay;
             // this re-pulls any shortfall from the safe's Aave position and asserts the full input is
             // present before the safe approves the router. Runs after the cancel so the released
             // reservation no longer masks the loose balance.
-            _pullAndRequire(safe, swap.order.srcToken, swap.order.srcAmount);
+            healthFactorBefore = _pullAndRequire(safe, swap.order.srcToken, swap.order.srcAmount);
         }
 
         _dispatchSwap(safe, swap);
 
-        // The input was collateral pulled out of Aave (at request or just above), so the end state
-        // must sit at or above the gateway's health-factor floor.
-        if (address(cashModule) != address(0)) _ensureGatewayFloor(safe);
+        // The input was collateral pulled out of Aave (at request or just above), so the end state must hold
+        // the gateway's health-factor floor unless it left the position no worse off than it started.
+        if (address(cashModule) != address(0)) _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.order.minOut);
     }

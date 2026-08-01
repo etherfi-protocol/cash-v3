@@ -100,6 +100,23 @@ interface ILendGateway {
     function ensureMinHealthFactor(address safe) external view;
 
     /**
+     * @notice Returns `safe`'s current Aave health factor in WAD (1e18), unbounded when it carries no debt
+     * @param safe The safe to query
+     * @return The health factor in WAD
+     */
+    function healthFactor(address safe) external view returns (uint256);
+
+    /**
+     * @notice Enforces the floor as "no worse off": passes when the operation did not degrade `safe`'s health,
+     *         otherwise requires the end state to hold the configured floor
+     * @dev Lets a position already below the floor still run health-neutral or de-risking operations, which a
+     *      plain end-state floor check would block. Callers capture the health factor before the operation.
+     * @param safe The safe to check
+     * @param healthFactorBefore The safe's health factor captured before the operation ran
+     */
+    function ensureMinHealthFactorNotWorsened(address safe, uint256 healthFactorBefore) external view;
+
+    /**
      * @notice Sets the post-op health-factor floor
      * @param value The floor in WAD; 0 disables, otherwise bounded to [1e18, 2e18]
      */

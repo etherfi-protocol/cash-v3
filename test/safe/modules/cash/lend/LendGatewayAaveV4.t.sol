@@ -197,6 +197,39 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertGt(gw.deficitValue(address(safe)), 0, "deficitValue surfaces it");
     }
 
+    /// The floor is enforced as "no worse off": a position already under the floor may still run operations
+    /// that hold or improve its health, and only an operation that worsens it must clear the floor. Without
+    /// that, a safe parked between Aave's 1.00 bound and the floor could not even de-risk, because the check
+    /// compared the end state to the floor alone and ignored where the position started.
+    function test_ensureMinHealthFactorNotWorsened_allowsImprovementBelowFloor() public {
+        // Lever to ~98% of raw capacity, then park the safe between 1.00 and a 1.05 floor
+        _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 0);
+        _borrowOnGateway(address(safe), address(usdc), (gw.rawBorrowCapacity(address(safe), address(usdc)) * 98) / 100, recipient);
+        vm.prank(owner);
+        gw.setMinHealthFactor(1.05e18);
+
+        uint256 hfBefore = gw.healthFactor(address(safe));
+        assertLt(hfBefore, 1.05e18, "safe sits below the floor");
+        assertGt(hfBefore, 1e18, "but above Aave's own bound");
+
+        // Unchanged position: not worsened, so it passes even though it is still under the floor
+        gw.ensureMinHealthFactorNotWorsened(address(safe), hfBefore);
+        // The plain floor check still rejects the same state, which is what used to block de-risking
+        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        gw.ensureMinHealthFactor(address(safe));
+
+        // Improved but still under the floor: allowed
+        _supplyToGateway(address(safe), address(weETH), 0.02 ether);
+        uint256 hfImproved = gw.healthFactor(address(safe));
+        assertGt(hfImproved, hfBefore, "supply improved health");
+        assertLt(hfImproved, 1.05e18, "still under the floor");
+        gw.ensureMinHealthFactorNotWorsened(address(safe), hfBefore);
+
+        // Worsened while under the floor: rejected
+        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        gw.ensureMinHealthFactorNotWorsened(address(safe), hfImproved + 1);
+    }
+
     /// isBorrowable/borrowableAssets read the reserve's borrowable flag on the Spoke: USDC's reserve allows
     /// borrowing, weETH's is collateral-only, and unregistered assets are never borrowable.
     function test_reads_borrowable() public view {

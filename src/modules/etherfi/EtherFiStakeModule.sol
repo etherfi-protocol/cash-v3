@@ -107,7 +107,7 @@ contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGateway
 
         // Pull any shortfall of the input out of the safe's Aave position (a no-op for ETH, which is not a
         // reserve), then confirm the safe holds the full amount loose.
-        _pullAndRequire(safe, assetToDeposit, amountToDeposit);
+        uint256 healthFactorBefore = _pullAndRequire(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
         bytes[] memory data;
@@ -143,7 +143,7 @@ contract EtherFiStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGateway
         // Re-supply the weETH output as collateral when the gateway lists it; an unlisted output stays loose.
         _resupplyToGateway(safe, weETH, weETHAmtReceived);
 
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit StakeDeposit(safe, assetToDeposit, weETH, amountToDeposit, weETHAmtReceived);
     }
