@@ -15,9 +15,9 @@ import { ChainConfig, Utils } from "../utils/Utils.sol";
  *         DeployAaveV4TestInstance (addresses from deployments/<env>/10/aave-v4-test.json):
  *         supply weETH, enable it as collateral, and withdraw the whole position. Reserve ids
  *         are resolved on-chain by underlying, not from the manifest.
- * @dev Since the spoke upgrade to EtherFiSpokeInstanceDev, `borrow` reverts unless the position
- *      owner is an ether.fi Cash Safe, so this script no longer covers borrow/repay — exercise
- *      those through the LendGateway with a dev safe (see the lend dev-flows fork suite).
+ * @dev The dev spoke is the borrow-gated EtherFiSpokeInstance build, so `borrow` reverts unless
+ *      the position owner is an ether.fi Cash Safe and this script no longer covers borrow/repay —
+ *      exercise those through the LendGateway with a dev safe (see the lend dev-flows fork suite).
  *
  * Usage (simulate by dropping --broadcast):
  *   source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
