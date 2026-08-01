@@ -10,7 +10,6 @@ import { IAccessManager } from "aave-v4/dependencies/openzeppelin/IAccessManager
 import { AssetInterestRateStrategy } from "aave-v4/hub/AssetInterestRateStrategy.sol";
 import { IAssetInterestRateStrategy } from "aave-v4/hub/interfaces/IAssetInterestRateStrategy.sol";
 import { IHub } from "aave-v4/hub/interfaces/IHub.sol";
-import { Roles } from "aave-v4/libraries/types/Roles.sol";
 import { ISpoke } from "aave-v4/spoke/interfaces/ISpoke.sol";
 
 import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
@@ -21,6 +20,7 @@ import { ChainlinkPriceFeed } from "../../src/oracle/ChainlinkPriceFeed.sol";
 import { IPythPairOracle, PythPriceFeed } from "../../src/oracle/PythPriceFeed.sol";
 import { VedaAccountantPriceFeed } from "../../src/oracle/VedaAccountantPriceFeed.sol";
 import { ChainConfig, Utils } from "../utils/Utils.sol";
+import { AaveV4DevRoles } from "./AaveV4DevRoles.sol";
 
 /**
  * @title AddSummerLendCollateral
@@ -128,7 +128,7 @@ contract AddSummerLendCollateral is Utils {
         // updateReservePriceSource is `restricted`; its selector was not mapped at instance deploy.
         bytes4[] memory sourceSelectors = new bytes4[](1);
         sourceSelectors[0] = ISpoke.updateReservePriceSource.selector;
-        accessManager.setTargetFunctionRole(address(spoke), sourceSelectors, Roles.SPOKE_ADMIN_ROLE);
+        accessManager.setTargetFunctionRole(address(spoke), sourceSelectors, AaveV4DevRoles.SPOKE_ADMIN_ROLE);
 
         // One staleness-checked ChainlinkPriceFeed per Chainlink oracle, shared as direct sources
         // and as underlying legs
