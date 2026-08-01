@@ -12,7 +12,6 @@ import { AssetInterestRateStrategy } from "aave-v4/hub/AssetInterestRateStrategy
 import { HubInstance } from "aave-v4/hub/instances/HubInstance.sol";
 import { IAssetInterestRateStrategy } from "aave-v4/hub/interfaces/IAssetInterestRateStrategy.sol";
 import { IHub } from "aave-v4/hub/interfaces/IHub.sol";
-import { Roles } from "aave-v4/libraries/types/Roles.sol";
 import { AaveOracle } from "aave-v4/spoke/AaveOracle.sol";
 import { SpokeInstance } from "aave-v4/spoke/instances/SpokeInstance.sol";
 import { TreasurySpokeInstance } from "aave-v4/spoke/instances/TreasurySpokeInstance.sol";
@@ -48,6 +47,11 @@ abstract contract AaveV4Fixture is Test {
 
     /// @notice Fixed link address for LiquidationLogic (see foundry.toml `[profile.lend]` libraries)
     address internal constant LIQUIDATION_LOGIC = 0x0000000000000000000000000000000000000a01;
+
+    // v0.5.11 role ids, matching the live dev instance; the launch-branch Roles library renumbered
+    // them (hub 100s, spoke 300s) so they are pinned here rather than imported
+    uint64 internal constant HUB_ADMIN_ROLE = 1;
+    uint64 internal constant SPOKE_ADMIN_ROLE = 2;
 
     /// @notice Deploys and wires a full Aave v4 instance (access manager, hub, spoke, oracle, treasury)
     function _deployAaveV4() internal {
@@ -85,8 +89,8 @@ abstract contract AaveV4Fixture is Test {
     function _grantAaveRoles() private {
         vm.startPrank(aaveAdmin);
 
-        accessManager.grantRole(Roles.HUB_ADMIN_ROLE, aaveAdmin, 0);
-        accessManager.grantRole(Roles.SPOKE_ADMIN_ROLE, aaveAdmin, 0);
+        accessManager.grantRole(HUB_ADMIN_ROLE, aaveAdmin, 0);
+        accessManager.grantRole(SPOKE_ADMIN_ROLE, aaveAdmin, 0);
 
         bytes4[] memory spokeSelectors = new bytes4[](5);
         spokeSelectors[0] = ISpoke.addReserve.selector;
@@ -94,14 +98,14 @@ abstract contract AaveV4Fixture is Test {
         spokeSelectors[2] = ISpoke.updateLiquidationConfig.selector;
         spokeSelectors[3] = ISpoke.updateDynamicReserveConfig.selector;
         spokeSelectors[4] = ISpoke.updateReserveConfig.selector;
-        accessManager.setTargetFunctionRole(address(spoke), spokeSelectors, Roles.SPOKE_ADMIN_ROLE);
+        accessManager.setTargetFunctionRole(address(spoke), spokeSelectors, SPOKE_ADMIN_ROLE);
 
         bytes4[] memory hubSelectors = new bytes4[](4);
         hubSelectors[0] = IHub.addAsset.selector;
         hubSelectors[1] = IHub.updateAssetConfig.selector;
         hubSelectors[2] = IHub.addSpoke.selector;
         hubSelectors[3] = IHub.updateSpokeConfig.selector;
-        accessManager.setTargetFunctionRole(address(hub), hubSelectors, Roles.HUB_ADMIN_ROLE);
+        accessManager.setTargetFunctionRole(address(hub), hubSelectors, HUB_ADMIN_ROLE);
 
         // A permissive liquidation config, so borrows/withdrawals are governed by collateral factors alone
         spoke.updateLiquidationConfig(ISpoke.LiquidationConfig({ targetHealthFactor: 1.05e18, healthFactorForMaxBonus: 0.7e18, liquidationBonusFactor: 2000 }));
