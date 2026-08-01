@@ -14,7 +14,6 @@ import { AssetInterestRateStrategy } from "aave-v4/hub/AssetInterestRateStrategy
 import { HubInstance } from "aave-v4/hub/instances/HubInstance.sol";
 import { IAssetInterestRateStrategy } from "aave-v4/hub/interfaces/IAssetInterestRateStrategy.sol";
 import { IHub } from "aave-v4/hub/interfaces/IHub.sol";
-import { Roles } from "aave-v4/libraries/types/Roles.sol";
 import { AaveOracle } from "aave-v4/spoke/AaveOracle.sol";
 import { SpokeInstance } from "aave-v4/spoke/instances/SpokeInstance.sol";
 import { TreasurySpokeInstance } from "aave-v4/spoke/instances/TreasurySpokeInstance.sol";
@@ -26,6 +25,7 @@ import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { ChainlinkPriceFeed } from "../../src/oracle/ChainlinkPriceFeed.sol";
 import { ChainConfig, Utils } from "../utils/Utils.sol";
+import { AaveV4DevRoles } from "./AaveV4DevRoles.sol";
 
 /// @dev Minimal init interface shared by the hub/spoke/treasury proxy implementations
 interface IProxyInit {
@@ -45,11 +45,10 @@ interface IProxyInit {
  *
  * @dev SpokeInstance links the external LiquidationLogic library via an aave-rooted `src/` import that
  *      forge can't resolve to an artifact, so auto-linking is unavailable (and the lend test profile's
- *      0x...0A01 pin only works under vm.etch). The `aave-deploy` profile therefore pins the library to
- *      its deterministic CREATE2 address (Nick's factory + fixed salt + current aave-v4 bytecode), and
- *      this script deploys the library there (idempotent) before the spoke. If the aave-v4 bytecode or
- *      compiler settings change, the recomputed address won't match the pin and the script reverts —
- *      recompute the address and update foundry.toml. The script refuses to run under any other profile.
+ *      0x...0A01 pin only works under vm.etch). The `aave-deploy` profile therefore links the canonical
+ *      Aave-deployed LiquidationLogic on OP Mainnet — the same library the prod whitelabel instance
+ *      links — and this script requires its code to be present before deploying the spoke. The script
+ *      refuses to run under any other profile.
  *
  * Usage (simulate by dropping --broadcast):
  *   source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
@@ -61,11 +60,9 @@ interface IProxyInit {
  *   SEED_USDC         USDC amount (6 decimals) to supply from the deployer as initial borrowable liquidity
  */
 contract DeployAaveV4TestInstance is Utils {
-    // --- LiquidationLogic deterministic deployment (see @dev above) ---
-    address constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-    bytes32 constant LIQUIDATION_LOGIC_SALT = keccak256("ether.fi/aave-v4-test/LiquidationLogic");
-    /// @dev Must match the pin in foundry.toml [profile.aave-deploy] libraries
-    address constant LIQUIDATION_LOGIC = 0x49dEE75906621Ea28D7332bb26E0da6f2d15E838;
+    /// @dev Canonical Aave-deployed LiquidationLogic on OP Mainnet; must match the pin in
+    ///      foundry.toml [profile.aave-deploy] libraries
+    address constant LIQUIDATION_LOGIC = 0x88dF535473C5adf1f57789734A05E555F7Deb8DB;
 
     // --- reserve policy (mirrors the lend test fixture) ---
     uint16 constant WEETH_COLLATERAL_FACTOR_BPS = 55_00; // 55% LTV
@@ -130,22 +127,11 @@ contract DeployAaveV4TestInstance is Utils {
         _logAndRecord();
     }
 
-    /// @dev Deploys LiquidationLogic to its pinned CREATE2 address (no-op if already there). Reads the
-    ///      creation bytecode straight from the compiled artifact — the same direct-read workaround the
-    ///      lend fixture uses, since forge can't resolve the aave-rooted import — and reverts loudly if
-    ///      the recomputed CREATE2 address no longer matches the foundry.toml pin the spoke was linked to.
-    function _ensureLiquidationLogic() internal {
-        bytes memory initCode = vm.parseJsonBytes(vm.readFile("out/LiquidationLogic.sol/LiquidationLogic.json"), ".bytecode.object");
-        address expected = address(uint160(uint256(keccak256(abi.encodePacked(bytes1(0xff), NICKS_FACTORY, LIQUIDATION_LOGIC_SALT, keccak256(initCode))))));
-        require(expected == LIQUIDATION_LOGIC, "LiquidationLogic bytecode drifted from the foundry.toml pin; recompute the CREATE2 address and update both");
-
-        if (LIQUIDATION_LOGIC.code.length == 0) {
-            (bool success,) = NICKS_FACTORY.call(abi.encodePacked(LIQUIDATION_LOGIC_SALT, initCode));
-            require(success && LIQUIDATION_LOGIC.code.length > 0, "LiquidationLogic CREATE2 deployment failed");
-            console.log("Deployed LiquidationLogic:", LIQUIDATION_LOGIC);
-        } else {
-            console.log("LiquidationLogic already deployed:", LIQUIDATION_LOGIC);
-        }
+    /// @dev The canonical library is deployed by Aave, not this script; the spoke bytecode is linked
+    ///      against it, so refuse to deploy if it is somehow absent.
+    function _ensureLiquidationLogic() internal view {
+        require(LIQUIDATION_LOGIC.code.length > 0, "Canonical LiquidationLogic has no code on this chain");
+        console.log("Linking canonical LiquidationLogic:", LIQUIDATION_LOGIC);
     }
 
     /// @dev Deploys access manager, hub (proxy), IR strategy, oracle, spoke (proxy) and treasury spoke (proxy)
@@ -168,21 +154,21 @@ contract DeployAaveV4TestInstance is Utils {
 
     /// @dev Grants the admin the hub/spoke roles and maps the admin functions we call to those roles
     function _grantRoles() internal {
-        accessManager.grantRole(Roles.HUB_ADMIN_ROLE, admin, 0);
-        accessManager.grantRole(Roles.SPOKE_ADMIN_ROLE, admin, 0);
+        accessManager.grantRole(AaveV4DevRoles.HUB_ADMIN_ROLE, admin, 0);
+        accessManager.grantRole(AaveV4DevRoles.SPOKE_ADMIN_ROLE, admin, 0);
 
         bytes4[] memory spokeSelectors = new bytes4[](4);
         spokeSelectors[0] = ISpoke.addReserve.selector;
         spokeSelectors[1] = ISpoke.updatePositionManager.selector;
         spokeSelectors[2] = ISpoke.updateLiquidationConfig.selector;
         spokeSelectors[3] = ISpoke.updateDynamicReserveConfig.selector;
-        accessManager.setTargetFunctionRole(address(spoke), spokeSelectors, Roles.SPOKE_ADMIN_ROLE);
+        accessManager.setTargetFunctionRole(address(spoke), spokeSelectors, AaveV4DevRoles.SPOKE_ADMIN_ROLE);
 
         bytes4[] memory hubSelectors = new bytes4[](3);
         hubSelectors[0] = IHub.addAsset.selector;
         hubSelectors[1] = IHub.updateAssetConfig.selector;
         hubSelectors[2] = IHub.addSpoke.selector;
-        accessManager.setTargetFunctionRole(address(hub), hubSelectors, Roles.HUB_ADMIN_ROLE);
+        accessManager.setTargetFunctionRole(address(hub), hubSelectors, AaveV4DevRoles.HUB_ADMIN_ROLE);
     }
 
     /// @dev Lists `token` on the hub + spoke with the given price source, LTV and borrowability

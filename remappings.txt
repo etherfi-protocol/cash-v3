@@ -4,6 +4,7 @@ forge-std/=lib/forge-std/src/
 openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/
 openzeppelin-contracts/=lib/openzeppelin-contracts/
 solady/=lib/solady/src/
+aave-v4/=lib/aave-v4/src/
 lib/aave-v4/:src/=lib/aave-v4/src/
 @layerzerolabs/oapp-evm/=lib/devtools/packages/oapp-evm/
 @layerzerolabs/oapp-evm-upgradeable/=lib/devtools/packages/oapp-evm-upgradeable/

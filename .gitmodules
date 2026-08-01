@@ -18,4 +18,4 @@
 	url = https://github.com/LayerZero-Labs/LayerZero-v2
 [submodule "lib/aave-v4"]
 	path = lib/aave-v4
-	url = https://github.com/aave/aave-v4
+	url = https://github.com/etherfi-protocol/aave-v4
