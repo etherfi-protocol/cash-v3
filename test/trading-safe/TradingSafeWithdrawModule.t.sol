@@ -99,7 +99,7 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
 
         // Permissionless relay: an arbitrary caller submits the owner-signed authorization.
         vm.prank(relayer);
-        module.withdraw(safeAddr, address(token), recipient, amount, DEADLINE, signers, sigs);
+        _withdraw(address(token), recipient, amount, DEADLINE, signers, sigs);
 
         assertEq(token.balanceOf(recipient), amount, "recipient credited exact amount");
         assertEq(token.balanceOf(safeAddr), held - amount, "safe keeps the remainder");
@@ -112,8 +112,98 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
 
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), arbitrary, amount, DEADLINE);
 
-        module.withdraw(safeAddr, address(token), arbitrary, amount, DEADLINE, signers, sigs);
+        _withdraw(address(token), arbitrary, amount, DEADLINE, signers, sigs);
         assertEq(token.balanceOf(arbitrary), amount, "arbitrary recipient credited");
+    }
+
+    // ---- Batch (multiple tokens) ----
+
+    function test_withdraw_multipleTokensInOneBatch() public {
+        MockERC20 token2 = new MockERC20("Trade2", "TRD2", 6);
+        uint256 amount1 = 400e18;
+        uint256 amount2 = 150e6;
+        token.mint(safeAddr, 1000e18);
+        token2.mint(safeAddr, 500e6);
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(token);
+        tokens[1] = address(token2);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = amount1;
+        amounts[1] = amount2;
+
+        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(tokens, amounts, recipient, DEADLINE);
+
+        vm.expectEmit(true, true, true, true, address(module));
+        emit ITradingSafeWithdrawModule.Withdrawn(safeAddr, address(token), recipient, amount1);
+        vm.expectEmit(true, true, true, true, address(module));
+        emit ITradingSafeWithdrawModule.Withdrawn(safeAddr, address(token2), recipient, amount2);
+
+        vm.prank(relayer);
+        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
+
+        assertEq(token.balanceOf(recipient), amount1, "token1 credited");
+        assertEq(token2.balanceOf(recipient), amount2, "token2 credited");
+        assertEq(token.balanceOf(safeAddr), 1000e18 - amount1, "token1 remainder kept");
+        assertEq(token2.balanceOf(safeAddr), 500e6 - amount2, "token2 remainder kept");
+    }
+
+    /// @dev One over-drawn token in the batch reverts the whole withdrawal (all-or-nothing).
+    function test_withdraw_batchRevertsIfOneTokenInsufficient() public {
+        MockERC20 token2 = new MockERC20("Trade2", "TRD2", 18);
+        token.mint(safeAddr, 1000e18);
+        token2.mint(safeAddr, 100e18);
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(token);
+        tokens[1] = address(token2);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 400e18;
+        amounts[1] = 101e18;
+
+        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(tokens, amounts, recipient, DEADLINE);
+
+        vm.expectRevert(ITradingSafeWithdrawModule.InsufficientBalance.selector);
+        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
+        assertEq(token.balanceOf(recipient), 0, "no partial transfer");
+    }
+
+    function test_withdraw_revertsOnEmptyArrays() public {
+        address[] memory tokens = new address[](0);
+        uint256[] memory amounts = new uint256[](0);
+        address[] memory signers = new address[](0);
+        bytes[] memory sigs = new bytes[](0);
+
+        vm.expectRevert(ITradingSafeWithdrawModule.EmptyWithdrawal.selector);
+        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
+    }
+
+    function test_withdraw_revertsOnArrayLengthMismatch() public {
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(token);
+        tokens[1] = address(token);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1e18;
+        address[] memory signers = new address[](0);
+        bytes[] memory sigs = new bytes[](0);
+
+        vm.expectRevert(ModuleBase.ArrayLengthMismatch.selector);
+        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
+    }
+
+    function test_withdraw_revertsOnDuplicateToken() public {
+        token.mint(safeAddr, 1000e18);
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(token);
+        tokens[1] = address(token);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 1e18;
+        amounts[1] = 2e18;
+
+        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(tokens, amounts, recipient, DEADLINE);
+
+        vm.expectRevert(ITradingSafeWithdrawModule.DuplicateToken.selector);
+        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
     }
 
     // ---- Input validation ----
@@ -121,19 +211,19 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
     function test_withdraw_revertsIfTokenZero() public {
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(0), recipient, 1e18, DEADLINE);
         vm.expectRevert(ITradingSafeWithdrawModule.InvalidToken.selector);
-        module.withdraw(safeAddr, address(0), recipient, 1e18, DEADLINE, signers, sigs);
+        _withdraw(address(0), recipient, 1e18, DEADLINE, signers, sigs);
     }
 
     function test_withdraw_revertsIfRecipientZero() public {
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), address(0), 1e18, DEADLINE);
         vm.expectRevert(ITradingSafeWithdrawModule.InvalidRecipient.selector);
-        module.withdraw(safeAddr, address(token), address(0), 1e18, DEADLINE, signers, sigs);
+        _withdraw(address(token), address(0), 1e18, DEADLINE, signers, sigs);
     }
 
     function test_withdraw_revertsIfAmountZero() public {
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 0, DEADLINE);
         vm.expectRevert(ITradingSafeWithdrawModule.InvalidAmount.selector);
-        module.withdraw(safeAddr, address(token), recipient, 0, DEADLINE, signers, sigs);
+        _withdraw(address(token), recipient, 0, DEADLINE, signers, sigs);
     }
 
     /// @dev A stashed signature must not be replayable against a future deposit once expired.
@@ -144,21 +234,21 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
 
         vm.warp(deadline + 1);
         vm.expectRevert(ITradingSafeWithdrawModule.WithdrawExpired.selector);
-        module.withdraw(safeAddr, address(token), recipient, 1e18, deadline, signers, sigs);
+        _withdraw(address(token), recipient, 1e18, deadline, signers, sigs);
     }
 
     function test_withdraw_revertsIfInsufficientBalance() public {
         token.mint(safeAddr, 100e18);
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 101e18, DEADLINE);
         vm.expectRevert(ITradingSafeWithdrawModule.InsufficientBalance.selector);
-        module.withdraw(safeAddr, address(token), recipient, 101e18, DEADLINE, signers, sigs);
+        _withdraw(address(token), recipient, 101e18, DEADLINE, signers, sigs);
     }
 
     function test_withdraw_revertsForNonTradingSafe() public {
         address notASafe = makeAddr("notASafe");
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 1e18, DEADLINE);
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
-        module.withdraw(notASafe, address(token), recipient, 1e18, DEADLINE, signers, sigs);
+        module.withdraw(notASafe, _single(address(token)), _single(uint256(1e18)), recipient, DEADLINE, signers, sigs);
     }
 
     // ---- Signature / replay ----
@@ -168,24 +258,24 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         // Sign over 1e18, submit 2e18 -> digest mismatch.
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 1e18, DEADLINE);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.withdraw(safeAddr, address(token), recipient, 2e18, DEADLINE, signers, sigs);
+        _withdraw(address(token), recipient, 2e18, DEADLINE, signers, sigs);
     }
 
     function test_withdraw_revertsIfSignatureOverDifferentRecipient() public {
         token.mint(safeAddr, 10e18);
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 1e18, DEADLINE);
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.withdraw(safeAddr, address(token), makeAddr("other"), 1e18, DEADLINE, signers, sigs);
+        _withdraw(address(token), makeAddr("other"), 1e18, DEADLINE, signers, sigs);
     }
 
     function test_withdraw_revertsOnNonceReplay() public {
         token.mint(safeAddr, 4e18);
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 2e18, DEADLINE);
 
-        module.withdraw(safeAddr, address(token), recipient, 2e18, DEADLINE, signers, sigs);
+        _withdraw(address(token), recipient, 2e18, DEADLINE, signers, sigs);
         // Safe nonce advanced; the same signatures no longer match.
         vm.expectRevert(ModuleBase.InvalidSignature.selector);
-        module.withdraw(safeAddr, address(token), recipient, 2e18, DEADLINE, signers, sigs);
+        _withdraw(address(token), recipient, 2e18, DEADLINE, signers, sigs);
     }
 
     function test_withdraw_revertsIfBelowThreshold() public {
@@ -198,7 +288,7 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         oneSig[0] = fullSigs[0];
 
         vm.expectRevert(EtherFiSafeErrors.InsufficientSigners.selector);
-        module.withdraw(safeAddr, address(token), recipient, 2e18, DEADLINE, oneSigner, oneSig);
+        _withdraw(address(token), recipient, 2e18, DEADLINE, oneSigner, oneSig);
     }
 
     // ---- Module enablement ----
@@ -217,7 +307,7 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         (address[] memory signers, bytes[] memory sigs) = _signWithdrawFor(address(module2), address(token), recipient, 1e18, DEADLINE);
         // The safe rejects the unenabled module when it tries to consume the nonce.
         vm.expectRevert(EtherFiSafeErrors.OnlyModules.selector);
-        module2.withdraw(safeAddr, address(token), recipient, 1e18, DEADLINE, signers, sigs);
+        module2.withdraw(safeAddr, _single(address(token)), _single(uint256(1e18)), recipient, DEADLINE, signers, sigs);
     }
 
     // ---- Pause ----
@@ -229,7 +319,7 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         token.mint(safeAddr, 1e18);
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 1e18, DEADLINE);
         vm.expectRevert(bytes4(keccak256("EnforcedPause()")));
-        module.withdraw(safeAddr, address(token), recipient, 1e18, DEADLINE, signers, sigs);
+        _withdraw(address(token), recipient, 1e18, DEADLINE, signers, sigs);
     }
 
     function test_pause_onlyPauser() public {
@@ -252,7 +342,7 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         // Withdrawals work again after unpausing.
         token.mint(safeAddr, 1e18);
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 1e18, DEADLINE);
-        module.withdraw(safeAddr, address(token), recipient, 1e18, DEADLINE, signers, sigs);
+        _withdraw(address(token), recipient, 1e18, DEADLINE, signers, sigs);
         assertEq(token.balanceOf(recipient), 1e18, "withdrawal resumes after unpause");
     }
 
@@ -263,17 +353,30 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         bad.mint(safeAddr, 5e18);
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(bad), recipient, 5e18, DEADLINE);
         vm.expectRevert(ITradingSafeWithdrawModule.WithdrawTransferFailed.selector);
-        module.withdraw(safeAddr, address(bad), recipient, 5e18, DEADLINE, signers, sigs);
+        _withdraw(address(bad), recipient, 5e18, DEADLINE, signers, sigs);
     }
 
     // --- helpers ---
 
+    /// @dev Convenience single-token withdraw against the default `module`.
+    function _withdraw(address token_, address recipient_, uint256 amount_, uint256 deadline_, address[] memory signers, bytes[] memory sigs) internal {
+        module.withdraw(safeAddr, _single(token_), _single(amount_), recipient_, deadline_, signers, sigs);
+    }
+
     function _signWithdraw(address token_, address recipient_, uint256 amount_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
-        return _signWithdrawFor(address(module), token_, recipient_, amount_, deadline_);
+        return _signWithdrawMultiFor(address(module), _single(token_), _single(amount_), recipient_, deadline_);
     }
 
     function _signWithdrawFor(address module_, address token_, address recipient_, uint256 amount_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
-        bytes32 digest = keccak256(abi.encodePacked(keccak256("TradingSafeWithdrawModule.withdraw"), block.chainid, module_, safe.nonce(), safeAddr, token_, recipient_, amount_, deadline_)).toEthSignedMessageHash();
+        return _signWithdrawMultiFor(module_, _single(token_), _single(amount_), recipient_, deadline_);
+    }
+
+    function _signWithdrawMulti(address[] memory tokens_, uint256[] memory amounts_, address recipient_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
+        return _signWithdrawMultiFor(address(module), tokens_, amounts_, recipient_, deadline_);
+    }
+
+    function _signWithdrawMultiFor(address module_, address[] memory tokens_, uint256[] memory amounts_, address recipient_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
+        bytes32 digest = keccak256(abi.encodePacked(keccak256("TradingSafeWithdrawModule.withdraw"), block.chainid, module_, safe.nonce(), safeAddr, keccak256(abi.encode(tokens_)), keccak256(abi.encode(amounts_)), recipient_, deadline_)).toEthSignedMessageHash();
 
         signers = new address[](2);
         signers[0] = owner1;
@@ -282,6 +385,16 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         sigs = new bytes[](2);
         sigs[0] = _signDigest(owner1Pk, digest);
         sigs[1] = _signDigest(owner2Pk, digest);
+    }
+
+    function _single(address a) internal pure returns (address[] memory arr) {
+        arr = new address[](1);
+        arr[0] = a;
+    }
+
+    function _single(uint256 x) internal pure returns (uint256[] memory arr) {
+        arr = new uint256[](1);
+        arr[0] = x;
     }
 
     function _signDigest(uint256 pk, bytes32 digest) internal pure returns (bytes memory) {
