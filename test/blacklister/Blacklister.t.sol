@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { Blacklister } from "../../src/blacklister/Blacklister.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 
@@ -35,8 +36,8 @@ contract BlacklisterTest is Test {
         roleRegistry.grantRole(keccak256("GUARDIAN_ROLE"), guardian);
         roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), governance);
 
-        address blacklisterImpl = address(new Blacklister(address(roleRegistry)));
-        blacklister = Blacklister(address(new UUPSProxy(blacklisterImpl, abi.encodeWithSelector(Blacklister.initialize.selector))));
+        address blacklisterImpl = address(new Blacklister());
+        blacklister = Blacklister(address(new UUPSProxy(blacklisterImpl, abi.encodeWithSelector(Blacklister.initialize.selector, address(roleRegistry)))));
 
         vm.stopPrank();
     }
@@ -180,7 +181,7 @@ contract BlacklisterTest is Test {
 
     function test_setBlacklistUntil_revertsWhenNotGovernance() public {
         vm.prank(guardian);
-        vm.expectRevert(Blacklister.OnlyGovernanceMultisig.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         blacklister.setBlacklistUntil(alice, 1 days);
     }
 
@@ -206,7 +207,7 @@ contract BlacklisterTest is Test {
 
     function test_blacklistUser_revertsWhenNotGovernance() public {
         vm.prank(guardian);
-        vm.expectRevert(Blacklister.OnlyGovernanceMultisig.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         blacklister.blacklistUser(alice);
     }
 
@@ -239,7 +240,7 @@ contract BlacklisterTest is Test {
         blacklister.blacklistUser(alice);
 
         vm.prank(guardian);
-        vm.expectRevert(Blacklister.OnlyGovernanceMultisig.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         blacklister.unblacklistUser(alice);
     }
 
@@ -260,7 +261,7 @@ contract BlacklisterTest is Test {
     // ---- Upgrade auth ----
 
     function test_upgrade_onlyRoleRegistryOwner() public {
-        address newImpl = address(new Blacklister(address(roleRegistry)));
+        address newImpl = address(new Blacklister());
 
         vm.prank(guardian);
         vm.expectRevert(RoleRegistry.OnlyUpgrader.selector);

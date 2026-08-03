@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-
-import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
+import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
  * @title Blacklister
  * @author ether.fi
  * @notice Central address-level freeze registry for the cash protocol
- * @dev Standalone UUPS singleton mirroring smart-contracts/src/governance/Blacklister.sol.
- *      Consumers hold this contract's address and call `nonBlacklisted(user)` as a view
- *      guard; where that guard is enforced is decided per flow in the wiring.
+ * @dev UUPS singleton mirroring smart-contracts/src/governance/Blacklister.sol, on the
+ *      cash-v3 UpgradeableProxy base. Consumers hold this contract's address and call
+ *      `nonBlacklisted(user)` as a view guard; where that guard is enforced is decided
+ *      per flow in the wiring.
  *      Two tiers: a low-trust guardian can freeze an address for a fixed, auto-expiring
  *      window, while the governance multisig can freeze for an arbitrary duration or
- *      indefinitely, and lift any freeze.
+ *      indefinitely, and lift any freeze. The freeze gate itself is deliberately never
+ *      gated by the pause: `nonBlacklisted` must stay readable under any pause state.
  */
-contract Blacklister is UUPSUpgradeable {
+contract Blacklister is UpgradeableProxy {
     /// @custom:storage-location erc7201:etherfi.storage.Blacklister
     struct BlacklisterStorage {
         /// @notice Timestamp (exclusive) until which each user is blacklisted, 0 when never blacklisted
@@ -26,17 +26,11 @@ contract Blacklister is UUPSUpgradeable {
     /// @notice Role identifier for guardians allowed to trip the auto-expiring blacklist
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
 
-    /// @notice Role identifier for the governance multisig, gating config and treasury functions
-    bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
-
     /// @notice Fixed window applied by the guardian's `blacklistUserUntil`
     uint256 public constant BLACKLIST_DURATION = 3 days;
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.Blacklister")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant BlacklisterStorageLocation = 0x9ea2b95533369649149a4112dbf03a9ec872da99b01b6ea9b13a361bcd248100;
-
-    /// @notice Reference to the role registry contract for access control
-    IRoleRegistry public immutable roleRegistry;
 
     /// @notice Emitted when a user is blacklisted indefinitely
     /// @param user Address that was blacklisted
@@ -63,19 +57,16 @@ contract Blacklister is UUPSUpgradeable {
     /// @notice Error thrown when caller does not hold the GUARDIAN_ROLE
     error OnlyGuardian();
 
-    /// @notice Error thrown when caller does not hold the GOVERNANCE_ROLE
-    error OnlyGovernanceMultisig();
-
-    constructor(address _roleRegistry) {
-        roleRegistry = IRoleRegistry(_roleRegistry);
+    constructor() {
         _disableInitializers();
     }
 
     /**
      * @notice Initializes the contract
+     * @param _roleRegistry Address of the role registry contract
      */
-    function initialize() external initializer {
-        __UUPSUpgradeable_init();
+    function initialize(address _roleRegistry) external initializer {
+        __UpgradeableProxy_init(_roleRegistry);
     }
 
     /**
@@ -159,17 +150,6 @@ contract Blacklister is UUPSUpgradeable {
     }
 
     /**
-     * @dev Ensures only authorized upgraders can upgrade the contract
-     * @param newImplementation Address of the new implementation contract
-     */
-    function _authorizeUpgrade(address newImplementation) internal view override {
-        roleRegistry.onlyUpgrader(msg.sender);
-
-        // Silence compiler warning on unused variables.
-        newImplementation = newImplementation;
-    }
-
-    /**
      * @dev Returns the storage struct from the specified storage slot
      * @return $ Reference to the BlacklisterStorage struct
      */
@@ -183,15 +163,7 @@ contract Blacklister is UUPSUpgradeable {
      * @dev Modifier to restrict access to holders of the GUARDIAN_ROLE
      */
     modifier onlyGuardian() {
-        if (!roleRegistry.hasRole(GUARDIAN_ROLE, msg.sender)) revert OnlyGuardian();
-        _;
-    }
-
-    /**
-     * @dev Modifier to restrict access to holders of the GOVERNANCE_ROLE
-     */
-    modifier onlyGovernanceMultisig() {
-        if (!roleRegistry.hasRole(GOVERNANCE_ROLE, msg.sender)) revert OnlyGovernanceMultisig();
+        if (!roleRegistry().hasRole(GUARDIAN_ROLE, msg.sender)) revert OnlyGuardian();
         _;
     }
 }
