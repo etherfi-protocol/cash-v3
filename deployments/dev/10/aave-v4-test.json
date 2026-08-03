@@ -4,13 +4,29 @@
   "aaveV4LensImpl": "0x30695edd8e35c2ea0e281b7253d029865d5ae804",
   "accessManager": "0x3E05aBDe0588d56ea9B44579Aa93299971FFF3fe",
   "admin": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
-  "hub": "0x03641abDa8BF0d9196CE44EbEd9f85ccCe3c5e1f",
-  "irStrategy": "0xA5B8515C52149E3f8EC9bFD99144E3C9BC00E0f3",
-  "liquidationLogic": "0x88dF535473C5adf1f57789734A05E555F7Deb8DB",
-  "spoke": "0x7e99c7846df8527FFE510a2CA0215874052102ed",
-  "spokeImpl": "0xd5a5efaA08f2DF808f2EA2dBFA82cfC0B0AfaF75",
-  "spokeImplType": "EtherFiSpokeInstanceDev",
-  "treasurySpoke": "0xf316938C33E81b4f02e1B7141399b872671f13Ad",
+  "assetIds": {
+    "ETHFI": 2,
+    "EURC": 5,
+    "OP": 17,
+    "USDC": 1,
+    "USDT": 15,
+    "WETH": 16,
+    "WHYPE": 3,
+    "beHYPE": 4,
+    "eBTC": 10,
+    "eUSD": 11,
+    "frxUSD": 18,
+    "iPAXG": 22,
+    "iwSPYx": 21,
+    "liquidBTC": 8,
+    "liquidETH": 7,
+    "liquidRESERVE": 19,
+    "liquidRWA": 14,
+    "liquidUSD": 9,
+    "sETHFI": 6,
+    "weETH": 0,
+    "weEUR": 13
+  },
   "details": {
     "weETH": {
       "assetId": 0,
@@ -89,9 +105,42 @@
       "oracle": "0x439755986dB80135F7Aa4d300c113Faa88aDe304"
     },
     "iwSPYx": {
-      "oracle": "0xDDC9D65D80F6BF51682F50A5647584465D724094",
-      "spyUsdLeg": "0x3184C90dAFbC13Eff2D402B84d341B2f71720140",
+      "oracle": "0xF81b2D32401fcd8E2d9649F15f809c72a5D574f5",
+      "spyUsdLeg": "0xcA5bB551C8919B500C576d93042aA385E8F8a08A",
       "assetId": 20
+    },
+    "iPAXG": {
+      "oracle": "0x5c7E37b3Ddd7A098A641A9b879Ef3a84f2d52Cd0"
     }
-  }
+  },
+  "hub": "0x03641abDa8BF0d9196CE44EbEd9f85ccCe3c5e1f",
+  "irStrategy": "0xA5B8515C52149E3f8EC9bFD99144E3C9BC00E0f3",
+  "liquidationLogic": "0x88dF535473C5adf1f57789734A05E555F7Deb8DB",
+  "reserveIds": {
+    "ETHFI": 2,
+    "EURC": 5,
+    "OP": 17,
+    "USDC": 1,
+    "USDT": 15,
+    "WETH": 16,
+    "WHYPE": 3,
+    "beHYPE": 4,
+    "eBTC": 10,
+    "eUSD": 11,
+    "frxUSD": 18,
+    "iPAXG": 22,
+    "iwSPYx": 21,
+    "liquidBTC": 8,
+    "liquidETH": 7,
+    "liquidRESERVE": 19,
+    "liquidRWA": 14,
+    "liquidUSD": 9,
+    "sETHFI": 6,
+    "weETH": 0,
+    "weEUR": 13
+  },
+  "spoke": "0x7e99c7846df8527FFE510a2CA0215874052102ed",
+  "spokeImpl": "0xd5a5efaA08f2DF808f2EA2dBFA82cfC0B0AfaF75",
+  "spokeImplType": "EtherFiSpokeInstanceDev",
+  "treasurySpoke": "0xf316938C33E81b4f02e1B7141399b872671f13Ad"
 }
