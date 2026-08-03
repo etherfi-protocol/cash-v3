@@ -101,6 +101,7 @@ contract TopUpFactoryTest is Test, Constants {
         nttAdapter = new NTTAdapter();
         address roleRegistryImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), owner);
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
@@ -236,8 +237,31 @@ contract TopUpFactoryTest is Test, Constants {
 
     function test_setRecoveryWallet_reverts_whenCalledByNonOwner() public {
         vm.prank(user);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         factory.setRecoveryWallet(makeAddr("recovery"));
+    }
+
+    function test_governanceGate_roleHolderPasses_ownerNoLongerAccepted() public {
+        address governance = makeAddr("governance");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), governance);
+        roleRegistry.revokeRole(keccak256("GOVERNANCE_ROLE"), owner);
+        vm.stopPrank();
+
+        // GOVERNANCE_ROLE holder passes
+        address newWallet = makeAddr("govRecoveryWallet");
+        vm.prank(governance);
+        factory.setRecoveryWallet(newWallet);
+        assertEq(factory.getRecoveryWallet(), newWallet, "Recovery wallet not set by governance");
+
+        // roleRegistry owner without the role is no longer accepted
+        vm.prank(owner);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        factory.setRecoveryWallet(makeAddr("ownerRecoveryWallet"));
+
+        vm.prank(owner);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        factory.recoverFunds(address(weth), 1);
     }
 
     function test_setRecoveryWallet_reverts_whenZeroAddress() public {
@@ -461,7 +485,7 @@ contract TopUpFactoryTest is Test, Constants {
         configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
 
         vm.prank(user);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
     }
 
@@ -829,6 +853,7 @@ contract TopUpFactoryTest is Test, Constants {
         address cctpAdapter = address(new CCTPAdapter());
         address roleRegistryImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), owner);
 
         implementation = new TopUp(address(weth));
         address factoryImpl = address(new TopUpFactory());

@@ -237,10 +237,29 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         liquidUSDLiquifier.withdrawFunds(address(USDC), address(0), 100e6);
     }
 
-    function test_withdrawFunds_OnlyRoleRegistryOwner() public {
-        vm.prank(makeAddr("notRoleRegistryOwner"));
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+    function test_withdrawFunds_onlyGovernanceMultisig() public {
+        deal(address(USDC), address(liquidUSDLiquifier), 100e6);
+
+        // non-holder reverts
+        vm.prank(makeAddr("notGovernance"));
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         liquidUSDLiquifier.withdrawFunds(address(USDC), owner, 100e6);
+
+        address governance = makeAddr("governance");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), governance);
+        roleRegistry.revokeRole(keccak256("GOVERNANCE_ROLE"), owner);
+        vm.stopPrank();
+
+        // roleRegistry owner without the role is no longer accepted
+        vm.prank(owner);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        liquidUSDLiquifier.withdrawFunds(address(USDC), owner, 100e6);
+
+        // GOVERNANCE_ROLE holder passes
+        vm.prank(governance);
+        liquidUSDLiquifier.withdrawFunds(address(USDC), governance, 100e6);
+        assertEq(USDC.balanceOf(governance), 100e6);
     }
 
     function test_withdrawFunds_reverts_whenAmountZero() public {

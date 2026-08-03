@@ -336,6 +336,31 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         assertEq(safeBalAfter, 0);
     }
 
+    function test_withdrawFunds_governanceGate_roleHolderPasses_ownerNoLongerAccepted() public {
+        deal(address(usdc), address(cashbackDispatcher), 1 ether);
+
+        address governance = makeAddr("governance");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), governance);
+        roleRegistry.revokeRole(keccak256("GOVERNANCE_ROLE"), owner);
+        vm.stopPrank();
+
+        // GOVERNANCE_ROLE holder passes
+        vm.prank(governance);
+        cashbackDispatcher.withdrawFunds(address(usdc), governance, 100e6);
+        assertEq(usdc.balanceOf(governance), 100e6);
+
+        // roleRegistry owner without the role is no longer accepted
+        vm.prank(owner);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        cashbackDispatcher.withdrawFunds(address(usdc), owner, 100e6);
+
+        // non-holder reverts
+        vm.prank(notOwner);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        cashbackDispatcher.withdrawFunds(address(usdc), notOwner, 100e6);
+    }
+
     function test_withdrawFunds_succeeds_withNativeToken() public {
         deal(address(cashbackDispatcher), 1 ether);
         uint256 amount = 100e6;

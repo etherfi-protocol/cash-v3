@@ -81,6 +81,7 @@ contract TopUpDestTest is Utils, Constants {
         token2.mint(depositor, INITIAL_AMOUNT);
 
         // Grant roles
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), owner);
         roleRegistry.grantRole(TOP_UP_DEPOSITOR_ROLE, depositor);
         roleRegistry.grantRole(TOP_UP_ROLE, topUpRole);
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
@@ -162,10 +163,31 @@ contract TopUpDestTest is Utils, Constants {
 
         vm.startPrank(nonUser);
 
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 2);
 
         vm.stopPrank();
+    }
+
+    function test_withdraw_governanceGate_roleHolderPasses_ownerNoLongerAccepted() public {
+        vm.prank(depositor);
+        topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
+
+        address governance = makeAddr("governance");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), governance);
+        roleRegistry.revokeRole(keccak256("GOVERNANCE_ROLE"), owner);
+        vm.stopPrank();
+
+        // GOVERNANCE_ROLE holder passes
+        vm.prank(governance);
+        topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 2);
+        assertEq(token1.balanceOf(governance), DEPOSIT_AMOUNT / 2);
+
+        // roleRegistry owner without the role is no longer accepted
+        vm.prank(owner);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 4);
     }
 
     function test_withdraw_fails_withZeroAmount() public {
