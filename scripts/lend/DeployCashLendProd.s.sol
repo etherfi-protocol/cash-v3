@@ -142,8 +142,10 @@ contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
         require(RoleRegistry(existing.roleRegistry).owner() == SAFE, "RoleRegistry owner is not the prod Safe");
         _requireDeployer(msg.sender);
 
+        uint256 privateKey = vm.envUint("PRIVATE_KEY");
+
         // ── 1. Deployer EOA: unprivileged CREATE3 deployments only ──
-        vm.startBroadcast();
+        vm.startBroadcast(privateKey);
         Deployed memory deployed = _deployAll(existing, address(spoke));
         vm.stopBroadcast();
 
@@ -606,55 +608,6 @@ contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
     function _fixtureAsset(string memory key) internal view returns (address) {
         string memory fixtures = vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/fixtures/fixtures.json"));
         return stdJson.readAddress(fixtures, string.concat(".", vm.toString(block.chainid), ".", key));
-    }
-
-    /// @dev Constructor assets/tellers for a replacement liquid module: every candidate the live
-    ///      module has a teller for.
-    function _liquidConfig(EtherFiLiquidModule module) internal view returns (address[] memory, address[] memory) {
-        address[9] memory candidates = _liquidAssetCandidates();
-        uint256 count;
-        for (uint256 i = 0; i < candidates.length; ++i) {
-            if (address(module.liquidAssetToTeller(candidates[i])) != address(0)) ++count;
-        }
-        require(count > 0, "liquid module has no configured assets");
-        address[] memory assets = new address[](count);
-        address[] memory tellers = new address[](count);
-        uint256 j;
-        for (uint256 i = 0; i < candidates.length; ++i) {
-            address teller = address(module.liquidAssetToTeller(candidates[i]));
-            if (teller != address(0)) {
-                assets[j] = candidates[i];
-                tellers[j] = teller;
-                ++j;
-            }
-        }
-        return (assets, tellers);
-    }
-
-    /// @dev Constructor vault arrays for the replacement Midas module: every candidate token the
-    ///      live module has vaults for.
-    function _midasConfig(MidasModule module) internal view returns (address[] memory, address[] memory, address[] memory) {
-        address[3] memory candidates = [LIQUID_RESERVE, LIQUID_EUR, LIQUID_RWA];
-        uint256 count;
-        for (uint256 i = 0; i < candidates.length; ++i) {
-            (address deposit,) = module.vaults(candidates[i]);
-            if (deposit != address(0)) ++count;
-        }
-        require(count > 0, "Midas module has no configured vaults");
-        address[] memory tokens = new address[](count);
-        address[] memory deposits = new address[](count);
-        address[] memory redemptions = new address[](count);
-        uint256 j;
-        for (uint256 i = 0; i < candidates.length; ++i) {
-            (address deposit, address redemption) = module.vaults(candidates[i]);
-            if (deposit != address(0)) {
-                tokens[j] = candidates[i];
-                deposits[j] = deposit;
-                redemptions[j] = redemption;
-                ++j;
-            }
-        }
-        return (tokens, deposits, redemptions);
     }
 
     function _singleton(address value) internal pure returns (address[] memory list) {

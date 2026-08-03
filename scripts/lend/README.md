@@ -28,9 +28,20 @@ source .env && ENV=mainnet forge script scripts/lend/DeployCashLendProd.s.sol:De
   --rpc-url $OPTIMISM_RPC --ledger --sender $PROD_DEPLOYER \
   --broadcast --verify --etherscan-api-key $ETHERSCAN_KEY -vvvv
 
-# 2. Safe signs & executes output/CashLendProd-10.json (Gnosis tx builder)
+# 2. Bytecode verification (any time after the EOA broadcast; read-only). The address checks in
+#    VerifyCashLendProd prove WHO deployed (CREATE3 addresses derive from salts, not initcode);
+#    this proves WHAT was deployed: every contract is redeployed locally from current source with
+#    the same chain-mirrored constructor args and must match on-chain byte-for-byte (immutable
+#    self-addresses and linked-library addresses are matched as consistent bindings, and the
+#    linked libraries themselves are verified recursively).
+source .env && ENV=mainnet forge script scripts/lend/VerifyCashLendProdBytecode.s.sol:VerifyCashLendProdBytecode \
+  --rpc-url $OPTIMISM_RPC -vv
 
-# 3. After execution, verify the live chain (all checks are requires)
+# 3. Safe signs & executes output/CashLendProd-10.json (Gnosis tx builder)
+
+# 4. After execution, verify the live chain (all checks are requires). Runs BEFORE Safe execution
+#    too: if the bundle's effects are not yet on-chain, it simulates output/CashLendProd-10.json
+#    on the fork first and checks the simulated end state.
 source .env && ENV=mainnet forge script scripts/lend/VerifyCashLendProd.s.sol:VerifyCashLendProd \
   --rpc-url $OPTIMISM_RPC -vvvv
 ```

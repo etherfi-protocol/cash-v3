@@ -12,14 +12,19 @@ import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { CashModuleCore } from "../../src/modules/cash/CashModuleCore.sol";
 import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 import { CashLendProdConfig } from "./CashLendProdConfig.sol";
 
 /**
  * @title VerifyCashLendProd
- * @notice Companion verification for DeployCashLendProd. Run read-only against live Optimism AFTER
- *         the prod Safe executes output/CashLendProd-10.json. Every check is a require, so the
- *         script reverts (non-zero exit) on any failure.
+ * @notice Companion verification for DeployCashLendProd. Run against live Optimism AFTER the prod
+ *         Safe executes output/CashLendProd-10.json. Every check is a require, so the script
+ *         reverts (non-zero exit) on any failure.
+ *
+ *         Can also run BEFORE the Safe executes: if the bundle's effects are not yet on-chain, the
+ *         local output/CashLendProd-10.json is simulated against the fork first and the same checks
+ *         run on the simulated end state (a pre-signing rehearsal of the exact bundle file).
  *
  *         Every expected implementation and module address is recomputed from the CREATE3 salts —
  *         not read from a mutable record — so this catches a swapped-in impl at an unexpected
@@ -34,8 +39,8 @@ import { CashLendProdConfig } from "./CashLendProdConfig.sol";
  *   source .env && ENV=mainnet forge script scripts/lend/VerifyCashLendProd.s.sol:VerifyCashLendProd \
  *     --rpc-url $OPTIMISM_RPC -vvvv
  */
-contract VerifyCashLendProd is Utils, CashLendProdConfig {
-    function run() public view {
+contract VerifyCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
+    function run() public {
         require(block.chainid == 10, "Optimism only");
         require(isEqualString(getEnv(), "mainnet"), "ENV must be mainnet");
         require(
@@ -48,6 +53,8 @@ contract VerifyCashLendProd is Utils, CashLendProdConfig {
         address dataProvider = _addr(json, "EtherFiDataProvider");
         address debtManager = _addr(json, "DebtManager");
         address roleRegistry = _addr(json, "RoleRegistry");
+
+        _simulateBundleIfNeeded(cashModule);
 
         // ── Proxy implementations: EIP-1967 slots must hold the EXACT CREATE3-predicted impls ──
         _requireImpl(cashModule, "CashModuleCoreImpl", "CashModule");
@@ -79,14 +86,7 @@ contract VerifyCashLendProd is Utils, CashLendProdConfig {
         require(EtherFiDataProvider(dataProvider).isDefaultModule(gatewayProxy), "LendGateway not a default module");
 
         LendGateway gateway = LendGateway(gatewayProxy);
-        IAaveV4Spoke spoke = IAaveV4Spoke(stdJson.readAddress(vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/10/summer-lend.json")), ".spoke"));
-        require(address(gateway.spoke()) == address(spoke), "gateway spoke mismatch");
-        require(spoke.isPositionManagerActive(gatewayProxy), "gateway not an active position manager");
-        uint256 reserveCount = spoke.getReserveCount();
-        require(reserveCount > 0, "spoke has no reserves");
-        for (uint256 reserveId = 0; reserveId < reserveCount; ++reserveId) {
-            require(gateway.isRegistered(spoke.getReserve(reserveId).underlying), "reserve not mirrored");
-        }
+        _verifySpoke(gateway, gatewayProxy);
         string[7] memory spendAssetKeys = _spendAssetKeys();
         for (uint256 i = 0; i < spendAssetKeys.length; ++i) {
             require(gateway.isSpendAsset(_fixtureAsset(spendAssetKeys[i])), string.concat(spendAssetKeys[i], " not a spend asset"));
@@ -114,6 +114,47 @@ contract VerifyCashLendProd is Utils, CashLendProdConfig {
         require(RoleRegistry(roleRegistry).owner() == SAFE, "CRITICAL: RoleRegistry owner changed");
 
         console.log("All checks passed");
+    }
+
+    function _verifySpoke(LendGateway gateway, address gatewayProxy) internal view {
+        string memory summerLend = vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/10/summer-lend.json"));
+        IAaveV4Spoke spoke = IAaveV4Spoke(stdJson.readAddress(summerLend, ".spoke"));
+        require(address(gateway.spoke()) == address(spoke), "gateway spoke mismatch");
+        // Mirrors the deploy script: when the Spoke admin (not our Safe) activates the gateway,
+        // its tx is outside the bundle, so a missing activation is a warning, not a failure.
+        bool skipPositionManagerTx = vm.keyExistsJson(summerLend, ".skipPositionManagerTx") && stdJson.readBool(summerLend, ".skipPositionManagerTx");
+        if (skipPositionManagerTx) {
+            if (!spoke.isPositionManagerActive(gatewayProxy)) {
+                console.log("WARNING: gateway is not yet an active position manager; the Spoke admin must activate it before any Safe migrates");
+            }
+        } else {
+            require(spoke.isPositionManagerActive(gatewayProxy), "gateway not an active position manager");
+        }
+        uint256 reserveCount = spoke.getReserveCount();
+        require(reserveCount > 0, "spoke has no reserves");
+        for (uint256 reserveId = 0; reserveId < reserveCount; ++reserveId) {
+            require(gateway.isRegistered(spoke.getReserve(reserveId).underlying), "reserve not mirrored");
+        }
+    }
+
+    /// @dev Lets this script run BEFORE the Safe executes: if the bundle's effects are not yet
+    ///      on-chain, simulate output/CashLendProd-10.json against the fork first (same pattern as
+    ///      VerifyOptimismProdModules). The probe is getLendGateway — setLendGateway is the LAST
+    ///      bundle tx (one-time set), so it distinguishes fully-executed from not-executed; a
+    ///      partially-executed bundle fails here either way, which is the correct outcome. The
+    ///      pre-upgrade impl has no getLendGateway(), so probe with a raw staticcall.
+    function _simulateBundleIfNeeded(address cashModule) internal {
+        (bool ok, bytes memory ret) = cashModule.staticcall(abi.encodeWithSelector(ICashModule.getLendGateway.selector));
+        if (ok && ret.length == 32 && abi.decode(ret, (address)) == _predicted("LendGatewayProxy")) {
+            console.log("Gnosis bundle already executed on-chain; verifying live state.");
+            return;
+        }
+
+        string memory path = string.concat("./output/CashLendProd-", vm.toString(block.chainid), ".json");
+        require(vm.exists(path), "bundle not executed on-chain and no local bundle to simulate; run DeployCashLendProd first");
+        console.log("Gnosis bundle NOT yet executed; simulating", path, "on the fork...");
+        executeGnosisTransactionBundle(path);
+        console.log("Bundle simulated; verifying end state.");
     }
 
     function _verifyModules(string memory json, address cashModule, address dataProvider, LendGateway gateway) internal view {

@@ -3,6 +3,9 @@ pragma solidity ^0.8.28;
 
 import { CREATE3 } from "solady/utils/CREATE3.sol";
 
+import { EtherFiLiquidModule } from "../../src/modules/etherfi/EtherFiLiquidModule.sol";
+import { MidasModule } from "../../src/modules/midas/MidasModule.sol";
+
 /**
  * @title CashLendProdConfig
  * @notice Single source of truth for the constants and address derivation shared by
@@ -50,7 +53,7 @@ abstract contract CashLendProdConfig {
      *      LendGateway and DISABLES enforcement (ensureMinHealthFactor no-ops), so both scripts
      *      assert this exact value rather than merely "non-zero".
      */
-    uint256 internal constant MIN_HEALTH_FACTOR = 1.05e18;
+    uint256 internal constant MIN_HEALTH_FACTOR = 1.1e18;
 
     // ─────────────────────────────── liquid assets ───────────────────────────────
 
@@ -69,6 +72,56 @@ abstract contract CashLendProdConfig {
 
     function _liquidAssetCandidates() internal pure returns (address[9] memory) {
         return [LIQUID_ETH, LIQUID_USD, LIQUID_BTC, EBTC, SETHFI, EUSD, LIQUID_RESERVE, LIQUID_EUR, LIQUID_RWA];
+    }
+
+    /// @dev Constructor assets/tellers for a replacement liquid module: every candidate the live
+    ///      module has a teller for. Shared so the bytecode verifier rebuilds the EXACT constructor
+    ///      args the deploy script used.
+    function _liquidConfig(EtherFiLiquidModule module) internal view returns (address[] memory, address[] memory) {
+        address[9] memory candidates = _liquidAssetCandidates();
+        uint256 count;
+        for (uint256 i = 0; i < candidates.length; ++i) {
+            if (address(module.liquidAssetToTeller(candidates[i])) != address(0)) ++count;
+        }
+        require(count > 0, "liquid module has no configured assets");
+        address[] memory assets = new address[](count);
+        address[] memory tellers = new address[](count);
+        uint256 j;
+        for (uint256 i = 0; i < candidates.length; ++i) {
+            address teller = address(module.liquidAssetToTeller(candidates[i]));
+            if (teller != address(0)) {
+                assets[j] = candidates[i];
+                tellers[j] = teller;
+                ++j;
+            }
+        }
+        return (assets, tellers);
+    }
+
+    /// @dev Constructor vault arrays for the replacement Midas module: every candidate token the
+    ///      live module has vaults for. Shared for the same reason as _liquidConfig.
+    function _midasConfig(MidasModule module) internal view returns (address[] memory, address[] memory, address[] memory) {
+        address[3] memory candidates = [LIQUID_RESERVE, LIQUID_EUR, LIQUID_RWA];
+        uint256 count;
+        for (uint256 i = 0; i < candidates.length; ++i) {
+            (address deposit,) = module.vaults(candidates[i]);
+            if (deposit != address(0)) ++count;
+        }
+        require(count > 0, "Midas module has no configured vaults");
+        address[] memory tokens = new address[](count);
+        address[] memory deposits = new address[](count);
+        address[] memory redemptions = new address[](count);
+        uint256 j;
+        for (uint256 i = 0; i < candidates.length; ++i) {
+            (address deposit, address redemption) = module.vaults(candidates[i]);
+            if (deposit != address(0)) {
+                tokens[j] = candidates[i];
+                deposits[j] = deposit;
+                redemptions[j] = redemption;
+                ++j;
+            }
+        }
+        return (tokens, deposits, redemptions);
     }
 
     // ─────────────────────────────── spend assets ───────────────────────────────
