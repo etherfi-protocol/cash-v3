@@ -202,6 +202,11 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
      */
     function requestSwapWithNativeFee(address safe, Order calldata order, bytes calldata swapData, uint256 nativeFee, address[] calldata signers, bytes[] calldata signatures) external payable whenNotPaused onlyEtherFiSafe(safe) {
         if (nativeFee == 0) revert InvalidNativeFee();
+        // A native-fee refund and native swap output are indistinguishable in the safe's
+        // balance delta, so this combination cannot enforce minOut accurately.
+        if (order.dstChainId == block.chainid && order.dstToken == NATIVE_TOKEN && order.recipient == safe) {
+            revert InvalidNativeFee();
+        }
         if (address(cashModule) != address(0) && msg.value != 0) revert InvalidNativeFee();
         _requestSwap(safe, order, swapData, nativeFee, true, signers, signatures);
     }
@@ -323,10 +328,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
         if (validateOutput) {
             uint256 balanceAfter = _balanceOf(swap.order.dstToken, swap.order.recipient);
-            if (
-                balanceAfter < balanceBefore ||
-                balanceAfter - balanceBefore < swap.order.minOut
-            ) revert InsufficientOutputAmount();
+            if (balanceAfter < balanceBefore || balanceAfter - balanceBefore < swap.order.minOut) revert InsufficientOutputAmount();
             // Back bookend: a same-chain output delivered to the safe goes back into Aave as
             // collateral (best-effort, no-op for an unregistered asset or a non-gateway safe).
             // Cross-chain settlement is non-atomic and a third-party recipient's funds have left

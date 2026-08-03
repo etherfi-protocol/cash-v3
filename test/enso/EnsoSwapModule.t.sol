@@ -154,6 +154,18 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         module.requestSwapWithNativeFee(address(safe), order, swapData, 0, signers, sigs);
     }
 
+    function test_requestSwapWithNativeFee_revertsForSameChainNativeOutputToSafe() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.dstChainId = block.chainid;
+        order.dstToken = NATIVE_TOKEN;
+        order.recipient = address(safe);
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, NATIVE_FEE);
+
+        vm.expectRevert(EnsoSwapModule.InvalidNativeFee.selector);
+        module.requestSwapWithNativeFee(address(safe), order, swapData, NATIVE_FEE, signers, sigs);
+    }
+
     function test_requestSwapWithNativeFee_revertsWhenDelayedFeeIsSentAtRequest() public {
         EnsoSwapModule.Order memory order = _baseOrder();
         bytes memory swapData = _swapData(SRC_AMOUNT);
