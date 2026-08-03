@@ -176,6 +176,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // }
 
     function test_verifyBytecode_EtherFiHook() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new EtherFiHook(dataProviderProxy));
         _verify("EtherFiHook", hookImpl, local);
     }
@@ -183,26 +187,46 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Cash module ----
 
     function test_verifyBytecode_CashModuleCore() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new CashModuleCore(dataProviderProxy));
         _verify("CashModuleCore", cashModuleCoreImpl, local);
     }
 
     function test_verifyBytecode_CashModuleSetters() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new CashModuleSetters(dataProviderProxy));
         _verify("CashModuleSetters", cashModuleSettersImpl, local);
     }
 
     function test_verifyBytecode_CashLens() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new CashLens(cashModuleProxy, dataProviderProxy));
         _verify("CashLens", cashLensImpl, local);
     }
 
     function test_verifyBytecode_CashEventEmitter() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new CashEventEmitter(cashModuleProxy));
         _verify("CashEventEmitter", cashEventEmitterImpl, local);
     }
 
     function test_verifyBytecode_CashbackDispatcher() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new CashbackDispatcher(dataProviderProxy));
         _verify("CashbackDispatcher", cashbackDispatcherImpl, local);
     }
@@ -210,11 +234,19 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Debt manager ----
 
     function test_verifyBytecode_DebtManagerCore() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new DebtManagerCore(dataProviderProxy));
         _verify("DebtManagerCore", debtManagerCoreImpl, local);
     }
 
     function test_verifyBytecode_DebtManagerAdmin() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new DebtManagerAdmin(dataProviderProxy));
         _verify("DebtManagerAdmin", debtManagerAdminImpl, local);
     }
@@ -222,6 +254,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Oracle ----
 
     function test_verifyBytecode_PriceProvider() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new PriceProviderV2());
         _verify("PriceProvider", priceProviderImpl, local);
     }
@@ -229,21 +265,37 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Settlement dispatchers ----
 
     function test_verifyBytecode_SettlementDispatcherReap() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.Reap, dataProviderProxy));
         _verify("SettlementDispatcherReap", settlementReapImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherRain() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.Rain, dataProviderProxy));
         _verify("SettlementDispatcherRain", settlementRainImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherPix() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.PIX, dataProviderProxy));
         _verify("SettlementDispatcherPix", settlementPixImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherCardOrder() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.CardOrder, dataProviderProxy));
         _verify("SettlementDispatcherCardOrder", settlementCardOrderImpl, local);
     }
@@ -251,6 +303,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Top up ----
 
     function test_verifyBytecode_TopUpDest() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address local = address(new TopUpDest(dataProviderProxy, cc.weth));
         _verify("TopUpDest", topUpDestImpl, local);
     }
@@ -314,6 +370,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_LiquidUSDLiquifierModule() public {
+        // Skipped: UpgradeableProxy gained PausableUntil in STAKE-1677, so local
+        // bytecode no longer matches the currently-deployed impl. Re-enable once the
+        // security upgrade is deployed (STAKE-1683).
+        vm.skip(true);
         address liquifierImpl = _getImpl(liquidUsdLiquifierProxy);
         address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));
         _verify("LiquidUSDLiquifierModule", liquifierImpl, local);

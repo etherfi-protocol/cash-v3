@@ -61,6 +61,7 @@ contract SafeTestSetup is Utils {
     address public notOwner;
     address public pauser;
     address public unpauser;
+    address public guardian;
 
     uint8 threshold;
 
@@ -133,6 +134,7 @@ contract SafeTestSetup is Utils {
         refundWallet = makeAddr("refundWallet");
         pauser = makeAddr("pauser");
         unpauser = makeAddr("unpauser");
+        guardian = makeAddr("guardian");
         owner = makeAddr("owner");
         (owner1, owner1Pk) = makeAddrAndKey("owner1");
         (owner2, owner2Pk) = makeAddrAndKey("owner2");
@@ -150,6 +152,7 @@ contract SafeTestSetup is Utils {
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
+        roleRegistry.grantRole(keccak256("GUARDIAN_ROLE"), guardian);
         roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), owner);
 
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
