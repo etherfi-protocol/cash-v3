@@ -33,8 +33,8 @@ import { Utils } from "./utils/Utils.sol";
 contract DeployWspyxOracleSinkFeed is Utils {
     /// @dev Dev OracleSink on Optimism (cash-mainnet-asset-listing deployments/dev/10)
     address constant ORACLE_SINK = 0x83Ba7f354B705C34935437526Cf318c77d9093Aa;
-    /// @dev Mainnet wSPYx — the OracleSink price key (the relay ships mainnet token addresses)
-    address constant WSPYX_MAINNET = 0xc88FcD8B874fDb3256E8B55b3decB8c24EAb4c02;
+    /// @dev Mainnet wSPYx (canonical wrapper) — the OracleSink price key (the relay ships mainnet token addresses)
+    address constant WSPYX_MAINNET = 0xE7E553Cd128F0011777323A0b44a7b96EA1CB540;
     /// @dev Chainlink SPY/USD (24/5) aggregator on Optimism, 8 decimals
     address constant SPY_USD_FEED = 0x5F77134CfAA7DB2906649Ca21C50dA54daE9291d;
 

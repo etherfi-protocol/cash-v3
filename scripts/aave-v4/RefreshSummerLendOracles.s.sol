@@ -35,15 +35,21 @@ import { AddSummerLendCollateral } from "./AddSummerLendCollateral.s.sol";
 contract RefreshSummerLendOracles is AddSummerLendCollateral {
     /// @dev Dev OracleSink on Optimism (cash-mainnet-asset-listing deployments/dev/10)
     address constant ORACLE_SINK = 0x83Ba7f354B705C34935437526Cf318c77d9093Aa;
-    /// @dev Mainnet wSPYx, the OracleSink price key (the relay ships mainnet token addresses)
-    address constant WSPYX_MAINNET = 0xc88FcD8B874fDb3256E8B55b3decB8c24EAb4c02;
+    /// @dev Mainnet wSPYx (canonical wrapper), the OracleSink price key (the relay ships mainnet token addresses)
+    address constant WSPYX_MAINNET = 0xE7E553Cd128F0011777323A0b44a7b96EA1CB540;
     /// @dev iwSPYx ShadowOFT on Optimism (cash-mainnet-asset-listing deployments/dev/10)
-    address constant IWSPYX = 0xc83305D859EAc5E34B6aa00b4a45bDC13b2F3869;
+    address constant IWSPYX = 0xCb4Ee509849AC1101b16556c658d6c48e5862fFA;
     /// @dev Chainlink SPY/USD (24/5) aggregator on Optimism; staleness spans the weekend close gap
     address constant SPY_USD_FEED = 0x5F77134CfAA7DB2906649Ca21C50dA54daE9291d;
     uint256 constant SPY_USD_MAX_STALENESS = 78 hours;
     /// @dev Max age of the relay's source-chain read; matches the sink's own dev window
     uint256 constant SINK_RATE_MAX_STALENESS = 7 days;
+    /// @dev Mainnet PAXG, the OracleSink price key (the relay ships mainnet token addresses)
+    address constant PAXG_MAINNET = 0x45804880De22913dAFE09f4980848ECE6EcbAf78;
+    /// @dev iPAXG ShadowOFT on Optimism (cash-mainnet-asset-listing deployments/dev/10)
+    address constant IPAXG = 0x56904d70E597e1D2D40853c61B6aA95622c70B0e;
+    /// @dev PAXG sink window: 24h Chainlink heartbeat x margin (a live price, not a slow rate)
+    uint256 constant PAXG_SINK_MAX_STALENESS = 2 days;
 
     function run() public override {
         require(block.chainid == 10, "Must run on Optimism (10)");
@@ -97,6 +103,12 @@ contract RefreshSummerLendOracles is AddSummerLendCollateral {
             _requireLivePrice(address(iwspyxUsd), "iwSPYx / USD");
             _update(IWSPYX, address(iwspyxUsd));
             vm.writeJson(vm.toString(spyUsd), jsonPath, ".details.iwSPYx.spyUsdLeg");
+
+            // iPAXG: relayed full PAXG/USD price from the OracleSink, no composition leg (see
+            // DeployPaxgOracleSinkFeed).
+            OracleSinkPriceFeed ipaxgUsd = new OracleSinkPriceFeed(IOracleSink(ORACLE_SINK), PAXG_MAINNET, IAaveV4PriceFeed(address(0)), FEED_DECIMALS, PAXG_SINK_MAX_STALENESS, false, "iPAXG / USD");
+            _requireLivePrice(address(ipaxgUsd), "iPAXG / USD");
+            _update(IPAXG, address(ipaxgUsd));
         }
 
         // Deploy-time reserves (their ids come from the deployment json, not a token scan)
