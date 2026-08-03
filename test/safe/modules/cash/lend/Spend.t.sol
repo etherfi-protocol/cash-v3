@@ -184,6 +184,44 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(usdc)), 100e6 - 60e6, 2, "shortfall withdrawn from the supply-only reserve");
     }
 
+    /// Audit I-02: a paused reserve must not block a debit spend the safe can fund entirely from loose
+    /// balance — no Aave interaction is needed, and an opted-out safe (forced into Debit, everything loose)
+    /// would otherwise have card settlement blocked by an Aave pause it does not depend on.
+    function test_spend_debit_succeeds_fromLooseWhileReservePaused() public {
+        deal(address(usdc), address(safe), 100e6);
+        _setAaveReservePaused(usdcReserveId, true);
+        uint256 dispatcherBefore = usdc.balanceOf(address(settlementDispatcherReap));
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(100e6), _noCashback());
+
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBefore + 100e6, "loose balance settled the spend during the pause");
+    }
+
+    /// The pause still binds the part a debit spend cannot fund loose: withdrawalLiquidity reads zero for a
+    /// paused reserve, so the supplied leg is unavailable and the spend declines on balance, not membership.
+    function test_spend_debit_revertsWhenPausedAndNeedsSuppliedLeg() public {
+        _supplyToGateway(address(safe), address(usdc), 100e6);
+        deal(address(usdc), address(safe), 40e6);
+        _setAaveReservePaused(usdcReserveId, true);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.InsufficientBalance.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(100e6), _noCashback());
+    }
+
+    /// A paused reserve cannot fund a CREDIT spend: the borrow gate (isBorrowable) reads the pause itself, so
+    /// the typed rejection survives making the debit gate pause-agnostic.
+    function test_spend_credit_reverts_whenReservePaused() public {
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
+        _enterCreditMode();
+        _setAaveReservePaused(usdcReserveId, true);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ICashModule.UnsupportedToken.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(10e6), _noCashback());
+    }
+
     /// The auth-vs-freeze race: an auth approved while the reserve was borrowable cannot settle once the
     /// reserve is frozen. The spend reverts on the module's gate — the same predicate the auth now declines
     /// on — instead of deep inside Aave.
@@ -477,6 +515,100 @@ contract CashModuleSpendAaveTest is CashGatewayTestSetup {
 
         assertEq(gw.suppliedOf(address(safe), address(weETH)), 0.001 ether, "small weETH balance fully supplied first");
         assertEq(gw.suppliedOf(address(safe), address(usdc)), expectedUsdc, "USDC covers the proportional remainder");
+    }
+
+    /// A frozen reserve would revert the whole spend at supply time: sizing skips it (headroom zero) and the
+    /// next registered token covers the shortfall, even though the frozen one is first and could fully cover.
+    function test_spend_creditResupply_skipsFrozenReserve_nextTokenCovers() public {
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        _setAaveReserveFrozen(weethReserveId, true);
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "frozen weETH skipped");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), _resupplyAmount(address(usdc), 10e6), "USDC covers the whole shortfall");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
+    }
+
+    /// The paused sibling: a paused reserve is skipped the same way.
+    function test_spend_creditResupply_skipsPausedReserve_nextTokenCovers() public {
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        _setAaveReservePaused(weethReserveId, true);
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "paused weETH skipped");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), _resupplyAmount(address(usdc), 10e6), "USDC covers the whole shortfall");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
+    }
+
+    /// A reserve near its addCap contributes exactly its remaining cap room (not skipped outright, not
+    /// oversized into an AddCapExceeded revert) and the next token covers the proportional remainder.
+    function test_spend_creditResupply_atCapUsesPartialHeadroom_thenNextToken() public {
+        // Someone else's supply fills most of a 1-token weETH addCap without giving the safe any capacity
+        _seedAaveLiquidity(weethReserveId, address(weETH), 0.999 ether);
+        _setAaveSpokeCaps(weethReserveId, 1, type(uint40).max);
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+
+        uint256 headroom = gw.supplyHeadroom(address(weETH));
+        uint256 shortfallValue = _bufferedShortfallValue(10e6);
+        uint256 neededWeeth = gw.collateralForValue(address(weETH), shortfallValue);
+        assertLt(headroom, neededWeeth, "cap room must be the binding limit for this test to bite");
+        uint256 expectedUsdc = gw.collateralForValue(address(usdc), _residualValue(shortfallValue, headroom, neededWeeth));
+
+        _creditSpendUsdc(10e6);
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), headroom, "weETH fills exactly its remaining cap room");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), expectedUsdc, "USDC covers the proportional remainder");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 10e6, 2, "borrow lands");
+    }
+
+    /// Audit L-08: a pre-existing deficit (a price crash parked the position under Aave's 1.00 before
+    /// liquidation caught it) is invisible to the clamped rawBorrowCapacity, so resupply used to size
+    /// collateral for the new borrow only and the settlement borrow reverted on Aave's whole-position
+    /// health check — with ample loose collateral sitting in the safe. Sizing now adds deficitValue:
+    /// the spend settles and the resupply incidentally restores the position to at or above 1.00.
+    function test_spend_creditResupply_coversPreexistingDeficit() public {
+        _enterCreditMode();
+        // Lever an existing position to ~98% of raw capacity, then crash weETH 15%
+        _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 0);
+        _borrowOnGateway(address(safe), address(usdc), (gw.rawBorrowCapacity(address(safe), address(usdc)) * 98) / 100, recipient);
+        _crashWeethAavePrice(8500);
+        assertLt(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "underwater before the spend");
+        uint256 debtBefore = gw.debtOf(address(safe), address(usdc));
+
+        // Ample loose collateral: enough for the deficit and the new borrow's cover
+        deal(address(weETH), address(safe), 1 ether);
+
+        _creditSpendUsdc(10e6);
+
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)) - debtBefore, 10e6, 2, "settlement borrow landed");
+        assertGe(spoke.getUserAccountData(address(safe)).healthFactor, 1e18, "resupply covered the deficit too");
+    }
+
+    /// Every candidate unsuppliable (weETH frozen, USDC at its addCap): nothing is supplied and the failing
+    /// borrow reverts the whole spend, same terminal error as the no-eligible-collateral case.
+    function test_spend_creditResupply_allUnsuppliable_borrowReverts() public {
+        deal(address(weETH), address(safe), 1 ether);
+        deal(address(usdc), address(safe), 100e6);
+        _enterCreditMode();
+        _setAaveReserveFrozen(weethReserveId, true);
+        // The seeded 1M USDC liquidity fills a 1M-token addCap exactly; USDC stays borrowable and spendable
+        _setAaveSpokeCaps(usdcReserveId, 1_000_000, type(uint40).max);
+        assertEq(gw.supplyHeadroom(address(usdc)), 0, "USDC reserve at its cap");
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ISpoke.HealthFactorBelowThreshold.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _tokens(address(usdc)), _amounts(10e6), _noCashback());
+
+        assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "nothing supplied on the reverted spend");
+        assertEq(gw.suppliedOf(address(safe), address(usdc)), 0, "nothing supplied on the reverted spend");
     }
 
     // ================ helpers ================

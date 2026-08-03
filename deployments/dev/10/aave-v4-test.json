@@ -6,8 +6,10 @@
   "admin": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
   "hub": "0x03641abDa8BF0d9196CE44EbEd9f85ccCe3c5e1f",
   "irStrategy": "0xA5B8515C52149E3f8EC9bFD99144E3C9BC00E0f3",
-  "liquidationLogic": "0x49dEE75906621Ea28D7332bb26E0da6f2d15E838",
+  "liquidationLogic": "0x88dF535473C5adf1f57789734A05E555F7Deb8DB",
   "spoke": "0x7e99c7846df8527FFE510a2CA0215874052102ed",
+  "spokeImpl": "0xd5a5efaA08f2DF808f2EA2dBFA82cfC0B0AfaF75",
+  "spokeImplType": "EtherFiSpokeInstanceDev",
   "treasurySpoke": "0xf316938C33E81b4f02e1B7141399b872671f13Ad",
   "details": {
     "weETH": {

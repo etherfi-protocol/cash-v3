@@ -667,6 +667,9 @@ library CashLendLib {
      * @dev Resupplies loose collateral for the part of a pending borrow of `amount` that Aave's raw (1.00)
      *      capacity cannot cover. Gating on the raw capacity, not the configured floor, is what lets an
      *      authorized spend execute in the band between the floor and 1.00 without touching the safe's funds.
+     *      Any existing deficit is added on top: rawBorrowCapacity clamps to zero for an underwater
+     *      position, so sizing the new borrow alone would still leave the borrow failing Aave's
+     *      whole-position check (audit L-08).
      * @param $ The CashModule storage pointer
      * @param dataProvider The EtherFiDataProvider
      * @param gateway The LendGateway serving the safe
@@ -676,9 +679,12 @@ library CashLendLib {
      */
     function _resupplyForCreditShortfall(CashModuleStorageContract.CashModuleStorage storage $, IEtherFiDataProvider dataProvider, ILendGateway gateway, address safe, address token, uint256 amount) private {
         uint256 rawCapacity = gateway.rawBorrowCapacity(safe, token);
-        if (rawCapacity >= amount) return;
-        // Aave-priced: the collateral the shortfall's borrow requires at Aave's own 1.00 bound
-        uint256 shortfallValue = gateway.borrowValue(token, amount - rawCapacity);
+        uint256 deficit = gateway.deficitValue(safe);
+        if (rawCapacity >= amount && deficit == 0) return;
+        // Aave-priced: the collateral the shortfall's borrow requires at Aave's own 1.00 bound, plus the
+        // value the position is already short of it
+        uint256 shortfallValue = deficit;
+        if (amount > rawCapacity) shortfallValue += gateway.borrowValue(token, amount - rawCapacity);
         _resupplyCollateral($, dataProvider, gateway, safe, shortfallValue);
     }
 
@@ -686,8 +692,9 @@ library CashLendLib {
      * @dev Supplies loose collateral to cover the pre-measured shortfall. The first sizing pass uses only
      *      balance not reserved by the pending withdrawal request; the reserved remainder is taken only when
      *      the spend cannot be funded otherwise, and then the request is cancelled before any supply executes
-     *      (the debit path's rule). If loose collateral cannot fully cover, it supplies what fits and the
-     *      caller's borrow reverts the whole spend. CashLens never counts this capacity, so canSpend does not
+     *      (the debit path's rule). Reserves Aave would reject the supply into are skipped at sizing (see
+     *      _sizeResupply). If loose collateral cannot fully cover, it supplies what fits and the caller's
+     *      borrow reverts the whole spend. CashLens never counts this capacity, so canSpend does not
      *      advertise it as headroom.
      * @param $ The CashModule storage pointer
      * @param dataProvider The EtherFiDataProvider
@@ -728,6 +735,14 @@ library CashLendLib {
             // A zero-LTV asset adds no borrowing headroom, so supplying it cannot help
             if (gateway.ltv(tokens[i]) == 0) continue;
 
+            // A reserve Aave will not accept (paused, frozen, halted, or at its supply cap) would revert
+            // the whole spend at supply time; bound this token by its headroom so the next token carries
+            // the rest. The first pass's earmark is not supplied yet, so it still counts against the
+            // fresh headroom.
+            uint256 headroom = gateway.supplyHeadroom(tokens[i]);
+            if (headroom <= supplyAmounts[i]) continue;
+            headroom -= supplyAmounts[i];
+
             // Loose balance still available for this token, net of what an earlier pass already claimed
             uint256 capacity = IERC20(tokens[i]).balanceOf(safe) - supplyAmounts[i];
             if (!useReserved) {
@@ -735,6 +750,7 @@ library CashLendLib {
                 uint256 pending = _pendingWithdrawalAmount($, safe, tokens[i]);
                 capacity = capacity > pending ? capacity - pending : 0;
             }
+            if (capacity > headroom) capacity = headroom;
             if (capacity == 0) continue;
 
             // Full cover fits in this token: take it and stop

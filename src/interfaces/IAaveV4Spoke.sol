@@ -139,6 +139,9 @@ interface IAaveV4Spoke {
     /// @notice Total underlying supplied to the reserve, in asset units.
     function getReserveSuppliedAssets(uint256 reserveId) external view returns (uint256);
 
+    /// @notice Total supplied shares of the reserve.
+    function getReserveSuppliedShares(uint256 reserveId) external view returns (uint256);
+
     /// @notice Total debt (drawn + premium) of the reserve, in asset units.
     function getReserveTotalDebt(uint256 reserveId) external view returns (uint256);
 

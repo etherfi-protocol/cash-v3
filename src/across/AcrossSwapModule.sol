@@ -363,22 +363,23 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         }
 
         delete $.swaps[safe];
+        uint256 healthFactorBefore;
         if (address(cashModule) != address(0)) {
             cashModule.cancelWithdrawalByModule(safe);
             // Front bookend: request-time sourcing normally leaves the input loose through the delay;
             // this re-pulls any shortfall from the safe's Aave position and asserts the full input is
             // present before the safe approves the target. Runs after the cancel so the released
             // reservation no longer masks the loose balance.
-            _pullAndRequire(safe, swap.order.srcToken, swap.order.srcAmount);
+            healthFactorBefore = _pullAndRequire(safe, swap.order.srcToken, swap.order.srcAmount);
         }
 
         if (swap.swapData.length != 0) _dispatchOriginSwap(safe, swap);
         else _dispatchDeposit(safe, swap);
 
-        // The input was collateral pulled out of Aave (at request or just above) and every route
-        // bridges it away from this chain, so the end state must sit at or above the gateway's
-        // health-factor floor. Nothing lands back at the safe here, hence no resupply half.
-        if (address(cashModule) != address(0)) _ensureGatewayFloor(safe);
+        // The input was collateral pulled out of Aave (at request or just above) and every route bridges it
+        // away from this chain, so the end state must hold the gateway's health-factor floor unless it left
+        // the position no worse off. Nothing lands back at the safe here, hence no resupply half.
+        if (address(cashModule) != address(0)) _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.depositArgs.outputAmount);
     }

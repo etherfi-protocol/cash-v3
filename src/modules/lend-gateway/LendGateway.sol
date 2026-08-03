@@ -208,7 +208,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @dev Reverts while the reserve still has outstanding debt or supplied balance. Removing a
      * held asset would drop it from the USD views (debt reads 0, understating debt and inflating
      * borrow headroom) and strand supplied funds behind AssetNotRegistered on the withdraw paths.
-     * Our whitelabel Spoke serves only our safes, so the reserve aggregates gate on our positions.
+     * The gate reads spoke-wide aggregates, which any outside address can hold non-zero forever with a
+     * dust self-supply (Spoke.supply is permissionless for self-positions, and a debt-free position can
+     * be neither liquidated nor force-withdrawn). A reserve pinned that way stays registered by design:
+     * freezing it on the Spoke is the deprecation path (no new supply or borrows, exits stay open, every
+     * gateway supply flow skips or tolerates a frozen reserve), so removal is never operationally
+     * required and the pin is harmless. See audit L-01.
      * @param asset The asset to remove from the registry
      */
     function removeReserve(address asset) external onlyRole(LEND_GATEWAY_ADMIN_ROLE) {
@@ -490,6 +495,35 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
+     * @notice `safe`'s current Aave health factor in WAD (1e18), unbounded when it carries no debt
+     * @dev Read straight from the Spoke, like the floor check itself: getAccountData's healthFactor is the
+     *      same number but reached through the PriceProvider-derived USD fields, which revert for a supplied
+     *      asset Cash cannot price.
+     * @param safe The safe to query
+     * @return The health factor in WAD
+     */
+    function healthFactor(address safe) external view returns (uint256) {
+        return spoke.getUserAccountData(safe).healthFactor;
+    }
+
+    /**
+     * @notice Enforces the floor as "no worse off": passes when the position did not degrade, otherwise
+     *         requires the end state to hold the configured floor
+     * @dev The floor exists to stop ether.fi-initiated operations from parking a position near Aave's
+     *      liquidation line, so it has nothing to say about an operation that holds or improves health. A
+     *      plain floor check cannot express that: comparing only the end state traps a safe sitting between
+     *      Aave's 1.00 bound and the floor, blocking even the de-risking operations that would lift it out.
+     *      An operation that degrades health still takes the full floor, so nothing may cross down through it.
+     * @param safe The safe to check
+     * @param healthFactorBefore The safe's health factor captured before the operation ran
+     * @custom:throws HealthFactorBelowMinimum if the operation degraded health and the end state is below the floor
+     */
+    function ensureMinHealthFactorNotWorsened(address safe, uint256 healthFactorBefore) external view {
+        if (spoke.getUserAccountData(safe).healthFactor >= healthFactorBefore) return;
+        ensureMinHealthFactor(safe);
+    }
+
+    /**
      * @notice Returns `safe`'s Cash-priced position summary (collateral, debt, borrow headroom, health factor)
      * @dev Re-derives the USD fields from PriceProvider for display only; capacity and sizing use the
      *      Aave-priced borrowCapacity and withdrawHeadroom families. healthFactor (WAD) comes directly from Aave.
@@ -526,6 +560,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
             }
         }
 
+        // Gross power is reported unclamped alongside the clamped headroom: once debt passes gross power the
+        // headroom floors at zero, which cannot distinguish an over-LTV position from one sitting exactly at
+        // its limit, and nothing else here recovers the gap.
+        data.maxBorrowUsd = maxBorrowUsd;
         data.availableBorrowsUsd = maxBorrowUsd > data.debtUsd ? maxBorrowUsd - data.debtUsd : 0;
         // healthFactor is WAD (1e18) on Aave, matching ILendGateway's 1e18 scale.
         data.healthFactor = spoke.getUserAccountData(safe).healthFactor;
@@ -603,6 +641,34 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
+     * @notice Returns the amount of `asset` the Spoke can currently accept as new supply
+     * @dev Zero while the reserve is paused or frozen or its Hub Spoke is inactive or halted (the states
+     *      where Aave rejects a supply outright); type(uint256).max when the addCap is the uncapped
+     *      sentinel. Finite cap usage counts the spoke's added shares rounded up exactly as Hub execution
+     *      does, so filling to this headroom never trips AddCapExceeded.
+     * @param asset The reserve asset
+     * @return The suppliable amount in asset units, or 0 if the asset is not registered
+     */
+    function supplyHeadroom(address asset) external view returns (uint256) {
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        if (!$.assets.contains(asset)) return 0;
+
+        uint256 reserveId = $.reserveId[asset];
+        IAaveV4Spoke.ReserveConfig memory reserveConfig = spoke.getReserveConfig(reserveId);
+        if (reserveConfig.paused || reserveConfig.frozen) return 0;
+
+        IAaveV4Spoke.Reserve memory reserve = spoke.getReserve(reserveId);
+        IAaveV4Hub hub = IAaveV4Hub(reserve.hub);
+        IAaveV4Hub.SpokeConfig memory config = hub.getSpokeConfig(reserve.assetId, address(spoke));
+        if (!config.active || config.halted) return 0;
+        if (config.addCap == hub.MAX_ALLOWED_SPOKE_CAP()) return type(uint256).max;
+
+        uint256 capLimit = uint256(config.addCap) * (10 ** reserve.decimals);
+        uint256 supplied = hub.previewAddByShares(reserve.assetId, spoke.getReserveSuppliedShares(reserveId));
+        return supplied >= capLimit ? 0 : capLimit - supplied;
+    }
+
+    /**
      * @notice Returns `safe`'s buffered Aave-priced borrowing capacity in units of `asset`
      * @dev The auth quote: capacity that keeps the post-borrow health factor at or above the configured floor
      *      (Aave's 1.00 bound while no floor is set). New auth decisions and getMaxSpendCredit read this so an
@@ -654,6 +720,19 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      */
     function rawWithdrawHeadroom(address safe) external view returns (uint256) {
         return LendCapacityLib.withdrawHeadroom(spoke, safe, MIN_HEALTH_FACTOR);
+    }
+
+    /**
+     * @notice The weighted collateral value the safe's position is short of Aave's 1.00 bound, 0 while healthy
+     * @dev The unclamped complement of rawWithdrawHeadroom (audit L-08): the capacity views clamp at zero
+     *      once a price move parks the position under 1.00, hiding how deep. Sizing paths that must pass
+     *      Aave's whole-position check (credit resupply, the repay-withdraw leg) add this so a pre-existing
+     *      deficit is covered up front rather than resurfacing as an opaque Aave revert.
+     * @param safe The Safe whose position is measured
+     * @return The deficit in weighted collateral value units
+     */
+    function deficitValue(address safe) external view returns (uint256) {
+        return LendCapacityLib.deficitValue(spoke, safe);
     }
 
     /**
@@ -764,37 +843,25 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @notice Whether `asset` can fund a debit spend: an admin-declared spend asset whose reserve is not paused
-     * @dev Membership is declared via setSpendAsset (always a subset of registered reserves), so "is this a
-     *      card settlement token" no longer keys on Aave's borrowable flag and a supply-only reserve can be
-     *      spendable. A debit spend transfers loose balance and withdraws supplied balance, which Aave allows
-     *      while frozen, so frozen is tolerated; paused blocks the withdraw leg, so a paused reserve is not
-     *      spendable. New debt takes the full isBorrowable gate instead.
+     * @notice Whether `asset` is an admin-declared card settlement token
+     * @dev Static membership only, declared via setSpendAsset (always a subset of registered reserves), so
+     *      "is this a card settlement token" keys on neither Aave's borrowable flag (a supply-only reserve
+     *      can be spendable) nor its execution state. Aave's state is deliberately NOT folded in (audit
+     *      I-02): a debit spend transfers loose balance and withdraws supplied balance, so a spend funded
+     *      entirely from loose balance needs nothing from Aave, and folding a pause in here blocked such
+     *      settlements outright — worst for a lend-opted-out safe, which is forced into Debit and holds
+     *      everything loose. A pause costs only the supplied leg, which withdrawalLiquidity already reports
+     *      as zero, so the sourcing gate declines exactly the spends that truly need the withdraw. New debt
+     *      takes the full isBorrowable gate, which reads the pause itself.
      * @param asset The asset to query
      */
     function isSpendAsset(address asset) external view returns (bool) {
-        LendGatewayStorage storage $ = _getLendGatewayStorage();
-        if (!$.spendAssets.contains(asset)) return false;
-        return !spoke.getReserveConfig($.reserveId[asset]).paused;
+        return _getLendGatewayStorage().spendAssets.contains(asset);
     }
 
-    /// @notice The spend-set assets that can currently fund a debit spend (see isSpendAsset)
+    /// @notice The admin-declared card settlement tokens (see isSpendAsset: membership, not Aave state)
     function spendAssets() external view returns (address[] memory) {
-        LendGatewayStorage storage $ = _getLendGatewayStorage();
-        address[] memory assets = $.spendAssets.values();
-        uint256 count = 0;
-        for (uint256 i = 0; i < assets.length; i++) {
-            if (!spoke.getReserveConfig($.reserveId[assets[i]]).paused) {
-                assets[count] = assets[i];
-                unchecked {
-                    ++count;
-                }
-            }
-        }
-        assembly ("memory-safe") {
-            mstore(assets, count)
-        }
-        return assets;
+        return _getLendGatewayStorage().spendAssets.values();
     }
 
     /// @notice Whether `account` may drive the gateway (CashModule or an authorized driver)

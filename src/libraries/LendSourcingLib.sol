@@ -106,6 +106,13 @@ library LendSourcingLib {
         }
 
         uint256 borrowAmount = fromUsdUp(priceProvider, token, totalSpendingInUsd);
+        // Check the Safe-specific constraint first. A shared-market decline therefore guarantees this Safe
+        // had sufficient borrowing power for the quote, which lets downstream systems distinguish a user
+        // shortfall from a temporary Hub-side availability problem.
+        if (gateway.borrowCapacity(safe, token) < borrowAmount) {
+            return (false, "Insufficient borrowing power");
+        }
+
         if (gateway.borrowLiquidity(token) < borrowAmount) {
             // borrowLiquidity folds Hub cash and the spoke's draw cap into one bound; withdrawalLiquidity is
             // the cash alone (zero under the same pause/halt gates), so cash covering the loan means the draw
@@ -114,10 +121,6 @@ library LendSourcingLib {
                 return (false, "Lend borrow cap reached, please try again later");
             }
             return (false, "Insufficient Lend liquidity to cover the loan");
-        }
-
-        if (gateway.borrowCapacity(safe, token) < borrowAmount) {
-            return (false, "Insufficient borrowing power");
         }
 
         return (true, "");
@@ -132,9 +135,18 @@ library LendSourcingLib {
      *      health check at the exact boundary). Raw headroom: a repay de-risks the position, so it is
      *      floor-exempt like spends. Callers only get here with debt remaining after the loose leg, so
      *      the headroom cap always applies.
+     *
+     *      Any existing deficit is netted out first: rawWithdrawHeadroom clamps to zero for an underwater
+     *      position, so adding the freed value to the clamped figure would over-credit the quote by the
+     *      deficit and the sized withdraw would fail Aave's own health check (audit L-08). The loose leg
+     *      must therefore free more than the deficit before anything is withdrawable.
      */
     function repayWithdrawable(ILendGateway gateway, address safe, address token, uint256 fromLoose) public view returns (uint256) {
         uint256 headroom = gateway.rawWithdrawHeadroom(safe) + gateway.repayValue(safe, token, fromLoose);
+        // Saturating, so a healthy position (deficit 0) keeps the unmodified quote and an underwater one
+        // only becomes withdrawable once the repay frees more than the deficit
+        uint256 deficit = gateway.deficitValue(safe);
+        headroom = headroom > deficit ? headroom - deficit : 0;
         return withdrawableSupplied(gateway, safe, token, headroom, true);
     }
 

@@ -170,7 +170,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
         // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
         // full amount loose.
-        _pullAndRequire(safe, assetToDeposit, amountToDeposit);
+        uint256 healthFactorBefore = _pullAndRequire(safe, assetToDeposit, amountToDeposit);
 
         // Validate that custodian has sufficient balance for synchronous deposit
         // The custodian needs at least minReturnAmount of fraxusd tokens to fulfill the deposit synchronously
@@ -199,7 +199,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         // Re-supply the fraxUSD output as collateral when the gateway lists it; an unlisted output stays loose.
         _resupplyToGateway(safe, fraxusd, fraxUSDTokenReceived);
 
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit Deposit(safe, assetToDeposit, amountToDeposit, fraxUSDTokenReceived);
     }
@@ -249,7 +249,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
         // Pull any shortfall of the fraxUSD input out of the safe's Aave position, then confirm the safe holds
         // the full amount loose.
-        _pullAndRequire(safe, fraxusd, amountToWithdraw);
+        uint256 healthFactorBefore = _pullAndRequire(safe, fraxusd, amountToWithdraw);
 
         address[] memory to = new address[](2);
         bytes[] memory data = new bytes[](2);
@@ -273,7 +273,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         _resupplyToGateway(safe, outputAsset, assetReceived);
 
         // Risk-increasing flow: the end state takes the gateway's health-factor floor
-        _ensureGatewayFloor(safe);
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit Withdrawal(safe, outputAsset, amountToWithdraw, assetReceived);
     }
@@ -303,12 +303,13 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @param safe Address for user safe
      * @param _recipient Recipient address from Frax api
      * @param _withdrawAmount Amount to withdraw asynchronously
-     * @param signer The address that signed the transaction
-     * @param signature The signature authorizing this transaction
+     * @param signers Array of addresses of safe owners that signed the transaction
+     * @param signatures Array of signatures from the signers
+     * @dev Requires the Safe's owner quorum because funds exit to an arbitrary recipient
      */
-    function requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount, address signer, bytes calldata signature) external payable onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+    function requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
         bytes32 digestHash = _getRequestAsyncWithdrawDigestHash(safe, _recipient, _withdrawAmount);
-        _verifyAdminSig(digestHash, signer, signature);
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _requestAsyncWithdraw(safe, _recipient, _withdrawAmount);
     }
 
@@ -377,7 +378,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @return The digest hash for signature verification
      */
     function _getRequestAsyncWithdrawDigestHash(address safe, address _recipient, uint256 _withdrawAmount) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
     }
 
     /**

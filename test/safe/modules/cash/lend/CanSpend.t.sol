@@ -45,6 +45,38 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         assertEq(reason, "");
     }
 
+    /// Audit I-02: a pause must not decline a debit auth the safe can fund entirely from loose balance — the
+    /// settlement needs no Aave interaction at all. The pause only removes the supplied leg (below).
+    function test_canSpend_succeeds_inDebitMode_fromLooseWhileReservePaused() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        deal(address(usdc), address(safe), 100e6); // fully funded loose, nothing needed from Aave
+        _setAaveReservePaused(usdcReserveId, true);
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, true);
+        assertEq(reason, "");
+    }
+
+    /// The pause still blocks the supplied leg: with nothing loose, the auth declines on the Aave-liquidity
+    /// attribution (withdrawalLiquidity reads zero while paused), not on spend-token membership.
+    function test_canSpend_fails_inDebitMode_whenPausedAndNeedsSuppliedLeg() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        _supplyToGateway(address(safe), address(usdc), 1000e6); // supplied only, nothing loose
+        _setAaveReservePaused(usdcReserveId, true);
+
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Insufficient Lend withdrawal liquidity, please try again later");
+    }
+
     /// Debit spend is declined with an Aave-specific reason when the safe's supplied balance covers the spend
     /// but the Hub's withdrawal liquidity cannot pay it out (utilization spike / drained reserve).
     function test_canSpend_fails_inDebitMode_whenAaveWithdrawalLiquidityDrained() public {
@@ -264,6 +296,25 @@ contract CashLensCanSpendAaveTest is CashGatewayTestSetup {
         amounts[0] = 50e6;
 
         // Fresh gateway safe has nothing supplied, so no borrowing power.
+        (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
+        assertEq(canSpend, false);
+        assertEq(reason, "Insufficient borrowing power");
+    }
+
+    /// A user-level shortfall takes precedence over a shared draw-cap shortfall so market-side declines
+    /// safely prove that the Safe itself had enough borrowing power for the requested spend.
+    function test_canSpend_failsInCreditMode_withInsufficientBorrowingPowerBeforeDrawCap() public {
+        _setMode(Mode.Credit);
+        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e6;
+
+        // No collateral leaves the Safe with zero borrowing power, while the shared draw cap is also short.
+        _setAaveSpokeCaps(usdcReserveId, type(uint40).max, 50);
+
         (bool canSpend, string memory reason) = cashLens.canSpend(address(safe), txId, tokens, amounts);
         assertEq(canSpend, false);
         assertEq(reason, "Insufficient borrowing power");
