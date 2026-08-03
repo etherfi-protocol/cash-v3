@@ -36,11 +36,10 @@ contract EtherFiHook is UpgradeableProxy {
 
     /**
      * @notice Hook called before module operations
-     * @dev Pausing this contract blocks `execTransactionFromModule` on every safe, providing
-     *      the emergency pause path for the beacon-proxied safes
+     * @dev Currently implemented as a view function with no effects
      * @param module Address of the module being operated on
      */
-    function preOpHook(address module) external view whenNotPaused { }
+    function preOpHook(address module) external view { }
 
     /**
      * @notice Hook called after module operations

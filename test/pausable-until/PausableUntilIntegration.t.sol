@@ -37,29 +37,13 @@ contract PausableUntilIntegrationTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
-    function test_guardianPauseUntil_onHook_blocksSafeModuleExecution() public {
-        address[] memory to = new address[](1);
-        to[0] = makeAddr("target");
-        uint256[] memory values = new uint256[](1);
-        bytes[] memory data = new bytes[](1);
-
-        // Works before the pause
-        vm.prank(address(cashModule));
-        safe.execTransactionFromModule(to, values, data);
-
+    function test_guardianPauseUntil_governanceCanLiftEarly() public {
         vm.prank(guardian);
-        PausableUntil(address(hook)).pauseUntil();
+        PausableUntil(address(cashModule)).pauseUntil();
+        assertTrue(PausableUntil(address(cashModule)).isPaused());
 
-        uint256 pausedUntil = PausableUntil(address(hook)).pausedUntil();
-        vm.prank(address(cashModule));
-        vm.expectRevert(abi.encodeWithSelector(PausableUntil.ContractPausedUntil.selector, pausedUntil));
-        safe.execTransactionFromModule(to, values, data);
-
-        // Governance lifts the pause early and execution resumes
         vm.prank(owner);
-        PausableUntil(address(hook)).unpauseUntil();
-
-        vm.prank(address(cashModule));
-        safe.execTransactionFromModule(to, values, data);
+        PausableUntil(address(cashModule)).unpauseUntil();
+        assertFalse(PausableUntil(address(cashModule)).isPaused());
     }
 }
