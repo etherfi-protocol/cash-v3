@@ -70,12 +70,13 @@ interface ISpokeConfiguratorLike {
  *         calldata for that batch after verifying every adapter against the feed it replaces.
  *
  * Usage — dry run first (no --broadcast), which still runs every check:
- *   source .env && forge script scripts/aave-v4/DeployCapoPriceAdapters.s.sol:DeployCapoPriceAdapters \
- *     --rpc-url $OPTIMISM_RPC -vvv
+ *   forge script scripts/aave-v4/DeployCapoPriceAdapters.s.sol:DeployCapoPriceAdapters \
+ *     --rpc-url $OPTIMISM_RPC --sender <deployer address> -vvv
  *
- * Then broadcast and verify:
- *   source .env && forge script scripts/aave-v4/DeployCapoPriceAdapters.s.sol:DeployCapoPriceAdapters \
- *     --rpc-url $OPTIMISM_RPC --broadcast --verify --etherscan-api-key $ETHERSCAN_API_KEY -vvv
+ * Then broadcast and verify, using the forge keystore account:
+ *   forge script scripts/aave-v4/DeployCapoPriceAdapters.s.sol:DeployCapoPriceAdapters \
+ *     --rpc-url $OPTIMISM_RPC --account etherfi-deployer --sender <deployer address> \
+ *     --broadcast --verify --etherscan-api-key $ETHERSCAN_API_KEY -vvv
  */
 contract DeployCapoPriceAdapters is Script {
     // ---------------------------------------------------------------- instance (OP Mainnet)
@@ -149,6 +150,11 @@ contract DeployCapoPriceAdapters is Script {
     uint8 constant VEDA_RATE_DECIMALS = 18;
 
     uint8 constant USD_FEED_DECIMALS = 8;
+
+    /// @dev Floor for the broadcaster's balance. OP calldata is cheap and these are small contracts,
+    ///      so 0.01 ETH is generous for ~30 deployments — it exists to catch an empty or wrong
+    ///      account before the first transaction, not to estimate gas.
+    uint256 constant MIN_DEPLOYER_BALANCE = 0.01 ether;
 
     // ---------------------------------------------------------------- cap parameters
     // $1.04, matching Aave everywhere they cap a USD stable: V3 OP, and their own V4 Ethereum and
@@ -303,7 +309,11 @@ contract DeployCapoPriceAdapters is Script {
 
         _preflightStableCaps();
 
-        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
+        // No-arg: takes whatever the CLI supplies, so this works with a forge keystore account
+        // (--account etherfi-deployer), a raw --private-key, or a hardware wallet. Do not pin it to
+        // vm.envUint("PRIVATE_KEY") — that forces a bare key and locks out the keystore.
+        vm.startBroadcast();
+        _logDeployer();
         _deployLegs();
         _deployAdapters();
         vm.stopBroadcast();
@@ -312,6 +322,17 @@ contract DeployCapoPriceAdapters is Script {
         _printSafeBatch();
         _writeJson();
         _writeSafeBatchJson();
+    }
+
+    /// @dev Names the broadcaster and checks it can actually pay for ~30 deployments. Running dry
+    ///      halfway through leaves a partial set: the adapters already deployed are harmless because
+    ///      nothing points at them, but the run has to be repeated from scratch and the earlier
+    ///      contracts are then dead weight on chain.
+    function _logDeployer() internal {
+        (, address deployer,) = vm.readCallers();
+        console.log("deployer                    ", deployer);
+        console.log(string.concat("  balance: ", vm.toString(deployer.balance), " wei"));
+        require(deployer.balance >= MIN_DEPLOYER_BALANCE, "deployer balance too low for ~30 deployments");
     }
 
     /// @dev `PriceCapAdapterStable` reverts with `CapLowerThanActualPrice` if the cap is below the
