@@ -180,7 +180,7 @@ contract DeployCapoPriceAdapters is Script {
     //
     // These are not derived from a formula — each one is a risk decision, with the reasoning the
     // reviewer gave. Do not "recompute" them from observed yield without going back to risk.
-    uint16 constant GROWTH_SETHFI = 900; //  9.00% — strategy targets ~6%, so this leaves headroom
+    uint16 constant GROWTH_SETHFI = 1200; // 12.00% — raised from 9.00% on the reviewer's call
     uint16 constant GROWTH_LIQUID_USD = 750; //  7.50%
     uint16 constant GROWTH_LIQUID_RESERVE = 650; //  6.50% — allows for a higher-yielding strategy coming
     uint16 constant GROWTH_LIQUID_ETH = 500; //  5.00%
@@ -192,9 +192,9 @@ contract DeployCapoPriceAdapters is Script {
     uint16 constant GROWTH_WEEUR = 900; //  9.00% — Midas is instructed not to post an update
         //           implying more than 7.5%, so this sits just above that contractual bound
     //
-    // NOT YET SET BY RISK. liquidBTC was not in the reviewer's list; this is the prior 1.5x-observed
-    // placeholder (observed 1.88%). It needs a decision before deploy.
-    uint16 constant GROWTH_LIQUID_BTC = 282; //  2.82% — PLACEHOLDER
+    // liquidBTC: PROPOSED, NOT YET CONFIRMED BY RISK. Set to match beHYPE, whose observed growth is
+    // near-identical (1.81% vs 1.74% realised over the snapshot window). Confirm before deploy.
+    uint16 constant GROWTH_LIQUID_BTC = 300; //  3.00% — PROPOSED, awaiting confirmation
 
     // Snapshot ratios, read 60 days back, in the units the matching getRatio() returns: 18 decimals
     // for every Veda rate leg, and the leg's own decimals otherwise.
