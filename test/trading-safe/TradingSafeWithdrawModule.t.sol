@@ -2,10 +2,11 @@
 pragma solidity 0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
-import { ITradingSafeWithdrawModule } from "../../src/interfaces/ITradingSafeWithdrawModule.sol";
+import { ITradingSafeWithdrawModule, Withdrawal } from "../../src/interfaces/ITradingSafeWithdrawModule.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
@@ -29,6 +30,64 @@ contract FalseTransferToken {
     }
 }
 
+/// @dev Stand-in for the `WrappedBackedToken` ERC-4626 vaults the mainnet TradingSafe holds every
+///      tokenized equity in (wTSLAx over TSLAx, etc.): shares are 1:1 with the underlying's shares,
+///      and a multiplier — which the real underlying moves on stock splits, dividends and fee
+///      accrual — converts them to an asset amount.
+contract MockWrappedToken is ERC20 {
+    MockERC20 public immutable underlying;
+    uint256 public multiplier = 1e18;
+
+    constructor(MockERC20 _underlying) ERC20("Wrapped Mock", "wMOCK") {
+        underlying = _underlying;
+    }
+
+    function asset() external view returns (address) {
+        return address(underlying);
+    }
+
+    function setMultiplier(uint256 newMultiplier) external {
+        multiplier = newMultiplier;
+    }
+
+    function convertToAssets(uint256 shares) public view returns (uint256) {
+        return (shares * multiplier) / 1e18;
+    }
+
+    /// @dev Wraps by escrowing the underlying, so the vault can always cover a redeem.
+    function mintShares(address to, uint256 shares) external {
+        underlying.mint(address(this), convertToAssets(shares));
+        _mint(to, shares);
+    }
+
+    function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
+        if (msg.sender != owner) _spendAllowance(owner, msg.sender, shares);
+        assets = convertToAssets(shares);
+        _burn(owner, shares);
+        underlying.transfer(receiver, assets);
+    }
+}
+
+/// @dev ERC-4626-shaped vault whose `redeem` moves nothing, to prove the balance-delta check still
+///      guards the unwrap path the same way it guards a plain transfer.
+contract NoOpRedeemVault {
+    address public immutable asset;
+
+    mapping(address => uint256) public balanceOf;
+
+    constructor(address _asset) {
+        asset = _asset;
+    }
+
+    function mint(address to, uint256 amt) external {
+        balanceOf[to] += amt;
+    }
+
+    function redeem(uint256, address, address) external pure returns (uint256) {
+        return 0;
+    }
+}
+
 contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
     using MessageHashUtils for bytes32;
 
@@ -36,6 +95,8 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
     TradingSafeWithdrawModule internal module;
     TradingSafe internal safe;
     MockERC20 internal token;
+    MockERC20 internal underlying;
+    MockWrappedToken internal wrapper;
 
     address internal safeAddr;
     address internal recipient = makeAddr("recipient");
@@ -82,6 +143,8 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         safeAddr = address(safe);
 
         token = new MockERC20("Trade", "TRD", 18);
+        underlying = new MockERC20("Mock xStock", "MOCKx", 18);
+        wrapper = new MockWrappedToken(underlying);
         vm.stopPrank();
     }
 
@@ -125,14 +188,11 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         token.mint(safeAddr, 1000e18);
         token2.mint(safeAddr, 500e6);
 
-        address[] memory tokens = new address[](2);
-        tokens[0] = address(token);
-        tokens[1] = address(token2);
-        uint256[] memory amounts = new uint256[](2);
-        amounts[0] = amount1;
-        amounts[1] = amount2;
+        Withdrawal[] memory legs = new Withdrawal[](2);
+        legs[0] = Withdrawal(address(token), amount1, false);
+        legs[1] = Withdrawal(address(token2), amount2, false);
 
-        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(tokens, amounts, recipient, DEADLINE);
+        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(legs, recipient, DEADLINE);
 
         vm.expectEmit(true, true, true, true, address(module));
         emit ITradingSafeWithdrawModule.Withdrawn(safeAddr, address(token), recipient, amount1);
@@ -140,7 +200,7 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         emit ITradingSafeWithdrawModule.Withdrawn(safeAddr, address(token2), recipient, amount2);
 
         vm.prank(relayer);
-        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
+        module.withdraw(safeAddr, legs, recipient, DEADLINE, signers, sigs);
 
         assertEq(token.balanceOf(recipient), amount1, "token1 credited");
         assertEq(token2.balanceOf(recipient), amount2, "token2 credited");
@@ -154,56 +214,132 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         token.mint(safeAddr, 1000e18);
         token2.mint(safeAddr, 100e18);
 
-        address[] memory tokens = new address[](2);
-        tokens[0] = address(token);
-        tokens[1] = address(token2);
-        uint256[] memory amounts = new uint256[](2);
-        amounts[0] = 400e18;
-        amounts[1] = 101e18;
+        Withdrawal[] memory legs = new Withdrawal[](2);
+        legs[0] = Withdrawal(address(token), 400e18, false);
+        legs[1] = Withdrawal(address(token2), 101e18, false);
 
-        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(tokens, amounts, recipient, DEADLINE);
+        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(legs, recipient, DEADLINE);
 
         vm.expectRevert(ITradingSafeWithdrawModule.InsufficientBalance.selector);
-        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
+        module.withdraw(safeAddr, legs, recipient, DEADLINE, signers, sigs);
         assertEq(token.balanceOf(recipient), 0, "no partial transfer");
     }
 
-    function test_withdraw_revertsOnEmptyArrays() public {
-        address[] memory tokens = new address[](0);
-        uint256[] memory amounts = new uint256[](0);
+    function test_withdraw_revertsOnEmptyWithdrawals() public {
         address[] memory signers = new address[](0);
         bytes[] memory sigs = new bytes[](0);
 
         vm.expectRevert(ITradingSafeWithdrawModule.EmptyWithdrawal.selector);
-        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
-    }
-
-    function test_withdraw_revertsOnArrayLengthMismatch() public {
-        address[] memory tokens = new address[](2);
-        tokens[0] = address(token);
-        tokens[1] = address(token);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = 1e18;
-        address[] memory signers = new address[](0);
-        bytes[] memory sigs = new bytes[](0);
-
-        vm.expectRevert(ModuleBase.ArrayLengthMismatch.selector);
-        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
+        module.withdraw(safeAddr, new Withdrawal[](0), recipient, DEADLINE, signers, sigs);
     }
 
     function test_withdraw_revertsOnDuplicateToken() public {
         token.mint(safeAddr, 1000e18);
-        address[] memory tokens = new address[](2);
-        tokens[0] = address(token);
-        tokens[1] = address(token);
-        uint256[] memory amounts = new uint256[](2);
-        amounts[0] = 1e18;
-        amounts[1] = 2e18;
+        Withdrawal[] memory legs = new Withdrawal[](2);
+        legs[0] = Withdrawal(address(token), 1e18, false);
+        legs[1] = Withdrawal(address(token), 2e18, false);
 
-        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(tokens, amounts, recipient, DEADLINE);
+        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(legs, recipient, DEADLINE);
 
         vm.expectRevert(ITradingSafeWithdrawModule.DuplicateToken.selector);
-        module.withdraw(safeAddr, tokens, amounts, recipient, DEADLINE, signers, sigs);
+        module.withdraw(safeAddr, legs, recipient, DEADLINE, signers, sigs);
+    }
+
+    // ---- Unwrap (ERC-4626 redeem) ----
+
+    function test_withdraw_unwrapDeliversUnderlyingNotWrapper() public {
+        uint256 held = 100e18;
+        uint256 shares = 40e18;
+        wrapper.mintShares(safeAddr, held);
+
+        (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(wrapper), recipient, shares, true, DEADLINE);
+
+        vm.expectEmit(true, true, true, true, address(module));
+        emit ITradingSafeWithdrawModule.Withdrawn(safeAddr, address(wrapper), recipient, shares);
+        vm.expectEmit(true, true, true, true, address(module));
+        emit ITradingSafeWithdrawModule.Unwrapped(safeAddr, address(wrapper), recipient, address(underlying), shares);
+
+        vm.prank(relayer);
+        _withdraw(address(wrapper), recipient, shares, true, DEADLINE, signers, sigs);
+
+        assertEq(underlying.balanceOf(recipient), shares, "recipient got the underlying");
+        assertEq(wrapper.balanceOf(recipient), 0, "recipient got no wrapper");
+        assertEq(wrapper.balanceOf(safeAddr), held - shares, "safe debited exactly the signed shares");
+    }
+
+    /// @dev `amounts` is always denominated in what the safe holds, so a multiplier away from 1:1
+    ///      (a stock split or accrued fee on the real Backed token) changes what the recipient
+    ///      receives without changing what the owners authorized debiting.
+    function test_withdraw_unwrapConvertsAtCurrentMultiplier() public {
+        uint256 shares = 10e18;
+        wrapper.mintShares(safeAddr, shares);
+        wrapper.setMultiplier(1.5e18);
+        // Back the revalued shares, as a split/dividend on the real Backed token would.
+        underlying.mint(address(wrapper), 5e18);
+
+        (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(wrapper), recipient, shares, true, DEADLINE);
+        _withdraw(address(wrapper), recipient, shares, true, DEADLINE, signers, sigs);
+
+        assertEq(underlying.balanceOf(recipient), 15e18, "recipient credited shares * multiplier");
+        assertEq(wrapper.balanceOf(safeAddr), 0, "safe debited exactly the signed shares");
+    }
+
+    function test_withdraw_deliversWrapperWhenUnwrapNotRequested() public {
+        uint256 shares = 10e18;
+        wrapper.mintShares(safeAddr, shares);
+
+        (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(wrapper), recipient, shares, DEADLINE);
+        _withdraw(address(wrapper), recipient, shares, DEADLINE, signers, sigs);
+
+        assertEq(wrapper.balanceOf(recipient), shares, "recipient got the wrapper");
+        assertEq(underlying.balanceOf(recipient), 0, "no unwrap happened");
+    }
+
+    function test_withdraw_mixesUnwrappedAndPlainTokensInOneBatch() public {
+        token.mint(safeAddr, 1000e18);
+        wrapper.mintShares(safeAddr, 100e18);
+
+        Withdrawal[] memory legs = new Withdrawal[](2);
+        legs[0] = Withdrawal(address(token), 400e18, false);
+        legs[1] = Withdrawal(address(wrapper), 30e18, true);
+
+        (address[] memory signers, bytes[] memory sigs) = _signWithdrawMulti(legs, recipient, DEADLINE);
+
+        vm.prank(relayer);
+        module.withdraw(safeAddr, legs, recipient, DEADLINE, signers, sigs);
+
+        assertEq(token.balanceOf(recipient), 400e18, "plain token transferred as-is");
+        assertEq(underlying.balanceOf(recipient), 30e18, "vault entry delivered as underlying");
+        assertEq(wrapper.balanceOf(recipient), 0, "no wrapper delivered");
+        assertEq(wrapper.balanceOf(safeAddr), 70e18, "safe debited exactly the signed shares");
+    }
+
+    function test_withdraw_revertsIfUnwrapRequestedForPlainToken() public {
+        token.mint(safeAddr, 10e18);
+        (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 1e18, true, DEADLINE);
+
+        vm.expectRevert(ITradingSafeWithdrawModule.NotUnwrappable.selector);
+        _withdraw(address(token), recipient, 1e18, true, DEADLINE, signers, sigs);
+    }
+
+    /// @dev The unwrap flag is part of the signed digest, so a relayer cannot decide on the owners'
+    ///      behalf whether the recipient ends up with the wrapper or the underlying.
+    function test_withdraw_revertsIfSignatureOverDifferentUnwrapFlag() public {
+        wrapper.mintShares(safeAddr, 10e18);
+        (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(wrapper), recipient, 1e18, false, DEADLINE);
+
+        vm.expectRevert(ModuleBase.InvalidSignature.selector);
+        _withdraw(address(wrapper), recipient, 1e18, true, DEADLINE, signers, sigs);
+    }
+
+    function test_withdraw_revertsIfUnwrapMovesNothing() public {
+        NoOpRedeemVault vault = new NoOpRedeemVault(address(underlying));
+        vault.mint(safeAddr, 5e18);
+
+        (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(vault), recipient, 5e18, true, DEADLINE);
+
+        vm.expectRevert(ITradingSafeWithdrawModule.WithdrawTransferFailed.selector);
+        _withdraw(address(vault), recipient, 5e18, true, DEADLINE, signers, sigs);
     }
 
     // ---- Input validation ----
@@ -248,7 +384,7 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         address notASafe = makeAddr("notASafe");
         (address[] memory signers, bytes[] memory sigs) = _signWithdraw(address(token), recipient, 1e18, DEADLINE);
         vm.expectRevert(ModuleBase.OnlyEtherFiSafe.selector);
-        module.withdraw(notASafe, _single(address(token)), _single(uint256(1e18)), recipient, DEADLINE, signers, sigs);
+        module.withdraw(notASafe, _single(address(token), 1e18, false), recipient, DEADLINE, signers, sigs);
     }
 
     // ---- Signature / replay ----
@@ -307,7 +443,7 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         (address[] memory signers, bytes[] memory sigs) = _signWithdrawFor(address(module2), address(token), recipient, 1e18, DEADLINE);
         // The safe rejects the unenabled module when it tries to consume the nonce.
         vm.expectRevert(EtherFiSafeErrors.OnlyModules.selector);
-        module2.withdraw(safeAddr, _single(address(token)), _single(uint256(1e18)), recipient, DEADLINE, signers, sigs);
+        module2.withdraw(safeAddr, _single(address(token), 1e18, false), recipient, DEADLINE, signers, sigs);
     }
 
     // ---- Pause ----
@@ -358,25 +494,33 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
 
     // --- helpers ---
 
-    /// @dev Convenience single-token withdraw against the default `module`.
+    /// @dev Convenience single-token withdraw against the default `module`, delivering the token as held.
     function _withdraw(address token_, address recipient_, uint256 amount_, uint256 deadline_, address[] memory signers, bytes[] memory sigs) internal {
-        module.withdraw(safeAddr, _single(token_), _single(amount_), recipient_, deadline_, signers, sigs);
+        _withdraw(token_, recipient_, amount_, false, deadline_, signers, sigs);
+    }
+
+    function _withdraw(address token_, address recipient_, uint256 amount_, bool unwrap_, uint256 deadline_, address[] memory signers, bytes[] memory sigs) internal {
+        module.withdraw(safeAddr, _single(token_, amount_, unwrap_), recipient_, deadline_, signers, sigs);
     }
 
     function _signWithdraw(address token_, address recipient_, uint256 amount_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
-        return _signWithdrawMultiFor(address(module), _single(token_), _single(amount_), recipient_, deadline_);
+        return _signWithdraw(token_, recipient_, amount_, false, deadline_);
+    }
+
+    function _signWithdraw(address token_, address recipient_, uint256 amount_, bool unwrap_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
+        return _signWithdrawMultiFor(address(module), _single(token_, amount_, unwrap_), recipient_, deadline_);
     }
 
     function _signWithdrawFor(address module_, address token_, address recipient_, uint256 amount_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
-        return _signWithdrawMultiFor(module_, _single(token_), _single(amount_), recipient_, deadline_);
+        return _signWithdrawMultiFor(module_, _single(token_, amount_, false), recipient_, deadline_);
     }
 
-    function _signWithdrawMulti(address[] memory tokens_, uint256[] memory amounts_, address recipient_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
-        return _signWithdrawMultiFor(address(module), tokens_, amounts_, recipient_, deadline_);
+    function _signWithdrawMulti(Withdrawal[] memory legs, address recipient_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
+        return _signWithdrawMultiFor(address(module), legs, recipient_, deadline_);
     }
 
-    function _signWithdrawMultiFor(address module_, address[] memory tokens_, uint256[] memory amounts_, address recipient_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
-        bytes32 digest = keccak256(abi.encodePacked(keccak256("TradingSafeWithdrawModule.withdraw"), block.chainid, module_, safe.nonce(), safeAddr, keccak256(abi.encode(tokens_)), keccak256(abi.encode(amounts_)), recipient_, deadline_)).toEthSignedMessageHash();
+    function _signWithdrawMultiFor(address module_, Withdrawal[] memory legs, address recipient_, uint256 deadline_) internal view returns (address[] memory signers, bytes[] memory sigs) {
+        bytes32 digest = keccak256(abi.encodePacked(keccak256("TradingSafeWithdrawModule.withdraw"), block.chainid, module_, safe.nonce(), safeAddr, keccak256(abi.encode(legs)), recipient_, deadline_)).toEthSignedMessageHash();
 
         signers = new address[](2);
         signers[0] = owner1;
@@ -387,14 +531,9 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         sigs[1] = _signDigest(owner2Pk, digest);
     }
 
-    function _single(address a) internal pure returns (address[] memory arr) {
-        arr = new address[](1);
-        arr[0] = a;
-    }
-
-    function _single(uint256 x) internal pure returns (uint256[] memory arr) {
-        arr = new uint256[](1);
-        arr[0] = x;
+    function _single(address token_, uint256 amount_, bool unwrap_) internal pure returns (Withdrawal[] memory legs) {
+        legs = new Withdrawal[](1);
+        legs[0] = Withdrawal(token_, amount_, unwrap_);
     }
 
     function _signDigest(uint256 pk, bytes32 digest) internal pure returns (bytes memory) {
