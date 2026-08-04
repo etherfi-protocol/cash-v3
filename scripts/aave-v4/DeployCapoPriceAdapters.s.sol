@@ -156,20 +156,28 @@ contract DeployCapoPriceAdapters is Script {
     uint48 constant SNAPSHOT_DELAY_BEHYPE = 3 days;
     uint48 constant SNAPSHOT_TS_BEHYPE = 1_785_344_431;
 
-    // maxYearlyRatioGrowthPercent, in bps of the snapshot ratio. Each is roughly 2-3x the growth
-    // actually observed over the trailing 90 days, matching how Aave sizes its own (9.68% for
-    // wstETH against a ~3.5% observed yield). THESE ARE RISK PARAMETERS AND NEED NONCE'S SIGN-OFF.
-    uint16 constant GROWTH_WEETH = 850; //  8.50% (observed 3.50%)
-    uint16 constant GROWTH_BEHYPE = 800; //  8.00% (observed 1.86% over 5 days)
-    uint16 constant GROWTH_EBTC = 300; //  3.00% (observed 0.16%)
-    uint16 constant GROWTH_EUSD = 500; //  5.00% (observed 0.11%)
-    uint16 constant GROWTH_SETHFI = 1500; // 15.00% (observed 7.87%)
-    uint16 constant GROWTH_LIQUID_ETH = 900; //  9.00% (observed 3.44%)
-    uint16 constant GROWTH_LIQUID_BTC = 500; //  5.00% (observed 1.88%)
-    uint16 constant GROWTH_LIQUID_USD = 1200; // 12.00% (observed 4.98%)
-    uint16 constant GROWTH_LIQUID_RESERVE = 1000; // 10.00% (observed 4.08%)
-    uint16 constant GROWTH_LIQUID_RWA = 1500; // 15.00% (observed ~7.06% over 7 days)
-    uint16 constant GROWTH_WEEUR = 1200; // 12.00% (observed 5.28%)
+    // maxYearlyRatioGrowthPercent, in bps of the snapshot ratio: 1.5x the growth actually observed
+    // over the trailing 90 days, per risk direction. Note this is tighter than Aave's own practice —
+    // they run 9.68% on wstETH against a ~3.5% observed yield, roughly 2.8x. A tighter multiple gives
+    // better protection against a bad publisher but leaves less room before the ceiling binds during
+    // normal operation, and a binding ceiling under-prices collateral.
+    // THESE ARE RISK PARAMETERS AND NEED NONCE'S SIGN-OFF.
+    uint16 constant GROWTH_WEETH = 525; //   5.25% (observed 3.50%)
+    uint16 constant GROWTH_BEHYPE = 279; //   2.79% (observed 1.86% over 5 days)
+    uint16 constant GROWTH_EBTC = 24; //   0.24% (observed 0.16%)
+    uint16 constant GROWTH_EUSD = 17; //   0.17% (observed 0.11%)
+    uint16 constant GROWTH_SETHFI = 1181; //  11.81% (observed 7.87%)
+    uint16 constant GROWTH_LIQUID_ETH = 516; //   5.16% (observed 3.44%)
+    uint16 constant GROWTH_LIQUID_BTC = 282; //   2.82% (observed 1.88%)
+    uint16 constant GROWTH_LIQUID_USD = 747; //   7.47% (observed 4.98%)
+    uint16 constant GROWTH_LIQUID_RESERVE = 612; //   6.12% (observed 4.08%)
+    uint16 constant GROWTH_LIQUID_RWA = 1059; //  10.59% (observed 7.06% over 7 days)
+    // weEUR is measured over 30 days, not 90: the feed sat flat at exactly 1.00000000 for its first
+    // ~30 days, so a 90-day window reads 5.28% and understates the real accrual by nearly half.
+    // 1.5x of that would be 792 bps, which is BELOW the 955 bps the ceiling already needs to clear the
+    // rate realised since the snapshot — the adapter would refuse to deploy. The 30-day window (7.99%)
+    // is the honest basis; 45-day agrees at 7.33% and 60-day at 6.66%.
+    uint16 constant GROWTH_WEEUR = 1199; //  11.99% (observed 7.99% over 30 days)
 
     // Snapshot ratios, in the units the matching getRatio() returns: 18 decimals for every Veda
     // rate leg: 18 decimals for every Veda vault, and the leg's own decimals otherwise.
