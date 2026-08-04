@@ -1,0 +1,159 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import { ILendGateway } from "../interfaces/ILendGateway.sol";
+import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
+
+/**
+ * @title ModuleLendGatewaySandwich
+ * @notice Bookends for modules that move a safe's assets once auto-supply has parked them in Aave:
+ *         withdraw the input back to the safe, run the action, re-supply the output as collateral.
+ * @dev Aave rejects any withdraw that would push the health factor below 1 (its collateralFactor is both
+ *      LTV and liquidation threshold), and the back bookend only adds collateral. On top of that,
+ *      risk-increasing consumer flows end with _ensureGatewayFloor: whatever the resupply put back, the
+ *      end state must sit at or above the gateway's configured health-factor floor (a failed or
+ *      unregistered resupply otherwise leaves the health factor between Aave's 1.0 limit and the floor).
+ *      Repayment flows (the LiquidUSD liquifier) are deliberately exempt: de-risking must never be
+ *      blocked. Gating: the WITHDRAW bookend and the FLOOR check run for any gateway-engine safe —
+ *      an opted-out safe (including a matured opt-out whose unwind open borrows still block) can hold
+ *      funds supplied on Aave, and pulling them loose is an exit op the repayment/exit paths depend on
+ *      (repayUsingLiquidUSD sourcing supplied LiquidUSD); the floor must bind those pulls exactly
+ *      because the resupply behind them is off (audit L-03). Only the RESUPPLY bookend stays on
+ *      _lendActive, so no new supply reaches Aave for a legacy or opted-out safe.
+ *
+ *      Inherits ModuleCheckBalance because the bookends extend its balance model (the front bookend
+ *      sources what _getAvailableAmount found missing) and it holds the cashModule reference every
+ *      consumer already has. Abstract, compiled into each consumer, never deployed on its own; changes
+ *      ship by redeploying the consumers.
+ * @author ether.fi
+ */
+abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
+    /// @notice Emitted when a best-effort post-operation supply to the lend gateway fails
+    event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
+
+    /**
+     * @notice The lend gateway the bookends drive, resolved live from the CashModule
+     * @dev Virtual only for the test harness, which pins a mock
+     * @return The lend gateway
+     */
+    function gateway() public view virtual returns (ILendGateway) {
+        return cashModule.getLendGateway();
+    }
+
+    /**
+     * @notice Whether the safe's assets live in Aave: on the gateway engine and not opted out
+     * @dev Virtual only for the test harness. Gates the resupply bookend and the floor check.
+     * @param safe The safe to test
+     * @return True if new supply may reach Aave for the safe
+     */
+    function _lendActive(address safe) internal view virtual returns (bool) {
+        return cashModule.isLendActive(safe);
+    }
+
+    /**
+     * @notice Whether the safe runs on the gateway engine, regardless of its opt-out state
+     * @dev Virtual only for the test harness. Gates the withdraw bookend: an opted-out safe can still
+     *      hold funds supplied on Aave (a matured opt-out blocked by open borrows, or a residual after
+     *      processing), and reclaiming them is an exit op that must stay open.
+     * @param safe The safe to test
+     * @return True if the safe's supplied funds may sit in the gateway
+     */
+    function _onGatewayEngine(address safe) internal view virtual returns (bool) {
+        return cashModule.usesLendGateway(safe);
+    }
+
+    /**
+     * @notice Pulls the part of `amount` not already loose in the safe out of its Aave position
+     * @dev Withdraws min(amount - looseAvailable, supplied), so an unsupplied or unregistered asset (ETH
+     *      included) is untouched. Aave rejects a withdraw that would push the health factor below 1.
+     * @param safe The safe whose position is debited
+     * @param asset The asset to make available
+     * @param amount The total amount the operation needs loose in the safe
+     * @param looseAvailable The loose balance already usable in the safe (net of pending-withdrawal reservations)
+     */
+    function _withdrawShortfall(address safe, address asset, uint256 amount, uint256 looseAvailable) internal {
+        if (amount <= looseAvailable) return;
+        // Engine-gated, NOT _lendActive: an opted-out safe's supplied funds must stay reclaimable
+        if (!_onGatewayEngine(safe)) return;
+        ILendGateway lendGateway = gateway();
+        if (address(lendGateway) == address(0)) return;
+        uint256 supplied = lendGateway.suppliedOf(safe, asset);
+        uint256 shortfall = amount - looseAvailable;
+        if (shortfall > supplied) shortfall = supplied;
+        if (shortfall != 0) lendGateway.withdraw(safe, asset, shortfall, safe);
+    }
+
+    /**
+     * @notice Front bookend: source `amount` of `asset` loose from Aave if short, then require it all present
+     * @dev The idiom every gateway consumer runs before acting: _withdrawShortfall to pull the missing part
+     *      out of the safe's Aave position, then the ModuleCheckBalance assertion that the full amount is now
+     *      loose. Returns the health factor read BEFORE the pull, which is what _ensureGatewayFloor compares
+     *      against — the pull itself lowers health, so a snapshot taken any later would measure the operation
+     *      against its own first step.
+     * @param safe The safe whose input is sourced
+     * @param asset The input asset the operation needs loose
+     * @param amount The full amount the operation needs
+     * @return healthFactorBefore The safe's pre-operation health factor, to pass to _ensureGatewayFloor
+     */
+    function _pullAndRequire(address safe, address asset, uint256 amount) internal returns (uint256 healthFactorBefore) {
+        healthFactorBefore = _gatewayHealthFactor(safe);
+        _withdrawShortfall(safe, asset, amount, _getAvailableAmount(safe, asset));
+        _checkAmountAvailable(safe, asset, amount);
+    }
+
+    /**
+     * @notice The safe's current health factor, or 0 for a safe with no gateway position to protect
+     * @dev Zero is the inert value: _ensureGatewayFloor no-ops off the gateway engine, and a zero snapshot
+     *      elsewhere can only ever read as "not worsened", never as a tightened bound.
+     * @param safe The safe to read
+     * @return The health factor in WAD, or 0 when the safe is not on the gateway engine
+     */
+    function _gatewayHealthFactor(address safe) internal view returns (uint256) {
+        if (!_onGatewayEngine(safe)) return 0;
+        ILendGateway lendGateway = gateway();
+        if (address(lendGateway) == address(0)) return 0;
+        return lendGateway.healthFactor(safe);
+    }
+
+    /**
+     * @notice Supplies an asset from the safe back into Aave and marks it as collateral, best-effort
+     * @dev No-op for an unregistered asset. A rejected supply (frozen, paused, capped) is swallowed rather
+     *      than reverting the action that already ran; the output stays loose and the next sweep restores it.
+     * @param safe The safe whose position is credited
+     * @param asset The asset to supply
+     * @param amount The amount to supply
+     */
+    function _resupplyToGateway(address safe, address asset, uint256 amount) internal {
+        if (!_lendActive(safe)) return;
+        ILendGateway lendGateway = gateway();
+        if (!lendGateway.isRegistered(asset)) return;
+        try lendGateway.supply(safe, asset, amount) { } catch (bytes memory reason) {
+            emit LendSupplyFailed(safe, asset, amount, reason);
+        }
+    }
+
+    /**
+     * @notice Post-op health-factor floor check for risk-increasing consumer flows
+     * @dev Called at the very end of an operation that may have pulled collateral out of Aave: the
+     *      module's signed amount is not bound to the lens quote, and a failed or unregistered resupply
+     *      can leave the health factor between Aave's 1.0 limit and the configured floor — this makes the
+     *      end state take the floor. Repayment flows are deliberately exempt (de-risking must never be
+     *      blocked). Engine-gated like the withdraw bookend, NOT _lendActive: an opted-out safe can still
+     *      hold a live Aave position (a matured opt-out whose unwind open borrows block), and the floor
+     *      must bind its extractions too — otherwise the withdraw bookend could park that position at
+     *      Aave's raw 1.0 boundary with no check. A cleanly opted-out safe has no debt, so
+     *      an unbounded health factor passes and the check stays a no-op for it. No-op for legacy safes
+     *      and while the floor is disabled.
+     *
+     *      Enforced as "no worse off" against the pre-operation snapshot from _pullAndRequire: a position
+     *      already under the floor may still run operations that hold or improve its health, since the floor
+     *      exists to stop extraction from approaching the liquidation line, not to freeze a safe out of
+     *      de-risking. Anything that degrades health still takes the full floor.
+     * @param safe The safe to check
+     * @param healthFactorBefore The health factor _pullAndRequire captured before the operation ran
+     */
+    function _ensureGatewayFloor(address safe, uint256 healthFactorBefore) internal view {
+        if (!_onGatewayEngine(safe)) return;
+        gateway().ensureMinHealthFactorNotWorsened(safe, healthFactorBefore);
+    }
+}

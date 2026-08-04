@@ -20,6 +20,9 @@ contract MidasVerifyBytecode is ContractCodeChecker, Test {
     }
 
     function test_midasModule_verifyBytecode() public {
+        // MidasModule gains the Aave sandwich for Lend, so its bytecode no longer matches the deployed
+        // pre-Lend implementation. Re-enable after the Lend deployment.
+        vm.skip(true);
         address[] memory midasTokens = new address[](1);
         midasTokens[0] = midasToken;
 

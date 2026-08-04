@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import { Mode, SafeCashData } from "../../../../../src/interfaces/ICashModule.sol";
+import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
+import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
+import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
+
+/**
+ * @title CashLensAaveTest
+ * @notice The gateway-path CashLens reads (collateral, safe cash data with and without borrows) built through
+ *         real Aave supply/borrow flows. The legacy-engine and plumbing CashLens tests stay in
+ *         test/safe/modules/cash/CashLens.t.sol (default profile).
+ * @dev Run with: source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/CashLens.t.sol"
+ */
+contract CashLensAaveTest is CashGatewayTestSetup {
+    /// A gateway safe's collateral is its Aave-supplied balance plus any idle loose balance.
+    function test_getUserCollateralForToken_gatewaySafe_countsSuppliedPlusIdle() public {
+        deal(address(weETH), address(safe), 5 ether); // idle funds count as collateral
+        assertEq(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 5 ether, "idle balance is collateral");
+
+        _supplyToGateway(address(safe), address(weETH), 3 ether); // deals 3 more and supplies them, so the idle 5 stay put
+        assertApproxEqAbs(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 8 ether, 2, "supplied plus idle");
+
+        IDebtManager.TokenData[] memory collateral = cashLens.getUserTotalCollateral(address(safe));
+        assertEq(collateral.length, 1, "only the weETH position shows up");
+        assertEq(collateral[0].token, address(weETH));
+        assertApproxEqAbs(collateral[0].amount, 8 ether, 2);
+    }
+
+    /// A pending withdrawal reserves loose funds, so only the unreserved idle part counts as collateral.
+    function test_getUserCollateralForToken_pendingWithdrawalReservesIdle() public {
+        _supplyToGateway(address(safe), address(weETH), 3 ether);
+        deal(address(weETH), address(safe), 5 ether);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(weETH);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 2 ether;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // supplied 3, plus idle = 5 loose - 2 pending; the supplied side is never reserved
+        assertApproxEqAbs(cashLens.getUserCollateralForToken(address(safe), address(weETH)), 6 ether, 2, "pending reserves the loose part only");
+    }
+
+    /// getSafeCashData's totalCollateral extends the gateway's Aave-priced aggregate with idle balances
+    /// priced by the PriceProvider, and the per-token breakdown lists idle-only positions.
+    function test_getSafeCashData_totalCollateralIncludesIdle() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        deal(address(usdc), address(safe), 3000e6); // idle, never supplied
+
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
+        ILendGateway.AccountData memory account = gw.getAccountData(address(safe));
+
+        uint256 idleUsd = (3000e6 * priceProvider.price(address(usdc))) / 1e6;
+        assertEq(data.totalCollateral, account.collateralUsd + idleUsd, "gateway aggregate plus idle USD");
+
+        assertEq(data.collateralBalances.length, 2, "supplied weETH and idle USDC both listed");
+        for (uint256 i = 0; i < data.collateralBalances.length; i++) {
+            if (data.collateralBalances[i].token == address(usdc)) {
+                assertEq(data.collateralBalances[i].amount, 3000e6, "idle-only USDC listed at its idle balance");
+            }
+        }
+
+        // Idle funds carry no borrowing power: maxBorrow stays the gateway's figure.
+        assertEq(data.maxBorrow, account.availableBorrowsUsd + account.debtUsd, "maxBorrow unaffected by idle funds");
+    }
+
+    /// getSafeCashData reports collateral entries, debit mode, and a pending withdrawal for a gateway safe with no borrows.
+    function test_getSafeCashData() public {
+        // 5 weETH + 5000 USDC supplied as collateral; 5000 USDC loose with a pending withdrawal against it.
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _supplyToGateway(address(safe), address(usdc), 5000e6);
+        deal(address(usdc), address(safe), 5000e6);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 5000e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
+
+        assertEq(uint8(data.mode), uint8(Mode.Debit), "Initial mode should be Debit");
+        assertEq(data.incomingModeStartTime, 0, "No incoming mode change");
+        assertEq(data.totalCashbackEarnedInUsd, 0, "No cashback earned initially");
+
+        assertEq(data.collateralBalances.length, 2, "Should have two collateral entries");
+        assertEq(data.borrows.length, 0, "Should have no borrows initially");
+
+        assertEq(data.withdrawalRequest.tokens.length, 1, "Should have one withdrawal token");
+        assertEq(data.withdrawalRequest.amounts.length, 1, "Should have one withdrawal amount");
+        assertEq(data.withdrawalRequest.tokens[0], address(usdc), "Withdrawal token should be USDC");
+        assertEq(data.withdrawalRequest.amounts[0], 5000e6, "Withdrawal amount should be 5000 USDC");
+
+        // The 5000 loose USDC is fully reserved by the pending withdrawal, so idle is zero and the
+        // total is exactly the gateway's account data.
+        ILendGateway.AccountData memory account = gw.getAccountData(address(safe));
+        assertEq(data.totalCollateral, account.collateralUsd, "Total collateral matches gateway when idle is fully reserved");
+        assertEq(data.totalBorrow, 0, "Total borrow should be zero initially");
+        assertEq(data.maxBorrow, account.availableBorrowsUsd + account.debtUsd, "Max borrow matches gateway headroom plus debt");
+    }
+
+    /// getSafeCashData reports the outstanding Aave debt as the safe's borrow.
+    function test_getSafeCashData_withBorrows() public {
+        uint256 borrowAmount = 1000e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowAmount);
+
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
+
+        assertEq(data.borrows.length, 1, "Should have one borrow entry");
+        assertEq(data.borrows[0].token, address(usdc), "Borrow token should be USDC");
+        assertApproxEqAbs(data.borrows[0].amount, borrowAmount, 2, "Borrow amount should match the Aave debt");
+        assertApproxEqAbs(data.totalBorrow, borrowAmount, 2, "Total borrow should match the Aave debt");
+    }
+
+    /// A reserve that stops being borrowable after a borrow (flag off, or frozen/paused) must not drop its
+    /// debt from the breakdown: the per-token borrows walk registered assets, so they stay consistent with
+    /// totalBorrow.
+    function test_getSafeCashData_borrowsSurviveReserveMadeNonBorrowable() public {
+        uint256 borrowAmount = 1000e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowAmount);
+
+        // Governance blocks new USDC borrows; the existing debt stays open.
+        _setAaveReserveBorrowable(usdcReserveId, false);
+        assertFalse(gw.isBorrowable(address(usdc)), "USDC no longer borrowable");
+
+        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
+
+        assertEq(data.borrows.length, 1, "Debt breakdown still lists the USDC borrow");
+        assertEq(data.borrows[0].token, address(usdc), "Borrow token should be USDC");
+        assertApproxEqAbs(data.borrows[0].amount, borrowAmount, 2, "Breakdown matches the Aave debt");
+        assertApproxEqAbs(data.totalBorrow, borrowAmount, 2, "Total still matches, so breakdown and total agree");
+    }
+
+    /// With no debt, the max is the loose balance (net of a pending withdrawal) plus the full supplied balance.
+    function test_getMaxSourceable_noDebt_looseNetOfPendingPlusSupplied() public {
+        _supplyToGateway(address(safe), address(weETH), 3 ether);
+        deal(address(weETH), address(safe), 2 ether);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(weETH);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 0.5 ether;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        assertApproxEqAbs(cashLens.getMaxSourceable(address(safe), address(weETH)), 4.5 ether, 2, "loose net of pending plus supplied");
+    }
+
+    /// With debt, the supplied part is capped by the borrowing headroom, and the number is exactly what the
+    /// gateway allows: withdrawing more reverts on Aave's health check, withdrawing it succeeds.
+    function test_getMaxSourceable_withDebt_matchesWhatTheGatewayAllows() public {
+        _buildGatewayPosition(address(safe), address(weETH), 10 ether, address(usdc), 5000e6);
+
+        uint256 max = cashLens.getMaxSourceable(address(safe), address(weETH));
+        assertLt(max, 10 ether, "debt must cap the withdrawable supplied balance");
+
+        // One weETH-cent past the max breaches Aave's LTV bound.
+        vm.prank(driver);
+        vm.expectRevert();
+        gw.withdraw(address(safe), address(weETH), max + 0.01 ether, address(safe));
+
+        // The max itself goes through, and it means what it says: taking it exhausts the borrowing headroom.
+        vm.prank(driver);
+        gw.withdraw(address(safe), address(weETH), max, address(safe));
+        assertApproxEqAbs(weETH.balanceOf(address(safe)), max, 2, "max withdrawal lands in the safe");
+        assertApproxEqAbs(gw.getAccountData(address(safe)).availableBorrowsUsd, 0, 0.02e6, "max should consume all borrowing headroom");
+    }
+
+    /// A legacy safe's funds are all loose: the max is its balance and the gateway is never consulted.
+    function test_getMaxSourceable_legacySafe_looseOnly() public {
+        _forceLegacyEngine(address(safe));
+        deal(address(weETH), address(safe), 2 ether);
+
+        assertEq(cashLens.getMaxSourceable(address(safe), address(weETH)), 2 ether, "legacy max is the loose balance");
+    }
+}

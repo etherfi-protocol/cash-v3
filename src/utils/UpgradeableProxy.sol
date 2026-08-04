@@ -2,17 +2,17 @@
 pragma solidity ^0.8.28;
 
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ReentrancyGuardTransientUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardTransientUpgradeable.sol";
 
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
+import { PausableUntil } from "./PausableUntil.sol";
 
 /**
  * @title UpgradeableProxy
  * @author ether.fi
  * @notice An UpgradeableProxy contract which can be upgraded by RoleRegistry contract
  */
-contract UpgradeableProxy is UUPSUpgradeable, PausableUpgradeable, ReentrancyGuardTransientUpgradeable {
+contract UpgradeableProxy is UUPSUpgradeable, PausableUntil, ReentrancyGuardTransientUpgradeable {
     /// @custom:storage-location erc7201:etherfi.storage.UpgradeableProxy
     struct UpgradeableProxyStorage {
         /// @notice Reference to the role registry contract for access control
@@ -34,12 +34,11 @@ contract UpgradeableProxy is UUPSUpgradeable, PausableUpgradeable, ReentrancyGua
     /// @notice Error thrown when caller does not hold the GOVERNANCE_ROLE
     error OnlyGovernanceMultisig();
 
-
     /**
      * @notice Returns the address of the Role Registry contract
      * @return roleRegistry Reference to the role registry contract
      */
-    function roleRegistry() public view returns (IRoleRegistry) {
+    function roleRegistry() public view override returns (IRoleRegistry) {
         UpgradeableProxyStorage storage $ = _getUpgradeableProxyStorage();
         return $.roleRegistry;
     }
@@ -126,7 +125,7 @@ contract UpgradeableProxy is UUPSUpgradeable, PausableUpgradeable, ReentrancyGua
     /**
      * @dev Modifier to restrict access to holders of the GOVERNANCE_ROLE
      */
-    modifier onlyGovernanceMultisig() {
+    modifier onlyGovernanceMultisig() override {
         if (!roleRegistry().hasRole(GOVERNANCE_ROLE, msg.sender)) revert OnlyGovernanceMultisig();
         _;
     }

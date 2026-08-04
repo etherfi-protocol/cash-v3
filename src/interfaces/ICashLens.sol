@@ -36,6 +36,16 @@ interface ICashLens {
      */
     function getPendingWithdrawalAmount(address safe, address token) external view returns (uint256);
 
+    /**
+     * @notice Max amount of `token` an operation can source from the safe: the loose balance (net of any
+     *         pending-withdrawal reservation) plus the Aave-supplied amount withdrawable without leaving
+     *         the position over-LTV
+     * @param safe Address of the safe
+     * @param token Address of the token (or the ETH marker address)
+     * @return Max sourceable amount of `token`, in token units
+     */
+    function getMaxSourceable(address safe, address token) external view returns (uint256);
+
     function getUserCollateralForToken(address safe, address token) external view returns (uint256);
 
     function getUserTotalCollateral(address safe) external view returns (IDebtManager.TokenData[] memory);

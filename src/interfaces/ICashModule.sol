@@ -5,6 +5,7 @@ import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
 import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.sol";
 
@@ -14,7 +15,7 @@ import { SpendingLimit, SpendingLimitLib } from "../libraries/SpendingLimitLib.s
 //  */
 // enum CashbackTypes {
 //     Regular,
-//     Spender, 
+//     Spender,
 //     Promotion,
 //     Referral
 // }
@@ -30,7 +31,7 @@ struct Cashback {
 
 /**
  * @title CashbackTokens
- * @notice Defines the structure of Cashback tokens 
+ * @notice Defines the structure of Cashback tokens
  */
 struct CashbackTokens {
     address token;
@@ -135,7 +136,13 @@ struct SafeCashConfig {
     /// @notice Running total of all cashback earned by this safe (and its spenders) in USD
     uint256 totalCashbackEarnedInUsd;
     /// @notice Incoming mode that will be applied after the delay
-    Mode incomingMode; 
+    Mode incomingMode;
+    /// @notice True once the safe has opted out of the Aave lend market (no auto-supply, no lend ops)
+    bool lendOptedOut;
+    /// @notice Timestamp after which a pending lend opt-out request can be executed (0 if none)
+    uint96 lendOptOutFinalizeTime;
+    /// @notice True once the safe's borrow/collateral engine is the Aave gateway (set at onboarding or by migration; one-way)
+    bool usesLendGateway;
 }
 
 /**
@@ -168,7 +175,7 @@ struct SafeCashData {
     uint256 totalCashbackEarnedInUsd;
     /// @notice Timestamp when a pending change to incoming mode mode will take effect (0 if no pending change)
     uint256 incomingModeStartTime;
-    /// @notice Maximum spendable amount in Debit mode 
+    /// @notice Maximum spendable amount in Debit mode
     DebitModeMaxSpend debitMaxSpend;
 }
 
@@ -177,7 +184,7 @@ struct SafeCashData {
  * @notice Data structure to return Debit mode max spend result
  */
 struct DebitModeMaxSpend {
-    /// @notice Tokens that can be spent. Order of token matter, Order determines 
+    /// @notice Tokens that can be spent. Order of token matter, Order determines
     /// priority for deficit coverage - earlier tokens are used first
     address[] spendableTokens;
     /// @notice Amounts of respective tokens that can be spent
@@ -207,8 +214,11 @@ interface ICashModule {
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
 
-    /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
-    error BorrowingsExceedMaxBorrowAfterSpending();
+    /// @notice Error thrown when a lend-market operation targets a safe on the legacy DebtManager engine
+    error OnlyLendGatewaySafe();
+
+    /// @notice Error thrown when a non-DebtManager contract calls restricted functions
+    error OnlyDebtManager();
 
     /// @notice Error thrown when a recipient address is zero
     error RecipientCannotBeAddressZero();
@@ -225,8 +235,20 @@ interface ICashModule {
     /// @notice Error thrown when trying to set a mode that's already active
     error ModeAlreadySet();
 
-    /// @notice Error thrown when a non-DebtManager contract calls restricted functions
-    error OnlyDebtManager();
+    /// @notice Error thrown when a lend op is attempted while the safe has opted out of lend
+    error LendOptedOut();
+    /// @notice Error thrown when opting out of lend while the safe still has open borrows
+    error HasOpenBorrows();
+    /// @notice Error thrown when executing a lend opt-out that was never requested
+    error NoPendingLendOptOut();
+    /// @notice Error thrown when executing a lend opt-out before its delay has elapsed
+    error LendOptOutNotReady();
+    /// @notice Error thrown when opting out while already opted out, or when a request is already pending
+    error LendAlreadyOptedOut();
+    /// @notice Error thrown when enabling lend that is already enabled
+    error LendNotOptedOut();
+    /// @notice Error thrown when the lend gateway has not been configured
+    error LendGatewayNotSet();
 
     /// @notice Error thrown when trying to set a tier that's already set
     error AlreadyInSameTier(uint256 index);
@@ -277,6 +299,9 @@ interface ICashModule {
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
 
+    /// @notice Error thrown when attempting to configure the Aave gateway after the initial bootstrap
+    error GatewayAlreadySet();
+
     /**
      * @notice Role identifier for EtherFi wallet access control
      * @return The role identifier as bytes32
@@ -304,7 +329,7 @@ interface ICashModule {
     /**
      * @notice Returns all the assets whitelisted for withdrawals
      * @return Array of whitelisted withdraw assets
-     */    
+     */
     function getWhitelistedWithdrawAssets() external view returns (address[] memory);
 
     /**
@@ -323,6 +348,55 @@ interface ICashModule {
      * @custom:throws OnlyEtherFiSafe if the address is not a valid EtherFi Safe
      */
     function transactionCleared(address safe, bytes32 txId) external view returns (bool);
+
+    /**
+     * @notice Whether lend is live for the safe: on the Aave gateway engine and not opted out. This is the
+     *         predicate every lend action and module sandwich gates on.
+     * @param safe The safe to query
+     * @return True if the safe uses the gateway engine and has not opted out
+     */
+    function isLendActive(address safe) external view returns (bool);
+
+    /**
+     * @notice The user's effective lend opt-out state, independent of which engine the safe runs on
+     * @dev The gateway's supply/collateral gates read this (not isLendActive), since a safe is supplied into
+     *      Aave during migration before its engine flag flips. Effective: a pending opt-out whose finalize
+     *      time has passed reports true even before it is processed, mirroring how getMode honors a matured
+     *      incoming mode.
+     * @param safe The safe to query
+     * @return True if the safe opted out via toggleLend(false), processed or matured-pending
+     */
+    function isLendOptedOut(address safe) external view returns (bool);
+
+    /**
+     * @notice Returns the timestamp when a pending lend opt-out request becomes executable
+     * @param safe The safe to query
+     * @return Timestamp when processLendOptOut may be called, or 0 if none pending
+     */
+    function lendOptOutFinalizeTime(address safe) external view returns (uint256);
+
+    /**
+     * @notice Returns the configured Aave gateway used for lend operations
+     * @return LendGateway instance (zero if not set)
+     */
+    function getLendGateway() external view returns (ILendGateway);
+
+    /**
+     * @notice Whether the safe's borrow/collateral engine is the Aave gateway (vs the legacy DebtManager)
+     * @dev The canonical routing flag: every spend/repay/lens path branches on this. True for safes onboarded
+     *      after the gateway launch and for safes migrated via DebtManager.migrateToLendGateway; false means legacy.
+     * @param safe The safe to query
+     * @return True if the safe uses the Aave gateway
+     */
+    function usesLendGateway(address safe) external view returns (bool);
+
+    /**
+     * @notice Marks a safe as using the Aave gateway engine
+     * @dev Only callable by the DebtManager, as the last step of migrateToLendGateway. Idempotent and one-way.
+     * @param safe The safe to mark
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
+    function markUsesLendGateway(address safe) external;
 
     /**
      * @notice Gets the debt manager contract
@@ -464,7 +538,7 @@ interface ICashModule {
     /**
      * @notice Configures the withdraw assets whitelist
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param assets Array of asset addresses to configure 
+     * @param assets Array of asset addresses to configure
      * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
      * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
      * @custom:throws InvalidInput If the arrays are empty
@@ -482,6 +556,16 @@ interface ICashModule {
      * @custom:throws InvalidInput if caller doesn't have the controller role
      */
     function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external;
+
+    /**
+     * @notice Sets the Aave gateway address for the initial Lend deployment
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE while no gateway is configured
+     * @param gateway Address of the gateway contract
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws InvalidInput if gateway = address(0)
+     * @custom:throws GatewayAlreadySet if the gateway has already been configured
+     */
+    function setLendGateway(address gateway) external;
 
     /**
      * @notice Sets the tier for one or more safes
@@ -520,6 +604,30 @@ interface ICashModule {
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external;
 
     /**
+     * @notice Toggles a safe's participation in the Aave lend market (auto-supply and borrow ops)
+     * @dev Owner-signed, with the requested flag bound into the signature. Enabling (enable == true) opts the
+     *      safe back in immediately and cancels any pending opt-out. Opting out (enable == false) does not act
+     *      immediately: it records a request that becomes executable after the mode-change delay, at which
+     *      point anyone may call processLendOptOut. Disabling requires the safe to have no open borrows.
+     * @param safe Address of the EtherFi Safe
+     * @param enable True to enable lend now, false to request opting out
+     * @param signer A safe admin authorizing the change
+     * @param signature The signer's signature over the intent
+     * @custom:throws LendNotOptedOut if enabling while lend is already enabled and no opt-out is pending
+     * @custom:throws LendAlreadyOptedOut if disabling while lend is already disabled or a request is pending
+     * @custom:throws HasOpenBorrows if opting out while the safe still has open borrows
+     */
+    function toggleLend(address safe, bool enable, address signer, bytes calldata signature) external;
+
+    /**
+     * @notice Executes a pending lend opt-out request (from toggleLend(false)) once its delay has elapsed
+     * @dev Permissionless. Withdraws all of the safe's Aave collateral back to the safe, marks the safe opted out,
+     *      and forces the safe into Debit mode. Re-checks the safe has no open borrows.
+     * @param safe Address of the EtherFi Safe
+     */
+    function processLendOptOut(address safe) external;
+
+    /**
      * @notice Updates the spending limits for a safe
      * @dev Can only be called by the safe itself with a valid admin signature
      * @param safe Address of the EtherFi Safe
@@ -549,55 +657,7 @@ interface ICashModule {
      * @custom:throws OnlyOneTokenAllowedInCreditMode if multiple tokens are used in credit mode
      * @custom:throws If spending would exceed limits or balances
      */
-    function spend(address safe, bytes32 txId, BinSponsor binSponsor,  address[] calldata tokens,  uint256[] calldata amountsInUsd,  Cashback[] calldata cashbacks) external;
-
-    /**
-     * @notice Clears pending cashback for users
-     * @param users Addresses of users to clear the pending cashback for
-     * @param tokens Addresses of cashback tokens
-     */
-    function clearPendingCashback(address[] calldata users, address[] calldata tokens) external;
-
-    /**
-     * @notice Repays borrowed tokens
-     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to repay
-     * @param amountInUsd Amount to repay in USD
-     * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
-     * @custom:throws OnlyEtherFiSafe if the safe is not a valid EtherFi Safe
-     * @custom:throws OnlyBorrowToken if token is not a valid borrow token
-     * @custom:throws AmountZero if the converted amount is zero
-     * @custom:throws InsufficientBalance if there is not enough balance for the operation
-     */
-    function repay(address safe, address token, uint256 amountInUsd) external;
-
-    /**
-     * @notice Requests a withdrawal of tokens to a recipient
-     * @dev Creates a pending withdrawal request that can be processed after the delay period
-     * @dev Can only be done by the quorum of owners of the safe
-     * @param safe Address of the EtherFi Safe
-     * @param tokens Array of token addresses to withdraw
-     * @param amounts Array of token amounts to withdraw
-     * @param recipient Address to receive the withdrawn tokens 
-     * @param signers Array of safe owner addresses signing the transaction
-     * @param signatures Array of signatures from the safe owners
-     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
-     * @custom:throws InvalidSignatures if signature verification fails
-     * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
-     * @custom:throws ArrayLengthMismatch if arrays have different lengths
-     * @custom:throws InsufficientBalance if any token has insufficient balance
-     */
-    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external;
-
-    /**
-     * @notice Processes a pending withdrawal request after the delay period
-     * @dev Executes the token transfers and clears the request
-     * @param safe Address of the EtherFi Safe
-     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
-     * @custom:throws CannotWithdrawYet if the withdrawal delay period hasn't passed
-     */
-    function processWithdrawal(address safe) external;
+    function spend(address safe, bytes32 txId, BinSponsor binSponsor, address[] calldata tokens, uint256[] calldata amountsInUsd, Cashback[] calldata cashbacks) external;
 
     /**
      * @notice Prepares a safe for liquidation by canceling any pending withdrawals
@@ -616,6 +676,91 @@ interface ICashModule {
      * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
      */
     function postLiquidate(address safe, address liquidator, IDebtManager.LiquidationTokenData[] memory tokensToSend) external;
+
+    /**
+     * @notice Clears pending cashback for users
+     * @param users Addresses of users to clear the pending cashback for
+     * @param tokens Addresses of cashback tokens
+     */
+    function clearPendingCashback(address[] calldata users, address[] calldata tokens) external;
+
+    /**
+     * @notice Repays borrowed tokens
+     * @dev Only callable by EtherFi wallet for valid EtherFi Safe addresses
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to repay
+     * @param amountInUsd Amount to repay in USD
+     * @custom:throws OnlyEtherFiWallet if caller doesn't have the wallet role
+     * @custom:throws OnlyEtherFiSafe if the safe is not a valid EtherFi Safe
+     * @custom:throws OnlyBorrowToken if the token cannot carry debt on the safe's engine
+     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws InsufficientBalance if there is not enough balance for the operation
+     */
+    function repay(address safe, address token, uint256 amountInUsd) external;
+
+    /**
+     * @notice Repays Aave debt using token units without reading the Cash PriceProvider
+     * @dev Only available to safes on the lend gateway. The amount is capped at the live debt.
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to repay
+     * @param amount Amount to repay in token units
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function repayLendTokenAmount(address safe, address token, uint256 amount) external;
+
+    /**
+     * @notice Supplies a safe's loose token balances into the Aave lend market (the auto-supply sweep)
+     * @dev Per token: supplies the loose balance net of any pending-withdrawal reservation and flags it
+     *      as collateral; zero and unregistered tokens are skipped. No-op for an opted-out safe; reverts
+     *      for a legacy safe.
+     * @param safe Address of the EtherFi Safe
+     * @param tokens Tokens to sweep
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function supplyToLend(address safe, address[] calldata tokens) external;
+
+    /**
+     * @notice Borrows a token against the safe's lend-market position; the proceeds land in the safe and
+     *         are immediately supplied back as collateral
+     * @dev Owner-quorum signed: the signatures bind the token and USD amount. Any relayer may submit the intent.
+     * @param safe Address of the EtherFi Safe
+     * @param token Address of the token to borrow
+     * @param amountInUsd Amount to borrow in USD
+     * @param signers Addresses of the owners authorizing the borrow
+     * @param signatures The signers' signatures over the intent
+     * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
+     * @custom:throws OnlyBorrowToken if token is not borrowable on the gateway
+     * @custom:throws AmountZero if the converted amount is zero
+     * @custom:throws OnlyLendGatewaySafe if the safe runs on the legacy DebtManager engine
+     */
+    function borrow(address safe, address token, uint256 amountInUsd, address[] calldata signers, bytes[] calldata signatures) external;
+
+    /**
+     * @notice Requests a withdrawal of tokens to a recipient
+     * @dev Creates a pending withdrawal request that can be processed after the delay period
+     * @dev Can only be done by the quorum of owners of the safe
+     * @param safe Address of the EtherFi Safe
+     * @param tokens Array of token addresses to withdraw
+     * @param amounts Array of token amounts to withdraw
+     * @param recipient Address to receive the withdrawn tokens
+     * @param signers Array of safe owner addresses signing the transaction
+     * @param signatures Array of signatures from the safe owners
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws InvalidSignatures if signature verification fails
+     * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
+     * @custom:throws ArrayLengthMismatch if arrays have different lengths
+     * @custom:throws InsufficientBalance if any token has insufficient balance
+     */
+    function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external;
+
+    /**
+     * @notice Processes a pending withdrawal request after the delay period
+     * @dev Executes the token transfers and clears the request
+     * @param safe Address of the EtherFi Safe
+     * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
+     * @custom:throws CannotWithdrawYet if the withdrawal delay period hasn't passed
+     */
+    function processWithdrawal(address safe) external;
 
     /**
      * @notice Returns the current nonce for a Safe

@@ -13,6 +13,50 @@ fs_permissions = [{ access = "read-write", path = "./" }]
 extra_output = ["storageLayout"]
 ffi = true
 dynamic_test_linking = true
+# The lend tests deploy a real Aave v4 instance (Hub/Spoke from the aave-v4 source) on an Optimism fork,
+# and scripts/aave-v4/** deploys one for real. Keep both out of the default profile so the default build
+# stays small and free of the aave-v4 dependency; run them under FOUNDRY_PROFILE=lend / aave-deploy (below).
+skip = ["test/safe/modules/cash/lend/**", "scripts/aave-v4/**"]
+
+# Profile for the lend (Aave v4) tests: un-skips them and links aave-v4's external LiquidationLogic library.
+# SpokeInstance links LiquidationLogic via an aave-rooted `src/` import forge can't resolve to an artifact,
+# so pin it to a fixed address; AaveV4Fixture etches the library's runtime code there before deploying.
+[profile.lend]
+skip = []
+libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x0000000000000000000000000000000000000A01"]
+
+# Modest bounds: each handler call drives real Aave ops on the fork, so keep the campaign small.
+[profile.lend.invariant]
+runs = 12
+depth = 10
+
+# Opt-in local soak for the lend invariant campaigns (profiles don't inherit, so the lend profile's
+# skip and library pin are restated). Not run in CI; use for longer local runs:
+#   FOUNDRY_PROFILE=soak TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test --match-path "test/safe/modules/cash/lend/*Invariant*"
+[profile.soak]
+skip = []
+libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x0000000000000000000000000000000000000A01"]
+
+[profile.soak.invariant]
+runs = 100
+depth = 25
+
+# Profile for scripts/aave-v4/** (real Aave v4 deployments). Forge can't resolve LiquidationLogic's
+# aave-rooted `src/` import to an artifact (same issue as [profile.lend]), so auto-link/auto-deploy fails;
+# instead link the canonical Aave-deployed LiquidationLogic on OP Mainnet — the same library the prod
+# whitelabel instance links — so dev spoke impls run the exact library code prod runs. The historical
+# self-deployed CREATE2 library (Nick's factory, salt keccak256("ether.fi/aave-v4-test/LiquidationLogic"),
+# 0x49dEE75906621Ea28D7332bb26E0da6f2d15E838) is what the pre-upgrade dev spoke impl links; new deploys
+# use the canonical address below. Scripts must require code at this address before deploying a spoke.
+[profile.aave-deploy]
+skip = ["test/safe/modules/cash/lend/**"]
+libraries = ["src/spoke/libraries/LiquidationLogic.sol:LiquidationLogic:0x88dF535473C5adf1f57789734A05E555F7Deb8DB"]
+# HubInstance/SpokeInstance exceed EIP-170 (spoke: 25441 bytes runtime) under this repo's default settings
+# (optimizer_runs = 0, no via-ir). Compile the whole profile with aave-v4's spoke settings (via-ir, 750 runs)
+# so the deployed instances fit the size limit — a per-contract compilation_restrictions split doesn't work
+# here because the deploy script `new`s the instances, embedding their creation code in its own unit.
+via_ir = true
+optimizer_runs = 750
 
 [fuzz]
 runs = 10000

@@ -14,6 +14,7 @@ import { ILayerZeroTeller } from "../../interfaces/ILayerZeroTeller.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 
 
@@ -21,9 +22,12 @@ import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
  * @title EtherFiLiquidModule
  * @author ether.fi
  * @notice Module for interacting with ether.fi Liquid vaults
- * @dev Extends ModuleBase to provide ether.fi Liquid integration for Safes
+ * @dev Extends ModuleBase to provide ether.fi Liquid integration for Safes. A gateway safe's assets may be
+ *      supplied to Aave, so deposit and withdraw sandwich the vault action: withdraw any shortfall of the
+ *      moved asset from the safe's Aave position first, and re-supply a deposit's receipt token when the
+ *      gateway lists it as a reserve (a queued withdrawal's output arrives async and stays loose).
  */
-contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
+contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
 
@@ -161,6 +165,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         }
     }
 
+
     /**
      * @notice Deposits tokens to a Liquid vault using signature verification
      * @param safe The Safe address which holds the tokens
@@ -209,13 +214,23 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @custom:throws AssetNotSupportedForDeposit If the asset cannot be deposited to the teller
      * @custom:throws InsufficientReturnAmount If the return amount is less than min return
      */
+    /**
+     * @dev Calldata for the teller's deposit call within the safe's execution batch. Virtual so the
+     *      referrer variant can substitute the referrer-flavored selector; the batch is otherwise identical.
+     */
+    function _encodeTellerDeposit(address depositAsset, uint256 amountToDeposit, uint256 minReturn) internal pure virtual returns (bytes memory) {
+        return abi.encodeWithSelector(ILayerZeroTeller.deposit.selector, ERC20(depositAsset), amountToDeposit, minReturn);
+    }
+
     function _deposit(address safe, address assetToDeposit, address liquidAsset, uint256 amountToDeposit, uint256 minReturn) internal {
         ILayerZeroTeller teller = liquidAssetToTeller[liquidAsset];
         if (address(teller) == address(0)) revert UnsupportedLiquidAsset();
         
         if (amountToDeposit == 0 || minReturn == 0) revert InvalidInput();
-        
-        _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
+
+        // Pull any shortfall of the deposit asset out of the safe's Aave position (no-op for ETH), then
+        // confirm the safe holds the full amount loose (net of any pending-withdrawal reservation).
+        uint256 healthFactorBefore = _pullAndRequire(safe, assetToDeposit, amountToDeposit);
 
         address[] memory to;
         bytes[] memory data;
@@ -236,7 +251,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
             data[1] = abi.encodeWithSelector(ERC20.approve.selector, address(liquidAsset), amountToDeposit);
             
             to[2] = address(teller);
-            data[2] = abi.encodeWithSelector(ILayerZeroTeller.deposit.selector, ERC20(weth), amountToDeposit, minReturn);
+            data[2] = _encodeTellerDeposit(weth, amountToDeposit, minReturn);
         } else {
             if (!teller.assetData(ERC20(assetToDeposit)).allowDeposits) revert AssetNotSupportedForDeposit();
 
@@ -248,7 +263,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
             data[0] = abi.encodeWithSelector(ERC20.approve.selector, address(liquidAsset), amountToDeposit);
             
             to[1] = address(teller);
-            data[1] = abi.encodeWithSelector(ILayerZeroTeller.deposit.selector, ERC20(assetToDeposit), amountToDeposit, minReturn);
+            data[1] = _encodeTellerDeposit(assetToDeposit, amountToDeposit, minReturn);
         }
 
         uint256 liquidTokenBalBefore = ERC20(liquidAsset).balanceOf(safe);
@@ -257,6 +272,11 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         
         uint256 liquidTokenReceived = ERC20(liquidAsset).balanceOf(safe) - liquidTokenBalBefore;
         if (liquidTokenReceived < minReturn) revert InsufficientReturnAmount();
+
+        // Re-supply the receipt token as collateral when the gateway lists it; an unlisted receipt stays loose.
+        _resupplyToGateway(safe, liquidAsset, liquidTokenReceived);
+
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit LiquidDeposit(safe, assetToDeposit, liquidAsset, amountToDeposit, liquidTokenReceived);
     }
@@ -316,8 +336,10 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         IBoringOnChainQueue boringQueue = IBoringOnChainQueue(liquidWithdrawQueue[liquidAsset]);
         if (address(boringQueue) == address(0)) revert LiquidWithdrawConfigNotSet();
         if (amountToWithdraw == 0) revert InvalidInput();
-        
-        _checkAmountAvailable(safe, liquidAsset, amountToWithdraw);
+
+        // Pull any shortfall of the liquid token out of the safe's Aave position. Only this front bookend
+        // applies: the queued withdrawal's output arrives later, loose in the safe.
+        uint256 healthFactorBefore = _pullAndRequire(safe, liquidAsset, amountToWithdraw);
 
         uint128 amountOutFromQueue = boringQueue.previewAssetsOut(assetOut, amountToWithdraw, discount);
         if (amountOutFromQueue < minReturn) revert InsufficientReturnAmount();
@@ -333,6 +355,10 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
         data[1] = abi.encodeWithSelector(IBoringOnChainQueue.requestOnChainWithdraw.selector, assetOut, amountToWithdraw, discount, secondsToDeadline);
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+
+        // Risk-increasing flow with no resupply (the queued output arrives later, loose): the end state
+        // takes the gateway's health-factor floor
+        _ensureGatewayFloor(safe, healthFactorBefore);
         
         emit LiquidWithdrawal(safe, liquidAsset, amountToWithdraw, amountOutFromQueue);
     }

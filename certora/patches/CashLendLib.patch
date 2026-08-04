@@ -1,0 +1,13 @@
+diff --git a/src/modules/cash/CashLendLib.sol b/src/modules/cash/CashLendLib.sol
+index b44b32b..96b85e8 100644
+--- a/src/modules/cash/CashLendLib.sol
++++ b/src/modules/cash/CashLendLib.sol
+@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
+ 
+ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+ import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
++import { EnumerableSet as EnumerableSetLib } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+ 
+ import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
+ import { BinSponsor, Mode, SafeCashConfig, WithdrawalRequest } from "../../interfaces/ICashModule.sol";

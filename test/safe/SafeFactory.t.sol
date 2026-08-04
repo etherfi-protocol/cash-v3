@@ -4,7 +4,8 @@ pragma solidity ^0.8.28;
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 
 import { EtherFiSafe, EtherFiSafeFactory, SafeTestSetup } from "./SafeTestSetup.t.sol";
-import { UpgradeableProxy, PausableUpgradeable } from "../../src/utils/UpgradeableProxy.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { BeaconFactory } from "../../src/beacon-factory/BeaconFactory.sol";
 
 contract SafeFactoryTest is SafeTestSetup {
