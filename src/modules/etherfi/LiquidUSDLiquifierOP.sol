@@ -2,10 +2,13 @@
 pragma solidity ^0.8.28;
 
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
+import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IBoringOnChainQueue } from "../../interfaces/IBoringOnChainQueue.sol";
@@ -13,9 +16,11 @@ import { Constants } from "../../utils/Constants.sol";
 
 /**
  * @title LiquidUSDLiquifierOPModule
- * @notice Module for liquifying Liquid USD into USDC and repay on debt manager
+ * @notice Module for liquifying Liquid USD into USDC and repaying the user's debt
+ * @dev Dual-engine: a gateway safe's debt is repaid on Aave through the lend gateway (the liquifier's USDC
+ *      hops through the safe, since the gateway pulls repayment from it), a legacy safe's on the DebtManager.
  */
-contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckBalance {
+contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckBalance, ModuleLendGatewaySandwich {
     using SafeERC20 for IERC20;
 
     /// @notice Address of the Liquid USD token
@@ -97,6 +102,7 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
         _disableInitializers();
     }
 
+
     /**
      * @notice Initializes the contract
      * @param _roleRegistry Address of the Role Registry
@@ -123,22 +129,43 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
      * @param usdAmount Amount of USD to repay
      */
     function _repayUsingLiquidUSD(address user, uint256 usdAmount) internal {
-        if (USDC.balanceOf(address(this)) < usdAmount) revert InsufficientUsdcBalance();
+        uint256 usdcRepaid;
+        if (cashModule.usesLendGateway(user)) {
+            // Cap at the user's Aave debt: the gateway refunds any unconsumed repayment to the safe, and an
+            // uncapped transfer would strand the liquifier's float there.
+            uint256 debt = gateway().debtOf(user, address(USDC));
+            if (usdAmount > debt) usdAmount = debt;
+            if (usdAmount == 0) revert AmountZero();
+            if (USDC.balanceOf(address(this)) < usdAmount) revert InsufficientUsdcBalance();
 
-        uint256 usdcAmountBefore = USDC.balanceOf(address(this));
+            // The gateway pulls repayment from the safe, so the float hops through it within this transaction.
+            USDC.safeTransfer(user, usdAmount);
+            usdcRepaid = gateway().repay(user, address(USDC), usdAmount);
+        } else {
+            if (USDC.balanceOf(address(this)) < usdAmount) revert InsufficientUsdcBalance();
 
-        USDC.forceApprove(address(debtManager), usdAmount);
-        debtManager.repay(user, address(USDC), usdAmount);
-        USDC.forceApprove(address(debtManager), 0);
+            uint256 usdcAmountBefore = USDC.balanceOf(address(this));
 
-        uint256 usdcRepaid = usdcAmountBefore - USDC.balanceOf(address(this));
+            USDC.forceApprove(address(debtManager), usdAmount);
+            debtManager.repay(user, address(USDC), usdAmount);
+            USDC.forceApprove(address(debtManager), 0);
 
-        if (usdcRepaid > usdAmount) revert InvalidConversion();
+            usdcRepaid = usdcAmountBefore - USDC.balanceOf(address(this));
+
+            if (usdcRepaid > usdAmount) revert InvalidConversion();
+        }
 
         uint256 liquidUsdAmountRepaid = convertUsdToLiquidUSD(usdcRepaid);
 
         if (liquidUsdAmountRepaid == 0) revert LiquidUsdAmountZero();
-        _checkAmountAvailable(user, address(LIQUID_USD), liquidUsdAmountRepaid);
+
+        // LiquidUSD is a listed reserve, so a gateway safe's holdings may be supplied to Aave: pull the
+        // shortfall loose before reclaiming (no-op for legacy safes; engine-gated, so it still works for
+        // an opted-out safe — including a matured opt-out whose unwind open borrows block — because this
+        // repayment is exactly the deleveraging that unblocks it). The flow is deliberately EXEMPT from
+        // the gateway's health-factor floor (_ensureGatewayFloor): it swaps collateral for a matching
+        // debt reduction, and de-risking must never be blocked by the floor.
+        _pullAndRequire(user, address(LIQUID_USD), liquidUsdAmountRepaid);
 
         address[] memory to = new address[](1);
         bytes[] memory data = new bytes[](1);
@@ -213,20 +240,23 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
     
     /**
      * @notice Converts USD to Liquid USD
+     * @dev Prices against the PriceProvider directly (the DebtManager's formula without its collateral-token
+     *      gate), so the conversion survives the DebtManager's retirement and both engines share it.
      * @param usdAmount Amount of USD to convert
      * @return Amount of Liquid USD
      */
     function convertUsdToLiquidUSD(uint256 usdAmount) public view returns (uint256) {
-        return debtManager.convertUsdToCollateralToken(address(LIQUID_USD), usdAmount);
+        return (usdAmount * 10 ** IERC20Metadata(address(LIQUID_USD)).decimals()) / IPriceProvider(etherFiDataProvider.getPriceProvider()).price(address(LIQUID_USD));
     }
 
     /**
      * @notice Converts Liquid USD to USD
+     * @dev Prices against the PriceProvider directly; see convertUsdToLiquidUSD.
      * @param liquidUsdAmount Amount of Liquid USD to convert
      * @return Amount of USD
      */
     function convertLiquidUSDToUsd(uint256 liquidUsdAmount) public view returns (uint256) {
-        return debtManager.convertCollateralTokenToUsd(address(LIQUID_USD), liquidUsdAmount);
+        return (liquidUsdAmount * IPriceProvider(etherFiDataProvider.getPriceProvider()).price(address(LIQUID_USD))) / 10 ** IERC20Metadata(address(LIQUID_USD)).decimals();
     }
 
     /**

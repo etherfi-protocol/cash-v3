@@ -134,7 +134,7 @@ abstract contract RecoveryManager is EtherFiSafeBase {
         
         RecoveryManagerStorage storage $ = _getRecoveryManagerStorage();
 
-        if (threshold > 2 && threshold - 2 > $.userRecoverySigners.length()) revert RecoverySignersLengthLessThanThreshold();
+        if (threshold == 0 || (threshold > 2 && threshold - 2 > $.userRecoverySigners.length())) revert RecoverySignersLengthLessThanThreshold();
 
         emit RecoveryThresholdSet($.recoveryThreshold, threshold);
         $.recoveryThreshold = threshold;

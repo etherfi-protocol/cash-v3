@@ -1,0 +1,95 @@
+# Cash Lend dev deployment scripts
+
+Dev-only scripts that upgrade the existing Optimism dev Cash deployment in place and route
+it through the Aave v4 test instance via the LendGateway. The CLI sender must be the dev
+admin (the Cash RoleRegistry owner, who is also the Aave test-instance admin).
+
+## Run order
+
+First refresh the Aave test-instance price feeds if the feed code changed since they were
+last deployed (for example the USD-stable snap). The listing script is idempotent: on a
+re-run it redeploys every feed and repoints each existing reserve instead of re-listing.
+Afterwards, refresh the `details` oracle map in `aave-v4-test.json` by hand — the script
+does not rewrite it.
+
+```sh
+source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
+  scripts/aave-v4/AddSummerLendCollateral.s.sol:AddSummerLendCollateral \
+  --rpc-url $OPTIMISM_RPC --broadcast -vvvv
+```
+
+Deploy and check:
+
+```sh
+source .env && ENV=dev forge script scripts/lend/DeployCashLendDev.s.sol:DeployCashLendDev \
+  --rpc-url $OPTIMISM_RPC --broadcast -vvvv
+source .env && ENV=dev forge script scripts/lend/VerifyCashLendDev.s.sol:VerifyCashLendDev \
+  --rpc-url $OPTIMISM_RPC -vvvv
+```
+
+Roll back and check:
+
+```sh
+source .env && ENV=dev forge script scripts/lend/RollbackCashLendDev.s.sol:RollbackCashLendDev \
+  --rpc-url $OPTIMISM_RPC --broadcast -vvvv
+source .env && ENV=dev forge script scripts/lend/VerifyCashLendRollbackDev.s.sol:VerifyCashLendRollbackDev \
+  --rpc-url $OPTIMISM_RPC -vvvv
+```
+
+Drop `--broadcast` to simulate any script first; a dry run skips writing
+`cash-lend.json`, so it never blocks the real run. Rollback stops if the test Spoke holds
+more than $100 of aggregate supply or debt; set `SKIP_FUND_CHECK=true` to override.
+
+The deploy leaves the old modules enabled (default, whitelisted, requesters) so existing
+Safes keep working while they migrate gradually; a later pass retires them.
+`check-pending-withdrawals.sh` guards that retirement, not this deploy: a pending Cash
+withdrawal paying out to an old liquid, liquidReferrer, or frax module would strand when
+the old modules are disabled. It scans all Safes in parallel in about a minute; the same
+scan inside the forge script took 20+ minutes, which is why it lives outside. Run it right
+before broadcasting the retirement.
+
+After the upgrade, new Safes must be set up with the four-field Cash setup payload that
+carries the explicit `useLendGateway` flag. Coordinate with cash-be before it deploys
+Safes against the upgraded dev stack, or Safe creation fails on the payload decode.
+
+## If a broadcast dies partway
+
+Forge writes `cash-lend.json` during the pre-broadcast simulation, before any transaction
+is sent. If the broadcast dies before its first transaction, the next deploy run detects
+the record as stale (no recorded address has code on-chain), discards it, and proceeds —
+just rerun the deploy. If transactions landed, deploy refuses to rerun directly. Instead:
+
+1. Run `RollbackCashLendDev` — it skips references that are already restored.
+2. Run `VerifyCashLendRollbackDev` to confirm the chain is back at the baseline.
+3. Delete `deployments/dev/10/cash-lend.json`, then rerun the deploy.
+
+Rollback itself can be rerun safely after a partial broadcast. A redeploy after rollback
+reuses the gateway proxy CashModule already references (its one-time `setLendGateway`
+reference survives rollback) and upgrades it to the freshly compiled implementation.
+
+## Files
+
+- `deployments/dev/10/cash-lend-rollback-baseline.json` — **rollback baseline**: the
+  committed pre-Lend implementation and module addresses. Deploy requires the chain to be
+  exactly here before starting; Rollback restores to it.
+- `deployments/dev/10/cash-lend.json` — **deployment record**: written by Deploy, read by
+  both Verify scripts and Rollback. Delete it only after a verified rollback.
+- `deployments/dev/10/aave-v4-test.json` — the dev Aave v4 test instance (Spoke and admin).
+
+## Glossary
+
+- **Old / new modules**: the seven immutable modules that move assets out of a Safe
+  (openOcean, liquid, liquidReferrer, frax, stake, midas, beHype — always in that order).
+  They cannot be upgraded, so Lend support means deploying new copies with the old
+  configuration and enabling them alongside the old ones. The old modules stay enabled
+  for gradual migration and are retired in a later pass. The liquifier is behind a UUPS
+  proxy and only gets a new implementation.
+- **Driver**: a contract allowed to call the LendGateway's sandwich operations
+  (`setDriver` on the gateway).
+- **Sandwich**: the withdraw-from-Aave / act / re-supply-to-Aave wrapper the gateway puts
+  around a module operation. See `docs/lend/CONTEXT.md`.
+- **Dev policy**: the expected module permissions, hardcoded in
+  `CashLendDevModules.requesterFlags`: all seven modules are default and whitelisted, and
+  exactly liquid, liquidReferrer, and frax may request Cash withdrawals. Deploy asserts the
+  chain matches before broadcasting; drift fails the run instead of being copied forward.
+- **Spoke**: the Aave v4 test-instance contract holding reserves and positions.

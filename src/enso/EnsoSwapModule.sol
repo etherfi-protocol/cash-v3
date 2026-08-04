@@ -5,11 +5,11 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
-import { ICashModule } from "../interfaces/ICashModule.sol";
-import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ModuleBase } from "../modules/ModuleBase.sol";
+import { ModuleCheckBalance } from "../modules/ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../modules/ModuleLendGatewaySandwich.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
@@ -40,8 +40,13 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *      The Enso Router address is admin-set (pinned) and every swap is forwarded only to it,
  *      mirroring how `AcrossSwapModule` pins its periphery. Enso recommends using the API's
  *      `tx.to`, so an admin must update `ensoRouter` if Enso ships a new router deployment.
+ *
+ *      A gateway safe's input may be supplied to Aave, so `executeSwap` runs the lend-gateway
+ *      sandwich: it withdraws any shortfall of the input from the safe's Aave position, swaps,
+ *      re-supplies a same-chain output delivered to the safe, and takes the health-factor floor.
+ *      Every bookend is skipped where `cashModule` is zero (no card spending, no gateway).
  */
-contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
+contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySandwich, UpgradeableProxy, IBridgeModule {
     using MessageHashUtils for bytes32;
 
     /// @notice User-signed swap intent. One per safe at a time.
@@ -89,9 +94,6 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("EnsoSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("EnsoSwapModule.cancelSwap");
     address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
-
-    /// @notice CashModule on the same chain. Zero where there is no card spending.
-    ICashModule public immutable cashModule;
 
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id.
@@ -141,11 +143,11 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     /// @notice Reverts when a same-chain swap delivers less than the signed minimum output.
     error InsufficientOutputAmount();
 
-    /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's
-    ///      code — every upgrade impl must be constructed with the same data provider.
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
+    ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
+    ///      `cashModule` is zero where there is no card spending (and therefore no lend gateway).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
-        cashModule = ICashModule(IEtherFiDataProvider(_etherFiDataProvider).getCashModule());
+    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         _disableInitializers();
     }
 
@@ -289,9 +291,21 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         }
 
         delete $.swaps[safe];
-        if (address(cashModule) != address(0)) cashModule.cancelWithdrawalByModule(safe);
+        uint256 healthFactorBefore;
+        if (address(cashModule) != address(0)) {
+            cashModule.cancelWithdrawalByModule(safe);
+            // Front bookend: request-time sourcing normally leaves the input loose through the delay;
+            // this re-pulls any shortfall from the safe's Aave position and asserts the full input is
+            // present before the safe approves the router. Runs after the cancel so the released
+            // reservation no longer masks the loose balance.
+            healthFactorBefore = _pullAndRequire(safe, swap.order.srcToken, swap.order.srcAmount);
+        }
 
         _dispatchSwap(safe, swap);
+
+        // The input was collateral pulled out of Aave (at request or just above), so the end state must hold
+        // the gateway's health-factor floor unless it left the position no worse off than it started.
+        if (address(cashModule) != address(0)) _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.order.minOut);
     }
@@ -327,6 +341,13 @@ contract EnsoSwapModule is ModuleBase, UpgradeableProxy, IBridgeModule {
                 balanceAfter < balanceBefore ||
                 balanceAfter - balanceBefore < swap.order.minOut
             ) revert InsufficientOutputAmount();
+            // Back bookend: a same-chain output delivered to the safe goes back into Aave as
+            // collateral (best-effort, no-op for an unregistered asset or a non-gateway safe).
+            // Cross-chain settlement is non-atomic and a third-party recipient's funds have left
+            // the safe, so there is nothing to resupply on those routes.
+            if (swap.order.recipient == safe && address(cashModule) != address(0)) {
+                _resupplyToGateway(safe, swap.order.dstToken, balanceAfter - balanceBefore);
+            }
         }
     }
 

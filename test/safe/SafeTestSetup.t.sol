@@ -31,6 +31,7 @@ import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
 import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { PriceProvider, IAggregatorV3 } from "../../src/oracle/PriceProvider.sol";
 import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
+import { MockLendGateway } from "../../src/mocks/MockLendGateway.sol";
 import { Utils, ChainConfig } from "../utils/Utils.sol";
 
 contract SafeTestSetup is Utils {
@@ -46,6 +47,7 @@ contract SafeTestSetup is Utils {
     SettlementDispatcherV2 settlementDispatcherRain;
     SettlementDispatcherV2 settlementDispatcherReap;
     IDebtManager debtManager;
+    MockLendGateway gateway;
     address debtManagerAdminImpl;
     CashbackDispatcher cashbackDispatcher;
     ICashEventEmitter cashEventEmitter;
@@ -178,6 +180,13 @@ contract SafeTestSetup is Utils {
         address hookImpl = address(new EtherFiHook(address(dataProvider)));
         hook = EtherFiHook(address(new UUPSProxy(hookImpl, abi.encodeWithSelector(EtherFiHook.initialize.selector, address(roleRegistry)))));
 
+        gateway = new MockLendGateway();
+        // Mirror the DebtManager's token universe on the mock: the gateway paths read their token checks
+        // from the gateway (isBorrowable/isRegistered), not the DebtManager
+        gateway.setRegistered(address(weETH), true);
+        gateway.setRegistered(address(usdc), true);
+        gateway.setBorrowable(address(usdc), true);
+        gateway.setSpendAsset(address(usdc), true);
         address cashLensImpl = address(new CashLens(address(cashModule), address(dataProvider)));
         cashLens = CashLens(address(new UUPSProxy(cashLensImpl, abi.encodeWithSelector(CashLens.initialize.selector, address(roleRegistry)))));
 
@@ -201,6 +210,8 @@ contract SafeTestSetup is Utils {
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
 
+        _wireDefaultGateway();
+
         _setupWithdrawTokenWhitelist();
 
         address[] memory owners = new address[](3);
@@ -218,6 +229,13 @@ contract SafeTestSetup is Utils {
         safe = EtherFiSafe(payable(safeFactory.getDeterministicAddress(keccak256("safe"))));
 
         vm.stopPrank();
+    }
+
+    /// @dev Wires the one-time gateway during setup, so a safe onboarded with useLendGateway set lands on the
+    ///      gateway. The gateway is set once and never repointed, so an Aave suite that needs the real gateway
+    ///      overrides this to a no-op and sets it after deploying Aave.
+    function _wireDefaultGateway() internal virtual {
+        cashModule.setLendGateway(address(gateway));
     }
 
     function _setupWithdrawTokenWhitelist() internal {
