@@ -45,9 +45,96 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + amount);
     }
 
+    /// A gateway-only debit spend must not issue a zero-value loose transfer.
+    function test_spend_debit_gatewaySkipsTransferWhenLooseBalanceIsZero() public {
+        uint256 amount = 100e6;
+        gateway.setSuppliedOf(address(safe), address(usdc), amount);
+        gateway.setWithdrawalLiquidity(address(usdc), amount);
+        deal(address(usdc), address(safe), 0);
+
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (address(settlementDispatcherReap), 0)), 0);
+        vm.prank(etherFiWallet);
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = amount;
+        Cashback[] memory cashbacks;
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        (address withdrawnSafe, address withdrawnAsset, uint256 withdrawnAmount, address withdrawnTo) = gateway.lastWithdraw();
+        assertEq(withdrawnSafe, address(safe));
+        assertEq(withdrawnAsset, address(usdc));
+        assertEq(withdrawnAmount, amount);
+        assertEq(withdrawnTo, address(settlementDispatcherReap));
+    }
+
+    /// Fully reserved loose balance must not produce a zero-value transfer.
+    function test_spend_debit_gatewaySkipsTransferWhenLooseBalanceIsFullyReserved() public {
+        uint256 reserved = 100e6;
+        uint256 amount = 50e6;
+        deal(address(usdc), address(safe), reserved);
+        _requestWithdrawal(_singleAddress(address(usdc)), _singleUint(reserved), withdrawRecipient);
+        gateway.setSuppliedOf(address(safe), address(usdc), amount);
+        gateway.setWithdrawalLiquidity(address(usdc), amount);
+
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (address(settlementDispatcherReap), 0)), 0);
+        vm.prank(etherFiWallet);
+        Cashback[] memory cashbacks;
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, _singleAddress(address(usdc)), _singleUint(amount), cashbacks);
+
+        assertEq(usdc.balanceOf(address(safe)), reserved);
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), reserved);
+        (,, uint256 withdrawnAmount,) = gateway.lastWithdraw();
+        assertEq(withdrawnAmount, amount);
+    }
+
+    /// A mixed-token spend must compact zero loose legs without misaligning the batch.
+    function test_spend_debit_gatewayCompactsMixedLooseTransfers() public {
+        uint256 amountInUsd = 100e6;
+        uint256 weETHAmount = debtManager.convertUsdToCollateralToken(address(weETH), amountInUsd);
+        gateway.setSpendAsset(address(weETH), true);
+        gateway.setSuppliedOf(address(safe), address(usdc), amountInUsd);
+        gateway.setWithdrawalLiquidity(address(usdc), amountInUsd);
+        deal(address(usdc), address(safe), 0);
+        deal(address(weETH), address(safe), weETHAmount);
+
+        address[] memory spendTokens = new address[](2);
+        spendTokens[0] = address(usdc);
+        spendTokens[1] = address(weETH);
+        uint256[] memory spendAmounts = new uint256[](2);
+        spendAmounts[0] = amountInUsd;
+        spendAmounts[1] = amountInUsd;
+        Cashback[] memory cashbacks;
+
+        uint256 dispatcherWeETHBefore = weETH.balanceOf(address(settlementDispatcherReap));
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (address(settlementDispatcherReap), 0)), 0);
+        vm.expectCall(address(weETH), abi.encodeCall(IERC20.transfer, (address(settlementDispatcherReap), weETHAmount)), 1);
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        assertEq(weETH.balanceOf(address(settlementDispatcherReap)), dispatcherWeETHBefore + weETHAmount);
+        (address withdrawnSafe, address withdrawnAsset, uint256 withdrawnAmount, address withdrawnTo) = gateway.lastWithdraw();
+        assertEq(withdrawnSafe, address(safe));
+        assertEq(withdrawnAsset, address(usdc));
+        assertEq(withdrawnAmount, amountInUsd);
+        assertEq(withdrawnTo, address(settlementDispatcherReap));
+    }
+
+    function _singleAddress(address value) private pure returns (address[] memory values) {
+        values = new address[](1);
+        values[0] = value;
+    }
+
+    function _singleUint(uint256 value) private pure returns (uint256[] memory values) {
+        values = new uint256[](1);
+        values[0] = value;
+    }
+
     function test_spend_worksWithMultipleToken_inDebitMode() public {
         vm.prank(owner);
         debtManager.supportBorrowToken(address(weETH), borrowApyPerSecond, minShares);
+        gateway.setBorrowable(address(weETH), true);
+        gateway.setSpendAsset(address(weETH), true);
 
         uint256 amountInUsd = 100e6;
         uint256 totalAmountInUsd = amountInUsd * 2; // Pre-calculate total
@@ -88,7 +175,9 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(weETH.balanceOf(address(settlementDispatcherReap)), settlementDispatcherWeETHBalBefore + weETHAmount);
     }
 
-    function test_spend_works_inCreditMode() public {
+    /// A legacy-engine safe borrows credit from the DebtManager, leaving its own balance untouched.
+    function test_spend_inCreditMode_borrowsFromDebtManager_whenNotMigrated() public {
+        _forceLegacyEngine(address(safe));
         uint256 initialBalance = 100e6;
         deal(address(usdc), address(safe), initialBalance);
 
@@ -115,7 +204,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), txId));
 
-        // Verify tokens were transferred to settlement dispatcher
+        // A non-migrated safe borrows from the DebtManager, which forwards the borrow to the dispatcher
         assertEq(usdc.balanceOf(address(safe)), initialBalance);
         assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherBalBefore + amount);
         assertEq(usdc.balanceOf(address(debtManager)), debtManagerBalBefore - amount);
@@ -247,7 +336,10 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
     }
 
-    function test_spend_cancelsPendingWithdrawalInCreditModeIfBlocked() public {
+    // A failed gateway borrow propagates and reverts the whole credit spend (the old catch-and-retry is gone).
+    /// A credit spend cancels a pending withdrawal when it would otherwise block the DebtManager borrow.
+    function test_spend_inCreditMode_cancelsPendingWithdrawal_whenDebtManagerBorrowBlocked() public {
+        _forceLegacyEngine(address(safe));
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         address recipient = withdrawRecipient;
@@ -353,76 +445,6 @@ contract CashModuleSpendTest is CashModuleTestSetup {
 
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
-    }
-
-    function test_spend_inDebitMode_fails_whenBorrowExceedsMaxBorrow() public {
-        _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
-
-        uint256 safeBalUsdc = 1000e6;
-        deal(address(usdc), address(safe), safeBalUsdc);
-        deal(address(weETH), address(safe), 0);
-        deal(address(usdc), address(debtManager), 1000e6);
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdc);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = 10e6;
-
-        Cashback[] memory cashbacks;
-
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-
-        _setMode(Mode.Debit);
-        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
-
-        spendAmounts[0] = safeBalUsdc;
-
-        vm.prank(etherFiWallet);
-        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
-        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-    }
-    
-    function test_spend_inDebitMode_cancelsWithdrawal_whenBorrowExceedsMaxBorrowAfterSpending() public {
-        _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
-
-        uint256 safeBalUsdc = 1000e6;
-        uint256 safeBalWeETH = 1 ether;
-        deal(address(usdc), address(safe), safeBalUsdc);
-        deal(address(weETH), address(safe), safeBalWeETH);
-        deal(address(usdc), address(debtManager), 1000e6);
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdc);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = 10e6;
-
-        Cashback[] memory cashbacks;
-
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-
-        _setMode(Mode.Debit);
-        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
-
-        address[] memory withdrawTokens = new address[](1);
-        withdrawTokens[0] = address(weETH);
-        uint256[] memory withdrawAmounts = new uint256[](1);
-        withdrawAmounts[0] = safeBalWeETH;
-        address recipient = makeAddr("alice");
-        _requestWithdrawal(withdrawTokens, withdrawAmounts, recipient);    
-
-        spendAmounts[0] = safeBalUsdc;
-
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETH)), safeBalWeETH);
-
-        vm.prank(etherFiWallet);
-        vm.expectEmit(true, true, true, true);
-        emit CashEventEmitter.WithdrawalCancelled(address(safe), withdrawTokens, withdrawAmounts, recipient);
-        cashModule.spend(address(safe), keccak256("newTxId"), BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(weETH)), 0);
     }
 
     function test_spend_reverts_whenArrayLengthMismatch() public {
@@ -561,6 +583,63 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(cashModule.getSettlementDispatcher(BinSponsor.Rain), address(settlementDispatcherRain));
     }
 
+    /// A legacy debit spend must leave the DebtManager position healthy: loose tokens are its collateral.
+    function test_spend_inDebitMode_legacySafe_revertsWhenPositionUnhealthy() public {
+        _forceLegacyEngine(address(safe));
+        deal(address(usdc), address(safe), 100e6);
+        deal(address(usdc), address(debtManager), 1 ether);
+
+        uint256 borrowAmt = debtManager.getMaxBorrowAmount(address(safe), true) / 2;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 95e6; // leaves 5e6 backing the debt
+
+        Cashback[] memory cashbacks;
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+    }
+
+    /// A legacy debit spend that is unhealthy only because of the withdrawal reservation cancels the pending
+    /// withdrawal (the spend wins the competing claim) and then succeeds.
+    function test_spend_inDebitMode_legacySafe_cancelsWithdrawalWhenUnhealthyWithReservation() public {
+        _forceLegacyEngine(address(safe));
+        deal(address(usdc), address(safe), 100e6);
+        deal(address(usdc), address(debtManager), 1 ether);
+
+        uint256 borrowAmt = debtManager.getMaxBorrowAmount(address(safe), true) / 4;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        // Reserve 70e6 for withdrawal; the 25e6 spend fits the unreserved 30e6, but the post-spend position
+        // is unhealthy while the reservation stands (effective collateral 5e6 against the debt)
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 70e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        address[] memory spendTokens = new address[](1);
+        spendTokens[0] = address(usdc);
+        uint256[] memory spendAmounts = new uint256[](1);
+        spendAmounts[0] = 25e6;
+
+        Cashback[] memory cashbacks;
+
+        uint256 dispatcherBefore = usdc.balanceOf(address(settlementDispatcherReap));
+
+        vm.prank(etherFiWallet);
+        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
+
+        assertEq(usdc.balanceOf(address(settlementDispatcherReap)), dispatcherBefore + 25e6, "spend executed");
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0, "withdrawal cancelled to restore health");
+    }
+
     function test_spend_FundsGoToBinSponsorSettlementDispatcherAsSpecified_inDebitMode() public {
         uint256 amount = 100e6;
         deal(address(usdc), address(safe), 2 * amount);
@@ -601,7 +680,9 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         assertEq(usdc.balanceOf(address(settlementDispatcherRain)), settlementDispatcherRainBalBefore + amount);
     }
 
-    function test_spend_FundsGoToBinSponsorSettlementDispatcherAsSpecified_inCreditMode() public {
+    /// The DebtManager credit borrow is forwarded to the settlement dispatcher of the chosen bin sponsor.
+    function test_spend_inCreditMode_routesDebtManagerBorrowToBinSponsorDispatcher() public {
+        _forceLegacyEngine(address(safe));
         uint256 initialBalance = 100e6;
         deal(address(usdc), address(safe), initialBalance);
 
@@ -628,7 +709,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), txId));
 
-        // Verify tokens were transferred to settlement dispatcher
+        // The Reap borrow is forwarded to the Reap dispatcher
         assertEq(usdc.balanceOf(address(safe)), initialBalance);
         assertEq(usdc.balanceOf(address(settlementDispatcherReap)), settlementDispatcherReapBalBefore + amount);
         assertEq(usdc.balanceOf(address(debtManager)), debtManagerBalBefore - amount);
@@ -643,7 +724,7 @@ contract CashModuleSpendTest is CashModuleTestSetup {
         // Verify transaction was cleared
         assertTrue(cashModule.transactionCleared(address(safe), keccak256("txId2")));
 
-        // Verify tokens were transferred to settlement dispatcher
+        // The Rain borrow is forwarded to the Rain dispatcher
         assertEq(usdc.balanceOf(address(safe)), initialBalance);
         assertEq(usdc.balanceOf(address(settlementDispatcherRain)), settlementDispatcherRainBalBefore + amount);
     }

@@ -2,11 +2,12 @@
 pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
+import { StdStorage, stdStorage } from "forge-std/Test.sol";
 
 import { ChainConfig } from "../../../utils/Utils.sol";
 import { SafeTestSetup, MessageHashUtils } from "../..//SafeTestSetup.t.sol";
 import { LiquidUSDLiquifierOPModule, IERC20, SafeERC20, ModuleCheckBalance, UpgradeableProxy } from "../../../../src/modules/etherfi/LiquidUSDLiquifierOP.sol";
-import { BinSponsor, Cashback, Mode, SpendingLimit } from "../../../../src/interfaces/ICashModule.sol";
+import { BinSponsor, Cashback, ICashModule, Mode, SpendingLimit } from "../../../../src/interfaces/ICashModule.sol";
 import { CashEventEmitter } from "../cash/CashModuleTestSetup.t.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
@@ -18,6 +19,7 @@ import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 contract LiquidUSDLiquifierTest is SafeTestSetup {
     using SafeERC20 for IERC20;
     using MessageHashUtils for bytes32;
+    using stdStorage for StdStorage;
 
     LiquidUSDLiquifierOPModule public liquidUSDLiquifier;
 
@@ -43,6 +45,11 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
         _setLiquidUsdAsCollateralAndBorrowToken();
         _updateSpendingLimit(10000e6, 10000e6);
+
+        // This file is the legacy (DebtManager) twin of the dual-engine repay; the gateway path lives in
+        // test/safe/modules/cash/lend/LiquidUsdLiquifierGateway.t.sol. Force the safe onto the legacy engine
+        // so spend and repay route through the DebtManager.
+        stdstore.enable_packed_slots().target(address(cashModule)).sig(ICashModule.usesLendGateway.selector).with_key(address(safe)).checked_write(false);
 
         address liquidUsdLiquifierImpl = address(new LiquidUSDLiquifierOPModule(address(debtManager), address(dataProvider)));
         liquidUSDLiquifier = LiquidUSDLiquifierOPModule(address(new UUPSProxy(liquidUsdLiquifierImpl, "")));

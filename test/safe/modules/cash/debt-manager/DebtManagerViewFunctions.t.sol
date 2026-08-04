@@ -23,6 +23,9 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
     function setUp() public override {
         super.setUp();
 
+        // This suite tests the legacy DebtManager engine (new safes default to the Aave gateway)
+        _forceLegacyEngine(address(safe));
+
         // remove all supplies from debt manager
         vm.startPrank(owner);
         debtManager.withdrawBorrowToken(address(usdc), debtManager.supplierBalance(owner, address(usdc)));
@@ -45,7 +48,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         borrowAmt = debtManager.remainingBorrowingCapacityInUSD(address(safe)) / 2;
     }
 
-    // Test getUserCollateralForToken external function
+    /// getUserCollateralForToken returns a safe's collateral amount and its USD value.
     function test_getUserCollateralForToken() public view {
         (uint256 tokenAmount, uint256 usdAmount) = debtManager.getUserCollateralForToken(address(safe), address(weETH));
         
@@ -55,7 +58,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         assertEq(usdAmount, expectedUsdAmount, "USD amount should match the converted collateral value");
     }
 
-    // Test getUserCollateralForToken with unsupported token
+    /// getUserCollateralForToken reverts for an unsupported collateral token.
     function test_getUserCollateralForToken_reverts_withUnsupportedToken() public {
         address unsupportedToken = makeAddr("unsupportedToken");
         
@@ -63,7 +66,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         debtManager.getUserCollateralForToken(address(safe), unsupportedToken);
     }
 
-    // Test getUserCurrentState comprehensive function
+    /// getUserCurrentState returns collateral plus the DebtManager borrowings of a non-migrated safe.
     function test_getUserCurrentState() public {
         address[] memory spendTokens = new address[](1);
         spendTokens[0] = address(usdc);
@@ -99,7 +102,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         assertApproxEqAbs(totalBorrowings, borrowAmt, 1, "Total borrowings should match");
     }
 
-    // Test getCollateralValueInUsd
+    /// getCollateralValueInUsd sums the USD value across a safe's collateral tokens.
     function test_getCollateralValueInUsd() public {
         // Test with a single collateral token
         uint256 collateralValue = debtManager.getCollateralValueInUsd(address(safe));
@@ -151,7 +154,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         assertEq(newCollateralValue, totalExpectedValue, "Total collateral value should include both tokens");
     }
 
-    // Test ensureHealth function
+    /// ensureHealth passes for a healthy position, before and after a sub-max borrow.
     function test_ensureHealth_succeeds_whenPositionHealthy() public {
         // Position is initially healthy
         debtManager.ensureHealth(address(safe));
@@ -164,6 +167,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         debtManager.ensureHealth(address(safe));
     }
     
+    /// ensureHealth reverts once a collateral price drop makes the position unhealthy.
     function test_ensureHealth_reverts_whenPositionUnhealthy() public {
         // Borrow maximum amount
         uint256 maxBorrowAmount = debtManager.getMaxBorrowAmount(address(safe), true);
@@ -180,7 +184,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         debtManager.ensureHealth(address(safe));
     }
     
-    // Test getMaxBorrowAmount with both parameter options
+    /// getMaxBorrowAmount returns more against the liquidation threshold than against LTV.
     function test_getMaxBorrowAmount_differsByParameter() public view {
         // Get max borrow amount with LTV
         uint256 maxBorrowWithLtv = debtManager.getMaxBorrowAmount(address(safe), true);
@@ -200,7 +204,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         assertApproxEqAbs(maxBorrowWithThreshold, expectedThresholdAmount, 10, "Threshold calculation should match");
     }
     
-    // Test totalSupplies() for all tokens
+    /// totalSupplies lists every supplied token and their combined USD value.
     function test_totalSupplies() public {
         // Set up a second borrow token
         MockERC20 secondToken = new MockERC20("Second", "SEC", 18);
@@ -273,7 +277,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         assertTrue(foundSecondToken, "Second token should be in supplies");
     }
     
-    // Test remainingBorrowingCapacityInUSD
+    /// remainingBorrowingCapacityInUSD shrinks as the safe borrows against its capacity.
     function test_remainingBorrowingCapacityInUSD() public {
         // Initial capacity
         uint256 initialCapacity = debtManager.remainingBorrowingCapacityInUSD(address(safe));
@@ -295,7 +299,7 @@ contract DebtManagerViewFunctionTests is CashModuleTestSetup {
         assertApproxEqAbs(finalCapacity, 0, 1, "Final capacity should be close to zero");
     }
     
-    // Test collateralOf with multiple tokens
+    /// collateralOf lists every collateral token and their combined USD value.
     function test_collateralOf_withMultipleTokens() public {
         // Add a second collateral token
         address secondToken = address(new MockERC20("Second", "SEC", 18));
