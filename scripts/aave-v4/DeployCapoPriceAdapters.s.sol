@@ -311,6 +311,7 @@ contract DeployCapoPriceAdapters is Script {
         _verify();
         _printSafeBatch();
         _writeJson();
+        _writeSafeBatchJson();
     }
 
     /// @dev `PriceCapAdapterStable` reverts with `CapLowerThanActualPrice` if the cap is below the
@@ -789,6 +790,45 @@ contract DeployCapoPriceAdapters is Script {
                 )
             );
         }
+    }
+
+    /// @dev Emits the repoint batch as Safe Transaction Builder JSON, the shape the 3CP process and
+    ///      the Safe UI both consume directly (same format as the existing Recovery3CP artifacts).
+    ///
+    ///      ONLY THE FILE FROM A --broadcast RUN IS SUBMITTABLE. A dry run deploys into a simulated
+    ///      EVM, so the adapter addresses it writes here do not exist on chain. The console prints a
+    ///      warning to that effect; check one adapter address on Etherscan before submitting.
+    function _writeSafeBatchJson() internal {
+        string memory json = string.concat(
+            '{"version":"1.0","chainId":"10","createdAt":0,',
+            '"meta":{"name":"ether.fi Cash OP - repoint 17 reserves onto capped price adapters",',
+            '"description":"One updateReservePriceSource per reserve on SpokeConfigurator. Requires role 400.",',
+            '"txBuilderVersion":"1.16.5","createdFromSafeAddress":"',
+            vm.toString(OWNER_SAFE),
+            '"},"safeAddress":"',
+            vm.toString(OWNER_SAFE),
+            '","transactions":['
+        );
+        for (uint256 i; i < results.length; i++) {
+            json = string.concat(
+                json,
+                i == 0 ? "" : ",",
+                '{"to":"',
+                vm.toString(SPOKE_CONFIGURATOR),
+                '","value":"0","data":"',
+                vm.toString(
+                    abi.encodeCall(
+                        ISpokeConfiguratorLike.updateReservePriceSource,
+                        (SPOKE, results[i].reserveId, results[i].adapter)
+                    )
+                ),
+                '"}'
+            );
+        }
+        json = string.concat(json, "]}");
+        vm.writeFile("output/CapoRepoint3CP-op-10.json", json);
+        console.log("wrote output/CapoRepoint3CP-op-10.json  (Safe Transaction Builder batch)");
+        console.log("  !! only submit this file if it came from a --broadcast run !!");
     }
 
     function _writeJson() internal {
