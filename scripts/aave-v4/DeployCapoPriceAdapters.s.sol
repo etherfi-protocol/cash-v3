@@ -123,9 +123,29 @@ contract DeployCapoPriceAdapters is Script {
     uint256 constant STALENESS_MIDAS = 7 days; // liquidRESERVE, liquidRWA, weEUR/EUR
     uint256 constant STALENESS_VEDA_RATE = 2 days; // accountantState().lastUpdateTimestamp
 
-    /// @dev Every Veda rate leg reports 18 decimals regardless of the accountant's native precision
-    ///      (8 for the WBTC vaults, 18 for WETH/ETHFI/USDe, 6 for liquidUSD). Aave's cap base rejects
-    ///      anything below 8, and scaling up also preserves the precision of the growth rate.
+    /// @dev Precision of the Veda RATE leg. This is NOT the decimals AaveOracle sees — that comes
+    ///      from the BASE leg and is always 8. `RATIO_DECIMALS` divides straight back out inside
+    ///      `latestAnswer()` (price = basePrice x ratio / 10**RATIO_DECIMALS), so an 18-decimal rate
+    ///      leg still produces an 8-decimal feed. Verified on the deployed set: `DECIMALS` reads 8 on
+    ///      all eleven cap adapters.
+    ///
+    ///      8 would also produce a correct price, but 18 is deliberate and matches what Aave does in
+    ///      their own adapter for our eBTC vault, which multiplies the 8-decimal accountant rate by
+    ///      1e10 with the comment: "Considering the current configuration of
+    ///      maxYearlyRatioGrowthPercent, it is necessary to add an extra precision of 1e10 to ensure
+    ///      that maxRatioGrowthPerSecond is accurately configured."
+    ///
+    ///      Concretely, `maxRatioGrowthPerSecondScaled` is integer-divided and floors to zero below
+    ///      317. At 18 decimals our legs sit at 2.5e14-4.5e15; at 8 they would sit near 2.5e4, about
+    ///      1e10 closer to silently pinning the ceiling flat.
+    ///
+    ///      IF YOU CHANGE THIS, CHANGE EVERY SNAP_* VEDA CONSTANT TO MATCH. The snapshot must be in
+    ///      the same units the leg returns. Changing only one side is not a compile error and one
+    ///      direction is not even a visible one — see the scale check in `_assertCapWiring`.
+    ///
+    ///      Native accountant precisions: 8 for the WBTC vaults, 18 for WETH/ETHFI/USDe, 6 for
+    ///      liquidUSD. Aave's cap base rejects a ratio precision below 8, so liquidUSD cannot be
+    ///      passed raw regardless.
     uint8 constant VEDA_RATE_DECIMALS = 18;
 
     uint8 constant USD_FEED_DECIMALS = 8;
@@ -714,6 +734,30 @@ contract DeployCapoPriceAdapters is Script {
         require(
             okRatio && ratioDecimals >= 8 && ratioDecimals <= 24,
             string.concat(sym, ": ratio decimals outside the 8-24 range Aave's cap base accepts")
+        );
+
+        // The snapshot ratio must be expressed in the SAME units the rate leg returns. Get that wrong
+        // and one direction is loud while the other is silent:
+        //
+        //   snapshot too small (say 1e8 against an 18-decimal leg) -> the ceiling sits far below the
+        //     rate, the price is clamped to near zero, and every position holding the asset becomes
+        //     instantly liquidatable. The isCapped check above catches this.
+        //
+        //   snapshot too large (an 18-decimal snapshot against an 8-decimal leg) -> the ceiling sits
+        //     1e10 above the rate, so it can never bind. The price stays perfectly correct, isCapped
+        //     stays false, and every other check here passes — the growth cap is simply GONE. Nothing
+        //     else in this script would notice, which is why this comparison exists.
+        //
+        // Real drift is tiny: these snapshots are 60 days old and the caps are single-digit percent,
+        // so a couple of percent at most. A 2x band catches any scale error with room to spare.
+        (bool okSnap, bytes memory snapRet) = adapter.staticcall(abi.encodeWithSignature("getSnapshotRatio()"));
+        (bool okCur, bytes memory curRet) = adapter.staticcall(abi.encodeWithSignature("getRatio()"));
+        require(okSnap && okCur, string.concat(sym, ": cannot read the snapshot or current ratio"));
+        uint256 snapshotRatio = abi.decode(snapRet, (uint256));
+        uint256 currentRatio = abi.decode(curRet, (uint256));
+        require(
+            snapshotRatio <= currentRatio * 2 && snapshotRatio * 2 >= currentRatio,
+            string.concat(sym, ": snapshot ratio is not in the rate leg's units - scale mismatch, cap would be void")
         );
     }
 
