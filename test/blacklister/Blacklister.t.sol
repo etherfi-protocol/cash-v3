@@ -7,6 +7,7 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { Blacklister } from "../../src/blacklister/Blacklister.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { PausableUntil } from "../../src/utils/PausableUntil.sol";
 
 contract BlacklisterTest is Test {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.Blacklister")) - 1)) & ~bytes32(uint256(0xff))
@@ -84,12 +85,12 @@ contract BlacklisterTest is Test {
 
     function test_blacklistUserUntil_revertsWhenNotGuardian() public {
         vm.prank(alice);
-        vm.expectRevert(Blacklister.OnlyGuardian.selector);
+        vm.expectRevert(PausableUntil.OnlyGuardian.selector);
         blacklister.blacklistUserUntil(bob);
 
         // Governance holds the multisig paths but not the guardian path — disjoint, not hierarchical
         vm.prank(governance);
-        vm.expectRevert(Blacklister.OnlyGuardian.selector);
+        vm.expectRevert(PausableUntil.OnlyGuardian.selector);
         blacklister.blacklistUserUntil(bob);
     }
 

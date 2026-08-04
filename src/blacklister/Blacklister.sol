@@ -23,9 +23,6 @@ contract Blacklister is UpgradeableProxy {
         mapping(address => uint256) blacklistedUntil;
     }
 
-    /// @notice Role identifier for guardians allowed to trip the auto-expiring blacklist
-    bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
-
     /// @notice Fixed window applied by the guardian's `blacklistUserUntil`
     uint256 public constant BLACKLIST_DURATION = 3 days;
 
@@ -53,9 +50,6 @@ contract Blacklister is UpgradeableProxy {
 
     /// @notice Error thrown when a guardian blacklists a user whose blacklist is still active
     error UserAlreadyBlacklisted(address user);
-
-    /// @notice Error thrown when caller does not hold the GUARDIAN_ROLE
-    error OnlyGuardian();
 
     constructor() {
         _disableInitializers();
@@ -157,13 +151,5 @@ contract Blacklister is UpgradeableProxy {
         assembly {
             $.slot := BlacklisterStorageLocation
         }
-    }
-
-    /**
-     * @dev Modifier to restrict access to holders of the GUARDIAN_ROLE
-     */
-    modifier onlyGuardian() {
-        if (!roleRegistry().hasRole(GUARDIAN_ROLE, msg.sender)) revert OnlyGuardian();
-        _;
     }
 }
