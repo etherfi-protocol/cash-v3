@@ -141,57 +141,74 @@ contract DeployCapoPriceAdapters is Script {
     int256 constant EUR_PRICE_CAP_RATIO = 1.04e8;
     uint8 constant EUR_PRICE_CAP_RATIO_DECIMALS = 8;
 
-    /// @dev Aave's own live adapters require a snapshot at least 7 days old, and the base contract
-    ///      also rejects anything older than 180 days. The readings below were taken exactly 7 days
-    ///      before this script was written, so they satisfy the lower bound today and only gain
-    ///      margin as time passes. If you re-measure the snapshots, take them at least 8 days back
-    ///      so the constructor cannot land on the boundary.
+    /// @dev Snapshots are taken 60 days back, not 7.
+    ///
+    ///      The cap only refuses to construct if the ceiling has already been overtaken by the rate
+    ///      realised between the snapshot and now, so the snapshot window is what decides whether a
+    ///      given cap is deployable at all. Over 7 days that realised figure is noise: these
+    ///      publishers update every few days, so one lumpy week reads far above true yield. sETHFI
+    ///      measured 10.99%/yr over 7 days against ~7.7% across every multi-week window, and weEUR
+    ///      9.83% against ~6.7% — both would have made the reviewer's 9% caps undeployable for no
+    ///      real reason.
+    ///
+    ///      A 60-day window also leaves a healthier operating buffer. The gap between ceiling and
+    ///      spot grows with the elapsed time since the snapshot, so a 7-day snapshot puts the ceiling
+    ///      only ~0.03% above spot — one unusual publish and it binds, under-pricing collateral. At
+    ///      60 days it sits ~0.3-0.4% above. Aave goes much further still: their live wstETH adapter
+    ///      snapshots from February 2024.
+    ///
+    ///      MINIMUM_SNAPSHOT_DELAY stays at Aave's 7 days. It is a floor on how fresh a snapshot may
+    ///      be, not a target, and keeping it low leaves room for future re-snapshots.
+    ///
+    ///      Aave's base also rejects a snapshot older than 180 days, which puts a deploy deadline on
+    ///      these values — see the README note in the pull request.
     uint48 constant SNAPSHOT_DELAY = 7 days;
-    uint48 constant SNAPSHOT_TS_VEDA = 1_785_188_807;
-    uint48 constant SNAPSHOT_TS_MIDAS = 1_785_188_849;
+    uint48 constant SNAPSHOT_TS_VEDA = 1_780_627_963; // 60 days back
+    uint48 constant SNAPSHOT_TS_MIDAS = 1_780_627_963; // 60 days back
 
-    /// @dev beHYPE's Chainlink rate feed went live only ~5 days ago, so its snapshot is taken from
-    ///      the feed's first published round and the delay is loosened to match. RE-SNAPSHOT once
-    ///      the feed has 30+ days of history.
+    /// @dev liquidRWA's feed launched at exactly 1.00000000 about 60 days ago, so a 60-day snapshot
+    ///      would land on its first published round. Taken 45 days back to clear that edge.
+    uint48 constant SNAPSHOT_TS_LIQUID_RWA = 1_781_923_963;
+
+    /// @dev beHYPE's Chainlink rate feed is only ~6 days old, so there is no 60-day reading to take.
+    ///      Snapshot is its first published round and the delay is loosened to match. RE-SNAPSHOT
+    ///      once the feed has a month of history.
     uint48 constant SNAPSHOT_DELAY_BEHYPE = 3 days;
     uint48 constant SNAPSHOT_TS_BEHYPE = 1_785_344_431;
 
-    // maxYearlyRatioGrowthPercent, in bps of the snapshot ratio: 1.5x the growth actually observed
-    // over the trailing 90 days, per risk direction. Note this is tighter than Aave's own practice —
-    // they run 9.68% on wstETH against a ~3.5% observed yield, roughly 2.8x. A tighter multiple gives
-    // better protection against a bad publisher but leaves less room before the ceiling binds during
-    // normal operation, and a binding ceiling under-prices collateral.
-    // THESE ARE RISK PARAMETERS AND NEED NONCE'S SIGN-OFF.
-    uint16 constant GROWTH_WEETH = 525; //   5.25% (observed 3.50%)
-    uint16 constant GROWTH_BEHYPE = 279; //   2.79% (observed 1.86% over 5 days)
-    uint16 constant GROWTH_EBTC = 24; //   0.24% (observed 0.16%)
-    uint16 constant GROWTH_EUSD = 17; //   0.17% (observed 0.11%)
-    uint16 constant GROWTH_SETHFI = 1181; //  11.81% (observed 7.87%)
-    uint16 constant GROWTH_LIQUID_ETH = 516; //   5.16% (observed 3.44%)
-    uint16 constant GROWTH_LIQUID_BTC = 282; //   2.82% (observed 1.88%)
-    uint16 constant GROWTH_LIQUID_USD = 747; //   7.47% (observed 4.98%)
-    uint16 constant GROWTH_LIQUID_RESERVE = 612; //   6.12% (observed 4.08%)
-    uint16 constant GROWTH_LIQUID_RWA = 1059; //  10.59% (observed 7.06% over 7 days)
-    // weEUR is measured over 30 days, not 90: the feed sat flat at exactly 1.00000000 for its first
-    // ~30 days, so a 90-day window reads 5.28% and understates the real accrual by nearly half.
-    // 1.5x of that would be 792 bps, which is BELOW the 955 bps the ceiling already needs to clear the
-    // rate realised since the snapshot — the adapter would refuse to deploy. The 30-day window (7.99%)
-    // is the honest basis; 45-day agrees at 7.33% and 60-day at 6.66%.
-    uint16 constant GROWTH_WEEUR = 1199; //  11.99% (observed 7.99% over 30 days)
+    // maxYearlyRatioGrowthPercent, in bps of the snapshot ratio. SET BY RISK REVIEW.
+    //
+    // These are not derived from a formula — each one is a risk decision, with the reasoning the
+    // reviewer gave. Do not "recompute" them from observed yield without going back to risk.
+    uint16 constant GROWTH_SETHFI = 900; //  9.00% — strategy targets ~6%, so this leaves headroom
+    uint16 constant GROWTH_LIQUID_USD = 750; //  7.50%
+    uint16 constant GROWTH_LIQUID_RESERVE = 650; //  6.50% — allows for a higher-yielding strategy coming
+    uint16 constant GROWTH_LIQUID_ETH = 500; //  5.00%
+    uint16 constant GROWTH_LIQUID_RWA = 900; //  9.00% — reviewer flagged this can tighten later
+    uint16 constant GROWTH_BEHYPE = 300; //  3.00%
+    uint16 constant GROWTH_WEETH = 500; //  5.00%
+    uint16 constant GROWTH_EBTC = 100; //  1.00% — deliberately loose, small TVL
+    uint16 constant GROWTH_EUSD = 75; //  0.75% — deliberately loose, small TVL
+    uint16 constant GROWTH_WEEUR = 900; //  9.00% — Midas is instructed not to post an update
+        //           implying more than 7.5%, so this sits just above that contractual bound
+    //
+    // NOT YET SET BY RISK. liquidBTC was not in the reviewer's list; this is the prior 1.5x-observed
+    // placeholder (observed 1.88%). It needs a decision before deploy.
+    uint16 constant GROWTH_LIQUID_BTC = 282; //  2.82% — PLACEHOLDER
 
-    // Snapshot ratios, in the units the matching getRatio() returns: 18 decimals for every Veda
-    // rate leg: 18 decimals for every Veda vault, and the leg's own decimals otherwise.
-    uint104 constant SNAP_EBTC = 1_003_756_160_000_000_000; // 100375616 x 1e10
-    uint104 constant SNAP_LIQUID_BTC = 1_032_072_210_000_000_000; // 103207221 x 1e10
-    uint104 constant SNAP_LIQUID_USD = 1_169_002_000_000_000_000; // 1169002 x 1e12
-    uint104 constant SNAP_EUSD = 1_065_800_778_210_971_516;
-    uint104 constant SNAP_SETHFI = 1_198_651_357_817_307_758;
-    uint104 constant SNAP_LIQUID_ETH = 1_100_489_482_323_509_616;
-    uint104 constant SNAP_WEETH = 1_100_025_909_594_918_000;
+    // Snapshot ratios, read 60 days back, in the units the matching getRatio() returns: 18 decimals
+    // for every Veda rate leg, and the leg's own decimals otherwise.
+    uint104 constant SNAP_EBTC = 1_003_626_440_000_000_000; // raw 100362644, 8 dec, x1e10
+    uint104 constant SNAP_LIQUID_BTC = 1_029_351_010_000_000_000; // raw 102935101, 8 dec, x1e10
+    uint104 constant SNAP_LIQUID_USD = 1_160_589_000_000_000_000; // raw 1160589, 6 dec, x1e12
+    uint104 constant SNAP_EUSD = 1_065_594_833_004_492_070;
+    uint104 constant SNAP_SETHFI = 1_187_971_295_403_462_986;
+    uint104 constant SNAP_LIQUID_ETH = 1_094_734_190_917_310_748;
+    uint104 constant SNAP_WEETH = 1_095_883_047_457_899_600;
     uint104 constant SNAP_BEHYPE = 1_018_457_451_127_239_140;
-    uint104 constant SNAP_LIQUID_RESERVE = 102_507_121; // 8 dec
-    uint104 constant SNAP_LIQUID_RWA = 101_048_728; // 8 dec
-    uint104 constant SNAP_WEEUR = 101_112_075; // 8 dec
+    uint104 constant SNAP_LIQUID_RESERVE = 101_921_231; // 8 dec
+    uint104 constant SNAP_LIQUID_RWA = 100_306_638; // 8 dec
+    uint104 constant SNAP_WEEUR = 100_205_896; // 8 dec
 
     /// @dev A new adapter must price within this much of the feed it replaces, in bps. Wide enough to
     ///      absorb the stable de-snap (up to 1%) and the Pyth -> Chainlink provider switch on the
@@ -420,7 +437,7 @@ contract DeployCapoPriceAdapters is Script {
         );
         _record(
             "liquidRWA",
-            _clRate(legs.oneUsd, legs.liquidRwaRate, "Capped liquidRWA / USD", SNAP_LIQUID_RWA, SNAPSHOT_TS_MIDAS, GROWTH_LIQUID_RWA, SNAPSHOT_DELAY),
+            _clRate(legs.oneUsd, legs.liquidRwaRate, "Capped liquidRWA / USD", SNAP_LIQUID_RWA, SNAPSHOT_TS_LIQUID_RWA, GROWTH_LIQUID_RWA, SNAPSHOT_DELAY),
             RESERVE_LIQUIDRWA
         );
         _record(
