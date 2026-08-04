@@ -624,6 +624,7 @@ contract DeployCapoPriceAdapters is Script {
 
             uint8 dec = ICLSynchronicityPriceAdapter(r.adapter).decimals();
             require(dec == USD_FEED_DECIMALS, string.concat(sym, ": adapter decimals != 8, AaveOracle would reject it"));
+            _assertCapWiring(sym, r.adapter);
 
             int256 newAnswer = ICLSynchronicityPriceAdapter(r.adapter).latestAnswer();
             require(newAnswer > 0, string.concat(sym, ": adapter returned a non-positive price"));
@@ -670,6 +671,50 @@ contract DeployCapoPriceAdapters is Script {
                 )
             );
         }
+    }
+
+    /// @dev Checks the decimal plumbing inside a growth-cap adapter, which is invisible from the
+    ///      outside and where a mistake would be silent rather than loud.
+    ///
+    ///      The layers use different precisions on purpose. `decimals()` — the only one AaveOracle
+    ///      sees — is inherited from the BASE leg, so it is 8 because every base we pass is an 8-decimal
+    ///      USD feed. `RATIO_DECIMALS` is the precision of the RATE leg, which is 18 for the Veda and
+    ///      Chainlink rate feeds and 8 for the Midas NAV proxies, and it divides straight back out in
+    ///      `latestAnswer()`: price = basePrice x ratio / 10**RATIO_DECIMALS. So an 18-decimal rate leg
+    ///      does not make an 18-decimal feed.
+    ///
+    ///      The hazard worth asserting is `maxRatioGrowthPerSecond`. It is derived as
+    ///      `snapshotRatio * growthBps * 1e6 / 1e4 / SECONDS_PER_YEAR` with integer division, so a
+    ///      small snapshot combined with a small growth rate can floor it to ZERO — the ceiling would
+    ///      then sit flat at the snapshot forever, clamping the price permanently. Nothing in Aave's
+    ///      constructor rejects that. An 8-decimal ratio leg carries ~1e10 less headroom above the
+    ///      floor than an 18-decimal one, so the Midas assets are where it would bite first.
+    function _assertCapWiring(string memory sym, address adapter) internal view {
+        // Discriminate on getMaxRatioGrowthPerSecondScaled(), which only PriceCapAdapterBase has.
+        // Do NOT discriminate on RATIO_DECIMALS(): EURPriceCapAdapterStable exposes that name too, for
+        // an unrelated quantity — there it is the precision of the cap RATIO (1.04e8), not of a rate
+        // leg — and it has no DECIMALS() getter at all, only a lowercase `decimals` state variable.
+        (bool okGrowth, bytes memory growthRet) =
+            adapter.staticcall(abi.encodeWithSignature("getMaxRatioGrowthPerSecondScaled()"));
+        if (!okGrowth || growthRet.length != 32) return; // a stable cap or a plain feed
+
+        require(
+            abi.decode(growthRet, (uint256)) > 0,
+            string.concat(sym, ": growth rate floored to zero - the ceiling would never rise, pinning the price")
+        );
+
+        (bool okBase, bytes memory baseRet) = adapter.staticcall(abi.encodeWithSignature("DECIMALS()"));
+        require(
+            okBase && baseRet.length == 32 && abi.decode(baseRet, (uint8)) == USD_FEED_DECIMALS,
+            string.concat(sym, ": cap base leg is not 8 decimals")
+        );
+
+        (bool okRatio, bytes memory ratioRet) = adapter.staticcall(abi.encodeWithSignature("RATIO_DECIMALS()"));
+        uint8 ratioDecimals = abi.decode(ratioRet, (uint8));
+        require(
+            okRatio && ratioDecimals >= 8 && ratioDecimals <= 24,
+            string.concat(sym, ": ratio decimals outside the 8-24 range Aave's cap base accepts")
+        );
     }
 
     /// @dev The uncapped market feeds have no isCapped(); a failed call means "not a cap adapter".
