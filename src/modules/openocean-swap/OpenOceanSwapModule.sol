@@ -8,14 +8,17 @@ import {OpenOceanSwapDescription, IOpenOceanCaller, IOpenOceanRouter} from "../.
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 
 /**
  * @title OpenOceanSwapModule
  * @author ether.fi
  * @notice Module for executing token swaps through OpenOcean exchange
- * @dev Extends ModuleBase to integrate with the EtherFi ecosystem
+ * @dev Extends ModuleBase to integrate with the EtherFi ecosystem. A gateway safe's input may be supplied to
+ *      Aave, so the swap sandwiches the aggregator call: it withdraws any shortfall of the input from the
+ *      safe's Aave position, swaps, and re-supplies the output when the gateway lists it as a reserve.
  */
-contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
+contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
 
     /// @notice OpenOcean router contract to give allowance to perform swaps
@@ -74,8 +77,8 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
         address toAsset, 
         uint256 fromAssetAmount, 
         uint256 minToAssetAmount, 
-        bytes calldata data, 
-        address[] calldata signers, 
+        bytes calldata data,
+        address[] calldata signers,
         bytes[] calldata signatures
     ) external onlyEtherFiSafe(safe) {
         _checkSignatures(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, data, signers, signatures);
@@ -159,8 +162,10 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
     ) internal {
         if (fromAsset == toAsset) revert SwappingToSameAsset();
         if (minToAssetAmount == 0) revert InvalidInput();
-        
-        _checkAmountAvailable(safe, fromAsset, fromAssetAmount);
+
+        // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
+        // full amount loose (net of any pending-withdrawal reservation).
+        uint256 healthFactorBefore = _pullAndRequire(safe, fromAsset, fromAssetAmount);
 
         uint256 balBefore;
         if (toAsset == ETH) balBefore = address(safe).balance;
@@ -182,6 +187,11 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance {
 
         uint256 receivedAmt = balAfter - balBefore;
         if (receivedAmt < minToAssetAmount) revert OutputLessThanMinAmount();
+
+        // Re-supply the output as collateral when the gateway lists it; an unlisted output (or ETH) stays loose.
+        _resupplyToGateway(safe, toAsset, receivedAmt);
+
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit SwapOnOpenOcean(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, receivedAmt);
     }

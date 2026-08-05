@@ -41,7 +41,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
         uint256 recoveryDelayPeriod;
         /// @notice Default modules
         EnumerableSetLib.AddressSet defaultModules;
-        /// @notice Address of the refund wallet 
+        /// @notice Address of the refund wallet
         address refundWallet;
     }
 

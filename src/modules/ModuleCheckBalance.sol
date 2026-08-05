@@ -3,9 +3,9 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
+import { ICashModule } from "../interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
-import { ICashModule } from "../interfaces/ICashModule.sol";
 import { SignatureUtils } from "../libraries/SignatureUtils.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -37,9 +37,9 @@ abstract contract ModuleCheckBalance is Constants {
         uint256 balance;
         if (asset == ETH) balance = safe.balance;
         else balance = IERC20(asset).balanceOf(safe);
-        
+
         if (pendingWithdrawalAmount > balance) return 0;
-        
+
         return balance - pendingWithdrawalAmount;
     }
 

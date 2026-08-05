@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+
 import { Mode, BinSponsor, Cashback } from "../../../../src/interfaces/ICashModule.sol";
 import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
@@ -119,6 +121,60 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount);
     }
 
+    /// @dev An empty request withdraws nothing, yet it cancelled any live request (and its
+    ///      in-flight bridge) and stored a request with a finalizeTime that every other function reads as
+    ///      non-existent — cancelWithdrawal and processWithdrawal all key existence off tokens.length.
+    function test_requestWithdrawal_fails_forEmptyTokenList() public {
+        // A live request first, to prove the rejected call cannot destroy it
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdc), address(safe), withdrawalAmount);
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        address[] memory noTokens = new address[](0);
+        uint256[] memory noAmounts = new uint256[](0);
+        (address[] memory signers, bytes[] memory signatures) = _signWithdrawal(noTokens, noAmounts, withdrawRecipient);
+
+        vm.expectRevert(ICashModule.InvalidInput.selector);
+        cashModule.requestWithdrawal(address(safe), noTokens, noAmounts, withdrawRecipient, signers, signatures);
+
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), withdrawalAmount, "live request survived");
+    }
+
+    /// @dev An all-zero request is an empty request wearing a token list — it withdraws nothing
+    ///      while still cancelling the previous one. Partially-zero requests stay legal (see
+    ///      test_processWithdrawals_compactsMixedZeroAmounts): the process path skips those entries by design.
+    function test_requestWithdrawal_fails_whenEveryAmountIsZero() public {
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
+        uint256[] memory amounts = new uint256[](2); // both zero
+
+        (address[] memory signers, bytes[] memory signatures) = _signWithdrawal(tokens, amounts, withdrawRecipient);
+
+        vm.expectRevert(ICashModule.AmountZero.selector);
+        cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, signers, signatures);
+    }
+
+    /// @dev Signs an owner-quorum withdrawal request without submitting it, for the rejection cases above.
+    function _signWithdrawal(address[] memory tokens, uint256[] memory amounts, address recipient) internal view returns (address[] memory signers, bytes[] memory signatures) {
+        bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, recipient))).toEthSignedMessageHash();
+
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+
+        signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+    }
+
     function test_requestWithdrawal_fails_forUnsupportedAsset() public {
         uint256 withdrawalAmount = 50e6;
 
@@ -182,6 +238,53 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0);
     }
 
+    /// A zero-amount leg must not issue a zero-value ERC-20 transfer, and the request still clears fully.
+    /// @dev A request whose legs are ALL zero is rejected upstream now (audit I-08, see
+    ///      test_requestWithdrawal_fails_whenEveryAmountIsZero), so the zero leg is paired with a real one.
+    function test_processWithdrawals_skipsZeroAmount() external {
+        uint256 weETHAmount = 1 ether;
+        deal(address(weETH), address(safe), weETHAmount);
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[1] = weETHAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (withdrawRecipient, 0)), 0);
+        cashModule.processWithdrawal(address(safe));
+
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0, "request cleared");
+    }
+
+    /// A mixed withdrawal must compact zero amounts without misaligning the remaining transfers.
+    function test_processWithdrawals_compactsMixedZeroAmounts() external {
+        uint256 weETHAmount = 1 ether;
+        deal(address(weETH), address(safe), weETHAmount);
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(usdc);
+        tokens[1] = address(weETH);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[1] = weETHAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+
+        vm.expectCall(address(usdc), abi.encodeCall(IERC20.transfer, (withdrawRecipient, 0)), 0);
+        vm.expectCall(address(weETH), abi.encodeCall(IERC20.transfer, (withdrawRecipient, weETHAmount)), 1);
+        cashModule.processWithdrawal(address(safe));
+
+        assertEq(weETH.balanceOf(withdrawRecipient), weETHAmount);
+    }
+
     function test_processWithdrawals_fails_whenAssetIsNotWhitelistedWithdrawAsset() external {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdc), address(safe), withdrawalAmount);
@@ -210,7 +313,9 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.processWithdrawal(address(safe));
     }
 
+    /// @notice A non-migrated safe borrows from the DebtManager, so withdrawing its backing collateral reverts as unhealthy.
     function test_processWithdrawals_fails_ifPositionUnhealthyAfterWithdrawal() external {
+        _forceLegacyEngine(address(safe));
         uint256 totalSafeBalance = 100e6;
         deal(address(usdc), address(safe), totalSafeBalance);
         deal(address(weETH), address(safe), 0);
@@ -274,7 +379,9 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.processWithdrawal(address(safe));
     }
 
+    /// @notice Reserving all collateral for withdrawal while DebtManager debt is open makes the request unhealthy.
     function test_requestWithdrawal_fails_whenAccountBecomesUnhealthy() external {
+        _forceLegacyEngine(address(safe));
         address[] memory tokens = new address[](2);
         tokens[0] = address(usdc);
         tokens[1] = address(weETH);

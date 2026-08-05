@@ -12,6 +12,9 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
     function setUp() public override {
         super.setUp();
 
+        // This suite tests the legacy DebtManager engine (new safes default to the Aave gateway)
+        _forceLegacyEngine(address(safe));
+
         vm.prank(owner);
         cashModule.setDelays(60, 3600, 0); // set credit mode delay to 0
 
@@ -34,6 +37,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
     }
 
+    /// Repaying the full debt through the CashModule clears it and emits RepayDebtManager.
     function test_repay_works() public {
         uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
         assertGt(debtAmtBefore, 0);
@@ -50,6 +54,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         assertEq(debtAmtBefore - debtAmtAfter, repayAmt);
     }
 
+     /// A partial repay reduces the debt by the repaid amount and leaves the rest outstanding.
      function test_repay_partial_amount_works() public {
         uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
         assertGt(debtAmtBefore, 0);
@@ -69,6 +74,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         assertApproxEqAbs(debtAmtAfter, repayAmt, 1); // Half of the debt remains
     }
 
+    /// Repaying more than the debt only pulls the debt amount and leaves the excess in the safe.
     function test_repay_more_than_debt_only_repays_debt() public {
         uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
         assertGt(debtAmtBefore, 0);
@@ -90,13 +96,15 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         assertApproxEqAbs(remainingBalance, repayAmt - debtAmtBefore, 1);
     }
 
-    function test_repay_faile_whenAmountIsZero() public {
+    /// A zero repay amount reverts.
+    function test_repay_fails_whenAmountIsZero() public {
         vm.startPrank(address(safe));
         vm.expectRevert(IDebtManager.RepaymentAmountIsZero.selector);
         debtManager.repay(address(safe), address(usdc), 0);
         vm.stopPrank();
     }
 
+    /// A third party can repay a safe's debt directly on the DebtManager.
     function test_repay_by_third_party_works() public {
         address thirdParty = makeAddr("thirdParty");
         uint256 debtAmtBefore = debtManager.borrowingOf(address(safe), address(usdc));
@@ -115,6 +123,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         assertEq(debtAmtAfter, 0);
     }
 
+    /// Repaying frees the safe's borrowing capacity by the repaid amount.
     function test_repay_affects_borrowingCapacity() public {
         uint256 capacityBefore = debtManager.remainingBorrowingCapacityInUSD(address(safe));
         
@@ -130,6 +139,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         assertApproxEqAbs(capacityAfter, capacityBefore + debtAmtBefore, 1);
     }
 
+    /// Repaying reduces the DebtManager's tracked total borrowing amounts.
     function test_repay_updates_totalBorrowingAmounts() public {
         (IDebtManager.TokenData[] memory beforeTokenData, uint256 beforeTotalAmount) = debtManager.totalBorrowingAmounts();
         
@@ -162,6 +172,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         }
     }
 
+    /// Repaying for a non-EtherFi safe reverts.
     function test_repay_fails_nonEtherFiSafe() public {
         uint256 debtAmt = debtManager.borrowingOf(address(safe), address(usdc));
         deal(address(usdc), address(this), debtAmt);
@@ -170,12 +181,14 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         debtManager.repay(makeAddr("notSafe"), address(usdc), debtAmt);
     }
 
+    /// Repaying a token that is not a borrow token reverts.
     function test_repay_fails_withNonBorrowToken() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(ICashModule.OnlyBorrowToken.selector);
         cashModule.repay(address(safe), address(weETH), 1 ether);
     }
 
+    /// Repaying after time passes clears the debt plus its accrued interest.
     function test_repay_incursInterest() public {
         uint256 timeElapsed = 10;
 
@@ -193,6 +206,7 @@ contract DebtManagerRepayTest is CashModuleTestSetup {
         assertApproxEqAbs(debtAmtBefore - debtAmtAfter, repayAmt, 1);
     }
 
+    /// Repaying with insufficient safe balance reverts.
     function test_repay_fails_whenBalanceIsInsufficient() public {
         deal(address(usdc), address(safe), 0);
 

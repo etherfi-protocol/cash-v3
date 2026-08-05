@@ -33,6 +33,12 @@ library CashVerificationLib {
     /// @notice Method identifier for cashback split changes for a safe
     bytes32 public constant SET_CASHBACK_SPLIT_TO_SAFE_PERCENTAGE = keccak256("setCashbackSplitToSafePercentage");
 
+    /// @notice Method identifier for toggling lend participation (opt in/out of Aave)
+    bytes32 public constant TOGGLE_LEND_METHOD = keccak256("toggleLend");
+
+    /// @notice Method identifier for borrowing against the safe's lend-market position
+    bytes32 public constant BORROW_METHOD = keccak256("borrow");
+
     /// @notice Error for Invalid Owner quorum signatures
     error InvalidSignatures();
 
@@ -123,5 +129,37 @@ library CashVerificationLib {
      */
     function verifySetCashbackSplitToSafePercentage(address safe, address signer, uint256 nonce, uint256 split, bytes calldata signature) internal view {
         verifySignature(safe, signer, SET_CASHBACK_SPLIT_TO_SAFE_PERCENTAGE, nonce, abi.encode(split), signature);
+    }
+
+    /**
+     * @notice Verifies a signature for toggling lend participation (opt in/out of the Aave market)
+     * @dev Creates and validates an EIP-191 signed message hash. The requested `enable` flag is bound into
+     *      the digest, so an opt-in authorization cannot be replayed as an opt-out (or vice versa).
+     * @param safe Address of the safe
+     * @param signer Address of the signer to verify against
+     * @param nonce Transaction nonce for replay protection
+     * @param enable True to enable lend, false to request opting out
+     * @param signature ECDSA signature bytes
+     * @custom:throws SignatureUtils.InvalidSigner if the signature is invalid
+     */
+    function verifyToggleLendSig(address safe, address signer, uint256 nonce, bool enable, bytes calldata signature) internal view {
+        verifySignature(safe, signer, TOGGLE_LEND_METHOD, nonce, abi.encode(enable), signature);
+    }
+
+    /**
+     * @notice Verifies the owner quorum authorizing a borrow against the safe's lend-market position
+     * @dev The signatures bind the borrow token and USD amount, so neither a compromised backend nor a single
+     *      compromised admin can lever a safe up: only a borrow the owner quorum signed can execute
+     * @param safe Address of the safe
+     * @param nonce Transaction nonce for replay protection
+     * @param token Address of the token to borrow
+     * @param amountInUsd USD amount to borrow
+     * @param signers Address of the signers
+     * @param signatures ECDSA signatures by signers
+     * @custom:throws InvalidSignatures if the signatures do not meet the owner quorum
+     */
+    function verifyBorrowSig(address safe, uint256 nonce, address token, uint256 amountInUsd, address[] calldata signers, bytes[] calldata signatures) internal view {
+        bytes32 digestHash = keccak256(abi.encodePacked(BORROW_METHOD, block.chainid, safe, nonce, abi.encode(token, amountInUsd))).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
     }
 }

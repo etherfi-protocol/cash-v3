@@ -9,7 +9,7 @@ import { RecoveryMessageLib } from "../../src/libraries/RecoveryMessageLib.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { AssetRecoveryDispatcher, ITopUpFactoryDeployer } from "../../src/top-up/AssetRecoveryDispatcher.sol";
 import { TopUpV2 } from "../../src/top-up/TopUpV2.sol";
-import { ITopUpFactoryView } from "../../src/top-up/TopUpV2.sol";
+import { ITopUpFactory } from "../../src/interfaces/ITopUpFactory.sol";
 import { LZEndpointMock } from "../mocks/LZEndpointMock.sol";
 import { RoleRegistryMock } from "../mocks/RoleRegistryMock.sol";
 
@@ -91,7 +91,7 @@ contract AssetRecoveryDispatcherTest is Test {
 
         // Direct-deployed impl pins owner() to 0xdEaD; stub isTokenSupported so the
         // unsupported-token check inside executeRecovery passes.
-        vm.mockCall(topup.owner(), abi.encodeWithSelector(ITopUpFactoryView.isTokenSupported.selector, address(token)), abi.encode(false));
+        vm.mockCall(topup.owner(), abi.encodeWithSelector(ITopUpFactory.isTokenSupported.selector, address(token)), abi.encode(false));
 
         address recipient = makeAddr("recipient");
         bytes memory message = RecoveryMessageLib.encode(_payload(address(topup), address(token), recipient, SALT));
@@ -130,7 +130,7 @@ contract AssetRecoveryDispatcherTest is Test {
         bytes32 OWNER_SLOT = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffff74873927;
         vm.store(predictedSafe, OWNER_SLOT, bytes32(uint256(uint160(address(0xdEaD)))));
 
-        vm.mockCall(address(0xdEaD), abi.encodeWithSelector(ITopUpFactoryView.isTokenSupported.selector, address(token)), abi.encode(false));
+        vm.mockCall(address(0xdEaD), abi.encodeWithSelector(ITopUpFactory.isTokenSupported.selector, address(token)), abi.encode(false));
 
         address recipient = makeAddr("recipient");
         bytes memory message = RecoveryMessageLib.encode(_payload(predictedSafe, address(token), recipient, SALT));

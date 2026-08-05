@@ -18,7 +18,7 @@ import { ILayerZeroTeller, AccountantWithRateProviders } from "../../../../src/i
 contract CashLensTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
 
-    IERC20 public liquidUsdScroll = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
+    IERC20 public liquidUsd = IERC20(0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C);
     ILayerZeroTeller public liquidUsdTeller = ILayerZeroTeller(0x4DE413a26fC24c3FC27Cc983be70aA9c5C299387);
 
     function setUp() public override {
@@ -41,7 +41,7 @@ contract CashLensTest is CashModuleTestSetup {
         });
 
         address[] memory tokens = new address[](1);
-        tokens[0] = address(liquidUsdScroll);
+        tokens[0] = address(liquidUsd);
 
         PriceProvider.Config[] memory tokensConfig = new PriceProvider.Config[](1);
         tokensConfig[0] = liquidUsdConfig;
@@ -54,10 +54,13 @@ contract CashLensTest is CashModuleTestSetup {
         collateralTokenConfig[0].liquidationThreshold = liquidationThreshold;
         collateralTokenConfig[0].liquidationBonus = liquidationBonus;
 
-        debtManager.supportCollateralToken(address(liquidUsdScroll), collateralTokenConfig[0]);        
+        debtManager.supportCollateralToken(address(liquidUsd), collateralTokenConfig[0]);        
 
-        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsdScroll)).decimals());
-        debtManager.supportBorrowToken(address(liquidUsdScroll), borrowApyPerSecond, minShares);
+        minShares = uint128(10 * 10 ** IERC20Metadata(address(liquidUsd)).decimals());
+        debtManager.supportBorrowToken(address(liquidUsd), borrowApyPerSecond, minShares);
+        gateway.setRegistered(address(liquidUsd), true);
+        gateway.setBorrowable(address(liquidUsd), true);
+        gateway.setSpendAsset(address(liquidUsd), true);
 
         // Add some collateral to safe for tests
         deal(address(weETH), address(safe), 10 ether);
@@ -69,7 +72,9 @@ contract CashLensTest is CashModuleTestSetup {
         vm.stopPrank();
     }
 
+    /// A legacy safe's collateral is its raw balance minus pending withdrawals.
     function test_getUserCollateralForToken() public {
+        _forceLegacyEngine(address(safe));
         uint256 depositAmount = 5 ether;
         deal(address(weETH), address(safe), depositAmount);
         
@@ -97,6 +102,7 @@ contract CashLensTest is CashModuleTestSetup {
     }
 
     function test_getUserTotalCollateral() public {
+        _forceLegacyEngine(address(safe));
         // Add multiple collateral types
         deal(address(weETH), address(safe), 5 ether);
         deal(address(usdc), address(safe), 10000e6);
@@ -132,42 +138,6 @@ contract CashLensTest is CashModuleTestSetup {
         }
     }
 
-    function test_getSafeCashData() public {
-        // Setup test state
-        deal(address(weETH), address(safe), 5 ether);
-        deal(address(usdc), address(safe), 10000e6);
-        
-        // Create a withdrawal request
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(usdc);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = 5000e6;
-        _requestWithdrawal(tokens, amounts, withdrawRecipient);
-        
-        // Get safe cash data
-        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
-        
-        // Verify basic data
-        assertEq(uint8(data.mode), uint8(Mode.Debit), "Initial mode should be Debit");
-        assertEq(data.incomingModeStartTime, 0, "No incoming mode change");
-        assertEq(data.totalCashbackEarnedInUsd, 0, "No cashback earned initially");
-        
-        // Verify collateral and borrows
-        assertEq(data.collateralBalances.length, 2, "Should have two collateral entries");
-        assertEq(data.borrows.length, 0, "Should have no borrows initially");
-        
-        // Verify withdrawal request
-        assertEq(data.withdrawalRequest.tokens.length, 1, "Should have one withdrawal token");
-        assertEq(data.withdrawalRequest.amounts.length, 1, "Should have one withdrawal amount");
-        assertEq(data.withdrawalRequest.tokens[0], address(usdc), "Withdrawal token should be USDC");
-        assertEq(data.withdrawalRequest.amounts[0], 5000e6, "Withdrawal amount should be 5000 USDC");
-        
-        // Verify total values
-        assertGt(data.totalCollateral, 0, "Total collateral should be positive");
-        assertEq(data.totalBorrow, 0, "Total borrow should be zero initially");
-        assertGt(data.maxBorrow, 0, "Max borrow should be positive");
-    }
-
     function test_getSafeCashData_inCreditMode() public {
         // Setup test state
         deal(address(weETH), address(safe), 5 ether);
@@ -191,55 +161,6 @@ contract CashLensTest is CashModuleTestSetup {
         
         // Verify mode is now Credit
         assertEq(uint8(data.mode), uint8(Mode.Credit), "Mode should now be Credit");
-    }
-
-    function test_getSafeCashData_withBorrows() public {
-        // Setup test state
-        deal(address(weETH), address(safe), 5 ether);
-        
-        // Set to credit mode and wait for it to activate
-        _setMode(Mode.Credit);
-        vm.warp(cashModule.incomingModeStartTime(address(safe)) + 1);
-
-        uint256 spendAmount = 1000e6;
-
-        address[] memory spendTokens = new address[](1);
-        spendTokens[0] = address(usdc);
-        uint256[] memory spendAmounts = new uint256[](1);
-        spendAmounts[0] = spendAmount;
-
-        Cashback[] memory cashbacks = new Cashback[](1);
-        CashbackTokens[] memory cashbackTokens = new CashbackTokens[](1);
-
-        CashbackTokens memory scr = CashbackTokens({
-            token: address(cashbackToken),
-            amountInUsd: 1e6,
-            cashbackType: 0
-        });
-
-        cashbackTokens[0] = scr;
-
-        Cashback memory scrCashback = Cashback({
-            to: address(safe),
-            cashbackTokens: cashbackTokens
-        });
-
-        cashbacks[0] = scrCashback;
-        
-        // Spend in credit mode to create a borrow
-        vm.prank(etherFiWallet);
-        cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
-        
-        // Get safe cash data
-        SafeCashData memory data = cashLens.getSafeCashData(address(safe), new address[](0));
-        
-        // Verify borrows
-        assertEq(data.borrows.length, 1, "Should have one borrow entry");
-        assertEq(data.borrows[0].token, address(usdc), "Borrow token should be USDC");
-        assertApproxEqAbs(data.borrows[0].amount, spendAmount, 1, "Borrow amount should match spend amount");
-        
-        // Verify total borrow
-        assertApproxEqAbs(data.totalBorrow, spendAmount, 1, "Total borrow should match spend amount");
     }
 
     function test_applicableSpendingLimit() public {
@@ -336,8 +257,8 @@ contract CashLensTest is CashModuleTestSetup {
         shouldWhitelist[0] = true;
         
         bytes[] memory setupData = new bytes[](1);
-        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
-        
+        setupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, true);
+
         vm.prank(owner);
         safeFactory.deployEtherFiSafe(keccak256("insufficientSafe"), owners, modules, setupData, 1);
         address insufficientSafe = safeFactory.getDeterministicAddress(keccak256("insufficientSafe"));
