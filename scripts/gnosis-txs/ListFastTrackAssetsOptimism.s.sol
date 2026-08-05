@@ -104,8 +104,8 @@ contract ListFastTrackAssetsOptimism is Utils, GnosisHelpers, Test {
     string constant PAXG_SYMBOL = "iPAXG";
     uint8 constant SHADOW_DECIMALS = 18;
 
-    /// @dev Matched pairwise with the Ethereum-side adapter limits.
-    uint256 constant WSPYX_RATE_LIMIT_TOKENS = 1000;
+    /// @dev Matched pairwise with the Ethereum-side adapter limits; ~$1.5M/hr per asset.
+    uint256 constant WSPYX_RATE_LIMIT_TOKENS = 2000;
     uint256 constant PAXG_RATE_LIMIT_TOKENS = 300;
     uint256 constant RATE_WINDOW = 1 hours;
 
