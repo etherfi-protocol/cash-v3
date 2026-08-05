@@ -1,8 +1,58 @@
-# Cash Lend dev deployment scripts
+# Cash Lend deployment scripts
 
-Dev-only scripts that upgrade the existing Optimism dev Cash deployment in place and route
+Dev scripts upgrade the existing Optimism dev Cash deployment in place and route
 it through the Aave v4 test instance via the LendGateway. The CLI sender must be the dev
 admin (the Cash RoleRegistry owner, who is also the Aave test-instance admin).
+
+## Prod (Gnosis bundle)
+
+`DeployCashLendProd.s.sol` is the prod counterpart. The deployer EOA broadcasts only
+unprivileged CREATE3 deployments (implementations, replacement modules, the atomically
+initialized LendGateway proxy); every privileged call lands in
+`output/CashLendProd-10.json` for the prod Safe (`0xA6cf...AAC4`) to execute via the
+Gnosis tx builder. The script simulates the full bundle on the fork and asserts the end
+state before anything is signed. Module policy (default / whitelisted / withdraw
+requester) is mirrored from the live chain per module, and the bundle also carries the
+Enso/Across module upgrades (trading-account.json), the safe-beacon RecoveryManager fix,
+and the liquifier implementation upgrade.
+
+Prerequisite: create `deployments/mainnet/10/summer-lend.json` with `.spoke` set to the
+live Summer Lend Spoke from the AIP payload. If our Safe does not hold the Spoke admin
+role, add `"skipPositionManagerTx": true` and have the Spoke admin (or the AIP payload)
+call `updatePositionManager(<CREATE3 gateway address>, true)` instead — the gateway
+address is deterministic, so it can be activated before the bundle executes.
+
+```sh
+# 1. EOA deployments + bundle generation + fork simulation (drop --broadcast to rehearse)
+source .env && ENV=mainnet forge script scripts/lend/DeployCashLendProd.s.sol:DeployCashLendProd \
+  --rpc-url $OPTIMISM_RPC --ledger --sender $PROD_DEPLOYER \
+  --broadcast --verify --etherscan-api-key $ETHERSCAN_KEY -vvvv
+
+# 2. Bytecode verification (any time after the EOA broadcast; read-only). The address checks in
+#    VerifyCashLendProd prove WHO deployed (CREATE3 addresses derive from salts, not initcode);
+#    this proves WHAT was deployed: every contract is redeployed locally from current source with
+#    the same chain-mirrored constructor args and must match on-chain byte-for-byte (immutable
+#    self-addresses and linked-library addresses are matched as consistent bindings, and the
+#    linked libraries themselves are verified recursively).
+source .env && ENV=mainnet forge script scripts/lend/VerifyCashLendProdBytecode.s.sol:VerifyCashLendProdBytecode \
+  --rpc-url $OPTIMISM_RPC -vv
+
+# 3. Safe signs & executes output/CashLendProd-10.json (Gnosis tx builder)
+
+# 4. After execution, verify the live chain (all checks are requires). Runs BEFORE Safe execution
+#    too: if the bundle's effects are not yet on-chain, it simulates output/CashLendProd-10.json
+#    on the fork first and checks the simulated end state.
+source .env && ENV=mainnet forge script scripts/lend/VerifyCashLendProd.s.sol:VerifyCashLendProd \
+  --rpc-url $OPTIMISM_RPC -vvvv
+```
+
+The verify script recomputes every expected address from the CREATE3 salts
+(`keccak256("CashLendProd.<Name>")`), so it detects a swapped-in implementation at an
+unexpected address, not just a missing one. Old modules stay enabled for gradual
+migration — run `check-pending-withdrawals.sh` before any later retirement pass, exactly
+as on dev.
+
+## Dev
 
 ## Run order
 
