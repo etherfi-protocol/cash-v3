@@ -11,26 +11,28 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
 /**
- * @notice Generates the OP 3CP JSON that retires the seven pre-lend modules 3CP-614 replaced
- *         ("old modules stay enabled for gradual migration"). Single tx from the OperatingSafe:
+ * @notice Generates the OP 3CP JSON that retires the eight superseded modules: the seven
+ *         pre-lend modules 3CP-614 replaced ("old modules stay enabled for gradual migration")
+ *         plus SafeAssetRecoveryModule v1, superseded by v2 in 3CP-617. Single tx from the
+ *         OperatingSafe:
  *
- *           EtherFiDataProvider.configureModules([7 old modules], [false x 7])
+ *           EtherFiDataProvider.configureModules([8 old modules], [false x 8])
  *
  *         configureModules(false) removes each module from BOTH the whitelist and the default
  *         set, so EtherFiSafe.isModuleEnabled(old) turns false on every safe in one call.
  *
- *         Old addresses are pinned as constants (deployments.json already points at the lend
+ *         Old addresses are pinned as constants (deployments.json already points at the
  *         replacements, so they cannot be read from the file) and cross-checked at run time
  *         against the pre-lend deployment record in git (commit 65640df~1).
  *
- *         DELIBERATELY EXCLUDED: SafeAssetRecoveryModule v1 (0x0AD7FDf0…A6F2) — cash-be's live
- *         recovery flow still reads its configured module address, which points at v1. Retire it
- *         in a separate 3CP once cash-be's chain registry switches to v2.
- *
- *         PREFLIGHT (must pass before signing): scripts/lend/check-pending-withdrawals.sh —
- *         a pending Cash withdrawal paying out to the old liquid / liquidReferrer / frax module
- *         would be stranded by retirement. NOTE: the script reads addresses from the CURRENT
- *         deployments json (now the new modules); scan for the old addresses below instead.
+ *         EXECUTION-ORDER REQUIREMENTS (must hold before signing):
+ *         1. cash-be's chain registry must point safeAssetRecoveryModule at v2 and be deployed —
+ *            its live recovery flow still uses the configured address; retiring v1 first breaks
+ *            prod same-chain recovery.
+ *         2. scripts/lend/check-pending-withdrawals.sh — a pending Cash withdrawal paying out to
+ *            the old liquid / liquidReferrer / frax module would be stranded by retirement.
+ *            NOTE: the script reads addresses from the CURRENT deployments json (now the new
+ *            modules); scan for the old addresses below instead.
  *
  * Usage:
  *   forge script scripts/gnosis-txs/RemoveOldLendModulesOP3CP.s.sol --rpc-url $OPTIMISM_RPC
@@ -46,8 +48,6 @@ contract RemoveOldLendModulesOP3CP is GnosisHelpers, Utils, Test {
     address constant OLD_STAKE           = 0xD908117461378323C68257d522DC2De5D7890A1B;
     address constant OLD_MIDAS           = 0x2D43400058cE6810916Fd312FB38a7DcdF9708aa;
     address constant OLD_BEHYPE_STAKE    = 0xd12efd5067DE109F9D00e1A31a34991d58DbB9F3;
-
-    // Still-live modules that must remain untouched (sanity guard on the post-state)
     address constant SAFE_ASSET_RECOVERY_V1 = 0x0AD7FDf0ED3BF0943753047B7C8F0922c624A6F2;
 
     function run() public {
@@ -61,20 +61,20 @@ contract RemoveOldLendModulesOP3CP is GnosisHelpers, Utils, Test {
         require(address(dp) != address(0), "EtherFiDataProvider not found");
         require(roleRegistry != address(0), "RoleRegistry not found");
 
-        (address[] memory oldModules, string[7] memory names) = _oldModules();
+        (address[] memory oldModules, string[8] memory names) = _oldModules();
 
-        // The new replacements now live under the same deployments.json keys; every one must be
+        // The replacements now live under the same deployments.json keys; every one must be
         // whitelisted AND distinct from the module it replaced, or we're reading a stale file.
-        string[7] memory newKeys = ["OpenOceanSwapModule", "EtherFiLiquidModule", "EtherFiLiquidModuleWithReferrer", "FraxModule", "EtherFiStakeModule", "MidasModule", "BeHYPEStakeModule"];
-        address[] memory newModules = new address[](7);
-        for (uint256 i = 0; i < 7; i++) {
+        string[8] memory newKeys = ["OpenOceanSwapModule", "EtherFiLiquidModule", "EtherFiLiquidModuleWithReferrer", "FraxModule", "EtherFiStakeModule", "MidasModule", "BeHYPEStakeModule", "SafeAssetRecoveryModule"];
+        address[] memory newModules = new address[](8);
+        for (uint256 i = 0; i < 8; i++) {
             newModules[i] = stdJson.readAddress(deployments, string.concat(".addresses.", newKeys[i]));
-            require(newModules[i] != address(0) && newModules[i] != oldModules[i], "deployments.json still pre-lend");
-            require(dp.isWhitelistedModule(newModules[i]), "replacement module not whitelisted - lend upgrade incomplete");
+            require(newModules[i] != address(0) && newModules[i] != oldModules[i], "deployments.json still pre-upgrade");
+            require(dp.isWhitelistedModule(newModules[i]), "replacement module not whitelisted - upgrade incomplete");
             require(dp.isWhitelistedModule(oldModules[i]), "old module already removed?");
         }
 
-        bool[] memory flags = new bool[](7);
+        bool[] memory flags = new bool[](8);
         // flags default to false — explicit loop omitted; configureModules(false) removes from
         // whitelist AND default set.
 
@@ -90,14 +90,13 @@ contract RemoveOldLendModulesOP3CP is GnosisHelpers, Utils, Test {
         address ownerBefore = IRoleRegistry(roleRegistry).owner();
         executeGnosisTransactionBundle(path);
 
-        for (uint256 i = 0; i < 7; i++) {
+        for (uint256 i = 0; i < 8; i++) {
             require(!dp.isWhitelistedModule(oldModules[i]), "SIM FAILED: old module still whitelisted");
             require(!dp.isDefaultModule(oldModules[i]), "SIM FAILED: old module still default");
             require(dp.isWhitelistedModule(newModules[i]), "SIM FAILED: replacement lost whitelist");
             console.log("  removed %s: %s", names[i], oldModules[i]);
         }
-        // Collateral damage guards: everything else stays live.
-        require(dp.isWhitelistedModule(SAFE_ASSET_RECOVERY_V1), "SIM FAILED: recovery v1 must NOT be touched here");
+        // Collateral damage guard: the gateway stays live.
         if (lendGateway != address(0)) {
             require(dp.isDefaultModule(lendGateway), "SIM FAILED: LendGateway lost default status");
         }
@@ -106,8 +105,8 @@ contract RemoveOldLendModulesOP3CP is GnosisHelpers, Utils, Test {
         console.log("Simulation passed");
     }
 
-    function _oldModules() internal pure returns (address[] memory oldModules, string[7] memory names) {
-        oldModules = new address[](7);
+    function _oldModules() internal pure returns (address[] memory oldModules, string[8] memory names) {
+        oldModules = new address[](8);
         oldModules[0] = OLD_OPEN_OCEAN;
         oldModules[1] = OLD_LIQUID;
         oldModules[2] = OLD_LIQUID_REFERRER;
@@ -115,6 +114,7 @@ contract RemoveOldLendModulesOP3CP is GnosisHelpers, Utils, Test {
         oldModules[4] = OLD_STAKE;
         oldModules[5] = OLD_MIDAS;
         oldModules[6] = OLD_BEHYPE_STAKE;
-        names = ["OpenOceanSwapModule", "EtherFiLiquidModule", "EtherFiLiquidModuleWithReferrer", "FraxModule", "EtherFiStakeModule", "MidasModule", "BeHYPEStakeModule"];
+        oldModules[7] = SAFE_ASSET_RECOVERY_V1;
+        names = ["OpenOceanSwapModule", "EtherFiLiquidModule", "EtherFiLiquidModuleWithReferrer", "FraxModule", "EtherFiStakeModule", "MidasModule", "BeHYPEStakeModule", "SafeAssetRecoveryModule v1"];
     }
 }
