@@ -10,12 +10,24 @@ import { MessagingFee } from "../../../../src/interfaces/IOFT.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.sol";
 import { FraxModule } from "../../../../src/modules/frax/FraxModule.sol";
-import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 import { ChainConfig } from "../../../utils/Utils.sol";
+import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 
 interface IFraxCustodian {
     function maxDeposit(address recipient) external view returns (uint256);
     function mintCap() external view returns (uint256);
+}
+
+contract MockFraxRemoteHop {
+    uint256 private constant NATIVE_FEE = 0.001 ether;
+
+    function quote(address, uint32, bytes32, uint256) external pure returns (MessagingFee memory) {
+        return MessagingFee({ nativeFee: NATIVE_FEE, lzTokenFee: 0 });
+    }
+
+    function sendOFT(address oft, uint32, bytes32, uint256 amount) external payable {
+        require(IERC20(oft).transferFrom(msg.sender, address(this), amount));
+    }
 }
 
 contract FraxModuleTest is SafeTestSetup {
@@ -141,6 +153,7 @@ contract FraxModuleTest is SafeTestSetup {
     }
 
     function test_requestAsyncWithdrawAndExecuteAsyncWithdraw_success() public {
+        _mockRemoteHop();
         vm.prank(owner);
 
         uint256 amountToWithdraw = 1 * 10 ** 18;
@@ -205,6 +218,7 @@ contract FraxModuleTest is SafeTestSetup {
     }
 
     function test_requestAsyncWithdrawal_executesAsyncWithdrawal_whenTheWithdrawDelayIsZero() public {
+        _mockRemoteHop();
         // make withdraw delay 0
         vm.prank(owner);
         cashModule.setDelays(0, 0, 0);
@@ -237,6 +251,11 @@ contract FraxModuleTest is SafeTestSetup {
 
         uint256 liquidAssetBalAfter = fraxusd.balanceOf(address(safe));
         assertEq(liquidAssetBalAfter, liquidAssetBalBefore - amount);
+    }
+
+    function _mockRemoteHop() private {
+        MockFraxRemoteHop mock = new MockFraxRemoteHop();
+        vm.etch(remoteHop, address(mock).code);
     }
 
     //Revert cases
