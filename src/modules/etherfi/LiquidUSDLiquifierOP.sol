@@ -203,11 +203,12 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
 
     /**
      * @notice Withdraws funds from the contract
+     * @dev Only callable by the governance multisig (GOVERNANCE_ROLE)
      * @param token Address of the token to withdraw
      * @param recipient Address to receive the withdrawn funds
      * @param amount Amount of tokens to withdraw
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRoleRegistryOwner() {
+    function withdrawFunds(address token, address recipient, uint256 amount) external onlyGovernanceMultisig() {
         if (recipient == address(0)) revert InvalidValue();
         amount = _withdrawFunds(token, recipient, amount);
         emit FundsWithdrawn(token, amount, recipient);

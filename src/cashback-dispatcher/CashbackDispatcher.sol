@@ -333,7 +333,7 @@ contract CashbackDispatcher is UpgradeableProxy {
 
     /**
      * @notice Withdraws tokens or ETH from the contract
-     * @dev Only callable by the owner of the role registry
+     * @dev Only callable by the governance multisig (GOVERNANCE_ROLE)
      * @param token Address of the token to withdraw (address(0) for ETH)
      * @param recipient Address to receive the withdrawn funds
      * @param amount Amount to withdraw (0 to withdraw all)
@@ -341,7 +341,7 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @custom:throws CannotWithdrawZeroAmount When attempting to withdraw zero tokens or ETH
      * @custom:throws WithdrawFundsFailed When ETH transfer fails
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRoleRegistryOwner() {
+    function withdrawFunds(address token, address recipient, uint256 amount) external onlyGovernanceMultisig() {
         if (recipient == address(0)) revert InvalidValue();
 
         if (token == address(0)) {

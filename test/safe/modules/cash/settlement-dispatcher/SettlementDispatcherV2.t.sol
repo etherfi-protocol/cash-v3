@@ -151,11 +151,39 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_setRefundWallet_reverts_whenNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         v2.setRefundWallet(makeAddr("newWallet"));
     }
 
     // --- Frax config and redeem tests ---
+
+    function test_v2_governanceGate_roleHolderPasses_ownerNoLongerAccepted() public {
+        address governance = makeAddr("governance");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(keccak256("GOVERNANCE_ROLE"), governance);
+        roleRegistry.revokeRole(keccak256("GOVERNANCE_ROLE"), owner);
+        vm.stopPrank();
+
+        // GOVERNANCE_ROLE holder passes
+        address newWallet = makeAddr("govRefundWallet");
+        vm.prank(governance);
+        v2.setRefundWallet(newWallet);
+        assertEq(v2.getRefundWallet(), newWallet);
+
+        // roleRegistry owner without the role is no longer accepted
+        vm.prank(owner);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        v2.setRefundWallet(makeAddr("ownerRefundWallet"));
+
+        vm.prank(owner);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        v2.withdrawFunds(address(usdc), owner, 1);
+
+        // non-holder reverts
+        vm.prank(alice);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
+        v2.withdrawFunds(address(usdc), alice, 1);
+    }
 
     function test_v2_redeemFraxToUsdc_succeeds() public {
         MockERC20 fraxUsdToken = new MockERC20("Frax USD", "FRAX", 18);
@@ -605,7 +633,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockERC20 token = new MockERC20("USDC", "USDC", 6);
 
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyGovernanceMultisig.selector);
         _setRecipient(address(token), alice);
     }
 

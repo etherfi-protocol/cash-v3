@@ -138,13 +138,13 @@ contract TopUpDest is UpgradeableProxy {
 
     /**
      * @notice Withdraws tokens from the contract
-     * @dev Only callable by the upgrader role
+     * @dev Only callable by the governance multisig (GOVERNANCE_ROLE)
      * @param token Address of the token to withdraw
      * @param amount Amount of tokens to withdraw
      * @custom:throws AmountCannotBeZero if amount is zero
      * @custom:throws AmountGreaterThanDeposit if amount exceeds available deposit
      */
-    function withdraw(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner() {
+    function withdraw(address token, uint256 amount) external nonReentrant onlyGovernanceMultisig() {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
         if (amount == 0) revert AmountCannotBeZero();

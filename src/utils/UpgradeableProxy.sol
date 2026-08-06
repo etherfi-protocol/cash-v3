@@ -19,6 +19,9 @@ contract UpgradeableProxy is UUPSUpgradeable, PausableUpgradeable, ReentrancyGua
         IRoleRegistry roleRegistry;
     }
 
+    /// @notice Role identifier for the governance multisig, gating config and treasury functions
+    bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
+
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.UpgradeableProxy")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant UpgradeableProxyStorageLocation = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
 
@@ -27,6 +30,9 @@ contract UpgradeableProxy is UUPSUpgradeable, PausableUpgradeable, ReentrancyGua
 
     /// @notice Error thrown when caller is not the role registry owner
     error OnlyRoleRegistryOwner();
+
+    /// @notice Error thrown when caller does not hold the GOVERNANCE_ROLE
+    error OnlyGovernanceMultisig();
 
 
     /**
@@ -114,6 +120,14 @@ contract UpgradeableProxy is UUPSUpgradeable, PausableUpgradeable, ReentrancyGua
      */
     modifier onlyRoleRegistryOwner() {
         if (roleRegistry().owner() != msg.sender) revert OnlyRoleRegistryOwner();
+        _;
+    }
+
+    /**
+     * @dev Modifier to restrict access to holders of the GOVERNANCE_ROLE
+     */
+    modifier onlyGovernanceMultisig() {
+        if (!roleRegistry().hasRole(GOVERNANCE_ROLE, msg.sender)) revert OnlyGovernanceMultisig();
         _;
     }
 }
