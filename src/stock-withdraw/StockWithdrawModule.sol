@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { EnumerableMapLib } from "solady/utils/EnumerableMapLib.sol";
 
@@ -39,6 +40,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  */
 contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy, IBridgeModule {
     using MessageHashUtils for bytes32;
+    using Math for uint256;
     using SafeERC20 for IERC20;
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using EnumerableMapLib for EnumerableMapLib.Uint256ToAddressMap;
@@ -80,6 +82,11 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         EnumerableMapLib.Uint256ToAddressMap stockUnwrappers;
         /// @notice Executor gas limit for the destination lzCompose call.
         uint128 composeGasLimit;
+        /// @notice Provider (exit) fee in basis points, taken from the wrapped-stock amount
+        ///         at execute time. Capped at `MAX_PROVIDER_FEE_BPS`; zero disables the fee.
+        uint16 providerFeeBps;
+        /// @notice Recipient of the provider fee.
+        address feeReceiver;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockWithdrawModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -87,6 +94,11 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
 
     /// @notice Role allowed to configure supported tokens, destination and compose gas.
     bytes32 public constant STOCK_WITHDRAW_MODULE_ADMIN_ROLE = keccak256("STOCK_WITHDRAW_MODULE_ADMIN_ROLE");
+
+    /// @notice 100% in basis points.
+    uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
+    /// @notice Maximum provider fee (10%).
+    uint16 public constant MAX_PROVIDER_FEE_BPS = 1000;
 
     /// @dev Domain-separator-style prefixes for the digests the user signs.
     bytes32 private constant REQUEST_WITHDRAWAL_SIG = keccak256("StockWithdrawModule.requestWithdrawal");
@@ -109,10 +121,11 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
      * @param safe The safe that executed the withdrawal.
      * @param withdrawalId The ID of the withdrawal.
      * @param iToken The iToken that is being withdrawn.
-     * @param amount The amount of the iToken that is being withdrawn.
+     * @param amount The amount of the iToken that is being withdrawn (gross, incl. fee).
+     * @param providerFee The provider fee taken from `amount` (in iToken units).
      * @param recipient The recipient of the withdrawal.
      */
-    event WithdrawalExecuted(address indexed safe, bytes32 indexed withdrawalId, address iToken, uint256 amount, address recipient);
+    event WithdrawalExecuted(address indexed safe, bytes32 indexed withdrawalId, address iToken, uint256 amount, uint256 providerFee, address recipient);
 
     /**
      * @notice Emitted when a withdrawal is cancelled.
@@ -142,6 +155,15 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
      */
     event ComposeGasLimitSet(uint128 oldGasLimit, uint128 newGasLimit);
 
+    /**
+     * @notice Emitted when the provider fee config is set.
+     * @param oldFeeBps The old provider fee in basis points.
+     * @param newFeeBps The new provider fee in basis points.
+     * @param oldFeeReceiver The old fee receiver.
+     * @param newFeeReceiver The new fee receiver.
+     */
+    event ProviderFeeSet(uint16 oldFeeBps, uint16 newFeeBps, address oldFeeReceiver, address newFeeReceiver);
+
     /// @notice Reverts when a non-admin calls an admin function.
     error OnlyAdmin();
     /// @notice Reverts when the iToken is not on the supported list.
@@ -170,6 +192,8 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     error ZeroWithdrawalDelay();
     /// @notice Reverts when the order expires before the CashModule withdrawal delay elapses.
     error DeadlineBeforeWithdrawalDelay();
+    /// @notice Reverts when the provider fee exceeds `MAX_PROVIDER_FEE_BPS`.
+    error ProviderFeeTooHigh();
 
     /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's code —
     ///      every upgrade impl must be constructed with the same data provider.
@@ -178,29 +202,39 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         _disableInitializers();
     }
 
+    /// @notice Full module config passed to `initialize`, packed as a struct to stay under
+    ///         the legacy codegen stack limit.
+    /// @param roleRegistry Role registry (upgrade authority + pause control + admin role).
+    /// @param composeGasLimit Executor gas for the destination lzCompose call.
+    /// @param providerFeeBps Provider (exit) fee in basis points; zero disables the fee.
+    /// @param feeReceiver Recipient of the provider fee; may be zero only when the fee is zero.
+    /// @param iTokens Wrapped-stock ShadowOFTs to register.
+    /// @param supported Support flag per iToken; same length as `iTokens`.
+    /// @param dstEids Destination endpoint IDs to configure unwrappers for.
+    /// @param unwrappers StockUnwrapper per endpoint; same length as `dstEids`.
+    struct InitParams {
+        address roleRegistry;
+        uint128 composeGasLimit;
+        uint16 providerFeeBps;
+        address feeReceiver;
+        address[] iTokens;
+        bool[] supported;
+        uint32[] dstEids;
+        address[] unwrappers;
+    }
+
     /**
      * @notice Initialises the proxy with the full module config. Any of the config arrays may
      *         be empty and set later via the admin setters (requests revert `MissingConfig` /
      *         `TokenNotSupported` until the route they need is configured).
-     * @param _roleRegistry Role registry (upgrade authority + pause control + admin role).
-     * @param _composeGasLimit Executor gas for the destination lzCompose call.
-     * @param _iTokens Wrapped-stock ShadowOFTs to register.
-     * @param _supported Support flag per iToken; same length as `_iTokens`.
-     * @param _dstEids Destination endpoint IDs to configure unwrappers for.
-     * @param _unwrappers StockUnwrapper per endpoint; same length as `_dstEids`.
+     * @param params The full module config (see `InitParams`).
      */
-    function initialize(
-        address _roleRegistry,
-        uint128 _composeGasLimit,
-        address[] calldata _iTokens,
-        bool[] calldata _supported,
-        uint32[] calldata _dstEids,
-        address[] calldata _unwrappers
-    ) external initializer {
-        __UpgradeableProxy_init(_roleRegistry);
-        _setComposeGasLimit(_composeGasLimit);
-        if (_iTokens.length > 0) _configureTokens(_iTokens, _supported);
-        if (_dstEids.length > 0) _configureUnwrappers(_dstEids, _unwrappers);
+    function initialize(InitParams calldata params) external initializer {
+        __UpgradeableProxy_init(params.roleRegistry);
+        _setComposeGasLimit(params.composeGasLimit);
+        _setProviderFee(params.providerFeeBps, params.feeReceiver);
+        if (params.iTokens.length > 0) _configureTokens(params.iTokens, params.supported);
+        if (params.dstEids.length > 0) _configureUnwrappers(params.dstEids, params.unwrappers);
     }
 
     // ---- Admin config ----
@@ -244,6 +278,22 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     function setComposeGasLimit(uint128 _composeGasLimit) external {
         _onlyAdmin();
         _setComposeGasLimit(_composeGasLimit);
+    }
+
+    /**
+     * @notice Sets the provider (exit) fee taken from the wrapped-stock amount at execute
+     *         time, and its receiver. Read live at execute (not snapshotted per order);
+     *         the `MAX_PROVIDER_FEE_BPS` cap bounds what a config change can cost an
+     *         in-flight order, and `minReturn` still protects the user on the destination.
+     * @param _providerFeeBps Fee in basis points; zero disables the fee.
+     * @param _feeReceiver Recipient of the fee; may be zero only when the fee is zero.
+     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws ProviderFeeTooHigh If the fee exceeds `MAX_PROVIDER_FEE_BPS`.
+     * @custom:throws InvalidInput If the receiver is zero while the fee is non-zero.
+     */
+    function setProviderFee(uint16 _providerFeeBps, address _feeReceiver) external {
+        _onlyAdmin();
+        _setProviderFee(_providerFeeBps, _feeReceiver);
     }
 
     // ---- Views ----
@@ -322,6 +372,16 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     }
 
     /**
+     * @notice Returns the provider fee config.
+     * @return providerFeeBps The fee in basis points (zero = disabled).
+     * @return feeReceiver The fee recipient.
+     */
+    function getProviderFee() external view returns (uint16 providerFeeBps, address feeReceiver) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        return ($.providerFeeBps, $.feeReceiver);
+    }
+
+    /**
      * @notice Quotes the LayerZero native fee for the stored withdrawal.
      * @param safe The safe whose stored withdrawal to quote.
      * @return feeToken Always `Constants.ETH`.
@@ -332,7 +392,8 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     function getWithdrawalFee(address safe) external view returns (address feeToken, uint256 amount) {
         StoredWithdrawal memory withdrawal = _getStockWithdrawModuleStorage().withdrawals[safe];
         if (withdrawal.order.iToken == address(0)) revert NoActiveOrder();
-        MessagingFee memory fee = IOFT(withdrawal.order.iToken).quoteSend(_buildSendParam(safe, withdrawal), false);
+        uint256 bridgeAmount = withdrawal.order.amount - _providerFeeAmount(withdrawal.order.amount);
+        MessagingFee memory fee = IOFT(withdrawal.order.iToken).quoteSend(_buildSendParam(safe, withdrawal, bridgeAmount), false);
         return (ETH, fee.nativeFee);
     }
 
@@ -397,9 +458,11 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         delete $.withdrawals[safe];
         cashModule.processWithdrawal(safe);
 
-        _sendOft(safe, withdrawal);
+        // Provider (exit) fee is carved out of the wrapped-stock amount before bridging.
+        uint256 providerFee = _takeProviderFee(withdrawal.order.iToken, withdrawal.order.amount);
+        _sendOft(safe, withdrawal, withdrawal.order.amount - providerFee);
 
-        emit WithdrawalExecuted(safe, withdrawal.withdrawalId, withdrawal.order.iToken, withdrawal.order.amount, withdrawal.order.recipient);
+        emit WithdrawalExecuted(safe, withdrawal.withdrawalId, withdrawal.order.iToken, withdrawal.order.amount, providerFee, withdrawal.order.recipient);
     }
 
     /**
@@ -490,12 +553,25 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         )).toEthSignedMessageHash();
     }
 
-    /// @dev Builds the SendParam for the stored withdrawal. The unwrapper is resolved LIVE
-    ///      from `stockUnwrappers[order.dstEid]` (reverting `MissingConfig` if the route was
-    ///      disabled after request). `minAmountLD` starts at the full amount and is tightened
-    ///      to `quoteOFT`'s `amountReceivedLD` at send time (dust rounding only — economic
-    ///      slippage is `minReturn`, enforced on the destination chain).
-    function _buildSendParam(address safe, StoredWithdrawal memory withdrawal) internal view returns (SendParam memory) {
+    /// @dev Provider fee owed on `amount` (in wrapped-stock units), from the LIVE bps config.
+    function _providerFeeAmount(uint256 amount) internal view returns (uint256) {
+        return amount.mulDiv(_getStockWithdrawModuleStorage().providerFeeBps, HUNDRED_PERCENT_IN_BPS);
+    }
+
+    /// @dev Carves the provider fee out of the just-processed withdrawal and transfers it to
+    ///      the fee receiver. Returns the fee taken (zero when the fee is disabled).
+    function _takeProviderFee(address iToken, uint256 amount) internal returns (uint256 providerFee) {
+        providerFee = _providerFeeAmount(amount);
+        if (providerFee > 0) IERC20(iToken).safeTransfer(_getStockWithdrawModuleStorage().feeReceiver, providerFee);
+    }
+
+    /// @dev Builds the SendParam for the stored withdrawal, bridging `amountLD` (the order
+    ///      amount net of the provider fee). The unwrapper is resolved LIVE from
+    ///      `stockUnwrappers[order.dstEid]` (reverting `MissingConfig` if the route was
+    ///      disabled after request). `minAmountLD` starts at the full bridge amount and is
+    ///      tightened to `quoteOFT`'s `amountReceivedLD` at send time (dust rounding only —
+    ///      economic slippage is `minReturn`, enforced on the destination chain).
+    function _buildSendParam(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal view returns (SendParam memory) {
         StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
         (, address unwrapper) = $.stockUnwrappers.tryGet(uint256(withdrawal.order.dstEid));
         if (unwrapper == address(0)) revert MissingConfig();
@@ -503,8 +579,8 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         return SendParam({
             dstEid: withdrawal.order.dstEid,
             to: bytes32(uint256(uint160(unwrapper))),
-            amountLD: withdrawal.order.amount,
-            minAmountLD: withdrawal.order.amount,
+            amountLD: amountLD,
+            minAmountLD: amountLD,
             extraOptions: _lzComposeOptions($.composeGasLimit),
             composeMsg: abi.encode(safe, withdrawal.order.recipient, withdrawal.order.minReturn, withdrawal.order.deadline),
             oftCmd: new bytes(0)
@@ -564,11 +640,23 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         $.composeGasLimit = _composeGasLimit;
     }
 
-    /// @dev Quotes, pays and dispatches the OFT send from this module's balance. The caller
-    ///      funds the LZ fee; excess is refunded to them (and they are the LZ refund address).
-    function _sendOft(address safe, StoredWithdrawal memory withdrawal) internal {
+    /// @dev Shared by `initialize` and `setProviderFee`. Zero bps disables the fee (the
+    ///      receiver may then be zero too); a non-zero fee requires a real receiver.
+    function _setProviderFee(uint16 _providerFeeBps, address _feeReceiver) internal {
+        if (_providerFeeBps > MAX_PROVIDER_FEE_BPS) revert ProviderFeeTooHigh();
+        if (_providerFeeBps > 0 && _feeReceiver == address(0)) revert InvalidInput();
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        emit ProviderFeeSet($.providerFeeBps, _providerFeeBps, $.feeReceiver, _feeReceiver);
+        $.providerFeeBps = _providerFeeBps;
+        $.feeReceiver = _feeReceiver;
+    }
+
+    /// @dev Quotes, pays and dispatches the OFT send of `amountLD` from this module's
+    ///      balance. The caller funds the LZ fee; excess is refunded to them (and they are
+    ///      the LZ refund address).
+    function _sendOft(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal {
         IOFT oft = IOFT(withdrawal.order.iToken);
-        SendParam memory sendParam = _buildSendParam(safe, withdrawal);
+        SendParam memory sendParam = _buildSendParam(safe, withdrawal, amountLD);
 
         (,, OFTReceipt memory receipt) = oft.quoteOFT(sendParam);
         sendParam.minAmountLD = receipt.amountReceivedLD;
@@ -576,7 +664,7 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         MessagingFee memory fee = oft.quoteSend(sendParam, false);
         if (msg.value < fee.nativeFee) revert InsufficientNativeFee();
 
-        if (oft.approvalRequired()) IERC20(oft.token()).forceApprove(address(oft), withdrawal.order.amount);
+        if (oft.approvalRequired()) IERC20(oft.token()).forceApprove(address(oft), amountLD);
         oft.send{ value: fee.nativeFee }(sendParam, fee, payable(msg.sender));
 
         uint256 excess = msg.value - fee.nativeFee;

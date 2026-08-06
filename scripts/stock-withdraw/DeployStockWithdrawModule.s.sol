@@ -96,15 +96,16 @@ contract DeployStockWithdrawModule is StockWithdrawConfig, GnosisHelpers {
         address[] memory unwrappers = new address[](1);
         unwrappers[0] = _predictAddress(_unwrapperProxySalt());
 
-        bytes memory initData = abi.encodeWithSelector(
-            StockWithdrawModule.initialize.selector,
-            address(roleRegistry),
-            COMPOSE_GAS_LIMIT,
-            iTokens,
-            supported,
-            dstEids,
-            unwrappers
-        );
+        bytes memory initData = abi.encodeCall(StockWithdrawModule.initialize, (StockWithdrawModule.InitParams({
+            roleRegistry: address(roleRegistry),
+            composeGasLimit: COMPOSE_GAS_LIMIT,
+            providerFeeBps: PROVIDER_FEE_BPS,
+            feeReceiver: FEE_RECEIVER,
+            iTokens: iTokens,
+            supported: supported,
+            dstEids: dstEids,
+            unwrappers: unwrappers
+        })));
         proxy = _create3(_moduleProxySalt(), type(UUPSProxy).creationCode, abi.encode(impl, initData));
     }
 

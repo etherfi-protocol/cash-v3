@@ -67,6 +67,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     address internal moduleAdmin = makeAddr("moduleAdmin");
     address internal stockRecipient = makeAddr("stockRecipient");
     address internal unwrapper = makeAddr("stockUnwrapper");
+    address internal feeReceiver = makeAddr("feeReceiver");
 
     uint32 internal constant DST_EID = 30101; // Ethereum mainnet EID
     uint128 internal constant COMPOSE_GAS = 300_000;
@@ -92,10 +93,16 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         address impl = address(new StockWithdrawModule(address(dataProvider)));
         module = StockWithdrawModule(payable(address(new UUPSProxy(
             impl,
-            abi.encodeWithSelector(
-                StockWithdrawModule.initialize.selector,
-                address(roleRegistry), COMPOSE_GAS, iTokens, supported, dstEids, unwrappers
-            )
+            abi.encodeCall(StockWithdrawModule.initialize, (StockWithdrawModule.InitParams({
+                roleRegistry: address(roleRegistry),
+                composeGasLimit: COMPOSE_GAS,
+                providerFeeBps: 0,
+                feeReceiver: feeReceiver,
+                iTokens: iTokens,
+                supported: supported,
+                dstEids: dstEids,
+                unwrappers: unwrappers
+            })))
         ))));
 
         address[] memory mods = new address[](1);
@@ -192,6 +199,9 @@ contract StockWithdrawModuleTest is SafeTestSetup {
 
     function test_initialize_setsFullConfig() public view {
         assertEq(module.getComposeGasLimit(), COMPOSE_GAS);
+        (uint16 feeBps, address receiver) = module.getProviderFee();
+        assertEq(feeBps, 0);
+        assertEq(receiver, feeReceiver);
         assertTrue(module.isTokenSupported(address(oft)));
         assertEq(module.getSupportedTokens().length, 1);
         assertEq(module.getSupportedTokens()[0], address(oft));
@@ -521,5 +531,65 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         vm.prank(moduleAdmin);
         module.setComposeGasLimit(500_000);
         assertEq(module.getComposeGasLimit(), 500_000);
+    }
+
+    // ---- provider fee ----
+
+    function test_setProviderFee_adminOnlyCapAndValidation() public {
+        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        module.setProviderFee(100, feeReceiver);
+
+        vm.startPrank(moduleAdmin);
+        // above the 1000 bps cap
+        vm.expectRevert(StockWithdrawModule.ProviderFeeTooHigh.selector);
+        module.setProviderFee(1001, feeReceiver);
+
+        // non-zero fee requires a real receiver
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        module.setProviderFee(100, address(0));
+
+        // max fee is allowed
+        module.setProviderFee(1000, feeReceiver);
+        (uint16 feeBps, address receiver) = module.getProviderFee();
+        assertEq(feeBps, 1000);
+        assertEq(receiver, feeReceiver);
+
+        // zero disables the fee (zero receiver allowed then)
+        module.setProviderFee(0, address(0));
+        (feeBps, receiver) = module.getProviderFee();
+        assertEq(feeBps, 0);
+        assertEq(receiver, address(0));
+        vm.stopPrank();
+    }
+
+    function test_executeWithdrawal_takesProviderFeeAndBridgesNet() public {
+        vm.prank(moduleAdmin);
+        module.setProviderFee(100, feeReceiver); // 1%
+
+        StockWithdrawModule.Order memory order = _baseOrder();
+        _request(order);
+        _warpPastDelay();
+
+        uint256 expectedFee = AMOUNT / 100;
+        vm.expectEmit(true, false, false, true, address(module));
+        emit StockWithdrawModule.WithdrawalExecuted(address(safe), bytes32(0), address(oft), AMOUNT, expectedFee, stockRecipient);
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+
+        assertEq(oft.balanceOf(feeReceiver), expectedFee, "fee receiver got the wrapped-stock fee");
+        assertEq(oft.lastAmountLD(), AMOUNT - expectedFee, "net amount bridged");
+        assertEq(oft.balanceOf(address(module)), 0, "nothing left in the module");
+        // the order terms in the compose message are untouched by the fee
+        assertEq(oft.lastComposeMsg(), abi.encode(address(safe), stockRecipient, MIN_RETURN, order.deadline));
+    }
+
+    function test_executeWithdrawal_zeroFee_takesNothing() public {
+        _request(_baseOrder());
+        _warpPastDelay();
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+        assertEq(oft.balanceOf(feeReceiver), 0, "no fee taken when disabled");
+        assertEq(oft.lastAmountLD(), AMOUNT, "full amount bridged");
     }
 }

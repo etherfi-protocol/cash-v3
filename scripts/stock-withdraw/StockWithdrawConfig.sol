@@ -41,6 +41,12 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
     /// @notice Executor gas limit for the destination lzCompose call.
     uint128 internal constant COMPOSE_GAS_LIMIT = 500_000;
 
+    /// @notice Provider (exit) fee in basis points taken from the wrapped-stock amount at
+    ///         execute time (0 = disabled at launch; module admin can set up to 1000).
+    uint16 internal constant PROVIDER_FEE_BPS = 0;
+    /// @notice Recipient of the provider fee.
+    address internal constant FEE_RECEIVER = SAFE;
+
     // ---- Wrapped-stock asset set (shared between envs today) ----
 
     /// @notice OP ShadowOFTs (the iTOKENs the module bridges).
