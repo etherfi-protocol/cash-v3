@@ -11,7 +11,7 @@ import { OFTComposeMsgCodec } from "@layerzerolabs/oft-evm/contracts/libs/OFTCom
 /**
  * @notice Post-deployment verification for StockUnwrapper on Ethereum. Runs read-only against
  *         the live chain and REVERTS on any mismatch (non-zero exit for CI/wrappers). The
- *         RoleRegistry is read from deployments/{ENV}/1/trading-account.json; the OP source
+ *         RoleRegistry is read from deployments/{ENV}/1/deployments.json; the OP source
  *         module is predicted from its CREATE3 salt.
  *
  * Env: ENV (dev|mainnet)
@@ -25,9 +25,13 @@ contract VerifyStockUnwrapper is EtherFiDeployerHelper {
     // UpgradeableProxy ERC-7201 slot: first member is the roleRegistry address (hijack check).
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
 
-    string internal constant SALT_IMPL = "StockWithdraw.StockUnwrapperImpl";
-    string internal constant SALT_PROXY = "StockWithdraw.StockUnwrapperProxy";
-    string internal constant SALT_SRC_MODULE_PROXY = "StockWithdraw.StockWithdrawModuleProxy";
+    string internal constant DEV_SALT_IMPL = "Dev.StockWithdraw.StockUnwrapperImpl";
+    string internal constant DEV_SALT_PROXY = "Dev.StockWithdraw.StockUnwrapperProxy";
+    string internal constant DEV_SALT_SRC_MODULE_PROXY = "Dev.StockWithdraw.StockWithdrawModuleProxy";
+
+    string internal constant PROD_SALT_IMPL = "Prod.StockWithdraw.StockUnwrapperImpl";
+    string internal constant PROD_SALT_PROXY = "Prod.StockWithdraw.StockUnwrapperProxy";
+    string internal constant PROD_SALT_SRC_MODULE_PROXY = "Prod.StockWithdraw.StockWithdrawModuleProxy";
 
     /// @notice LayerZero V2 endpoint on Ethereum mainnet.
     address internal constant LZ_ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
@@ -37,11 +41,12 @@ contract VerifyStockUnwrapper is EtherFiDeployerHelper {
     function run() public view {
         require(block.chainid == 1, "This script must be run on Ethereum mainnet (chain ID 1)");
 
-        string memory tradingAccount = vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/trading-account.json"));
-        address roleRegistry = tradingAccount.readAddress(".RoleRegistry");
+        string memory deployments = readDeploymentFile();
+        address roleRegistry = deployments.readAddress(".addresses.RoleRegistry");
 
-        address expectedImpl = _predictAddress(SALT_IMPL);
-        address proxy = _predictAddress(SALT_PROXY);
+        bool isDev = isEqualString(getEnv(), "dev");
+        address expectedImpl = _predictAddress(isDev ? DEV_SALT_IMPL : PROD_SALT_IMPL);
+        address proxy = _predictAddress(isDev ? DEV_SALT_PROXY : PROD_SALT_PROXY);
 
         require(expectedImpl.code.length > 0, "impl not deployed");
         require(proxy.code.length > 0, "proxy not deployed");
@@ -59,7 +64,7 @@ contract VerifyStockUnwrapper is EtherFiDeployerHelper {
         // Initialized config + cross-chain wiring.
         require(unwrapper.getLzEndpoint() == LZ_ENDPOINT, "lzEndpoint mismatch");
         require(unwrapper.getSrcEid() == SRC_EID, "srcEid mismatch");
-        require(unwrapper.getSrcModule() == OFTComposeMsgCodec.addressToBytes32(_predictAddress(SALT_SRC_MODULE_PROXY)), "srcModule mismatch");
+        require(unwrapper.getSrcModule() == OFTComposeMsgCodec.addressToBytes32(_predictAddress(isDev ? DEV_SALT_SRC_MODULE_PROXY : PROD_SALT_SRC_MODULE_PROXY)), "srcModule mismatch");
 
         console.log("VerifyStockUnwrapper: all checks passed");
         console.log("  proxy:", proxy);

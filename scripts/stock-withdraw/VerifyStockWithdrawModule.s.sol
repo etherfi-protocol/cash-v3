@@ -26,8 +26,11 @@ contract VerifyStockWithdrawModule is EtherFiDeployerHelper {
     // UpgradeableProxy ERC-7201 slot: first member is the roleRegistry address (hijack check).
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
 
-    string internal constant SALT_IMPL = "StockWithdraw.StockWithdrawModuleImpl";
-    string internal constant SALT_PROXY = "StockWithdraw.StockWithdrawModuleProxy";
+    string internal constant DEV_SALT_IMPL = "Dev.StockWithdraw.StockWithdrawModuleImpl";
+    string internal constant DEV_SALT_PROXY = "Dev.StockWithdraw.StockWithdrawModuleProxy";
+
+    string internal constant PROD_SALT_IMPL = "Prod.StockWithdraw.StockWithdrawModuleImpl";
+    string internal constant PROD_SALT_PROXY = "Prod.StockWithdraw.StockWithdrawModuleProxy";
 
     function run() public view {
         require(block.chainid == 10, "This script must be run on Optimism (chain ID 10)");
@@ -37,8 +40,9 @@ contract VerifyStockWithdrawModule is EtherFiDeployerHelper {
         EtherFiDataProvider dataProvider = EtherFiDataProvider(deployments.readAddress(".addresses.EtherFiDataProvider"));
         ICashModule cashModule = ICashModule(deployments.readAddress(".addresses.CashModule"));
 
-        address expectedImpl = _predictAddress(SALT_IMPL);
-        address proxy = _predictAddress(SALT_PROXY);
+        bool isDev = isEqualString(getEnv(), "dev");
+        address expectedImpl = _predictAddress(isDev ? DEV_SALT_IMPL : PROD_SALT_IMPL);
+        address proxy = _predictAddress(isDev ? DEV_SALT_PROXY : PROD_SALT_PROXY);
 
         require(expectedImpl.code.length > 0, "impl not deployed");
         require(proxy.code.length > 0, "proxy not deployed");

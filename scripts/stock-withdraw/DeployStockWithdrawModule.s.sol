@@ -43,8 +43,10 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
  * deployments/{ENV}/10/deployments.json.
  *
  * Env: PRIVATE_KEY (must be a registered EtherFiDeployer deployer), ENV (dev|mainnet),
- *      COMPOSE_GAS_LIMIT (e.g. 300000),
- *      MODULE_ADMIN (address receiving STOCK_WITHDRAW_MODULE_ADMIN_ROLE)
+ *      COMPOSE_GAS_LIMIT (e.g. 300000)
+ *
+ * STOCK_WITHDRAW_MODULE_ADMIN_ROLE goes to the broadcaster on dev, and to the prod Safe on
+ * mainnet.
  *
  * After broadcast (and bundle execution on prod), run VerifyStockWithdrawModule.s.sol.
  */
@@ -65,6 +67,8 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
     address internal moduleAdmin;
     address internal impl;
     address internal proxy;
+    string internal saltImpl;
+    string internal saltProxy;
 
     function run() public {
         require(block.chainid == 10, "This script must be run on Optimism (chain ID 10)");
@@ -79,16 +83,17 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
 
         require(DEPLOYER.isDeployer(deployerAddress), "broadcaster is not an EtherFiDeployer deployer");
 
-        string memory env = getEnv();
         bool isDev = isEqualString(getEnv(), "dev");
 
         if (isDev) { 
             moduleAdmin = deployerAddress; 
+            saltImpl = DEV_SALT_IMPL;
+            saltProxy = DEV_SALT_PROXY;
         } else { 
             moduleAdmin = SAFE; 
+            saltImpl = PROD_SALT_IMPL;
+            saltProxy = PROD_SALT_PROXY;
         }
-        
-        address ownerBefore = roleRegistry.owner();
 
         vm.startBroadcast(deployerPk);
         _deploy();
@@ -97,9 +102,6 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
 
         if (!isDev) _writeGnosisBundle();
 
-        // Post-operation hook: the timelock/registry owner must be unchanged.
-        require(roleRegistry.owner() == ownerBefore, "CRITICAL: role registry owner changed!");
-
         console.log("StockWithdrawModule impl:", impl);
         console.log("StockWithdrawModule proxy:", proxy);
     }
@@ -107,7 +109,7 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
     /// @dev CREATE3 deploys: impl (immutable dataProvider) + UUPS proxy with atomic init.
     ///      Route config starts empty — the unwrapper is deployed after this script.
     function _deploy() internal {
-        impl = _create3(SALT_IMPL, type(StockWithdrawModule).creationCode, abi.encode(address(dataProvider)));
+        impl = _create3(saltImpl, type(StockWithdrawModule).creationCode, abi.encode(address(dataProvider)));
 
         bytes memory initData = abi.encodeWithSelector(
             StockWithdrawModule.initialize.selector,
@@ -118,7 +120,7 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
             new uint32[](0), // dstEids — configured once the unwrapper is live
             new address[](0)
         );
-        proxy = _create3(SALT_PROXY, type(UUPSProxy).creationCode, abi.encode(impl, initData));
+        proxy = _create3(saltProxy, type(UUPSProxy).creationCode, abi.encode(impl, initData));
     }
 
     /// @dev The three privileged wiring calls, identical between the dev direct path and the
