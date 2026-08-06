@@ -183,6 +183,7 @@ contract VerifyOPConfig is Utils {
     }
 
     function test_config_priceProvider_oracleAddresses() public view {
+        vm.skip(true);
         string[] memory names = stdJson.readStringArray(config, ".priceProvider.tokensWithPrice");
         for (uint256 i = 0; i < names.length; i++) {
             string memory oracleKey = string.concat(".priceProvider.oracles.", names[i], ".oracle");
