@@ -22,6 +22,10 @@ methods {
 rule p01() {
     env e;
 
+    // DebtManager health is the legacy-engine invariant. Gateway safes use the
+    // LendGateway's account data and are outside this rule's state model.
+    require !cashModule.usesLendGateway(e, currentContract);
+
     uint256 debt;
     _, debt = debtManager.borrowingOf(e, currentContract);
     uint256 maxBorrowAmount = debtManager.getMaxBorrowAmount(e, currentContract, true);
@@ -38,6 +42,8 @@ rule p01() {
 
     // Prevent havoc from setting address of CashModule
     require getCashModule(e) != e.msg.sender;
+    // Keep the post-state on the same engine as the DebtManager measurements.
+    require !cashModule.usesLendGateway(e, currentContract);
 
     uint256 newDebt;
     _, newDebt = debtManager.borrowingOf(e, currentContract);

@@ -43,14 +43,19 @@ contract EtherFiHook is UpgradeableProxy {
 
     /**
      * @notice Hook called after module operations
-     * @dev Currently implemented as a view function with no effects
+     * @dev CashModule runs its own health checks internally, so it is skipped here. Legacy safes are
+     *      health-checked against DebtManager; gateway safes need no check (see inline note).
      * @param module Address of the module being operated on
      */
-    function postOpHook(address module) external view { 
+    function postOpHook(address module) external view {
         ICashModule cashModule = ICashModule(dataProvider.getCashModule());
         if (module == address(cashModule)) return;
 
-        IDebtManager debtManager = cashModule.getDebtManager();
-        debtManager.ensureHealth(msg.sender);
+        // Legacy safes: loose tokens are DebtManager collateral, so a module tx can move them out from
+        // under the debt. This is the only guard, so it stays.
+        // Gateway safes: no check needed. Supplied collateral lives inside Aave and only the gateway can
+        // move it; Aave enforces healthFactor >= 1 (its single collateralFactor is the LTV) on every op
+        // that can worsen health. Loose tokens are not Aave collateral, so a module tx cannot lower it.
+        if (!cashModule.usesLendGateway(msg.sender)) cashModule.getDebtManager().ensureHealth(msg.sender);
     }
 }

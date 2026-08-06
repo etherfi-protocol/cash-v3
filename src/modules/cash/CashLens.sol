@@ -1,31 +1,55 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { ICashModule, Mode, SafeCashData, SafeData, WithdrawalRequest, DebitModeMaxSpend } from "../../interfaces/ICashModule.sol";
+import { DebitModeMaxSpend, ICashModule, Mode, SafeCashData, SafeData } from "../../interfaces/ICashModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
-import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
+import { LendSourcingLib } from "../../libraries/LendSourcingLib.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
+import { Constants } from "../../utils/Constants.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
-import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
+import { CashLensLegacyLib } from "./CashLensLegacyLib.sol";
 
 /**
  * @title CashLens
- * @notice Read-only contract providing views into the state of the CashModule system
- * @dev Extends UpgradeableProxy to provide upgrade functionality
+ * @notice Read-only contract providing views into a Safe's cash state
+ * @dev Every engine-touching view branches on CashModule.usesLendGateway: gateway safes are read from the
+ *      Aave gateway (the logic in this contract), legacy safes from the DebtManager (preserved output-identical
+ *      in the linked CashLensLegacyLib). The check side of a spend must always agree with what the execution
+ *      side (CashLendLib) will do, so both read the same flag. Legacy code always sits inside an
+ *      `if (!usesLendGateway(safe))` block (routing to CashLensLegacyLib, or a couple of master-verbatim
+ *      lines inline), deleted wholesale when the legacy engine is retired; the gateway path is the unguarded
+ *      fall-through.
+ *
+ *      LendGateway safes: the position and the supported-token lists (registered/borrowable assets) are read
+ *      from the Aave gateway; nothing on the gateway path touches the DebtManager.
+ *      Credit capacity comes straight from Aave. Debit spendable is the raw Safe balance plus the
+ *      withdrawable supplied amount; when the Safe has debt, the withdrawable part is capped by the
+ *      borrowing headroom (collateral weighted by LTV, minus debt) so the leftover position keeps
+ *      debt within its borrowing power. USD is 6 decimals throughout, matching PriceProvider.DECIMALS;
+ *      the gateway returns its USD aggregates in the same scale.
+ *
+ *      The debit cap uses LTV, the same bound Aave enforces on every collateral withdraw (v4's single
+ *      collateralFactor doubles as LTV and liquidation threshold), so what CashLens reports as debit
+ *      spendable is exactly what a gateway withdraw allows; there is no separate module-side health gate.
+ *
+ *      A pending withdrawal sits against the loose Safe balance, not the supplied position. CashLens reserves
+ *      it from the loose balance and uses the gateway's figures (maxBorrow, credit/debit headroom)
+ *      for the supplied position as-is.
+ *
+ *      Collateral views (getSafeCashData totals, getUserTotalCollateral, getUserCollateralForToken) report a
+ *      gateway safe's supplied position plus its idle balance of registered assets — loose funds net of any
+ *      pending-withdrawal reservation. Idle funds show as collateral but carry no borrowing power until
+ *      supplied, so maxBorrow and the spend ceilings stay gateway-derived.
  * @author ether.fi
  */
-contract CashLens is UpgradeableProxy {
-    using EnumerableSetLib for EnumerableSetLib.AddressSet;
+contract CashLens is UpgradeableProxy, Constants {
     using SpendingLimitLib for SpendingLimit;
-    using ArrayDeDupLib for address[];
-    using Math for uint256;
     using ArrayDeDupLib for address[];
 
     /// @notice Reference to the deployed CashModule contract
@@ -33,16 +57,23 @@ contract CashLens is UpgradeableProxy {
     /// @notice Reference to the deployed EtherFiDataProvider contract
     IEtherFiDataProvider public immutable dataProvider;
 
-    /// @notice Constant representing 100% with 18 decimal places
-    uint256 public constant HUNDRED_PERCENT = 100e18;
-
     /// @notice Error thrown when trying to use a token that is not on the collateral whitelist
     error NotACollateralToken();
     /// @notice Error thrown when trying to use a token that is not on the borrow whitelist
     error NotABorrowToken();
 
+    /// @dev Working variables of _debitCheck's per-token loop, held in memory to keep the stack flat
+    struct DebitCheckVars {
+        bool hasDebt;
+        uint256 withdrawHeadroom;
+        uint256 needed;
+        uint256 pending;
+        uint256 raw;
+        uint256 used;
+    }
+
     /**
-     * @notice Initializes the CashLens contract with a reference to the CashModule
+     * @notice Initializes the CashLens contract with its dependencies
      * @param _cashModule Address of the deployed CashModule contract
      * @param _dataProvider Address of the deployed EtherFiDataProvider contract
      */
@@ -62,6 +93,11 @@ contract CashLens is UpgradeableProxy {
         __UpgradeableProxy_init(_roleRegistry);
     }
 
+    /// @notice Returns the Aave gateway currently configured on CashModule
+    function gateway() public view returns (ILendGateway) {
+        return cashModule.getLendGateway();
+    }
+
     /**
      * @notice Gets the currently applicable spending limit for a safe
      * @dev Returns the spending limit considering current time and renewal logic
@@ -69,8 +105,7 @@ contract CashLens is UpgradeableProxy {
      * @return Current applicable spending limit
      */
     function applicableSpendingLimit(address safe) external view returns (SpendingLimit memory) {
-        SafeData memory safeData = cashModule.getData(address(safe));
-        return safeData.spendingLimit.getCurrentLimit();
+        return cashModule.getData(safe).spendingLimit.getCurrentLimit();
     }
 
     /**
@@ -83,184 +118,140 @@ contract CashLens is UpgradeableProxy {
      * @return canSpend Boolean indicating if the spending is allowed
      * @return message Error message if spending is not allowed
      */
-    function canSpend(address safe, bytes32 txId, address[] memory tokens,uint256[] memory amountsInUsd) public view returns (bool, string memory) {
+    function canSpend(address safe, bytes32 txId, address[] memory tokens, uint256[] memory amountsInUsd) public view returns (bool, string memory) {
         // Basic validation
         if (tokens.length == 0) return (false, "No tokens provided");
         if (tokens.length != amountsInUsd.length) return (false, "Tokens and amounts arrays length mismatch");
         if (cashModule.transactionCleared(safe, txId)) return (false, "Transaction already cleared");
 
         if (tokens.length > 1) tokens.checkDuplicates();
-        
+
         // Check total spending amount
         uint256 totalSpendingInUsd = 0;
         for (uint256 i = 0; i < amountsInUsd.length; i++) {
             totalSpendingInUsd += amountsInUsd[i];
         }
         if (totalSpendingInUsd == 0) return (false, "Total amount zero in USD");
-        
+
         // Validate mode and spending limits
         return _validateSpending(safe, tokens, amountsInUsd, totalSpendingInUsd);
     }
 
-    function canSpendSingleToken(
-        address safe, 
-        bytes32 txId, 
-        address[] calldata creditModeTokenPreferences, 
-        address[] calldata debitModeTokenPreferences, 
-        uint256 amountInUsd
-    ) public view returns (Mode mode, address token, bool canSpendResult, string memory declineReason) {
+    function canSpendSingleToken(address safe, bytes32 txId, address[] calldata creditModeTokenPreferences, address[] calldata debitModeTokenPreferences, uint256 amountInUsd) public view returns (Mode mode, address token, bool canSpendResult, string memory declineReason) {
         SafeData memory safeData = cashModule.getData(safe);
         if (safeData.incomingModeStartTime != 0) mode = safeData.incomingMode;
         else mode = safeData.mode;
-        
+
         address[] memory tokenPreferences = mode == Mode.Debit ? debitModeTokenPreferences : creditModeTokenPreferences;
-        
+
         if (tokenPreferences.length == 0) return (mode, address(0), false, "No token preferences provided");
         if (amountInUsd == 0) return (mode, tokenPreferences[0], false, "Amount cannot be zero");
         if (cashModule.transactionCleared(safe, txId)) return (mode, tokenPreferences[0], false, "Transaction already cleared");
-        
+
         (token, canSpendResult, declineReason) = _checkTokenPreferences(safe, txId, tokenPreferences, amountInUsd);
-        
+
         return (mode, token, canSpendResult, declineReason);
     }
 
-    function _checkTokenPreferences(
-        address safe,
-        bytes32 txId,
-        address[] memory tokenPreferences,
-        uint256 amountInUsd
-    ) internal view returns (address token, bool canSpendResult, string memory declineReason) {
+    function _checkTokenPreferences(address safe, bytes32 txId, address[] memory tokenPreferences, uint256 amountInUsd) internal view returns (address token, bool canSpendResult, string memory declineReason) {
         uint256[] memory amountsInUsd = new uint256[](1);
         amountsInUsd[0] = amountInUsd;
         address[] memory singleToken = new address[](1);
-        
-        string memory firstError;
-        
-        for (uint256 i = 0; i < tokenPreferences.length; ) {
+
+        string memory firstReason;
+
+        for (uint256 i = 0; i < tokenPreferences.length;) {
             singleToken[0] = tokenPreferences[i];
-            
-            (bool success, string memory error) = canSpend(safe, txId, singleToken, amountsInUsd);
-            if (i == 0) firstError = error;
-            
+
+            (bool success, string memory reason) = canSpend(safe, txId, singleToken, amountsInUsd);
+            if (i == 0) firstReason = reason;
+
             if (success) return (tokenPreferences[i], true, "");
-            
+
             unchecked {
                 ++i;
             }
         }
-        
-        return (tokenPreferences[0], false, firstError);
+
+        return (tokenPreferences[0], false, firstReason);
     }
 
-    /**
-     * @notice Validates mode, limits and completes spending checks
-     */
+    /// @notice Validates mode and spending limits, then runs the mode-specific check
     function _validateSpending(address safe, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
-        IDebtManager debtManager = cashModule.getDebtManager();
         SafeData memory safeData = cashModule.getData(safe);
 
-        Mode mode = safeData.mode; 
-        // Update mode if necessary
+        Mode mode = safeData.mode;
         if (safeData.incomingModeStartTime != 0) mode = safeData.incomingMode;
 
         // In Credit mode, only one token is allowed
         if (mode == Mode.Credit && tokens.length > 1) return (false, "Only one token allowed in Credit mode");
-        
+
         // Check spending limit
         (bool withinLimit, string memory limitMessage) = safeData.spendingLimit.canSpend(totalSpendingInUsd);
-        if (!withinLimit) return (false, limitMessage);
-        
-        // Validate tokens
-        return _processTokensAndMode(safe, tokens, amountsInUsd, totalSpendingInUsd, debtManager, safeData, mode);
-    }
-
-    /**
-     * @notice Process tokens and check mode-specific rules
-     */
-    function _processTokensAndMode(address safe, address[] memory tokens, uint256[] memory amountsInUsd, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData, Mode mode) internal view returns (bool, string memory) {
-        // Convert USD to token amounts and validate each token
-        uint256[] memory amounts = new uint256[](tokens.length);
-        
-        for (uint256 i = 0; i < tokens.length; i++) {
-            // Check if token is supported
-            if (!debtManager.isBorrowToken(tokens[i])) {
-                return (false, "Not a supported stable token");
-            }
-            
-            // Convert USD to token amount
-            amounts[i] = debtManager.convertUsdToCollateralToken(tokens[i], amountsInUsd[i]);
-            
-            // In Debit mode, check each token's balance
-            if (mode == Mode.Debit && IERC20(tokens[i]).balanceOf(safe) < amounts[i]) {
-                return (false, "Insufficient token balance for debit mode spending");
-            }
+        if (!withinLimit) {
+            return (false, limitMessage);
         }
-        
-        // Check mode-specific conditions
+
+        // Route by engine, mirroring the spend execution: legacy safes get the pre-gateway DebtManager
+        // checks (and decline strings) exactly as before the gateway existed.
+        if (!cashModule.usesLendGateway(safe)) {
+            return CashLensLegacyLib.check(cashModule, safe, tokens, amountsInUsd, totalSpendingInUsd, safeData, mode);
+        }
+
         if (mode == Mode.Credit) {
-            return _creditModeCheck(safe, tokens, amounts, totalSpendingInUsd, debtManager, safeData);
-        } else {
-            return _debitModeCheck(safe, tokens, amounts, debtManager, safeData);
+            return _creditCheck(safe, tokens[0], totalSpendingInUsd);
         }
+        return _debitCheck(safe, tokens, amountsInUsd, safeData);
     }
 
-    /**
-     * @notice Credit mode specific checks
-     */
-    function _creditModeCheck(address safe, address[] memory tokens, uint256[] memory amounts, uint256 totalSpendingInUsd, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
-        // credit mode should only have 1 token
-        // Check if debt manager has enough liquidity
-        if (IERC20(tokens[0]).balanceOf(address(debtManager)) < amounts[0]) return (false, "Insufficient liquidity in debt manager to cover the loan");
-        
-        // Get collateral balances with pending withdrawals factored in
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, tokens, amounts, Mode.Credit);
-        
-        if (bytes(error).length != 0) return (false, error);
-        
-        return _checkBorrowingPower(safe, collateralTokenAmounts, totalSpendingInUsd, debtManager);
+    /// @notice Credit mode check: the spend must fit the Aave borrowing capacity and the reserve's liquidity
+    function _creditCheck(address safe, address token, uint256 totalSpendingInUsd) internal view returns (bool, string memory) {
+        // Token gate, reserve liquidity, and the health-factor-floor-buffered borrowing power live in the
+        // linked LendSourcingLib (code size); see creditCheck there for the quote-vs-execution contract.
+        return LendSourcingLib.creditCheck(cashModule.getLendGateway(), IPriceProvider(dataProvider.getPriceProvider()), safe, token, totalSpendingInUsd);
     }
 
-    /**
-     * @notice Debit mode specific checks
-     */
-    function _debitModeCheck(address safe, address[] memory tokens, uint256[] memory amounts, IDebtManager debtManager, SafeData memory safeData) internal view returns (bool, string memory) {
-        // Simulate the spending of multiple tokens
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) =  _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, tokens, amounts, Mode.Debit);
-        
-        if (bytes(error).length != 0) return (false, error);
-        
-        // Check if spending would cause collateral ratio issues
-        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
-        
-        if (totalBorrowings > totalMaxBorrow) return (false, "Borrowings greater than max borrow after spending");
-        
-        return (true, "");
-    }
+    /// @notice Debit mode check: each token's spendable amount must cover its share of the spend, threading the borrowing headroom across tokens
+    function _debitCheck(address safe, address[] memory tokens, uint256[] memory amountsInUsd, SafeData memory safeData) internal view returns (bool, string memory) {
+        ILendGateway lendGateway = gateway();
+        DebitCheckVars memory v;
+        v.hasDebt = lendGateway.hasDebt(safe);
+        // Aave-priced and buffered by the health-factor floor: quotes size collateral withdrawals so the
+        // position stays above the floor; debit execution keeps the raw bound (spends always settle)
+        v.withdrawHeadroom = v.hasDebt ? lendGateway.withdrawHeadroom(safe) : 0;
 
-    /**
-     * @notice Check borrowing power for credit mode
-     */
-    function _checkBorrowingPower(address safe, IDebtManager.TokenData[] memory collateralTokenAmounts, uint256 totalSpendingInUsd, IDebtManager debtManager) internal view returns (bool, string memory) {
-        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
-        
-        if (totalBorrowings > totalMaxBorrow) {
-            return (false, "Borrowings greater than max borrow");
+        for (uint256 i = 0; i < tokens.length; i++) {
+            address token = tokens[i];
+            if (!lendGateway.isSpendAsset(token)) {
+                return (false, "Not a supported spend token");
+            }
+
+            v.needed = LendSourcingLib.fromUsd(IPriceProvider(dataProvider.getPriceProvider()), token, amountsInUsd[i]);
+            // The sourcing gate and its decline reasons (including the Lend-liquidity attribution) live in the
+            // linked LendSourcingLib (code size); on success it returns the loose balance net of the pending
+            // reservation for the headroom accounting below.
+            v.pending = _getPendingWithdrawalAmount(safeData, token);
+            (bool ok, string memory reason, uint256 rawNet) = LendSourcingLib.debitTokenCheck(lendGateway, safe, token, v.needed, v.pending, v.withdrawHeadroom, v.hasDebt);
+            if (!ok) return (false, reason);
+            v.raw = rawNet;
+
+            // Only the supplied portion (effective raw is spent first) consumes the borrowing headroom for later tokens
+            if (v.hasDebt) {
+                v.used = _headroomRemoved(safe, token, v.needed > v.raw ? v.needed - v.raw : 0);
+                v.withdrawHeadroom = v.withdrawHeadroom > v.used ? v.withdrawHeadroom - v.used : 0;
+            }
         }
-        
-        if (totalSpendingInUsd > totalMaxBorrow - totalBorrowings) {
-            return (false, "Insufficient borrowing power");
-        }
-        
+
         return (true, "");
     }
 
     /**
      * @notice Gets comprehensive cash data for a Safe
-     * @dev Aggregates data from multiple sources including DebtManager and CashModule
+     * @dev Aggregates the Safe's Aave position (via the gateway) with its CashModule configuration
      * @param safe Address of the EtherFi Safe
      * @param debtServiceTokenPreference Optional ordered array of borrow tokens for debit calculations.
-     *                                   If empty, uses all available borrow tokens from DebtManager.
-     * @return safeCashData Comprehensive data structure containing:
+     *                                   If empty, uses all available borrow tokens.
+     * @return Comprehensive data structure containing:
      *   - mode: Current operating mode (Credit or Debit)
      *   - collateralBalances: Array of collateral token balances
      *   - borrows: Array of borrowed token balances
@@ -275,222 +266,151 @@ contract CashLens is UpgradeableProxy {
      *   - totalCashbackEarnedInUsd: Running total of all cashback earned
      *   - incomingModeStartTime: Timestamp when Credit mode takes effect
      */
-    function getSafeCashData(address safe, address[] memory debtServiceTokenPreference) external view returns (SafeCashData memory safeCashData) {
-        IDebtManager debtManager = cashModule.getDebtManager();
+    function getSafeCashData(address safe, address[] memory debtServiceTokenPreference) external view returns (SafeCashData memory) {
         IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
         SafeData memory safeData = cashModule.getData(safe);
 
-        (safeCashData.collateralBalances, safeCashData.totalCollateral, safeCashData.borrows, safeCashData.totalBorrow) = debtManager.getUserCurrentState(safe);
+        SafeCashData memory data;
 
-        safeCashData.withdrawalRequest = safeData.pendingWithdrawalRequest;
-        safeCashData.maxBorrow = debtManager.getMaxBorrowAmount(safe, true);
+        // Each engine names its own token universe: DebtManager's lists for a legacy safe, the gateway's
+        // registered/spendable assets for an Aave safe. The spend list is the debitMaxSpend default; on
+        // the legacy engine the borrow-token list is that same list.
+        address[] memory collateralTokens;
+        address[] memory debitSpendTokens;
 
-        address[] memory supportedTokens = debtManager.getCollateralTokens();
-        uint256 len = supportedTokens.length;
-        safeCashData.tokenPrices = new IDebtManager.TokenData[](len);
+        if (!cashModule.usesLendGateway(safe)) {
+            IDebtManager debtManager = cashModule.getDebtManager();
+            collateralTokens = debtManager.getCollateralTokens();
+            debitSpendTokens = debtManager.getBorrowTokens();
+            (data.collateralBalances, data.totalCollateral, data.borrows, data.totalBorrow) = debtManager.getUserCurrentState(safe);
+            data.maxBorrow = debtManager.getMaxBorrowAmount(safe, true);
+        } else {
+            ILendGateway lendGateway = gateway();
+            collateralTokens = lendGateway.registeredAssets();
+            debitSpendTokens = lendGateway.spendAssets();
+            ILendGateway.AccountData memory account = lendGateway.getAccountData(safe);
+            uint256 idleUsd;
+            (data.collateralBalances, idleUsd) = _collateralBalances(safe, collateralTokens, safeData);
+            // Debt can sit on any registered reserve, including one that stopped being borrowable after
+            // the borrow (borrowable flag turned off, or the reserve frozen/paused), so walk all
+            // registered assets here to match totalBorrow and hasOpenBorrows.
+            data.borrows = _debtBalances(safe, collateralTokens);
+            // Supplied position (the gateway's Aave-priced aggregate) plus idle registered assets
+            // (PriceProvider-priced, same 6-decimal scale). Idle funds add no borrowing power.
+            data.totalCollateral = account.collateralUsd + idleUsd;
+            data.totalBorrow = account.debtUsd;
+            // Gross borrowing power (collateral weighted by LTV), read unclamped rather than reconstructed
+            // from the headroom: headroom + debt collapses to exactly the debt once the headroom floors at
+            // zero, so an over-LTV position would read as one sitting precisely at its limit. Taken direct,
+            // this can fall below totalBorrow and measure the breach.
+            data.maxBorrow = account.maxBorrowUsd;
+        }
 
+        uint256 len = collateralTokens.length;
+        data.tokenPrices = new IDebtManager.TokenData[](len);
         for (uint256 i = 0; i < len;) {
-            safeCashData.tokenPrices[i].token = supportedTokens[i];
-            safeCashData.tokenPrices[i].amount = priceProvider.price(supportedTokens[i]);
+            data.tokenPrices[i].token = collateralTokens[i];
+            data.tokenPrices[i].amount = priceProvider.price(collateralTokens[i]);
             unchecked {
                 ++i;
             }
         }
 
-        safeCashData.spendingLimitAllowance = safeData.spendingLimit.maxCanSpend();
-        
-        safeCashData.creditMaxSpend = getMaxSpendCredit(safe);
+        data.withdrawalRequest = safeData.pendingWithdrawalRequest;
+        data.spendingLimitAllowance = safeData.spendingLimit.maxCanSpend();
+        data.creditMaxSpend = getMaxSpendCredit(safe);
 
-        if (debtServiceTokenPreference.length == 0) safeCashData.debitMaxSpend = getMaxSpendDebit(safe, debtManager.getBorrowTokens());
-        else safeCashData.debitMaxSpend = getMaxSpendDebit(safe, debtServiceTokenPreference);
+        if (debtServiceTokenPreference.length == 0) {
+            data.debitMaxSpend = getMaxSpendDebit(safe, debitSpendTokens);
+        } else {
+            data.debitMaxSpend = getMaxSpendDebit(safe, debtServiceTokenPreference);
+        }
 
-        safeCashData.totalCashbackEarnedInUsd = safeData.totalCashbackEarnedInUsd;
-        safeCashData.incomingModeStartTime = safeData.incomingModeStartTime;
-        safeCashData.mode = safeData.mode;
+        data.totalCashbackEarnedInUsd = safeData.totalCashbackEarnedInUsd;
+        data.incomingModeStartTime = safeData.incomingModeStartTime;
+        data.mode = safeData.mode;
+        if (data.incomingModeStartTime > 0 && block.timestamp > data.incomingModeStartTime) {
+            data.mode = safeData.incomingMode;
+        }
 
-        if (safeCashData.incomingModeStartTime > 0 && block.timestamp > safeCashData.incomingModeStartTime) safeCashData.mode = safeData.incomingMode;
+        return data;
     }
 
     /**
      * @notice Calculates the maximum amounts that can be spent in debit mode across multiple tokens
-     * @dev Analyzes the safe's collateral health to determine spendable amounts for each token while
-     *      maintaining solvency. When underwater (borrowings > max borrow), tokens are consumed in 
-     *      preference order to restore health before allowing spending. The function strictly respects 
-     *      token preference order.
-     * 
-     * @param safe Address of the EtherFi Safe to calculate spending limits for
-     * @param debtServiceTokenPreference Ordered array of borrow token addresses. Order determines 
-     *                                   priority for deficit coverage - earlier tokens are used first.
-     *                                   Must contain only valid borrow tokens (stablecoins).
-     * 
-     * @return DebitModeMaxSpend
-     *  - spendableTokens Array of token addresses (mirrors input debtServiceTokenPreference)
-     *  - spendableAmounts Array of maximum spendable amounts per token in native token units.
-     *                          Accounts for pending withdrawals. Zero for tokens needed as collateral.
-     *  - amountsInUsd Array of spendable amounts converted to USD values. Corresponds 1:1 with
-     *                      spendableAmounts. Zero for tokens reserved for collateral.
-     *  - totalSpendableInUsd Aggregate USD value spendable across all tokens
-     * 
+     * @dev Each token's spendable amount is its loose Safe balance (less any pending withdrawal it has
+     *      reserved) plus the withdrawable supplied amount. When the Safe has debt, the withdrawable supplied
+     *      amount is capped by the borrowing headroom (collateral weighted by LTV, minus debt), threaded
+     *      across the preference order so each token only spends the headroom the earlier ones left. Pending
+     *      withdrawals are reserved from the raw Safe balance only; the supplied side is used as-is.
+     * @param safe Address of the EtherFi Safe
+     * @param debtServiceTokenPreference Ordered array of borrow token addresses (stablecoins). Order is
+     *                                   preserved in the result.
+     * @return DebitModeMaxSpend with:
+     *   - spendableTokens: token addresses, mirrors debtServiceTokenPreference
+     *   - spendableAmounts: max spendable per token in native units, after pending withdrawals
+     *   - amountsInUsd: those amounts in USD, 1:1 with spendableAmounts
+     *   - totalSpendableInUsd: aggregate USD value spendable across all tokens
      * @custom:reverts NotABorrowToken if any token in debtServiceTokenPreference is not whitelisted
      * @custom:reverts DuplicateElementFound if debtServiceTokenPreference contains duplicate addresses
-     * 
-     * @custom:example Healthy Position
-     * // Safe: $1000 USDC, $500 USDT, no borrowings
-     * // Returns: spendableAmounts=[1000e6, 500e6], amountsInUsd=[1000e18, 500e18], total=$1500
-     * 
-     * @custom:example Underwater Position  
-     * // Safe: 1 weETH ($3000, 50% LTV), $1000 USDC (80% LTV), $500 USDT (80% LTV), $1700 borrowings
-     * // $1500 borrowing covered by weETH
-     * // Deficit: $200, needs $250 collateral at 80% LTV from USDC (first preference)
-     * // Returns: spendableAmounts=[750e6, 500e6], amountsInUsd=[750e18, 500e18], total=$1250
-     * 
-     * @custom:edge-cases
-     * - Empty token preference array returns empty results
-     * - Zero effective balances after withdrawals are handled correctly  
-     * - Tokens with zero value break the preference chain for subsequent tokens
-     * - If deficit cannot be covered, returns empty arrays and zero total
-     * 
-     * @custom:security 
-     * - Read-only view function with no state modifications
-     * - Conservative calculations ensure safe remains solvent after spending
-     * - Pending withdrawals reduce spendable amounts to prevent double-spending
      */
     function getMaxSpendDebit(address safe, address[] memory debtServiceTokenPreference) public view returns (DebitModeMaxSpend memory) {
         uint256 len = debtServiceTokenPreference.length;
         if (len == 0) return DebitModeMaxSpend(new address[](0), new uint256[](0), new uint256[](0), 0);
         if (len > 1) debtServiceTokenPreference.checkDuplicates();
 
-        IDebtManager debtManager = cashModule.getDebtManager();
+        if (!cashModule.usesLendGateway(safe)) {
+            return CashLensLegacyLib.maxSpendDebit(cashModule, safe, debtServiceTokenPreference);
+        }
+
+        ILendGateway lendGateway = gateway();
         SafeData memory safeData = cashModule.getData(safe);
 
-        // Calculate token values
-        (uint256[] memory effectiveBalances, uint256[] memory tokenValuesInUsd, uint256 totalValueInUsd) = _calculateTokenValues(debtManager, safe, debtServiceTokenPreference, len);
+        bool hasDebt = lendGateway.hasDebt(safe);
+        // Aave-priced and buffered by the health-factor floor, matching _debitCheck
+        uint256 withdrawHeadroom = hasDebt ? lendGateway.withdrawHeadroom(safe) : 0;
 
-        if (totalValueInUsd == 0) return DebitModeMaxSpend(debtServiceTokenPreference, new uint256[](len), new uint256[](len), 0);
-
-        // Check collateral after theoretical spending all debit tokens
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, debtServiceTokenPreference, effectiveBalances, Mode.Debit);
-
-        if (bytes(error).length != 0) return DebitModeMaxSpend(new address[](0), new uint256[](0), new uint256[](0), 0);
-
-        // Get borrowing power
-        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
-        
-        // Healthy position - can spend all effective balances
-        if (totalBorrowings == 0 || totalMaxBorrow >= totalBorrowings) return DebitModeMaxSpend(debtServiceTokenPreference, effectiveBalances, tokenValuesInUsd, totalValueInUsd);
-        
-        // Underwater position - need to calculate deficit coverage
-        return _processUnderwaterPosition(debtServiceTokenPreference, tokenValuesInUsd, effectiveBalances, debtManager, totalBorrowings - totalMaxBorrow);
-    }
-
-    function _calculateTokenValues(IDebtManager debtManager,address safe,address[] memory tokens,uint256 len) internal view returns (uint256[] memory effectiveBalances,uint256[] memory tokenValuesInUsd,uint256 totalValueInUsd) {
-        effectiveBalances = new uint256[](len);
-        tokenValuesInUsd = new uint256[](len);
+        uint256[] memory spendableAmounts = new uint256[](len);
+        uint256[] memory amountsInUsd = new uint256[](len);
+        uint256 totalSpendableInUsd = 0;
 
         for (uint256 i = 0; i < len;) {
-            address token = tokens[i];
-            if (!debtManager.isBorrowToken(token)) revert NotABorrowToken();
-            
-            effectiveBalances[i] = IERC20(token).balanceOf(safe) - getPendingWithdrawalAmount(safe, token);
-            
-            if (effectiveBalances[i] > 0) {  
-                tokenValuesInUsd[i] = debtManager.convertCollateralTokenToUsd(token, effectiveBalances[i]);
-                totalValueInUsd += tokenValuesInUsd[i];
+            address token = debtServiceTokenPreference[i];
+            if (!lendGateway.isSpendAsset(token)) revert NotABorrowToken();
+
+            (uint256 spendable, uint256 used) = _debitSpendable(safe, token, safeData, withdrawHeadroom, hasDebt);
+            withdrawHeadroom = withdrawHeadroom > used ? withdrawHeadroom - used : 0;
+
+            spendableAmounts[i] = spendable;
+            if (spendable > 0) {
+                amountsInUsd[i] = LendSourcingLib.toUsd(IPriceProvider(dataProvider.getPriceProvider()), token, spendable);
+                totalSpendableInUsd += amountsInUsd[i];
             }
-            
-            unchecked { ++i; }
-        }
-    }
 
-    function _processUnderwaterPosition(address[] memory tokens,uint256[] memory tokenValuesInUsd,uint256[] memory effectiveBalances,IDebtManager debtManager,uint256 deficit) internal view returns (DebitModeMaxSpend memory) {
-        uint256 len = tokens.length;
-        
-        // Cover deficit and calculate spendable amounts
-        (uint256[] memory spendableAmounts, uint256[] memory spendableUsdValues, uint256 remainingDeficit, uint256 lastProcessedIndex) = _coverDeficitAndCalculateSpendable(tokens, tokenValuesInUsd, debtManager, deficit);
-        
-        // If deficit remains uncovered, can't spend anything
-        if (remainingDeficit > 0) return DebitModeMaxSpend(new address[](0), new uint256[](0), new uint256[](0), 0);
-        
-        // Add remaining tokens and calculate total
-        uint256 totalSpendableUsd = _addRemainingTokens(spendableAmounts,spendableUsdValues,effectiveBalances,tokenValuesInUsd,lastProcessedIndex,len);
-        
-        return DebitModeMaxSpend(tokens, spendableAmounts, spendableUsdValues, totalSpendableUsd);
-    }
-
-    function _coverDeficitAndCalculateSpendable(address[] memory tokens,uint256[] memory tokenValuesInUsd,IDebtManager debtManager,uint256 deficit) internal view returns (uint256[] memory spendableAmounts,uint256[] memory spendableUsdValues,uint256 remainingDeficit,uint256 lastProcessedIndex) {
-        uint256 len = tokens.length;
-        spendableAmounts = new uint256[](len);
-        spendableUsdValues = new uint256[](len);
-        remainingDeficit = deficit;
-        
-        for (uint256 i = 0; i < len && remainingDeficit > 0;) {
-            uint256 tokenValue = tokenValuesInUsd[i];
-            
-            if (tokenValue > 0) {
-                (uint256 spendableAmount, uint256 spendableUsd, uint256 deficitCovered) = _processTokenForDeficit(tokens[i], tokenValue, remainingDeficit, debtManager);
-                
-                spendableAmounts[i] = spendableAmount;
-                spendableUsdValues[i] = spendableUsd;
-                remainingDeficit -= deficitCovered;
-                lastProcessedIndex = i;
-                
-                if (remainingDeficit == 0) break;
+            unchecked {
+                ++i;
             }
-            
-            unchecked { ++i; }
         }
-    }
 
-    function _processTokenForDeficit(address token,uint256 tokenValue,uint256 remainingDeficit,IDebtManager debtManager) internal view returns (uint256 spendableAmount,uint256 spendableUsd,uint256 deficitCovered) {
-        uint80 ltv = debtManager.collateralTokenConfig(token).ltv;
-        uint256 borrowingPower = tokenValue.mulDiv(ltv, HUNDRED_PERCENT, Math.Rounding.Floor);
-        
-        if (borrowingPower >= remainingDeficit) {
-            // This token can cover the remaining deficit
-            uint256 collateralNeeded = remainingDeficit.mulDiv(HUNDRED_PERCENT, ltv, Math.Rounding.Ceil);
-            spendableUsd = tokenValue - collateralNeeded;
-            spendableAmount = debtManager.convertUsdToCollateralToken(token, spendableUsd);
-            deficitCovered = remainingDeficit;
-        } else {
-            // This token can't cover deficit alone - use it all for collateral
-            spendableAmount = 0;
-            spendableUsd = 0;
-            deficitCovered = borrowingPower;
-        }
-    }
-
-    function _addRemainingTokens(uint256[] memory spendableAmounts,uint256[] memory spendableUsdValues,uint256[] memory effectiveBalances,uint256[] memory tokenValuesInUsd,uint256 lastProcessedIndex,uint256 len) internal pure returns (uint256 totalSpendableUsd) {
-        // Sum up what we can spend from deficit coverage
-        for (uint256 i = 0; i <= lastProcessedIndex;) {
-            totalSpendableUsd += spendableUsdValues[i];
-            unchecked { ++i; }
-        }
-        
-        // Add remaining tokens that weren't needed for deficit
-        for (uint256 i = lastProcessedIndex + 1; i < len;) {
-            if (tokenValuesInUsd[i] > 0) {
-                spendableAmounts[i] = effectiveBalances[i];
-                spendableUsdValues[i] = tokenValuesInUsd[i];
-                totalSpendableUsd += tokenValuesInUsd[i];
-            }
-            unchecked { ++i; }
-        }
+        return DebitModeMaxSpend(debtServiceTokenPreference, spendableAmounts, amountsInUsd, totalSpendableInUsd);
     }
 
     /**
      * @notice Calculates the maximum amount that can be spent in credit mode
+     * @dev Borrowing power (collateral weighted by LTV, minus debt) bounded by pool liquidity: a credit
+     *      spend draws a single borrow token, so the most liquid borrow token sets the achievable ceiling,
+     *      matching the reserve-liquidity decline in _creditCheck.
      * @param safe Address of the EtherFi Safe
-     * @return returnAmtInCreditModeUsd Maximum amount that can be spent in credit mode (USD)
+     * @return Maximum amount that can be spent in credit mode (USD, 6 decimals)
      */
-    function getMaxSpendCredit(address safe) public view returns (uint256 returnAmtInCreditModeUsd) {
-        // Get debt manager and safe data once to avoid multiple calls
-        IDebtManager debtManager = cashModule.getDebtManager();
-        SafeData memory safeData = cashModule.getData(safe);
+    function getMaxSpendCredit(address safe) public view returns (uint256) {
+        if (!cashModule.usesLendGateway(safe)) {
+            return CashLensLegacyLib.maxSpendCredit(cashModule, safe);
+        }
 
-        bool isValidCredit;
-
-        (returnAmtInCreditModeUsd, isValidCredit) = _calculateCreditModeAmount(debtManager, safe, safeData);
-        if (!isValidCredit) return 0;
+        // Floor-buffered borrowing power bounded by reserve liquidity; lives in the linked
+        // LendSourcingLib (code size), matching _creditCheck's gates
+        return LendSourcingLib.maxSpendCredit(cashModule.getLendGateway(), IPriceProvider(dataProvider.getPriceProvider()), safe);
     }
 
     /**
@@ -503,6 +423,38 @@ contract CashLens is UpgradeableProxy {
     function getPendingWithdrawalAmount(address safe, address token) public view returns (uint256) {
         SafeData memory safeData = cashModule.getData(safe);
         return _getPendingWithdrawalAmount(safeData, token);
+    }
+
+    /**
+     * @notice Max amount of `token` an operation can source from the safe: the loose balance (net of any
+     *         pending-withdrawal reservation) plus the Aave-supplied amount withdrawable without leaving
+     *         the position over-LTV
+     * @dev The number a module's sandwich (swap input, Liquid deposit/withdraw) or a backend repay can
+     *      actually pull, sized by the same LendSourcingLib math the spend paths use, so a frontend max
+     *      never needs to reimplement LTV accounting. Works for any token: an unregistered token or ETH has no supplied part, and a legacy safe's funds
+     *      are all loose. Conservative for a zero-LTV reserve while the safe has debt (it cannot be sized
+     *      against debt), matching the debit-spend sizing. For a legacy safe with DebtManager debt the number
+     *      is an upper bound, not a health promise: an operation that removes value from the safe (rather than
+     *      swapping it in place) is still subject to the hook's DebtManager health check at execution,
+     *      matching what the legacy engine has always enforced.
+     * @param safe Address of the safe
+     * @param token Address of the token (or the ETH marker address)
+     * @return Max sourceable amount of `token`, in token units
+     */
+    function getMaxSourceable(address safe, address token) external view returns (uint256) {
+        SafeData memory safeData = cashModule.getData(safe);
+        uint256 loose = token == ETH ? safe.balance : IERC20(token).balanceOf(safe);
+        uint256 pending = _getPendingWithdrawalAmount(safeData, token);
+        uint256 looseAvailable = loose > pending ? loose - pending : 0;
+
+        if (!cashModule.usesLendGateway(safe)) {
+            return looseAvailable;
+        }
+
+        ILendGateway lendGateway = gateway();
+        // Aave-priced and buffered by the health-factor floor: withdrawal sourcing enforces the floor at
+        // execution, so this quote is exactly what a request (or module sandwich) can actually pull.
+        return looseAvailable + _withdrawableSupplied(safe, token, lendGateway.withdrawHeadroom(safe), lendGateway.hasDebt(safe));
     }
 
     /**
@@ -530,139 +482,99 @@ contract CashLens is UpgradeableProxy {
 
     /**
      * @notice Gets the effective collateral amount for a specific token
-     * @dev Returns balance minus pending withdrawals
+     * @dev A gateway safe's collateral is its Aave-supplied balance plus its idle balance (loose funds net
+     *      of any pending-withdrawal reservation). A legacy safe's collateral is its raw balance minus pending
+     *      withdrawals — DebtManager reads this branch for its health and borrow checks, so it must keep the
+     *      exact pre-gateway semantics until the legacy engine is retired.
      * @param safe Address of the safe
      * @param token Address of the collateral token to check
      * @return Effective collateral amount
-     * @custom:throws NotACollateralToken if token is not a valid collateral token
+     * @custom:throws NotACollateralToken if token is not a collateral token on the safe's engine
      */
     function getUserCollateralForToken(address safe, address token) public view returns (uint256) {
-        IDebtManager debtManager = cashModule.getDebtManager();
+        if (!cashModule.usesLendGateway(safe)) {
+            if (!cashModule.getDebtManager().isCollateralToken(token)) revert NotACollateralToken();
+            uint256 balance = IERC20(token).balanceOf(safe);
+            uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
 
-        if (!debtManager.isCollateralToken(token)) revert NotACollateralToken();
-        uint256 balance = IERC20(token).balanceOf(safe);
-        uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, token);
+            return balance > pendingWithdrawalAmount ? balance - pendingWithdrawalAmount : 0;
+        }
 
-        return balance - pendingWithdrawalAmount;
+        ILendGateway lendGateway = gateway();
+        if (!lendGateway.isRegistered(token)) revert NotACollateralToken();
+        return lendGateway.suppliedOf(safe, token) + _idleBalance(safe, token, cashModule.getData(safe));
     }
 
     /**
      * @notice Gets all effective collateral balances for a safe
-     * @dev Returns array of token addresses and their effective amounts (balance minus pending withdrawals)
+     * @dev A gateway safe's collateral is its Aave-supplied balances plus its idle balances of registered
+     *      assets (loose funds net of pending-withdrawal reservations); a legacy safe's is its raw balances
+     *      minus pending withdrawals. DebtManager reads the legacy branch for its health and borrow checks,
+     *      so that branch must keep the exact pre-gateway semantics until the legacy engine is retired.
      * @param safe Address of the safe
      * @return Array of token data with token addresses and effective amounts
      */
     function getUserTotalCollateral(address safe) public view returns (IDebtManager.TokenData[] memory) {
-        IDebtManager debtManager = cashModule.getDebtManager();
-        address[] memory collateralTokens = debtManager.getCollateralTokens();
-        uint256 len = collateralTokens.length;
-        IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
-        uint256 m = 0;
-        for (uint256 i = 0; i < len;) {
-            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
-            uint256 pendingWithdrawalAmount = getPendingWithdrawalAmount(safe, collateralTokens[i]);
-            if (balance != 0) {
-                balance = balance - pendingWithdrawalAmount;
-                if (balance != 0) {
-                    tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
-                    unchecked {
-                        ++m;
-                    }
-                }
-            }
-            unchecked {
-                ++i;
-            }
+        if (!cashModule.usesLendGateway(safe)) {
+            return CashLensLegacyLib.userTotalCollateral(cashModule, safe, cashModule.getDebtManager().getCollateralTokens());
         }
 
-        assembly ("memory-safe") {
-            mstore(tokenAmounts, m)
-        }
-
-        return tokenAmounts;
+        (IDebtManager.TokenData[] memory collateral,) = _collateralBalances(safe, gateway().registeredAssets(), cashModule.getData(safe));
+        return collateral;
     }
 
     /**
-     * @notice Calculate the amount that can be spent in credit mode
-     * @dev Internal helper that handles credit mode calculations
-     * @param debtManager The debt manager instance
-     * @param safe The address of the safe
-     * @param safeData The safe data
-     * @return creditModeAmount The amount that can be spent in credit mode
-     * @return isValid Whether the calculation was successful
+     * @notice Supplied amount of `token` withdrawable for a debit spend, in token units
+     * @dev min(supplied, reserve cash). When the Safe has debt, the supplied side is what the gateway's
+     *      Aave-priced collateral headroom allows.
      */
-    function _calculateCreditModeAmount(IDebtManager debtManager, address safe, SafeData memory safeData) internal view returns (uint256 creditModeAmount, bool isValid) {
-        (IDebtManager.TokenData[] memory collateralTokenAmounts, string memory error) = _getCollateralBalanceWithTokensSubtracted(debtManager, safe, safeData, new address[](0), new uint256[](0), Mode.Credit);
+    function _withdrawableSupplied(address safe, address token, uint256 headroom, bool hasDebt) internal view returns (uint256) {
+        return LendSourcingLib.withdrawableSupplied(gateway(), safe, token, headroom, hasDebt);
+    }
 
-        // Check for errors - short circuit to save gas
-        if (bytes(error).length != 0 || collateralTokenAmounts.length == 0) {
-            return (0, false);
-        }
+    /// @notice The weighted collateral value withdrawing `amount` of `token` consumes (gateway view; helper keeps call-site stacks flat)
+    function _headroomRemoved(address safe, address token, uint256 amount) internal view returns (uint256) {
+        return gateway().headroomRemoved(safe, token, amount);
+    }
 
-        // Get borrowing power and total borrowing
-        (uint256 totalMaxBorrow, uint256 totalBorrowings) = debtManager.getBorrowingPowerAndTotalBorrowing(safe, collateralTokenAmounts);
+    /// @notice Debit spendable for `token` (token units) given the running borrowing headroom, and the headroom that withdrawal consumes
+    function _debitSpendable(address safe, address token, SafeData memory safeData, uint256 withdrawHeadroom, bool hasDebt) internal view returns (uint256, uint256) {
+        uint256 withdrawableSupplied = _withdrawableSupplied(safe, token, withdrawHeadroom, hasDebt);
+        uint256 headroomUsed = hasDebt ? _headroomRemoved(safe, token, withdrawableSupplied) : 0;
 
-        // Check if borrowings exceed max borrow
-        if (totalBorrowings > totalMaxBorrow) {
-            return (0, false);
-        }
+        uint256 raw = IERC20(token).balanceOf(safe);
+        uint256 pending = _getPendingWithdrawalAmount(safeData, token);
+        uint256 spendable = _debitSpendableAmount(raw, withdrawableSupplied, pending);
 
-        // Calculate credit mode amount 
-        return (totalMaxBorrow - totalBorrowings, true);
+        return (spendable, headroomUsed);
     }
 
     /**
-     * @notice Gets collateral balances with multiple token amounts subtracted
-     * @dev Internal helper for simulating multi-token debit spending
-     * @param debtManager Reference to the debt manager contract
-     * @param safe Address of the EtherFi Safe
-     * @param safeData Safe data structure containing withdrawal requests
-     * @param tokens Array of addresses of tokens to subtract
-     * @param amounts Array of amounts to subtract (must match tokens array)
-     * @return tokenAmounts Array of token data with updated balances
-     * @return error Error message if calculation fails
+     * @notice Spendable amount of one debit token: its loose Safe balance less the pending withdrawal it has reserved, plus the withdrawable supplied amount.
+     * @dev A pending withdrawal sits against the loose Safe balance, so it is reserved from `raw` only;
+     *      `withdrawableSupplied` (the supplied side) is unaffected.
      */
-    function _getCollateralBalanceWithTokensSubtracted(
-        IDebtManager debtManager,
-        address safe,
-        SafeData memory safeData,
-        address[] memory tokens,
-        uint256[] memory amounts,
-        Mode mode
-    ) internal view returns (IDebtManager.TokenData[] memory, string memory) {
-        address[] memory collateralTokens = debtManager.getCollateralTokens();
-        uint256 len = collateralTokens.length;
-        
-        IDebtManager.TokenData[] memory tokenAmounts = new IDebtManager.TokenData[](collateralTokens.length);
+    function _debitSpendableAmount(uint256 raw, uint256 withdrawableSupplied, uint256 pending) internal pure returns (uint256) {
+        uint256 rawAfterPending = raw > pending ? raw - pending : 0;
+        return rawAfterPending + withdrawableSupplied;
+    }
+
+    /// @notice Per-token collateral of a gateway safe: the Aave-supplied position plus the idle Safe balance
+    ///         (loose funds net of any pending-withdrawal reservation), skipping zero balances. Also returns
+    ///         the idle part's total USD value (6 decimals) so getSafeCashData can extend the gateway's
+    ///         Aave-priced collateral aggregate in the same scale.
+    function _collateralBalances(address safe, address[] memory tokens, SafeData memory safeData) internal view returns (IDebtManager.TokenData[] memory, uint256) {
+        ILendGateway lendGateway = cashModule.getLendGateway();
+        IPriceProvider priceProvider = IPriceProvider(dataProvider.getPriceProvider());
+        IDebtManager.TokenData[] memory out = new IDebtManager.TokenData[](tokens.length);
+        uint256 idleUsd = 0;
         uint256 m = 0;
-        
-        for (uint256 i = 0; i < len;) {
-            uint256 balance = IERC20(collateralTokens[i]).balanceOf(safe);
-            uint256 pendingWithdrawalAmount = _getPendingWithdrawalAmount(safeData, collateralTokens[i]);
-            
-            if (balance != 0) {
-                balance = balance - pendingWithdrawalAmount;
-
-                if (mode == Mode.Debit) {
-    
-                    // Check if this token is in the tokens array
-                    for (uint256 j = 0; j < tokens.length; j++) {
-                        if (collateralTokens[i] == tokens[j]) {
-                            if (balance < amounts[j]) {
-                                return (
-                                    new IDebtManager.TokenData[](0), 
-                                    "Insufficient effective balance after withdrawal to spend with debit mode"
-                                );
-                            }
-            
-                            balance = balance - amounts[j];
-                            break;
-                        }
-                    }
-                }
-                
-                tokenAmounts[m] = IDebtManager.TokenData({ token: collateralTokens[i], amount: balance });
-
+        for (uint256 i = 0; i < tokens.length;) {
+            uint256 idle = _idleBalance(safe, tokens[i], safeData);
+            if (idle != 0) idleUsd += LendSourcingLib.toUsd(priceProvider, tokens[i], idle);
+            uint256 amount = lendGateway.suppliedOf(safe, tokens[i]) + idle;
+            if (amount != 0) {
+                out[m] = IDebtManager.TokenData({ token: tokens[i], amount: amount });
                 unchecked {
                     ++m;
                 }
@@ -671,11 +583,43 @@ contract CashLens is UpgradeableProxy {
                 ++i;
             }
         }
-        
+
         assembly ("memory-safe") {
-            mstore(tokenAmounts, m)
+            mstore(out, m)
         }
-        
-        return (tokenAmounts, "");
+
+        return (out, idleUsd);
+    }
+
+    /// @notice Idle balance of `token` in the Safe: the loose balance less any pending-withdrawal reservation
+    function _idleBalance(address safe, address token, SafeData memory safeData) internal view returns (uint256) {
+        uint256 loose = IERC20(token).balanceOf(safe);
+        uint256 pending = _getPendingWithdrawalAmount(safeData, token);
+        return loose > pending ? loose - pending : 0;
+    }
+
+    /// @notice Per-token debt in the Safe's Aave account, skipping zero balances
+    function _debtBalances(address safe, address[] memory tokens) internal view returns (IDebtManager.TokenData[] memory) {
+        ILendGateway lendGateway = cashModule.getLendGateway();
+        IDebtManager.TokenData[] memory out = new IDebtManager.TokenData[](tokens.length);
+        uint256 m = 0;
+        for (uint256 i = 0; i < tokens.length;) {
+            uint256 amount = lendGateway.debtOf(safe, tokens[i]);
+            if (amount != 0) {
+                out[m] = IDebtManager.TokenData({ token: tokens[i], amount: amount });
+                unchecked {
+                    ++m;
+                }
+            }
+            unchecked {
+                ++i;
+            }
+        }
+
+        assembly ("memory-safe") {
+            mstore(out, m)
+        }
+
+        return out;
     }
 }

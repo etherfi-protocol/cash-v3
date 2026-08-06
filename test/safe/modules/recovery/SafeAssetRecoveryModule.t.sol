@@ -131,6 +131,32 @@ contract SafeAssetRecoveryModuleTest is SafeTestSetup {
         module.recover(safeAddr, address(withdrawable), recipient, DEADLINE, signers, sigs);
     }
 
+    /// @dev L-07 regression: a token registered as a LendGateway reserve — but absent from every
+    ///      legacy DebtManager list and the withdraw whitelist — is in active use by gateway safes'
+    ///      Aave positions (loose funds awaiting auto-supply included) and must not be sweepable.
+    ///      The gateway registry and the legacy lists diverge by design as DebtManager is retired.
+    function test_recover_revertsIfGatewayRegisteredToken() public {
+        MockERC20 gatewayAsset = new MockERC20("Gateway Reserve", "GWR", 18);
+        gateway.setRegistered(address(gatewayAsset), true);
+        gatewayAsset.mint(safeAddr, 1_000e18);
+
+        (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(gatewayAsset), recipient);
+        vm.expectRevert(ISafeAssetRecoveryModule.OnlySupportedTokensCannotBeRecovered.selector);
+        module.recover(safeAddr, address(gatewayAsset), recipient, DEADLINE, signers, sigs);
+    }
+
+    /// @dev With no gateway configured the registry check is skipped, not reverted on: a genuinely
+    ///      unsupported token still recovers.
+    function test_recover_worksWhenNoGatewayConfigured() public {
+        vm.mockCall(address(cashModule), abi.encodeWithSignature("getLendGateway()"), abi.encode(address(0)));
+
+        uint256 amount = 1_000e18;
+        token.mint(safeAddr, amount);
+        (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), recipient);
+        module.recover(safeAddr, address(token), recipient, DEADLINE, signers, sigs);
+        assertEq(token.balanceOf(recipient), amount, "sweep unaffected by missing gateway");
+    }
+
     function test_recover_revertsIfZeroBalance() public {
         // token unsupported but safe holds none.
         (address[] memory signers, bytes[] memory sigs) = _signRecover(address(module), address(token), recipient);

@@ -85,6 +85,9 @@ contract DebtManagerStorageContract is UpgradeableProxy {
 
     /// @notice Role identifier for debt manager administrators
     bytes32 public constant DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
+
+    /// @notice Role identifier for the ether.fi wallet, which runs lend gateway migrations
+    bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
     
     /// @notice Constant representing 100% with 18 decimals precision (100e18)
     uint256 public constant HUNDRED_PERCENT = 100e18;
@@ -123,6 +126,9 @@ contract DebtManagerStorageContract is UpgradeableProxy {
                 
         /// @notice Shares of borrow tokens with 18 decimals precision
         mapping(address supplier => mapping(address borrowToken => uint256 shares)) sharesOfBorrowTokens;
+
+        /// @notice Whether a Safe's position has been migrated to Aave (set once migrated, including Safes that had no debt)
+        mapping(address safe => bool migrated) migratedToLendGateway;
     }
 
     /// @notice Storage location for DebtManagerStorage (ERC-7201 compliant)
@@ -270,6 +276,11 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      */
     event InterestIndexUpdated(address indexed borrowToken, uint256 oldIndex, uint256 newIndex);
 
+    /// @notice Emitted when a Safe's position is migrated from DebtManager to the Aave instance
+    /// @param safe The migrated Safe
+    /// @param debtUsd The total debt migrated, in USD with 6 decimals
+    event MigratedToLendGateway(address indexed safe, uint256 debtUsd);
+
     /**
      * @notice Error thrown when collateral token preference array is empty while liquidating
      */
@@ -384,6 +395,24 @@ contract DebtManagerStorageContract is UpgradeableProxy {
      * @notice Error thrown when borrow shares are insufficient
      */
     error InsufficientBorrowShares();
+
+    /// @notice Thrown when the Aave reserve lacks the liquidity to fund the migration borrow
+    error InsufficientLendGatewayLiquidity(address token);
+
+    /// @notice Thrown when an Aave reserve cannot take the migration supply (paused, frozen, halted, or past its cap)
+    error LendGatewayCannotAcceptSupply(address token);
+
+    /// @notice Thrown when, after supplying its collateral, the Safe's debt does not fit Aave's LTVs
+    error PositionExceedsLendGatewayLtv();
+
+    /// @notice Thrown when the migration gateway has not been configured
+    error GatewayNotSet();
+
+    /// @notice Thrown when migrating an opted-out Safe that still carries DebtManager debt (repay it first)
+    error LendOptedOutSafeHasDebt();
+
+    /// @notice Thrown when a legacy DebtManager operation or a migration is attempted on a Safe whose engine is the lend gateway
+    error SafeUsesLendGateway();
     
     /**
      * @notice Error thrown when user is still liquidatable
