@@ -38,6 +38,11 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
     /// @notice Prod Safe holding the admin roles (same address on OP and Ethereum).
     address internal constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
+    /// @notice Executor gas limit for the destination lzReceive (OFTAdapter credit) call.
+    ///         Carried in the module's own send options: the executor rejects options with
+    ///         no lzReceive gas, and the third-party ShadowOFTs cannot be assumed to have
+    ///         enforced options set for SEND_AND_CALL.
+    uint128 internal constant LZ_RECEIVE_GAS_LIMIT = 150_000;
     /// @notice Executor gas limit for the destination lzCompose call.
     uint128 internal constant COMPOSE_GAS_LIMIT = 500_000;
 

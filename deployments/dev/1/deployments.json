@@ -9,6 +9,7 @@
       "EtherFiLiquidBridgeAdapter": "0x8F8792221b7d41C7a11C71c04d325D5aA4D2A1D6",
       "CCTPAdapter": "0x695B13F329F146D87b52364aD7bcc48560567270",
       "ScrollERC20BridgeAdapter": "0x46A2A0eDf74eD97A72518349B5ccBD53AABf8265",
-      "PixWalletAutoTopup": "0x6Bdc59A8Dd435c2Da4045522491eF5769944d33B"
+      "PixWalletAutoTopup": "0x6Bdc59A8Dd435c2Da4045522491eF5769944d33B",
+      "StockUnwrapper": "0xd020D5ADCDf0fAD06c853482cfd921a383aeFF12"
     }
 }

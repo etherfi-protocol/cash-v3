@@ -12,8 +12,19 @@ import { SendParam, MessagingFee, MessagingReceipt, OFTLimit, OFTFeeDetail, OFTR
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
 
 /// @dev ShadowOFT stand-in: an ERC20 that is its own OFT (token() == address(this),
-///      approvalRequired() == false), recording the last send() for assertions.
+///      approvalRequired() == false), recording the last send() for assertions. Faithful to
+///      the semantics that bit us with hand-rolled stubs before: like the real `OFTCore`,
+///      `quoteOFT`/`quoteSend`/`send` all run `_debitView` — truncating dust below the shared
+///      decimals and enforcing the CALLER's `minAmountLD` (`SlippageExceeded`) — and, like
+///      the real `ExecutorFeeLib`, the quote/send path rejects extraOptions that carry no
+///      executor lzReceive gas (`Executor_ZeroLzReceiveGasProvided`).
 contract OFTStub is ERC20 {
+    error SlippageExceeded(uint256 amountLD, uint256 minAmountLD);
+    error Executor_ZeroLzReceiveGasProvided();
+
+    /// @dev 18 local decimals / 6 shared decimals, the standard OFT default.
+    uint256 public constant decimalConversionRate = 1e12;
+
     uint256 public callCount;
     uint32 public lastDstEid;
     bytes32 public lastTo;
@@ -22,30 +33,62 @@ contract OFTStub is ERC20 {
     bytes public lastExtraOptions;
     bytes public lastComposeMsg;
     uint256 public nativeFee = 0.01 ether;
-    uint256 public dust; // simulated shared-decimal rounding loss
 
     constructor() ERC20("iWrapped SPY Stock", "iwSPYx") { }
 
     function mint(address to, uint256 amount) external { _mint(to, amount); }
     function setNativeFee(uint256 f) external { nativeFee = f; }
-    function setDust(uint256 d) external { dust = d; }
 
     function token() external view returns (address) { return address(this); }
     function approvalRequired() external pure returns (bool) { return false; }
 
-    function quoteOFT(SendParam calldata p) external view returns (OFTLimit memory limit, OFTFeeDetail[] memory details, OFTReceipt memory receipt) {
+    /// @dev Mirrors OFTCore._debitView: dust-truncate, then enforce the caller's minAmountLD.
+    function _debitView(uint256 amountLD, uint256 minAmountLD) internal pure returns (uint256 sent, uint256 received) {
+        sent = (amountLD / decimalConversionRate) * decimalConversionRate;
+        received = sent;
+        if (received < minAmountLD) revert SlippageExceeded(received, minAmountLD);
+    }
+
+    /// @dev Mirrors ExecutorFeeLib._parseExecutorOptions: walks the TYPE_3 worker options and
+    ///      reverts unless an executor lzReceive option (type 1) carries non-zero gas —
+    ///      LZCOMPOSE options alone do NOT satisfy the executor.
+    function _requireLzReceiveGas(bytes memory options) internal pure {
+        require(options.length >= 2 && uint16(bytes2(abi.encodePacked(options[0], options[1]))) == 3, "OFTStub: not TYPE_3");
+        uint128 lzReceiveGas;
+        uint256 cursor = 2;
+        while (cursor < options.length) {
+            // workerId (1) ‖ optionLength (2) ‖ optionType (1) ‖ payload (optionLength - 1)
+            uint16 optionLength = uint16(bytes2(abi.encodePacked(options[cursor + 1], options[cursor + 2])));
+            if (uint8(options[cursor + 3]) == 1) {
+                bytes memory gasBytes = new bytes(16);
+                for (uint256 i = 0; i < 16; i++) {
+                    gasBytes[i] = options[cursor + 4 + i];
+                }
+                lzReceiveGas += uint128(bytes16(gasBytes));
+            }
+            cursor += 3 + optionLength;
+        }
+        if (lzReceiveGas == 0) revert Executor_ZeroLzReceiveGasProvided();
+    }
+
+    function quoteOFT(SendParam calldata p) external pure returns (OFTLimit memory limit, OFTFeeDetail[] memory details, OFTReceipt memory receipt) {
+        (uint256 sent, uint256 received) = _debitView(p.amountLD, p.minAmountLD);
         limit = OFTLimit(0, type(uint256).max);
-        receipt = OFTReceipt(p.amountLD, p.amountLD - dust);
+        receipt = OFTReceipt(sent, received);
         return (limit, details, receipt);
     }
 
-    function quoteSend(SendParam calldata, bool) external view returns (MessagingFee memory) {
+    function quoteSend(SendParam calldata p, bool) external view returns (MessagingFee memory) {
+        _debitView(p.amountLD, p.minAmountLD);
+        _requireLzReceiveGas(p.extraOptions);
         return MessagingFee(nativeFee, 0);
     }
 
     function send(SendParam calldata p, MessagingFee calldata fee, address) external payable returns (MessagingReceipt memory mr, OFTReceipt memory oftReceipt) {
         require(msg.value == fee.nativeFee, "OFTStub: bad fee");
-        _burn(msg.sender, p.amountLD);
+        (uint256 sent, uint256 received) = _debitView(p.amountLD, p.minAmountLD);
+        _requireLzReceiveGas(p.extraOptions);
+        _burn(msg.sender, sent);
         callCount++;
         lastDstEid = p.dstEid;
         lastTo = p.to;
@@ -53,7 +96,7 @@ contract OFTStub is ERC20 {
         lastMinAmountLD = p.minAmountLD;
         lastExtraOptions = p.extraOptions;
         lastComposeMsg = p.composeMsg;
-        return (mr, OFTReceipt(p.amountLD, p.amountLD - dust));
+        return (mr, OFTReceipt(sent, received));
     }
 }
 
@@ -70,6 +113,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     address internal feeReceiver = makeAddr("feeReceiver");
 
     uint32 internal constant DST_EID = 30101; // Ethereum mainnet EID
+    uint128 internal constant LZ_RECEIVE_GAS = 100_000;
     uint128 internal constant COMPOSE_GAS = 300_000;
     uint256 internal constant AMOUNT = 100e18;
     uint256 internal constant MIN_RETURN = 99e18;
@@ -95,6 +139,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
             impl,
             abi.encodeCall(StockWithdrawModule.initialize, (StockWithdrawModule.InitParams({
                 roleRegistry: address(roleRegistry),
+                lzReceiveGasLimit: LZ_RECEIVE_GAS,
                 composeGasLimit: COMPOSE_GAS,
                 providerFeeBps: 0,
                 feeReceiver: feeReceiver,
@@ -198,7 +243,9 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     // ---- initialize ----
 
     function test_initialize_setsFullConfig() public view {
-        assertEq(module.getComposeGasLimit(), COMPOSE_GAS);
+        (uint128 lzReceiveGasLimit, uint128 composeGasLimit) = module.getLzGasLimits();
+        assertEq(lzReceiveGasLimit, LZ_RECEIVE_GAS);
+        assertEq(composeGasLimit, COMPOSE_GAS);
         (uint16 feeBps, address receiver) = module.getProviderFee();
         assertEq(feeBps, 0);
         assertEq(receiver, feeReceiver);
@@ -319,9 +366,12 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         assertEq(oft.lastTo(), bytes32(uint256(uint160(unwrapper))));
         assertEq(oft.lastAmountLD(), AMOUNT);
         assertEq(oft.lastComposeMsg(), abi.encode(address(safe), stockRecipient, MIN_RETURN, order.deadline));
-        // TYPE_3 ‖ workerId=1 ‖ optionLength=19 ‖ OPTION_TYPE_LZCOMPOSE=3 ‖ index=0 ‖ gas —
-        // the manual equivalent of OptionsBuilder.addExecutorLzComposeOption(0, gas, 0).
-        assertEq(oft.lastExtraOptions(), abi.encodePacked(uint16(3), uint8(1), uint16(19), uint8(3), uint16(0), COMPOSE_GAS));
+        // TYPE_3 ‖ [workerId=1 ‖ optionLength=17 ‖ OPTION_TYPE_LZRECEIVE=1 ‖ gas] ‖
+        // [workerId=1 ‖ optionLength=19 ‖ OPTION_TYPE_LZCOMPOSE=3 ‖ index=0 ‖ gas] — the
+        // equivalent of OptionsBuilder.addExecutorLzReceiveOption(gas, 0)
+        // .addExecutorLzComposeOption(0, gas, 0). The lzReceive leg is mandatory: the
+        // executor rejects options carrying no lzReceive gas.
+        assertEq(oft.lastExtraOptions(), abi.encodePacked(uint16(3), uint8(1), uint16(17), uint8(1), LZ_RECEIVE_GAS, uint8(1), uint16(19), uint8(3), uint16(0), COMPOSE_GAS));
         // iTOKEN was pulled from the safe into the module and burned by the OFT send
         assertEq(oft.balanceOf(address(safe)), 0);
         assertEq(oft.balanceOf(address(module)), 0);
@@ -354,13 +404,60 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         module.executeWithdrawal{ value: 0.01 ether }(address(safe));
     }
 
-    function test_executeWithdrawal_adjustsMinAmountForOftDust() public {
-        oft.setDust(1e12);
+    function test_executeWithdrawal_pinsAmountsToQuoteForDustFreeAmount() public {
         _request(_baseOrder());
         _warpPastDelay();
         vm.prank(keeper);
         module.executeWithdrawal{ value: 0.01 ether }(address(safe));
-        assertEq(oft.lastMinAmountLD(), AMOUNT - 1e12, "minAmountLD set from quoteOFT");
+        assertEq(oft.lastAmountLD(), AMOUNT, "dust-free amount bridged whole");
+        assertEq(oft.lastMinAmountLD(), AMOUNT, "minAmountLD pinned to quoteOFT");
+    }
+
+    /// @dev Regression: `quoteOFT` enforces the CALLER's `minAmountLD` against its
+    ///      dust-truncated amount, so quoting with `minAmountLD = amountLD` bricked every
+    ///      order whose amount wasn't a multiple of the OFT's decimal conversion rate (the
+    ///      normal case for a full-balance withdrawal). The module must quote with
+    ///      `minAmountLD = 0`, pin both amounts to the quote, and return the dust to the safe.
+    function test_executeWithdrawal_succeedsForDustBearingAmount() public {
+        uint256 dust = 123_456; // below the stub's 1e12 conversion rate
+        oft.mint(address(safe), dust);
+
+        StockWithdrawModule.Order memory order = _baseOrder();
+        order.amount = AMOUNT + dust;
+        _request(order);
+        _warpPastDelay();
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+
+        assertEq(oft.lastAmountLD(), AMOUNT, "amountLD pinned to quoteOFT's amountSentLD");
+        assertEq(oft.lastMinAmountLD(), AMOUNT, "minAmountLD pinned to quoteOFT's amountReceivedLD");
+        assertEq(oft.balanceOf(address(safe)), dust, "truncated dust returned to the safe");
+        assertEq(oft.balanceOf(address(module)), 0, "nothing stranded in the module");
+    }
+
+    function test_executeWithdrawal_dustBearingAmountWithProviderFee() public {
+        vm.prank(moduleAdmin);
+        module.setProviderFee(100, feeReceiver); // 1%
+
+        uint256 dust = 123_456;
+        oft.mint(address(safe), dust);
+
+        StockWithdrawModule.Order memory order = _baseOrder();
+        order.amount = AMOUNT + dust;
+        _request(order);
+        _warpPastDelay();
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+
+        uint256 fee = (AMOUNT + dust) / 100; // mulDiv floors
+        uint256 net = AMOUNT + dust - fee;
+        uint256 sent = (net / 1e12) * 1e12;
+        assertEq(oft.balanceOf(feeReceiver), fee, "fee taken on the gross amount");
+        assertEq(oft.lastAmountLD(), sent, "net amount bridged dust-truncated");
+        assertEq(oft.balanceOf(address(safe)), net - sent, "truncated dust returned to the safe");
+        assertEq(oft.balanceOf(address(module)), 0, "nothing stranded in the module");
     }
 
     function test_executeWithdrawal_refundsExcessFeeToCaller() public {
@@ -418,6 +515,19 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         _request(_baseOrder());
         (address feeToken, uint256 fee) = module.getWithdrawalFee(address(safe));
         assertEq(feeToken, 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE);
+        assertEq(fee, 0.01 ether);
+    }
+
+    /// @dev Regression: the fee view must survive dust-bearing amounts too (it quotes the
+    ///      same pinned SendParam that `executeWithdrawal` sends).
+    function test_getWithdrawalFee_worksForDustBearingAmount() public {
+        uint256 dust = 123_456;
+        oft.mint(address(safe), dust);
+        StockWithdrawModule.Order memory order = _baseOrder();
+        order.amount = AMOUNT + dust;
+        _request(order);
+
+        (, uint256 fee) = module.getWithdrawalFee(address(safe));
         assertEq(fee, 0.01 ether);
     }
 
@@ -524,13 +634,22 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         assertEq(eids.length, 1, "removed route not enumerated");
     }
 
-    function test_setComposeGasLimit_adminOnlyAndStores() public {
+    function test_setLzGasLimits_adminOnlyValidatesAndStores() public {
         vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
-        module.setComposeGasLimit(500_000);
+        module.setLzGasLimits(80_000, 500_000);
 
-        vm.prank(moduleAdmin);
-        module.setComposeGasLimit(500_000);
-        assertEq(module.getComposeGasLimit(), 500_000);
+        vm.startPrank(moduleAdmin);
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        module.setLzGasLimits(0, 500_000);
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        module.setLzGasLimits(80_000, 0);
+
+        module.setLzGasLimits(80_000, 500_000);
+        vm.stopPrank();
+
+        (uint128 lzReceiveGasLimit, uint128 composeGasLimit) = module.getLzGasLimits();
+        assertEq(lzReceiveGasLimit, 80_000);
+        assertEq(composeGasLimit, 500_000);
     }
 
     // ---- provider fee ----

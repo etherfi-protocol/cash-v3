@@ -29,6 +29,7 @@
     "AcrossSwapModule": "0x7EF26F117a5C4f84A0caE2f79a61Af90Fb1D8e8A",
     "EnsoSwapModule": "0xd6B0c55f4F2bFdFe9355e5Af1Bac0f3DAb101DC2",
     "SafeAssetRecoveryModule": "0xf7eF41dCd3f807A001929c1559CF5Db0C5Eb0199",
+    "StockWithdrawModule": "0x367c0f68599c4B75DBeC7500dFA6dB7F55a1Dd0c",
     "LendGateway": "0x26ba458CFc67e73dB227AB7BBd71d33d04865695",
     "AaveV4Spoke": "0x7e99c7846df8527FFE510a2CA0215874052102ed"
   }

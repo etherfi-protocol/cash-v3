@@ -6,6 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 import { EnumerableMapLib } from "solady/utils/EnumerableMapLib.sol";
+import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 
 import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
 import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
@@ -28,15 +29,17 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         it to the mainnet `StockUnwrapper` with a composeMsg carrying the order terms. On
  *         Ethereum the unwrapper redeems the Backed ERC-4626 wrapper to `recipient` (reverting
  *         if output < `minReturn`, which parks the LZ compose message for retry) or, past
- *         `deadline`, delivers the wrapped token to the user's deterministic TradingSafe.
+ *         `deadline`, delivers the wrapped token to the safe's own deterministic mainnet
+ *         address (the CREATE3-derived TopUp address, recoverable via the TopUp redirect flow).
  * @dev Funds route through the module (Stargate pattern) because the OFT send needs
  *      `msg.value` for the LayerZero fee, which the execute caller supplies — that cannot be
  *      injected into a safe-originated call. iTOKENs are ShadowOFTs (the OFT IS the token,
  *      mint/burn), so no residual approvals are left behind.
  *
- *      OFT `minAmountLD` only guards shared-decimal dust rounding (set from `quoteOFT`);
- *      economic slippage protection is exclusively `minReturn`, enforced against the actual
- *      redeem output on Ethereum.
+ *      The send amount and `minAmountLD` are pinned to `quoteOFT`'s `amountSentLD` /
+ *      `amountReceivedLD` (the OFT truncates dust below its shared-decimal precision; the
+ *      truncated remainder is returned to the safe). Economic slippage protection is
+ *      exclusively `minReturn`, enforced against the actual redeem output on Ethereum.
  */
 contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy, IBridgeModule {
     using MessageHashUtils for bytes32;
@@ -45,6 +48,7 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using EnumerableMapLib for EnumerableMapLib.Uint256ToAddressMap;
     using EnumerableAddressWhitelistLib for EnumerableSetLib.AddressSet;
+    using OptionsBuilder for bytes;
 
     /// @notice User-signed withdrawal intent. One per safe at a time.
     /// @dev `minReturn` is denominated in the UNDERLYING stock (e.g. SPYx), not the wrapper.
@@ -61,7 +65,7 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     }
 
     /// @notice Everything `executeWithdrawal` needs, captured at `requestWithdrawal`.
-    /// @dev The unwrapper address and `composeGasLimit` are deliberately NOT snapshotted:
+    /// @dev The unwrapper address and the LZ gas limits are deliberately NOT snapshotted:
     ///      they are read live at execute time (keyed by the signed `order.dstEid`) so the
     ///      admin can repoint a redeployed unwrapper or bump compose gas for in-flight orders
     ///      without users having to cancel and re-sign. The admin role and the module's
@@ -87,6 +91,11 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         uint16 providerFeeBps;
         /// @notice Recipient of the provider fee.
         address feeReceiver;
+        /// @notice Executor gas limit for the destination lzReceive call (the OFTAdapter
+        ///         credit that precedes the compose). The executor rejects options that
+        ///         carry no lzReceive gas, so this cannot be left to the OFT's enforced
+        ///         options (the ShadowOFTs are third-party contracts).
+        uint128 lzReceiveGasLimit;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockWithdrawModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -149,11 +158,13 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     event UnwrappersConfigured(uint32[] dstEids, address[] unwrappers);
 
     /**
-     * @notice Emitted when the compose gas limit is set.
-     * @param oldGasLimit The old compose gas limit.
-     * @param newGasLimit The new compose gas limit.
+     * @notice Emitted when the LayerZero executor gas limits are set.
+     * @param oldLzReceiveGasLimit The old lzReceive gas limit.
+     * @param newLzReceiveGasLimit The new lzReceive gas limit.
+     * @param oldComposeGasLimit The old compose gas limit.
+     * @param newComposeGasLimit The new compose gas limit.
      */
-    event ComposeGasLimitSet(uint128 oldGasLimit, uint128 newGasLimit);
+    event LzGasLimitsSet(uint128 oldLzReceiveGasLimit, uint128 newLzReceiveGasLimit, uint128 oldComposeGasLimit, uint128 newComposeGasLimit);
 
     /**
      * @notice Emitted when the provider fee config is set.
@@ -205,6 +216,7 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     /// @notice Full module config passed to `initialize`, packed as a struct to stay under
     ///         the legacy codegen stack limit.
     /// @param roleRegistry Role registry (upgrade authority + pause control + admin role).
+    /// @param lzReceiveGasLimit Executor gas for the destination lzReceive (OFTAdapter credit) call.
     /// @param composeGasLimit Executor gas for the destination lzCompose call.
     /// @param providerFeeBps Provider (exit) fee in basis points; zero disables the fee.
     /// @param feeReceiver Recipient of the provider fee; may be zero only when the fee is zero.
@@ -214,6 +226,7 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     /// @param unwrappers StockUnwrapper per endpoint; same length as `dstEids`.
     struct InitParams {
         address roleRegistry;
+        uint128 lzReceiveGasLimit;
         uint128 composeGasLimit;
         uint16 providerFeeBps;
         address feeReceiver;
@@ -231,7 +244,7 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
      */
     function initialize(InitParams calldata params) external initializer {
         __UpgradeableProxy_init(params.roleRegistry);
-        _setComposeGasLimit(params.composeGasLimit);
+        _setLzGasLimits(params.lzReceiveGasLimit, params.composeGasLimit);
         _setProviderFee(params.providerFeeBps, params.feeReceiver);
         if (params.iTokens.length > 0) _configureTokens(params.iTokens, params.supported);
         if (params.dstEids.length > 0) _configureUnwrappers(params.dstEids, params.unwrappers);
@@ -269,15 +282,17 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     }
 
     /**
-     * @notice Sets the executor gas limit for the destination lzCompose call. Read live at
-     *         execute time (not snapshotted) so admins can bump gas for stuck sends.
-     * @param _composeGasLimit The new executor gas limit; must be non-zero.
+     * @notice Sets the executor gas limits for the destination lzReceive (OFTAdapter credit)
+     *         and lzCompose calls. Read live at execute time (not snapshotted) so admins can
+     *         bump gas for stuck sends.
+     * @param _lzReceiveGasLimit The new lzReceive executor gas limit; must be non-zero.
+     * @param _composeGasLimit The new compose executor gas limit; must be non-zero.
      * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
-     * @custom:throws InvalidInput If the gas limit is zero.
+     * @custom:throws InvalidInput If either gas limit is zero.
      */
-    function setComposeGasLimit(uint128 _composeGasLimit) external {
+    function setLzGasLimits(uint128 _lzReceiveGasLimit, uint128 _composeGasLimit) external {
         _onlyAdmin();
-        _setComposeGasLimit(_composeGasLimit);
+        _setLzGasLimits(_lzReceiveGasLimit, _composeGasLimit);
     }
 
     /**
@@ -364,11 +379,14 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     }
 
     /**
-     * @notice Returns the executor gas limit used for the destination lzCompose call.
-     * @return The compose gas limit.
+     * @notice Returns the executor gas limits used for the destination lzReceive and
+     *         lzCompose calls.
+     * @return lzReceiveGasLimit The lzReceive gas limit.
+     * @return composeGasLimit The compose gas limit.
      */
-    function getComposeGasLimit() external view returns (uint128) {
-        return _getStockWithdrawModuleStorage().composeGasLimit;
+    function getLzGasLimits() external view returns (uint128 lzReceiveGasLimit, uint128 composeGasLimit) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        return ($.lzReceiveGasLimit, $.composeGasLimit);
     }
 
     /**
@@ -393,7 +411,8 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         StoredWithdrawal memory withdrawal = _getStockWithdrawModuleStorage().withdrawals[safe];
         if (withdrawal.order.iToken == address(0)) revert NoActiveOrder();
         uint256 bridgeAmount = withdrawal.order.amount - _providerFeeAmount(withdrawal.order.amount);
-        MessagingFee memory fee = IOFT(withdrawal.order.iToken).quoteSend(_buildSendParam(safe, withdrawal, bridgeAmount), false);
+        (SendParam memory sendParam,) = _quotedSendParam(safe, withdrawal, bridgeAmount);
+        MessagingFee memory fee = IOFT(withdrawal.order.iToken).quoteSend(sendParam, false);
         return (ETH, fee.nativeFee);
     }
 
@@ -568,9 +587,11 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     /// @dev Builds the SendParam for the stored withdrawal, bridging `amountLD` (the order
     ///      amount net of the provider fee). The unwrapper is resolved LIVE from
     ///      `stockUnwrappers[order.dstEid]` (reverting `MissingConfig` if the route was
-    ///      disabled after request). `minAmountLD` starts at the full bridge amount and is
-    ///      tightened to `quoteOFT`'s `amountReceivedLD` at send time (dust rounding only —
-    ///      economic slippage is `minReturn`, enforced on the destination chain).
+    ///      disabled after request). `minAmountLD` is left at zero — `quoteOFT` enforces the
+    ///      caller's `minAmountLD` against its dust-truncated amount, so a non-zero value
+    ///      here would make the quote itself revert `SlippageExceeded` for any amount that
+    ///      isn't a multiple of the OFT's decimal conversion rate. `_quotedSendParam` pins
+    ///      both amounts to the quote before anything is sent.
     function _buildSendParam(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal view returns (SendParam memory) {
         StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
         (, address unwrapper) = $.stockUnwrappers.tryGet(uint256(withdrawal.order.dstEid));
@@ -580,21 +601,32 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
             dstEid: withdrawal.order.dstEid,
             to: bytes32(uint256(uint160(unwrapper))),
             amountLD: amountLD,
-            minAmountLD: amountLD,
-            extraOptions: _lzComposeOptions($.composeGasLimit),
+            minAmountLD: 0,
+            extraOptions: _lzOptions($.lzReceiveGasLimit, $.composeGasLimit),
             composeMsg: abi.encode(safe, withdrawal.order.recipient, withdrawal.order.minReturn, withdrawal.order.deadline),
             oftCmd: new bytes(0)
         });
     }
 
-    /// @dev LayerZero TYPE_3 options carrying a single executor lzCompose option — the
-    ///      manual equivalent of `OptionsBuilder.newOptions().addExecutorLzComposeOption(0,
-    ///      gas, 0)`, inlined to avoid OptionsBuilder's `solidity-bytes-utils` dependency
-    ///      (not a tracked submodule). Layout: TYPE_3 (uint16) ‖ workerId=1 (uint8) ‖
-    ///      optionLength=19 (uint16) ‖ OPTION_TYPE_LZCOMPOSE=3 (uint8) ‖ index=0 (uint16) ‖
-    ///      gas (uint128). optionLength = 1 (type) + 2 (index) + 16 (gas).
-    function _lzComposeOptions(uint128 gas) internal pure returns (bytes memory) {
-        return abi.encodePacked(uint16(3), uint8(1), uint16(19), uint8(3), uint16(0), gas);
+    /// @dev Builds the SendParam and pins its amounts to `quoteOFT`: `amountLD` to
+    ///      `amountSentLD` (what the OFT will actually debit after truncating dust below its
+    ///      shared-decimal precision) and `minAmountLD` to `amountReceivedLD` (dust rounding
+    ///      only — economic slippage is `minReturn`, enforced on the destination chain).
+    ///      Returns the truncated dust so `_sendOft` can return it to the safe.
+    function _quotedSendParam(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal view returns (SendParam memory sendParam, uint256 dust) {
+        sendParam = _buildSendParam(safe, withdrawal, amountLD);
+        (,, OFTReceipt memory receipt) = IOFT(withdrawal.order.iToken).quoteOFT(sendParam);
+        sendParam.amountLD = receipt.amountSentLD;
+        sendParam.minAmountLD = receipt.amountReceivedLD;
+        dust = amountLD - receipt.amountSentLD;
+    }
+
+    /// @dev LayerZero TYPE_3 options carrying the executor lzReceive gas (the OFTAdapter
+    ///      credit on the destination — the executor REVERTS quotes whose options carry no
+    ///      lzReceive gas, and the third-party ShadowOFTs cannot be assumed to enforce it)
+    ///      followed by the executor lzCompose gas, built with LayerZero's `OptionsBuilder`.
+    function _lzOptions(uint128 lzReceiveGas, uint128 composeGas) internal pure returns (bytes memory) {
+        return OptionsBuilder.newOptions().addExecutorLzReceiveOption(lzReceiveGas, 0).addExecutorLzComposeOption(0, composeGas, 0);
     }
 
     /// @dev Shared by `initialize` and `configureTokens`. Validates the ShadowOFT invariant
@@ -632,11 +664,12 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
         emit UnwrappersConfigured(dstEids, unwrappers);
     }
 
-    /// @dev Shared by `initialize` and `setComposeGasLimit`.
-    function _setComposeGasLimit(uint128 _composeGasLimit) internal {
-        if (_composeGasLimit == 0) revert InvalidInput();
+    /// @dev Shared by `initialize` and `setLzGasLimits`.
+    function _setLzGasLimits(uint128 _lzReceiveGasLimit, uint128 _composeGasLimit) internal {
+        if (_lzReceiveGasLimit == 0 || _composeGasLimit == 0) revert InvalidInput();
         StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
-        emit ComposeGasLimitSet($.composeGasLimit, _composeGasLimit);
+        emit LzGasLimitsSet($.lzReceiveGasLimit, _lzReceiveGasLimit, $.composeGasLimit, _composeGasLimit);
+        $.lzReceiveGasLimit = _lzReceiveGasLimit;
         $.composeGasLimit = _composeGasLimit;
     }
 
@@ -652,20 +685,20 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     }
 
     /// @dev Quotes, pays and dispatches the OFT send of `amountLD` from this module's
-    ///      balance. The caller funds the LZ fee; excess is refunded to them (and they are
-    ///      the LZ refund address).
+    ///      balance. The OFT only debits `quoteOFT`'s `amountSentLD`; the sub-shared-decimal
+    ///      dust it truncates is returned to the safe rather than stranding here. The caller
+    ///      funds the LZ fee; excess is refunded to them (and they are the LZ refund address).
     function _sendOft(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal {
         IOFT oft = IOFT(withdrawal.order.iToken);
-        SendParam memory sendParam = _buildSendParam(safe, withdrawal, amountLD);
-
-        (,, OFTReceipt memory receipt) = oft.quoteOFT(sendParam);
-        sendParam.minAmountLD = receipt.amountReceivedLD;
+        (SendParam memory sendParam, uint256 dust) = _quotedSendParam(safe, withdrawal, amountLD);
 
         MessagingFee memory fee = oft.quoteSend(sendParam, false);
         if (msg.value < fee.nativeFee) revert InsufficientNativeFee();
 
-        if (oft.approvalRequired()) IERC20(oft.token()).forceApprove(address(oft), amountLD);
+        if (oft.approvalRequired()) IERC20(oft.token()).forceApprove(address(oft), sendParam.amountLD);
         oft.send{ value: fee.nativeFee }(sendParam, fee, payable(msg.sender));
+
+        if (dust > 0) IERC20(withdrawal.order.iToken).safeTransfer(safe, dust);
 
         uint256 excess = msg.value - fee.nativeFee;
         if (excess > 0) {

@@ -53,9 +53,11 @@ contract VerifyStockWithdrawModule is StockWithdrawConfig {
         // Immutable wiring on the implementation (read through the proxy).
         require(address(module.etherFiDataProvider()) == address(dataProvider), "dataProvider mismatch");
 
-        // Initialized config: compose gas, provider fee, token set and the Ethereum route
+        // Initialized config: LZ gas limits, provider fee, token set and the Ethereum route
         // pointing at the unwrapper's deterministic address.
-        require(module.getComposeGasLimit() == COMPOSE_GAS_LIMIT, "composeGasLimit mismatch");
+        (uint128 lzReceiveGasLimit, uint128 composeGasLimit) = module.getLzGasLimits();
+        require(lzReceiveGasLimit == LZ_RECEIVE_GAS_LIMIT, "lzReceiveGasLimit mismatch");
+        require(composeGasLimit == COMPOSE_GAS_LIMIT, "composeGasLimit mismatch");
 
         (uint16 providerFeeBps, address feeReceiver) = module.getProviderFee();
         require(providerFeeBps == PROVIDER_FEE_BPS, "providerFeeBps mismatch");

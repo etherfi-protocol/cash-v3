@@ -98,6 +98,7 @@ contract DeployStockWithdrawModule is StockWithdrawConfig, GnosisHelpers {
 
         bytes memory initData = abi.encodeCall(StockWithdrawModule.initialize, (StockWithdrawModule.InitParams({
             roleRegistry: address(roleRegistry),
+            lzReceiveGasLimit: LZ_RECEIVE_GAS_LIMIT,
             composeGasLimit: COMPOSE_GAS_LIMIT,
             providerFeeBps: PROVIDER_FEE_BPS,
             feeReceiver: FEE_RECEIVER,
