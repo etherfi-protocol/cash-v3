@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { console } from "forge-std/console.sol";
 import { stdJson } from "forge-std/StdJson.sol";
 
-import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
+import { StockWithdrawConfig } from "./StockWithdrawConfig.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { StockUnwrapper } from "../../src/stock-withdraw/StockUnwrapper.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -14,59 +14,38 @@ import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
  * @title DeployStockUnwrapper
  * @notice Deploys the Ethereum-side StockUnwrapper (CREATE3 impl + CREATE3 UUPS proxy with
  *         atomic init) through the on-chain EtherFiDeployer, and grants
- *         STOCK_UNWRAPPER_ADMIN_ROLE. Run AFTER DeployStockWithdrawModule on OP, so
- *         SRC_MODULE is known.
+ *         STOCK_UNWRAPPER_ADMIN_ROLE.
+ *
+ *         The unwrapper initialises with the FULL config from `StockWithdrawConfig`: the
+ *         OFTAdapter allowlist, and the trusted OP StockWithdrawModule PREDICTED from its
+ *         CREATE3 salt (the EtherFiDeployer lives at the same address on every chain), so no
+ *         cross-chain address plumbing is needed.
  *
  *         Two-actor flow, selected by ENV:
  *         - ENV=dev:      the broadcaster owns the RoleRegistry — the role grant is
  *                         broadcast directly.
  *         - ENV=mainnet:  the broadcaster only performs the unprivileged CREATE3 deploys;
  *                         the role grant is written as a Gnosis transaction bundle to
- *                         output/StockUnwrapper-<chainid>.json for the prod Safe
- *                         (RoleRegistry owner) to execute.
+ *                         output/StockUnwrapper-<chainid>.json for the prod Safe to execute.
  *
- *         Adapters are configured post-deploy by the unwrapper admin via `configureAdapters`
- *         as OFTAdapters get listed.
- *
- * The RoleRegistry is read from deployments/{ENV}/1/deployments.json. The OP
- * StockWithdrawModule address is PREDICTED from its CREATE3 salt (the EtherFiDeployer lives
- * at the same address on every chain), so it needs no env/config plumbing. Salts are
- * env-prefixed (Dev./Prod.) so dev and prod land at distinct addresses. The LayerZero
- * endpoint and OP EID are chain constants.
+ * The RoleRegistry is read from deployments/{ENV}/1/deployments.json; everything else comes
+ * from StockWithdrawConfig.
  *
  * Env: PRIVATE_KEY (must be a registered EtherFiDeployer deployer), ENV (dev|mainnet)
  *
- * STOCK_UNWRAPPER_ADMIN_ROLE goes to the broadcaster on dev, and to the prod Safe (the
- * RoleRegistry owner) on mainnet.
+ * STOCK_UNWRAPPER_ADMIN_ROLE goes to the broadcaster on dev, and to the prod Safe on
+ * mainnet.
  *
  * Run with --verify. After broadcast (and bundle execution on prod), run
  * VerifyStockUnwrapper.s.sol against the live chain.
  */
-contract DeployStockUnwrapper is EtherFiDeployerHelper, GnosisHelpers {
+contract DeployStockUnwrapper is StockWithdrawConfig, GnosisHelpers {
     using stdJson for string;
-
-    string internal constant DEV_SALT_IMPL = "Dev.StockWithdraw.StockUnwrapperImpl";
-    string internal constant DEV_SALT_PROXY = "Dev.StockWithdraw.StockUnwrapperProxy";
-    string internal constant DEV_SALT_SRC_MODULE_PROXY = "Dev.StockWithdraw.StockWithdrawModuleProxy";
-
-    string internal constant PROD_SALT_IMPL = "Prod.StockWithdraw.StockUnwrapperImpl";
-    string internal constant PROD_SALT_PROXY = "Prod.StockWithdraw.StockUnwrapperProxy";
-    string internal constant PROD_SALT_SRC_MODULE_PROXY = "Prod.StockWithdraw.StockWithdrawModuleProxy";
-
-    /// @notice LayerZero V2 endpoint on Ethereum mainnet.
-    address internal constant LZ_ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
-    /// @notice OP mainnet endpoint ID.
-    uint32 internal constant SRC_EID = 30111;
-
-    address constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     RoleRegistry internal roleRegistry;
     address internal unwrapperAdmin;
     address internal impl;
     address internal proxy;
-    string internal saltImpl;
-    string internal saltProxy;
-    string internal saltSrcModuleProxy;
 
     function run() public {
         require(block.chainid == 1, "This script must be run on Ethereum mainnet (chain ID 1)");
@@ -79,12 +58,8 @@ contract DeployStockUnwrapper is EtherFiDeployerHelper, GnosisHelpers {
         require(DEPLOYER.isDeployer(deployerAddress), "broadcaster is not an EtherFiDeployer deployer");
 
         address ownerBefore = roleRegistry.owner();
-        bool isDev = isEqualString(getEnv(), "dev");
-
-        saltImpl = isDev ? DEV_SALT_IMPL : PROD_SALT_IMPL;
-        saltProxy = isDev ? DEV_SALT_PROXY : PROD_SALT_PROXY;
-        saltSrcModuleProxy = isDev ? DEV_SALT_SRC_MODULE_PROXY : PROD_SALT_SRC_MODULE_PROXY;
-        unwrapperAdmin = isDev ? deployerAddress : SAFE;
+        unwrapperAdmin = _adminFor(deployerAddress);
+        bool isDev = _isDev();
 
         vm.startBroadcast(deployerPk);
         _deploy();
@@ -103,25 +78,23 @@ contract DeployStockUnwrapper is EtherFiDeployerHelper, GnosisHelpers {
         console.log("StockUnwrapper proxy:", proxy);
     }
 
-    /// @dev CREATE3 deploys: impl + UUPS proxy with atomic init. Adapters start empty and
-    ///      are configured post-deploy by the unwrapper admin.
+    /// @dev CREATE3 deploys: impl + UUPS proxy with atomic init carrying the adapter
+    ///      allowlist and the predicted OP module as the trusted compose sender.
     function _deploy() internal {
-        impl = _create3(saltImpl, type(StockUnwrapper).creationCode, "");
+        impl = _create3(_unwrapperImplSalt(), type(StockUnwrapper).creationCode, "");
 
-        // The OP module proxy address is deterministic from its salt — same EtherFiDeployer
-        // address on every chain — so it can be derived here without cross-chain plumbing.
-        address srcModule = _predictAddress(saltSrcModuleProxy);
+        (address[] memory adapters, bool[] memory registered) = _adapters();
 
         bytes memory initData = abi.encodeWithSelector(
             StockUnwrapper.initialize.selector,
             address(roleRegistry),
-            LZ_ENDPOINT,
-            SRC_EID,
-            srcModule,
-            new address[](0), // adapters — configured post-deploy as OFTAdapters list
-            new bool[](0)
+            LZ_ENDPOINT_ETHEREUM,
+            OP_EID,
+            _predictAddress(_moduleProxySalt()),
+            adapters,
+            registered
         );
-        proxy = _create3(saltProxy, type(UUPSProxy).creationCode, abi.encode(impl, initData));
+        proxy = _create3(_unwrapperProxySalt(), type(UUPSProxy).creationCode, abi.encode(impl, initData));
     }
 
     /// @dev The single privileged wiring call, identical between dev and the prod bundle.
@@ -129,10 +102,9 @@ contract DeployStockUnwrapper is EtherFiDeployerHelper, GnosisHelpers {
         return abi.encodeWithSignature("grantRole(bytes32,address)", StockUnwrapper(proxy).STOCK_UNWRAPPER_ADMIN_ROLE(), unwrapperAdmin);
     }
 
-    /// @dev Prod: the role grant goes to the RoleRegistry owner (the prod Safe) as a Gnosis
-    ///      transaction bundle.
+    /// @dev Prod: the role grant goes to the prod Safe as a Gnosis transaction bundle.
     function _writeGnosisBundle() internal {
-        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(roleRegistry.owner()));
+        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(SAFE));
         txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(roleRegistry)), iToHex(_grantRoleData()), "0", true));
 
         string memory path = string.concat("./output/StockUnwrapper-", vm.toString(block.chainid), ".json");

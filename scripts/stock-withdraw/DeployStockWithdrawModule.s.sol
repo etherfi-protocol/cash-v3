@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import { console } from "forge-std/console.sol";
 import { stdJson } from "forge-std/StdJson.sol";
 
-import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
+import { StockWithdrawConfig } from "./StockWithdrawConfig.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { StockWithdrawModule } from "../../src/stock-withdraw/StockWithdrawModule.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -19,47 +19,36 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
  *         module on the EtherFiDataProvider and as a withdraw-requester on the CashModule,
  *         and grants STOCK_WITHDRAW_MODULE_ADMIN_ROLE.
  *
+ *         The module initialises with the FULL config from `StockWithdrawConfig`: the
+ *         supported ShadowOFTs and the Ethereum route pointing at the StockUnwrapper's
+ *         PREDICTED CREATE3 address (the EtherFiDeployer lives at the same address on every
+ *         chain, so the mainnet address is derivable before that deploy runs).
+ *
  *         Two-actor flow, selected by ENV:
  *         - ENV=dev:      the broadcaster holds the admin roles (dev admin owns the
  *                         RoleRegistry), so deploys AND wiring are broadcast directly.
  *         - ENV=mainnet:  the broadcaster only performs the unprivileged CREATE3 deploys;
  *                         every privileged call is written as a Gnosis transaction bundle to
- *                         output/StockWithdrawModule-<chainid>.json for the prod Safe
- *                         (RoleRegistry owner) to execute.
- *
- *         The mainnet StockUnwrapper does not exist yet at this point, so the module
- *         initialises with empty route config; the module admin wires routes post-deploy via
- *         `configureUnwrappers` / `configureTokens` (admin-role calls, not part of this
- *         script).
+ *                         output/StockWithdrawModule-<chainid>.json for the prod Safe to
+ *                         execute.
  *
  * Rollout order:
  *   1. OP:  this script — run with --verify (prod: then execute the Gnosis bundle).
- *   2. ETH: DeployStockUnwrapper with SRC_MODULE = this proxy — run with --verify.
- *   3. OP module admin:  module.configureUnwrappers([30101], [<unwrapper proxy>]).
- *   4. OP module admin:  module.configureTokens([<iTokens>], [true]).
- *   5. ETH unwrapper admin: unwrapper.configureAdapters([<OFTAdapters>], [true]).
+ *   2. ETH: DeployStockUnwrapper — run with --verify (prod: then execute its bundle).
+ *   3. Further tokens/adapters/routes are added later via the admin setters.
  *
  * Addresses (DataProvider, RoleRegistry, CashModule) are read from
- * deployments/{ENV}/10/deployments.json.
+ * deployments/{ENV}/10/deployments.json; everything else comes from StockWithdrawConfig.
  *
- * Env: PRIVATE_KEY (must be a registered EtherFiDeployer deployer), ENV (dev|mainnet),
- *      COMPOSE_GAS_LIMIT (e.g. 300000)
+ * Env: PRIVATE_KEY (must be a registered EtherFiDeployer deployer), ENV (dev|mainnet)
  *
  * STOCK_WITHDRAW_MODULE_ADMIN_ROLE goes to the broadcaster on dev, and to the prod Safe on
  * mainnet.
  *
  * After broadcast (and bundle execution on prod), run VerifyStockWithdrawModule.s.sol.
  */
-contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
+contract DeployStockWithdrawModule is StockWithdrawConfig, GnosisHelpers {
     using stdJson for string;
-
-    string internal constant DEV_SALT_IMPL = "Dev.StockWithdraw.StockWithdrawModuleImpl";
-    string internal constant PROD_SALT_IMPL = "Prod.StockWithdraw.StockWithdrawModuleImpl";
-    
-    string internal constant DEV_SALT_PROXY = "Dev.StockWithdraw.StockWithdrawModuleProxy";
-    string internal constant PROD_SALT_PROXY = "Prod.StockWithdraw.StockWithdrawModuleProxy";
-
-    address constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     EtherFiDataProvider internal dataProvider;
     RoleRegistry internal roleRegistry;
@@ -67,8 +56,6 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
     address internal moduleAdmin;
     address internal impl;
     address internal proxy;
-    string internal saltImpl;
-    string internal saltProxy;
 
     function run() public {
         require(block.chainid == 10, "This script must be run on Optimism (chain ID 10)");
@@ -80,20 +67,10 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
 
         uint256 deployerPk = vm.envUint("PRIVATE_KEY");
         address deployerAddress = vm.addr(deployerPk);
-
         require(DEPLOYER.isDeployer(deployerAddress), "broadcaster is not an EtherFiDeployer deployer");
 
-        bool isDev = isEqualString(getEnv(), "dev");
-
-        if (isDev) { 
-            moduleAdmin = deployerAddress; 
-            saltImpl = DEV_SALT_IMPL;
-            saltProxy = DEV_SALT_PROXY;
-        } else { 
-            moduleAdmin = SAFE; 
-            saltImpl = PROD_SALT_IMPL;
-            saltProxy = PROD_SALT_PROXY;
-        }
+        moduleAdmin = _adminFor(deployerAddress);
+        bool isDev = _isDev();
 
         vm.startBroadcast(deployerPk);
         _deploy();
@@ -106,21 +83,29 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
         console.log("StockWithdrawModule proxy:", proxy);
     }
 
-    /// @dev CREATE3 deploys: impl (immutable dataProvider) + UUPS proxy with atomic init.
-    ///      Route config starts empty — the unwrapper is deployed after this script.
+    /// @dev CREATE3 deploys: impl (immutable dataProvider) + UUPS proxy with atomic init
+    ///      carrying the full token + route config. The Ethereum route targets the
+    ///      unwrapper's PREDICTED address — deployed right after this script.
     function _deploy() internal {
-        impl = _create3(saltImpl, type(StockWithdrawModule).creationCode, abi.encode(address(dataProvider)));
+        impl = _create3(_moduleImplSalt(), type(StockWithdrawModule).creationCode, abi.encode(address(dataProvider)));
+
+        (address[] memory iTokens, bool[] memory supported) = _iTokens();
+
+        uint32[] memory dstEids = new uint32[](1);
+        dstEids[0] = ETHEREUM_EID;
+        address[] memory unwrappers = new address[](1);
+        unwrappers[0] = _predictAddress(_unwrapperProxySalt());
 
         bytes memory initData = abi.encodeWithSelector(
             StockWithdrawModule.initialize.selector,
             address(roleRegistry),
-            uint128(vm.envUint("COMPOSE_GAS_LIMIT")),
-            new address[](0), // iTokens — configured post-deploy by the module admin
-            new bool[](0),
-            new uint32[](0), // dstEids — configured once the unwrapper is live
-            new address[](0)
+            COMPOSE_GAS_LIMIT,
+            iTokens,
+            supported,
+            dstEids,
+            unwrappers
         );
-        proxy = _create3(saltProxy, type(UUPSProxy).creationCode, abi.encode(impl, initData));
+        proxy = _create3(_moduleProxySalt(), type(UUPSProxy).creationCode, abi.encode(impl, initData));
     }
 
     /// @dev The three privileged wiring calls, identical between the dev direct path and the
@@ -148,12 +133,11 @@ contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
         }
     }
 
-    /// @dev Prod: the wiring goes to the RoleRegistry owner (the prod Safe) as a Gnosis
-    ///      transaction bundle.
+    /// @dev Prod: the wiring goes to the prod Safe as a Gnosis transaction bundle.
     function _writeGnosisBundle() internal {
         (address[3] memory targets, bytes[3] memory payloads) = _wiringCalls();
 
-        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(roleRegistry.owner()));
+        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(SAFE));
         for (uint256 i = 0; i < 3; i++) {
             txs = string.concat(txs, _getGnosisTransaction(addressToHex(targets[i]), iToHex(payloads[i]), "0", i == 2));
         }
