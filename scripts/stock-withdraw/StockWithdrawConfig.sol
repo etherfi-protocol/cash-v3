@@ -51,11 +51,9 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
 
     /// @notice OP ShadowOFTs (the iTOKENs the module bridges).
     address internal constant WSPYX_SHADOW_OFT = 0xc1e636Aae7d6B46229FC2C362d562610519e8D7c;
-    address internal constant PAXG_SHADOW_OFT = 0x41a7f2bb9789199654c206f09392674c1Af6676c;
 
     /// @notice Mainnet OFTAdapters (lock/unlock counterparts of the ShadowOFTs).
     address internal constant WSPYX_ADAPTER = 0xB3b3412E3D367D26B6f37ddf74eECb7de8827318;
-    address internal constant PAXG_ADAPTER = 0xB20A9C1fCE74EC335F5DbF30720E3b628bdE49f9;
 
     // ---- Env-derived selectors ----
 
@@ -89,21 +87,17 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
 
     /// @dev The iTOKENs the OP module registers at initialize.
     function _iTokens() internal pure returns (address[] memory iTokens, bool[] memory supported) {
-        iTokens = new address[](2);
+        iTokens = new address[](1);
         iTokens[0] = WSPYX_SHADOW_OFT;
-        iTokens[1] = PAXG_SHADOW_OFT;
-        supported = new bool[](2);
+        supported = new bool[](1);
         supported[0] = true;
-        supported[1] = true;
     }
 
     /// @dev The mainnet OFTAdapters the unwrapper registers at initialize.
     function _adapters() internal pure returns (address[] memory adapters, bool[] memory registered) {
-        adapters = new address[](2);
+        adapters = new address[](1);
         adapters[0] = WSPYX_ADAPTER;
-        adapters[1] = PAXG_ADAPTER;
-        registered = new bool[](2);
+        registered = new bool[](1);
         registered[0] = true;
-        registered[1] = true;
     }
 }
