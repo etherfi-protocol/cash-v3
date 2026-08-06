@@ -13,9 +13,9 @@ import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhi
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { IOFT, MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
-import { WithdrawalRequest } from "../interfaces/ICashModule.sol";
+import { ICashModule, WithdrawalRequest } from "../interfaces/ICashModule.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { ModuleBase } from "../modules/ModuleBase.sol";
-import { ModuleCheckBalance } from "../modules/ModuleCheckBalance.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
@@ -41,7 +41,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *      truncated remainder is returned to the safe). Economic slippage protection is
  *      exclusively `minReturn`, enforced against the actual redeem output on Ethereum.
  */
-contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy, IBridgeModule {
+contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     using MessageHashUtils for bytes32;
     using Math for uint256;
     using SafeERC20 for IERC20;
@@ -100,6 +100,9 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockWithdrawModule")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant StockWithdrawModuleStorageLocation = 0x79b068f9b079c00932ab348c89f00dce3855a0360decf75df1474e5e0fccf900;
+
+    /// @notice CashModule that holds, delays and processes the withdrawal requests.
+    ICashModule public immutable cashModule;
 
     /// @notice Role allowed to configure supported tokens, destination and compose gas.
     bytes32 public constant STOCK_WITHDRAW_MODULE_ADMIN_ROLE = keccak256("STOCK_WITHDRAW_MODULE_ADMIN_ROLE");
@@ -205,11 +208,15 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     error DeadlineBeforeWithdrawalDelay();
     /// @notice Reverts when the provider fee exceeds `MAX_PROVIDER_FEE_BPS`.
     error ProviderFeeTooHigh();
+    /// @notice Reverts when the bridge amount (net of the provider fee) truncates to zero at
+    ///         the OFT's shared-decimal precision — the send would bridge nothing.
+    error AmountTooSmall();
 
     /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's code —
     ///      every upgrade impl must be constructed with the same data provider.
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
+        cashModule = ICashModule(IEtherFiDataProvider(_etherFiDataProvider).getCashModule());
         _disableInitializers();
     }
 
@@ -616,6 +623,7 @@ contract StockWithdrawModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy
     function _quotedSendParam(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal view returns (SendParam memory sendParam, uint256 dust) {
         sendParam = _buildSendParam(safe, withdrawal, amountLD);
         (,, OFTReceipt memory receipt) = IOFT(withdrawal.order.iToken).quoteOFT(sendParam);
+        if (receipt.amountSentLD == 0) revert AmountTooSmall();
         sendParam.amountLD = receipt.amountSentLD;
         sendParam.minAmountLD = receipt.amountReceivedLD;
         dust = amountLD - receipt.amountSentLD;

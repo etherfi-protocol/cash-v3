@@ -460,6 +460,22 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         assertEq(oft.balanceOf(address(module)), 0, "nothing stranded in the module");
     }
 
+    /// @dev An amount below the OFT's shared-decimal precision truncates to a zero-amount
+    ///      send; the module refuses it instead of paying LZ fees to bridge nothing.
+    function test_executeWithdrawal_revertsWhenAmountTruncatesToZero() public {
+        StockWithdrawModule.Order memory order = _baseOrder();
+        order.amount = 1e12 - 1; // below the stub's conversion rate: amountSentLD == 0
+        _request(order);
+        _warpPastDelay();
+
+        vm.expectRevert(StockWithdrawModule.AmountTooSmall.selector);
+        module.getWithdrawalFee(address(safe));
+
+        vm.prank(keeper);
+        vm.expectRevert(StockWithdrawModule.AmountTooSmall.selector);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+    }
+
     function test_executeWithdrawal_refundsExcessFeeToCaller() public {
         _request(_baseOrder());
         _warpPastDelay();
