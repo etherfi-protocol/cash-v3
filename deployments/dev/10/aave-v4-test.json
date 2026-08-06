@@ -22,23 +22,23 @@
     },
     "ETHFI": {
       "assetId": 2,
-      "oracle": "0x3688ccB12F2eD98c7EC6587AfE25Ee1352754F39"
+      "oracle": "0x5f3AB9C6827C327b7D0F472Eb9B48954bF8fB3CA"
     },
     "WHYPE": {
       "assetId": 3,
-      "oracle": "0x043CfC32dC6477479Bb3240147064345cb377009"
+      "oracle": "0x5A0Cd4c7b56349030D8180358592A783F45cEE7a"
     },
     "beHYPE": {
       "assetId": 4,
-      "oracle": "0x826A756D05F706E3B17142D5dF649342EEda281a"
+      "oracle": "0xb4C086BD0C5Aa7ad39317B05378f392F72A07694"
     },
     "EURC": {
       "assetId": 5,
-      "oracle": "0x53aeD288F362e23171E1dd8c4D7e670B7a2Bd199"
+      "oracle": "0x5E169BFAacB0CA0d500459da652D33d962CD9cbA"
     },
     "sETHFI": {
       "assetId": 6,
-      "oracle": "0x14864EEFB48F78833c4c12b5Dd001857B99d42D3"
+      "oracle": "0x23fB1FcDeBa86AbAD98f05cD5e43471506771EFa"
     },
     "liquidETH": {
       "assetId": 7,
@@ -86,7 +86,7 @@
     },
     "frxUSD": {
       "assetId": 18,
-      "oracle": "0x439755986dB80135F7Aa4d300c113Faa88aDe304"
+      "oracle": "0x29D41f740b21dd28E1627DF2cCd307E978A7A454"
     },
     "iwSPYx": {
       "oracle": "0x5ce12709a8881309580e6768d0111CD7526c6888",
