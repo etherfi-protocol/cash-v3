@@ -9,8 +9,8 @@ import { EtherFiSafeErrors } from "./EtherFiSafeErrors.sol";
 /**
  * @title EtherFiSafeBase
  * @author ether.fi
- * @notice Base contract for EtherFi safe implementations providing common functionality
- * @dev Implements EIP-712 typed data signing and core safe functionality
+ * @notice Base contract for EtherFi safe implementations providing common functionality.
+ * @dev Implements EIP-712 typed data signing and core safe functionality.
  */
 abstract contract EtherFiSafeBase is EtherFiSafeErrors, EIP712Upgradeable {
     /**

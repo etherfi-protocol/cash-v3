@@ -301,6 +301,14 @@ interface IDebtManager {
     function borrowingOf(address user) external view returns (TokenData[] memory, uint256);
 
     /**
+     * @notice Whether a safe has migrated its position from the DebtManager to the Aave gateway.
+     * @dev Once migrated, DebtManager borrow/repay are frozen for the safe and credit spends borrow via the gateway.
+     * @param safe Address of the EtherFi Safe.
+     * @return True if the safe has migrated to Aave.
+     */
+    function hasMigratedToLendGateway(address safe) external view returns (bool);
+
+    /**
      * @notice Function to fetch the max borrow amount for ltv or liquidation purpose.
      * @notice Calculates user's total collateral amount in USD and finds max borrowable amount using liquidation threshold.
      * @param  user Address of the user.

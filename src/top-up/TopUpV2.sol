@@ -3,11 +3,8 @@ pragma solidity ^0.8.28;
 
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+import { ITopUpFactory } from "../interfaces/ITopUpFactory.sol";
 import { TopUp } from "./TopUp.sol";
-
-interface ITopUpFactoryView {
-    function isTokenSupported(address token) external view returns (bool);
-}
 
 /**
  * @title TopUpV2
@@ -38,7 +35,7 @@ contract TopUpV2 is TopUp {
     function executeRecovery(address token, address recipient) external {
         if (msg.sender != DISPATCHER) revert OnlyDispatcher();
         if (recipient == address(0)) revert InvalidRecipient();
-        if (ITopUpFactoryView(owner()).isTokenSupported(token)) revert OnlyUnsupportedTokens();
+        if (ITopUpFactory(owner()).isTokenSupported(token)) revert OnlyUnsupportedTokens();
 
         uint256 amount = IERC20(token).balanceOf(address(this));
         if (amount == 0) revert NoBalanceToRecover();

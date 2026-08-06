@@ -7,14 +7,14 @@ import { EtherFiDataProvider } from "../src/data-provider/EtherFiDataProvider.so
 import { ICashModule } from "../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../src/interfaces/IDebtManager.sol";
 import { FraxModule } from "../src/modules/frax/FraxModule.sol";
-import { IAggregatorV3, PriceProvider } from "../src/oracle/PriceProvider.sol";
+import { IAggregatorV3, PriceProviderV2 as PriceProvider } from "../src/oracle/PriceProviderV2.sol";
 import { Utils } from "./utils/Utils.sol";
 
 contract DeployFraxModule is Utils {
-    address fraxusd = 0x397F939C3b91A74C321ea7129396492bA9Cdce82;
-    address custodian = 0x05bF905356fbeA7E59500f904b908402dB7A53DD;
-    address fraxUsdPriceOracle = 0x7be4f8b373853b74CDf48FE817bC2eB2272eBe45;
-    address remoteHop = 0xF6f45CCB5E85D1400067ee66F9e168f83e86124E;
+    address fraxusd = 0x80Eede496655FB9047dd39d9f418d5483ED600df;
+    address custodian = 0x8C81eda18b8F1cF5AdB4f2dcDb010D0B707fd940;
+    address fraxUsdPriceOracle = 0x8BF42811876e1B692d0E70F61b80e1fbc68Ef1bf;
+    address remoteHop = 0x31D982ebd82Ad900358984bd049207A4c2468640;
 
     IDebtManager debtManager;
     PriceProvider priceProvider;
@@ -57,9 +57,8 @@ contract DeployFraxModule is Utils {
             oraclePriceDecimals: IAggregatorV3(fraxUsdPriceOracle).decimals(),
             maxStaleness: 2 days,
             dataType: PriceProvider.ReturnType.Int256,
-            isBaseTokenEth: false,
-            isStableToken: true, //Stable coin
-            isBaseTokenBtc: false
+            isStableToken: true,
+            baseAsset: address(0)
         });
         PriceProvider.Config[] memory fraxUsdConfigs = new PriceProvider.Config[](1);
         fraxUsdConfigs[0] = fraxUsdConfig;
@@ -76,9 +75,9 @@ contract DeployFraxModule is Utils {
         uint64 borrowApy = 1; // ~0%
         uint128 minShares = type(uint128).max; // Since we dont want to use it in borrow mode
 
-        //debt manager set collateral and borrow config
-        debtManager.supportCollateralToken(address(fraxusd), collateralConfig);
-        debtManager.supportBorrowToken(address(fraxusd), borrowApy, minShares);
+        //debt manager set collateral and borrow config (idempotent)
+        if (!debtManager.isCollateralToken(fraxusd)) debtManager.supportCollateralToken(fraxusd, collateralConfig);
+        if (!debtManager.isBorrowToken(fraxusd)) debtManager.supportBorrowToken(fraxusd, borrowApy, minShares);
 
         address[] memory withdrawableAssets = new address[](1);
         withdrawableAssets[0] = address(fraxusd);
