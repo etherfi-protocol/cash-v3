@@ -58,6 +58,8 @@ contract DeployStockUnwrapper is EtherFiDeployerHelper, GnosisHelpers {
     /// @notice OP mainnet endpoint ID.
     uint32 internal constant SRC_EID = 30111;
 
+    address constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+
     RoleRegistry internal roleRegistry;
     address internal unwrapperAdmin;
     address internal impl;
@@ -82,8 +84,7 @@ contract DeployStockUnwrapper is EtherFiDeployerHelper, GnosisHelpers {
         saltImpl = isDev ? DEV_SALT_IMPL : PROD_SALT_IMPL;
         saltProxy = isDev ? DEV_SALT_PROXY : PROD_SALT_PROXY;
         saltSrcModuleProxy = isDev ? DEV_SALT_SRC_MODULE_PROXY : PROD_SALT_SRC_MODULE_PROXY;
-        unwrapperAdmin = isDev ? deployerAddress : roleRegistry.owner();
-
+        unwrapperAdmin = isDev ? deployerAddress : SAFE;
 
         vm.startBroadcast(deployerPk);
         _deploy();
