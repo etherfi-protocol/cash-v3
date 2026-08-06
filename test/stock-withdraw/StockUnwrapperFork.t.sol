@@ -37,7 +37,6 @@ interface ISanctionsList {
 ///      Requires MAINNET_RPC env var; skipped otherwise.
 contract StockUnwrapperForkTest is Test {
     address internal constant WSPYX = 0xE7E553Cd128F0011777323A0b44a7b96EA1CB540;
-    address internal constant TRADING_SAFE_FACTORY = 0xE54e00b0e72F8FC8Cb7e124C378bAd2E7371d2b8;
     uint32 internal constant OP_EID = 30111;
 
     StockUnwrapper internal unwrapper;
@@ -57,20 +56,20 @@ contract StockUnwrapperForkTest is Test {
         adapter = new AdapterStub(WSPYX);
         RoleRegistryStub registry = new RoleRegistryStub();
 
+        // Full config at initialize, including the adapter allowlist.
+        address[] memory adapters = new address[](1);
+        adapters[0] = address(adapter);
+        bool[] memory registered = new bool[](1);
+        registered[0] = true;
+
         address impl = address(new StockUnwrapper());
         unwrapper = StockUnwrapper(address(new UUPSProxy(
             impl,
             abi.encodeWithSelector(
                 StockUnwrapper.initialize.selector,
-                address(registry), lzEndpoint, OP_EID, srcModule, TRADING_SAFE_FACTORY
+                address(registry), lzEndpoint, OP_EID, srcModule, adapters, registered
             )
         )));
-
-        address[] memory adapters = new address[](1);
-        adapters[0] = address(adapter);
-        bool[] memory registered = new bool[](1);
-        registered[0] = true;
-        unwrapper.configureAdapters(adapters, registered);
 
         amount = 10 ** IERC20Metadata(WSPYX).decimals(); // 1 wSPYx
         deal(WSPYX, address(unwrapper), amount);
@@ -104,7 +103,7 @@ contract StockUnwrapperForkTest is Test {
         unwrapper.lzCompose(address(adapter), bytes32(0), _message(amount, expectedAssets + 1, block.timestamp + 1 hours), address(0), "");
     }
 
-    function test_pastDeadline_deliversWrappedToRealTradingSafeAddress() public {
+    function test_pastDeadline_deliversWrappedToSourceSafe() public {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory message = _message(amount, 1, deadline);
         vm.warp(deadline + 1);
@@ -112,11 +111,7 @@ contract StockUnwrapperForkTest is Test {
         vm.prank(lzEndpoint);
         unwrapper.lzCompose(address(adapter), bytes32(0), message, address(0), "");
 
-        // Real CREATE3 derivation from the live factory; the safe needn't be deployed.
-        (bool ok, bytes memory ret) = TRADING_SAFE_FACTORY.staticcall(abi.encodeWithSignature("getDeterministicAddress(address)", sourceSafe));
-        assertTrue(ok);
-        address tradingSafe = abi.decode(ret, (address));
-        assertEq(IERC20(WSPYX).balanceOf(tradingSafe), amount, "wrapped delivered to deterministic safe");
+        assertEq(IERC20(WSPYX).balanceOf(sourceSafe), amount, "wrapped delivered to the safe address");
     }
 
     function test_sanctionedHolder_makesRedeemRevert_provingRetryPath() public {

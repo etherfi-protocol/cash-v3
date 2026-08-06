@@ -33,19 +33,11 @@ contract AdapterStub {
     constructor(address _token) { token = _token; }
 }
 
-/// @dev Deterministic-address factory stub (real one is CREATE3; only the mapping matters here).
-contract FactoryStub {
-    function getDeterministicAddress(address sourceSafe) external pure returns (address) {
-        return address(uint160(uint256(keccak256(abi.encode("TradingSafe", sourceSafe)))));
-    }
-}
-
 contract StockUnwrapperTest is SafeTestSetup {
     StockUnwrapper internal unwrapper;
     TestERC20 internal underlying;
     TestWrapper internal wrapper;
     AdapterStub internal adapter;
-    FactoryStub internal factory;
 
     address internal lzEndpoint = makeAddr("lzEndpoint");
     address internal srcModule = makeAddr("stockWithdrawModule");
@@ -62,27 +54,25 @@ contract StockUnwrapperTest is SafeTestSetup {
         underlying = new TestERC20();
         wrapper = new TestWrapper(IERC20(address(underlying)));
         adapter = new AdapterStub(address(wrapper));
-        factory = new FactoryStub();
+
+        // Full config passed atomically at initialize, including the adapter allowlist.
+        address[] memory adapters = new address[](1);
+        adapters[0] = address(adapter);
+        bool[] memory registered = new bool[](1);
+        registered[0] = true;
 
         address impl = address(new StockUnwrapper());
         unwrapper = StockUnwrapper(address(new UUPSProxy(
             impl,
             abi.encodeWithSelector(
                 StockUnwrapper.initialize.selector,
-                address(roleRegistry), lzEndpoint, SRC_EID, srcModule, address(factory)
+                address(roleRegistry), lzEndpoint, SRC_EID, srcModule, adapters, registered
             )
         )));
 
         vm.startPrank(owner);
         roleRegistry.grantRole(unwrapper.STOCK_UNWRAPPER_ADMIN_ROLE(), unwrapperAdmin);
         vm.stopPrank();
-
-        address[] memory adapters = new address[](1);
-        adapters[0] = address(adapter);
-        bool[] memory registered = new bool[](1);
-        registered[0] = true;
-        vm.prank(unwrapperAdmin);
-        unwrapper.configureAdapters(adapters, registered);
 
         // Simulate the OFTAdapter having credited wrapped tokens to the unwrapper
         // before lzCompose runs: deposit underlying 1:1, shares minted to the unwrapper.
@@ -108,6 +98,26 @@ contract StockUnwrapperTest is SafeTestSetup {
     function _compose(bytes memory message) internal {
         vm.prank(lzEndpoint);
         unwrapper.lzCompose(address(adapter), bytes32(uint256(1)), message, address(0), "");
+    }
+
+    // ---- initialize ----
+
+    function test_initialize_setsFullConfig() public view {
+        assertEq(unwrapper.getLzEndpoint(), lzEndpoint);
+        assertEq(unwrapper.getSrcEid(), SRC_EID);
+        assertEq(unwrapper.getSrcModule(), OFTComposeMsgCodec.addressToBytes32(srcModule));
+        assertTrue(unwrapper.isRegisteredAdapter(address(adapter)));
+        assertEq(unwrapper.getRegisteredAdapters().length, 1);
+        assertEq(unwrapper.getRegisteredAdapters()[0], address(adapter));
+    }
+
+    function test_initialize_revertsOnZeroInput() public {
+        address impl = address(new StockUnwrapper());
+        vm.expectRevert(StockUnwrapper.InvalidInput.selector);
+        new UUPSProxy(impl, abi.encodeWithSelector(
+            StockUnwrapper.initialize.selector,
+            address(roleRegistry), address(0), SRC_EID, srcModule, new address[](0), new bool[](0)
+        ));
     }
 
     // ---- auth ----
@@ -179,17 +189,16 @@ contract StockUnwrapperTest is SafeTestSetup {
 
     // ---- deadline branch ----
 
-    function test_lzCompose_pastDeadline_deliversWrappedToTradingSafe() public {
+    function test_lzCompose_pastDeadline_deliversWrappedToSourceSafe() public {
         uint256 deadline = block.timestamp + 1 hours;
         bytes memory message = _message(AMOUNT, AMOUNT, deadline);
         vm.warp(deadline + 1);
 
-        address tradingSafe = factory.getDeterministicAddress(sourceSafe);
         vm.expectEmit(true, true, true, true, address(unwrapper));
-        emit StockUnwrapper.WrappedDeliveredToSafe(bytes32(uint256(1)), sourceSafe, tradingSafe, address(wrapper), AMOUNT);
+        emit StockUnwrapper.WrappedDeliveredToSafe(bytes32(uint256(1)), sourceSafe, address(wrapper), AMOUNT);
         _compose(message);
 
-        assertEq(wrapper.balanceOf(tradingSafe), AMOUNT, "wrapped delivered to safe");
+        assertEq(wrapper.balanceOf(sourceSafe), AMOUNT, "wrapped delivered to the safe address");
         assertEq(underlying.balanceOf(stockRecipient), 0, "no unwrap happened");
     }
 
@@ -212,7 +221,7 @@ contract StockUnwrapperTest is SafeTestSetup {
 
         vm.warp(deadline + 1);
         _compose(message);
-        assertEq(wrapper.balanceOf(factory.getDeterministicAddress(sourceSafe)), AMOUNT);
+        assertEq(wrapper.balanceOf(sourceSafe), AMOUNT);
     }
 
     // ---- pause / rescue / config ----
@@ -243,14 +252,17 @@ contract StockUnwrapperTest is SafeTestSetup {
         unwrapper.configureAdapters(adapters, registered);
     }
 
-    function test_configureAdapters_validatesInput() public {
+    function test_configureAdapters_removesFromEnumerableSet() public {
         address[] memory adapters = new address[](1);
-        adapters[0] = address(0);
+        adapters[0] = address(adapter);
         bool[] memory registered = new bool[](1);
-        registered[0] = true;
+        registered[0] = false;
+
         vm.prank(unwrapperAdmin);
-        vm.expectRevert(StockUnwrapper.InvalidInput.selector);
         unwrapper.configureAdapters(adapters, registered);
+
+        assertFalse(unwrapper.isRegisteredAdapter(address(adapter)));
+        assertEq(unwrapper.getRegisteredAdapters().length, 0);
     }
 
     function test_setSrcModule_adminOnlyAndStores() public {
@@ -261,14 +273,5 @@ contract StockUnwrapperTest is SafeTestSetup {
         vm.prank(unwrapperAdmin);
         unwrapper.setSrcModule(newModule);
         assertEq(unwrapper.getSrcModule(), OFTComposeMsgCodec.addressToBytes32(newModule));
-    }
-
-    function test_initialize_revertsOnZeroInput() public {
-        address impl = address(new StockUnwrapper());
-        vm.expectRevert(StockUnwrapper.InvalidInput.selector);
-        new UUPSProxy(impl, abi.encodeWithSelector(
-            StockUnwrapper.initialize.selector,
-            address(roleRegistry), address(0), SRC_EID, srcModule, address(factory)
-        ));
     }
 }

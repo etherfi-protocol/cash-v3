@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
 
 import { StockWithdrawModule } from "../../src/stock-withdraw/StockWithdrawModule.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
@@ -60,7 +59,6 @@ contract OFTStub is ERC20 {
 
 contract StockWithdrawModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
-    using OptionsBuilder for bytes;
 
     StockWithdrawModule internal module;
     OFTStub internal oft;
@@ -80,12 +78,23 @@ contract StockWithdrawModuleTest is SafeTestSetup {
 
         oft = new OFTStub();
 
+        // Full config passed atomically at initialize: compose gas, supported tokens and
+        // the dstEid -> unwrapper route.
+        address[] memory iTokens = new address[](1);
+        iTokens[0] = address(oft);
+        bool[] memory supported = new bool[](1);
+        supported[0] = true;
+        uint32[] memory dstEids = new uint32[](1);
+        dstEids[0] = DST_EID;
+        address[] memory unwrappers = new address[](1);
+        unwrappers[0] = unwrapper;
+
         address impl = address(new StockWithdrawModule(address(dataProvider)));
         module = StockWithdrawModule(payable(address(new UUPSProxy(
             impl,
             abi.encodeWithSelector(
                 StockWithdrawModule.initialize.selector,
-                address(roleRegistry), DST_EID, unwrapper, COMPOSE_GAS
+                address(roleRegistry), COMPOSE_GAS, iTokens, supported, dstEids, unwrappers
             )
         ))));
 
@@ -108,13 +117,6 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         bytes[] memory setupData = new bytes[](1);
         _configureModules(mods, shouldWhitelist, setupData);
 
-        address[] memory iTokens = new address[](1);
-        iTokens[0] = address(oft);
-        bool[] memory supported = new bool[](1);
-        supported[0] = true;
-        vm.prank(moduleAdmin);
-        module.configureTokens(iTokens, supported);
-
         oft.mint(address(safe), AMOUNT);
         vm.deal(keeper, 1 ether);
     }
@@ -127,7 +129,8 @@ contract StockWithdrawModuleTest is SafeTestSetup {
             amount: AMOUNT,
             minReturn: MIN_RETURN,
             deadline: block.timestamp + 1 days,
-            recipient: stockRecipient
+            recipient: stockRecipient,
+            dstEid: DST_EID
         });
     }
 
@@ -138,9 +141,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
             address(module),
             safe.nonce(),
             address(safe),
-            abi.encode(order),
-            module.getDstEid(),
-            module.getStockUnwrapper()
+            abi.encode(order)
         )).toEthSignedMessageHash();
         return _twoSig(digest);
     }
@@ -178,12 +179,37 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         vm.warp(block.timestamp + withdrawalDelay + 1);
     }
 
+    function _setUnwrapper(uint32 dstEid, address newUnwrapper) internal {
+        uint32[] memory dstEids = new uint32[](1);
+        dstEids[0] = dstEid;
+        address[] memory unwrappers = new address[](1);
+        unwrappers[0] = newUnwrapper;
+        vm.prank(moduleAdmin);
+        module.configureUnwrappers(dstEids, unwrappers);
+    }
+
+    // ---- initialize ----
+
+    function test_initialize_setsFullConfig() public view {
+        assertEq(module.getComposeGasLimit(), COMPOSE_GAS);
+        assertTrue(module.isTokenSupported(address(oft)));
+        assertEq(module.getSupportedTokens().length, 1);
+        assertEq(module.getSupportedTokens()[0], address(oft));
+        assertEq(module.getStockUnwrapper(DST_EID), unwrapper);
+
+        (uint32[] memory dstEids, address[] memory unwrappers) = module.getConfiguredUnwrappers();
+        assertEq(dstEids.length, 1);
+        assertEq(dstEids[0], DST_EID);
+        assertEq(unwrappers[0], unwrapper);
+    }
+
     // ---- requestWithdrawal ----
 
     function test_requestWithdrawal_storesOrderAndPlacesHold() public {
         _request(_baseOrder());
         assertEq(module.getOrder(address(safe)).amount, AMOUNT);
         assertEq(module.getOrder(address(safe)).iToken, address(oft));
+        assertEq(module.getOrder(address(safe)).dstEid, DST_EID);
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(module));
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens[0], address(oft));
     }
@@ -213,6 +239,14 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         order.minReturn = 0;
         (signers, sigs) = _signRequest(order);
         vm.expectRevert(ModuleBase.InvalidInput.selector);
+        module.requestWithdrawal(address(safe), order, signers, sigs);
+    }
+
+    function test_requestWithdrawal_revertsForUnconfiguredDstEid() public {
+        StockWithdrawModule.Order memory order = _baseOrder();
+        order.dstEid = DST_EID + 1;
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
+        vm.expectRevert(StockWithdrawModule.MissingConfig.selector);
         module.requestWithdrawal(address(safe), order, signers, sigs);
     }
 
@@ -251,9 +285,8 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         module.requestWithdrawal(address(safe), order, signers, sigs);
     }
 
-    function test_requestWithdrawal_revertsWhenUnwrapperNotSet() public {
-        vm.prank(moduleAdmin);
-        module.setDestination(DST_EID, address(0));
+    function test_requestWithdrawal_revertsWhenUnwrapperRemoved() public {
+        _setUnwrapper(DST_EID, address(0));
 
         StockWithdrawModule.Order memory order = _baseOrder();
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
@@ -276,13 +309,39 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         assertEq(oft.lastTo(), bytes32(uint256(uint160(unwrapper))));
         assertEq(oft.lastAmountLD(), AMOUNT);
         assertEq(oft.lastComposeMsg(), abi.encode(address(safe), stockRecipient, MIN_RETURN, order.deadline));
-        assertEq(oft.lastExtraOptions(), OptionsBuilder.newOptions().addExecutorLzComposeOption(0, COMPOSE_GAS, 0));
+        // TYPE_3 ‖ workerId=1 ‖ optionLength=19 ‖ OPTION_TYPE_LZCOMPOSE=3 ‖ index=0 ‖ gas —
+        // the manual equivalent of OptionsBuilder.addExecutorLzComposeOption(0, gas, 0).
+        assertEq(oft.lastExtraOptions(), abi.encodePacked(uint16(3), uint8(1), uint16(19), uint8(3), uint16(0), COMPOSE_GAS));
         // iTOKEN was pulled from the safe into the module and burned by the OFT send
         assertEq(oft.balanceOf(address(safe)), 0);
         assertEq(oft.balanceOf(address(module)), 0);
         // order + hold cleared
         assertEq(module.getOrder(address(safe)).iToken, address(0));
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
+    }
+
+    function test_executeWithdrawal_usesLiveUnwrapperFromStorage() public {
+        _request(_baseOrder());
+
+        // Admin repoints the route after the user signed: execute must honor storage.
+        address newUnwrapper = makeAddr("newUnwrapper");
+        _setUnwrapper(DST_EID, newUnwrapper);
+        _warpPastDelay();
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+
+        assertEq(oft.lastTo(), bytes32(uint256(uint160(newUnwrapper))), "unwrapper resolved live");
+    }
+
+    function test_executeWithdrawal_revertsWhenRouteDisabled() public {
+        _request(_baseOrder());
+        _setUnwrapper(DST_EID, address(0));
+        _warpPastDelay();
+
+        vm.prank(keeper);
+        vm.expectRevert(StockWithdrawModule.MissingConfig.selector);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
     }
 
     function test_executeWithdrawal_adjustsMinAmountForOftDust() public {
@@ -419,17 +478,48 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         module.configureTokens(iTokens, supported);
     }
 
-    function test_setDestination_and_setComposeGasLimit() public {
+    function test_configureTokens_removesFromEnumerableSet() public {
+        address[] memory iTokens = new address[](1);
+        iTokens[0] = address(oft);
+        bool[] memory supported = new bool[](1);
+        supported[0] = false;
+
+        vm.prank(moduleAdmin);
+        module.configureTokens(iTokens, supported);
+
+        assertFalse(module.isTokenSupported(address(oft)));
+        assertEq(module.getSupportedTokens().length, 0);
+    }
+
+    function test_configureUnwrappers_adminOnlyStoresAndRemoves() public {
+        uint32[] memory dstEids = new uint32[](1);
+        dstEids[0] = 30102;
+        address[] memory unwrappers = new address[](1);
+        unwrappers[0] = makeAddr("otherUnwrapper");
+
         vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
-        module.setDestination(1, makeAddr("x"));
+        module.configureUnwrappers(dstEids, unwrappers);
 
-        vm.startPrank(moduleAdmin);
-        module.setDestination(30102, makeAddr("newUnwrapper"));
-        assertEq(module.getDstEid(), 30102);
-        assertEq(module.getStockUnwrapper(), makeAddr("newUnwrapper"));
+        vm.prank(moduleAdmin);
+        module.configureUnwrappers(dstEids, unwrappers);
+        assertEq(module.getStockUnwrapper(30102), makeAddr("otherUnwrapper"));
 
+        (uint32[] memory eids,) = module.getConfiguredUnwrappers();
+        assertEq(eids.length, 2, "both routes enumerable");
+
+        // zero removes the route from the enumerable map
+        _setUnwrapper(30102, address(0));
+        assertEq(module.getStockUnwrapper(30102), address(0));
+        (eids,) = module.getConfiguredUnwrappers();
+        assertEq(eids.length, 1, "removed route not enumerated");
+    }
+
+    function test_setComposeGasLimit_adminOnlyAndStores() public {
+        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        module.setComposeGasLimit(500_000);
+
+        vm.prank(moduleAdmin);
         module.setComposeGasLimit(500_000);
         assertEq(module.getComposeGasLimit(), 500_000);
-        vm.stopPrank();
     }
 }

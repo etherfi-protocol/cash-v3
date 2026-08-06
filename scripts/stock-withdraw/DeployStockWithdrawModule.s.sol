@@ -1,95 +1,163 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Script, console } from "forge-std/Script.sol";
-import { CREATE3 } from "solady/utils/CREATE3.sol";
+import { console } from "forge-std/console.sol";
+import { stdJson } from "forge-std/StdJson.sol";
 
+import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
+import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { StockWithdrawModule } from "../../src/stock-withdraw/StockWithdrawModule.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import { IRoleRegistry } from "../../src/interfaces/IRoleRegistry.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 
 /**
+ * @title DeployStockWithdrawModule
  * @notice Deploys the OP-side StockWithdrawModule (CREATE3 impl + CREATE3 UUPS proxy with
- *         atomic init). The mainnet StockUnwrapper does not exist yet at this point:
- *         initialize with stockUnwrapper = address(0); after the mainnet deploy, the module
- *         admin calls setDestination(dstEid, unwrapper).
+ *         atomic init) through the on-chain EtherFiDeployer, then wires it up as a DEFAULT
+ *         module on the EtherFiDataProvider and as a withdraw-requester on the CashModule,
+ *         and grants STOCK_WITHDRAW_MODULE_ADMIN_ROLE.
+ *
+ *         Two-actor flow, selected by ENV:
+ *         - ENV=dev:      the broadcaster holds the admin roles (dev admin owns the
+ *                         RoleRegistry), so deploys AND wiring are broadcast directly.
+ *         - ENV=mainnet:  the broadcaster only performs the unprivileged CREATE3 deploys;
+ *                         every privileged call is written as a Gnosis transaction bundle to
+ *                         output/StockWithdrawModule-<chainid>.json for the prod Safe
+ *                         (RoleRegistry owner) to execute.
+ *
+ *         The mainnet StockUnwrapper does not exist yet at this point, so the module
+ *         initialises with empty route config; the module admin wires routes post-deploy via
+ *         `configureUnwrappers` / `configureTokens` (admin-role calls, not part of this
+ *         script).
  *
  * Rollout order:
- *   1. OP:  this script (unwrapper = 0) — run with --verify.
+ *   1. OP:  this script — run with --verify (prod: then execute the Gnosis bundle).
  *   2. ETH: DeployStockUnwrapper with SRC_MODULE = this proxy — run with --verify.
- *   3. OP admin:  module.setDestination(30101, <unwrapper proxy>).
- *   4. OP admin:  module.configureTokens([<iTokens>], [true]).
- *   5. ETH admin: unwrapper.configureAdapters([<OFTAdapters>], [true]).
- *   6. OP governance: dataProvider.configureModules([module], [true]),
- *      cashModule.configureModulesCanRequestWithdraw([module], [true]),
- *      grant STOCK_WITHDRAW_MODULE_ADMIN_ROLE; ETH governance: grant STOCK_UNWRAPPER_ADMIN_ROLE.
- *   7. Per-safe enable via ModuleManager.configureModules (user-signed).
+ *   3. OP module admin:  module.configureUnwrappers([30101], [<unwrapper proxy>]).
+ *   4. OP module admin:  module.configureTokens([<iTokens>], [true]).
+ *   5. ETH unwrapper admin: unwrapper.configureAdapters([<OFTAdapters>], [true]).
  *
- * Env: PRIVATE_KEY, ETHERFI_DATA_PROVIDER, ROLE_REGISTRY, DST_EID (30101),
- *      COMPOSE_GAS_LIMIT (e.g. 300000)
+ * Addresses (DataProvider, RoleRegistry, CashModule) are read from
+ * deployments/{ENV}/10/deployments.json.
  *
- * After broadcast, run VerifyStockWithdrawModule.s.sol against the live chain.
+ * Env: PRIVATE_KEY (must be a registered EtherFiDeployer deployer), ENV (dev|mainnet),
+ *      COMPOSE_GAS_LIMIT (e.g. 300000),
+ *      MODULE_ADMIN (address receiving STOCK_WITHDRAW_MODULE_ADMIN_ROLE)
+ *
+ * After broadcast (and bundle execution on prod), run VerifyStockWithdrawModule.s.sol.
  */
-contract DeployStockWithdrawModule is Script {
-    address internal constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+contract DeployStockWithdrawModule is EtherFiDeployerHelper, GnosisHelpers {
+    using stdJson for string;
 
-    bytes32 public constant SALT_STOCK_WITHDRAW_MODULE_IMPL = keccak256("DeployStockWithdrawModule.StockWithdrawModuleImpl");
-    bytes32 public constant SALT_STOCK_WITHDRAW_MODULE_PROXY = keccak256("DeployStockWithdrawModule.StockWithdrawModuleProxy");
+    string internal constant DEV_SALT_IMPL = "Dev.StockWithdraw.StockWithdrawModuleImpl";
+    string internal constant PROD_SALT_IMPL = "Prod.StockWithdraw.StockWithdrawModuleImpl";
+    
+    string internal constant DEV_SALT_PROXY = "Dev.StockWithdraw.StockWithdrawModuleProxy";
+    string internal constant PROD_SALT_PROXY = "Prod.StockWithdraw.StockWithdrawModuleProxy";
 
-    // --- CREATE3 deploy helper (idempotent — skips if already deployed) ---
-    function deployCreate3(bytes memory creationCode, bytes32 salt) internal returns (address deployed) {
-        deployed = CREATE3.predictDeterministicAddress(salt, NICKS_FACTORY);
+    address constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-        if (deployed.code.length > 0) {
-            console.log("  [SKIP] already deployed at", deployed);
-            return deployed;
-        }
-
-        address proxy = address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", NICKS_FACTORY, salt, CREATE3.PROXY_INITCODE_HASH)))));
-
-        bool ok;
-        if (proxy.code.length == 0) {
-            (ok,) = NICKS_FACTORY.call(abi.encodePacked(salt, hex"67363d3d37363d34f03d5260086018f3"));
-            require(ok, "CREATE3 proxy deploy failed");
-        }
-
-        (ok,) = proxy.call(creationCode);
-        require(ok, "CREATE3 contract deploy failed");
-
-        require(deployed.code.length > 0, "CREATE3 deployment verification failed");
-    }
+    EtherFiDataProvider internal dataProvider;
+    RoleRegistry internal roleRegistry;
+    ICashModule internal cashModule;
+    address internal moduleAdmin;
+    address internal impl;
+    address internal proxy;
 
     function run() public {
         require(block.chainid == 10, "This script must be run on Optimism (chain ID 10)");
 
-        address dataProvider = vm.envAddress("ETHERFI_DATA_PROVIDER");
-        address roleRegistry = vm.envAddress("ROLE_REGISTRY");
-        uint32 dstEid = uint32(vm.envUint("DST_EID"));
-        uint128 composeGasLimit = uint128(vm.envUint("COMPOSE_GAS_LIMIT"));
+        string memory deployments = readDeploymentFile();
+        dataProvider = EtherFiDataProvider(deployments.readAddress(".addresses.EtherFiDataProvider"));
+        roleRegistry = RoleRegistry(deployments.readAddress(".addresses.RoleRegistry"));
+        cashModule = ICashModule(deployments.readAddress(".addresses.CashModule"));
 
-        address ownerBefore = IRoleRegistry(roleRegistry).owner();
+        uint256 deployerPk = vm.envUint("PRIVATE_KEY");
+        address deployerAddress = vm.addr(deployerPk);
 
-        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
+        require(DEPLOYER.isDeployer(deployerAddress), "broadcaster is not an EtherFiDeployer deployer");
 
-        address impl = deployCreate3(
-            abi.encodePacked(type(StockWithdrawModule).creationCode, abi.encode(dataProvider)),
-            SALT_STOCK_WITHDRAW_MODULE_IMPL
-        );
+        string memory env = getEnv();
+        bool isDev = isEqualString(getEnv(), "dev");
 
-        address proxy = deployCreate3(
-            abi.encodePacked(
-                type(UUPSProxy).creationCode,
-                abi.encode(impl, abi.encodeWithSelector(StockWithdrawModule.initialize.selector, roleRegistry, dstEid, address(0), composeGasLimit))
-            ),
-            SALT_STOCK_WITHDRAW_MODULE_PROXY
-        );
+        if (isDev) { 
+            moduleAdmin = deployerAddress; 
+        } else { 
+            moduleAdmin = SAFE; 
+        }
+        
+        address ownerBefore = roleRegistry.owner();
 
+        vm.startBroadcast(deployerPk);
+        _deploy();
+        if (isDev) _wireDirectly();
         vm.stopBroadcast();
 
+        if (!isDev) _writeGnosisBundle();
+
         // Post-operation hook: the timelock/registry owner must be unchanged.
-        require(IRoleRegistry(roleRegistry).owner() == ownerBefore, "CRITICAL: role registry owner changed!");
+        require(roleRegistry.owner() == ownerBefore, "CRITICAL: role registry owner changed!");
 
         console.log("StockWithdrawModule impl:", impl);
         console.log("StockWithdrawModule proxy:", proxy);
+    }
+
+    /// @dev CREATE3 deploys: impl (immutable dataProvider) + UUPS proxy with atomic init.
+    ///      Route config starts empty — the unwrapper is deployed after this script.
+    function _deploy() internal {
+        impl = _create3(SALT_IMPL, type(StockWithdrawModule).creationCode, abi.encode(address(dataProvider)));
+
+        bytes memory initData = abi.encodeWithSelector(
+            StockWithdrawModule.initialize.selector,
+            address(roleRegistry),
+            uint128(vm.envUint("COMPOSE_GAS_LIMIT")),
+            new address[](0), // iTokens — configured post-deploy by the module admin
+            new bool[](0),
+            new uint32[](0), // dstEids — configured once the unwrapper is live
+            new address[](0)
+        );
+        proxy = _create3(SALT_PROXY, type(UUPSProxy).creationCode, abi.encode(impl, initData));
+    }
+
+    /// @dev The three privileged wiring calls, identical between the dev direct path and the
+    ///      prod Gnosis bundle.
+    function _wiringCalls() internal view returns (address[3] memory targets, bytes[3] memory payloads) {
+        address[] memory modules = new address[](1);
+        modules[0] = proxy;
+        bool[] memory enable = new bool[](1);
+        enable[0] = true;
+
+        targets[0] = address(dataProvider);
+        payloads[0] = abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, modules, enable);
+        targets[1] = address(cashModule);
+        payloads[1] = abi.encodeWithSelector(ICashModule.configureModulesCanRequestWithdraw.selector, modules, enable);
+        targets[2] = address(roleRegistry);
+        payloads[2] = abi.encodeWithSignature("grantRole(bytes32,address)", StockWithdrawModule(payable(proxy)).STOCK_WITHDRAW_MODULE_ADMIN_ROLE(), moduleAdmin);
+    }
+
+    /// @dev Dev: the broadcaster holds the roles — execute the wiring in-broadcast.
+    function _wireDirectly() internal {
+        (address[3] memory targets, bytes[3] memory payloads) = _wiringCalls();
+        for (uint256 i = 0; i < 3; i++) {
+            (bool ok,) = targets[i].call(payloads[i]);
+            require(ok, "wiring call failed");
+        }
+    }
+
+    /// @dev Prod: the wiring goes to the RoleRegistry owner (the prod Safe) as a Gnosis
+    ///      transaction bundle.
+    function _writeGnosisBundle() internal {
+        (address[3] memory targets, bytes[3] memory payloads) = _wiringCalls();
+
+        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(roleRegistry.owner()));
+        for (uint256 i = 0; i < 3; i++) {
+            txs = string.concat(txs, _getGnosisTransaction(addressToHex(targets[i]), iToHex(payloads[i]), "0", i == 2));
+        }
+
+        string memory path = string.concat("./output/StockWithdrawModule-", vm.toString(block.chainid), ".json");
+        vm.writeFile(path, txs);
+        console.log("Gnosis wiring bundle written to:", path);
     }
 }
