@@ -31,8 +31,9 @@ import { Utils } from "../utils/Utils.sol";
 /// Usage (no broadcast — writes ./output/*.json and simulates):
 ///   forge script scripts/gnosis-txs/TimelockHandoverOptimism.s.sol --rpc-url $OPTIMISM_RPC
 contract TimelockHandoverOptimism is Utils, GnosisHelpers {
-    /// @dev EtherFiTimelock at its deterministic CREATE3 address (DeployTimelock.s.sol)
-    address constant ETHERFI_TIMELOCK = 0xDb546E6466f6A7Ff5D381835bEfAf2c3Ae944f9b;
+    /// @dev EtherFiTimelock at its deterministic CREATE3 address, deployed through the
+    ///      permissioned EtherFiDeployer (DeployTimelock.s.sol)
+    address constant ETHERFI_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
     uint256 constant TIMELOCK_DELAY = 8 hours;
     bytes32 constant TL_PREDECESSOR = bytes32(0);
     bytes32 constant TL_SALT = bytes32(0);
