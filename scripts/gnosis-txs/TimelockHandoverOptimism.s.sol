@@ -54,6 +54,20 @@ contract TimelockHandoverOptimism is Utils, GnosisHelpers {
         address safe = RoleRegistry(roleRegistry).owner();
         require(safe == GOVERNANCE_MULTISIG, "RoleRegistry owner != expected governance");
 
+        // Bytecode alone does not prove configuration — TimelockController roles and delay
+        // live in storage, so the same code could have been deployed with extra proposers or
+        // an admin. Re-assert the full expected config before building any handover bundle.
+        EtherFiTimelock tl = EtherFiTimelock(payable(ETHERFI_TIMELOCK));
+        require(tl.getMinDelay() == TIMELOCK_DELAY, "delay != 8 hours");
+        require(tl.hasRole(tl.PROPOSER_ROLE(), safe), "governance is not proposer");
+        require(tl.hasRole(tl.EXECUTOR_ROLE(), safe), "governance is not executor");
+        require(tl.hasRole(tl.CANCELLER_ROLE(), safe), "governance is not canceller");
+        require(tl.hasRole(tl.DEFAULT_ADMIN_ROLE(), ETHERFI_TIMELOCK), "timelock is not its own admin");
+        require(!tl.hasRole(tl.DEFAULT_ADMIN_ROLE(), safe), "governance must not be admin");
+        // AccessControl is not enumerable, so "no OTHER proposer/admin exists" cannot be
+        // asserted on-chain here; that guarantee comes from the deploy path — the permissioned
+        // EtherFiDeployer ran our exact initCode, whose constructor grants exactly these roles.
+
         // ── Build step 1: schedule the handover request on the timelock ──
         string memory step1 = _getGnosisHeader(vm.toString(block.chainid), addressToHex(safe));
         step1 = string(abi.encodePacked(step1, _scheduleTimelockOpTx(roleRegistry, _handoverRequestCalldata(), true)));
