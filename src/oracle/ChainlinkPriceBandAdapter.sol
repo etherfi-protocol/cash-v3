@@ -36,10 +36,12 @@ import { IChainlinkPriceBandAdapter } from "../interfaces/IChainlinkPriceBandAda
  *      Sized against measurement: the worst one-hour move across the full history of the two target
  *      feeds is 7.50% (PAXG) and 1.54% (SPY), both comfortably inside a 2000 bps band.
  *
- *      Residual: a view function must bound its lookback for gas, so flooding more than
- *      `MAX_LOOKBACK` rounds inside the window falls back to the oldest reachable round and gains
- *      one band per `MAX_LOOKBACK` rounds. Closing that needs stored state, which this cannot have.
- *      `referenceIsAnchored()` reports when the fallback is in use.
+ *      The anchor is located by binary search, so it is found exactly however many rounds get
+ *      posted. A bounded backwards walk would leave the very hole it was meant to close: flood past
+ *      it and the reference becomes one of the attacker's own recent rounds, restoring the per-round
+ *      bound - and the burst can be repeated inside the same block. The search relies on round
+ *      timestamps inside a phase being non-decreasing, which holds because rounds are appended
+ *      chronologically.
  *
  * @dev BOTH DIRECTIONS
  *      A manipulated low print is as damaging as a high one and lands on a different party. The
@@ -99,12 +101,6 @@ contract ChainlinkPriceBandAdapter is IChainlinkPriceBandAdapter {
     /// @notice Longest permitted reference age. Beyond this the reference predates a full heartbeat
     ///         on these feeds and the band would start binding on ordinary movement.
     uint32 public constant MAX_REFERENCE_AGE = 12 hours;
-
-    /// @notice How many rounds back the search for an anchor walks before giving up.
-    /// @dev Every step is a staticcall, so this is a gas bound as much as a security one. The normal
-    ///      case exits on the first step, because these feeds publish far less often than the anchor
-    ///      window. Only a burst walks further.
-    uint256 public constant MAX_LOOKBACK = 16;
 
     /// @dev Ceiling on the widened band so a dead feed cannot overflow the delta arithmetic.
     uint256 internal constant MAX_EFFECTIVE_BAND_BPS = 1_000_000;
@@ -262,44 +258,84 @@ contract ChainlinkPriceBandAdapter is IChainlinkPriceBandAdapter {
     /**
      * @dev The newest round at least `REFERENCE_AGE` old, within the same aggregator phase.
      *
-     *      Walking back in TIME rather than taking `latestRound - 1` is what makes the band a bound
-     *      per hour instead of per round. A burst of rounds inside the window all resolve to the
-     *      same anchor, so posting more rounds buys no further movement.
+     *      Anchoring in TIME rather than at `latestRound - 1` is what makes the band a bound per
+     *      hour instead of per round. Without it, anyone able to produce rounds posts several in one
+     *      block, each inside the band against its immediate predecessor, and walks the price
+     *      anywhere - four rounds halve a price at a 20% band.
+     *
+     *      The anchor is found EXACTLY, not approximately. A bounded linear walk backwards would
+     *      leave a hole: flood more rounds than the walk can cover and the reference becomes one of
+     *      the attacker's own recent rounds, restoring the per-round bound they were trying to
+     *      escape - and they can repeat it in the same block. So this binary searches instead.
+     *      Round timestamps inside a phase are non-decreasing, because rounds are appended
+     *      chronologically, which is exactly the property a binary search needs. The cost is one
+     *      staticcall in the common case, rising to log2(rounds) only while a burst is in progress.
      *
      *      A Chainlink proxy round id packs `phaseId` in the high 16 bits and the aggregator's own
-     *      round in the low 64. Decrementing across a phase boundary reads a different aggregator
-     *      and in practice answers zero - `phase 2, round 0` on the live OP SPY feed does exactly
-     *      that. So the phase is fixed for the whole walk, and the start of a phase ends it.
+     *      round in the low 64. Reaching across a phase boundary reads a different aggregator and in
+     *      practice answers zero - `phase 2, round 0` on the live OP SPY feed does exactly that. So
+     *      the phase is fixed for the whole search.
      *
-     *      Fails open: with no usable round the raw answer passes through rather than reverting. A
-     *      revert on a collateral price takes every action on the reserve with it, liquidation
-     *      included. `hasReference()` and `referenceIsAnchored()` expose both degraded states.
+     *      `anchored` is false only when no round in this phase is old enough, which means the phase
+     *      itself is younger than `REFERENCE_AGE` - a fresh aggregator upgrade, not something an
+     *      attacker can manufacture. The oldest round in the phase is used then, which is the most
+     *      conservative reference available rather than one of theirs.
+     *
+     *      Fails open with no usable round at all: the raw answer passes through rather than
+     *      reverting, because a revert on a collateral price takes every action on the reserve with
+     *      it, liquidation included. `hasReference()` and `referenceIsAnchored()` expose both states.
      */
     function _reference(uint80 latestRoundId) internal view returns (int256 answer, bool available, bool anchored) {
-        uint64 round = uint64(latestRoundId);
-        if (round <= 1) return (0, false, false);
+        uint64 latest = uint64(latestRoundId);
+        if (latest <= 1) return (0, false, false);
 
         uint256 phase = uint256(uint16(latestRoundId >> 64)) << 64;
         uint256 cutoff = block.timestamp > REFERENCE_AGE ? block.timestamp - REFERENCE_AGE : 0;
 
-        for (uint256 i = 0; i < MAX_LOOKBACK; ++i) {
-            round -= 1;
-            try FEED.getRoundData(uint80(phase | uint256(round))) returns (uint80, int256 previous, uint256, uint256 previousUpdatedAt, uint80) {
-                // A hole in history ends the walk; keep whatever was already reached.
-                if (previous <= 0 || previousUpdatedAt == 0) break;
-                answer = previous;
-                available = true;
-                if (previousUpdatedAt <= cutoff) return (answer, true, true);
-            } catch {
-                break;
-            }
-            if (round <= 1) break;
+        // Common case, one read: these feeds publish far less often than the anchor window, so the
+        // immediately preceding round is already old enough.
+        {
+            (bool ok, int256 a, uint256 u) = _round(phase, latest - 1);
+            if (!ok) return (0, false, false);
+            if (u <= cutoff) return (a, true, true);
         }
 
-        // The lookback ran out or the phase began. Whatever was reached is the furthest back
-        // available and therefore the most conservative reference on offer, but it is NOT anchored
-        // in time and callers are told so.
-        return (answer, available, false);
+        // A burst is in progress. Binary search for the NEWEST round at or before the cutoff.
+        // Terminates structurally: `mid` always lies in [lo, hi] and each branch moves the bound past
+        // it, so the range strictly shrinks - at most log2(uint64) iterations.
+        uint64 lo = 1;
+        uint64 hi = latest - 2;
+        while (lo <= hi) {
+            uint64 mid = lo + (hi - lo) / 2;
+            (bool ok, int256 a, uint256 u) = _round(phase, mid);
+            if (!ok) break; // unreadable history; fall through to the conservative branch
+            if (u <= cutoff) {
+                answer = a;
+                anchored = true;
+                lo = mid + 1;
+            } else {
+                if (mid == 0) break;
+                hi = mid - 1;
+            }
+        }
+        if (anchored) return (answer, true, true);
+
+        // Nothing in this phase is old enough, so the phase itself is younger than REFERENCE_AGE -
+        // a fresh aggregator upgrade, not something an attacker can manufacture. Use the oldest round
+        // in the phase, which is the most conservative reference available rather than one of theirs.
+        (bool ok1, int256 oldest,) = _round(phase, 1);
+        if (ok1) return (oldest, true, false);
+        return (0, false, false);
+    }
+
+    /// @dev One history read, normalised. `ok` is false for an unreadable or unwritten round.
+    function _round(uint256 phase, uint64 round) internal view returns (bool ok, int256 answer, uint256 updatedAt) {
+        try FEED.getRoundData(uint80(phase | uint256(round))) returns (uint80, int256 a, uint256, uint256 u, uint80) {
+            if (a <= 0 || u == 0) return (false, 0, 0);
+            return (true, a, u);
+        } catch {
+            return (false, 0, 0);
+        }
     }
 
     /**

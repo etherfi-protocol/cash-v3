@@ -191,22 +191,55 @@ contract ChainlinkPriceBandAdapterTest is Test {
         assertLt(price, 11e8, "the feed itself walked down almost 90%");
         assertEq(adapter.latestAnswer(), 80e8, "the adapter moved exactly one band, not ten");
         assertTrue(adapter.isCapped());
-        assertTrue(adapter.referenceIsAnchored(), "still anchored: 10 rounds is inside MAX_LOOKBACK");
+        assertTrue(adapter.referenceIsAnchored(), "the anchor is the genuine pre-burst round");
     }
 
-    /// @dev The residual, asserted rather than left implicit. Flooding past MAX_LOOKBACK exhausts the
-    ///      walk, so the oldest reachable round is used and the attacker gains one band per
-    ///      MAX_LOOKBACK rounds. referenceIsAnchored() goes false, which is the alerting signal.
-    function test_flood_pastMaxLookbackFallsBackAndSaysSo() public {
+    /// @dev The hole a bounded backwards walk would leave, now closed. Flooding far more rounds
+    ///      than any fixed lookback could cover must NOT hand the attacker a reference of their own
+    ///      choosing: the anchor is binary-searched, so it is still the genuine pre-burst round.
+    function test_flood_pastAnyFixedLookbackStillAnchorsCorrectly() public {
         uint256 t = block.timestamp;
         int256 price = 100e8;
-        for (uint256 i = 0; i < adapter.MAX_LOOKBACK() + 4; ++i) {
+        for (uint256 i = 0; i < 80; ++i) {
             price = price - (price * 500) / 10_000;
             feed.push(price, t);
         }
-        assertFalse(adapter.referenceIsAnchored(), "lookback exhausted - this is the alert condition");
-        assertTrue(adapter.hasReference(), "but a conservative reference is still used");
-        assertGt(adapter.latestAnswer(), price, "and it still clamps against the furthest round reached");
+        assertLt(price, 2e8, "the feed itself walked down over 98%");
+        assertTrue(adapter.referenceIsAnchored(), "still anchored despite 80 rounds inside the window");
+        assertEq(adapter.referenceAnswer(), 100e8, "anchor is the genuine pre-burst round");
+        assertEq(adapter.latestAnswer(), 80e8, "still exactly one band, not one band per lookback");
+        assertTrue(adapter.isCapped());
+    }
+
+    /// @dev Repeating the burst in the same instant must buy nothing either - the anchor does not
+    ///      move until the clock does, so a second flood is bounded by the same reference.
+    function test_flood_repeatedBurstsInOneInstantBuyNothing() public {
+        uint256 t = block.timestamp;
+        int256 price = 100e8;
+        for (uint256 round = 0; round < 3; ++round) {
+            for (uint256 i = 0; i < 40; ++i) {
+                price = price - (price * 500) / 10_000;
+                feed.push(price, t);
+            }
+            assertEq(adapter.latestAnswer(), 80e8, "every burst clamps to the same one band");
+            assertEq(adapter.referenceAnswer(), 100e8, "and against the same anchor");
+        }
+    }
+
+    /// @dev `anchored` false is now reserved for a phase younger than REFERENCE_AGE - a fresh
+    ///      aggregator upgrade, which an attacker cannot manufacture. The oldest round in the phase
+    ///      is used, which is the most conservative reference available.
+    function test_anchorAbsentOnlyWhenTheWholePhaseIsYoungerThanTheWindow() public {
+        feed.setPhase(3, 0);
+        uint256 t = block.timestamp;
+        feed.seed(3, 1, 100e8, t);
+        feed.seed(3, 2, 100e8, t);
+        feed.seed(3, 3, 500e8, t);
+        feed.setPhase(3, 3);
+
+        assertFalse(adapter.referenceIsAnchored(), "no round in this phase is old enough");
+        assertTrue(adapter.hasReference(), "but the oldest available round is still used");
+        assertEq(adapter.latestAnswer(), 120e8, "and it still clamps");
     }
 
     /// @dev THE LIMITATION, asserted so it is documented rather than assumed. The band bounds a
