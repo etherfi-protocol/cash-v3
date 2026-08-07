@@ -76,7 +76,13 @@ contract DeployTimelock is Utils {
 
         require(timelock == predicted, "deployed address != predicted");
 
-        // ── 3. Verify configuration (also guards a squatted or misconfigured deployment) ──
+        // ── 3. Verify bytecode + configuration ──
+        // The salt is public and Nick's factory permissionless, so an existing deployment could
+        // be a mimic squatting the address with the expected view values. Requiring an exact
+        // runtime-bytecode match against this build rules that out (EtherFiTimelock has no
+        // immutables, so type(...).runtimeCode is the exact expected code).
+        require(keccak256(timelock.code) == keccak256(type(EtherFiTimelock).runtimeCode), "deployed bytecode != local EtherFiTimelock build");
+
         EtherFiTimelock tl = EtherFiTimelock(payable(timelock));
         require(tl.getMinDelay() == TIMELOCK_DELAY, "delay != 8 hours");
         require(tl.hasRole(tl.PROPOSER_ROLE(), governance), "governance is not proposer");

@@ -5,6 +5,7 @@ import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
 
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { EtherFiTimelock } from "../../src/timelock/EtherFiTimelock.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
@@ -42,6 +43,9 @@ contract TimelockHandoverOptimism is Utils, GnosisHelpers {
     function run() public {
         require(block.chainid == 10, "TimelockHandover: Optimism only");
         require(ETHERFI_TIMELOCK.code.length > 0, "EtherFiTimelock not deployed - run DeployTimelock.s.sol first");
+        // Never hand RoleRegistry ownership to a mimic squatting the CREATE3 address: the code
+        // at the hardcoded address must be exactly this build's EtherFiTimelock runtime code
+        require(keccak256(ETHERFI_TIMELOCK.code) == keccak256(type(EtherFiTimelock).runtimeCode), "timelock bytecode != local EtherFiTimelock build");
 
         string memory deployments = readDeploymentFile();
         address roleRegistry = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "RoleRegistry"));
