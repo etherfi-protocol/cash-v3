@@ -125,8 +125,9 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      * @param minReturn The minimum return that is expected from the withdrawal.
      * @param deadline The deadline for the withdrawal.
      * @param recipient The recipient of the withdrawal.
+     * @param dstEid The destination endpoint ID of the withdrawal.
      */
-    event WithdrawalRequested(address indexed safe, bytes32 indexed withdrawalId, address iToken, uint256 amount, uint256 minReturn, uint256 deadline, address recipient);
+    event WithdrawalRequested(address indexed safe, bytes32 indexed withdrawalId, address iToken, uint256 amount, uint256 minReturn, uint256 deadline, address recipient, uint32 dstEid);
 
     /**
      * @notice Emitted when a withdrawal is executed.
@@ -136,8 +137,9 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      * @param amount The amount of the iToken that is being withdrawn (gross, incl. fee).
      * @param providerFee The provider fee taken from `amount` (in iToken units).
      * @param recipient The recipient of the withdrawal.
+     * @param dstEid The destination endpoint ID of the withdrawal.
      */
-    event WithdrawalExecuted(address indexed safe, bytes32 indexed withdrawalId, address iToken, uint256 amount, uint256 providerFee, address recipient);
+    event WithdrawalExecuted(address indexed safe, bytes32 indexed withdrawalId, address iToken, uint256 amount, uint256 providerFee, address recipient, uint32 dstEid);
 
     /**
      * @notice Emitted when a withdrawal is cancelled.
@@ -452,9 +454,14 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         bytes32 withdrawalId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
         $.withdrawals[safe] = StoredWithdrawal({ order: order, withdrawalId: withdrawalId });
 
-        emit WithdrawalRequested(safe, withdrawalId, order.iToken, order.amount, order.minReturn, order.deadline, order.recipient);
+        _emitWithdrawalRequested(safe, withdrawalId, order);
 
         cashModule.requestWithdrawalByModule(safe, order.iToken, order.amount);
+    }
+
+    /// @dev Split out of `requestWithdrawal` to keep the 8-arg emit under the legacy stack limit.
+    function _emitWithdrawalRequested(address safe, bytes32 withdrawalId, Order calldata order) internal {
+        emit WithdrawalRequested(safe, withdrawalId, order.iToken, order.amount, order.minReturn, order.deadline, order.recipient, order.dstEid);
     }
 
     /**
@@ -488,7 +495,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         uint256 providerFee = _takeProviderFee(withdrawal.order.iToken, withdrawal.order.amount);
         _sendOft(safe, withdrawal, withdrawal.order.amount - providerFee);
 
-        emit WithdrawalExecuted(safe, withdrawal.withdrawalId, withdrawal.order.iToken, withdrawal.order.amount, providerFee, withdrawal.order.recipient);
+        emit WithdrawalExecuted(safe, withdrawal.withdrawalId, withdrawal.order.iToken, withdrawal.order.amount, providerFee, withdrawal.order.recipient, withdrawal.order.dstEid);
     }
 
     /**

@@ -707,7 +707,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
 
         uint256 expectedFee = AMOUNT / 100;
         vm.expectEmit(true, false, false, true, address(module));
-        emit StockWithdrawModule.WithdrawalExecuted(address(safe), bytes32(0), address(oft), AMOUNT, expectedFee, stockRecipient);
+        emit StockWithdrawModule.WithdrawalExecuted(address(safe), bytes32(0), address(oft), AMOUNT, expectedFee, stockRecipient, DST_EID);
 
         vm.prank(keeper);
         module.executeWithdrawal{ value: 0.01 ether }(address(safe));
