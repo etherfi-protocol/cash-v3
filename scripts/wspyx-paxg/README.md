@@ -21,9 +21,10 @@ Summer Lend feed) is the relayed wSPYx → SPYx rate composed on Chainlink SPY/U
 Both reserves are collateral-only (borrowable no, draw cap 0), collateral risk 0 bps, flat 0%
 IR curve, 0% liquidity fee — the launch-payload house style.
 
-Staleness: SPY/USD and the relayed wSPYx→SPYx rate **3 days** (the relay keeper must poke at
-least every 3 days; SPY/USD is 24/5, so a US-market holiday weekend longer than 72h reads stale
-— fail-closed — until reopen). PAXG/USD **1 day** (~24h heartbeat).
+Staleness: SPY/USD, the relayed wSPYx→SPYx rate, and PAXG/USD all **3 days** (the relay keeper
+must poke at least every 3 days; SPY/USD is 24/5, so a US-market holiday weekend longer than 72h
+reads stale — fail-closed — until reopen). PAXG/USD was originally deployed at 1 day
+(`0xDc77fb41…03Be`, superseded and unused); the live feed is the 3-day `PaxgUsdFeedV2`.
 
 ## Oracle pattern vs the live instance
 

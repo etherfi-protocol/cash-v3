@@ -67,8 +67,9 @@ library WspyxPaxgProd {
     /// @dev Max age of the relay's source-chain read of the wSPYx -> SPYx rate; requires the relay
     ///      keeper to poke at least every 3 days (the sink's own wSPYx window from 622 is 7 days)
     uint256 internal constant IWSPYX_RATE_MAX_STALENESS = 3 days;
-    /// @dev PAXG/USD heartbeats ~24h; 1 day per risk sign-off
-    uint256 internal constant PAXG_USD_MAX_STALENESS = 1 days;
+    /// @dev PAXG/USD heartbeats ~24h; 3 days per risk sign-off (raised from 1 day, aligning with
+    ///      the SPY-side bounds; the 1-day PaxgUsdFeed at 0xDc77fb41…03Be is superseded and unused)
+    uint256 internal constant PAXG_USD_MAX_STALENESS = 3 days;
 
     uint8 internal constant FEED_DECIMALS = 8;
 

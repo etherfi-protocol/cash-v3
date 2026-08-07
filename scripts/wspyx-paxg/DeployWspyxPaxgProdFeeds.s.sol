@@ -50,7 +50,9 @@ abstract contract WspyxPaxgFeedDeployer is Utils {
 
         spyUsd = _create3(rehearsal, "SpyUsdFeed", abi.encodePacked(type(ChainlinkPriceFeed).creationCode, abi.encode(C.SPY_USD_AGGREGATOR, address(0), C.FEED_DECIMALS, C.SPY_USD_MAX_STALENESS, false, "SPY / USD")));
         iwspyxUsd = _create3(rehearsal, "IWSpyXUsdFeed", abi.encodePacked(type(OracleSinkPriceFeed).creationCode, abi.encode(C.ORACLE_SINK, C.WSPYX_MAINNET, spyUsd, C.FEED_DECIMALS, C.IWSPYX_RATE_MAX_STALENESS, false, "iwSPYx / USD")));
-        paxgUsd = _create3(rehearsal, "PaxgUsdFeed", abi.encodePacked(type(ChainlinkPriceFeed).creationCode, abi.encode(C.PAXG_USD_AGGREGATOR, address(0), C.FEED_DECIMALS, C.PAXG_USD_MAX_STALENESS, false, "PAXG / USD")));
+        // V2 salt: the original "PaxgUsdFeed" (0xDc77fb41…03Be) baked in the superseded 1-day
+        // staleness — immutable, so the 3-day bound needs a fresh deployment at a fresh address
+        paxgUsd = _create3(rehearsal, "PaxgUsdFeedV2", abi.encodePacked(type(ChainlinkPriceFeed).creationCode, abi.encode(C.PAXG_USD_AGGREGATOR, address(0), C.FEED_DECIMALS, C.PAXG_USD_MAX_STALENESS, false, "PAXG / USD")));
 
         // An earlier partial run could leave IWSpyXUsdFeed pointing at a different SPY leg only if
         // the salt scheme changed; the immutable binding is what makes this worth asserting.
