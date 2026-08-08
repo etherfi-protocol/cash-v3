@@ -42,8 +42,18 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
     ///         Carried in the module's own send options: the executor rejects options with
     ///         no lzReceive gas, and the third-party ShadowOFTs cannot be assumed to have
     ///         enforced options set for SEND_AND_CALL.
-    uint128 internal constant LZ_RECEIVE_GAS_LIMIT = 150_000;
+    /// @dev The executor passes this as the gas for the whole `endpoint.lzReceive` call, so it
+    ///      must cover the endpoint wrapper (`clearPayload` + checks) AND the adapter's
+    ///      `lzReceive` (Backed token credit + `sendCompose` store). Measured against the real
+    ///      wSPYx adapter on mainnet: ~194k needed; the live recovery tx burned 210k end to
+    ///      end. 150k stranded a real withdrawal mid-flight (LZ guid 0xff7dbce6...).
+    uint128 internal constant LZ_RECEIVE_GAS_LIMIT = 300_000;
     /// @notice Executor gas limit for the destination lzCompose call.
+    /// @dev Same rule: covers the endpoint wrapper plus `StockUnwrapper.lzCompose` (the
+    ///      ERC-4626 redeem to the recipient). Measured ~145k on mainnet at the real message.
+    ///      NOTE: measuring this on a fork in the SAME tx as the lzReceive leg reports only
+    ///      ~75k — the compose runs in its own tx in production, so every account and slot the
+    ///      redeem touches is COLD. Always measure the legs in separate transactions.
     uint128 internal constant COMPOSE_GAS_LIMIT = 500_000;
 
     /// @notice Provider (exit) fee in basis points taken from the wrapped-stock amount at
