@@ -9,33 +9,37 @@ import { Utils } from "../utils/Utils.sol";
 import { TradingAccountGnosisHelpers } from "./TradingAccountGnosisHelpers.sol";
 
 /**
- * @notice Generates the Ethereum 3CP JSON that brings the prod `TradingLens` allowlist up to
- *         `TradingAccountProdConfig.supportedTokens()` — today the wrapped xStocks already live on
- *         the dev lens. One tx per missing token from the OperatingSafe (holds
- *         TRADING_LENS_ADMIN_ROLE):
+ * @notice Generates the Ethereum 3CP JSON that reconciles the prod `TradingLens` allowlist with
+ *         `TradingAccountProdConfig.supportedTokens()` minus the top-up assets. From the
+ *         OperatingSafe (holds TRADING_LENS_ADMIN_ROLE), one tx per token that is out of sync:
  *
- *           TradingLens.addSupportedToken(token)
+ *           TradingLens.addSupportedToken(token)     — config token missing from the lens
+ *           TradingLens.removeSupportedToken(token)  — top-up asset still on the lens
  *
  *         Split out from `ConfigureTradingAccountEthereum` so growing the token list doesn't require
- *         re-running that bundle's one-shot proxy upgrades and role grants. Already-supported tokens
- *         are filtered out up front because `addSupportedToken` reverts `TokenAlreadySupported`
- *         rather than no-opping, which would take the whole Safe transaction down with it. wSPYx and
- *         PAXG are skipped as OP-only assets (see below). The bundle is fork-simulated and the
- *         resulting allowlist asserted before the JSON is trusted.
+ *         re-running that bundle's one-shot proxy upgrades and role grants. Both directions are
+ *         filtered against live lens state up front: `addSupportedToken` reverts
+ *         `TokenAlreadySupported` and `removeSupportedToken` reverts `TokenNotSupported` rather than
+ *         no-opping, and either would take the whole Safe transaction down with it. The bundle is
+ *         fork-simulated and the resulting allowlist asserted before the JSON is trusted.
  *
  * Usage:
  *   source .env && forge script scripts/gnosis-txs/AddTradingTokensEth3CP.s.sol --rpc-url $MAINNET_RPC
  */
 contract AddTradingTokensEth3CP is TradingAccountGnosisHelpers, Utils, TradingAccountCreate3 {
     /**
-     * @dev wSPYx and PAXG are still in `supportedTokens()` but must not reach the mainnet lens: their
-     *      OP iTOKENs sit on the user's own safe and Enso routes them on Optimism in both directions,
-     *      so no mainnet TradingSafe ever holds them (cash-be #7340). They are absent from the dev
-     *      lens for the same reason. Skipped here rather than deleted from the shared config, which
-     *      is being cleaned up separately; once that lands this filter simply stops matching.
+     * @dev Top-up assets. These are still in `supportedTokens()` but must not sit on the mainnet
+     *      trading lens — an asset is either a top-up asset or a trading asset, never both. wSPYx and
+     *      PAXG never reached the lens; wQQQx did, seeded by 3CP-611 before it was listed for top-up,
+     *      so it is removed here. Their OP iTOKENs sit on the user's own safe and Enso routes them on
+     *      Optimism in both directions, so no mainnet TradingSafe ever holds them (cash-be #7340).
+     *      They are absent from the dev lens for the same reason. Filtered here rather than deleted
+     *      from the shared config, which is being cleaned up separately; once that lands this filter
+     *      simply stops matching.
      */
     address private constant WSPYX = 0xE7E553Cd128F0011777323A0b44a7b96EA1CB540;
     address private constant PAXG = 0x45804880De22913dAFE09f4980848ECE6EcbAf78;
+    address private constant WQQQX = 0x4C1AE29c159838fC1b224636E28E086EB69101f7;
 
     function run() external {
         require(block.chainid == 1, "must run on Ethereum");
@@ -45,13 +49,19 @@ contract AddTradingTokensEth3CP is TradingAccountGnosisHelpers, Utils, TradingAc
         require(tradingLens.code.length > 0, "TradingLens not deployed");
 
         address[] memory pending = _pendingTokens(tradingLens);
-        require(pending.length > 0, "no tokens to add");
+        address[] memory stale = _staleTokens(tradingLens);
+        uint256 total = pending.length + stale.length;
+        require(total > 0, "lens already in sync");
 
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(C.OPERATING_SAFE));
+        uint256 emitted;
         for (uint256 i = 0; i < pending.length; ++i) {
             bytes memory data = abi.encodeWithSelector(TradingLens.addSupportedToken.selector, pending[i]);
-            bool isLast = i == pending.length - 1;
-            txs = string.concat(txs, _getGnosisTransaction(addressToHex(tradingLens), iToHex(data), "0", isLast));
+            txs = string.concat(txs, _getGnosisTransaction(addressToHex(tradingLens), iToHex(data), "0", ++emitted == total));
+        }
+        for (uint256 i = 0; i < stale.length; ++i) {
+            bytes memory data = abi.encodeWithSelector(TradingLens.removeSupportedToken.selector, stale[i]);
+            txs = string.concat(txs, _getGnosisTransaction(addressToHex(tradingLens), iToHex(data), "0", ++emitted == total));
         }
 
         vm.createDir("./output", true);
@@ -63,14 +73,15 @@ contract AddTradingTokensEth3CP is TradingAccountGnosisHelpers, Utils, TradingAc
 
         address[] memory tokens = C.supportedTokens();
         for (uint256 i = 0; i < tokens.length; ++i) {
-            if (_isOpOnly(tokens[i])) {
-                require(!TradingLens(tradingLens).isSupportedToken(tokens[i]), "OP-only token listed");
+            if (_isTopUpAsset(tokens[i])) {
+                require(!TradingLens(tradingLens).isSupportedToken(tokens[i]), "top-up asset listed");
                 continue;
             }
             require(TradingLens(tradingLens).isSupportedToken(tokens[i]), "supported token missing");
         }
 
         console.log("Simulation passed. Tokens added: %s", pending.length);
+        console.log("Tokens removed: %s", stale.length);
         console.log("Lens allowlist: %s", TradingLens(tradingLens).getSupportedTokens().length);
     }
 
@@ -89,11 +100,30 @@ contract AddTradingTokensEth3CP is TradingAccountGnosisHelpers, Utils, TradingAc
         }
     }
 
-    function _isPending(address tradingLens, address token) private view returns (bool) {
-        return !_isOpOnly(token) && !TradingLens(tradingLens).isSupportedToken(token);
+    /// @dev Top-up assets the lens still lists, so they can be removed in the same bundle.
+    function _staleTokens(address tradingLens) private view returns (address[] memory stale) {
+        address[] memory tokens = C.supportedTokens();
+        uint256 count;
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            if (_isStale(tradingLens, tokens[i])) ++count;
+        }
+
+        stale = new address[](count);
+        uint256 j;
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            if (_isStale(tradingLens, tokens[i])) stale[j++] = tokens[i];
+        }
     }
 
-    function _isOpOnly(address token) private pure returns (bool) {
-        return token == WSPYX || token == PAXG;
+    function _isPending(address tradingLens, address token) private view returns (bool) {
+        return !_isTopUpAsset(token) && !TradingLens(tradingLens).isSupportedToken(token);
+    }
+
+    function _isStale(address tradingLens, address token) private view returns (bool) {
+        return _isTopUpAsset(token) && TradingLens(tradingLens).isSupportedToken(token);
+    }
+
+    function _isTopUpAsset(address token) private pure returns (bool) {
+        return token == WSPYX || token == PAXG || token == WQQQX;
     }
 }
