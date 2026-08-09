@@ -123,7 +123,7 @@ abstract contract QqqxFeedDeployer is Utils {
         uint256 ts = block.timestamp;
         vm.store(C.ORACLE_SINK, bytes32(uint256(priceSlot) + 1), bytes32(ts | (ts << 64)));
         (, int256 answer,,,) = IOracleSinkAdminLike(C.ORACLE_SINK).latestRoundData(C.WQQQX_MAINNET);
-        require(uint256(answer) == price6dp, "sink seed did not read back");
+        require(SafeCast.toUint256(answer) == price6dp, "sink seed did not read back");
     }
 }
 
