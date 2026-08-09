@@ -70,9 +70,16 @@ abstract contract StockFeedDeployer is Utils {
 
     /// @dev Deploys via the EtherFiDeployer at the salt-derived address; a populated address means
     ///      a prior (possibly partial) run already deployed it, so reuse it instead of reverting
+    /// @dev The CREATE3 address a feed salt resolves to. Sole definition of the salt scheme, so a
+    ///      caller that only needs the address (the Verify* entrypoint) cannot drift from the one
+    ///      that deploys.
+    function _predictFeed(string memory saltPrefix, string memory name) internal view returns (address) {
+        return CREATE3.predictDeterministicAddress(keccak256(bytes(string.concat(saltPrefix, name))), address(etherFiDeployer));
+    }
+
     function _create3(bool rehearsal, string memory saltPrefix, string memory name, bytes memory initCode) internal returns (address deployed) {
         bytes32 salt = keccak256(bytes(string.concat(saltPrefix, name)));
-        deployed = CREATE3.predictDeterministicAddress(salt, address(etherFiDeployer));
+        deployed = _predictFeed(saltPrefix, name);
 
         if (deployed.code.length > 0) {
             console.log("  [SKIP]", name, "already deployed at", deployed);
@@ -89,8 +96,37 @@ abstract contract StockFeedDeployer is Utils {
     function _requireLivePrice(address feed, string memory desc) internal view {
         int256 answer = IAaveV4PriceFeed(feed).latestAnswer();
         require(answer > 0, string.concat("dead feed: ", desc));
-        uint256 usd = SafeCast.toUint256(answer);
-        // 8-decimal USD, printed as dollars.cents for a quick eyeball check
+        _logUsd(feed, desc, SafeCast.toUint256(answer));
+    }
+
+    /// @dev Same as {_requireLivePrice}, but tolerates the one failure that is expected when feeds
+    ///      are deployed AHEAD of the listing bundles: the relay has not delivered a price for
+    ///      `sinkToken` yet, so an OracleSink-backed leg cannot compose. The feeds are immutable and
+    ///      admin-less, so deploying them early is safe and makes their addresses final before the
+    ///      3CPs are proposed.
+    ///
+    ///      This is deliberately NOT a blanket try/catch. A revert is waved through ONLY when the
+    ///      sink genuinely holds no entry for `sinkToken`. If the sink has a price and the feed
+    ///      still reverts, that is a wiring bug in an immutable contract — it reverts here rather
+    ///      than surfacing later as a failed `addReserve`. The structural bindings
+    ///      (`underlyingUsdFeed()`, `token()`) are asserted unconditionally in {_deployFeeds}
+    ///      regardless of this outcome.
+    function _reportPriceAllowingUnrelayed(address feed, string memory desc, address sinkToken) internal view {
+        try IAaveV4PriceFeed(feed).latestAnswer() returns (int256 answer) {
+            require(answer > 0, string.concat("dead feed: ", desc));
+            _logUsd(feed, desc, SafeCast.toUint256(answer));
+        } catch {
+            (bool sinkHasPrice,) = LendRails.ORACLE_SINK.staticcall(abi.encodeCall(IOracleSinkAdminLike.latestRoundData, (sinkToken)));
+            require(!sinkHasPrice, string.concat("feed reverts despite a live sink price (wiring bug): ", desc));
+            console.log(string.concat("  [PENDING RELAY] ", desc, " deployed at ", vm.toString(feed)));
+            console.log(string.concat("                  Cannot price yet: the OracleSink holds no entry for ", vm.toString(sinkToken), "."));
+            console.log("                  The address is final. After the first PriceRelay.poke, run the Verify* entrypoint");
+            console.log("                  and require it green BEFORE proposing the Summer Lend 3CP.");
+        }
+    }
+
+    /// @dev 8-decimal USD, printed as dollars.cents for a quick eyeball check
+    function _logUsd(address feed, string memory desc, uint256 usd) private pure {
         uint256 cents = (usd % 1e8) / 1e6;
         console.log(string.concat("  ", desc, ": $", vm.toString(usd / 1e8), cents < 10 ? ".0" : ".", vm.toString(cents), " at ", vm.toString(feed)));
     }
@@ -181,12 +217,19 @@ abstract contract StockFeedDeployer is Utils {
  *              split ratio, with an immutable cap that cannot be re-snapshotted. A legitimate
  *              unbounded jump makes a growth cap the wrong tool here.
  *
- *         PREREQUISITE: the OracleSink must have never held (or already hold, from a completed
- *         relay) a live price for this wrapper. Until the corresponding cash-mainnet-asset-listing
- *         Ethereum bundle executes and the relay keeper pokes, `_requireLivePrice` on the wrapper
- *         feed reverts below — the correct, fail-closed behaviour. This script does not (and must
- *         not) seed the sink; seeding only happens in `_rehearseStockRails()`, which the 3CP
- *         generators use for fork-only rehearsal.
+ *         ORDERING: this can and should run BEFORE the listing 3CPs are proposed. The feeds are
+ *         immutable and admin-less, so deploying them early is free and makes their addresses
+ *         final — which the Summer Lend 3CP needs, since `addReserve` hardcodes the price source.
+ *
+ *         The wrapper leg cannot price until the cash-mainnet-asset-listing Ethereum bundle
+ *         executes and the relay keeper pokes, so this script only WARNS on that specific
+ *         condition (see `_reportPriceAllowingUnrelayed`) rather than reverting. It still reverts
+ *         if the leg fails for any other reason. This script does not (and must not) seed the
+ *         sink; seeding only happens in `_rehearseStockRails()`, which the 3CP generators use for
+ *         fork-only rehearsal.
+ *
+ *         The liveness gate moved to `Verify*ProdFeeds` below. Run that after the first poke and
+ *         require it green before proposing the Summer Lend 3CP.
  */
 abstract contract DeployStockProdFeedsBase is StockFeedDeployer {
     function _asset() internal pure virtual returns (StockLendAsset memory);
@@ -202,10 +245,65 @@ abstract contract DeployStockProdFeedsBase is StockFeedDeployer {
         (address stockUsd, address wrapperUsd) = _deployFeeds(false, asset);
         vm.stopBroadcast();
 
+        // The stock/USD leg reads a native Chainlink aggregator, so it must price the moment it is
+        // deployed — a failure here is a real problem, never a sequencing artefact.
+        _requireLivePrice(stockUsd, asset.stockFeedDesc);
+        // The wrapper leg composes the relayed rate, which does not exist until the Ethereum
+        // listing bundle executes and the keeper pokes. Deploying ahead of that is intended.
+        _reportPriceAllowingUnrelayed(wrapperUsd, asset.wrapperFeedDesc, asset.wrapper);
+
+        _record(asset, stockUsd, wrapperUsd);
+    }
+}
+
+/**
+ * @title VerifyStockProdFeedsBase
+ * @notice The liveness gate that {DeployStockProdFeedsBase} deliberately does not enforce. Deploys
+ *         nothing: it resolves both feeds at their CREATE3 addresses, asserts they are live, and
+ *         requires BOTH legs to price.
+ *
+ *         Run this after the first `PriceRelay.poke` and require it green before proposing the
+ *         Summer Lend 3CP — `addReserve` reads the wrapper feed, so a leg that cannot price here
+ *         is a 3CP that will revert on execution.
+ */
+abstract contract VerifyStockProdFeedsBase is StockFeedDeployer {
+    function _asset() internal pure virtual returns (StockLendAsset memory);
+
+    function run() public {
+        StockLendAsset memory asset = _asset();
+
+        require(block.chainid == 10, "Must run on Optimism (10)");
+        require(isEqualString(getEnv(), "mainnet"), "prod-only: run with ENV=mainnet");
+
+        _loadEtherFiDeployer();
+        address stockUsd = _predictFeed(asset.feedSaltPrefix, asset.stockFeedName);
+        address wrapperUsd = _predictFeed(asset.feedSaltPrefix, asset.wrapperFeedName);
+
+        require(stockUsd.code.length > 0, "stock/USD feed not deployed; run the Deploy* entrypoint first");
+        require(wrapperUsd.code.length > 0, "wrapper feed not deployed; run the Deploy* entrypoint first");
+        // The composition is immutable, but re-read it here so this gate is a standalone statement
+        // about the live contracts rather than a claim inherited from the deploy run.
+        require(address(OracleSinkPriceFeed(wrapperUsd).underlyingUsdFeed()) == stockUsd, "wrapper feed not composed on the stock/USD leg");
+        require(OracleSinkPriceFeed(wrapperUsd).token() == asset.wrapper, "wrapper feed keyed by the wrong token");
+
         _requireLivePrice(stockUsd, asset.stockFeedDesc);
         _requireLivePrice(wrapperUsd, asset.wrapperFeedDesc);
 
-        _record(asset, stockUsd, wrapperUsd);
+        console.log("  [OK] both legs live; safe to propose the Summer Lend 3CP");
+    }
+}
+
+/**
+ * @title VerifyQqqxProdFeeds
+ * @notice iwQQQx's post-relay feed liveness gate. See VerifyStockProdFeedsBase.
+ *
+ * Usage:
+ *   source .env && ENV=mainnet forge script \
+ *     scripts/stock-listing/DeployStockProdFeeds.s.sol:VerifyQqqxProdFeeds --rpc-url $OPTIMISM_RPC -vvv
+ */
+contract VerifyQqqxProdFeeds is VerifyStockProdFeedsBase {
+    function _asset() internal pure override returns (StockLendAsset memory) {
+        return StockLendAssets.wqqqx();
     }
 }
 

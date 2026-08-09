@@ -113,23 +113,40 @@ Optimism does not exist — the cash-mainnet-asset-listing Ethereum bundle has n
 Optimism bundle (which deploys the ShadowOFT and writes the cash-side `PriceProviderV2` entry) has
 not either. Until the Ethereum bundle executes and the relay keeper pokes:
 
-- `_requireLivePrice` in `DeployQqqxProdFeeds` reverts on the iwQQQx feed,
+- the iwQQQx feed cannot price (`VerifyQqqxProdFeeds` fails, and `addReserve` would revert),
 - `DebtManager.supportCollateralToken` reverts (it reads the iwQQQx price through
   `PriceProviderV2`, whose entry the other repo's Optimism bundle writes).
+
+**Deploying the feeds is not blocked by this.** They are immutable and admin-less, so step 1 below
+runs before the listing 3CPs are proposed — which is what you want, since `addReserve` hardcodes
+the price source and therefore needs the feed address to be final. `DeployQqqxProdFeeds` warns
+`[PENDING RELAY]` on the iwQQQx leg instead of reverting, but **only** for that specific cause: if
+the sink holds a price and the feed still fails, it reverts, because that is a wiring bug in an
+immutable contract rather than a sequencing artefact.
 
 ### Run order
 
 ```sh
-# 1. EOA (registered EtherFiDeployer deployer): immutable feeds on OP + manifest update
+# 1. EOA (registered EtherFiDeployer deployer): immutable feeds on OP + manifest update.
+#    Safe to run before the listing 3CPs exist; the iwQQQx leg will report [PENDING RELAY].
 source .env && ENV=mainnet forge script \
   scripts/stock-listing/DeployStockProdFeeds.s.sol:DeployQqqxProdFeeds \
   --rpc-url $OPTIMISM_RPC --ledger --sender $PROD_DEPLOYER \
   --broadcast --verify --etherscan-api-key $ETHERSCAN_KEY -vvvv
 
-# 2. Lend Owner Safe (0x082B…E844, OP): hub + spoke reserve listing
+# --- the cash-mainnet-asset-listing Ethereum + Optimism bundles execute here, then the first
+#     PriceRelay.poke lands and the keeper cadence (<= 3 days) is running ---
+
+# 2. Liveness gate. Require this green BEFORE proposing 3CPs for steps 3-4: addReserve and
+#    supportCollateralToken both read the iwQQQx price, so a red gate is a 3CP that will revert.
+ENV=mainnet forge script \
+  scripts/stock-listing/DeployStockProdFeeds.s.sol:VerifyQqqxProdFeeds --rpc-url $OPTIMISM_RPC -vvv
+
+# 3. Lend Owner Safe (0x082B…E844, OP): hub + spoke reserve listing.
+#    Regenerate immediately before signing — the asset/reserve ids come from live counters.
 forge script scripts/stock-listing/ListStockSummerLend3CP.s.sol:ListQqqxSummerLend3CP --rpc-url $OPTIMISM_RPC
 
-# 3. Operating Safe (0xA6cf…AAC4, OP): DebtManager collateral, LendGateway reserve id
+# 4. Operating Safe (0xA6cf…AAC4, OP): DebtManager collateral, LendGateway reserve id
 forge script scripts/stock-listing/ConfigureStockCashOP3CP.s.sol:ConfigureQqqxCashOP3CP --rpc-url $OPTIMISM_RPC
 ```
 
