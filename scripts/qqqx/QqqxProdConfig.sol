@@ -65,9 +65,9 @@ library QqqxProd {
     uint96 internal constant DM_IWQQQX_LIQ_BONUS = 7.5e18;
 
     // Summer Lend reserve params — mirrors iwSPYx
-    uint16 internal constant LEND_IWQQQX_COLLATERAL_FACTOR = 78_00;
+    uint16 internal constant LEND_IWQQQX_COLLATERAL_FACTOR = 7800;
     uint32 internal constant LEND_MAX_LIQUIDATION_BONUS = 11_000; // 10% bonus
-    uint16 internal constant LEND_LIQUIDATION_FEE = 10_00;
+    uint16 internal constant LEND_LIQUIDATION_FEE = 1000;
     uint24 internal constant LEND_COLLATERAL_RISK = 0;
     /// @dev Whole tokens, mirroring the OFT hourly rate limit (~$1.44M at listing-time prices).
     ///      Collateral-only, so the draw cap is 0.
