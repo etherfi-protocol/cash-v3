@@ -15,5 +15,6 @@
   "TradingLensImpl": "0xfC599407125e1888A47C38c87316691c5ee4479B",
   "TradingSafeFactory": "0xE54e00b0e72F8FC8Cb7e124C378bAd2E7371d2b8",
   "TradingSafeFactoryImpl": "0xE3cD5E563cF5531fA0Df33c6D3070e6e84f029E3",
-  "TradingSafeImpl": "0x28Fef82B15Ea8dbEe240e4CbB7b99d7Da7F4aDcE"
+  "TradingSafeImpl": "0x28Fef82B15Ea8dbEe240e4CbB7b99d7Da7F4aDcE",
+  "TradingSafeWithdrawModule": "0xE8ba8b323008edeBf4AbB1b3316c5B8b2935751C"
 }

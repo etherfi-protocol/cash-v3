@@ -39,6 +39,8 @@ library TradingAccountProdConfig {
     bytes32 internal constant SALT_ENSO_PROXY = keccak256("TradingAccount.Prod.v1.EnsoSwapModuleProxy");
     bytes32 internal constant SALT_TOPUP_FACTORY_IMPL = keccak256("TradingAccount.Prod.v1.TopUpFactoryImpl");
     bytes32 internal constant SALT_TOPUP_IMPL = keccak256("TradingAccount.Prod.v1.TopUpImpl");
+    /// @dev The withdraw module is immutable, so there is no impl/proxy pair to salt separately.
+    bytes32 internal constant SALT_TRADING_SAFE_WITHDRAW_MODULE = keccak256("TradingAccount.Prod.v1.TradingSafeWithdrawModule");
 
     function supportedTokens() internal pure returns (address[] memory tokens) {
         tokens = new address[](25);
