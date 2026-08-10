@@ -4,22 +4,33 @@ pragma solidity ^0.8.28;
 import { console } from "forge-std/console.sol";
 
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { TradingSafeWithdrawModule } from "../../src/trading-safe/TradingSafeWithdrawModule.sol";
 import { TradingAccountCreate3, TradingAccountProdConfig as C } from "../trading-account/TradingAccountProdConfig.sol";
 import { Utils } from "../utils/Utils.sol";
 import { TradingAccountGnosisHelpers } from "./TradingAccountGnosisHelpers.sol";
 
 /**
- * @notice Generates the Ethereum 3CP JSON that turns on the `TradingSafeWithdrawModule`. One tx from
- *         the OperatingSafe (holds DATA_PROVIDER_ADMIN_ROLE):
+ * @notice Generates the Ethereum 3CP JSON that turns on the `TradingSafeWithdrawModule`. Four txs
+ *         from the OperatingSafe, which owns the RoleRegistry and holds DATA_PROVIDER_ADMIN_ROLE:
  *
- *           EtherFiDataProvider.configureDefaultModules([TradingSafeWithdrawModule], [true])
+ *           1. RoleRegistry.grantRole(PAUSER, HyperNativeExecutor)
+ *           2. RoleRegistry.grantRole(PAUSER, OperatingSafe)
+ *           3. RoleRegistry.grantRole(UNPAUSER, OperatingSafe)
+ *           4. EtherFiDataProvider.configureDefaultModules([TradingSafeWithdrawModule], [true])
  *
  *         `configureDefaultModules` whitelists AND marks the module default in one call, so it is
  *         enabled on every mainnet TradingSafe — existing safes included, since `isModuleEnabled`
  *         short-circuits on the data provider's default set rather than per-safe storage. That
  *         matches how Enso and Across are registered on this deployment, and is what makes the
  *         module a usable exit path without a per-safe setup transaction.
+ *
+ *         The grants come first so the pause switch is live before the module is: this registry has
+ *         no PAUSER or UNPAUSER holders at all, which leaves `pause()` reverting `OnlyPauser()` for
+ *         everyone. That is a pre-existing gap covering the whole trading stack — Enso, Across and
+ *         TradingSafeFactory all read this registry — because 3CP-558/559 granted the HyperNative
+ *         executor PAUSER on the cash registries before this one existed. UNPAUSER stays Safe-only,
+ *         the same asymmetry as those proposals: fast to stop, deliberate to restart.
  *
  *         Ethereum only. OP TradingSafes carry a CashModule, so their exit is the delayed
  *         withdrawal that already exists there; this module deliberately has no delay because a
@@ -43,12 +54,25 @@ contract TradingSafeWithdrawEth3CP is TradingAccountGnosisHelpers, Utils, Tradin
         require(dataProvider.code.length > 0, "EtherFiDataProvider not deployed");
         require(!EtherFiDataProvider(dataProvider).isDefaultModule(module), "module already default");
 
+        // Read the registry off the data provider rather than trusting the salt: it is the one the
+        // module resolves at runtime, and grants to any other registry would be inert.
+        RoleRegistry registry = RoleRegistry(address(EtherFiDataProvider(dataProvider).roleRegistry()));
+        require(address(registry) == _predict(C.SALT_ROLE_REGISTRY_PROXY), "registry is not the prod CREATE3 registry");
+        require(registry.owner() == C.OPERATING_SAFE, "OperatingSafe does not own the RoleRegistry");
+
+        bytes32 pauser = registry.PAUSER();
+        bytes32 unpauser = registry.UNPAUSER();
+        require(pauser == keccak256("PAUSER") && unpauser == keccak256("UNPAUSER"), "unexpected role hashes");
+
         address[] memory modules = new address[](1);
         modules[0] = module;
         bool[] memory flags = new bool[](1);
         flags[0] = true;
 
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(C.OPERATING_SAFE));
+        txs = _appendRole(txs, address(registry), pauser, C.HYPERNATIVE_EXECUTOR);
+        txs = _appendRole(txs, address(registry), pauser, C.OPERATING_SAFE);
+        txs = _appendRole(txs, address(registry), unpauser, C.OPERATING_SAFE);
         bytes memory data = abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, modules, flags);
         txs = string.concat(txs, _getGnosisTransaction(addressToHex(dataProvider), iToHex(data), "0", true));
 
@@ -63,7 +87,39 @@ contract TradingSafeWithdrawEth3CP is TradingAccountGnosisHelpers, Utils, Tradin
         require(EtherFiDataProvider(dataProvider).isWhitelistedModule(module), "module not whitelisted");
         require(EtherFiDataProvider(dataProvider).isDefaultModule(module), "module not default");
 
+        require(registry.hasRole(pauser, C.HYPERNATIVE_EXECUTOR), "HyperNative not PAUSER");
+        require(registry.hasRole(pauser, C.OPERATING_SAFE), "OperatingSafe not PAUSER");
+        require(registry.hasRole(unpauser, C.OPERATING_SAFE), "OperatingSafe not UNPAUSER");
+        _requirePauseSwitchLive(module);
+
         console.log("Simulation passed. TradingSafeWithdrawModule: %s", module);
+    }
+
+    /// @dev The roles are the means, a working kill switch is the end — so exercise it rather than
+    ///      just reading `hasRole`. Both pausers must be able to stop withdrawals, only the Safe may
+    ///      restart them, and the module must be left unpaused.
+    function _requirePauseSwitchLive(address module) private {
+        TradingSafeWithdrawModule m = TradingSafeWithdrawModule(module);
+
+        vm.prank(C.HYPERNATIVE_EXECUTOR);
+        m.pause();
+        require(m.paused(), "HyperNative pause did not take effect");
+
+        vm.prank(C.HYPERNATIVE_EXECUTOR);
+        vm.expectRevert(); // UNPAUSER is Safe-only: a fast pauser must not be able to undo it.
+        m.unpause();
+
+        vm.prank(C.OPERATING_SAFE);
+        m.unpause();
+        require(!m.paused(), "OperatingSafe unpause did not take effect");
+
+        vm.prank(C.OPERATING_SAFE);
+        m.pause();
+        require(m.paused(), "OperatingSafe pause did not take effect");
+
+        vm.prank(C.OPERATING_SAFE);
+        m.unpause();
+        require(!m.paused(), "module must be left unpaused");
     }
 
     /// @dev CREATE3 is permissionless and address-deterministic, so deploying the module inside the

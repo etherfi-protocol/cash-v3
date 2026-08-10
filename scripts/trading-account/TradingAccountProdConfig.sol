@@ -13,6 +13,11 @@ library TradingAccountProdConfig {
     address internal constant THIRD_PARTY_RECOVERY_SIGNER = 0x4F5eB42edEce3285B97245f56b64598191b5A58E;
     address internal constant REFUND_WALLET = 0xF6B3422e3CC70fa9fce4fAb9A706ED2497c7bb9e;
 
+    /// @dev HyperNative's automated-response executor. Already holds PAUSER on the cash registries
+    ///      via 3CP-558 (Optimism) and 3CP-559 (Ethereum + 4 top-up source chains); the trading
+    ///      stack's own registry was stood up later and never covered.
+    address internal constant HYPERNATIVE_EXECUTOR = 0x9AF1298993DC1f397973C62A5D47a284CF76844D;
+
     address internal constant ETH_WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address internal constant ETH_SPOKE_POOL = 0x5c7BCd6E7De5423a257D81B442095A1a6ced35C5;
     address internal constant OP_SPOKE_POOL = 0x6f26Bf09B1C792e3228e5467807a900A503c0281;
