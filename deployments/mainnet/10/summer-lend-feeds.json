@@ -1,0 +1,79 @@
+{
+  "details": {
+    "beHYPE": {
+      "oracle": "0xefeDBa79436767AAfcF7902C66383d4735DacA50"
+    },
+    "BTC": {
+      "oracle": "0xd85031243f5c9CeFf5a976f509de65D0E12aec59"
+    },
+    "eBTC": {
+      "oracle": "0xFa80bA4b7aC946F3b45DC8ED537b1BEbD8eC860f"
+    },
+    "ETH": {
+      "oracle": "0xCFe45EF2B9E138E5A2e1C25592441D5c556B3ca3"
+    },
+    "ETHFI": {
+      "oracle": "0x89AB0BeEF8f88933f4724a2D0C4a149c644a8a80"
+    },
+    "EURC": {
+      "oracle": "0xcBF18F68e2aBd480231241fa97BD41aE556433A0"
+    },
+    "eUSD": {
+      "oracle": "0xD617E1D59aA992D985c07ADC48c36aD2a00E751b"
+    },
+    "frxUSD": {
+      "oracle": "0x859c126dad6952a798ecdc5c06f7063B8a9FCC31"
+    },
+    "iwQQQx": {
+      "oracle": "0xb5f61BDfCa60c02d13377d4386288FE143b9d6bE"
+    },
+    "iwSPYx": {
+      "oracle": "0x253F4Fb7082e314430972A2B783aD7514D20d64c"
+    },
+    "liquidBTC": {
+      "oracle": "0xD60ec8fCba09c7642099eA89A9D58721B00277C7"
+    },
+    "liquidETH": {
+      "oracle": "0x48420d702a3190235B5A5D123ca82f876752add1"
+    },
+    "liquidRESERVE": {
+      "oracle": "0x6b5C6155A07A5E3af6591d48571FC1BdFEc929BC"
+    },
+    "liquidRWA": {
+      "oracle": "0x6Bf29C9bec671EE7787352EBc42c2151a7BC2854"
+    },
+    "liquidUSD": {
+      "oracle": "0x17DdE04d8Ff1024D3076944658ED9B6bd5F51451"
+    },
+    "OP": {
+      "oracle": "0x6D53a69EBC75cFeDf319F77569a4F732f75AED79"
+    },
+    "PAXG": {
+      "oracle": "0x7DC0EAff1ECaED8A8A5aDC07dEe1997fF4617800"
+    },
+    "QQQ": {
+      "oracle": "0x459E1D5e587eB81bA25C6AA1e817e40bd36fb2F4"
+    },
+    "sETHFI": {
+      "oracle": "0xaF8749C3DC1Fc0592f21c2593204C45D3bE0d322"
+    },
+    "SPY": {
+      "oracle": "0x045ACc54e73f93c5b9B4F20Fa01931cB23234C38"
+    },
+    "USDC": {
+      "oracle": "0xE55eacdC1EC9dA0f33B9CEa7D136a47CC6008C69"
+    },
+    "USDT": {
+      "oracle": "0x6a6B2529c1BC14f0A062D7903B4894B477BfFc92"
+    },
+    "weETH": {
+      "oracle": "0x81ED135fc10FF855202E582d8cfd50E8A5533fd9"
+    },
+    "weEUR": {
+      "oracle": "0x7605dbe2948C99a559B9a065881916Ef043dA567"
+    },
+    "wHYPE": {
+      "oracle": "0x7405E1C9a5AdC2A1730f38186f5845EC54Cd1B22"
+    }
+  }
+}

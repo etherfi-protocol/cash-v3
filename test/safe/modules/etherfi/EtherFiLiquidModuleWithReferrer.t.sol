@@ -6,7 +6,9 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 import { SafeTestSetup, MessageHashUtils } from "../../SafeTestSetup.t.sol";
 import { ChainConfig } from "../../../utils/Utils.sol";
-import { EtherFiLiquidModuleWithReferrer, ModuleCheckBalance } from "../../../../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
+import { EtherFiLiquidModule } from "../../../../src/modules/etherfi/EtherFiLiquidModule.sol";
+import { EtherFiLiquidModuleWithReferrer } from "../../../../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
+import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { IBoringOnChainQueue } from "../../../../src/interfaces/IBoringOnChainQueue.sol";
 import { IDebtManager } from "../../../../src/interfaces/IDebtManager.sol";
@@ -190,7 +192,7 @@ contract EtherFiLiquidModuleWithReferrerTest is SafeTestSetup {
     }
 
     function test_executeBridge_reverts_whenNoWithdrawalQueued() public {
-        vm.expectRevert(EtherFiLiquidModuleWithReferrer.NoWithdrawalQueuedForLiquid.selector);
+        vm.expectRevert(EtherFiLiquidModule.NoWithdrawalQueuedForLiquid.selector);
         liquidModule.executeBridge{value: 0}(address(safe));
     }
 
@@ -216,7 +218,7 @@ contract EtherFiLiquidModuleWithReferrerTest is SafeTestSetup {
         amounts[0] = amount;
         _requestWithdrawal(tokens, amounts, address(1));
 
-        EtherFiLiquidModuleWithReferrer.LiquidCrossChainWithdrawal memory withdrawal = liquidModule.getPendingBridge(address(safe));
+        EtherFiLiquidModule.LiquidCrossChainWithdrawal memory withdrawal = liquidModule.getPendingBridge(address(safe));
         assertEq(withdrawal.destEid, 0);
         assertEq(withdrawal.asset, address(0));
         assertEq(withdrawal.amount, 0);
@@ -241,10 +243,10 @@ contract EtherFiLiquidModuleWithReferrerTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory signatures) = _getCancelSignatures();
 
         vm.expectEmit(true, true, true, true);
-        emit EtherFiLiquidModuleWithReferrer.LiquidBridgeCancelled(address(safe), address(sethfi), mainnetEid, owner, amount);
+        emit EtherFiLiquidModule.LiquidBridgeCancelled(address(safe), address(sethfi), mainnetEid, owner, amount);
         liquidModule.cancelBridge(address(safe), signers, signatures);
 
-        EtherFiLiquidModuleWithReferrer.LiquidCrossChainWithdrawal memory withdrawal = liquidModule.getPendingBridge(address(safe));
+        EtherFiLiquidModule.LiquidCrossChainWithdrawal memory withdrawal = liquidModule.getPendingBridge(address(safe));
         assertEq(withdrawal.destEid, 0);
         assertEq(withdrawal.asset, address(0));
         assertEq(withdrawal.amount, 0);
@@ -257,7 +259,7 @@ contract EtherFiLiquidModuleWithReferrerTest is SafeTestSetup {
     function test_cancelBridge_reverts_whenNoWithdrawalQueued() public {
         (address[] memory signers, bytes[] memory signatures) = _getCancelSignatures();
 
-        vm.expectRevert(EtherFiLiquidModuleWithReferrer.NoWithdrawalQueuedForLiquid.selector);
+        vm.expectRevert(EtherFiLiquidModule.NoWithdrawalQueuedForLiquid.selector);
         liquidModule.cancelBridge(address(safe), signers, signatures);
     }
 
@@ -279,7 +281,7 @@ contract EtherFiLiquidModuleWithReferrerTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory signatures) = _getCancelSignatures();
         signatures[1] = signatures[0]; // Invalid signature
 
-        vm.expectRevert(EtherFiLiquidModuleWithReferrer.InvalidSignatures.selector);
+        vm.expectRevert(EtherFiLiquidModule.InvalidSignatures.selector);
         liquidModule.cancelBridge(address(safe), signers, signatures);
     }
 
@@ -467,7 +469,7 @@ contract EtherFiLiquidModuleWithReferrerTest is SafeTestSetup {
     function _requestBridge(address liquidAsset, uint32 destEid, uint256 amountToBridge) internal {
         (address[] memory signers, bytes[] memory signatures) = _getSignaturesForRequestBridging(liquidAsset, destEid, amountToBridge, owner);
         vm.expectEmit(true, true, true, true);
-        emit EtherFiLiquidModuleWithReferrer.LiquidBridgeRequested(address(safe), address(liquidAsset), destEid, owner, amountToBridge);
+        emit EtherFiLiquidModule.LiquidBridgeRequested(address(safe), address(liquidAsset), destEid, owner, amountToBridge);
         liquidModule.requestBridge(address(safe), destEid, address(liquidAsset), amountToBridge, owner, signers, signatures);
     }
 
@@ -480,14 +482,14 @@ contract EtherFiLiquidModuleWithReferrerTest is SafeTestSetup {
         signatures[1] = signature2;
 
         vm.expectEmit(true, true, true, true);
-        emit EtherFiLiquidModuleWithReferrer.LiquidBridgeRequested(address(safe), address(liquidAsset), destEid, owner, amountToBridge);
+        emit EtherFiLiquidModule.LiquidBridgeRequested(address(safe), address(liquidAsset), destEid, owner, amountToBridge);
         liquidModule.requestBridge(address(safe), destEid, address(liquidAsset), amountToBridge, owner, owners, signatures);
 
         (uint64 withdrawalDelay, , ) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay);
 
         vm.expectEmit(true, true, true, true);
-        emit EtherFiLiquidModuleWithReferrer.LiquidBridgeExecuted(address(safe), address(liquidAsset), owner, destEid, amountToBridge, fee);
+        emit EtherFiLiquidModule.LiquidBridgeExecuted(address(safe), address(liquidAsset), owner, destEid, amountToBridge, fee);
         liquidModule.executeBridge{value: fee}(address(safe));
     }
 

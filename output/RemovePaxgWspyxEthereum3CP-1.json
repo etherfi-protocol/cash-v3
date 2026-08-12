@@ -1,0 +1,27 @@
+{
+  "chainId": "1",
+  "safeAddress": "0xa6cf33124cb342d1c604cac87986b965f428aac4",
+  "meta": { "txBuilderVersion": "1.16.5" },
+  "transactions": [
+    {
+      "to": "0xc4d666b44daa8d6d12b84875384e08bae52afe19",
+      "value": "0",
+      "data": "0x7262561c00000000000000000000000045804880de22913dafe09f4980848ece6ecbaf78"
+    },
+    {
+      "to": "0x12224c84783c66885cf838fcb189918d23b17f66",
+      "value": "0",
+      "data": "0x6e38237900000000000000000000000045804880de22913dafe09f4980848ece6ecbaf78"
+    },
+    {
+      "to": "0x7135ad135ec21ec765c1930e93deb7da9c27290c",
+      "value": "0",
+      "data": "0x76319190000000000000000000000000e7e553cd128f0011777323a0b44a7b96ea1cb540"
+    },
+    {
+      "to": "0x7135ad135ec21ec765c1930e93deb7da9c27290c",
+      "value": "0",
+      "data": "0x7631919000000000000000000000000045804880de22913dafe09f4980848ece6ecbaf78"
+    }
+  ]
+}

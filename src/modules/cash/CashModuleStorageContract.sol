@@ -3,21 +3,21 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
-import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
-import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { CashLendLib } from "./CashLendLib.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 /**
  * @title CashModule
@@ -39,7 +39,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         mapping(address safe => SafeCashConfig cashConfig) safeCashConfig;
         /// @notice Instance of the DebtManager for borrowing and repayment operations
         IDebtManager debtManager;
-        /// @notice Address of the SettlementDispatcher for Reap 
+        /// @notice Address of the SettlementDispatcher for Reap
         address settlementDispatcherReap;
         /// @notice Delay in seconds before a withdrawal request can be finalized
         uint64 withdrawalDelay;
@@ -59,7 +59,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address cashModuleSetters;
         /// @notice Cashback percentage for referrer in bps
         uint64 DEPRECATED_referrerCashbackPercentageInBps;
-        /// @notice Address of the SettlementDispatcher for Rain 
+        /// @notice Address of the SettlementDispatcher for Rain
         address settlementDispatcherRain;
         /// @notice Address of tokens that can be withdrawn from the safe
         EnumerableSetLib.AddressSet whitelistedWithdrawAssets;
@@ -71,6 +71,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address settlementDispatcherPix;
         /// @notice Address of the SettlementDispatcher for CardOrder
         address settlementDispatcherCardOrder;
+        /// @notice The Aave gateway that runs position operations (borrow/withdraw/repay) on a safe's behalf
+        ILendGateway gateway;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -103,8 +105,11 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when a balance is insufficient for an operation
     error InsufficientBalance();
 
-    /// @notice Error thrown when borrowings would exceed maximum allowed after a spending operation
-    error BorrowingsExceedMaxBorrowAfterSpending();
+    /// @notice Error thrown when a lend-market operation targets a safe on the legacy DebtManager engine
+    error OnlyLendGatewaySafe();
+
+    /// @notice Error thrown when a non-DebtManager contract calls restricted functions
+    error OnlyDebtManager();
 
     /// @notice Error thrown when a recipient address is set to zero
     error RecipientCannotBeAddressZero();
@@ -120,9 +125,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when attempting to set a mode that is already active
     error ModeAlreadySet();
-
-    /// @notice Error thrown when a function restricted to the Debt Manager is called by another address
-    error OnlyDebtManager();
 
     /// @notice Error thrown when trying to change a safe's tier to its current tier
     /// @param index The index of the safe for which tier that is the same
@@ -162,7 +164,24 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when a withdrawal request is made by an invalid address or to an invalid recipient
     error InvalidWithdrawRequest();
 
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) { 
+    /// @notice Error thrown when attempting to configure the Aave gateway after the initial bootstrap
+    error GatewayAlreadySet();
+    /// @notice Error thrown when a lend op is attempted while the safe has opted out of lend
+    error LendOptedOut();
+    /// @notice Error thrown when opting out of lend while the safe still has open borrows
+    error HasOpenBorrows();
+    /// @notice Error thrown when executing a lend opt-out that was never requested
+    error NoPendingLendOptOut();
+    /// @notice Error thrown when executing a lend opt-out before its delay has elapsed
+    error LendOptOutNotReady();
+    /// @notice Error thrown when opting out while already opted out, or when a request is already pending
+    error LendAlreadyOptedOut();
+    /// @notice Error thrown when enabling lend that is already enabled
+    error LendNotOptedOut();
+    /// @notice Error thrown when the lend gateway has not been configured
+    error LendGatewayNotSet();
+
+    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
         _disableInitializers();
     }
 
@@ -185,69 +204,21 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     }
 
     /**
-     * @dev Cancels pending withdrawal requests for a Safe
+     * @notice Whether the safe's borrow/collateral engine is the Aave gateway (vs the legacy DebtManager)
+     * @dev The canonical routing flag: every engine-touching path must branch on this and nothing else.
+     * @param safe Address of the EtherFi Safe
+     * @return True if the safe uses the Aave gateway
+     */
+    function _usesLendGateway(address safe) internal view returns (bool) {
+        return _getCashModuleStorage().safeCashConfig[safe].usesLendGateway;
+    }
+
+    /**
+     * @dev Cancels pending withdrawal requests for a Safe; the logic lives in CashLendLib for code size
      * @param safe Address of the EtherFi Safe
      */
     function _cancelOldWithdrawal(address safe) internal {
-        CashModuleStorage storage $ = _getCashModuleStorage();
-
-        ICashEventEmitter eventEmitter = $.cashEventEmitter;
-        SafeCashConfig storage safeCashConfig = $.safeCashConfig[safe];
-        
-        address recipient = safeCashConfig.pendingWithdrawalRequest.recipient;
-
-        if (safeCashConfig.pendingWithdrawalRequest.tokens.length > 0) {
-            if ($.whitelistedModulesCanRequestWithdraw.contains(recipient)) {
-                // Only call the function if the module is whitelisted on data provider
-                if (etherFiDataProvider.isWhitelistedModule(recipient)) IBridgeModule(recipient).cancelBridgeByCashModule(safe);
-            }
-
-            eventEmitter.emitWithdrawalCancelled(safe, safeCashConfig.pendingWithdrawalRequest.tokens, safeCashConfig.pendingWithdrawalRequest.amounts, recipient);
-            delete safeCashConfig.pendingWithdrawalRequest;
-        }
-    }
-
-    /**
-     * @dev Cancels withdrawal request if necessary based on available balance
-     * @param safe Address of the EtherFi Safe
-     * @param token Address of the token to update
-     * @param amount Amount being processed
-     * @custom:throws InsufficientBalance if there is not enough balance for the operation
-     */
-    function _cancelWithdrawalRequestIfNecessary(address safe, address token, uint256 amount) internal {
-        SafeCashConfig storage safeCashConfig = _getCashModuleStorage().safeCashConfig[safe];
-        uint256 balance = IERC20(token).balanceOf(safe);
-
-        if (amount > balance) revert InsufficientBalance();
-
-        uint256 len = safeCashConfig.pendingWithdrawalRequest.tokens.length;
-        uint256 tokenIndex = len;
-        for (uint256 i = 0; i < len;) {
-            if (safeCashConfig.pendingWithdrawalRequest.tokens[i] == token) {
-                tokenIndex = i;
-                break;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-
-        // If the token does not exist in withdrawal request, return
-        if (tokenIndex == len) return;
-
-        if (amount + safeCashConfig.pendingWithdrawalRequest.amounts[tokenIndex] > balance) {
-            _cancelOldWithdrawal(safe);
-        }
-    }
-
-    /**
-     * @dev Checks if a token is a valid borrow token
-     * @param debtManager Reference to the debt manager contract
-     * @param token Address of the token to check
-     * @return Boolean indicating if the token is a borrow token
-     */
-    function _isBorrowToken(IDebtManager debtManager, address token) internal view returns (bool) {
-        return debtManager.isBorrowToken(token);
+        CashLendLib.cancelOldWithdrawal(_getCashModuleStorage(), etherFiDataProvider, safe);
     }
 
     /**
@@ -275,13 +246,13 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /**
      * @dev Checks if assets are whitelisted withdraw assets
      * @param $ Storage reference to the SafeCashConfig for the safe
-     * @param tokens Array of token addresses to check 
+     * @param tokens Array of token addresses to check
      * @custom:throws InvalidWithdrawAsset if an asset is not whitelisted for withdrawals
      */
     function _areAssetsWithdrawable(CashModuleStorage storage $, address[] memory tokens) internal view {
         uint256 len = tokens.length;
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             if (!$.whitelistedWithdrawAssets.contains(tokens[i])) revert InvalidWithdrawAsset(tokens[i]);
             unchecked {
                 ++i;
@@ -298,7 +269,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     function _processWithdrawal(address safe) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = _getCashModuleStorage().safeCashConfig[safe];
-        
+
         // Ensure that the withdrawal request exists
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
 
@@ -314,21 +285,36 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
         address[] memory to = new address[](len);
         bytes[] memory data = new bytes[](len);
+        uint256 counter;
 
         for (uint256 i = 0; i < len;) {
-            to[i] = $$.pendingWithdrawalRequest.tokens[i];
-            data[i] = abi.encodeWithSelector(IERC20.transfer.selector, recipient, $$.pendingWithdrawalRequest.amounts[i]);
+            uint256 amount = $$.pendingWithdrawalRequest.amounts[i];
+            if (amount != 0) {
+                to[counter] = $$.pendingWithdrawalRequest.tokens[i];
+                data[counter] = abi.encodeWithSelector(IERC20.transfer.selector, recipient, amount);
+                unchecked {
+                    ++counter;
+                }
+            }
 
             unchecked {
                 ++i;
             }
         }
 
-        IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](len), data);
+        if (counter != 0) {
+            assembly ("memory-safe") {
+                mstore(to, counter)
+                mstore(data, counter)
+            }
+            IEtherFiSafe(safe).execTransactionFromModule(to, new uint256[](counter), data);
+        }
         _getCashModuleStorage().cashEventEmitter.emitWithdrawalProcessed(safe, $$.pendingWithdrawalRequest.tokens, $$.pendingWithdrawalRequest.amounts, recipient);
 
         delete $$.pendingWithdrawalRequest;
 
-        $.debtManager.ensureHealth(safe);
+        // Legacy safes only: see _requestWithdrawal. Gateway safes are health-gated by Aave at request time
+        // and would revert here if DebtManager cannot price a supplied Aave asset.
+        if (!_usesLendGateway(safe)) $.debtManager.ensureHealth(safe);
     }
 }

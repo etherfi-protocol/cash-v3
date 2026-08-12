@@ -171,6 +171,28 @@ contract RecoveryManagerTest is SafeTestSetup {
         safe.setRecoveryThreshold(excessiveThreshold, signers, signatures);
     }
 
+    // A zero threshold must be rejected: it would let recoverSafe pass its signature check with no
+    // recovery signatures at all, turning owner rotation permissionless.
+    function test_setRecoveryThreshold_revertsOnZeroThreshold() public {
+        uint8 zeroThreshold = 0;
+
+        bytes32 structHash = keccak256(abi.encode(safe.SET_RECOVERY_THRESHOLD_TYPEHASH(), zeroThreshold, safe.nonce()));
+        bytes32 digestHash = keccak256(abi.encodePacked("\x19\x01", safe.getDomainSeparator(), structHash));
+
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+
+        bytes[] memory signatures = new bytes[](2);
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digestHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digestHash);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+
+        vm.expectRevert(EtherFiSafeErrors.RecoverySignersLengthLessThanThreshold.selector);
+        safe.setRecoveryThreshold(zeroThreshold, signers, signatures);
+    }
+
     function test_toggleRecoveryEnabled_disablesRecovery() public {
         _toggleRecoveryEnabled(false);
         assertFalse(safe.isRecoveryEnabled());

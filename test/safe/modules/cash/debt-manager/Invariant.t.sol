@@ -33,7 +33,7 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
             modules[0] = address(cashModule);
 
             bytes[] memory modulesSetupData = new bytes[](1);
-            modulesSetupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset);
+            modulesSetupData[0] = abi.encode(dailyLimitInUsd, monthlyLimitInUsd, timezoneOffset, false);
 
             threshold = 1;
             bytes32 salt = keccak256(abi.encodePacked("borrower", i));
@@ -44,7 +44,10 @@ contract DebtManagerInvariantTest is CashModuleTestSetup {
 
             address deployedSafe = safeFactory.getDeterministicAddress(salt);
             safes.push(IEtherFiSafe(deployedSafe));
-            
+
+            // This suite tests the legacy DebtManager engine (new safes default to the Aave gateway)
+            _forceLegacyEngine(deployedSafe);
+
             // Setup borrower with sufficient collateral
             deal(address(weETH), deployedSafe, INITIAL_COLLATERAL_IN_WEETH);
             
