@@ -74,6 +74,8 @@ avalanche = "${AVALANCHE_RPC}"
 mantle = "${MANTLE_RPC}"
 plasma = "${PLASMA_RPC}"
 tempo = "${TEMPO_RPC}"
+arbitrum = "${ARBITRUM_RPC}"
+bsc = "${BSC_RPC}"
 
 [etherscan]
 mainnet = { key = "${ETHERSCAN_KEY}" }
@@ -88,6 +90,8 @@ avalanche = { key = "${SNOWTRACE_KEY}", chain = 43114, url = "https://api.snowtr
 mantle = { key = "${ETHERSCAN_KEY}" }
 plasma = { key = "${ETHERSCAN_KEY}", chain = 9745, url = "https://api.etherscan.io/v2/api?chainid=9745" }
 tempo = { key = "${ETHERSCAN_KEY}", chain = 4217, url = "https://api.etherscan.io/v2/api?chainid=4217" }
+arbitrum = { key = "${ETHERSCAN_KEY}", chain = 42161, url = "https://api.etherscan.io/v2/api?chainid=42161" }
+bsc = { key = "${ETHERSCAN_KEY}", chain = 56, url = "https://api.etherscan.io/v2/api?chainid=56" }
 
 
 [fmt]
