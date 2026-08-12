@@ -2,7 +2,7 @@
   "AcrossSwapModule": "0x241D0227e6Ae4df1747f2A04F4bF3d33eD850cA7",
   "AcrossSwapModuleImpl": "0x9E358d6Bf8CBF877AeF935d170783E87d1D764Df",
   "EnsoSwapModule": "0xac6BcA0bB66D4587171CFc77b19E5E68F74De55e",
-  "EnsoSwapModuleImpl": "0x2Cc95228Ac93506245bfD9b3Fb8348bC0Cad4385",
+  "EnsoSwapModuleImpl": "0x04Ea676CF7e77b6dCCec085b6c71C6C0d8B12682",
   "EtherFiDataProvider": "0xcaC7ec798A9561B00Ff2F3C7505a0C2c1B543d0C",
   "EtherFiDataProviderImpl": "0x0D0533fF108EAd420Bd912F949061F9C74Bc7f4c",
   "PriceProvider": "0x5e67363807764b90Cb7E86b33F2163224eFCb1A2",
@@ -15,5 +15,6 @@
   "TradingLensImpl": "0xfC599407125e1888A47C38c87316691c5ee4479B",
   "TradingSafeFactory": "0xE54e00b0e72F8FC8Cb7e124C378bAd2E7371d2b8",
   "TradingSafeFactoryImpl": "0xE3cD5E563cF5531fA0Df33c6D3070e6e84f029E3",
-  "TradingSafeImpl": "0x28Fef82B15Ea8dbEe240e4CbB7b99d7Da7F4aDcE"
+  "TradingSafeImpl": "0x28Fef82B15Ea8dbEe240e4CbB7b99d7Da7F4aDcE",
+  "TradingSafeWithdrawModule": "0xE8ba8b323008edeBf4AbB1b3316c5B8b2935751C"
 }
