@@ -293,6 +293,27 @@ contract CashFlowsInvariantTest is CashGatewayTestSetup {
 
         dispatcherBaseline = usdc.balanceOf(address(settlementDispatcherReap));
         targetContract(address(handler));
+        targetSelector(FuzzSelector({ addr: address(handler), selectors: _handlerActions() }));
+    }
+
+    /// @dev The campaign's action set, listed explicitly rather than left to "every external on the handler":
+    ///      `externalSpend` is external only so `spendCard` can try/catch it, and a direct fuzz call to it
+    ///      settles a spend (and in credit mode creates debt) without touching the ghosts the conservation
+    ///      invariants measure against, which breaks them on the seeds that reach it.
+    function _handlerActions() private pure returns (bytes4[] memory actions) {
+        actions = new bytes4[](12);
+        actions[0] = CashFlowsHandler.supplyWeeth.selector;
+        actions[1] = CashFlowsHandler.borrowUsdc.selector;
+        actions[2] = CashFlowsHandler.repayUsdc.selector;
+        actions[3] = CashFlowsHandler.withdrawWeeth.selector;
+        actions[4] = CashFlowsHandler.spendCard.selector;
+        actions[5] = CashFlowsHandler.requestWithdrawal.selector;
+        actions[6] = CashFlowsHandler.cancelWithdrawal.selector;
+        actions[7] = CashFlowsHandler.processWithdrawal.selector;
+        actions[8] = CashFlowsHandler.toggleMode.selector;
+        actions[9] = CashFlowsHandler.toggleOptOut.selector;
+        actions[10] = CashFlowsHandler.processOptOut.selector;
+        actions[11] = CashFlowsHandler.warpAccrue.selector;
     }
 
     /// @dev A larger seed so the campaign's bounded borrows are never capped by reserve liquidity.
