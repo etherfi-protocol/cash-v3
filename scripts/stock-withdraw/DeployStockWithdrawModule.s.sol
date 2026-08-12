@@ -5,7 +5,6 @@ import { console } from "forge-std/console.sol";
 import { stdJson } from "forge-std/StdJson.sol";
 
 import { StockWithdrawConfig } from "./StockWithdrawConfig.sol";
-import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { StockWithdrawModule } from "../../src/stock-withdraw/StockWithdrawModule.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
@@ -15,9 +14,9 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 /**
  * @title DeployStockWithdrawModule
  * @notice Deploys the OP-side StockWithdrawModule (CREATE3 impl + CREATE3 UUPS proxy with
- *         atomic init) through the on-chain EtherFiDeployer, then wires it up as a DEFAULT
- *         module on the EtherFiDataProvider and as a withdraw-requester on the CashModule,
- *         and grants STOCK_WITHDRAW_MODULE_ADMIN_ROLE.
+ *         atomic init) through the on-chain EtherFiDeployer. On DEV it also wires the module
+ *         up as a DEFAULT module on the EtherFiDataProvider, as a withdraw-requester on the
+ *         CashModule, and grants STOCK_WITHDRAW_MODULE_ADMIN_ROLE.
  *
  *         The module initialises with the FULL config from `StockWithdrawConfig`: the
  *         supported ShadowOFTs and the Ethereum route pointing at the StockUnwrapper's
@@ -27,15 +26,20 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
  *         Two-actor flow, selected by ENV:
  *         - ENV=dev:      the broadcaster holds the admin roles (dev admin owns the
  *                         RoleRegistry), so deploys AND wiring are broadcast directly.
- *         - ENV=mainnet:  the broadcaster only performs the unprivileged CREATE3 deploys;
- *                         every privileged call is written as a Gnosis transaction bundle to
- *                         output/StockWithdrawModule-<chainid>.json for the prod Safe to
- *                         execute.
+ *         - ENV=mainnet:  this script ONLY performs the unprivileged CREATE3 deploys. The
+ *                         privileged wiring is NOT emitted here — `grantRole` is owner-gated
+ *                         and the RoleRegistry owner is the 8h EtherFiTimelock, so the wiring
+ *                         is a two-step schedule -> execute rollout built by
+ *                         scripts/gnosis-txs/EnableStockWithdrawModuleOP3CP.s.sol. Keeping one
+ *                         source of truth stops a stale single-bundle version of the wiring
+ *                         (whose grantRole leg now reverts) from being signed by mistake.
  *
  * Rollout order:
- *   1. OP:  this script — run with --verify (prod: then execute the Gnosis bundle).
- *   2. ETH: DeployStockUnwrapper — run with --verify (prod: then execute its bundle).
- *   3. Further tokens/adapters/routes are added later via the admin setters.
+ *   1. OP:  this script — run with --verify.
+ *   2. OP:  prod only — record the proxy at .addresses.StockWithdrawModule in deployments.json,
+ *           then EnableStockWithdrawModuleOP3CP.s.sol for the two 3CP bundles (8h apart).
+ *   3. ETH: DeployStockUnwrapper — run with --verify (prod: then execute its bundle).
+ *   4. Further tokens/adapters/routes are added later via the admin setters.
  *
  * Addresses (DataProvider, RoleRegistry, CashModule) are read from
  * deployments/{ENV}/10/deployments.json; everything else comes from StockWithdrawConfig.
@@ -47,7 +51,7 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
  *
  * After broadcast (and bundle execution on prod), run VerifyStockWithdrawModule.s.sol.
  */
-contract DeployStockWithdrawModule is StockWithdrawConfig, GnosisHelpers {
+contract DeployStockWithdrawModule is StockWithdrawConfig {
     using stdJson for string;
 
     EtherFiDataProvider internal dataProvider;
@@ -77,10 +81,14 @@ contract DeployStockWithdrawModule is StockWithdrawConfig, GnosisHelpers {
         if (isDev) _wireDirectly();
         vm.stopBroadcast();
 
-        if (!isDev) _writeGnosisBundle();
-
         console.log("StockWithdrawModule impl:", impl);
         console.log("StockWithdrawModule proxy:", proxy);
+
+        if (!isDev) {
+            console.log("");
+            console.log("Next: record the proxy at .addresses.StockWithdrawModule in deployments/mainnet/10/deployments.json,");
+            console.log("then run scripts/gnosis-txs/EnableStockWithdrawModuleOP3CP.s.sol to generate the 3CP wiring bundles.");
+        }
     }
 
     /// @dev CREATE3 deploys: impl (immutable dataProvider) + UUPS proxy with atomic init
@@ -110,8 +118,9 @@ contract DeployStockWithdrawModule is StockWithdrawConfig, GnosisHelpers {
         proxy = _create3(_moduleProxySalt(), type(UUPSProxy).creationCode, abi.encode(impl, initData));
     }
 
-    /// @dev The three privileged wiring calls, identical between the dev direct path and the
-    ///      prod Gnosis bundle.
+    /// @dev The three privileged wiring calls. DEV ONLY — on prod these ship as the two 3CP
+    ///      bundles built by scripts/gnosis-txs/EnableStockWithdrawModuleOP3CP.s.sol, because
+    ///      `grantRole` is owner-gated and the owner is the 8h EtherFiTimelock.
     function _wiringCalls() internal view returns (address[3] memory targets, bytes[3] memory payloads) {
         address[] memory modules = new address[](1);
         modules[0] = proxy;
@@ -135,17 +144,4 @@ contract DeployStockWithdrawModule is StockWithdrawConfig, GnosisHelpers {
         }
     }
 
-    /// @dev Prod: the wiring goes to the prod Safe as a Gnosis transaction bundle.
-    function _writeGnosisBundle() internal {
-        (address[3] memory targets, bytes[3] memory payloads) = _wiringCalls();
-
-        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(SAFE));
-        for (uint256 i = 0; i < 3; i++) {
-            txs = string.concat(txs, _getGnosisTransaction(addressToHex(targets[i]), iToHex(payloads[i]), "0", i == 2));
-        }
-
-        string memory path = string.concat("./output/StockWithdrawModule-", vm.toString(block.chainid), ".json");
-        vm.writeFile(path, txs);
-        console.log("Gnosis wiring bundle written to:", path);
-    }
 }

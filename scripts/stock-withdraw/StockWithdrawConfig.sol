@@ -63,12 +63,28 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
     address internal constant FEE_RECEIVER = SAFE;
 
     // ---- Wrapped-stock asset set (shared between envs today) ----
+    //
+    // Each asset is a PAIR that must stay in lockstep: the OP ShadowOFT (iTOKEN) the module
+    // bridges, and the mainnet OFTAdapter the unwrapper accepts messages from. The adapter is
+    // the ShadowOFT's LayerZero peer for ETHEREUM_EID, and the unwrapper's adapter allowlist is
+    // load-bearing (`_from` is the only endpoint-authenticated field), so a wrong or missing
+    // adapter here is a security bug, not just a broken route.
+    //
+    // Both assets are Backed `WrappedBackedTokenProxy` ERC-4626 wrappers sharing implementation
+    // 0x76c6851eA0b2741eEDCBBED240715E8817e85583, and both adapters share identical runtime
+    // code — so wQQQx rides the exact rail already proven in prod by wSPYx.
 
-    /// @notice OP ShadowOFTs (the iTOKENs the module bridges).
+    /// @notice OP ShadowOFT for wSPYx (iwSPYx).
     address internal constant WSPYX_SHADOW_OFT = 0xc1e636Aae7d6B46229FC2C362d562610519e8D7c;
-
-    /// @notice Mainnet OFTAdapters (lock/unlock counterparts of the ShadowOFTs).
+    /// @notice Mainnet OFTAdapter for wSPYx — `token()` is wSPYx 0xE7E553Cd…, peer of iwSPYx.
     address internal constant WSPYX_ADAPTER = 0xB3b3412E3D367D26B6f37ddf74eECb7de8827318;
+
+    /// @notice OP ShadowOFT for wQQQx (iwQQQx). Same address book as the QQQx lend listing —
+    ///         `StockLendAssets.wqqqx().iToken`.
+    address internal constant WQQQX_SHADOW_OFT = 0x3c99d3a81b27583B2E26dbd387C10411f2763516;
+    /// @notice Mainnet OFTAdapter for wQQQx — `token()` is wQQQx 0x4C1AE29c…, and its
+    ///         `peers(OP_EID)` is iwQQQx (verified bidirectionally on-chain).
+    address internal constant WQQQX_ADAPTER = 0xD33685E92f079E05F7e25a5F14e68e44eD53bBC5;
 
     // ---- Env-derived selectors ----
 
@@ -100,19 +116,25 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
 
     // ---- Asset arrays (shared shape between deploy init and verification) ----
 
-    /// @dev The iTOKENs the OP module registers at initialize.
+    /// @dev The iTOKENs the OP module registers at initialize. Index-aligned with `_adapters()`
+    ///      — entry i here and entry i there are the two ends of the same asset's rail.
     function _iTokens() internal pure returns (address[] memory iTokens, bool[] memory supported) {
-        iTokens = new address[](1);
+        iTokens = new address[](2);
         iTokens[0] = WSPYX_SHADOW_OFT;
-        supported = new bool[](1);
+        iTokens[1] = WQQQX_SHADOW_OFT;
+        supported = new bool[](2);
         supported[0] = true;
+        supported[1] = true;
     }
 
-    /// @dev The mainnet OFTAdapters the unwrapper registers at initialize.
+    /// @dev The mainnet OFTAdapters the unwrapper registers at initialize. Index-aligned with
+    ///      `_iTokens()`.
     function _adapters() internal pure returns (address[] memory adapters, bool[] memory registered) {
-        adapters = new address[](1);
+        adapters = new address[](2);
         adapters[0] = WSPYX_ADAPTER;
-        registered = new bool[](1);
+        adapters[1] = WQQQX_ADAPTER;
+        registered = new bool[](2);
         registered[0] = true;
+        registered[1] = true;
     }
 }
