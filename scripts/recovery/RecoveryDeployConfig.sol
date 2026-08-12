@@ -30,6 +30,9 @@ library RecoveryDeployConfig {
     bytes32 internal constant SALT_TOPUP_V2_IMPL             = keccak256("Recovery.TopUpV2Impl.v1");
     // Same-chain (OP) Safe asset recovery module. Non-upgradable, deployed directly via CREATE3.
     bytes32 internal constant SALT_SAFE_RECOVERY_MODULE      = keccak256("Recovery.SafeAssetRecoveryModule.v1");
+    // v2: the module is non-upgradable, so an "upgrade" is a fresh CREATE3 deploy under the next
+    // versioned salt + a registration swap on the data provider (new in, old de-whitelisted).
+    bytes32 internal constant SALT_SAFE_RECOVERY_MODULE_V2   = keccak256("Recovery.SafeAssetRecoveryModule.v2");
 
     uint32 internal constant OP_EID = 30_111;
 }

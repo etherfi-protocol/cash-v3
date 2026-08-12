@@ -211,7 +211,9 @@ library CashLendLib {
 
     /**
      * @notice Sources and executes a token-denominated gateway repayment.
-     * @dev Uses the max sentinel for a full repayment so accrued interest dust is cleared.
+     * @dev For a full repayment, re-reads the debt after the loose leg before pulling supplied funds.
+     *      Aave rounds restored debt shares down on a partial repay while debtOf rounds the remaining
+     *      assets up, so the live remainder can be a unit larger than the original debt minus fromLoose.
      * @param $ Cash Module storage.
      * @param dataProvider Data provider used if a competing withdrawal must be cancelled.
      * @param gateway Lend gateway that owns the Aave position.
@@ -229,9 +231,41 @@ library CashLendLib {
             return gateway.repay(safe, token, amount == debt ? type(uint256).max : amount);
         }
 
+        bool repayAll = amount == debt;
         if (fromLoose != 0) repaid = gateway.repay(safe, token, fromLoose);
-        gateway.withdraw(safe, token, fromSupplied, safe);
-        repaid += gateway.repay(safe, token, amount == debt ? type(uint256).max : fromSupplied);
+
+        if (!repayAll) {
+            gateway.withdraw(safe, token, fromSupplied, safe);
+            return repaid + gateway.repay(safe, token, fromSupplied);
+        }
+
+        return repaid + _executeFullRepayFromSupplied($, gateway, safe, token);
+    }
+
+    /**
+     * @dev Executes the supplied leg of a requested full repayment from the live post-loose-leg state.
+     *      Repays the whole live debt when the Safe can safely fund it; otherwise repays only the
+     *      unreserved amount available so a rounding or liquidity edge still de-risks the position.
+     */
+    function _executeFullRepayFromSupplied(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token) private returns (uint256) {
+        // Size this leg from the post-repay debt, not from the stale pre-repay subtraction. This covers
+        // Aave's asymmetric share rounding without making the max-sentinel pull exceed the Safe's balance.
+        uint256 remainingDebt = gateway.debtOf(safe, token);
+        uint256 withdrawAmount = LendSourcingLib.repayWithdrawable(gateway, safe, token, 0);
+        if (withdrawAmount > remainingDebt) withdrawAmount = remainingDebt;
+        if (withdrawAmount != 0) gateway.withdraw(safe, token, withdrawAmount, safe);
+
+        // A withdrawal can return slightly less than requested at a share boundary. Repay what is really
+        // available instead of reverting the entire de-risking transaction, but never consume funds still
+        // reserved by a pending Cash withdrawal.
+        uint256 balance = IERC20(token).balanceOf(safe);
+        uint256 reserved = _pendingWithdrawalAmount($, safe, token);
+        uint256 available = balance > reserved ? balance - reserved : 0;
+        if (available == 0) return 0;
+
+        // Withdrawal can refresh the Aave position, so make the full-vs-partial decision from its final state.
+        remainingDebt = gateway.debtOf(safe, token);
+        return gateway.repay(safe, token, remainingDebt <= available ? type(uint256).max : available);
     }
 
     /**
@@ -402,7 +436,8 @@ library CashLendLib {
     ///      funds stay loose for the next sweep. Used by the sweep and the borrow auto-supply, where leaving
     ///      the funds loose is fine; callers that must not proceed without the supply do not use this.
     function _supplyAsCollateral(CashModuleStorageContract.CashModuleStorage storage $, ILendGateway gateway, address safe, address token, uint256 amount) private {
-        try gateway.supply(safe, token, amount) { } catch (bytes memory reason) {
+        try gateway.supply(safe, token, amount) { }
+        catch (bytes memory reason) {
             $.cashEventEmitter.emitLendSupplyFailed(safe, token, amount, reason);
         }
     }
