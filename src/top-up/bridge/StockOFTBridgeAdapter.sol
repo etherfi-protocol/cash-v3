@@ -113,6 +113,19 @@ contract StockOFTBridgeAdapter is BridgeAdapterBase {
      * @custom:throws InsufficientMinAmount if the received amount is below minimum.
      */
     function _send(address oftAddr, address wrapper, SendParam memory sendParam) internal returns (MessagingReceipt memory messageReceipt, OFTReceipt memory oftReceipt) {
+        // Pin `amountLD` to what the OFT will ACTUALLY debit: it truncates dust below its
+        // shared-decimal precision, so approving the untruncated share count would leave a
+        // residual allowance from the factory to a third-party Backed OFTAdapter. `minAmountLD`
+        // is left untouched — it stays the slippage floor on the original shares, which is what
+        // absorbs the truncation (hence the nonzero-bps requirement). Quoting must use the
+        // zeroed floor because `quoteOFT` enforces `minAmountLD` against its own truncated
+        // amount and would revert `SlippageExceeded` for any non-multiple amount.
+        uint256 minAmountLD = sendParam.minAmountLD;
+        sendParam.minAmountLD = 0;
+        (,, OFTReceipt memory quote) = IOFT(oftAddr).quoteOFT(sendParam);
+        sendParam.amountLD = quote.amountSentLD;
+        sendParam.minAmountLD = minAmountLD;
+
         MessagingFee memory messagingFee = IOFT(oftAddr).quoteSend(sendParam, false);
         if (address(this).balance < messagingFee.nativeFee) revert InsufficientNativeFee();
 

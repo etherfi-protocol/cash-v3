@@ -141,6 +141,28 @@ contract StockOFTBridgeAdapterTest is Test, Constants {
         assertEq(IERC20(wrapper).balanceOf(address(factory)), expectedShares - locked, "factory should hold only dust");
     }
 
+    /// @dev Regression: `_send` pins `amountLD` to `quoteOFT`'s `amountSentLD`, so the approval
+    ///      granted to the OFTAdapter matches exactly what it debits. Approving the untruncated
+    ///      share count instead left the OFT's shared-decimals dust behind as a standing
+    ///      allowance from the factory to a third-party contract we do not control.
+    function test_bridge_leavesNoResidualApprovalToOftAdapter() public {
+        // The residual only exists when the adapter pulls via allowance at all.
+        assertTrue(IOFT(WSPYX_ADAPTER).approvalRequired(), "premise: OFTAdapter debits via allowance");
+
+        // +1 raw unit nudges previewDeposit off a round number if it happened to be one.
+        uint256 amount = _fundFactoryWithStock(10 * oneStock + 1);
+        uint256 shares = IERC4626(wrapper).previewDeposit(amount);
+        uint256 conversionRate = 10 ** (IERC20Metadata(wrapper).decimals() - IOFT(WSPYX_ADAPTER).sharedDecimals());
+        // Deterministic on the pinned block; if a future re-pin lands on dust-free shares,
+        // adjust `amount` until dust != 0 — without dust there is no residual to leave behind.
+        assertGt(shares % conversionRate, 0, "test needs an amount that produces dusty shares");
+
+        (, uint256 fee) = factory.getBridgeFee(stock, amount, OP_CHAIN_ID);
+        factory.bridge{ value: fee }(stock, amount, OP_CHAIN_ID);
+
+        assertEq(IERC20(wrapper).allowance(address(factory), WSPYX_ADAPTER), 0, "dust-sized allowance left behind");
+    }
+
     function test_bridge_reverts_whenTokenNotWrapperAsset() public {
         _configureWethOnStockAdapter();
         deal(address(weth), address(factory), 1 ether);

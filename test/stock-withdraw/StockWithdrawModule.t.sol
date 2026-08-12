@@ -316,6 +316,27 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         module.requestWithdrawal(address(safe), order, signers, sigs);
     }
 
+    /// @dev I-01: the request-side floor includes `MIN_ARRIVAL_BUFFER`, so any order that passes
+    ///      validation is still executable once the withdrawal delay matures. Without this a
+    ///      deadline sitting just past the delay would be signable but could never clear
+    ///      `executeWithdrawal`'s buffer check.
+    function test_requestWithdrawal_revertsWhenDeadlineInsideArrivalBuffer() public {
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        StockWithdrawModule.Order memory order = _baseOrder();
+
+        // Inclusive boundary: exactly delay + buffer is still too tight.
+        order.deadline = block.timestamp + withdrawalDelay + module.MIN_ARRIVAL_BUFFER();
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
+        vm.expectRevert(StockWithdrawModule.DeadlineBeforeWithdrawalDelay.selector);
+        module.requestWithdrawal(address(safe), order, signers, sigs);
+
+        // One second more is accepted.
+        order.deadline = block.timestamp + withdrawalDelay + module.MIN_ARRIVAL_BUFFER() + 1;
+        (signers, sigs) = _signRequest(order);
+        module.requestWithdrawal(address(safe), order, signers, sigs);
+        assertEq(module.getOrder(address(safe)).deadline, order.deadline);
+    }
+
     function test_requestWithdrawal_revertsWhenWithdrawalDelayIsZero() public {
         vm.prank(owner);
         cashModule.setDelays(0, 0, 0);
@@ -525,6 +546,64 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         module.executeWithdrawal{ value: 0.01 ether }(address(safe));
     }
 
+    /// @dev I-01: `deadline` is evaluated twice against two clocks — here on OP at execute time,
+    ///      and again on Ethereum minutes later at lzCompose time. Executing inside the final
+    ///      `MIN_ARRIVAL_BUFFER` would deterministically land the destination compose in the
+    ///      expired branch, which skips the ERC-4626 redeem and so bypasses the user's signed
+    ///      `minReturn`, shipping wrapped shares to the safe instead. Since `executeWithdrawal`
+    ///      is permissionless and costs only the LZ fee, that was a cheap grief; the buffer
+    ///      closes it. A slow keeper hits the same guard, which is the point.
+    function test_executeWithdrawal_revertsInsideArrivalBuffer() public {
+        StockWithdrawModule.Order memory order = _baseOrder();
+        _request(order);
+        // One second inside the buffer: the source-chain deadline has NOT passed, so the old
+        // `block.timestamp > deadline` check alone would have let this through.
+        vm.warp(order.deadline - module.MIN_ARRIVAL_BUFFER() + 1);
+        assertLt(block.timestamp, order.deadline, "still before the deadline on the source chain");
+
+        vm.prank(keeper);
+        vm.expectRevert(StockWithdrawModule.InsufficientArrivalBuffer.selector);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+        assertEq(oft.callCount(), 0, "no LZ send paid for a doomed compose");
+    }
+
+    /// @dev The boundary is inclusive: exactly `MIN_ARRIVAL_BUFFER` of runway is enough.
+    function test_executeWithdrawal_succeedsAtArrivalBufferBoundary() public {
+        StockWithdrawModule.Order memory order = _baseOrder();
+        _request(order);
+        vm.warp(order.deadline - module.MIN_ARRIVAL_BUFFER());
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+        assertEq(oft.callCount(), 1);
+    }
+
+    /// @dev I-04: de-listing a compromised iTOKEN must halt orders already in flight, not just
+    ///      block new requests. The hold stays releasable, so nothing is permanently stranded.
+    function test_executeWithdrawal_revertsWhenTokenDelisted() public {
+        _request(_baseOrder());
+        _warpPastDelay();
+
+        address[] memory iTokens = new address[](1);
+        iTokens[0] = address(oft);
+        bool[] memory supported = new bool[](1);
+        supported[0] = false;
+        vm.prank(moduleAdmin);
+        module.configureTokens(iTokens, supported);
+
+        vm.prank(keeper);
+        vm.expectRevert(StockWithdrawModule.TokenNotSupported.selector);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+        assertEq(oft.callCount(), 0, "in-flight order halted");
+
+        // The safe is not stuck: owners can still release the CashModule hold immediately.
+        (address[] memory signers, bytes[] memory sigs) = _signCancel();
+        module.cancelWithdrawal(address(safe), signers, sigs);
+        assertEq(module.getOrder(address(safe)).iToken, address(0));
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
+        assertEq(oft.balanceOf(address(safe)), AMOUNT, "iTOKEN back with the safe");
+    }
+
     // ---- fee view ----
 
     function test_getWithdrawalFee_returnsEthAndQuote() public {
@@ -576,12 +655,48 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
     }
 
-    function test_cancelExpiredWithdrawal_revertsBeforeDeadline() public {
+    /// @dev The permissionless cancel opens when `executeWithdrawal` closes — at
+    ///      `deadline - MIN_ARRIVAL_BUFFER`, not at `deadline`. While the order is still
+    ///      executable it must stay closed, right up to the inclusive boundary.
+    function test_cancelExpiredWithdrawal_revertsWhileStillExecutable() public {
         StockWithdrawModule.Order memory order = _baseOrder();
         _request(order);
-        vm.warp(order.deadline); // inclusive boundary: not yet expired
+        vm.warp(order.deadline - module.MIN_ARRIVAL_BUFFER()); // inclusive boundary: still executable
         vm.expectRevert(StockWithdrawModule.OrderNotExpired.selector);
         module.cancelExpiredWithdrawal(address(safe));
+    }
+
+    /// @dev I-01: at the last instant the order is executable, execute works and the
+    ///      permissionless cancel is closed.
+    function test_executeAndCancelWindows_complementaryAtBoundary() public {
+        StockWithdrawModule.Order memory order = _baseOrder();
+        _request(order);
+        vm.warp(order.deadline - module.MIN_ARRIVAL_BUFFER());
+
+        vm.expectRevert(StockWithdrawModule.OrderNotExpired.selector);
+        module.cancelExpiredWithdrawal(address(safe));
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+        assertEq(oft.callCount(), 1, "executable at the buffer boundary");
+    }
+
+    /// @dev I-01: one second past the boundary the order is no longer executable, and the
+    ///      permissionless cancel takes over — so the hold is never stranded in a dead zone
+    ///      where neither path works.
+    function test_executeAndCancelWindows_complementaryPastBoundary() public {
+        StockWithdrawModule.Order memory order = _baseOrder();
+        _request(order);
+        vm.warp(order.deadline - module.MIN_ARRIVAL_BUFFER() + 1);
+
+        vm.prank(keeper);
+        vm.expectRevert(StockWithdrawModule.InsufficientArrivalBuffer.selector);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+
+        vm.prank(makeAddr("rando"));
+        module.cancelExpiredWithdrawal(address(safe));
+        assertEq(module.getOrder(address(safe)).iToken, address(0), "hold released, no dead zone");
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
     }
 
     function test_cancelBridgeByCashModule_onlyCashModule() public {
@@ -717,6 +832,121 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         assertEq(oft.balanceOf(address(module)), 0, "nothing left in the module");
         // the order terms in the compose message are untouched by the fee
         assertEq(oft.lastComposeMsg(), abi.encode(address(safe), stockRecipient, MIN_RETURN, order.deadline));
+    }
+
+    /// @dev I-02: `providerFeeBps` is snapshotted at request time. Raising the live fee after the
+    ///      user signed must not shrink their bridged shares — that could push an order sized
+    ///      near its `minReturn` floor into reverting at `lzCompose` and settling through the
+    ///      expired path instead of unwrapping.
+    function test_executeWithdrawal_usesFeeSnapshotNotRaisedLiveFee() public {
+        vm.prank(moduleAdmin);
+        module.setProviderFee(100, feeReceiver); // 1% when the user signs
+
+        _request(_baseOrder());
+        _warpPastDelay();
+
+        vm.prank(moduleAdmin);
+        module.setProviderFee(1000, feeReceiver); // admin raises to the 10% cap afterwards
+
+        uint256 snapshotFee = AMOUNT / 100;
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+
+        assertEq(oft.balanceOf(feeReceiver), snapshotFee, "fee charged at the signed rate");
+        assertEq(oft.lastAmountLD(), AMOUNT - snapshotFee, "bridged amount unaffected by the raise");
+    }
+
+    /// @dev The snapshot cuts both ways: a later reduction does not retroactively apply either.
+    ///      The receiver is left in place here — clearing it is covered separately below.
+    function test_executeWithdrawal_usesFeeSnapshotNotLoweredLiveFee() public {
+        vm.prank(moduleAdmin);
+        module.setProviderFee(100, feeReceiver);
+
+        _request(_baseOrder());
+        _warpPastDelay();
+
+        vm.prank(moduleAdmin);
+        module.setProviderFee(0, feeReceiver);
+
+        uint256 snapshotFee = AMOUNT / 100;
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+        assertEq(oft.balanceOf(feeReceiver), snapshotFee, "still the signed rate");
+        assertEq(oft.lastAmountLD(), AMOUNT - snapshotFee, "net of the signed rate");
+    }
+
+    /// @dev A snapshotted rate can outlive its receiver: `setProviderFee(0, address(0))` clears
+    ///      both at once, leaving an in-flight order owing a fee with nowhere to send it. The fee
+    ///      must be waived, not reverted on — transferring to the zero address would brick the
+    ///      order until its deadline and force the user through the recovery path.
+    function test_executeWithdrawal_waivesFeeWhenReceiverCleared() public {
+        vm.prank(moduleAdmin);
+        module.setProviderFee(100, feeReceiver);
+
+        _request(_baseOrder());
+        _warpPastDelay();
+
+        vm.prank(moduleAdmin);
+        module.setProviderFee(0, address(0));
+
+        // The quote must agree with what the send actually bridges.
+        (, uint256 quotedFee) = module.getWithdrawalFee(address(safe));
+        assertEq(quotedFee, 0.01 ether);
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+
+        assertEq(oft.balanceOf(feeReceiver), 0, "fee waived, not sent to the old receiver");
+        assertEq(oft.lastAmountLD(), AMOUNT, "full amount bridged when the fee is waived");
+        assertEq(oft.balanceOf(address(module)), 0, "nothing stranded in the module");
+    }
+
+    /// @dev An order signed while the fee was disabled stays free even if a fee is introduced.
+    function test_executeWithdrawal_zeroFeeSnapshotSurvivesLaterFee() public {
+        _request(_baseOrder()); // setUp initialises providerFeeBps == 0
+        _warpPastDelay();
+
+        vm.prank(moduleAdmin);
+        module.setProviderFee(1000, feeReceiver);
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+        assertEq(oft.balanceOf(feeReceiver), 0, "no fee on an order signed fee-free");
+        assertEq(oft.lastAmountLD(), AMOUNT, "full amount bridged");
+    }
+
+    /// @dev `feeReceiver` is deliberately NOT snapshotted: it is the protocol's own fee
+    ///      destination, so redirecting it cannot disadvantage the user.
+    function test_executeWithdrawal_feeReceiverIsReadLive() public {
+        vm.prank(moduleAdmin);
+        module.setProviderFee(100, feeReceiver);
+
+        _request(_baseOrder());
+        _warpPastDelay();
+
+        address newReceiver = makeAddr("newFeeReceiver");
+        vm.prank(moduleAdmin);
+        module.setProviderFee(100, newReceiver);
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+
+        assertEq(oft.balanceOf(newReceiver), AMOUNT / 100, "fee paid to the live receiver");
+        assertEq(oft.balanceOf(feeReceiver), 0);
+    }
+
+    /// @dev The fee view must price the order off the same snapshot `executeWithdrawal` uses,
+    ///      otherwise the quoted LZ fee could diverge from the actual send.
+    function test_getWithdrawalFee_usesFeeSnapshot() public {
+        vm.prank(moduleAdmin);
+        module.setProviderFee(100, feeReceiver);
+        _request(_baseOrder());
+
+        vm.prank(moduleAdmin);
+        module.setProviderFee(1000, feeReceiver);
+
+        (, uint256 fee) = module.getWithdrawalFee(address(safe));
+        assertEq(fee, 0.01 ether, "quote still resolves against the snapshotted rate");
     }
 
     function test_executeWithdrawal_zeroFee_takesNothing() public {

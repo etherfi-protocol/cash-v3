@@ -71,9 +71,15 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     ///      without users having to cancel and re-sign. The admin role and the module's
     ///      upgrade authority sit behind the same role registry, so snapshotting would add
     ///      no real protection.
+    ///
+    ///      `providerFeeBps` IS snapshotted, because unlike those it changes the user's signed
+    ///      economics: raising the live fee after signing shrinks the bridged shares, which can
+    ///      push an order sized near its `minReturn` floor into reverting at `lzCompose` and
+    ///      settling through the expired path instead of unwrapping.
     struct StoredWithdrawal {
         Order order;
         bytes32 withdrawalId;
+        uint16 providerFeeBps;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.StockWithdrawModule
@@ -111,6 +117,20 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
     /// @notice Maximum provider fee (10%).
     uint16 public constant MAX_PROVIDER_FEE_BPS = 1000;
+
+    /// @notice Minimum time that must remain before `order.deadline` for `executeWithdrawal`
+    ///         to be allowed, so the destination `lzCompose` still lands on the unwrap branch.
+    /// @dev `deadline` is evaluated TWICE against two different clocks: here on OP at execute
+    ///      time, and again on Ethereum minutes later at lzCompose time. Without this buffer,
+    ///      any execute in the final seconds before `deadline` — malicious OR simply a slow
+    ///      keeper — deterministically lands in the expired branch on the destination, which
+    ///      skips the ERC-4626 redeem and therefore the user's signed `minReturn` entirely,
+    ///      shipping wrapped shares to the safe's mainnet address instead. Since
+    ///      `executeWithdrawal` is permissionless and only costs the LZ fee, that was a cheap
+    ///      grief. Sized well above typical OP->Ethereum LZ latency; an order that ages past
+    ///      this window simply expires and is released on OP by `cancelExpiredWithdrawal`
+    ///      (funds never leave the safe), which is a strictly better outcome for the user.
+    uint256 public constant MIN_ARRIVAL_BUFFER = 30 minutes;
 
     /// @dev Domain-separator-style prefixes for the digests the user signs.
     bytes32 private constant REQUEST_WITHDRAWAL_SIG = keccak256("StockWithdrawModule.requestWithdrawal");
@@ -194,7 +214,11 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     error InvalidSignatures();
     /// @notice Reverts when `executeWithdrawal` runs after `order.deadline`.
     error OrderExpired();
-    /// @notice Reverts when `cancelExpiredWithdrawal` runs at or before `order.deadline`.
+    /// @notice Reverts when `executeWithdrawal` runs within `MIN_ARRIVAL_BUFFER` of
+    ///         `order.deadline`, where the destination compose would take the expired branch.
+    error InsufficientArrivalBuffer();
+    /// @notice Reverts when `cancelExpiredWithdrawal` runs while the order is still executable
+    ///         (more than `MIN_ARRIVAL_BUFFER` remains before `order.deadline`).
     error OrderNotExpired();
     /// @notice Reverts when `msg.value` doesn't cover the quoted LayerZero native fee.
     error InsufficientNativeFee();
@@ -419,7 +443,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     function getWithdrawalFee(address safe) external view returns (address feeToken, uint256 amount) {
         StoredWithdrawal memory withdrawal = _getStockWithdrawModuleStorage().withdrawals[safe];
         if (withdrawal.order.iToken == address(0)) revert NoActiveOrder();
-        uint256 bridgeAmount = withdrawal.order.amount - _providerFeeAmount(withdrawal.order.amount);
+        uint256 bridgeAmount = withdrawal.order.amount - _effectiveProviderFee(withdrawal.order.amount, withdrawal.providerFeeBps);
         (SendParam memory sendParam,) = _quotedSendParam(safe, withdrawal, bridgeAmount);
         MessagingFee memory fee = IOFT(withdrawal.order.iToken).quoteSend(sendParam, false);
         return (ETH, fee.nativeFee);
@@ -452,7 +476,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         if (!IEtherFiSafe(safe).checkSignatures(_requestDigest(safe, order, nonce), signers, signatures)) revert InvalidSignatures();
 
         bytes32 withdrawalId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
-        $.withdrawals[safe] = StoredWithdrawal({ order: order, withdrawalId: withdrawalId });
+        $.withdrawals[safe] = StoredWithdrawal({ order: order, withdrawalId: withdrawalId, providerFeeBps: $.providerFeeBps });
 
         _emitWithdrawalRequested(safe, withdrawalId, order);
 
@@ -474,6 +498,9 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      * @param safe Address of the EtherFiSafe whose stored withdrawal to execute.
      * @custom:throws NoActiveOrder If the safe has no stored withdrawal.
      * @custom:throws OrderExpired If the order deadline has passed (use `cancelExpiredWithdrawal`).
+     * @custom:throws InsufficientArrivalBuffer If less than `MIN_ARRIVAL_BUFFER` remains before
+     *                the deadline, where the destination compose would take the expired branch.
+     * @custom:throws TokenNotSupported If `order.iToken` has since been de-listed.
      * @custom:throws CannotFindMatchingWithdrawal If the CashModule hold doesn't match the order.
      * @custom:throws InsufficientNativeFee If `msg.value` doesn't cover the LayerZero fee.
      */
@@ -482,6 +509,13 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         StoredWithdrawal memory withdrawal = $.withdrawals[safe];
         if (withdrawal.order.iToken == address(0)) revert NoActiveOrder();
         if (block.timestamp > withdrawal.order.deadline) revert OrderExpired();
+        // Leave enough runway for the destination compose to still see an unexpired deadline.
+        if (block.timestamp + MIN_ARRIVAL_BUFFER > withdrawal.order.deadline) revert InsufficientArrivalBuffer();
+        // Re-checked (not just at request time) so de-listing a compromised iTOKEN immediately
+        // halts in-flight orders. Their CashModule hold is still releasable: owners can
+        // `cancelWithdrawal` at once, or anyone can `cancelExpiredWithdrawal` once the order
+        // falls inside `MIN_ARRIVAL_BUFFER` of its deadline.
+        if (!$.supportedTokens.contains(withdrawal.order.iToken)) revert TokenNotSupported();
 
         WithdrawalRequest memory pending = cashModule.getData(safe).pendingWithdrawalRequest;
         if (pending.recipient != address(this) || pending.tokens.length != 1 || pending.tokens[0] != withdrawal.order.iToken || pending.amounts[0] != withdrawal.order.amount) {
@@ -491,8 +525,9 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         delete $.withdrawals[safe];
         cashModule.processWithdrawal(safe);
 
-        // Provider (exit) fee is carved out of the wrapped-stock amount before bridging.
-        uint256 providerFee = _takeProviderFee(withdrawal.order.iToken, withdrawal.order.amount);
+        // Provider (exit) fee is carved out of the wrapped-stock amount before bridging, at the
+        // rate snapshotted when the user signed.
+        uint256 providerFee = _takeProviderFee(withdrawal.order.iToken, withdrawal.order.amount, withdrawal.providerFeeBps);
         _sendOft(safe, withdrawal, withdrawal.order.amount - providerFee);
 
         emit WithdrawalExecuted(safe, withdrawal.withdrawalId, withdrawal.order.iToken, withdrawal.order.amount, providerFee, withdrawal.order.recipient, withdrawal.order.dstEid);
@@ -520,21 +555,25 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     }
 
     /**
-     * @notice Permissionlessly cancels an EXPIRED stored withdrawal, releasing its CashModule
-     *         hold WITHOUT an owner signature.
-     * @dev Once `block.timestamp > order.deadline`, `executeWithdrawal` can never succeed
-     *      again, so the hold would otherwise sit until an owner signs. Authorization is
-     *      purely the elapsed deadline: this merely releases the safe's own funds back to the
-     *      safe — no fund-movement authority to abuse.
+     * @notice Permissionlessly cancels a no-longer-executable stored withdrawal, releasing its
+     *         CashModule hold WITHOUT an owner signature.
+     * @dev Opens the moment `executeWithdrawal` closes — at `order.deadline - MIN_ARRIVAL_BUFFER`,
+     *      not at `order.deadline`. The two windows are exactly complementary: execute requires
+     *      `block.timestamp + MIN_ARRIVAL_BUFFER <= deadline`, this requires the negation. Gating
+     *      on the raw deadline instead would leave a `MIN_ARRIVAL_BUFFER`-wide dead zone in which
+     *      the order can neither be executed nor permissionlessly released, stranding the hold
+     *      until an owner signs. Authorization is purely the elapsed clock: this merely releases
+     *      the safe's own funds back to the safe — no fund-movement authority to abuse.
      * @param safe Address of the EtherFiSafe whose expired withdrawal to cancel.
      * @custom:throws NoActiveOrder If the safe has no stored withdrawal.
-     * @custom:throws OrderNotExpired If the deadline has not passed yet.
+     * @custom:throws OrderNotExpired If the order is still executable.
      */
     function cancelExpiredWithdrawal(address safe) external nonReentrant onlyEtherFiSafe(safe) {
         StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
         StoredWithdrawal memory withdrawal = $.withdrawals[safe];
         if (withdrawal.order.iToken == address(0)) revert NoActiveOrder();
-        if (block.timestamp <= withdrawal.order.deadline) revert OrderNotExpired();
+        // Written as an addition rather than `deadline - MIN_ARRIVAL_BUFFER` to avoid underflow.
+        if (block.timestamp + MIN_ARRIVAL_BUFFER <= withdrawal.order.deadline) revert OrderNotExpired();
 
         cashModule.cancelWithdrawalByModule(safe);
     }
@@ -570,7 +609,10 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
 
         (uint64 withdrawalDelay,,) = cashModule.getDelays();
         if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
-        if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
+        // `MIN_ARRIVAL_BUFFER` is included so an order that passes validation here is always
+        // executable once the delay matures — otherwise a deadline sitting just past the delay
+        // would be signable but could never clear `executeWithdrawal`'s buffer check.
+        if (order.deadline <= block.timestamp + withdrawalDelay + MIN_ARRIVAL_BUFFER) revert DeadlineBeforeWithdrawalDelay();
     }
 
     /// @dev Digest the safe owners sign over the full order (incl. `dstEid`), bound to the
@@ -586,15 +628,31 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         )).toEthSignedMessageHash();
     }
 
-    /// @dev Provider fee owed on `amount` (in wrapped-stock units), from the LIVE bps config.
-    function _providerFeeAmount(uint256 amount) internal view returns (uint256) {
-        return amount.mulDiv(_getStockWithdrawModuleStorage().providerFeeBps, HUNDRED_PERCENT_IN_BPS);
+    /// @dev Provider fee owed on `amount` (in wrapped-stock units) at `feeBps`. Callers pass the
+    ///      rate snapshotted on the order, so a later `setProviderFee` cannot change the
+    ///      economics of an order the user has already signed.
+    function _providerFeeAmount(uint256 amount, uint16 feeBps) internal pure returns (uint256) {
+        return amount.mulDiv(feeBps, HUNDRED_PERCENT_IN_BPS);
+    }
+
+    /// @dev The fee actually owed on `amount`: the snapshotted rate, waived entirely when no fee
+    ///      receiver is configured.
+    /// @dev `feeReceiver` IS read live: it is the protocol's own fee destination, so redirecting
+    ///      it cannot disadvantage the user the way changing the rate would. But a snapshotted
+    ///      rate can outlive its receiver — `setProviderFee(0, address(0))` legitimately clears
+    ///      both at once — and an order signed while the fee was live would then owe a fee with
+    ///      nowhere to send it. Waiving beats reverting: a transfer to the zero address would
+    ///      brick the order until its deadline. Kept in one helper so `getWithdrawalFee` quotes
+    ///      the same bridge amount `executeWithdrawal` sends.
+    function _effectiveProviderFee(uint256 amount, uint16 feeBps) internal view returns (uint256) {
+        if (_getStockWithdrawModuleStorage().feeReceiver == address(0)) return 0;
+        return _providerFeeAmount(amount, feeBps);
     }
 
     /// @dev Carves the provider fee out of the just-processed withdrawal and transfers it to
-    ///      the fee receiver. Returns the fee taken (zero when the fee is disabled).
-    function _takeProviderFee(address iToken, uint256 amount) internal returns (uint256 providerFee) {
-        providerFee = _providerFeeAmount(amount);
+    ///      the fee receiver. Returns the fee taken (zero when the fee is disabled or waived).
+    function _takeProviderFee(address iToken, uint256 amount, uint16 feeBps) internal returns (uint256 providerFee) {
+        providerFee = _effectiveProviderFee(amount, feeBps);
         if (providerFee > 0) IERC20(iToken).safeTransfer(_getStockWithdrawModuleStorage().feeReceiver, providerFee);
     }
 
