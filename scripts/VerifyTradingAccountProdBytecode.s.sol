@@ -45,7 +45,7 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
         _verify(C.SALT_TRADING_LENS_IMPL, address(new TradingLens(priceProvider)));
         _verify(C.SALT_DATA_PROVIDER_IMPL, address(new EtherFiDataProvider()));
         _verify(C.SALT_ACROSS_IMPL, address(new AcrossSwapModule(dataProvider)));
-        _verify(C.SALT_ENSO_IMPL, address(new EnsoSwapModule(dataProvider)));
+        _verify(C.SALT_ENSO_IMPL_NATIVE_FEE, address(new EnsoSwapModule(dataProvider)));
         _verify(C.SALT_TOPUP_FACTORY_IMPL, address(new TopUpFactory()));
         _verify(C.SALT_TOPUP_IMPL, address(new TopUp(C.ETH_WETH)));
         _verify(C.SALT_TRADING_SAFE_WITHDRAW_MODULE, address(new TradingSafeWithdrawModule(dataProvider)));
@@ -56,7 +56,7 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
         _requireProxyImpl(C.SALT_TRADING_LENS_PROXY, C.SALT_TRADING_LENS_IMPL);
         _requireProxyImpl(C.SALT_DATA_PROVIDER_PROXY, C.SALT_DATA_PROVIDER_IMPL);
         _requireProxyImpl(C.SALT_ACROSS_PROXY, C.SALT_ACROSS_IMPL);
-        _requireProxyImpl(C.SALT_ENSO_PROXY, C.SALT_ENSO_IMPL);
+        _requireProxyImpl(C.SALT_ENSO_PROXY, C.SALT_ENSO_IMPL_NATIVE_FEE);
 
         address tradingFactory = _predict(C.SALT_TRADING_SAFE_FACTORY_PROXY);
         address tradingSafeBeacon = TradingSafeFactory(tradingFactory).beacon();
@@ -79,9 +79,9 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
         address dataProvider = deployments.readAddress(".addresses.EtherFiDataProvider");
 
         _verify(C.SALT_ACROSS_IMPL, address(new AcrossSwapModule(dataProvider)));
-        _verify(C.SALT_ENSO_IMPL, address(new EnsoSwapModule(dataProvider)));
+        _verify(C.SALT_ENSO_IMPL_NATIVE_FEE, address(new EnsoSwapModule(dataProvider)));
         _requireProxyImpl(C.SALT_ACROSS_PROXY, C.SALT_ACROSS_IMPL);
-        _requireProxyImpl(C.SALT_ENSO_PROXY, C.SALT_ENSO_IMPL);
+        _requireProxyImpl(C.SALT_ENSO_PROXY, C.SALT_ENSO_IMPL_NATIVE_FEE);
     }
 
     function _verify(bytes32 salt, address local) private view {

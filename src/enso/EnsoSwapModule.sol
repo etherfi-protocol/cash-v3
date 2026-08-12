@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
@@ -21,6 +22,8 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         keeper calls `executeSwap(safe)` — taking only the safe address — which replays
  *         the stored swap verbatim: it releases the solvency hold and drives the safe to
  *         approve the pinned Enso Router and forward the calldata.
+ *         Native-fee routes use `requestSwapWithNativeFee`; the exact signed fee is supplied
+ *         by the keeper at execution and forwarded through the safe to the Enso Router.
  * @dev The Enso calldata (`swapData`) is built off-chain by the BE via the Enso Route/Bundle
  *      API with the `router` routing strategy and stored at request time, then forwarded
  *      verbatim — there is no on-chain min-out / balance enforcement. Slippage protection
@@ -64,8 +67,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         uint256 deadline;
     }
 
-    /// @notice Everything `executeSwap` needs, captured at `requestSwap`: the user-signed
-    ///         order plus the BE-supplied Enso `router`-strategy calldata.
+    /// @notice Everything `executeSwap` needs, captured at request time: the user-signed
+    ///         order, BE-supplied Enso `router`-strategy calldata, and optional native fee.
     /// @dev `swapId` is the stable identifier minted at `requestSwap` and re-emitted at
     ///      execute/cancel so off-chain consumers can link the three lifecycle events of a
     ///      single swap.
@@ -74,6 +77,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         bytes swapData;
         bytes32 swapId;
         address target;
+        uint256 nativeFee;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.EnsoSwapModule
@@ -92,29 +96,15 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("EnsoSwapModule.requestSwap");
+    bytes32 private constant REQUEST_SWAP_WITH_NATIVE_FEE_SIG = keccak256("EnsoSwapModule.requestSwapWithNativeFee");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("EnsoSwapModule.cancelSwap");
     address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id.
-    event SwapRequested(
-        address indexed safe,
-        bytes32 indexed swapId,
-        address srcToken,
-        uint256 srcAmount,
-        uint256 dstChainId,
-        address dstToken,
-        address recipient,
-        uint256 minOut,
-        uint256 deadline
-    );
-    event SwapExecuted(
-        address indexed safe,
-        bytes32 indexed swapId,
-        uint256 dstChainId,
-        address indexed dstToken,
-        uint256 minOut
-    );
+    event SwapRequested(address indexed safe, bytes32 indexed swapId, address srcToken, uint256 srcAmount, uint256 dstChainId, address dstToken, address recipient, uint256 minOut, uint256 deadline);
+    event NativeFeeRequested(address indexed safe, bytes32 indexed swapId, uint256 nativeFee);
+    event SwapExecuted(address indexed safe, bytes32 indexed swapId, uint256 dstChainId, address indexed dstToken, uint256 minOut);
     event SwapCancelled(address indexed safe, bytes32 indexed swapId);
     event EnsoRouterSet(address oldEnsoRouter, address newEnsoRouter);
 
@@ -142,6 +132,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     error EmptySwapData();
     /// @notice Reverts when a same-chain swap delivers less than the signed minimum output.
     error InsufficientOutputAmount();
+    /// @notice Reverts when the native fee supplied by the keeper differs from the signed fee.
+    error InvalidNativeFee();
 
     /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
     ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
@@ -199,28 +191,39 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
      *      signs over the FULL request — `order` AND the Enso `swapData` — so the keeper cannot
      *      substitute a different swap payload at `executeSwap` than the user authorised.
      */
-    function requestSwap(
-        address safe,
-        Order calldata order,
-        bytes calldata swapData,
-        address[] calldata signers,
-        bytes[] calldata signatures
-    ) external whenNotPaused onlyEtherFiSafe(safe) {
+    function requestSwap(address safe, Order calldata order, bytes calldata swapData, address[] calldata signers, bytes[] calldata signatures) external whenNotPaused onlyEtherFiSafe(safe) {
+        _requestSwap(safe, order, swapData, 0, false, signers, signatures);
+    }
+
+    /**
+     * @notice Native-fee variant of `requestSwap`. On chains with a CashModule hold, the
+     *         keeper supplies the signed fee later to `executeSwap`. Without a CashModule,
+     *         execution is immediate and the fee must accompany this request.
+     */
+    function requestSwapWithNativeFee(address safe, Order calldata order, bytes calldata swapData, uint256 nativeFee, address[] calldata signers, bytes[] calldata signatures) external payable whenNotPaused onlyEtherFiSafe(safe) {
+        if (nativeFee == 0) revert InvalidNativeFee();
+        // A native-fee refund and native swap output are indistinguishable in the safe's
+        // balance delta, so this combination cannot enforce minOut accurately.
+        if (order.dstChainId == block.chainid && order.dstToken == NATIVE_TOKEN && order.recipient == safe) {
+            revert InvalidNativeFee();
+        }
+        if (address(cashModule) != address(0) && msg.value != 0) revert InvalidNativeFee();
+        _requestSwap(safe, order, swapData, nativeFee, true, signers, signatures);
+    }
+
+    function _requestSwap(address safe, Order calldata order, bytes calldata swapData, uint256 nativeFee, bool withNativeFee, address[] calldata signers, bytes[] calldata signatures) internal {
         _validateRequest(safe, order, swapData);
 
         uint256 nonce = IEtherFiSafe(safe).useNonce();
-        _verifyRequestSignature(safe, order, swapData, nonce, signers, signatures);
-        _storeAndDispatch(safe, order, swapData, nonce);
+        _verifyRequestSignature(safe, order, swapData, nativeFee, withNativeFee, nonce, signers, signatures);
+        _storeAndDispatch(safe, order, swapData, nativeFee, nonce);
     }
 
     /// @dev Shared request validation, split out to keep `requestSwap` under the legacy stack limit.
     function _validateRequest(address safe, Order calldata order, bytes calldata swapData) internal view {
         EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
         if (swapData.length == 0) revert EmptySwapData();
-        if (
-            order.srcToken == address(0) || order.srcAmount == 0 ||
-            order.recipient == address(0) || order.deadline <= block.timestamp
-        ) revert InvalidInput();
+        if (order.srcToken == address(0) || order.srcAmount == 0 || order.recipient == address(0) || order.deadline <= block.timestamp) revert InvalidInput();
         if (order.dstChainId == block.chainid && (order.dstToken == address(0) || order.minOut == 0)) {
             revert InvalidInput();
         }
@@ -235,17 +238,13 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
     /// @dev Stores the verified swap and either places the CashModule hold (OP) or executes
     ///      immediately (mainnet, where `cashModule == 0`).
-    function _storeAndDispatch(address safe, Order calldata order, bytes calldata swapData, uint256 nonce) internal {
+    function _storeAndDispatch(address safe, Order calldata order, bytes calldata swapData, uint256 nativeFee, uint256 nonce) internal {
         EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
         bytes32 swapId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
-        $.swaps[safe] = StoredSwap({
-            order: order,
-            swapData: swapData,
-            swapId: swapId,
-            target: $.ensoRouter
-        });
+        $.swaps[safe] = StoredSwap({ order: order, swapData: swapData, swapId: swapId, target: $.ensoRouter, nativeFee: nativeFee });
 
         _emitSwapRequested(safe, swapId, order);
+        if (nativeFee != 0) emit NativeFeeRequested(safe, swapId, nativeFee);
 
         if (address(cashModule) != address(0)) {
             cashModule.requestWithdrawalByModule(safe, order.srcToken, order.srcAmount);
@@ -255,34 +254,25 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     }
 
     function _emitSwapRequested(address safe, bytes32 swapId, Order calldata order) internal {
-        emit SwapRequested(
-            safe,
-            swapId,
-            order.srcToken,
-            order.srcAmount,
-            order.dstChainId,
-            order.dstToken,
-            order.recipient,
-            order.minOut,
-            order.deadline
-        );
+        emit SwapRequested(safe, swapId, order.srcToken, order.srcAmount, order.dstChainId, order.dstToken, order.recipient, order.minOut, order.deadline);
     }
 
     /**
-     * @notice Executes the stored swap for `safe`. Takes only the safe address: it reads the
-     *         order and Enso calldata captured at `requestSwap`, releases the solvency hold,
-     *         and drives the safe to approve the pinned Enso Router and forward the calldata.
-     * @dev Permissionless: it only replays the swap the user already signed at `requestSwap`
-     *      (order + swapData are both bound into that signature), so any caller can do no more
-     *      than execute exactly what the user authorised. Meant to be called after the
-     *      CashModule withdrawal delay matures.
+     * @notice Executes the stored swap for `safe`. It reads the order and Enso calldata
+     *         captured at request time, releases the solvency hold, and drives the safe to
+     *         approve the pinned Enso Router and forward the calldata and signed native fee.
+     * @dev Permissionless: it only replays the swap the user already signed at request time.
+     *      Native-fee executions require `msg.value` to exactly match the signed fee, so the
+     *      caller funds the route without drawing from or leaving ETH in the safe. Meant to
+     *      be called after the CashModule withdrawal delay matures.
      */
-    function executeSwap(address safe) public nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
+    function executeSwap(address safe) public payable nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
         EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
         StoredSwap memory swap = $.swaps[safe];
         if (swap.order.srcToken == address(0)) revert NoActiveOrder();
         if (block.timestamp > swap.order.deadline) revert OrderExpired();
         if (swap.target == address(0)) revert MissingConfig();
+        if (msg.value != swap.nativeFee) revert InvalidNativeFee();
 
         if (address(cashModule) != address(0)) {
             if (block.timestamp < cashModule.getData(safe).pendingWithdrawalRequest.finalizeTime) {
@@ -310,10 +300,9 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         emit SwapExecuted(safe, swap.swapId, swap.order.dstChainId, swap.order.dstToken, swap.order.minOut);
     }
 
-    /// @dev Approve the signed and snapshotted Enso Router for the input token, forward the signed Enso calldata
-    ///      verbatim, then reset the approval to zero. The safe is the router's caller, so it
-    ///      pulls the input token from the safe and (per the BE-built `swapData`) swaps and/or
-    ///      bridges to the recipient encoded in the calldata.
+    /// @dev Approve the signed and snapshotted Enso Router for the input token, forward the
+    ///      signed Enso calldata and native fee verbatim, then reset the approval to zero.
+    ///      The fee is first sent to the safe because the safe must remain the router's caller.
     function _dispatchSwap(address safe, StoredSwap memory swap) internal {
         address ensoRouter = swap.target;
         bool validateOutput = swap.order.dstChainId == block.chainid;
@@ -329,18 +318,17 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         to[0] = swap.order.srcToken;
         data[0] = abi.encodeCall(IERC20.approve, (ensoRouter, swap.order.srcAmount));
         to[1] = ensoRouter;
+        values[1] = swap.nativeFee;
         data[1] = swap.swapData;
         to[2] = swap.order.srcToken;
         data[2] = abi.encodeCall(IERC20.approve, (ensoRouter, 0));
 
+        if (swap.nativeFee != 0) Address.sendValue(payable(safe), swap.nativeFee);
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
 
         if (validateOutput) {
             uint256 balanceAfter = _balanceOf(swap.order.dstToken, swap.order.recipient);
-            if (
-                balanceAfter < balanceBefore ||
-                balanceAfter - balanceBefore < swap.order.minOut
-            ) revert InsufficientOutputAmount();
+            if (balanceAfter < balanceBefore || balanceAfter - balanceBefore < swap.order.minOut) revert InsufficientOutputAmount();
             // Back bookend: a same-chain output delivered to the safe goes back into Aave as
             // collateral (best-effort, no-op for an unregistered asset or a non-gateway safe).
             // Cross-chain settlement is non-atomic and a third-party recipient's funds have left
@@ -427,40 +415,26 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     ///      `swapData` — consuming a safe nonce so a signed request can't replay. Binding
     ///      `swapData` means the keeper cannot substitute a different swap payload than the
     ///      user actually authorised.
-    function _verifyRequestSignature(
-        address safe,
-        Order calldata order,
-        bytes calldata swapData,
-        uint256 nonce,
-        address[] calldata signers,
-        bytes[] calldata signatures
-    ) internal view {
-        bytes32 digest = _requestDigest(safe, order, swapData, nonce);
+    function _verifyRequestSignature(address safe, Order calldata order, bytes calldata swapData, uint256 nativeFee, bool withNativeFee, uint256 nonce, address[] calldata signers, bytes[] calldata signatures) internal view {
+        bytes32 digest = withNativeFee ? _requestWithNativeFeeDigest(safe, order, swapData, nativeFee, nonce) : _requestDigest(safe, order, swapData, nonce);
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
     }
 
-    /// @dev Digest the safe owners sign over the FULL request (order + swapData + target), bound to the safe nonce.
+    /// @dev Legacy zero-native-fee digest, retained so existing integrations keep working after upgrade.
     function _requestDigest(address safe, Order calldata order, bytes calldata swapData, uint256 nonce) internal view returns (bytes32) {
         address target = _getEnsoSwapModuleStorage().ensoRouter;
-        return keccak256(
-            abi.encodePacked(
-                REQUEST_SWAP_SIG,
-                block.chainid,
-                address(this),
-                nonce,
-                safe,
-                abi.encode(order),
-                keccak256(swapData),
-                target
-            )
-        ).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(REQUEST_SWAP_SIG, block.chainid, address(this), nonce, safe, abi.encode(order), keccak256(swapData), target)).toEthSignedMessageHash();
+    }
+
+    /// @dev Native-fee digest binds the exact keeper-funded value to the user authorization.
+    function _requestWithNativeFeeDigest(address safe, Order calldata order, bytes calldata swapData, uint256 nativeFee, uint256 nonce) internal view returns (bytes32) {
+        address target = _getEnsoSwapModuleStorage().ensoRouter;
+        return keccak256(abi.encodePacked(REQUEST_SWAP_WITH_NATIVE_FEE_SIG, block.chainid, address(this), nonce, safe, abi.encode(order), keccak256(swapData), target, nativeFee)).toEthSignedMessageHash();
     }
 
     /// @dev Digest the safe owners sign to cancel the active swap, bound to the safe nonce.
     function _cancelDigest(address safe, uint256 nonce) internal view returns (bytes32) {
-        return keccak256(
-            abi.encodePacked(CANCEL_SWAP_SIG, block.chainid, address(this), nonce, safe)
-        ).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(CANCEL_SWAP_SIG, block.chainid, address(this), nonce, safe)).toEthSignedMessageHash();
     }
 
     function _onlyAdmin() internal view {
