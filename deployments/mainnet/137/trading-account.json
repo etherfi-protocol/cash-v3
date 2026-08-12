@@ -1,0 +1,9 @@
+{
+  "EtherFiDataProvider": "0xcaC7ec798A9561B00Ff2F3C7505a0C2c1B543d0C",
+  "EtherFiDataProviderImpl": "0x0D0533fF108EAd420Bd912F949061F9C74Bc7f4c",
+  "RoleRegistry": "0xBdAe3A2EfDFf4f27Dc1D89E0BEdb88F3e9A62Bd0",
+  "RoleRegistryImpl": "0x7575f49A97C18081cF68e0413f63181E667cbc94",
+  "TradingSafeFactory": "0xE54e00b0e72F8FC8Cb7e124C378bAd2E7371d2b8",
+  "TradingSafeFactoryImpl": "0xE3cD5E563cF5531fA0Df33c6D3070e6e84f029E3",
+  "TradingSafeImpl": "0x28Fef82B15Ea8dbEe240e4CbB7b99d7Da7F4aDcE"
+}
