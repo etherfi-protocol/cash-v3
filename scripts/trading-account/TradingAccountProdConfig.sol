@@ -37,6 +37,8 @@ library TradingAccountProdConfig {
     bytes32 internal constant SALT_ACROSS_PROXY = keccak256("TradingAccount.Prod.v1.AcrossSwapModuleProxy");
     bytes32 internal constant SALT_ENSO_IMPL = keccak256("TradingAccount.Prod.v1.EnsoSwapModuleImpl");
     bytes32 internal constant SALT_ENSO_PROXY = keccak256("TradingAccount.Prod.v1.EnsoSwapModuleProxy");
+    /// @dev A CREATE3 salt is single-use, so every EnsoSwapModule implementation needs its own.
+    bytes32 internal constant SALT_ENSO_IMPL_NATIVE_FEE = keccak256("TradingAccount.Prod.v1.EnsoSwapModuleImplNativeFee");
     bytes32 internal constant SALT_TOPUP_FACTORY_IMPL = keccak256("TradingAccount.Prod.v1.TopUpFactoryImpl");
     bytes32 internal constant SALT_TOPUP_IMPL = keccak256("TradingAccount.Prod.v1.TopUpImpl");
 
