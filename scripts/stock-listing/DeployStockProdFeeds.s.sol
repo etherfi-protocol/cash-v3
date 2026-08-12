@@ -324,3 +324,35 @@ contract DeployQqqxProdFeeds is DeployStockProdFeedsBase {
         return StockLendAssets.wqqqx();
     }
 }
+
+/**
+ * @title VerifyTbllxProdFeeds
+ * @notice iwTBLLx's Verify*ProdFeeds. Liveness gate — require this green BEFORE proposing the
+ *         3CPs for the reserve listing and cash config.
+ */
+contract VerifyTbllxProdFeeds is VerifyStockProdFeedsBase {
+    function _asset() internal pure override returns (StockLendAsset memory) {
+        return StockLendAssets.wtbllx();
+    }
+}
+
+/**
+ * @title DeployTbllxProdFeeds
+ * @notice iwTBLLx's Deploy*ProdFeeds. See DeployStockProdFeedsBase for the shared mechanics and
+ *         StockLendAssets.wtbllx() for this asset's parameters and rollout-specific notes.
+ *
+ *         Safe to run before the listing 3CPs exist; the iwTBLLx leg reports [PENDING RELAY]
+ *         until the cash-mainnet-asset-listing Ethereum bundle executes and the keeper pokes.
+ *
+ * Usage (simulate by dropping --broadcast; the broadcaster must be a registered
+ * EtherFiDeployer deployer, e.g. $PROD_DEPLOYER):
+ *   source .env && ENV=mainnet forge script \
+ *     scripts/stock-listing/DeployStockProdFeeds.s.sol:DeployTbllxProdFeeds \
+ *     --rpc-url $OPTIMISM_RPC --ledger --sender $PROD_DEPLOYER \
+ *     --broadcast --verify --etherscan-api-key $ETHERSCAN_KEY -vvvv
+ */
+contract DeployTbllxProdFeeds is DeployStockProdFeedsBase {
+    function _asset() internal pure override returns (StockLendAsset memory) {
+        return StockLendAssets.wtbllx();
+    }
+}
