@@ -1,4 +1,10 @@
 {
+  "lib/LayerZero-v2": {
+    "rev": "9c741e7f9790639537b1710a203bcdfd73b0b9ac"
+  },
+  "lib/aave-v4": {
+    "rev": "5635234e2ec39205b9f4c7c699354f24f4c28016"
+  },
   "lib/devtools": {
     "rev": "128b697838f4b0fd53ae748093fd66cc409ae5c4"
   },

@@ -1,0 +1,354 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import { stdJson } from "forge-std/StdJson.sol";
+import { VmSafe } from "forge-std/Vm.sol";
+import { console } from "forge-std/console.sol";
+
+import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
+import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
+import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
+import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
+import { IAaveV4Spoke } from "../../src/interfaces/IAaveV4Spoke.sol";
+import { ICashModule } from "../../src/interfaces/ICashModule.sol";
+import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
+import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
+import { CashLens } from "../../src/modules/cash/CashLens.sol";
+import { CashModuleCore } from "../../src/modules/cash/CashModuleCore.sol";
+import { CashModuleSetters } from "../../src/modules/cash/CashModuleSetters.sol";
+import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
+import { Utils } from "../utils/Utils.sol";
+import { CashLendDevModules } from "./CashLendDevModules.sol";
+
+/**
+ * @title DeployCashLendDev
+ * @notice Upgrades the existing Optimism dev Cash deployment in place and enables Lend
+ * @dev Dev-only. The CLI sender must be the dev admin: the Cash RoleRegistry owner, who is also the
+ *      Aave test-instance admin. See scripts/lend/README.md for the full runbook and file glossary.
+ *
+ *      The script only runs from a clean starting point: every proxy must be at its rollback-baseline
+ *      implementation and no deployment record may exist. A record left by a broadcast that died
+ *      before its first transaction (forge writes the record during the pre-broadcast simulation) is
+ *      detected as stale and discarded automatically. If a broadcast dies after transactions landed,
+ *      run RollbackCashLendDev (it skips already-restored references), delete cash-lend.json, and rerun.
+ *
+ *      The old modules stay enabled after this deploy (gradual migration), so pending withdrawals
+ *      to them keep working. Run scripts/lend/check-pending-withdrawals.sh before the later pass
+ *      that retires the old modules; retiring while such a withdrawal is pending would strand it.
+ *
+ *      CashModuleCore, CashModuleSetters, CashLens, and LendGateway use dynamically linked libraries.
+ *      Forge deploys and links those libraries as part of the script run; retain the broadcast artifact
+ *      for verification (the LendGateway impl needs the LendCapacityLib address to verify).
+ *
+ * Usage (drop --broadcast for simulation):
+ *   source .env && ENV=dev forge script \
+ *     scripts/lend/DeployCashLendDev.s.sol:DeployCashLendDev \
+ *     --rpc-url $OPTIMISM_RPC --broadcast -vvvv
+ */
+contract DeployCashLendDev is Utils {
+    bytes32 internal constant EIP1967_IMPLEMENTATION_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+    uint256 internal constant MIN_HEALTH_FACTOR = 1.05e18;
+
+    struct ExistingContracts {
+        address cashEventEmitter;
+        address cashLens;
+        address cashModule;
+        address dataProvider;
+        address debtManager;
+        address hook;
+        address roleRegistry;
+        address topUpDest;
+        CashLendDevModules.OldModules modules;
+    }
+
+    struct Implementations {
+        address cashEventEmitter;
+        address cashLens;
+        address cashModuleCore;
+        address cashModuleSetters;
+        address debtManagerAdmin;
+        address debtManagerCore;
+        address hook;
+        address topUpDest;
+    }
+
+    /// @dev Validates the clean starting point, then deploys, upgrades, and activates Lend in one broadcast.
+    function run() public {
+        require(block.chainid == 10, "Optimism only");
+        require(isEqualString(getEnv(), "dev"), "ENV must be dev");
+
+        ExistingContracts memory existing = _readExistingContracts();
+        string memory aaveJson = _readAaveDeployment();
+        address spokeAddress = stdJson.readAddress(aaveJson, ".spoke");
+
+        // Stop before broadcasting if the sender, chain state, or module configuration is unexpected.
+        _validateDevAdmin(existing, aaveJson, _deployer());
+        _discardStaleRecordOrRevert();
+        CashLendDevModules.validateOld(existing.modules);
+        CashLendDevModules.requireDevPolicy(existing.dataProvider, existing.cashModule, existing.modules);
+        address previousLiquifierImplementation = _requireBaselineState(existing);
+
+        vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
+
+        // Direct module storage cannot move to a new address, so deploy new copies with the old configuration.
+        CashLendDevModules.NewModules memory modules = CashLendDevModules.deployNew(existing.modules, existing.dataProvider, existing.debtManager);
+        CashLendDevModules.copyLiquidQueues(existing.roleRegistry, existing.modules, modules);
+
+        // Upgrade existing proxies. The liquifier keeps its proxy and only gets the new implementation.
+        Implementations memory next = _deployImplementations(existing);
+        _upgradeExistingContracts(existing, next);
+        UUPSUpgradeable(existing.modules.liquifier).upgradeToAndCall(modules.liquifierImplementation, "");
+
+        // CashModule's gateway reference is one-time (setLendGateway reverts on a second set) and survives
+        // rollback, so a redeploy must reuse it. Read it after the CashModule upgrade makes it visible.
+        (address gatewayImpl, address gatewayProxy) = _deployOrUpgradeGateway(existing, spokeAddress);
+
+        // Configure every gateway driver before enabling the new modules or routing Safes through Lend.
+        _configureGateway(existing, IAaveV4Spoke(spokeAddress), gatewayProxy, modules);
+
+        // Migration (DebtManager.migrateToLendGateway) is gated on ETHER_FI_WALLET_ROLE; grant it so
+        // the dev admin can migrate Safes right after this deploy.
+        bytes32 walletRole = DebtManagerCore(existing.debtManager).ETHER_FI_WALLET_ROLE();
+        if (!RoleRegistry(existing.roleRegistry).hasRole(walletRole, _deployer())) RoleRegistry(existing.roleRegistry).grantRole(walletRole, _deployer());
+
+        // Enable the new modules (the old ones stay active for gradual migration), then activate
+        // Lend last so no Safe reaches a half-configured gateway.
+        CashLendDevModules.activate(existing.dataProvider, existing.cashModule, existing.modules, modules);
+        if (!IAaveV4Spoke(spokeAddress).isPositionManagerActive(gatewayProxy)) IAaveV4Spoke(spokeAddress).updatePositionManager(gatewayProxy, true);
+        if (address(ICashModule(existing.cashModule).getLendGateway()) == address(0)) ICashModule(existing.cashModule).setLendGateway(gatewayProxy);
+
+        vm.stopBroadcast();
+
+        CashLendDevModules.verifyNewConfig(existing.dataProvider, existing.debtManager, existing.modules, modules);
+        _writeDeploymentRecord(existing, next, modules, previousLiquifierImplementation, gatewayImpl, gatewayProxy, spokeAddress);
+        _logSummary(gatewayImpl, gatewayProxy, next, modules);
+    }
+
+    /// @dev Confirms the CLI sender has every permission used by this deployment.
+    function _validateDevAdmin(ExistingContracts memory existing, string memory aaveJson, address deployer) internal view {
+        RoleRegistry registry = RoleRegistry(existing.roleRegistry);
+        address cashAdmin = registry.owner();
+        require(deployer == cashAdmin, "sender is not Cash dev admin");
+        require(stdJson.readAddress(aaveJson, ".admin") == cashAdmin, "Cash and Aave dev admins differ");
+        require(registry.hasRole(ICashModule(existing.cashModule).CASH_MODULE_CONTROLLER_ROLE(), deployer), "dev admin missing CashModule controller role");
+        require(registry.hasRole(EtherFiDataProvider(existing.dataProvider).DATA_PROVIDER_ADMIN_ROLE(), deployer), "dev admin missing DataProvider admin role");
+    }
+
+    /// @dev Loads the existing Optimism dev Cash proxy addresses from the base deployment file.
+    function _readExistingContracts() internal view returns (ExistingContracts memory) {
+        string memory json = readDeploymentFile();
+        ExistingContracts memory contracts;
+        contracts.cashEventEmitter = _readAddress(json, "CashEventEmitter");
+        contracts.cashLens = _readAddress(json, "CashLens");
+        contracts.cashModule = _readAddress(json, "CashModule");
+        contracts.dataProvider = _readAddress(json, "EtherFiDataProvider");
+        contracts.debtManager = _readAddress(json, "DebtManager");
+        contracts.hook = _readAddress(json, "EtherFiHook");
+        contracts.roleRegistry = _readAddress(json, "RoleRegistry");
+        contracts.topUpDest = _readAddress(json, "TopUpDest");
+        contracts.modules = CashLendDevModules.readOld(json);
+        return contracts;
+    }
+
+    /// @dev Reads one named contract address from the base deployment JSON.
+    function _readAddress(string memory json, string memory name) internal pure returns (address) {
+        return stdJson.readAddress(json, string.concat(".addresses.", name));
+    }
+
+    /// @dev Loads the existing dev Aave v4 test-instance file for the active chain.
+    function _readAaveDeployment() internal view returns (string memory) {
+        string memory path = string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/aave-v4-test.json");
+        return vm.readFile(path);
+    }
+
+    /// @dev Forge runs the whole script, including the record write, before broadcasting anything, so a
+    ///      broadcast that dies before its first transaction leaves a record of contracts that never
+    ///      reached the chain. Such a record is provably stale (no recorded address has code) and is
+    ///      discarded so the deploy can rerun; a record with any live address still stops the run.
+    function _discardStaleRecordOrRevert() internal {
+        string memory path = _deploymentRecordPath();
+        if (!vm.exists(path)) return;
+
+        string memory record = vm.readFile(path);
+        require(stdJson.readUint(record, ".chainId") == block.chainid, "cash-lend.json is for another chain; roll back and delete it first");
+        bool live = stdJson.readAddress(record, ".lendGatewayImpl").code.length != 0 || stdJson.readAddress(record, ".cashModuleCoreImpl").code.length != 0 || stdJson.readAddress(record, ".liquifierImplementation").code.length != 0;
+        address[] memory newModules = CashLendDevModules.readNew(record);
+        for (uint256 i = 0; i < newModules.length; ++i) {
+            live = live || newModules[i].code.length != 0;
+        }
+        require(!live, "cash-lend.json records a live deployment; roll back and delete it first");
+
+        vm.removeFile(path);
+        console.log("Discarded stale cash-lend.json from an aborted broadcast; nothing it recorded reached the chain");
+    }
+
+    /// @dev Requires a clean starting point: every reference at its baseline value.
+    function _requireBaselineState(ExistingContracts memory c) internal view returns (address) {
+        string memory baseline = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend-rollback-baseline.json"));
+        require(stdJson.readUint(baseline, ".chainId") == block.chainid, "rollback baseline chain mismatch");
+        require(_implementationOf(c.cashEventEmitter) == stdJson.readAddress(baseline, ".cashEventEmitterImpl"), "CashEventEmitter differs from baseline");
+        require(_implementationOf(c.cashLens) == stdJson.readAddress(baseline, ".cashLensImpl"), "CashLens differs from baseline");
+        require(_implementationOf(c.cashModule) == stdJson.readAddress(baseline, ".cashModuleCoreImpl"), "CashModule differs from baseline");
+        require(CashModuleCore(c.cashModule).getCashModuleSetters() == stdJson.readAddress(baseline, ".cashModuleSettersImpl"), "CashModule setters differ from baseline");
+        require(_implementationOf(c.debtManager) == stdJson.readAddress(baseline, ".debtManagerCoreImpl"), "DebtManager differs from baseline");
+        require(IDebtManager(c.debtManager).getDebtManagerAdmin() == stdJson.readAddress(baseline, ".debtManagerAdminImpl"), "DebtManager admin differs from baseline");
+        require(_implementationOf(c.hook) == stdJson.readAddress(baseline, ".etherFiHookImpl"), "EtherFiHook differs from baseline");
+        require(_implementationOf(c.topUpDest) == stdJson.readAddress(baseline, ".topUpDestImpl"), "TopUpDest differs from baseline");
+
+        address[] memory oldModules = CashLendDevModules.oldAddresses(c.modules);
+        address[7] memory baselineModules = [stdJson.readAddress(baseline, ".openOcean"), stdJson.readAddress(baseline, ".liquid"), stdJson.readAddress(baseline, ".liquidReferrer"), stdJson.readAddress(baseline, ".frax"), stdJson.readAddress(baseline, ".stake"), stdJson.readAddress(baseline, ".midas"), stdJson.readAddress(baseline, ".beHype")];
+        for (uint256 i = 0; i < 7; ++i) {
+            require(oldModules[i] == baselineModules[i], "old module differs from baseline");
+        }
+        require(c.modules.liquifier == stdJson.readAddress(baseline, ".liquifier"), "liquifier differs from baseline");
+        address previousLiquifierImplementation = stdJson.readAddress(baseline, ".liquifierImplementation");
+        require(_implementationOf(c.modules.liquifier) == previousLiquifierImplementation, "liquifier implementation differs from baseline");
+        return previousLiquifierImplementation;
+    }
+
+    /// @dev Reads a UUPS proxy's implementation directly from its EIP-1967 storage slot.
+    function _implementationOf(address proxy) internal view returns (address) {
+        return address(uint160(uint256(vm.load(proxy, EIP1967_IMPLEMENTATION_SLOT))));
+    }
+
+    /// @dev The broadcast signer, derived from PRIVATE_KEY (tx.origin is unreliable outside the broadcast section).
+    function _deployer() internal view returns (address) {
+        return vm.addr(vm.envUint("PRIVATE_KEY"));
+    }
+
+    /// @dev Deploys a fresh gateway implementation, then either deploys a new proxy or upgrades the
+    ///      gateway CashModule already references from a previous deploy cycle.
+    function _deployOrUpgradeGateway(ExistingContracts memory c, address spoke) internal returns (address, address) {
+        address impl = address(new LendGateway(c.dataProvider, spoke));
+        address proxy = address(ICashModule(c.cashModule).getLendGateway());
+        if (proxy == address(0)) {
+            proxy = address(new UUPSProxy(impl, abi.encodeWithSelector(LendGateway.initialize.selector, c.roleRegistry)));
+        } else {
+            UUPSUpgradeable(proxy).upgradeToAndCall(impl, "");
+        }
+        return (impl, proxy);
+    }
+
+    /// @dev Deploys all new Cash implementations while preserving each proxy's existing constructor configuration.
+    function _deployImplementations(ExistingContracts memory c) internal returns (Implementations memory) {
+        Implementations memory implementations;
+        implementations.cashModuleCore = address(new CashModuleCore(c.dataProvider));
+        implementations.cashModuleSetters = address(new CashModuleSetters(c.dataProvider));
+        implementations.cashLens = address(new CashLens(c.cashModule, c.dataProvider));
+        implementations.cashEventEmitter = address(new CashEventEmitter(c.cashModule));
+        implementations.debtManagerCore = address(new DebtManagerCore(c.dataProvider));
+        implementations.debtManagerAdmin = address(new DebtManagerAdmin(c.dataProvider));
+        implementations.hook = address(new EtherFiHook(c.dataProvider));
+
+        address weth = getChainConfig(vm.toString(block.chainid)).weth;
+        implementations.topUpDest = address(new TopUpDest(c.dataProvider, weth));
+        return implementations;
+    }
+
+    /// @dev Upgrades every existing Cash proxy and updates delegated implementation pointers in place.
+    function _upgradeExistingContracts(ExistingContracts memory c, Implementations memory next) internal {
+        UUPSUpgradeable(c.cashModule).upgradeToAndCall(next.cashModuleCore, "");
+        ICashModule(c.cashModule).setCashModuleSettersAddress(next.cashModuleSetters);
+        UUPSUpgradeable(c.cashLens).upgradeToAndCall(next.cashLens, "");
+        UUPSUpgradeable(c.cashEventEmitter).upgradeToAndCall(next.cashEventEmitter, "");
+        UUPSUpgradeable(c.debtManager).upgradeToAndCall(next.debtManagerCore, "");
+        IDebtManager(c.debtManager).setAdminImpl(next.debtManagerAdmin);
+        UUPSUpgradeable(c.hook).upgradeToAndCall(next.hook, "");
+        UUPSUpgradeable(c.topUpDest).upgradeToAndCall(next.topUpDest, "");
+    }
+
+    /// @dev Registers Aave reserves and configures every gateway driver before activation.
+    function _configureGateway(ExistingContracts memory c, IAaveV4Spoke spoke, address gatewayAddress, CashLendDevModules.NewModules memory modules) internal {
+        // Grant the existing dev admin permission to manage LendGateway configuration.
+        LendGateway gateway = LendGateway(gatewayAddress);
+        RoleRegistry registry = RoleRegistry(c.roleRegistry);
+        address admin = registry.owner();
+        bytes32 adminRole = gateway.LEND_GATEWAY_ADMIN_ROLE();
+        if (!registry.hasRole(adminRole, admin)) registry.grantRole(adminRole, admin);
+
+        // The gateway executes Safe calls when pulling funds and granting Aave position-manager
+        // approval, so every Safe must recognize it as an enabled default module.
+        address[] memory defaultModules = new address[](1);
+        defaultModules[0] = gatewayAddress;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        EtherFiDataProvider(c.dataProvider).configureDefaultModules(defaultModules, shouldWhitelist);
+
+        // Mirror every Aave Spoke reserve ID into the gateway's asset registry.
+        uint256 reserveCount = spoke.getReserveCount();
+        for (uint256 reserveId = 0; reserveId < reserveCount; ++reserveId) {
+            gateway.setReserveId(spoke.getReserve(reserveId).underlying, reserveId);
+        }
+
+        // Apply the initial dev policy and enable every contract that calls the gateway.
+        address usdc = getChainConfig(vm.toString(block.chainid)).usdc;
+        gateway.setSpendAsset(usdc, true);
+        gateway.setMinHealthFactor(MIN_HEALTH_FACTOR);
+        gateway.setDriver(c.debtManager, true);
+        gateway.setDriver(c.topUpDest, true);
+        CashLendDevModules.enableDrivers(gateway, c.modules, modules);
+    }
+
+    /// @dev Returns the deployment record path for the active dev chain.
+    function _deploymentRecordPath() internal view returns (string memory) {
+        return string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(block.chainid), "/cash-lend.json");
+    }
+
+    /// @dev Records everything this run deployed, for verification and rollback. Skipped on dry
+    ///      runs: file cheatcodes execute even without --broadcast, and a leftover record from a
+    ///      simulation would block the real run at the clean-start check.
+    function _writeDeploymentRecord(ExistingContracts memory c, Implementations memory next, CashLendDevModules.NewModules memory modules, address previousLiquifierImplementation, address gatewayImpl, address gatewayProxy, address spoke) internal {
+        if (!vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) && !vm.isContext(VmSafe.ForgeContext.ScriptResume)) {
+            console.log("Dry run, not writing deployment record");
+            return;
+        }
+
+        string memory object = "cash-lend-dev";
+        vm.serializeUint(object, "chainId", block.chainid);
+        vm.serializeAddress(object, "deployer", _deployer());
+        vm.serializeAddress(object, "admin", RoleRegistry(c.roleRegistry).owner());
+        vm.serializeAddress(object, "spoke", spoke);
+        vm.serializeAddress(object, "lendGateway", gatewayProxy);
+        vm.serializeAddress(object, "lendGatewayImpl", gatewayImpl);
+        vm.serializeAddress(object, "cashModuleCoreImpl", next.cashModuleCore);
+        vm.serializeAddress(object, "cashModuleSettersImpl", next.cashModuleSetters);
+        vm.serializeAddress(object, "cashLensImpl", next.cashLens);
+        vm.serializeAddress(object, "cashEventEmitterImpl", next.cashEventEmitter);
+        vm.serializeAddress(object, "debtManagerCoreImpl", next.debtManagerCore);
+        vm.serializeAddress(object, "debtManagerAdminImpl", next.debtManagerAdmin);
+        vm.serializeAddress(object, "etherFiHookImpl", next.hook);
+        vm.serializeAddress(object, "topUpDestImpl", next.topUpDest);
+        vm.serializeString(object, "newModules", CashLendDevModules.serializeNew(modules));
+        vm.serializeAddress(object, "previousLiquifierImplementation", previousLiquifierImplementation);
+        string memory output = vm.serializeAddress(object, "liquifierImplementation", modules.liquifierImplementation);
+
+        vm.writeJson(output, _deploymentRecordPath());
+        console.log("Deployment record:", _deploymentRecordPath());
+    }
+
+    /// @dev Prints all newly deployed addresses.
+    function _logSummary(address gatewayImpl, address gatewayProxy, Implementations memory next, CashLendDevModules.NewModules memory modules) internal pure {
+        console.log("LendGateway proxy:       ", gatewayProxy);
+        console.log("LendGateway impl:        ", gatewayImpl);
+        console.log("CashModuleCore impl:     ", next.cashModuleCore);
+        console.log("CashModuleSetters impl:  ", next.cashModuleSetters);
+        console.log("CashLens impl:           ", next.cashLens);
+        console.log("CashEventEmitter impl:   ", next.cashEventEmitter);
+        console.log("DebtManagerCore impl:    ", next.debtManagerCore);
+        console.log("DebtManagerAdmin impl:   ", next.debtManagerAdmin);
+        console.log("EtherFiHook impl:        ", next.hook);
+        console.log("TopUpDest impl:          ", next.topUpDest);
+        console.log("OpenOcean module:        ", modules.openOcean);
+        console.log("Liquid module:           ", modules.liquid);
+        console.log("Liquid referrer module:  ", modules.liquidReferrer);
+        console.log("Frax module:             ", modules.frax);
+        console.log("Stake module:            ", modules.stake);
+        console.log("Midas module:            ", modules.midas);
+        console.log("BeHYPE module:           ", modules.beHype);
+        console.log("Liquifier impl:          ", modules.liquifierImplementation);
+    }
+}

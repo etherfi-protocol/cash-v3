@@ -5,20 +5,21 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { ICashEventEmitter } from "../../interfaces/ICashEventEmitter.sol";
-import { Mode, BinSponsor, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
+import { BinSponsor, Mode, SafeCashConfig, SafeData, SafeTiers, WithdrawalRequest } from "../../interfaces/ICashModule.sol";
 import { ICashbackDispatcher } from "../../interfaces/ICashbackDispatcher.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
+import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
 import { SignatureUtils } from "../../libraries/SignatureUtils.sol";
 import { SpendingLimit, SpendingLimitLib } from "../../libraries/SpendingLimitLib.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
+import { CashLendLib } from "./CashLendLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
-import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
-
 
 /**
  * @title CashModule
@@ -30,7 +31,7 @@ contract CashModuleSetters is CashModuleStorageContract {
     using SpendingLimitLib for SpendingLimit;
     using ArrayDeDupLib for address[];
 
-    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) { 
+    constructor(address _etherFiDataProvider) CashModuleStorageContract(_etherFiDataProvider) {
         _disableInitializers();
     }
 
@@ -47,7 +48,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        if (binSponsor == BinSponsor.Rain) { 
+        if (binSponsor == BinSponsor.Rain) {
             $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherRain, dispatcher);
             $.settlementDispatcherRain = dispatcher;
         } else if (binSponsor == BinSponsor.PIX) {
@@ -60,12 +61,46 @@ contract CashModuleSetters is CashModuleStorageContract {
             $.cashEventEmitter.emitSettlementDispatcherUpdated(binSponsor, $.settlementDispatcherReap, dispatcher);
             $.settlementDispatcherReap = dispatcher;
         }
-    }   
+    }
+
+    /**
+     * @notice Sets the Aave gateway address for the initial Lend deployment
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE while no gateway is configured
+     * @param gateway Address of the gateway contract
+     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws InvalidInput if gateway has no contract code (also rejects address(0))
+     * @custom:throws GatewayAlreadySet if the gateway has already been configured
+     */
+    function setLendGateway(address gateway) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        // One-time bootstrap that can't be repointed, so guard against a mistyped EOA or undeployed address.
+        if (gateway.code.length == 0) revert InvalidInput();
+
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        // CashModule was deployed before Lend existed, so this hook is only for the first gateway bootstrap.
+        // Repointing after positions exist can strand accounting and must use a dedicated migration flow.
+        if (address($.gateway) != address(0)) revert GatewayAlreadySet();
+
+        $.gateway = ILendGateway(gateway);
+        $.cashEventEmitter.emitLendGatewaySet(gateway);
+    }
+
+    /**
+     * @notice Marks a safe as using the Aave gateway engine
+     * @dev Only callable by the DebtManager, as the last step of migrateToLendGateway. Idempotent and one-way:
+     *      nothing ever clears the flag.
+     * @param safe Address of the EtherFi Safe
+     * @custom:throws OnlyDebtManager if called by any address other than the DebtManager
+     */
+    function markUsesLendGateway(address safe) external {
+        if (msg.sender != address(_getDebtManager())) revert OnlyDebtManager();
+        _getCashModuleStorage().safeCashConfig[safe].usesLendGateway = true;
+    }
 
     /**
      * @notice Configures the withdraw assets whitelist
      * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
-     * @param assets Array of asset addresses to configure 
+     * @param assets Array of asset addresses to configure
      * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
      * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
      * @custom:throws InvalidInput If the arrays are empty
@@ -130,8 +165,36 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
+     * @notice Toggles a safe's participation in the Aave lend market (auto-supply and borrow ops)
+     * @dev Owner-signed, and the signature binds the requested `enable` flag. The two directions are
+     *      deliberately asymmetric:
+     *      - enable == true: opts the safe back in immediately (opting into earning is not risk-increasing)
+     *        and cancels any pending opt-out request. Auto-supply resumes on the safe's next deposit.
+     *      - enable == false: does NOT opt out immediately. It records a request that becomes executable
+     *        after the mode-change delay, at which point anyone may call processLendOptOut to carry it out
+     *        (withdraw all collateral from Aave, force Debit mode). Opting out is only allowed when the safe
+     *        has no open borrows, since the collateral backing them is about to leave Aave.
+     * @param safe Address of the EtherFi Safe
+     * @param enable True to enable lend now, false to request opting out
+     * @param signer A safe admin authorizing the change
+     * @param signature The signer's signature over the intent
+     * @custom:throws OnlyEtherFiSafe if safe is not a valid EtherFi Safe
+     * @custom:throws OnlySafeAdmin if signer is not a safe admin
+     * @custom:throws InvalidSignatures if signature verification fails
+     * @custom:throws LendNotOptedOut if enabling while lend is already enabled and no opt-out is pending
+     * @custom:throws LendAlreadyOptedOut if disabling while lend is already disabled or a request is pending
+     * @custom:throws HasOpenBorrows if opting out while the safe still has open borrows
+     */
+    function toggleLend(address safe, bool enable, address signer, bytes calldata signature) external nonReentrant onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+        CashVerificationLib.verifyToggleLendSig(safe, signer, _useNonce(safe), enable, signature);
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        if (enable) CashLendLib.optInToLend($, safe);
+        else CashLendLib.requestLendOptOut($, safe);
+    }
+
+    /**
      * @notice Sets the operating mode for a safe
-     * @dev Switches between Debit and Credit modes with delay 
+     * @dev Switches between Debit and Credit modes with delay
      * @param safe Address of the EtherFi Safe
      * @param mode The target mode (Debit or Credit)
      * @param signer Address of the safe admin signing the transaction
@@ -141,9 +204,19 @@ contract CashModuleSetters is CashModuleStorageContract {
     function setMode(address safe, Mode mode, address signer, bytes calldata signature) external onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
+        // While an opt-out request is pending, the mode trajectory belongs to the opt-out: a Credit
+        // request would overwrite the Debit switch the request scheduled on the pending-mode rail, and a
+        // Debit request could only DEFER it (both use modeDelay, so a re-request always lands after the
+        // opt-out's finalize time), reopening the window where a matured-but-blocked opt-out sits in
+        // stored Credit. Opting back in (toggleLend(true)) re-opens setMode. No lazy opt-out processing
+        // here: with the request pending this reverts anyway, so processing could never be persisted.
+        if ($.safeCashConfig[safe].lendOptOutFinalizeTime != 0) revert LendOptedOut();
+
         _setCurrentMode($.safeCashConfig[safe]);
 
         if (mode == $.safeCashConfig[safe].mode) revert ModeAlreadySet();
+        // Credit mode requires collateral on Lend: a safe that opted out of lend cannot re-enter Credit
+        if (mode == Mode.Credit && $.safeCashConfig[safe].lendOptedOut) revert LendOptedOut();
 
         CashVerificationLib.verifySetModeSig(safe, signer, _useNonce(safe), mode, signature);
 
@@ -165,7 +238,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param safe Address of the EtherFi Safe
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
-     * @param recipient Address to receive the withdrawn tokens 
+     * @param recipient Address to receive the withdrawn tokens
      * @param signers Array of safe owner addresses signing the transaction
      * @param signatures Array of signatures from the safe owners
      * @custom:throws OnlyEtherFiSafe if the caller is not a valid EtherFi Safe
@@ -177,7 +250,14 @@ contract CashModuleSetters is CashModuleStorageContract {
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
 
-        if (_getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(msg.sender) || _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(recipient))  revert InvalidWithdrawRequest();
+        if (_getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(msg.sender) || _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(recipient)) {
+            revert InvalidWithdrawRequest();
+        }
+
+        // A matured opt-out returns all Aave collateral to the safe first, so the withdrawal sources
+        // from loose balances instead of pulling from the lend market
+        CashLendLib.processLendOptOutIfReady(_getCashModuleStorage(), safe);
+
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
 
@@ -196,13 +276,15 @@ contract CashModuleSetters is CashModuleStorageContract {
         if (!etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
         if (!$.whitelistedModulesCanRequestWithdraw.contains(msg.sender)) revert OnlyWhitelistedModuleCanRequestWithdraw();
 
+        CashLendLib.processLendOptOutIfReady($, safe);
+
         address[] memory tokens = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         tokens[0] = token;
         amounts[0] = amount;
 
         address recipient = msg.sender; // The module itself is the recipient
-        
+
         _requestWithdrawal(safe, tokens, amounts, recipient);
     }
 
@@ -220,7 +302,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         uint256 len = modules.length;
         if (len == 0 || len != shouldWhitelist.length) revert ArrayLengthMismatch();
 
-        for (uint256 i = 0; i < len; ) {
+        for (uint256 i = 0; i < len;) {
             if (shouldWhitelist[i] && !etherFiDataProvider.isWhitelistedModule(modules[i])) revert ModuleNotWhitelistedOnDataProvider();
             unchecked {
                 ++i;
@@ -261,10 +343,10 @@ contract CashModuleSetters is CashModuleStorageContract {
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
-        if (!$.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) revert InvalidWithdrawRequest(); 
+        if (!$.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) revert InvalidWithdrawRequest();
         if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanCancel();
         if (!etherFiDataProvider.isWhitelistedModule(msg.sender)) revert ModuleNotWhitelistedOnDataProvider();
-        
+
         _cancelOldWithdrawal(safe);
     }
 
@@ -319,32 +401,58 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Internal implementation of withdrawal request logic
-     * @dev Creates a pending withdrawal request and emits events
+     * @dev For a gateway safe, first pulls any lend-market shortfall into the safe (Aave enforces the
+     *      position's health on that pull), then creates a pending withdrawal request and emits events
      * @param safe Address of the EtherFi Safe
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
      * @param recipient Address to receive the withdrawn tokens
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
+     * @custom:throws InvalidInput if tokens is empty
+     * @custom:throws AmountZero if every amount is zero
      */
-function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient) internal {
+    function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
         if (recipient == address(0)) revert RecipientCannotBeAddressZero();
+        // A request that withdraws nothing still cancels the live request (and its in-flight bridge) and
+        // occupies the slot, while reading as non-existent to every other function — they all key existence
+        // off tokens.length. Individual zero entries stay legal: _processWithdrawal skips and
+        // compacts them by design, so a caller may pass a token list with some legs sized to zero.
+        if (tokens.length == 0) revert InvalidInput();
+        if (!_hasNonZeroAmount(amounts)) revert AmountZero();
         if (tokens.length > 1) tokens.checkDuplicates();
-        
+
         _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 
         uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
 
+        CashLendLib.sourceWithdrawal($, safe, tokens, amounts);
         _checkBalance(safe, tokens, amounts);
 
         $$.pendingWithdrawalRequest = WithdrawalRequest({ tokens: tokens, amounts: amounts, recipient: recipient, finalizeTime: finalTime });
         $.cashEventEmitter.emitWithdrawalRequested(safe, tokens, amounts, recipient, finalTime);
 
-        _getDebtManager().ensureHealth(safe);
+        // Legacy safes only: their loose tokens are DebtManager collateral, so a withdrawal can worsen the
+        // legacy position. Gateway safes are health-gated by Aave on the pull in sourceWithdrawal; calling
+        // ensureHealth here would revert once getMaxBorrowAmount prices a supplied Aave asset that DebtManager
+        // does not list as collateral (the two registries diverge by design as DebtManager is retired).
+        if (!_usesLendGateway(safe)) _getDebtManager().ensureHealth(safe);
 
         if ($.withdrawalDelay == 0) _processWithdrawal(safe);
+    }
+
+    /// @dev Whether the request moves anything at all (see _requestWithdrawal's zero-amount rule)
+    function _hasNonZeroAmount(uint256[] memory amounts) private pure returns (bool) {
+        uint256 len = amounts.length;
+        for (uint256 i = 0; i < len;) {
+            if (amounts[i] != 0) return true;
+            unchecked {
+                ++i;
+            }
+        }
+        return false;
     }
 }

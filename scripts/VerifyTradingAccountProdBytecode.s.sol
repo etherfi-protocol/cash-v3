@@ -16,6 +16,7 @@ import { TopUpFactory } from "../src/top-up/TopUpFactory.sol";
 import { TradingLens } from "../src/trading-safe/TradingLens.sol";
 import { TradingSafe } from "../src/trading-safe/TradingSafe.sol";
 import { TradingSafeFactory } from "../src/trading-safe/TradingSafeFactory.sol";
+import { TradingSafeWithdrawModule } from "../src/trading-safe/TradingSafeWithdrawModule.sol";
 import { TradingAccountCreate3, TradingAccountProdConfig as C } from "./trading-account/TradingAccountProdConfig.sol";
 import { GnosisHelpers } from "./utils/GnosisHelpers.sol";
 import { Utils } from "./utils/Utils.sol";
@@ -47,6 +48,7 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
         _verify(C.SALT_ENSO_IMPL, address(new EnsoSwapModule(dataProvider)));
         _verify(C.SALT_TOPUP_FACTORY_IMPL, address(new TopUpFactory()));
         _verify(C.SALT_TOPUP_IMPL, address(new TopUp(C.ETH_WETH)));
+        _verify(C.SALT_TRADING_SAFE_WITHDRAW_MODULE, address(new TradingSafeWithdrawModule(dataProvider)));
 
         _requireProxyImpl(C.SALT_ROLE_REGISTRY_PROXY, C.SALT_ROLE_REGISTRY_IMPL);
         _requireProxyImpl(C.SALT_PRICE_PROVIDER_PROXY, C.SALT_PRICE_PROVIDER_IMPL);

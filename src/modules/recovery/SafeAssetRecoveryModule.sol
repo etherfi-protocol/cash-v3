@@ -9,6 +9,7 @@ import { ISafeAssetRecoveryModule } from "../../interfaces/ISafeAssetRecoveryMod
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
+import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 
 /**
@@ -65,16 +66,36 @@ contract SafeAssetRecoveryModule is ISafeAssetRecoveryModule, ModuleBase, Pausab
     ///      supported token:
     ///        - collateral / borrow tokens back the safe's active debt position;
     ///        - whitelisted withdraw assets are timelocked on the normal withdrawal path, and
-    ///          sweeping one here would skip that delay (and could drain a pending withdrawal).
+    ///          sweeping one here would skip that delay (and could drain a pending withdrawal);
+    ///        - LendGateway-registered reserves serve gateway safes' Aave positions:
+    ///          the gateway registry diverges from DebtManager's legacy lists by design, and a
+    ///          registered asset's loose balance may be awaiting auto-supply or reserved by flows
+    ///          the legacy checks know nothing about.
     function _assertRecoverable(address token) internal view {
         ICashModule cashModule = ICashModule(etherFiDataProvider.getCashModule());
         IDebtManager debtManager = cashModule.getDebtManager();
         if (
-            debtManager.isCollateralToken(token) ||
+            _isGatewayRegistered(cashModule, token) ||
+            debtManager.isCollateralToken(token) || 
             debtManager.isBorrowToken(token) ||
             _isWithdrawWhitelisted(cashModule, token)
         ) {
             revert OnlySupportedTokensCannotBeRecovered();
+        }
+    }
+
+    /// @dev True if `token` is a registered reserve on the LendGateway. Borrowable and
+    ///      spend assets are strict subsets of the registry, so this one check covers all three
+    ///      gateway sets. Deliberately not branched per-safe on usesLendGateway: over-blocking is
+    ///      the safe direction for a rescue hatch, and a registered reserve is a live cash asset
+    ///      regardless of which engine this safe runs. False while no gateway is configured — the
+    ///      try/catch keeps recovery working against a CashModule that predates the lend gateway
+    ///      (no getLendGateway selector), so this module can ship ahead of the lend upgrade.
+    function _isGatewayRegistered(ICashModule cashModule, address token) internal view returns (bool) {
+        try cashModule.getLendGateway() returns (ILendGateway gateway) {
+            return address(gateway) != address(0) && gateway.isRegistered(token);
+        } catch {
+            return false;
         }
     }
 

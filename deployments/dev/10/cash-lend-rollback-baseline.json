@@ -1,0 +1,21 @@
+{
+  "chainId": 10,
+  "capturedAtBlock": 154255486,
+  "cashModuleCoreImpl": "0x639a161cd7cdac19b26f53238b12dd1132d8a74b",
+  "cashModuleSettersImpl": "0x223Dd602e7f0929D121252e923861dDd573b4731",
+  "cashLensImpl": "0x1a329fae0ab264328b3c07eb7218775923e6ffaa",
+  "cashEventEmitterImpl": "0x9ec8cacc5f08abdab75a430732dbcfd9b1b0a029",
+  "debtManagerCoreImpl": "0x76e142ae0bdc94350bb9980A299fBfb1f9ad8639",
+  "debtManagerAdminImpl": "0x822399950c8458eA7ec2E0B58abbd8C893C636b3",
+  "etherFiHookImpl": "0x07ff69c934dabefd3e3437564f28e591f4762229",
+  "topUpDestImpl": "0x4ef1d24603d3e945f1fb4bac47074d60d6e3b9a3",
+  "openOcean": "0xE0E41aD11FD94693036A39bDDF09d520baf3730d",
+  "liquid": "0x7a9294A22A5863942135430e6F736B82C210a787",
+  "liquidReferrer": "0x5a38410881153157c9Dbb402C26AE21BC09fc259",
+  "frax": "0x24688672A7deabE6F6495De95B11cC3411407807",
+  "stake": "0xBf3f1A1cEC22eec7F6cE7dDa4Ac9AB808DF46439",
+  "midas": "0x292B353d262E00a215E096A97596b55F8AFb00Df",
+  "beHype": "0x6477daec9a81AC76A7276e3f62136E0A10ca7A68",
+  "liquifier": "0x4f740E62011F582570E6d8d3431aad0046B7f74b",
+  "liquifierImplementation": "0xa40ce89329d8da5d93bbca30cadf83a42c388079"
+}
