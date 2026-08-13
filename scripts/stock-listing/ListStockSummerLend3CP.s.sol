@@ -161,3 +161,18 @@ contract ListQqqxSummerLend3CP is ListStockSummerLend3CPBase {
         return "./output/ListQqqxSummerLend3CP-10.json";
     }
 }
+
+/**
+ * @title ListTbllxSummerLend3CP
+ * @notice iwTBLLx's Lend Owner Safe bundle. Regenerate immediately before signing — the asset and
+ *         reserve ids come from live counters.
+ */
+contract ListTbllxSummerLend3CP is ListStockSummerLend3CPBase {
+    function _asset() internal pure override returns (StockLendAsset memory) {
+        return StockLendAssets.wtbllx();
+    }
+
+    function _outputPath() internal pure override returns (string memory) {
+        return "./output/3CP-642-ListTbllxSummerLend3CP-10.json";
+    }
+}
