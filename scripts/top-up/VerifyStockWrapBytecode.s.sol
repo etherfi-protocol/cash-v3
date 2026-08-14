@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { console } from "forge-std/console.sol";
+import { stdJson } from "forge-std/StdJson.sol";
 
 import { TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { TopUpV2 } from "../../src/top-up/TopUpV2.sol";
@@ -35,12 +36,23 @@ import { StockWrapProdConfig } from "./StockWrapProdConfig.sol";
  * Run: ENV=mainnet forge script scripts/top-up/VerifyStockWrapBytecode.s.sol --rpc-url $MAINNET_RPC -vv
  */
 contract VerifyStockWrapBytecode is StockWrapProdConfig, ContractCodeChecker {
+    using stdJson for string;
+
     function run() public {
         require(block.chainid == 1, "must run on Ethereum (1)");
         require(isEqualString(getEnv(), "mainnet"), "prod script: ENV must be mainnet (or unset)");
 
         address factoryImpl = TOPUP_FACTORY_IMPL;
         address topUpV2Impl = TOPUP_V2_IMPL;
+
+        // The scripts read the pinned constants; deployments/{ENV}/1/stock-wrap.json is the human
+        // -facing deployment record. Asserting they agree is what stops the record from rotting
+        // into a second, contradictory source of truth after a future redeploy.
+        string memory record = vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/1/stock-wrap.json"));
+        require(record.readAddress(".topUpFactoryImpl") == factoryImpl, "stock-wrap.json disagrees with TOPUP_FACTORY_IMPL");
+        require(record.readAddress(".topUpV2Impl") == topUpV2Impl, "stock-wrap.json disagrees with TOPUP_V2_IMPL");
+        require(record.readAddress(".weth") == WETH, "stock-wrap.json disagrees with WETH");
+        require(record.readAddress(".dispatcher") == RECOVERY_DISPATCHER, "stock-wrap.json disagrees with RECOVERY_DISPATCHER");
 
         console.log("TopUpFactory impl :", factoryImpl);
         console.log("TopUpV2 impl      :", topUpV2Impl);
