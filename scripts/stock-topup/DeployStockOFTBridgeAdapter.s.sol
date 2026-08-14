@@ -12,13 +12,20 @@ import { StockTopupConfig } from "./StockTopupConfig.sol";
  *         EtherFiDeployer (CREATE3, env-prefixed salt) and records it in
  *         deployments/{ENV}/1/deployments.json under `StockOFTBridgeAdapter`.
  *
- *         The adapter is stateless and unowned — it is only ever delegatecalled by
- *         `TopUpFactory.bridge()` — so this deploy needs no privileged call and no
- *         Gnosis bundle in either env. The privileged half (the token config) lives in
- *         SetSpyxTopupConfigEthereum.s.sol.
+ *         ONE adapter serves every raw-stock route (SPYx, QQQx, TBLLx): it is stateless and
+ *         unowned — only ever delegatecalled by `TopUpFactory.bridge()` — and each asset's OFT
+ *         adapter travels in the token config's `additionalData`. So this deploy needs no
+ *         privileged call and no Gnosis bundle in either env, and adding an asset later is a
+ *         `setTokenConfig` call, never a redeploy. The privileged half (the token configs) lives
+ *         in scripts/gnosis-txs/ConfigureStockRailEth3CP.s.sol, which carries the token configs
+ *         for all three raw stocks alongside the StockUnwrapper admin grant (same Safe, same
+ *         owner-gated authority, so one bundle).
  *
  *         Re-running is a no-op: `_create3` returns the existing address when the
  *         deterministic slot already holds code.
+ *
+ *         After broadcast: VerifyStockTopupBytecode.s.sol (proves the deployed code is this
+ *         source), then the 3CP bundle, then VerifyStockTopup.s.sol.
  *
  * Env: PRIVATE_KEY (must be a registered EtherFiDeployer deployer), ENV (dev|mainnet)
  *

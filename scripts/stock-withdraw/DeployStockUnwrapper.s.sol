@@ -5,7 +5,6 @@ import { console } from "forge-std/console.sol";
 import { stdJson } from "forge-std/StdJson.sol";
 
 import { StockWithdrawConfig } from "./StockWithdrawConfig.sol";
-import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { StockUnwrapper } from "../../src/stock-withdraw/StockUnwrapper.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
@@ -24,22 +23,26 @@ import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
  *         Two-actor flow, selected by ENV:
  *         - ENV=dev:      the broadcaster owns the RoleRegistry — the role grant is
  *                         broadcast directly.
- *         - ENV=mainnet:  the broadcaster only performs the unprivileged CREATE3 deploys;
- *                         the role grant is written as a Gnosis transaction bundle to
- *                         output/StockUnwrapper-<chainid>.json for the prod Safe to execute.
+ *         - ENV=mainnet:  the broadcaster only performs the unprivileged CREATE3 deploys. The
+ *                         role grant ships in the Ethereum 3CP,
+ *                         gnosis-txs/ConfigureStockRailEth3CP.s.sol, batched with the raw-stock
+ *                         top-up token configs — same Safe, same owner-gated authority, so one
+ *                         bundle and exactly one source of truth.
+ *
+ *         Nothing here is launch-blocking on the Ethereum side: the unwrapper's whole config
+ *         (endpoint, source EID, trusted OP module, adapter allowlist) is set at `initialize`,
+ *         and `pause()` is PAUSER-gated on the Ethereum RoleRegistry, which the Safe holds. The
+ *         admin role buys later ADJUSTMENT (`configureAdapters`, `setSrcModule`) and the
+ *         break-glass `rescueTokens`.
  *
  * The RoleRegistry is read from deployments/{ENV}/1/deployments.json; everything else comes
  * from StockWithdrawConfig.
  *
  * Env: PRIVATE_KEY (must be a registered EtherFiDeployer deployer), ENV (dev|mainnet)
  *
- * STOCK_UNWRAPPER_ADMIN_ROLE goes to the broadcaster on dev, and to the prod Safe on
- * mainnet.
- *
- * Run with --verify. After broadcast (and bundle execution on prod), run
- * VerifyStockUnwrapper.s.sol against the live chain.
+ * Run with --verify. After broadcast, run VerifyStockUnwrapper.s.sol against the live chain.
  */
-contract DeployStockUnwrapper is StockWithdrawConfig, GnosisHelpers {
+contract DeployStockUnwrapper is StockWithdrawConfig {
     using stdJson for string;
 
     RoleRegistry internal roleRegistry;
@@ -61,6 +64,13 @@ contract DeployStockUnwrapper is StockWithdrawConfig, GnosisHelpers {
         unwrapperAdmin = _adminFor(deployerAddress);
         bool isDev = _isDev();
 
+        // Fail before spending gas: the salts must resolve to the pinned prod addresses (the OP
+        // module bakes THIS unwrapper's predicted address into its Ethereum route), and every
+        // adapter in the launch set must lock a real ERC-4626 and be peered to the iToken the OP
+        // side bridges — the adapter allowlist is what authenticates a compose.
+        if (!isDev) _assertProdAddresses();
+        _assertAssetRails(false);
+
         vm.startBroadcast(deployerPk);
         _deploy();
         if (isDev) {
@@ -69,13 +79,23 @@ contract DeployStockUnwrapper is StockWithdrawConfig, GnosisHelpers {
         }
         vm.stopBroadcast();
 
-        if (!isDev) _writeGnosisBundle();
-
-        // Post-operation hook: the timelock/registry owner must be unchanged.
+        // Post-operation hook: the registry owner must be unchanged.
         require(roleRegistry.owner() == ownerBefore, "CRITICAL: role registry owner changed!");
+
+        if (!isDev) {
+            require(proxy == EXPECTED_PROD_UNWRAPPER_PROXY, "prod unwrapper did not land at the pinned address");
+            require(impl == EXPECTED_PROD_UNWRAPPER_IMPL, "prod unwrapper impl did not land at the pinned address");
+            require(StockUnwrapper(proxy).getSrcModule() == bytes32(uint256(uint160(EXPECTED_PROD_MODULE_PROXY))), "unwrapper trusts a different OP module");
+        }
 
         console.log("StockUnwrapper impl:", impl);
         console.log("StockUnwrapper proxy:", proxy);
+
+        if (!isDev) {
+            console.log("");
+            console.log("Next: record the proxy at .addresses.StockUnwrapper in deployments/mainnet/1/deployments.json,");
+            console.log("then run scripts/gnosis-txs/ConfigureStockRailEth3CP.s.sol for the Ethereum 3CP bundle.");
+        }
     }
 
     /// @dev CREATE3 deploys: impl + UUPS proxy with atomic init carrying the adapter
@@ -97,18 +117,9 @@ contract DeployStockUnwrapper is StockWithdrawConfig, GnosisHelpers {
         proxy = _create3(_unwrapperProxySalt(), type(UUPSProxy).creationCode, abi.encode(impl, initData));
     }
 
-    /// @dev The single privileged wiring call, identical between dev and the prod bundle.
+    /// @dev DEV ONLY: on dev the broadcaster owns the RoleRegistry, so the grant rides along
+    ///      with the deploy. On prod it is its own 3CP (see the contract docs).
     function _grantRoleData() internal view returns (bytes memory) {
         return abi.encodeWithSignature("grantRole(bytes32,address)", StockUnwrapper(proxy).STOCK_UNWRAPPER_ADMIN_ROLE(), unwrapperAdmin);
-    }
-
-    /// @dev Prod: the role grant goes to the prod Safe as a Gnosis transaction bundle.
-    function _writeGnosisBundle() internal {
-        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(SAFE));
-        txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(roleRegistry)), iToHex(_grantRoleData()), "0", true));
-
-        string memory path = string.concat("./output/StockUnwrapper-", vm.toString(block.chainid), ".json");
-        vm.writeFile(path, txs);
-        console.log("Gnosis wiring bundle written to:", path);
     }
 }

@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
+import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
+
+import { IOFT } from "../../src/interfaces/IOFT.sol";
+import { IOAppPeers } from "../utils/IOAppPeers.sol";
+import { StockSharedConfig } from "../utils/StockSharedConfig.sol";
 
 /**
  * @title StockWithdrawConfig
@@ -13,7 +17,7 @@ import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
  *         predicting the mainnet unwrapper and vice versa) derives from these salts, so they
  *         MUST only ever change together.
  */
-abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
+abstract contract StockWithdrawConfig is StockSharedConfig {
     // ---- CREATE3 salts (env-prefixed) ----
 
     string internal constant DEV_SALT_MODULE_IMPL = "Dev.StockWithdraw.StockWithdrawModuleImpl";
@@ -21,22 +25,34 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
     string internal constant DEV_SALT_UNWRAPPER_IMPL = "Dev.StockWithdraw.StockUnwrapperImpl";
     string internal constant DEV_SALT_UNWRAPPER_PROXY = "Dev.StockWithdraw.StockUnwrapperProxy";
 
-    string internal constant PROD_SALT_MODULE_IMPL = "Prod.StockWithdraw.StockWithdrawModuleImpl";
-    string internal constant PROD_SALT_MODULE_PROXY = "Prod.StockWithdraw.StockWithdrawModuleProxy";
-    string internal constant PROD_SALT_UNWRAPPER_IMPL = "Prod.StockWithdraw.StockUnwrapperImpl";
-    string internal constant PROD_SALT_UNWRAPPER_PROXY = "Prod.StockWithdraw.StockUnwrapperProxy";
+    // Prod runs on the `.V2` salts: the launch asset set (iwSPYx + iwQQQx + iwTBLLx) is baked in
+    // at `initialize`, so the pair that carries it has to be a fresh deterministic address.
+    string internal constant PROD_SALT_MODULE_IMPL = "Prod.StockWithdraw.StockWithdrawModuleImpl.V2";
+    string internal constant PROD_SALT_MODULE_PROXY = "Prod.StockWithdraw.StockWithdrawModuleProxy.V2";
+    string internal constant PROD_SALT_UNWRAPPER_IMPL = "Prod.StockWithdraw.StockUnwrapperImpl.V2";
+    string internal constant PROD_SALT_UNWRAPPER_PROXY = "Prod.StockWithdraw.StockUnwrapperProxy.V2";
+
+    // ---- Pinned prod addresses ----
+    //
+    // CREATE3 addresses are a pure function of the salt strings above, so pinning them turns a
+    // typo in a salt into a loud pre-broadcast failure (`_assertProdAddresses`) instead of a
+    // deploy at an address nothing else expects. Same guard StockLendAssets uses for its feeds.
+
+    /// @notice `Prod.StockWithdraw.StockWithdrawModuleProxy.V2` (Optimism).
+    address internal constant EXPECTED_PROD_MODULE_PROXY = 0xB9D4cdD267CB8f5F4123471A5B3dac8845EeAcA3;
+    /// @notice `Prod.StockWithdraw.StockWithdrawModuleImpl.V2` (Optimism).
+    address internal constant EXPECTED_PROD_MODULE_IMPL = 0xC9A3fCFB6a99286bDC337CB38011D2Dc8234EE4c;
+    /// @notice `Prod.StockWithdraw.StockUnwrapperProxy.V2` (Ethereum).
+    address internal constant EXPECTED_PROD_UNWRAPPER_PROXY = 0x4Fc4a684e6bd57f8149581C2bf84F80d973cD448;
+    /// @notice `Prod.StockWithdraw.StockUnwrapperImpl.V2` (Ethereum).
+    address internal constant EXPECTED_PROD_UNWRAPPER_IMPL = 0x19657A9aA109fbB9625623D1b50E5f1248f04f96;
 
     // ---- Chain / protocol constants ----
 
     /// @notice LayerZero V2 endpoint on Ethereum mainnet.
     address internal constant LZ_ENDPOINT_ETHEREUM = 0x1a44076050125825900e736c501f859c50fE728c;
-    /// @notice OP mainnet endpoint ID (source chain of every withdrawal).
-    uint32 internal constant OP_EID = 30111;
-    /// @notice Ethereum mainnet endpoint ID (destination of every withdrawal).
-    uint32 internal constant ETHEREUM_EID = 30101;
-
-    /// @notice Prod Safe holding the admin roles (same address on OP and Ethereum).
-    address internal constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    // `SAFE`, `OP_EID` (source chain of every withdrawal) and `ETHEREUM_EID` (destination) come
+    // from StockSharedConfig, which the top-up config also inherits.
 
     /// @notice Executor gas limit for the destination lzReceive (OFTAdapter credit) call.
     ///         Carried in the module's own send options: the executor rejects options with
@@ -70,9 +86,9 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
     // load-bearing (`_from` is the only endpoint-authenticated field), so a wrong or missing
     // adapter here is a security bug, not just a broken route.
     //
-    // Both assets are Backed `WrappedBackedTokenProxy` ERC-4626 wrappers sharing implementation
-    // 0x76c6851eA0b2741eEDCBBED240715E8817e85583, and both adapters share identical runtime
-    // code — so wQQQx rides the exact rail already proven in prod by wSPYx.
+    // All three assets are Backed `WrappedBackedTokenProxy` ERC-4626 wrappers, and their
+    // adapters share identical runtime code — so wQQQx and wTBLLx ride the exact rail already
+    // proven in prod by wSPYx.
 
     /// @notice OP ShadowOFT for wSPYx (iwSPYx).
     address internal constant WSPYX_SHADOW_OFT = 0xc1e636Aae7d6B46229FC2C362d562610519e8D7c;
@@ -86,12 +102,17 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
     ///         `peers(OP_EID)` is iwQQQx (verified bidirectionally on-chain).
     address internal constant WQQQX_ADAPTER = 0xD33685E92f079E05F7e25a5F14e68e44eD53bBC5;
 
-    // ---- Env-derived selectors ----
+    /// @notice OP ShadowOFT for wTBLLx (iwTBLLx). Same address book as the TBLLx collateral
+    ///         rollout — `StockLendAssets.wtbllx().iToken`, listed by 3CP-641/642/643.
+    address internal constant WTBLLX_SHADOW_OFT = 0x5F8b2D2b97aD4d63188f44965778F6004D5bc387;
+    /// @notice Mainnet OFTAdapter for wTBLLx, deployed by the 3CP-640 Ethereum listing bundle.
+    /// @dev Verified on-chain 2026-08-14: `token()` is wTBLLx 0x461b25b9… whose `asset()` is
+    ///      TBLLx 0x4cbf89ED…; `peers(OP_EID)` is iwTBLLx and `iwTBLLx.peers(ETHEREUM_EID)` is
+    ///      this adapter (bidirectional). Locked float 92.649049729892439115 wTBLLx against
+    ///      92.649049 iwTBLLx minted, i.e. the rail is live and in use, not just wired.
+    address internal constant WTBLLX_ADAPTER = 0x8C03Bba46607F0e1bd51c6860293040f0477A1D0;
 
-    /// @dev True when ENV=dev; picks salts and the admin address.
-    function _isDev() internal view returns (bool) {
-        return isEqualString(getEnv(), "dev");
-    }
+    // ---- Env-derived selectors (`_isDev` lives in StockSharedConfig) ----
 
     function _moduleImplSalt() internal view returns (string memory) {
         return _isDev() ? DEV_SALT_MODULE_IMPL : PROD_SALT_MODULE_IMPL;
@@ -119,22 +140,83 @@ abstract contract StockWithdrawConfig is EtherFiDeployerHelper {
     /// @dev The iTOKENs the OP module registers at initialize. Index-aligned with `_adapters()`
     ///      — entry i here and entry i there are the two ends of the same asset's rail.
     function _iTokens() internal pure returns (address[] memory iTokens, bool[] memory supported) {
-        iTokens = new address[](2);
+        iTokens = new address[](3);
         iTokens[0] = WSPYX_SHADOW_OFT;
         iTokens[1] = WQQQX_SHADOW_OFT;
-        supported = new bool[](2);
+        iTokens[2] = WTBLLX_SHADOW_OFT;
+        supported = new bool[](3);
         supported[0] = true;
         supported[1] = true;
+        supported[2] = true;
     }
 
     /// @dev The mainnet OFTAdapters the unwrapper registers at initialize. Index-aligned with
     ///      `_iTokens()`.
     function _adapters() internal pure returns (address[] memory adapters, bool[] memory registered) {
-        adapters = new address[](2);
+        adapters = new address[](3);
         adapters[0] = WSPYX_ADAPTER;
         adapters[1] = WQQQX_ADAPTER;
-        registered = new bool[](2);
+        adapters[2] = WTBLLX_ADAPTER;
+        registered = new bool[](3);
         registered[0] = true;
         registered[1] = true;
+        registered[2] = true;
+    }
+
+    // ---- Pre-broadcast guards ----
+
+    /**
+     * @dev Asserts the prod CREATE3 addresses the current salts resolve to are the pinned ones.
+     *      A salt typo otherwise deploys a perfectly good pair at an address the 3CP bundles,
+     *      the deployments file and the cross-chain init data all disagree with — and because
+     *      each side bakes in the OTHER side's predicted address, that mistake is only
+     *      recoverable through the admin role this whole rollout is designed to avoid needing.
+     */
+    function _assertProdAddresses() internal view {
+        require(_predictAddress(PROD_SALT_MODULE_IMPL) == EXPECTED_PROD_MODULE_IMPL, "prod module impl salt does not resolve to the pinned address");
+        require(_predictAddress(PROD_SALT_MODULE_PROXY) == EXPECTED_PROD_MODULE_PROXY, "prod module proxy salt does not resolve to the pinned address");
+        require(_predictAddress(PROD_SALT_UNWRAPPER_IMPL) == EXPECTED_PROD_UNWRAPPER_IMPL, "prod unwrapper impl salt does not resolve to the pinned address");
+        require(_predictAddress(PROD_SALT_UNWRAPPER_PROXY) == EXPECTED_PROD_UNWRAPPER_PROXY, "prod unwrapper proxy salt does not resolve to the pinned address");
+    }
+
+    /**
+     * @dev Asserts every configured asset is one consistent rail, off-line, before anything is
+     *      broadcast or bundled: the OP ShadowOFT satisfies the invariant `configureTokens`
+     *      enforces (`IOFT(iToken).token() == iToken`, else `InvalidOFT` reverts the whole
+     *      `initialize`), the mainnet adapter locks a real ERC-4626, and the two are each
+     *      other's LayerZero peers — the adapter allowlist in the unwrapper is what
+     *      authenticates a compose, so a wrong pairing here is a security bug and not merely a
+     *      broken route.
+     * @param onOptimism True when running on OP (only the iToken half is readable), false on
+     *                   Ethereum (only the adapter half is readable).
+     */
+    function _assertAssetRails(bool onOptimism) internal view {
+        (address[] memory iTokens,) = _iTokens();
+        (address[] memory adapters,) = _adapters();
+        require(iTokens.length == adapters.length, "asset arrays are not index-aligned");
+
+        for (uint256 i = 0; i < iTokens.length; i++) {
+            require(iTokens[i] != address(0) && adapters[i] != address(0), "zero address in the asset set");
+            for (uint256 j = i + 1; j < iTokens.length; j++) {
+                require(iTokens[i] != iTokens[j], "duplicate iToken in the asset set");
+                require(adapters[i] != adapters[j], "duplicate adapter in the asset set");
+            }
+
+            if (onOptimism) {
+                require(IOFT(iTokens[i]).token() == iTokens[i], "iToken is not its own OFT - configureTokens would revert InvalidOFT");
+                require(_peer(iTokens[i], ETHEREUM_EID) == adapters[i], "iToken's Ethereum peer is not the configured adapter");
+            } else {
+                address wrapped = IOFT(adapters[i]).token();
+                require(wrapped != address(0), "adapter exposes no token");
+                require(IERC4626(wrapped).asset() != address(0), "adapter's token is not an ERC-4626 wrapper - lzCompose redeem would revert");
+                require(_peer(adapters[i], OP_EID) == iTokens[i], "adapter's OP peer is not the configured iToken");
+            }
+        }
+    }
+
+    /// @dev `peers(eid)` as an address. Both ShadowOFTs and OFTAdapters are OApps, so this is
+    ///      the same call on either side of the rail.
+    function _peer(address oApp, uint32 eid) internal view returns (address) {
+        return address(uint160(uint256(IOAppPeers(oApp).peers(eid))));
     }
 }

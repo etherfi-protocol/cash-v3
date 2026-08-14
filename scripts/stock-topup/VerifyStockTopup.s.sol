@@ -34,26 +34,35 @@ contract VerifyStockTopup is StockTopupConfig {
         require(adapter.code.length > 0, "StockOFTBridgeAdapter not deployed");
         require(deployments.readAddress(string.concat(".addresses.", ADAPTER_DEPLOYMENT_KEY)) == adapter, "recorded adapter != predicted CREATE3 address");
 
-        TopUpFactory.TokenConfig memory stored = factory.getTokenConfig(SPYX, OP_CHAIN_ID);
-        require(stored.bridgeAdapter == adapter, "bridgeAdapter mismatch");
-        require(stored.recipientOnDestChain == _topUpDestOptimism(), "recipientOnDestChain is not the OP TopUpDest");
-        require(stored.maxSlippageInBps == MAX_SLIPPAGE_BPS, "maxSlippageInBps mismatch");
-        require(keccak256(stored.additionalData) == keccak256(_additionalData()), "additionalData mismatch");
-
-        // Decode the stored payload the way the adapter does, so a silently re-encoded
-        // config (right bytes length, wrong values) still fails here.
-        (address oftAdapter, uint32 destEid, uint128 lzReceiveGas) = abi.decode(stored.additionalData, (address, uint32, uint128));
-        require(oftAdapter == WSPYX_OFT_ADAPTER, "oftAdapter mismatch");
-        require(destEid == OP_EID, "destEid mismatch");
-        require(lzReceiveGas == LZ_RECEIVE_GAS, "lzReceiveGas mismatch");
-
-        // The route must be quotable at the live executor config — the failure mode that
-        // empty options / zero slippage produce shows up here, not in storage.
-        (, uint256 fee) = factory.getBridgeFee(SPYX, 10 ** 18, OP_CHAIN_ID);
-        require(fee > 0, "bridge fee quoted as zero");
+        address recipient = _topUpDestOptimism();
+        StockTopupAsset[] memory assets = _assets();
 
         console.log("ENV:", getEnv());
         console.log("StockOFTBridgeAdapter:", adapter);
-        console.log("SPYx -> OP topup verified. Quote for 1e18 SPYx: %s wei", fee);
+        console.log("recipientOnDestChain (OP TopUpDest):", recipient);
+
+        for (uint256 i = 0; i < assets.length; i++) {
+            StockTopupAsset memory a = assets[i];
+
+            TopUpFactory.TokenConfig memory stored = factory.getTokenConfig(a.stock, OP_CHAIN_ID);
+            require(stored.bridgeAdapter == adapter, string.concat(a.symbol, ": bridgeAdapter mismatch"));
+            require(stored.recipientOnDestChain == recipient, string.concat(a.symbol, ": recipientOnDestChain is not the OP TopUpDest"));
+            require(stored.maxSlippageInBps == MAX_SLIPPAGE_BPS, string.concat(a.symbol, ": maxSlippageInBps mismatch"));
+            require(keccak256(stored.additionalData) == keccak256(_additionalData(a.oftAdapter)), string.concat(a.symbol, ": additionalData mismatch"));
+
+            // Decode the stored payload the way the adapter does, so a silently re-encoded
+            // config (right bytes length, wrong values) still fails here.
+            (address oftAdapter, uint32 destEid, uint128 lzReceiveGas) = abi.decode(stored.additionalData, (address, uint32, uint128));
+            require(oftAdapter == a.oftAdapter, string.concat(a.symbol, ": oftAdapter mismatch"));
+            require(destEid == OP_EID, string.concat(a.symbol, ": destEid mismatch"));
+            require(lzReceiveGas == LZ_RECEIVE_GAS, string.concat(a.symbol, ": lzReceiveGas mismatch"));
+
+            // The route must be quotable at the live executor config — the failure mode that
+            // empty options / zero slippage produce shows up here, not in storage.
+            (, uint256 fee) = factory.getBridgeFee(a.stock, 10 ** 18, OP_CHAIN_ID);
+            require(fee > 0, string.concat(a.symbol, ": bridge fee quoted as zero"));
+
+            console.log(string.concat("  [OK] ", a.symbol, " -> OP. Quote for 1e18:"), fee, "wei");
+        }
     }
 }

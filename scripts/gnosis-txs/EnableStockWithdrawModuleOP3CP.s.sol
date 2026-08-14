@@ -14,17 +14,12 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 /**
  * @title EnableStockWithdrawModuleOP3CP
  * @author ether.fi
- * @notice 3CP-640 — PHASE 1 of the OP-prod stock-withdraw rollout: turns the already-deployed
+ * @notice 3CP-646 — the OP leg of the stock-withdraw launch: turns the deployed
  *         StockWithdrawModule on with a SINGLE 3CP bundle, then simulates it on the current
  *         fork and asserts the end state.
  *
- *         Sign this BEFORE 3CP-641. 640 needs no timelock and lands immediately; 641 carries
- *         the owner-gated follow-through (the module admin role) plus the TopUpDest drawdown
- *         through the 8h timelock.
- *
  *         Both calls here are ROLE-gated and the Safe holds both roles directly, so this
- *         bundle needs no timelock and is unaffected by the pending RoleRegistry ownership
- *         handover — it can be signed before or after that lands:
+ *         bundle needs NO timelock:
  *
  *           EtherFiDataProvider.configureDefaultModules([module], [true])   DATA_PROVIDER_ADMIN_ROLE
  *           CashModule.configureModulesCanRequestWithdraw([module], [true]) CASH_MODULE_CONTROLLER_ROLE
@@ -32,19 +27,26 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *         `configureDefaultModules(true)` adds to the whitelist AND the default set in one
  *         call, so every existing EtherFiSafe picks the module up without a per-safe tx.
  *
- * @dev PHASE 2 is the separate `GrantStockWithdrawAdminRoleOP3CP.s.sol`, which grants
- *      STOCK_WITHDRAW_MODULE_ADMIN_ROLE to the Safe through the 8h timelock (that grant is
- *      owner-gated, hence the split).
+ * @dev This is one of three independent 3CPs, deliberately not batched:
+ *        - 3CP-646 (this one, OP)  — enable the module. No timelock.
+ *        - 3CP-647 (Ethereum)      — the whole Ethereum leg in one bundle: STOCK_UNWRAPPER_ADMIN_ROLE
+ *                                    to the Safe, plus the raw-stock top-up token configs. No
+ *                                    timelock: the Safe owns the Ethereum RoleRegistry directly,
+ *                                    so both calls are plain Safe transactions.
+ *        - 3CP-648 (OP)            — grant STOCK_WITHDRAW_MODULE_ADMIN_ROLE to the Safe. Two
+ *                                    bundles 8h apart, because `grantRole` on OP is owner-gated
+ *                                    and the owner is the EtherFiTimelock.
  *
- *      Going live before phase 2 completes is deliberate and safe:
- *        - the module's launch config is complete at `initialize` (supported iTOKEN, Ethereum
- *          unwrapper route, measured LZ gas limits, providerFeeBps = 0), all re-asserted below;
+ *      Going live before 3CP-648 completes is deliberate and safe:
+ *        - the module's launch config is complete at `initialize` (all three supported iTOKENs,
+ *          the Ethereum unwrapper route, measured LZ gas limits, providerFeeBps = 0), all
+ *          re-asserted below;
  *        - `pause()` is PAUSER-role gated (NOT the admin role, NOT ownership) and the Safe holds
  *          PAUSER/UNPAUSER, so emergency stop is available immediately.
- *      What waits for phase 2 is only later ADJUSTMENT: `setLzGasLimits`, `configureTokens`,
+ *      What waits for 3CP-648 is only later ADJUSTMENT: `setLzGasLimits`, `configureTokens`,
  *      `configureUnwrappers`, `setProviderFee`. Until the grant lands, nobody can bump the LZ
  *      gas limits — the failure mode that previously stranded a live withdrawal — so treat
- *      phase 2 as launch-critical follow-through, not optional cleanup.
+ *      3CP-648 as launch-critical follow-through, not optional cleanup.
  *
  * Prerequisite: the prod module is deployed and recorded at `.addresses.StockWithdrawModule`
  * in deployments/mainnet/10/deployments.json (DeployStockWithdrawModule.s.sol, ENV=mainnet).
@@ -95,12 +97,17 @@ contract EnableStockWithdrawModuleOP3CP is StockWithdrawConfig, GnosisHelpers {
     ///      also chain 10, so a dev-salt module address landing in the prod file is a real
     ///      failure mode — the CREATE3 salt check is what rules it out.
     function _checkPreconditions() internal view {
+        _assertProdAddresses();
         require(address(module).code.length > 0, "StockWithdrawModule has no code at the recorded address");
-        require(address(module) == _predictAddress(_moduleProxySalt()), "recorded module != Prod.StockWithdraw.StockWithdrawModuleProxy CREATE3 address");
+        require(address(module) == _predictAddress(_moduleProxySalt()), "recorded module != Prod.StockWithdraw.StockWithdrawModuleProxy.V2 CREATE3 address");
         require(address(module.etherFiDataProvider()) == address(dataProvider), "module is bound to a different EtherFiDataProvider");
 
+        // The rails the module is about to be allowed to send over must still be correctly
+        // peered at SIGNING time, not merely at deploy time.
+        _assertAssetRails(true);
+
         // Enabling a module whose own config is empty would ship a dead feature — and with the
-        // admin role not yet granted (phase 2), nothing here can be fixed after the fact. Driven
+        // admin role not yet granted (3CP-648), nothing here can be fixed after the fact. Driven
         // off StockWithdrawConfig._iTokens() so adding an asset there cannot silently ship a
         // module that does not actually support it.
         (address[] memory iTokens,) = _iTokens();
@@ -108,7 +115,7 @@ contract EnableStockWithdrawModuleOP3CP is StockWithdrawConfig, GnosisHelpers {
             require(module.isTokenSupported(iTokens[i]), "module does not support a configured iToken");
         }
         require(module.getSupportedTokens().length == iTokens.length, "module supports a different NUMBER of tokens than configured");
-        require(module.getStockUnwrapper(ETHEREUM_EID) != address(0), "module has no Ethereum unwrapper route");
+        require(module.getStockUnwrapper(ETHEREUM_EID) == _predictAddress(_unwrapperProxySalt()), "module's Ethereum route is not the prod StockUnwrapper");
         (uint128 lzReceiveGas, uint128 composeGas) = module.getLzGasLimits();
         require(lzReceiveGas >= LZ_RECEIVE_GAS_LIMIT, "module lzReceive gas limit below the measured floor");
         require(composeGas >= COMPOSE_GAS_LIMIT, "module compose gas limit below the measured floor");
@@ -143,7 +150,7 @@ contract EnableStockWithdrawModuleOP3CP is StockWithdrawConfig, GnosisHelpers {
         txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(cashModule)), iToHex(canRequestWithdrawData), "0", true));
 
         vm.createDir("./output", true);
-        path = string.concat("./output/3CP-640-EnableStockWithdrawModule-op-", vm.toString(block.chainid), ".json");
+        path = string.concat("./output/3CP-646-EnableStockWithdrawModule-op-", vm.toString(block.chainid), ".json");
         vm.writeFile(path, txs);
         console.log("Wrote", path);
     }
@@ -179,10 +186,10 @@ contract EnableStockWithdrawModuleOP3CP is StockWithdrawConfig, GnosisHelpers {
         console.log("       can request withdrawals on CashModule");
         console.log("  [OK] pause/unpause verified against the live module");
         console.log("");
-        console.log("3CP-640 simulation passed.");
-        console.log("NEXT: 3CP-641 - StockWithdrawGrantAndTopUpDrawdownOP3CP.s.sol grants the module admin");
-        console.log("      role via the 8h timelock (batched with the TopUpDest drawdown). Until it lands");
-        console.log("      the module config is FROZEN (no setLzGasLimits).");
+        console.log("3CP-646 simulation passed.");
+        console.log("NEXT: 3CP-648 - GrantStockWithdrawAdminRoleOP3CP.s.sol grants the module admin role");
+        console.log("      via the 8h timelock. Until it lands the module config is FROZEN (no");
+        console.log("      setLzGasLimits, no configureTokens).");
     }
 
     function _canRequestWithdraw(address target) internal view returns (bool) {

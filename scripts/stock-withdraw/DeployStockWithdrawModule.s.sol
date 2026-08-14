@@ -26,20 +26,25 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
  *         Two-actor flow, selected by ENV:
  *         - ENV=dev:      the broadcaster holds the admin roles (dev admin owns the
  *                         RoleRegistry), so deploys AND wiring are broadcast directly.
- *         - ENV=mainnet:  this script ONLY performs the unprivileged CREATE3 deploys. The
- *                         privileged wiring is NOT emitted here — `grantRole` is owner-gated
- *                         and the RoleRegistry owner is the 8h EtherFiTimelock, so the wiring
- *                         is a two-step schedule -> execute rollout built by
- *                         scripts/gnosis-txs/EnableStockWithdrawModuleOP3CP.s.sol. Keeping one
- *                         source of truth stops a stale single-bundle version of the wiring
- *                         (whose grantRole leg now reverts) from being signed by mistake.
+ *         - ENV=mainnet:  this script ONLY performs the unprivileged CREATE3 deploys. Every
+ *                         privileged call is a separate 3CP with its own generator, so there is
+ *                         exactly one source of truth per bundle and no stale variant can be
+ *                         signed by mistake.
  *
- * Rollout order:
+ * Rollout order (prod):
  *   1. OP:  this script — run with --verify.
- *   2. OP:  prod only — record the proxy at .addresses.StockWithdrawModule in deployments.json,
- *           then EnableStockWithdrawModuleOP3CP.s.sol for the two 3CP bundles (8h apart).
- *   3. ETH: DeployStockUnwrapper — run with --verify (prod: then execute its bundle).
- *   4. Further tokens/adapters/routes are added later via the admin setters.
+ *   2. ETH: DeployStockUnwrapper — run with --verify.
+ *   3. OP:  record the proxy at .addresses.StockWithdrawModule in deployments/mainnet/10, then
+ *           gnosis-txs/EnableStockWithdrawModuleOP3CP.s.sol — one bundle, role-gated, NO
+ *           timelock. The module is live for users at this point: its whole launch config lands
+ *           at `initialize` and `pause()` is PAUSER-gated, which the Safe already holds.
+ *   4. ETH: gnosis-txs/ConfigureStockRailEth3CP.s.sol — one bundle: the StockUnwrapper admin
+ *           grant plus the raw-stock top-up token configs. No timelock — the Safe owns the
+ *           Ethereum RoleRegistry, so both calls are plain Safe transactions.
+ *   5. OP:  gnosis-txs/GrantStockWithdrawAdminRoleOP3CP.s.sol — two bundles 8h apart through
+ *           the EtherFiTimelock, because `grantRole` on OP is owner-gated. Launch-critical
+ *           follow-through: until it lands nobody can call `setLzGasLimits`.
+ *   6. Further tokens/adapters/routes are added after step 5 via the admin setters.
  *
  * Addresses (DataProvider, RoleRegistry, CashModule) are read from
  * deployments/{ENV}/10/deployments.json; everything else comes from StockWithdrawConfig.
@@ -76,6 +81,13 @@ contract DeployStockWithdrawModule is StockWithdrawConfig {
         moduleAdmin = _adminFor(deployerAddress);
         bool isDev = _isDev();
 
+        // Fail before spending gas: the salts must resolve to the pinned prod addresses (the
+        // Ethereum unwrapper bakes THIS module's predicted address into its own init data), and
+        // every asset in the launch set must be a real, correctly-peered rail whose iToken
+        // satisfies the ShadowOFT invariant `_configureTokens` enforces.
+        if (!isDev) _assertProdAddresses();
+        _assertAssetRails(true);
+
         vm.startBroadcast(deployerPk);
         _deploy();
         if (isDev) _wireDirectly();
@@ -85,9 +97,11 @@ contract DeployStockWithdrawModule is StockWithdrawConfig {
         console.log("StockWithdrawModule proxy:", proxy);
 
         if (!isDev) {
+            require(proxy == EXPECTED_PROD_MODULE_PROXY, "prod module did not land at the pinned address");
+            require(impl == EXPECTED_PROD_MODULE_IMPL, "prod module impl did not land at the pinned address");
             console.log("");
             console.log("Next: record the proxy at .addresses.StockWithdrawModule in deployments/mainnet/10/deployments.json,");
-            console.log("then run scripts/gnosis-txs/EnableStockWithdrawModuleOP3CP.s.sol to generate the 3CP wiring bundles.");
+            console.log("then run scripts/gnosis-txs/EnableStockWithdrawModuleOP3CP.s.sol to generate the enable bundle.");
         }
     }
 
