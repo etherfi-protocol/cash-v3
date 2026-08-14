@@ -71,7 +71,7 @@ contract VerifyCashLendProdBytecode is Utils, ContractCodeChecker, CashLendProdC
     address[] private bindingLocal;
     address[] private bindingOnchain;
 
-    function run() public {
+    function run() public virtual {
         require(block.chainid == 10, "Optimism only");
         require(isEqualString(getEnv(), "mainnet"), "ENV must be mainnet");
 

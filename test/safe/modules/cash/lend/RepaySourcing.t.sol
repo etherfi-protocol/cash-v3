@@ -85,6 +85,65 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         assertApproxEqAbs(suppliedBefore - gw.suppliedOf(address(safe), address(usdc)), debt, 2, "repay withdrew only the debt from the supplied pot");
     }
 
+    /// @dev Finds a loose amount near `base` whose repay leaves the live debt above debt - amount. Aave
+    ///      floors the restored shares while debtOf rounds up, so the gap appears only when the flooring
+    ///      loss (amount * RAY mod index) exceeds the debt read's ceiling slack; most amounts leave no gap.
+    ///      Stepping amount by one walks the loss down by (index - RAY), and the first wrap past zero lands
+    ///      it in [RAY, index), above any slack. The gap is then proven on real Aave state, so harness
+    ///      drift cannot quietly turn the callers back into happy-path tests.
+    function _gapLooseUsdc(uint256 base) private returns (uint256) {
+        uint256 index = hub.getAssetDrawnIndex(spoke.getReserve(usdcReserveId).assetId);
+        assertGt(index, 1e27, "no interest accrued, no rounding gap possible");
+        uint256 amount = base + mulmod(base, 1e27, index) / (index - 1e27) + 1;
+
+        uint256 snapshot = vm.snapshotState();
+        deal(address(usdc), address(safe), amount);
+        uint256 debtBefore = gw.debtOf(address(safe), address(usdc));
+        vm.prank(driver);
+        gw.repay(address(safe), address(usdc), amount);
+        assertGt(gw.debtOf(address(safe), address(usdc)), debtBefore - amount, "loose leg leaves no rounding gap: repro broken");
+        vm.revertToState(snapshot);
+        return amount;
+    }
+
+    /// Aave floors the debt shares restored by the loose leg but rounds the remaining asset debt up. The
+    /// supplied leg must therefore use the post-repay debt instead of subtracting the loose amount from the
+    /// pre-repay quote, or the final max-sentinel pull can exceed the Safe's balance by one unit and revert.
+    function test_repayLendTokenAmount_fullDebtFromLooseAndSuppliedAfterAccrual() public {
+        uint256 borrowedUsdc = 1000e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        _supplyToGateway(address(safe), address(usdc), borrowedUsdc);
+        vm.warp(block.timestamp + 30 minutes);
+        uint256 looseUsdc = _gapLooseUsdc(250e6);
+        deal(address(usdc), address(safe), looseUsdc);
+
+        uint256 debtBefore = gw.debtOf(address(safe), address(usdc));
+        assertGt(debtBefore, borrowedUsdc, "interest accrued");
+        assertLt(looseUsdc, debtBefore, "repay uses both loose and supplied legs");
+
+        vm.prank(etherFiWallet);
+        cashModule.repayLendTokenAmount(address(safe), address(usdc), type(uint256).max);
+
+        assertEq(gw.debtOf(address(safe), address(usdc)), 0, "full debt cleared after split repayment");
+    }
+
+    /// The USD-denominated entry point shares the same accrued mixed-pot full-repay behavior.
+    function test_repay_fullDebtFromLooseAndSuppliedAfterAccrual() public {
+        uint256 borrowedUsdc = 1000e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        _supplyToGateway(address(safe), address(usdc), borrowedUsdc);
+        vm.warp(block.timestamp + 30 minutes);
+        uint256 looseUsdc = _gapLooseUsdc(250e6);
+        deal(address(usdc), address(safe), looseUsdc);
+
+        uint256 debt = gw.debtOf(address(safe), address(usdc));
+        uint256 debtUsd = debtManager.convertCollateralTokenToUsd(address(usdc), debt);
+        vm.prank(etherFiWallet);
+        cashModule.repay(address(safe), address(usdc), debtUsd + 1e6);
+
+        assertEq(gw.debtOf(address(safe), address(usdc)), 0, "USD full repay clears accrued split debt");
+    }
+
     /// An over-repay is capped at the open debt and the event reports the capped USD value, not the
     /// requested one.
     function test_repay_overRepay_emitsCappedUsd() public {
@@ -191,6 +250,26 @@ contract RepaySourcingTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), 0, 3, "debt repaid");
         assertEq(usdc.balanceOf(address(safe)), reservedUsdc, "reserved loose untouched");
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), reservedUsdc, "withdrawal request survived");
+    }
+
+    /// Covering the post-loose-leg rounding gap must not consume or cancel an existing withdrawal
+    /// reservation: the pre-fix sentinel pull funded its one-unit gap from the reserved balance.
+    function test_repayLendTokenAmount_accruedFullRepayPreservesReservedLoose() public {
+        uint256 borrowedUsdc = 1000e6;
+        uint256 reservedUsdc = 100e6;
+        _buildGatewayPosition(address(safe), address(weETH), 5 ether, address(usdc), borrowedUsdc);
+        _supplyToGateway(address(safe), address(usdc), borrowedUsdc);
+        vm.warp(block.timestamp + 30 minutes);
+        uint256 unreservedUsdc = _gapLooseUsdc(250e6);
+        deal(address(usdc), address(safe), unreservedUsdc + reservedUsdc);
+        _requestWithdrawal(_addr1(address(usdc)), _uint1(reservedUsdc), withdrawRecipient);
+
+        vm.prank(etherFiWallet);
+        cashModule.repayLendTokenAmount(address(safe), address(usdc), type(uint256).max);
+
+        assertEq(gw.debtOf(address(safe), address(usdc)), 0, "full debt cleared");
+        assertEq(usdc.balanceOf(address(safe)), reservedUsdc, "reserved loose remains in the Safe");
+        assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), reservedUsdc, "withdrawal request survives");
     }
 
     /// With no supplied balance to draw on, the repay wins the competing claim: the withdrawal request is

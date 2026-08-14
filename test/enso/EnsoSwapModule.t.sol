@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Vm } from "forge-std/Vm.sol";
 
+import { UUPSProxy } from "../../src/UUPSProxy.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
 
 /// @dev Mock Enso Router for the forward-calldata path: when called with the encoded
@@ -19,21 +20,17 @@ contract EnsoRouterStub {
     address public lastCaller;
     uint256 public pulled;
     uint256 public callCount;
+    uint256 public lastValue;
 
-    function swap(address token, uint256 amount) external {
+    function swap(address token, uint256 amount) external payable {
         lastCaller = msg.sender;
         IERC20(token).transferFrom(msg.sender, address(this), amount);
         pulled = amount;
+        lastValue = msg.value;
         callCount++;
     }
 
-    function swapTo(
-        address srcToken,
-        uint256 srcAmount,
-        address dstToken,
-        address recipient,
-        uint256 dstAmount
-    ) external {
+    function swapTo(address srcToken, uint256 srcAmount, address dstToken, address recipient, uint256 dstAmount) external {
         lastCaller = msg.sender;
         IERC20(srcToken).transferFrom(msg.sender, address(this), srcAmount);
         IERC20(dstToken).transfer(recipient, dstAmount);
@@ -41,12 +38,7 @@ contract EnsoRouterStub {
         callCount++;
     }
 
-    function swapToNative(
-        address srcToken,
-        uint256 srcAmount,
-        address payable recipient,
-        uint256 dstAmount
-    ) external {
+    function swapToNative(address srcToken, uint256 srcAmount, address payable recipient, uint256 dstAmount) external {
         lastCaller = msg.sender;
         IERC20(srcToken).transferFrom(msg.sender, address(this), srcAmount);
         (bool success,) = recipient.call{ value: dstAmount }("");
@@ -55,7 +47,7 @@ contract EnsoRouterStub {
         callCount++;
     }
 
-    receive() external payable {}
+    receive() external payable { }
 }
 
 contract EnsoSwapModuleTest is SafeTestSetup {
@@ -68,8 +60,9 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     address internal recipient = makeAddr("recipient");
 
     uint256 internal constant DST_CHAIN = 1;
-    uint256 internal constant SRC_AMOUNT = 1_000e6;
+    uint256 internal constant SRC_AMOUNT = 1000e6;
     uint256 internal constant MIN_OUT = 990_000_000_000_000;
+    uint256 internal constant NATIVE_FEE = 0.001 ether;
     address internal constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     function setUp() public override {
@@ -77,14 +70,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
 
         ensoRouter = new EnsoRouterStub();
         address moduleImpl = address(new EnsoSwapModule(address(dataProvider)));
-        module = EnsoSwapModule(address(new UUPSProxy(
-            moduleImpl,
-            abi.encodeWithSelector(
-                EnsoSwapModule.initialize.selector,
-                address(roleRegistry),
-                address(ensoRouter)
-            )
-        )));
+        module = EnsoSwapModule(address(new UUPSProxy(moduleImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), address(ensoRouter)))));
 
         address[] memory mods = new address[](1);
         mods[0] = address(module);
@@ -129,10 +115,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     function test_initialize_revertsOnZeroConfig() public {
         address impl = address(new EnsoSwapModule(address(dataProvider)));
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        new UUPSProxy(impl, abi.encodeWithSelector(
-            EnsoSwapModule.initialize.selector,
-            address(roleRegistry), address(0)
-        ));
+        new UUPSProxy(impl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), address(0)));
     }
 
     // ---- requestSwap ----
@@ -148,6 +131,58 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         assertEq(module.getSwap(address(safe)).swapData, swapData);
         assertEq(module.getSwap(address(safe)).target, address(ensoRouter));
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(module));
+    }
+
+    function test_requestSwapWithNativeFee_storesSignedFeeAndPlacesHold() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, NATIVE_FEE);
+
+        module.requestSwapWithNativeFee(address(safe), order, swapData, NATIVE_FEE, signers, sigs);
+
+        assertEq(module.getSwap(address(safe)).nativeFee, NATIVE_FEE);
+        assertEq(address(module).balance, 0, "delayed fee must not be escrowed");
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(module));
+    }
+
+    function test_requestSwapWithNativeFee_revertsWhenFeeIsZero() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, 0);
+
+        vm.expectRevert(EnsoSwapModule.InvalidNativeFee.selector);
+        module.requestSwapWithNativeFee(address(safe), order, swapData, 0, signers, sigs);
+    }
+
+    function test_requestSwapWithNativeFee_revertsForSameChainNativeOutputToSafe() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.dstChainId = block.chainid;
+        order.dstToken = NATIVE_TOKEN;
+        order.recipient = address(safe);
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, NATIVE_FEE);
+
+        vm.expectRevert(EnsoSwapModule.InvalidNativeFee.selector);
+        module.requestSwapWithNativeFee(address(safe), order, swapData, NATIVE_FEE, signers, sigs);
+    }
+
+    function test_requestSwapWithNativeFee_revertsWhenDelayedFeeIsSentAtRequest() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, NATIVE_FEE);
+        deal(address(this), NATIVE_FEE);
+
+        vm.expectRevert(EnsoSwapModule.InvalidNativeFee.selector);
+        module.requestSwapWithNativeFee{ value: NATIVE_FEE }(address(safe), order, swapData, NATIVE_FEE, signers, sigs);
+    }
+
+    function test_requestSwapWithNativeFee_revertsWhenSignedFeeIsChanged() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, NATIVE_FEE);
+
+        vm.expectRevert(EnsoSwapModule.InvalidSignatures.selector);
+        module.requestSwapWithNativeFee(address(safe), order, swapData, NATIVE_FEE + 1, signers, sigs);
     }
 
     function test_requestSwap_revertsOnEmptySwapData() public {
@@ -239,6 +274,36 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         assertEq(usdc.allowance(address(safe), address(ensoRouter)), 0);
     }
 
+    function test_executeSwap_forwardsExactKeeperFundedNativeFee() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        _requestWithNativeFee(order, NATIVE_FEE);
+        _warpPastDelay();
+        deal(keeper, NATIVE_FEE);
+        uint256 safeBalanceBefore = address(safe).balance;
+
+        vm.prank(keeper);
+        module.executeSwap{ value: NATIVE_FEE }(address(safe));
+
+        assertEq(ensoRouter.lastValue(), NATIVE_FEE);
+        assertEq(ensoRouter.lastCaller(), address(safe));
+        assertEq(address(safe).balance, safeBalanceBefore, "safe must not subsidize fee");
+        assertEq(address(module).balance, 0, "module must not retain fee");
+    }
+
+    function test_executeSwap_revertsWhenKeeperFeeDoesNotMatchSignedFee() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        _requestWithNativeFee(order, NATIVE_FEE);
+        _warpPastDelay();
+        deal(keeper, NATIVE_FEE - 1);
+
+        vm.prank(keeper);
+        vm.expectRevert(EnsoSwapModule.InvalidNativeFee.selector);
+        module.executeSwap{ value: NATIVE_FEE - 1 }(address(safe));
+
+        assertEq(module.getSwap(address(safe)).nativeFee, NATIVE_FEE, "order should remain active");
+        assertEq(ensoRouter.callCount(), 0, "router must not be called");
+    }
+
     function test_executeSwap_usesRouterSnapshottedAtRequest() public {
         _request(_baseOrder());
 
@@ -274,10 +339,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         EnsoSwapModule.Order memory order = _baseOrder();
         order.dstChainId = block.chainid;
         order.dstToken = address(dstToken);
-        bytes memory swapData = abi.encodeCall(
-            EnsoRouterStub.swapTo,
-            (address(usdc), SRC_AMOUNT, address(dstToken), recipient, outputAmount)
-        );
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swapTo, (address(usdc), SRC_AMOUNT, address(dstToken), recipient, outputAmount));
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
         module.requestSwap(address(safe), order, swapData, signers, sigs);
         _warpPastDelay();
@@ -295,10 +357,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         EnsoSwapModule.Order memory order = _baseOrder();
         order.dstChainId = block.chainid;
         order.dstToken = address(dstToken);
-        bytes memory swapData = abi.encodeCall(
-            EnsoRouterStub.swapTo,
-            (address(usdc), SRC_AMOUNT, address(dstToken), recipient, outputAmount)
-        );
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swapTo, (address(usdc), SRC_AMOUNT, address(dstToken), recipient, outputAmount));
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
         module.requestSwap(address(safe), order, swapData, signers, sigs);
         _warpPastDelay();
@@ -319,10 +378,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         EnsoSwapModule.Order memory order = _baseOrder();
         order.dstChainId = block.chainid;
         order.dstToken = address(dstToken);
-        bytes memory swapData = abi.encodeCall(
-            EnsoRouterStub.swapTo,
-            (address(usdc), SRC_AMOUNT, address(dstToken), wrongRecipient, MIN_OUT)
-        );
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swapTo, (address(usdc), SRC_AMOUNT, address(dstToken), wrongRecipient, MIN_OUT));
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
         module.requestSwap(address(safe), order, swapData, signers, sigs);
         _warpPastDelay();
@@ -340,10 +396,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         EnsoSwapModule.Order memory order = _baseOrder();
         order.dstChainId = block.chainid;
         order.dstToken = NATIVE_TOKEN;
-        bytes memory swapData = abi.encodeCall(
-            EnsoRouterStub.swapToNative,
-            (address(usdc), SRC_AMOUNT, payable(recipient), MIN_OUT)
-        );
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swapToNative, (address(usdc), SRC_AMOUNT, payable(recipient), MIN_OUT));
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
         module.requestSwap(address(safe), order, swapData, signers, sigs);
         _warpPastDelay();
@@ -379,6 +432,23 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     function test_executeSwap_revertsBeforeWithdrawalDelayMatures() public {
         _request(_baseOrder());
         _expectExecuteRevert(EnsoSwapModule.WithdrawalDelayNotElapsed.selector, keeper);
+    }
+
+    function test_requestSwapWithNativeFee_executesImmediatelyWithoutCashModule() public {
+        EnsoSwapModule immediateModule = _deployImmediateModule();
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(immediateModule, order, swapData, NATIVE_FEE);
+        deal(address(this), NATIVE_FEE);
+        uint256 safeBalanceBefore = address(safe).balance;
+
+        immediateModule.requestSwapWithNativeFee{ value: NATIVE_FEE }(address(safe), order, swapData, NATIVE_FEE, signers, sigs);
+
+        assertEq(ensoRouter.lastValue(), NATIVE_FEE);
+        assertEq(ensoRouter.lastCaller(), address(safe));
+        assertEq(address(safe).balance, safeBalanceBefore, "safe must not subsidize fee");
+        assertEq(address(immediateModule).balance, 0, "module must not retain fee");
+        assertEq(immediateModule.getOrder(address(safe)).srcToken, address(0));
     }
 
     // ---- cancelSwap ----
@@ -433,11 +503,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         module.cancelExpiredSwap(address(safe));
 
         assertEq(module.getOrder(address(safe)).srcToken, address(0), "order not cleared");
-        assertEq(
-            cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient,
-            address(0),
-            "hold not cleared"
-        );
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0), "hold not cleared");
     }
 
     function test_cancelExpiredSwap_revertsForNoActiveOrder() public {
@@ -550,15 +616,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     // ---- Helpers ----
 
     function _baseOrder() internal returns (EnsoSwapModule.Order memory) {
-        return EnsoSwapModule.Order({
-            srcToken: address(usdc),
-            srcAmount: SRC_AMOUNT,
-            dstChainId: DST_CHAIN,
-            dstToken: makeAddr("dstToken"),
-            recipient: recipient,
-            minOut: MIN_OUT,
-            deadline: block.timestamp + 1 hours
-        });
+        return EnsoSwapModule.Order({ srcToken: address(usdc), srcAmount: SRC_AMOUNT, dstChainId: DST_CHAIN, dstToken: makeAddr("dstToken"), recipient: recipient, minOut: MIN_OUT, deadline: block.timestamp + 1 hours });
     }
 
     /// @dev Enso calldata the mock router understands: pull `amount` of usdc from the safe.
@@ -566,30 +624,18 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         return abi.encodeWithSelector(EnsoRouterStub.swap.selector, address(usdc), amount);
     }
 
-    function _signRequest(EnsoSwapModule.Order memory order, bytes memory swapData)
-        internal view returns (address[] memory, bytes[] memory)
-    {
-        bytes32 digest = keccak256(abi.encodePacked(
-            keccak256("EnsoSwapModule.requestSwap"),
-            block.chainid,
-            address(module),
-            safe.nonce(),
-            address(safe),
-            abi.encode(order),
-            keccak256(swapData),
-            module.getEnsoRouter()
-        )).toEthSignedMessageHash();
+    function _signRequest(EnsoSwapModule.Order memory order, bytes memory swapData) internal view returns (address[] memory, bytes[] memory) {
+        bytes32 digest = keccak256(abi.encodePacked(keccak256("EnsoSwapModule.requestSwap"), block.chainid, address(module), safe.nonce(), address(safe), abi.encode(order), keccak256(swapData), module.getEnsoRouter())).toEthSignedMessageHash();
+        return _twoSig(digest);
+    }
+
+    function _signNativeFeeRequest(EnsoSwapModule targetModule, EnsoSwapModule.Order memory order, bytes memory swapData, uint256 nativeFee) internal view returns (address[] memory, bytes[] memory) {
+        bytes32 digest = keccak256(abi.encodePacked(keccak256("EnsoSwapModule.requestSwapWithNativeFee"), block.chainid, address(targetModule), safe.nonce(), address(safe), abi.encode(order), keccak256(swapData), targetModule.getEnsoRouter(), nativeFee)).toEthSignedMessageHash();
         return _twoSig(digest);
     }
 
     function _signCancel() internal view returns (address[] memory, bytes[] memory) {
-        bytes32 digest = keccak256(abi.encodePacked(
-            keccak256("EnsoSwapModule.cancelSwap"),
-            block.chainid,
-            address(module),
-            safe.nonce(),
-            address(safe)
-        )).toEthSignedMessageHash();
+        bytes32 digest = keccak256(abi.encodePacked(keccak256("EnsoSwapModule.cancelSwap"), block.chainid, address(module), safe.nonce(), address(safe))).toEthSignedMessageHash();
         return _twoSig(digest);
     }
 
@@ -611,8 +657,36 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         module.requestSwap(address(safe), order, swapData, signers, sigs);
     }
 
+    function _requestWithNativeFee(EnsoSwapModule.Order memory order, uint256 nativeFee) internal {
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, nativeFee);
+        module.requestSwapWithNativeFee(address(safe), order, swapData, nativeFee, signers, sigs);
+    }
+
+    function _deployImmediateModule() internal returns (EnsoSwapModule immediateModule) {
+        address[] memory seedModules = new address[](1);
+        seedModules[0] = address(module);
+        EtherFiDataProvider.InitParams memory params =
+            EtherFiDataProvider.InitParams({ _roleRegistry: address(roleRegistry), _cashModule: address(0), _cashLens: address(0), _modules: seedModules, _defaultModules: seedModules, _hook: address(0), _etherFiSafeFactory: dataProvider.getEtherFiSafeFactory(), _priceProvider: dataProvider.getPriceProvider(), _etherFiRecoverySigner: dataProvider.getEtherFiRecoverySigner(), _thirdPartyRecoverySigner: dataProvider.getThirdPartyRecoverySigner(), _refundWallet: dataProvider.getRefundWallet() });
+        address immediateDataProviderImpl = address(new EtherFiDataProvider());
+        EtherFiDataProvider immediateDataProvider = EtherFiDataProvider(address(new UUPSProxy(immediateDataProviderImpl, abi.encodeCall(EtherFiDataProvider.initialize, (params)))));
+
+        address immediateModuleImpl = address(new EnsoSwapModule(address(immediateDataProvider)));
+        immediateModule = EnsoSwapModule(address(new UUPSProxy(immediateModuleImpl, abi.encodeCall(EnsoSwapModule.initialize, (address(roleRegistry), address(ensoRouter))))));
+
+        address[] memory modules = new address[](1);
+        modules[0] = address(immediateModule);
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+        bytes[] memory setupData = new bytes[](1);
+
+        vm.prank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        _configureModules(modules, shouldWhitelist, setupData);
+    }
+
     function _warpPastDelay() internal {
-        (uint64 withdrawalDelay, , ) = cashModule.getDelays();
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
         vm.warp(block.timestamp + withdrawalDelay + 1);
     }
 
