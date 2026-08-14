@@ -24,7 +24,7 @@ import { IRoleRegistry } from "../src/interfaces/IRoleRegistry.sol";
  */
 contract ConfigureCCTPModuleOptimismDev is Utils {
     // OP dev deploy — see broadcast/DeployCCTPModule.s.sol/10/run-latest.json
-    address constant CCTP_MODULE = 0x2C8fA5677160a6Ca98E93a5e1d38275E276c4578;
+    address constant CCTP_MODULE = 0xADD5ab3E0C247D49e8a16e0144c770899d2f002D;
     address constant USDC        = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
 
     // Allowed destination CCTP domains for dev. Domains per Circle docs:
