@@ -8,7 +8,7 @@ import { CCTPModule } from "../src/modules/cctp/CCTPModule.sol";
 
 /**
  * @notice Deploys CCTPModule to OP. Post-deploy wiring (grant role, configureModules on
- *         dataProvider + cashModule, setAllowedDomains) is done via governance, matching
+ *         dataProvider + cashModule, setAllowedRoutes) is done via governance, matching
  *         DeployStargateModule's split.
  */
 contract DeployCCTPModule is Utils {

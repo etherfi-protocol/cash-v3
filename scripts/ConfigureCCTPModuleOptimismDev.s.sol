@@ -19,12 +19,13 @@ import { IRoleRegistry } from "../src/interfaces/IRoleRegistry.sol";
  *        1. dataProvider.configureDefaultModules([cctp], [true])       // auto-enable on new safes
  *        2. cashModule.configureModulesCanRequestWithdraw([cctp], [true])
  *        3. roleRegistry.grantRole(CCTP_MODULE_ADMIN_ROLE, admin)
- *        4. cctp.setAllowedDomains([0, 6], [true, true])               // ETH + Base (FE-wired dests)
+ *        4. cctp.setAllowedRoutes(USDC, [0, 6], [true, true])          // ETH + Base (FE-wired dests)
  *        5. cctp.setproviderFeeRecipient(providerFeeRecipient)         // mandatory: providerFeeBps=50 baked in
  */
 contract ConfigureCCTPModuleOptimismDev is Utils {
     // OP dev deploy — see broadcast/DeployCCTPModule.s.sol/10/run-latest.json
     address constant CCTP_MODULE = 0x2C8fA5677160a6Ca98E93a5e1d38275E276c4578;
+    address constant USDC        = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
 
     // Allowed destination CCTP domains for dev. Domains per Circle docs:
     //   0=ETH, 1=Avax, 2=OP (source), 3=Arb, 6=Base, 7=Polygon, 10=Unichain, 11=Linea.
@@ -81,8 +82,8 @@ contract ConfigureCCTPModuleOptimismDev is Utils {
         bool[] memory allowed = new bool[](2);
         allowed[0] = true;
         allowed[1] = true;
-        CCTPModule(CCTP_MODULE).setAllowedDomains(domains, allowed);
-        console.log("[4/5] setAllowedDomains -> ok");
+        CCTPModule(CCTP_MODULE).setAllowedRoutes(USDC, domains, allowed);
+        console.log("[4/5] setAllowedRoutes(USDC) -> ok");
 
         // 5. Set provider fee recipient — mandatory because deploy set providerFeeBps = 50 (0.5%).
         //    Without this, requestBridge reverts with providerFeeRecipientNotSet.

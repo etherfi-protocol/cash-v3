@@ -8,13 +8,14 @@ import { Vm } from "forge-std/Vm.sol";
 import { CCTPModule } from "../../../../src/modules/cctp/CCTPModule.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ICCTPTokenMessenger } from "../../../../src/interfaces/ICCTPTokenMessenger.sol";
+import { ICCTPTokenMinter } from "../../../../src/interfaces/ICCTPTokenMinter.sol";
 import { ICashModule, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 
-/// @dev Mock TokenMessenger: records the last depositForBurn call so tests can assert the burn payload.
-contract MockTokenMessenger is ICCTPTokenMessenger {
+/// @dev Mock TokenMessenger + Minter. Default burn cap = uint256.max.
+contract MockTokenMessenger is ICCTPTokenMessenger, ICCTPTokenMinter {
     struct Call {
         uint256 amount;
         uint32 destDomain;
@@ -26,6 +27,7 @@ contract MockTokenMessenger is ICCTPTokenMessenger {
     }
     Call public last;
     uint256 public calls;
+    mapping(address => uint256) public limits;
 
     function depositForBurn(
         uint256 amount,
@@ -41,6 +43,19 @@ contract MockTokenMessenger is ICCTPTokenMessenger {
         last = Call(amount, destinationDomain, mintRecipient, burnToken, destinationCaller, maxFee, minFinalityThreshold);
         calls++;
     }
+
+    function localMinter() external view returns (address) {
+        return address(this);
+    }
+
+    function burnLimitsPerMessage(address token) external view returns (uint256) {
+        uint256 l = limits[token];
+        return l == 0 ? type(uint256).max : l;
+    }
+
+    function setBurnLimit(address token, uint256 limit) external {
+        limits[token] = limit;
+    }
 }
 
 contract CCTPModuleTest is SafeTestSetup {
@@ -49,11 +64,10 @@ contract CCTPModuleTest is SafeTestSetup {
     CCTPModule cctpModule;
     MockTokenMessenger messenger;
 
-    uint32 destDomain = 6; // arbitrary
-    // Finality is now signed per-request; maxFeeBps is admin ceiling.
-    uint32 cfgFinality = 1000;   // Fast, to exercise a non-zero fee
-    uint256 cfgMaxFeeBps = 5;    // 0.05%
-    address destRecipientAddr = makeAddr("destRecipient");
+    uint32 destDomain = 6;
+    uint32 cfgFinality = 1000;
+    uint256 cfgMaxFeeBps = 5;
+    bytes32 destRecipient = bytes32(uint256(uint160(makeAddr("destRecipient"))));
 
     function _expectedMaxFee(uint256 amount) internal view returns (uint256) {
         return (amount * cfgMaxFeeBps) / cctpModule.MAX_BPS();
@@ -91,19 +105,24 @@ contract CCTPModuleTest is SafeTestSetup {
         ok[0] = true;
         vm.startPrank(owner);
         roleRegistry.grantRole(adminRole, owner);
-        cctpModule.setAllowedDomains(doms, ok);
+        cctpModule.setAllowedRoutes(address(usdc), doms, ok);
         vm.stopPrank();
     }
 
     // ───────────────────────── helpers ─────────────────────────
 
     function _params(uint256 amount) internal view returns (CCTPModule.BridgeParams memory) {
+        CCTPModule.AssetConfig memory cfg = cctpModule.getAssetConfig(address(usdc));
         return CCTPModule.BridgeParams({
             destDomain: destDomain,
             asset: address(usdc),
             amount: amount,
-            destRecipient: destRecipientAddr,
-            finalityThreshold: cfgFinality
+            destRecipient: destRecipient,
+            finalityThreshold: cfgFinality,
+            tokenMessenger: cfg.tokenMessenger,
+            maxFeeBps: cfg.maxFeeBps,
+            providerFeeBps: cfg.providerFeeBps,
+            providerFeeRecipient: cctpModule.getproviderFeeRecipient()
         });
     }
 
@@ -159,14 +178,14 @@ contract CCTPModuleTest is SafeTestSetup {
         signatures[1] = abi.encodePacked(r2, s2, v2);
     }
 
-    function _assertBridgeCancelledOnce(uint256 expectedAmount, address expectedRecipient) internal {
+    function _assertBridgeCancelledOnce(uint256 expectedAmount, bytes32 expectedRecipient) internal {
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 cancelSig = keccak256("BridgeCancelled(address,uint32,address,uint256,address)");
+        bytes32 cancelSig = keccak256("BridgeCancelled(address,uint32,address,uint256,bytes32)");
         uint256 cancelCount;
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].emitter == address(cctpModule) && logs[i].topics[0] == cancelSig) {
                 cancelCount++;
-                (uint256 emittedAmount, address emittedRecipient) = abi.decode(logs[i].data, (uint256, address));
+                (uint256 emittedAmount, bytes32 emittedRecipient) = abi.decode(logs[i].data, (uint256, bytes32));
                 assertEq(emittedAmount, expectedAmount);
                 assertEq(emittedRecipient, expectedRecipient);
             }
@@ -176,13 +195,13 @@ contract CCTPModuleTest is SafeTestSetup {
 
     // ───────────────────────── config ─────────────────────────
 
-    function test_setAllowedDomains_nonAdminReverts() public {
+    function test_setAllowedRoutes_nonAdminReverts() public {
         uint32[] memory doms = new uint32[](1);
         doms[0] = 42;
         bool[] memory ok = new bool[](1);
         ok[0] = true;
         vm.expectRevert(CCTPModule.Unauthorized.selector);
-        cctpModule.setAllowedDomains(doms, ok);
+        cctpModule.setAllowedRoutes(address(usdc), doms, ok);
     }
 
     function test_requestBridge_invalidFinalityThresholdReverts() public {
@@ -386,18 +405,164 @@ contract CCTPModuleTest is SafeTestSetup {
         cctpModule.setAssetConfig(assets, cfgs);
     }
 
+    function test_setAssetConfig_validatesBpsOnRemoval() public {
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+        CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(0), maxFeeBps: 10_000, providerFeeBps: 0 });
+        vm.prank(owner);
+        vm.expectRevert(CCTPModule.MaxFeeBpsTooHigh.selector);
+        cctpModule.setAssetConfig(assets, cfgs);
+    }
+
+    function test_getproviderFee_revertsUnsupportedAsset() public {
+        vm.expectRevert(CCTPModule.UnsupportedAsset.selector);
+        cctpModule.getproviderFee(makeAddr("random"), 100e6);
+    }
+
+    function test_getBridgeFee_revertsUnsupportedAsset() public {
+        vm.expectRevert(CCTPModule.UnsupportedAsset.selector);
+        cctpModule.getBridgeFee(makeAddr("random"), 100e6, cfgFinality);
+    }
+
     // ───────────────────────── request validation ─────────────────────────
 
-    function test_requestBridge_unsupportedDomainReverts() public {
+    function test_requestBridge_unsupportedRouteReverts() public {
         CCTPModule.BridgeParams memory p = _params(100e6);
         p.destDomain = 999;
-        vm.expectRevert(CCTPModule.UnsupportedDomain.selector);
+        vm.expectRevert(CCTPModule.UnsupportedRoute.selector);
         cctpModule.requestBridge(address(safe), p, new address[](0), new bytes[](0));
+    }
+
+    function test_requestBridge_revertsWhenRouteAllowedForOtherAssetOnly() public {
+        // Configure a second asset with the SAME token messenger, allow it on `destDomain`,
+        // but do NOT allow USDC on `destDomain` via setAllowedRoutes for a fresh domain.
+        address otherAsset = address(usdt);
+        address[] memory assets = new address[](1);
+        assets[0] = otherAsset;
+        CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), maxFeeBps: 5, providerFeeBps: 0 });
+        vm.startPrank(owner);
+        cctpModule.setAssetConfig(assets, cfgs);
+        uint32[] memory doms = new uint32[](1);
+        doms[0] = 42;
+        bool[] memory ok = new bool[](1);
+        ok[0] = true;
+        cctpModule.setAllowedRoutes(otherAsset, doms, ok);
+        vm.stopPrank();
+
+        assertTrue(cctpModule.isRouteAllowed(otherAsset, 42));
+        assertFalse(cctpModule.isRouteAllowed(address(usdc), 42));
+
+        CCTPModule.BridgeParams memory p = _params(100e6);
+        p.destDomain = 42;
+        vm.expectRevert(CCTPModule.UnsupportedRoute.selector);
+        cctpModule.requestBridge(address(safe), p, new address[](0), new bytes[](0));
+    }
+
+    function test_requestBridge_revertsWhenTokenMessengerDrifted() public {
+        deal(address(usdc), address(safe), 100e6);
+        CCTPModule.BridgeParams memory p = _params(100e6);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+
+        MockTokenMessenger newMessenger = new MockTokenMessenger();
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+        CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(newMessenger), maxFeeBps: cfgMaxFeeBps, providerFeeBps: 0 });
+        vm.prank(owner);
+        cctpModule.setAssetConfig(assets, cfgs);
+
+        vm.expectRevert(CCTPModule.ConfigChangedSinceSigning.selector);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+    }
+
+    function test_requestBridge_revertsWhenMaxFeeBpsDrifted() public {
+        deal(address(usdc), address(safe), 100e6);
+        CCTPModule.BridgeParams memory p = _params(100e6);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+        CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
+        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), maxFeeBps: cfgMaxFeeBps + 1, providerFeeBps: 0 });
+        vm.prank(owner);
+        cctpModule.setAssetConfig(assets, cfgs);
+
+        vm.expectRevert(CCTPModule.ConfigChangedSinceSigning.selector);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+    }
+
+    function test_requestBridge_revertsWhenProviderFeeBpsDrifted() public {
+        deal(address(usdc), address(safe), 100e6);
+        CCTPModule.BridgeParams memory p = _params(100e6);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+
+        _configureproviderFee(25, makeAddr("feeRecipient"));
+
+        vm.expectRevert(CCTPModule.ConfigChangedSinceSigning.selector);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+    }
+
+    function test_requestBridge_revertsWhenProviderFeeRecipientDrifted() public {
+        _configureproviderFee(50, makeAddr("originalRecipient"));
+        deal(address(usdc), address(safe), 100e6);
+        CCTPModule.BridgeParams memory p = _params(100e6);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+
+        vm.prank(owner);
+        cctpModule.setproviderFeeRecipient(makeAddr("newRecipient"));
+
+        vm.expectRevert(CCTPModule.ConfigChangedSinceSigning.selector);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+    }
+
+    function test_executeBridge_revertsIfCctpLimitTightenedAfterRequest() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+        CCTPModule.BridgeParams memory p = _params(amount);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        messenger.setBurnLimit(address(usdc), amount - 1);
+        (uint64 delay, , ) = cashModule.getDelays();
+        vm.warp(block.timestamp + delay);
+
+        vm.expectRevert(abi.encodeWithSelector(CCTPModule.BurnExceedsCctpLimit.selector, amount, amount - 1));
+        cctpModule.executeBridge(address(safe));
+    }
+
+    function test_requestBridge_acceptsNonEvmRecipient() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+        bytes32 solanaRecipient = keccak256("some-solana-pubkey");
+        CCTPModule.BridgeParams memory p = _params(amount);
+        p.destRecipient = solanaRecipient;
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        (uint64 delay, , ) = cashModule.getDelays();
+        vm.warp(block.timestamp + delay);
+        cctpModule.executeBridge(address(safe));
+
+        (, , bytes32 r, , , , ) = messenger.last();
+        assertEq(r, solanaRecipient);
+    }
+
+    function test_setAllowedRoutes_zeroAssetReverts() public {
+        uint32[] memory doms = new uint32[](1);
+        doms[0] = 1;
+        bool[] memory ok = new bool[](1);
+        ok[0] = true;
+        vm.prank(owner);
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        cctpModule.setAllowedRoutes(address(0), doms, ok);
     }
 
     function test_requestBridge_invalidInputReverts() public {
         CCTPModule.BridgeParams memory p = _params(100e6);
-        p.destRecipient = address(0);
+        p.destRecipient = bytes32(0);
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         cctpModule.requestBridge(address(safe), p, new address[](0), new bytes[](0));
 
@@ -441,7 +606,7 @@ contract CCTPModuleTest is SafeTestSetup {
     function test_requestBridge_replacesPendingBridge() public {
         uint256 firstAmount = 100e6;
         uint256 secondAmount = 80e6;
-        address newRecipient = makeAddr("newDestRecipient");
+        bytes32 newRecipient = bytes32(uint256(uint160(makeAddr("newDestRecipient"))));
 
         deal(address(usdc), address(safe), firstAmount);
 
@@ -454,7 +619,7 @@ contract CCTPModuleTest is SafeTestSetup {
         (address[] memory s2, bytes[] memory sigs2) = _sign(second);
         vm.recordLogs();
         cctpModule.requestBridge(address(safe), second, s2, sigs2);
-        _assertBridgeCancelledOnce(firstAmount, destRecipientAddr);
+        _assertBridgeCancelledOnce(firstAmount, destRecipient);
 
         WithdrawalRequest memory wr = cashModule.getData(address(safe)).pendingWithdrawalRequest;
         assertEq(wr.tokens[0], address(usdc));
@@ -472,7 +637,7 @@ contract CCTPModuleTest is SafeTestSetup {
         assertEq(messenger.calls(), 1);
         (uint256 burned, , bytes32 mintRecipient, , , , ) = messenger.last();
         assertEq(burned, secondAmount);
-        assertEq(mintRecipient, bytes32(uint256(uint160(newRecipient))));
+        assertEq(mintRecipient, newRecipient);
         assertEq(usdc.balanceOf(address(messenger)), secondAmount);
     }
 
@@ -493,7 +658,7 @@ contract CCTPModuleTest is SafeTestSetup {
         assertEq(w.destDomain, destDomain);
         assertEq(w.asset, address(usdc));
         assertEq(w.amount, amount);
-        assertEq(w.destRecipient, destRecipientAddr);
+        assertEq(w.destRecipient, destRecipient);
         // snapshot of admin config
         assertEq(w.tokenMessenger, address(messenger));
         assertEq(w.maxFee, _expectedMaxFee(amount));
@@ -530,11 +695,61 @@ contract CCTPModuleTest is SafeTestSetup {
         (uint256 a, uint32 d, bytes32 r, address t, bytes32 dc, uint256 mf, uint32 mft) = messenger.last();
         assertEq(a, amount);
         assertEq(d, destDomain);
-        assertEq(r, bytes32(uint256(uint160(destRecipientAddr))));
+        assertEq(r, destRecipient);
         assertEq(t, address(usdc));
         assertEq(dc, bytes32(0));
         assertEq(mf, _expectedMaxFee(amount));
         assertEq(mft, cfgFinality);
+    }
+
+    function test_requestBridge_revertsWhenBurnExceedsCctpLimit() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+        messenger.setBurnLimit(address(usdc), amount - 1);
+
+        CCTPModule.BridgeParams memory p = _params(amount);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+
+        vm.expectRevert(abi.encodeWithSelector(CCTPModule.BurnExceedsCctpLimit.selector, amount, amount - 1));
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(0));
+    }
+
+    function test_requestBridge_succeedsAtCctpLimit() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+        messenger.setBurnLimit(address(usdc), amount);
+
+        CCTPModule.BridgeParams memory p = _params(amount);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        assertEq(cctpModule.getPendingBridge(address(safe)).amount, amount);
+    }
+
+    function test_requestBridge_zeroDelay_clearsPreExistingOrphan() public {
+        // Plant an orphan record at $.withdrawals[safe].destRecipient (struct slot offset +2).
+        bytes32 baseSlot = 0x8acda1cfca4f5cfd72da8b3438a383a2a5be2d370022c8dfe2b3e8c2690b2e00;
+        bytes32 withdrawalsSlot = bytes32(uint256(baseSlot) + 2);
+        bytes32 recordBase = keccak256(abi.encode(address(safe), withdrawalsSlot));
+        bytes32 destRecipientSlot = bytes32(uint256(recordBase) + 2);
+        vm.store(address(cctpModule), destRecipientSlot, bytes32(uint256(1)));
+        assertTrue(cctpModule.getPendingBridge(address(safe)).destRecipient != bytes32(0), "orphan planted");
+
+        // Flip delay to zero and submit a fresh request.
+        vm.prank(owner);
+        cashModule.setDelays(0, 0, 0);
+
+        uint256 amount = 50e6;
+        deal(address(usdc), address(safe), amount);
+        CCTPModule.BridgeParams memory p = _params(amount);
+        (address[] memory s, bytes[] memory sigs) = _sign(p);
+        cctpModule.requestBridge(address(safe), p, s, sigs);
+
+        // Burn happened, orphan cleared.
+        assertEq(messenger.calls(), 1);
+        assertEq(cctpModule.getPendingBridge(address(safe)).destRecipient, bytes32(0));
     }
 
     function test_executeBridge_afterDelay() public {
@@ -550,7 +765,7 @@ contract CCTPModuleTest is SafeTestSetup {
 
         assertEq(messenger.calls(), 1);
         assertEq(usdc.balanceOf(address(messenger)), amount);
-        assertEq(cctpModule.getPendingBridge(address(safe)).destRecipient, address(0));
+        assertEq(cctpModule.getPendingBridge(address(safe)).destRecipient, bytes32(0));
 
         (, , , , , uint256 mf, uint32 mft) = messenger.last();
         assertEq(mf, _expectedMaxFee(amount));
@@ -640,14 +855,14 @@ contract CCTPModuleTest is SafeTestSetup {
         bool[] memory no = new bool[](1);
         no[0] = false;
         vm.prank(owner);
-        cctpModule.setAllowedDomains(doms, no);
+        cctpModule.setAllowedRoutes(address(usdc), doms, no);
 
         (uint64 delay, , ) = cashModule.getDelays();
         vm.warp(block.timestamp + delay);
         cctpModule.executeBridge(address(safe));
 
         assertEq(messenger.calls(), 1);
-        assertFalse(cctpModule.isDomainAllowed(destDomain));
+        assertFalse(cctpModule.isRouteAllowed(address(usdc), destDomain));
     }
 
     // ───────────────────────── cancel ─────────────────────────
@@ -662,7 +877,7 @@ contract CCTPModuleTest is SafeTestSetup {
         (s, sigs) = _signCancel();
         cctpModule.cancelBridge(address(safe), s, sigs);
 
-        assertEq(cctpModule.getPendingBridge(address(safe)).destRecipient, address(0));
+        assertEq(cctpModule.getPendingBridge(address(safe)).destRecipient, bytes32(0));
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
     }
 
@@ -678,14 +893,14 @@ contract CCTPModuleTest is SafeTestSetup {
         cctpModule.cancelBridge(address(safe), s, sigs);
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
-        bytes32 sig = keccak256("BridgeCancelled(address,uint32,address,uint256,address)");
+        bytes32 sig = keccak256("BridgeCancelled(address,uint32,address,uint256,bytes32)");
         uint256 count;
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].emitter == address(cctpModule) && logs[i].topics[0] == sig) {
                 count++;
-                (uint256 emittedAmount, address emittedRecipient) = abi.decode(logs[i].data, (uint256, address));
+                (uint256 emittedAmount, bytes32 emittedRecipient) = abi.decode(logs[i].data, (uint256, bytes32));
                 assertEq(emittedAmount, amount);
-                assertEq(emittedRecipient, destRecipientAddr);
+                assertEq(emittedRecipient, destRecipient);
             }
         }
         assertEq(count, 1);
@@ -701,7 +916,7 @@ contract CCTPModuleTest is SafeTestSetup {
         vm.prank(address(cashModule));
         cctpModule.cancelBridgeByCashModule(address(safe));
 
-        assertEq(cctpModule.getPendingBridge(address(safe)).destRecipient, address(0));
+        assertEq(cctpModule.getPendingBridge(address(safe)).destRecipient, bytes32(0));
     }
 
     function test_cancelBridgeByCashModule_nonCashModuleReverts() public {

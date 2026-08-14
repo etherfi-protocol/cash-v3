@@ -10,6 +10,7 @@ import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ICCTPTokenMessenger } from "../../interfaces/ICCTPTokenMessenger.sol";
+import { ICCTPTokenMinter } from "../../interfaces/ICCTPTokenMinter.sol";
 import { WithdrawalRequest, SafeData } from "../../interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../interfaces/IBridgeModule.sol";
 
@@ -56,33 +57,36 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         uint256 providerFeeBps;
     }
 
-    /// @dev Queued bridge; snapshots the resolved config so execution cannot drift from what was signed.
     struct CrossChainWithdrawal {
         uint32 destDomain;
         address asset;
         uint256 amount;
-        address destRecipient;
-        address tokenMessenger;      // snapshot of assetConfig at request time
-        uint256 maxFee;              // snapshot: CCTP maxFee computed on burnAmount at request time
-        uint32 minFinalityThreshold; // snapshot of assetConfig.finalityThreshold
-        uint256 providerFee;          // snapshot: providerFeeBps * amount at request time
-        address providerFeeRecipient; // snapshot of module feeRecipient at request time
+        bytes32 destRecipient;
+        address tokenMessenger;
+        uint256 maxFee;
+        uint32 minFinalityThreshold;
+        uint256 providerFee;
+        address providerFeeRecipient;
     }
 
-    /// @dev Signed request params. Caller picks Fast (CONFIRMED=1000) or Standard (FINALIZED=2000)
-    ///      finality per-request; fee ceiling and messenger remain admin-config.
+    /// @dev destRecipient is bytes32 for non-EVM support; EVM callers pass bytes32(uint256(uint160(addr))).
+    ///      tokenMessenger/maxFeeBps/providerFeeBps commit the signer to the AssetConfig snapshot they quoted against.
     struct BridgeParams {
         uint32 destDomain;
         address asset;
         uint256 amount;
-        address destRecipient;
+        bytes32 destRecipient;
         uint32 finalityThreshold;
+        address tokenMessenger;
+        uint256 maxFeeBps;
+        uint256 providerFeeBps;
+        address providerFeeRecipient;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.CCTPModule
     struct CCTPModuleStorage {
         mapping(address token => AssetConfig assetConfig) assetConfig;
-        mapping(uint32 domain => bool) allowedDomain;
+        mapping(address token => mapping(uint32 domain => bool)) allowedRoute;
         mapping(address safe => CrossChainWithdrawal withdrawal) withdrawals;
         address providerFeeRecipient;
     }
@@ -98,7 +102,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     error InvalidSignatures();
     error InsufficientAmount();
     error UnsupportedAsset();
-    error UnsupportedDomain();
+    error UnsupportedRoute();
     error Unauthorized();
     error NoWithdrawalQueuedForCCTP();
     error CannotFindMatchingWithdrawalForSafe();
@@ -109,17 +113,19 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     error providerFeeRecipientNotSet();
     error BurnAmountZero();
     error InvalidTokenMessenger();
+    error BurnExceedsCctpLimit(uint256 burnAmount, uint256 limit);
+    error ConfigChangedSinceSigning();
 
     event AssetConfigSet(address[] assets, AssetConfig[] assetConfigs);
-    event AllowedDomainsSet(uint32[] domains, bool[] allowed);
+    event AllowedRoutesSet(address indexed asset, uint32[] domains, bool[] allowed);
     event providerFeeRecipientSet(address indexed recipient);
     event providerFeeCharged(address indexed safe, address indexed asset, uint256 fee, address indexed recipient);
-    event RequestBridgeWithCCTP(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, address destRecipient, uint256 maxFee, uint32 minFinalityThreshold, uint256 providerFee);
+    event RequestBridgeWithCCTP(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, bytes32 destRecipient, uint256 maxFee, uint32 minFinalityThreshold, uint256 providerFee);
     /// @param amount Gross amount signed by the user (before provider fee).
     /// @param burnAmount Amount actually burned via CCTP (amount - providerFee). This is what mints on destination
     ///                    minus Circle's `maxFee`. Indexers should use burnAmount for delivered-USDC accounting.
     event BridgeWithCCTP(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, uint256 burnAmount, bytes32 mintRecipient, address tokenMessenger, uint256 maxFee, uint32 minFinalityThreshold, uint256 providerFee);
-    event BridgeCancelled(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, address destRecipient);
+    event BridgeCancelled(address indexed safe, uint32 indexed destDomain, address indexed asset, uint256 amount, bytes32 destRecipient);
 
     constructor(address[] memory _assets, AssetConfig[] memory _assetConfigs, address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         _setAssetConfigs(_assets, _assetConfigs);
@@ -142,19 +148,20 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         _setAssetConfigs(assets, assetConfigs);
     }
 
-    function isDomainAllowed(uint32 domain) external view returns (bool) {
-        return _getCCTPModuleStorage().allowedDomain[domain];
+    function isRouteAllowed(address asset, uint32 domain) external view returns (bool) {
+        return _getCCTPModuleStorage().allowedRoute[asset][domain];
     }
 
-    function setAllowedDomains(uint32[] calldata domains, bool[] calldata allowed) external {
+    function setAllowedRoutes(address asset, uint32[] calldata domains, bool[] calldata allowed) external {
         _onlyAdmin();
+        if (asset == address(0)) revert InvalidInput();
         if (domains.length != allowed.length) revert ArrayLengthMismatch();
         CCTPModuleStorage storage $ = _getCCTPModuleStorage();
         for (uint256 i = 0; i < domains.length; ) {
-            $.allowedDomain[domains[i]] = allowed[i];
+            $.allowedRoute[asset][domains[i]] = allowed[i];
             unchecked { ++i; }
         }
-        emit AllowedDomainsSet(domains, allowed);
+        emit AllowedRoutesSet(asset, domains, allowed);
     }
 
     function _onlyAdmin() internal view {
@@ -173,17 +180,14 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     }
 
     function getproviderFee(address asset, uint256 amount) external view returns (uint256) {
-        return _computeMaxFee(amount, _getCCTPModuleStorage().assetConfig[asset].providerFeeBps);
+        AssetConfig memory cfg = _getCCTPModuleStorage().assetConfig[asset];
+        if (cfg.tokenMessenger == address(0)) revert UnsupportedAsset();
+        return _computeMaxFee(amount, cfg.providerFeeBps);
     }
 
-    /// @notice Total fees deducted from `amount`: provider service fee + CCTP relay fee (both in burn-token).
-    /// @dev CCTP maxFee is computed on the burn amount (gross minus provider fee), matching `_buildWithdrawal`.
-    /// @return feeToken The burn asset, or ETH sentinel for an unsupported asset.
-    /// @return providerFee provider service fee (goes to feeRecipient on source).
-    /// @return cctpMaxFee CCTP relay-fee ceiling (paid to Circle on destination).
     function getBridgeFee(address asset, uint256 amount, uint32 finalityThreshold) external view returns (address feeToken, uint256 providerFee, uint256 cctpMaxFee) {
         AssetConfig memory cfg = _getCCTPModuleStorage().assetConfig[asset];
-        if (cfg.tokenMessenger == address(0)) return (ETH, 0, 0);
+        if (cfg.tokenMessenger == address(0)) revert UnsupportedAsset();
         providerFee = _computeMaxFee(amount, cfg.providerFeeBps);
         cctpMaxFee = finalityThreshold == FINALITY_CONFIRMED ? _computeMaxFee(amount - providerFee, cfg.maxFeeBps) : 0;
         feeToken = asset;
@@ -203,11 +207,13 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         address[] calldata signers,
         bytes[] calldata signatures
     ) external nonReentrant onlyEtherFiSafe(safe) {
-        if (p.destRecipient == address(0) || p.asset == address(0) || p.amount == 0) revert InvalidInput();
+        if (p.destRecipient == bytes32(0) || p.asset == address(0) || p.amount == 0) revert InvalidInput();
 
-        AssetConfig memory cfg = _getCCTPModuleStorage().assetConfig[p.asset];
+        CCTPModuleStorage storage $ = _getCCTPModuleStorage();
+        AssetConfig memory cfg = $.assetConfig[p.asset];
         if (cfg.tokenMessenger == address(0)) revert UnsupportedAsset();
-        if (!_getCCTPModuleStorage().allowedDomain[p.destDomain]) revert UnsupportedDomain();
+        if (!$.allowedRoute[p.asset][p.destDomain]) revert UnsupportedRoute();
+        if (cfg.tokenMessenger != p.tokenMessenger || cfg.maxFeeBps != p.maxFeeBps || cfg.providerFeeBps != p.providerFeeBps || $.providerFeeRecipient != p.providerFeeRecipient) revert ConfigChangedSinceSigning();
 
         bytes32 digestHash = keccak256(abi.encodePacked(
             REQUEST_BRIDGE_SIG,
@@ -221,13 +227,23 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
         CrossChainWithdrawal memory w = _buildWithdrawal(p, cfg);
 
+        // Scoped so locals release before the CashModule call (stack depth).
+        {
+            uint256 limit = ICCTPTokenMinter(ICCTPTokenMessenger(cfg.tokenMessenger).localMinter()).burnLimitsPerMessage(p.asset);
+            uint256 burnAmt = p.amount - w.providerFee;
+            if (burnAmt > limit) revert BurnExceedsCctpLimit(burnAmt, limit);
+        }
+
         cashModule.requestWithdrawalByModule(safe, p.asset, p.amount);
 
         emit RequestBridgeWithCCTP(safe, w.destDomain, w.asset, w.amount, w.destRecipient, w.maxFee, w.minFinalityThreshold, w.providerFee);
 
         (uint64 withdrawalDelay, , ) = cashModule.getDelays();
+        // Clear any residual record; a stale entry would either be overwritten (delayed) or
+        // survive as an orphan pointing at a burn we just processed (zero-delay).
+        delete $.withdrawals[safe];
         if (withdrawalDelay == 0) _bridge(safe, w);
-        else _getCCTPModuleStorage().withdrawals[safe] = w;
+        else $.withdrawals[safe] = w;
     }
 
     function _buildWithdrawal(BridgeParams calldata p, AssetConfig memory cfg) internal view returns (CrossChainWithdrawal memory w) {
@@ -263,18 +279,14 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
     function executeBridge(address safe) external nonReentrant onlyEtherFiSafe(safe) {
         CrossChainWithdrawal memory w = _getCCTPModuleStorage().withdrawals[safe];
-        if (w.destRecipient == address(0)) revert NoWithdrawalQueuedForCCTP();
+        if (w.destRecipient == bytes32(0)) revert NoWithdrawalQueuedForCCTP();
 
         WithdrawalRequest memory wr = cashModule.getData(safe).pendingWithdrawalRequest;
         if (wr.recipient != address(this) || wr.tokens.length != 1 || wr.tokens[0] != w.asset || wr.amounts[0] != w.amount) revert CannotFindMatchingWithdrawalForSafe();
 
         cashModule.processWithdrawal(safe);
 
-        // Use the snapshot captured at request time, NOT a fresh config read — protects against config drift.
-        // Note (policy): the destination-domain allowlist is intentionally NOT re-checked here. A bridge that
-        // was authorized against an allowed domain stays executable even if the domain is later disabled, so an
-        // admin config change cannot strand a queued, already-signed withdrawal. (cancelBridge / CashModule
-        // override remain available to unwind it.)
+        // Snapshot captured at request time; route allowlist deliberately NOT re-checked.
         _bridge(safe, w);
 
         delete _getCCTPModuleStorage().withdrawals[safe];
@@ -285,7 +297,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
 
         CrossChainWithdrawal memory w = _getCCTPModuleStorage().withdrawals[safe];
-        if (w.destRecipient == address(0)) revert NoWithdrawalQueuedForCCTP();
+        if (w.destRecipient == bytes32(0)) revert NoWithdrawalQueuedForCCTP();
 
         // CEI: clear + emit before the external CashModule call. The callback (cancelBridgeByCashModule)
         // then finds nothing and returns silently, so we don't double-emit with a zeroed storage ref.
@@ -300,7 +312,7 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         if (msg.sender != etherFiDataProvider.getCashModule()) revert Unauthorized();
 
         CrossChainWithdrawal storage w = _getCCTPModuleStorage().withdrawals[safe];
-        if (w.destRecipient == address(0)) return;
+        if (w.destRecipient == bytes32(0)) return;
 
         emit BridgeCancelled(safe, w.destDomain, w.asset, w.amount, w.destRecipient);
         delete _getCCTPModuleStorage().withdrawals[safe];
@@ -311,27 +323,28 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         if (w.tokenMessenger == address(0)) revert UnsupportedAsset();
 
         if (w.providerFee > 0) {
-            // Recipient snapshotted at request-time; a mid-flight setproviderFeeRecipient(0) cannot redirect it.
             if (w.providerFeeRecipient == address(0)) revert providerFeeRecipientNotSet();
             IERC20(w.asset).safeTransfer(w.providerFeeRecipient, w.providerFee);
             emit providerFeeCharged(safe, w.asset, w.providerFee, w.providerFeeRecipient);
         }
 
         uint256 burnAmount = w.amount - w.providerFee;
-        bytes32 mintRecipient = bytes32(uint256(uint160(w.destRecipient)));
+
+        uint256 limit = ICCTPTokenMinter(ICCTPTokenMessenger(w.tokenMessenger).localMinter()).burnLimitsPerMessage(w.asset);
+        if (burnAmount > limit) revert BurnExceedsCctpLimit(burnAmount, limit);
 
         IERC20(w.asset).forceApprove(w.tokenMessenger, burnAmount);
         ICCTPTokenMessenger(w.tokenMessenger).depositForBurn(
             burnAmount,
             w.destDomain,
-            mintRecipient,
+            w.destRecipient,
             w.asset,
             bytes32(0),
             w.maxFee,
             w.minFinalityThreshold
         );
 
-        emit BridgeWithCCTP(safe, w.destDomain, w.asset, w.amount, burnAmount, mintRecipient, w.tokenMessenger, w.maxFee, w.minFinalityThreshold, w.providerFee);
+        emit BridgeWithCCTP(safe, w.destDomain, w.asset, w.amount, burnAmount, w.destRecipient, w.tokenMessenger, w.maxFee, w.minFinalityThreshold, w.providerFee);
     }
 
     function _computeMaxFee(uint256 amount, uint256 maxFeeBps) internal pure returns (uint256) {
@@ -347,13 +360,9 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         for (uint256 i = 0; i < len; ) {
             if (assets[i] == address(0)) revert InvalidInput();
             AssetConfig memory cfg = assetConfigs[i];
-            // Only validate fee/finality for *supported* assets (tokenMessenger != 0).
-            // A zero tokenMessenger is the "remove/unsupported" sentinel and skips validation.
-            if (cfg.tokenMessenger != address(0)) {
-                if (cfg.tokenMessenger.code.length == 0) revert InvalidTokenMessenger();
-                if (cfg.maxFeeBps > MAX_FEE_BPS) revert MaxFeeBpsTooHigh();
-                if (cfg.providerFeeBps > MAX_FEE_BPS) revert providerFeeBpsTooHigh();
-            }
+            if (cfg.maxFeeBps > MAX_FEE_BPS) revert MaxFeeBpsTooHigh();
+            if (cfg.providerFeeBps > MAX_FEE_BPS) revert providerFeeBpsTooHigh();
+            if (cfg.tokenMessenger != address(0) && cfg.tokenMessenger.code.length == 0) revert InvalidTokenMessenger();
             $.assetConfig[assets[i]] = cfg;
             unchecked { ++i; }
         }
