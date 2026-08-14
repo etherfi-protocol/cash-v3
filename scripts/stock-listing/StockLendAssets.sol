@@ -65,4 +65,78 @@ library StockLendAssets {
             addCap: 2000
         });
     }
+
+    /**
+     * @notice iwTBLLx prod collateral rollout parameters (follow-up to the
+     *         cash-mainnet-asset-listing ETH + OP bundles, which list wTBLLx and wire the
+     *         relay/OFT rails).
+     *
+     *         Same shape as iwQQQx: the USD leg is a Chainlink aggregator on Optimism, Ethereum
+     *         only relays the 4626 rate, and the wTBLLx relay leg is permanent — no retirement
+     *         bundle, iwTBLLx reads the OracleSink indefinitely.
+     *
+     *         Address provenance verified on-chain 2026-08-12: wrapper.asset() == stock, both 18
+     *         decimals; usdAggregator.description() == "TBLL / USD", 8 decimals, reading $105.735.
+     *         iToken is the CREATE3 ShadowOFT address from the listing repo's StockRails.oftSalt,
+     *         derived against the live factory (derivation validated by reproducing iwQQQx's
+     *         known address exactly).
+     *
+     *         Brand-new asset, so expectedStockFeed/expectedWrapperFeed are address(0) — there is
+     *         no prior deployment to regression-check the five identity strings against. Fill them
+     *         in from the DeployTbllxProdFeeds broadcast once it lands.
+     *
+     *         NOTE: wTBLLx totalSupply is 0 — nothing has been wrapped yet. The Backed wrapper is
+     *         rate-based rather than share-accounted, so convertToAssets still returns a real rate,
+     *         but there is no wrapped float for liquidation depth until deposits begin.
+     */
+    function wtbllx() internal pure returns (StockLendAsset memory) {
+        return StockLendAsset({
+            stock: 0x4cbf89ED7Bb30b8a860fa86d3c96E9c72931299b,
+            wrapper: 0x461b25b99606Fe169D6F0dD6816650eF6536403E,
+            iToken: 0x5F8b2D2b97aD4d63188f44965778F6004D5bc387,
+            usdAggregator: 0x6D94824F8c4F5a168913669B9bD9071fAb39BFD2,
+            feedSaltPrefix: "TbllxProdFeeds.",
+            stockFeedName: "TbllUsdFeed",
+            wrapperFeedName: "IWTbllXUsdFeed",
+            stockFeedDesc: "TBLL / USD",
+            wrapperFeedDesc: "iwTBLLx / USD",
+            /// @dev Filled in from the DeployTbllxProdFeeds CREATE3 prediction (dry run,
+            ///      2026-08-12) rather than left at address(0). The addresses are deterministic,
+            ///      so pinning them now turns on the identity-string regression guard immediately
+            ///      instead of after the broadcast — a typo in any of the five strings above
+            ///      moves the feed and fails loudly in StockFeedDeployer._deployFeeds.
+            expectedStockFeed: 0x1A74F66b6CF21b582C316398925b24D3D04C8C7D,
+            expectedWrapperFeed: 0x1cee92F999D536320aFb740b2ea5318C45d9C93B,
+            iTokenName: "EtherFi Wrapped TBLL xStock",
+            iTokenSymbol: "iwTBLLx",
+            feedsJsonStockKey: "TBLL",
+            feedsJsonWrapperKey: "iwTBLLx",
+            /// @dev TBLL is a US-listed ETF, so its feed is 24/5 exactly like QQQ: 3 days clears
+            ///      the ~65h Friday-close -> Sunday-reopen gap. A US market holiday adjacent to a
+            ///      weekend produces a longer gap and the feed reads stale — fail-closed on both
+            ///      the cash and lend sides — until reopen.
+            usdFeedMaxStaleness: 3 days,
+            /// @dev Max age of the relay's source-chain read of the wTBLLx -> TBLLx rate. This is
+            ///      the binding keeper cadence: tighter than the sink's own 7-day window, and
+            ///      immutable once deployed.
+            rateMaxStaleness: 3 days,
+            cashBaseFeedMaxStaleness: 78 hours,
+            seedRate6dp: 1_016_771, // live convertToAssets(1e18) at authoring time, normalised to 6 decimals
+            // Risk-signed-off 2026-08-12. TBLLx is a 1-3 month T-bill ETF, so it carries a wider
+            // LTV -> LT buffer (10pts vs iwQQQx's 5) on a higher threshold, and the DebtManager
+            // bonus is raised to match the Summer Lend max liquidation bonus exactly.
+            // DebtManager
+            ltv: 70e18,
+            liquidationThreshold: 80e18,
+            liquidationBonus: 10e18,
+            // Summer Lend reserve. collateralFactor tracks the DebtManager liquidationThreshold,
+            // as it does for iwQQQx/iwSPYx. maxLiquidationBonus (10%), liquidationFee (10%),
+            // collateralRisk (0bps) and borrowable (no) are shared launch-reserve constants on
+            // LendRails and already match this asset's sign-off.
+            collateralFactor: 80_00,
+            /// @dev Whole tokens: ~$2.11M at listing-time prices. Sized independently of the OFT
+            ///      hourly rate limit (15,000/hr). Collateral-only, so the draw cap is 0.
+            addCap: 20000
+        });
+    }
 }
