@@ -2,29 +2,35 @@
 pragma solidity ^0.8.28;
 
 /**
- * @title DevStockRedirectWrappers
+ * @title StockRedirectWrappers
  * @author ether.fi
  * @notice The raw Backed xStock -> `WrappedBackedToken` pairs registered as redirect wrappers on
- *         the Ethereum dev `TopUpFactory`, so a raw xStock landing at a TopUp address can be
- *         wrapped on the way out to the user's TradingSafe.
+ *         the Ethereum `TopUpFactory`, so a raw xStock landing at a TopUp address can be wrapped
+ *         on the way out to the user's TradingSafe.
+ *
+ * @dev ONE list serves BOTH environments. The dev and prod trading lenses were diffed on
+ *      2026-08-14 and list the identical 90 xStock wrappers, with identical raw and wrapper
+ *      addresses — unsurprising, since both read the same Backed deployments on the same chain.
+ *      Kept as a single table on purpose: two 90-row copies would drift.
  *
  * @dev Derived from two sources, and reproducible from both:
- *      - membership: every token on the dev `TradingLens`
- *        (0xC6d33e123164e540431165C22dC9D9f09cFb00e9) that is an xStock wrapper, read from
- *        `getSupportedTokens()`. 90 of its 102 tokens; the other 12 are the plain ERC20s (USDT,
- *        WBTC, LINK, ...) and the two collateral wrappers below.
- *      - addresses: `GET https://api.xstocks.fi/api/v2/public/assets?network=Ethereum`, whose
- *        per-deployment `address` is the raw stock and `wrapperAddressV2` the wrapper.
+ *      - membership: every token on the `TradingLens` that is an xStock wrapper, read from
+ *        `getSupportedTokens()`. Dev lens 0xC6d33e123164e540431165C22dC9D9f09cFb00e9 → 90 of 102
+ *        tokens; prod lens 0x7135AD135Ec21ec765C1930E93DEB7DA9c27290C → 90 of 100. The remainder
+ *        in each case are plain ERC20s (USDT, WBTC, LINK, PEPE, ...).
+ *      - addresses: `GET https://api.xstocks.fi/api/v2/public/assets?network=Ethereum` (paginated,
+ *        718 Ethereum deployments at time of writing), whose per-deployment `address` is the raw
+ *        stock and `wrapperAddressV2` the wrapper.
  *
- *      Collateral stocks are deliberately absent: wSPYx (not listed on the dev lens at all), and
- *      wQQQx / wTBLLx, which are listed but back Summer Lend collateral rather than being
- *      redirect targets.
+ *      Collateral stocks are deliberately absent: wSPYx, wQQQx and wTBLLx back Summer Lend
+ *      collateral rather than being redirect targets. On the prod lens they are not listed at all,
+ *      so the exclusion is automatic there; on dev, wQQQx / wTBLLx are listed and excluded here.
  *
  *      The pairing is not taken on trust — `TopUpFactory.setRedirectWrappers` reverts unless
  *      `IERC4626(wrapper).asset()` is the raw token it is registered against, so a stale or
  *      transposed row cannot be configured.
  */
-library DevStockRedirectWrappers {
+library StockRedirectWrappers {
     /// @return raws Raw Backed xStock tokens, ordered by symbol.
     /// @return wrappers `wrappers[i]` is the ERC-4626 over `raws[i]`.
     function pairs() internal pure returns (address[] memory raws, address[] memory wrappers) {

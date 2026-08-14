@@ -11,7 +11,7 @@ import { ITradingSafeFactory } from "../../src/interfaces/ITradingSafeFactory.so
 import { TopUp } from "../../src/top-up/TopUp.sol";
 import { TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { Utils } from "../utils/Utils.sol";
-import { DevStockRedirectWrappers } from "./DevStockRedirectWrappers.sol";
+import { StockRedirectWrappers } from "./StockRedirectWrappers.sol";
 
 /**
  * @title DeployDevStockWrapRedirectEth
@@ -35,7 +35,7 @@ import { DevStockRedirectWrappers } from "./DevStockRedirectWrappers.sol";
  *
  *      Collateral stocks are out of scope by construction: wSPYx is not on the dev lens, and
  *      wQQQx / wTBLLx are excluded from the generated pair list. See
- *      `DevStockRedirectWrappers.sol` for how the list is derived and reproduced.
+ *      `StockRedirectWrappers.sol` for how the list is derived and reproduced.
  *
  * Usage (simulate by dropping --broadcast; the wallet must be the dev RoleRegistry OWNER — the
  * factory upgrade, the beacon upgrade and `setRedirectWrappers` are all owner-gated):
@@ -57,7 +57,7 @@ contract DeployDevStockWrapRedirectEth is Utils {
         address sender = vm.addr(vm.envUint("PRIVATE_KEY"));
         require(roleRegistry.owner() == sender, "sender is not the dev RoleRegistry owner");
 
-        (address[] memory raws, address[] memory wrappers) = DevStockRedirectWrappers.pairs();
+        (address[] memory raws, address[] memory wrappers) = StockRedirectWrappers.pairs();
         _preflight(factory, raws, wrappers);
 
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
