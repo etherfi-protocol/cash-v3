@@ -206,6 +206,16 @@ contract StockWrapRedirectEth3CP is StockWrapProdConfig, GnosisHelpers, StdCheat
         // Wrapping is CONFIGURATION: an unconfigured token still redirects as-is.
         require(factory.wrapperFor(WETH) == address(0), "SIM FAILED: unexpected wrapper on an unconfigured token");
 
+        // The new impl also closes the sweep griefing vector: the permissionless sweep entry points
+        // must refuse a redirect-only token, or anyone could pull a misrouted stock out of a user's
+        // TopUp and out of the redirect path's reach. Asserted on the LIVE factory post-upgrade,
+        // against a real redirect-only token, because it is the reason this impl supersedes the
+        // first one that was deployed for this rollout.
+        address[] memory redirectOnly = new address[](1);
+        redirectOnly[0] = raws[0];
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUp(redirectOnly, 0, 1);
+
         // ── Collateral damage ──
         require(roleRegistry.owner() == ownerBefore, "SIM FAILED: RoleRegistry owner changed");
         require(factory.numContractsDeployed() == topUpsBefore, "SIM FAILED: TopUp set changed");

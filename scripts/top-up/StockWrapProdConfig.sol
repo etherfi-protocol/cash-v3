@@ -25,13 +25,22 @@ import { Utils } from "../utils/Utils.sol";
  *      is re-derived from the chain rather than trusted.
  */
 abstract contract StockWrapProdConfig is Utils {
-    // ---- Deployed implementations (Ethereum mainnet, block 25753168) ----
+    // ---- Deployed implementations (Ethereum mainnet) ----
 
-    /// @notice `TopUpFactory` implementation carrying `wrapperFor` / `setRedirectWrappers`.
-    ///         Deployed 2026-08-14, tx 0xd039a228d60412006fe7d5a0ad408a606316709860768436cb6e66eec86938ac.
-    address internal constant TOPUP_FACTORY_IMPL = 0x8546090Ad12bCF8ce0b0154d044792D4cd10714c;
+    /// @notice `TopUpFactory` implementation carrying `wrapperFor` / `setRedirectWrappers` AND the
+    ///         `_validateSweepTokens` guard on both permissionless sweep entry points.
+    ///         Deployed 2026-08-14, block 25753870,
+    ///         tx 0xaff8c146f46b1ef986f8e0f4664a547fca60e6daf723efdd57f9b901eaeedf67.
+    /// @dev Supersedes 0x8546090Ad12bCF8ce0b0154d044792D4cd10714c (block 25753168), which predates
+    ///      the sweep guard. That address must not be upgraded to: it leaves `processTopUp` /
+    ///      `processTopUpFromContracts` open to naming a redirect-only token, which anyone can use
+    ///      to pull a misrouted stock out of a user's TopUp and out of the redirect path's reach.
+    address internal constant TOPUP_FACTORY_IMPL = 0x1FDCF3b1C84d7dC3dea820744162379F3425E7c6;
     /// @notice `TopUpV2` implementation for the beacon, built with (WETH, RECOVERY_DISPATCHER).
-    ///         Deployed 2026-08-14, tx 0xe32c77791806bbc8f23fc5bd05123cdc01a92ebf9914d2e43a6c2a21c8cd4b13.
+    ///         Deployed 2026-08-14, block 25753168,
+    ///         tx 0xe32c77791806bbc8f23fc5bd05123cdc01a92ebf9914d2e43a6c2a21c8cd4b13.
+    /// @dev Unaffected by the factory's sweep-guard change — `TopUpV2` only imports the (unchanged)
+    ///      `ITopUpFactory` interface — so it was deliberately NOT redeployed alongside it.
     address internal constant TOPUP_V2_IMPL = 0xcA4930163F2FEa9cebf9aEa437832c3C408A8491;
 
     // ---- Chain constants (Ethereum mainnet) ----

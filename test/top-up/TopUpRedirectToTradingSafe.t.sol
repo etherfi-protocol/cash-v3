@@ -428,6 +428,106 @@ contract TopUpRedirectToTradingSafeTest is Test {
         factory.setTokenConfig(tokens, chainIds, configs);
     }
 
+    // ---- sweep guard: a permissionless processTopUp must not strand a redirect ----
+    //
+    // Both sweep entry points are open to anyone, by design. What they must not be open to is a
+    // token the sweep was never meant to move: pulling a redirect-only token into the factory puts
+    // it where `redirectToTradingSafe` can't reach it, leaving an owner-gated `recoverFunds` and
+    // an off-chain reimbursement as the only way to make the user whole.
+
+    function test_processTopUpFromContracts_cannotSweepRedirectOnlyToken() public {
+        uint256 balanceBefore = token.balanceOf(address(topUp));
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(token);
+        address[] memory topUpContracts = new address[](1);
+        topUpContracts[0] = address(topUp);
+
+        vm.prank(stranger);
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUpFromContracts(tokens, topUpContracts);
+
+        assertEq(token.balanceOf(address(topUp)), balanceBefore, "redirect-only token left the TopUp");
+        assertEq(token.balanceOf(address(factory)), 0, "redirect-only token reached the factory");
+    }
+
+    function test_processTopUpRange_cannotSweepRedirectOnlyToken() public {
+        // The range variant walks every deployed TopUp, so one call is all it would take to do
+        // this to every user at once.
+        uint256 balanceBefore = token.balanceOf(address(topUp));
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(token);
+
+        vm.prank(stranger);
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUp(tokens, 0, 1);
+
+        assertEq(token.balanceOf(address(topUp)), balanceBefore, "redirect-only token left the TopUp");
+    }
+
+    function test_processTopUp_revertsOnAnyUnsupportedEntry() public {
+        // One bad entry fails the sweep even alongside a legitimately supported token, so a caller
+        // can't smuggle a redirect-only token in behind a real one.
+        MockERC20 supported = new MockERC20("Supported", "SUP", 18);
+        supported.mint(address(topUp), 100e18);
+        _markTokenSupported(address(supported));
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(supported);
+        tokens[1] = address(token);
+        address[] memory topUpContracts = new address[](1);
+        topUpContracts[0] = address(topUp);
+
+        vm.prank(stranger);
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUpFromContracts(tokens, topUpContracts);
+
+        assertEq(supported.balanceOf(address(topUp)), 100e18, "supported token swept by a failed call");
+    }
+
+    function test_processTopUp_sweepsSupportedTokenAndLeavesRedirectTokenBehind() public {
+        // The guard narrows the sweep, it doesn't break it: the bridging asset still moves, and the
+        // redirect-only token beside it stays put and redirects afterwards.
+        MockERC20 supported = new MockERC20("Supported", "SUP", 18);
+        supported.mint(address(topUp), 100e18);
+        _markTokenSupported(address(supported));
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(supported);
+        address[] memory topUpContracts = new address[](1);
+        topUpContracts[0] = address(topUp);
+
+        vm.prank(stranger);
+        factory.processTopUpFromContracts(tokens, topUpContracts);
+
+        assertEq(supported.balanceOf(address(factory)), 100e18, "supported token not swept to the factory");
+        assertEq(token.balanceOf(address(topUp)), 1_000e18, "redirect-only token should be untouched");
+
+        vm.prank(stranger);
+        factory.redirectToTradingSafe(address(topUp), address(token), 1_000e18);
+        assertEq(token.balanceOf(derivedTradingSafe), 1_000e18, "redirect blocked after a sweep");
+    }
+
+    function test_processTopUp_cannotStrandAWrappedRedirect() public {
+        // Same guard for a token whose redirect wraps on the way out — the wrap is the case the
+        // whole redirect path exists for, and the one a griefed sweep would have cost the most.
+        MockWrappedToken wrapper = _registerWrapper();
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(token);
+        address[] memory topUpContracts = new address[](1);
+        topUpContracts[0] = address(topUp);
+
+        vm.prank(stranger);
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUpFromContracts(tokens, topUpContracts);
+
+        vm.prank(stranger);
+        factory.redirectToTradingSafe(address(topUp), address(token), 1_000e18);
+        assertEq(wrapper.balanceOf(derivedTradingSafe), 1_000e18, "wrapped redirect blocked after a sweep attempt");
+    }
+
     // ---- wrap on redirect: raw xStock -> ERC-4626 wrapper ----
     //
     // The call shape never changes: `token` and `amount` are still what leaves the TopUp. What a

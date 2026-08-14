@@ -138,6 +138,9 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     error RecoveryWalletCannotBeZeroAddress();
     /// @notice Error thrown when attempting to recover token which is a supported asset
     error OnlyUnsupportedTokens();
+    /// @notice Reverts when a sweep entry point is handed a token this factory has no topup
+    ///         configuration for — the redirect path owns those, not `processTopUp`.
+    error OnlySupportedTokens();
     /// @notice Error thrown when redirecting a token that isn't supported for trading.
     error TokenNotTradingSupported();
     /// @notice Error thrown when `redirectToTradingSafe` is called by an account lacking the redirect role.
@@ -197,13 +200,17 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /**
      * @notice Processes specified tokens from a range of deployed topUp contracts
      * @dev Iterates through deployed topUp contracts starting at index 'start' and calls processTopUp on each
-     * @param tokens Array of token addresses to process
+     * @param tokens Array of token addresses to process. Every entry must be topup-supported
+     *               (or the native-ETH sentinel); see `_validateSweepTokens`.
      * @param start Starting index in the deployedAddresses array
      * @param n Number of topUp contracts to process
+     * @custom:throws OnlySupportedTokens If any token has no topup configuration on this factory
      * @custom:throws If start + n exceeds the number of deployed topUp contracts
      * @custom:throws If any topUp's processTopUp call fails
      */
     function processTopUp(address[] calldata tokens, uint256 start, uint256 n) external {
+        _validateSweepTokens(tokens);
+
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         uint256 length = $.deployedAddresses.length();
@@ -221,18 +228,59 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /**
      * @notice Processes specified tokens from a given topUp contract
      * @dev Verifies the topUp contract is valid before attempting to pull funds
-     * @param tokens Array of token addresses to process
+     * @param tokens Array of token addresses to process. Every entry must be topup-supported
+     *               (or the native-ETH sentinel); see `_validateSweepTokens`.
      * @param topUpContracts Array of addresses of the topUp contracts to process
+     * @custom:throws OnlySupportedTokens If any token has no topup configuration on this factory
      * @custom:throws InvalidTopUpAddress if the TopUp address is not a deployed TopUp contract
      * @custom:throws If the TopUp contracts's processTopUp call fails
      */
     function processTopUpFromContracts(address[] calldata tokens, address[] calldata topUpContracts) external {
+        _validateSweepTokens(tokens);
+
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 addrLength = topUpContracts.length;
 
         for (uint256 i = 0; i < addrLength;) {
             if (!$.deployedAddresses.contains(topUpContracts[i])) revert InvalidTopUpAddress();
             TopUp(payable(topUpContracts[i])).processTopUp(tokens);
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
+     * @dev Shared guard for both sweep entry points: a sweep may only name tokens this factory
+     *      actually bridges. Both entry points are deliberately permissionless — anyone may pay
+     *      the gas to move a user's bridging asset along its intended path — but without this
+     *      check that openness extends to tokens the sweep was never meant to touch.
+     *
+     *      A token with no topup configuration reaches a TopUp address only by mistake, and the
+     *      redirect path (`redirectToTradingSafe`) owns getting it to the user's TradingSafe.
+     *      Naming one here pulls it into this factory instead, where the redirect can no longer
+     *      see it: the pending `redirectToTradingSafe` reverts on the drained balance, and because
+     *      the batch variant is all-or-nothing one griefed entry fails the whole batch. What is
+     *      left is an `onlyRoleRegistryOwner` `recoverFunds` per incident to get the user made
+     *      whole off-chain. The range variant walks every deployed TopUp, so one transaction could
+     *      do this to every user holding a misrouted stock at once — cheap for the caller, who
+     *      gains nothing by it, and expensive for us.
+     *
+     *      Validated against the token list once rather than per TopUp: the list is the same for
+     *      every contract in the sweep, so an n-contract range pays for the check once.
+     *
+     *      The native-ETH sentinel is allowed without a configuration of its own. `TopUp`
+     *      converts it to WETH before transferring, so what arrives here is the configured WETH,
+     *      and the sentinel names no ERC20 a redirect could ever be configured for.
+     * @param tokens Token list handed to a sweep entry point.
+     * @custom:throws OnlySupportedTokens If any entry is neither topup-supported nor the ETH sentinel.
+     */
+    function _validateSweepTokens(address[] calldata tokens) internal view {
+        TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
+        uint256 len = tokens.length;
+
+        for (uint256 i = 0; i < len;) {
+            if (tokens[i] != ETH && !$.supportedTokens.contains(tokens[i])) revert OnlySupportedTokens();
             unchecked {
                 ++i;
             }

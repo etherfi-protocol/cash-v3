@@ -31,6 +31,9 @@ import { StockWrapProdConfig } from "./StockWrapProdConfig.sol";
  *      it rides along because the beacon slot is being touched regardless.
  *
  * Env: PRIVATE_KEY, ENV=mainnet
+ *      SKIP_TOPUP_V2=true / SKIP_TOPUP_FACTORY=true — reuse the pinned impl instead of deploying
+ *      that half. Use when only one contract drifted: re-shipping both would move an address that
+ *      has already been bytecode-reviewed and force the 3CP hashes to be regenerated for nothing.
  *
  * Usage (simulate by dropping --broadcast):
  *   source .env && ENV=mainnet forge script \
@@ -57,10 +60,20 @@ contract DeployProdStockWrapRedirectEth is StockWrapProdConfig {
 
         address ownerBefore = roleRegistry.owner();
 
+        // Either impl can be redeployed on its own. Source drift in `TopUpFactory` does not touch
+        // `TopUpV2` (it only imports the unchanged `ITopUpFactory` interface), so re-shipping the
+        // factory should not move the beacon impl's address and force a second bytecode review.
+        bool skipTopUpV2 = vm.envOr("SKIP_TOPUP_V2", false);
+        bool skipFactory = vm.envOr("SKIP_TOPUP_FACTORY", false);
+        require(!skipTopUpV2 || !skipFactory, "both impls skipped - nothing to deploy");
+
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
-        address factoryImpl = address(new TopUpFactory());
-        address topUpImpl = address(new TopUpV2(WETH, RECOVERY_DISPATCHER));
+        address factoryImpl = skipFactory ? TOPUP_FACTORY_IMPL : address(new TopUpFactory());
+        address topUpImpl = skipTopUpV2 ? TOPUP_V2_IMPL : address(new TopUpV2(WETH, RECOVERY_DISPATCHER));
         vm.stopBroadcast();
+
+        if (skipFactory) require(factoryImpl.code.length > 0, "SKIP_TOPUP_FACTORY set but the pinned impl has no code");
+        if (skipTopUpV2) require(topUpImpl.code.length > 0, "SKIP_TOPUP_V2 set but the pinned impl has no code");
 
         // The immutables are the whole reason V2 needs its own deploy per chain — read them back.
         require(TopUpV2(payable(topUpImpl)).DISPATCHER() == RECOVERY_DISPATCHER, "VERIFY FAILED: DISPATCHER mismatch");
