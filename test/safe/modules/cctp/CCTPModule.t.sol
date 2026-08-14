@@ -112,17 +112,12 @@ contract CCTPModuleTest is SafeTestSetup {
     // ───────────────────────── helpers ─────────────────────────
 
     function _params(uint256 amount) internal view returns (CCTPModule.BridgeParams memory) {
-        CCTPModule.AssetConfig memory cfg = cctpModule.getAssetConfig(address(usdc));
         return CCTPModule.BridgeParams({
             destDomain: destDomain,
             asset: address(usdc),
             amount: amount,
             destRecipient: destRecipient,
-            finalityThreshold: cfgFinality,
-            tokenMessenger: cfg.tokenMessenger,
-            maxFeeBps: cfg.maxFeeBps,
-            providerFeeBps: cfg.providerFeeBps,
-            providerFeeRecipient: cctpModule.getproviderFeeRecipient()
+            finalityThreshold: cfgFinality
         });
     }
 
@@ -458,63 +453,6 @@ contract CCTPModuleTest is SafeTestSetup {
         p.destDomain = 42;
         vm.expectRevert(CCTPModule.UnsupportedRoute.selector);
         cctpModule.requestBridge(address(safe), p, new address[](0), new bytes[](0));
-    }
-
-    function test_requestBridge_revertsWhenTokenMessengerDrifted() public {
-        deal(address(usdc), address(safe), 100e6);
-        CCTPModule.BridgeParams memory p = _params(100e6);
-        (address[] memory s, bytes[] memory sigs) = _sign(p);
-
-        MockTokenMessenger newMessenger = new MockTokenMessenger();
-        address[] memory assets = new address[](1);
-        assets[0] = address(usdc);
-        CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(newMessenger), maxFeeBps: cfgMaxFeeBps, providerFeeBps: 0 });
-        vm.prank(owner);
-        cctpModule.setAssetConfig(assets, cfgs);
-
-        vm.expectRevert(CCTPModule.ConfigChangedSinceSigning.selector);
-        cctpModule.requestBridge(address(safe), p, s, sigs);
-    }
-
-    function test_requestBridge_revertsWhenMaxFeeBpsDrifted() public {
-        deal(address(usdc), address(safe), 100e6);
-        CCTPModule.BridgeParams memory p = _params(100e6);
-        (address[] memory s, bytes[] memory sigs) = _sign(p);
-
-        address[] memory assets = new address[](1);
-        assets[0] = address(usdc);
-        CCTPModule.AssetConfig[] memory cfgs = new CCTPModule.AssetConfig[](1);
-        cfgs[0] = CCTPModule.AssetConfig({ tokenMessenger: address(messenger), maxFeeBps: cfgMaxFeeBps + 1, providerFeeBps: 0 });
-        vm.prank(owner);
-        cctpModule.setAssetConfig(assets, cfgs);
-
-        vm.expectRevert(CCTPModule.ConfigChangedSinceSigning.selector);
-        cctpModule.requestBridge(address(safe), p, s, sigs);
-    }
-
-    function test_requestBridge_revertsWhenProviderFeeBpsDrifted() public {
-        deal(address(usdc), address(safe), 100e6);
-        CCTPModule.BridgeParams memory p = _params(100e6);
-        (address[] memory s, bytes[] memory sigs) = _sign(p);
-
-        _configureproviderFee(25, makeAddr("feeRecipient"));
-
-        vm.expectRevert(CCTPModule.ConfigChangedSinceSigning.selector);
-        cctpModule.requestBridge(address(safe), p, s, sigs);
-    }
-
-    function test_requestBridge_revertsWhenProviderFeeRecipientDrifted() public {
-        _configureproviderFee(50, makeAddr("originalRecipient"));
-        deal(address(usdc), address(safe), 100e6);
-        CCTPModule.BridgeParams memory p = _params(100e6);
-        (address[] memory s, bytes[] memory sigs) = _sign(p);
-
-        vm.prank(owner);
-        cctpModule.setproviderFeeRecipient(makeAddr("newRecipient"));
-
-        vm.expectRevert(CCTPModule.ConfigChangedSinceSigning.selector);
-        cctpModule.requestBridge(address(safe), p, s, sigs);
     }
 
     function test_executeBridge_revertsIfCctpLimitTightenedAfterRequest() public {
