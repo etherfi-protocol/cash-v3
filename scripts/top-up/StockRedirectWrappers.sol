@@ -9,9 +9,9 @@ pragma solidity ^0.8.28;
  *         on the way out to the user's TradingSafe.
  *
  * @dev ONE list serves BOTH environments. The dev and prod trading lenses were diffed on
- *      2026-08-14 and list the identical 90 xStock wrappers, with identical raw and wrapper
+ *      2026-08-14 and listed the identical 90 xStock wrappers, with identical raw and wrapper
  *      addresses — unsurprising, since both read the same Backed deployments on the same chain.
- *      Kept as a single table on purpose: two 90-row copies would drift.
+ *      Kept as a single table on purpose: two N-row copies would drift.
  *
  * @dev Derived from two sources, and reproducible from both:
  *      - membership: every token on the `TradingLens` that is an xStock wrapper, read from
@@ -29,13 +29,21 @@ pragma solidity ^0.8.28;
  *      The pairing is not taken on trust — `TopUpFactory.setRedirectWrappers` reverts unless
  *      `IERC4626(wrapper).asset()` is the raw token it is registered against, so a stale or
  *      transposed row cannot be configured.
+ *
+ * @dev SLVx (91st row, `scripts/gnosis-txs/ListSlvxEth3CP.s.sol`). wSLVx was a real ERC-4626
+ *      wrapper over raw SLVx that had simply never been added to the `TradingLens`, so at the
+ *      time of the 2026-08-14 diff it fell out of the lens ∩ xstocks-catalogue intersection this
+ *      table is derived from — wGLDx and wPPLTx, the other two bullion xStocks, were already on
+ *      the lens and already here. The SLVx listing 3CP adds wSLVx to the lens (tx 1) before this
+ *      row is registered (tx 2), so once that bundle lands the lens ∩ catalogue derivation above
+ *      holds again without qualification — SLVx is not a special case, just a later addition.
  */
 library StockRedirectWrappers {
     /// @return raws Raw Backed xStock tokens, ordered by symbol.
     /// @return wrappers `wrappers[i]` is the ERC-4626 over `raws[i]`.
     function pairs() internal pure returns (address[] memory raws, address[] memory wrappers) {
-        raws = new address[](90);
-        wrappers = new address[](90);
+        raws = new address[](91);
+        wrappers = new address[](91);
 
         raws[0] = 0x9d275685dC284C8eB1C79f6ABA7a63Dc75ec890a; wrappers[0] = 0x943BF64D566c32A2Bcd41AC92FB63C111cC9De8f; // AAPLx
         raws[1] = 0xfBF2398dF672cEE4aFcC2A4A733222331c742a6A; wrappers[1] = 0x7ad3DA1947926d0685496F6dAa2d786CA7f45E4a; // ABBVx
@@ -110,22 +118,23 @@ library StockRedirectWrappers {
         raws[70] = 0x338791c58fdED314b81EAb139A1A2Fb7967D90d6; wrappers[70] = 0x05F6035b7c42F7ACd13249C56f4ca7eBe52eEb83; // SBETx
         raws[71] = 0xF6D87E523512704C29E9b7cA3e9e6226bDCE3EA1; wrappers[71] = 0xb461ACb818F5cB3E9dB1F23D4D4a2018B5Cb4988; // SCHFx
         raws[72] = 0x58100046a4Afcd4eE4faDbD4244f3f895a341c56; wrappers[72] = 0x6215a58ed045d71F2561AaAbe54f4C885C522998; // SKHYx
-        raws[73] = 0xb63EFBc28860c8097e341DE1fCF59456161E9D98; wrappers[73] = 0x75e82E2884Ea10f72FCA777449B73377f4646219; // SNDKx
-        raws[74] = 0x7F8ba411ECBC0A135d669d5EaE5D15b0Ca0b0ea1; wrappers[74] = 0x705c971E9F919b36AB396C76EE02BBAA07b0862E; // SPCEx
-        raws[75] = 0x68fa48B1C2FE52b3D776E1953e0E782b5044Ce28; wrappers[75] = 0x8e2eeD8b8B5E13Ea7BF38e50d7821d2C57309072; // SPCXx
-        raws[76] = 0x1Aad217B8F78dbA5E6693460e8470F8b1A3977f3; wrappers[76] = 0x0B2456017C5Df2dFc0289740C4b352049892780C; // STRCx
-        raws[77] = 0xAF072F109A2C173D822a4fe9af311A1B18F83d19; wrappers[77] = 0x5C730581A6a33c64c26Eb06014A5fd163Ba71ab4; // TMOx
-        raws[78] = 0xe95ab205e333443D7970336D5fD827eF9eD97608; wrappers[78] = 0xf0ad3df8643b2f8554DB983529CD3f4A892748b0; // TONXx
-        raws[79] = 0xfDDDb57878eF9D6f681Ec4381DCB626b9E69AC86; wrappers[79] = 0x0b6cEC8Ded816651dB478411fDc2c5bFc269b1e1; // TQQQx
-        raws[80] = 0x8aD3c73F833d3F9A523aB01476625F269aEB7Cf0; wrappers[80] = 0xc3FdBe3A68EE5dE461D30415a8165cf9Aefe1171; // TSLAx
-        raws[81] = 0x9e3bf4Ecfc44EeDD624F26656B6736a3F093b073; wrappers[81] = 0x27D62249488fc66ECBb92C8da3F56f700B8e8501; // TSMx
-        raws[82] = 0xdb9783Ca04bBD64fe2c6d7B9503A979b3DE30729; wrappers[82] = 0x1789a222C560DDd62E7E422d64D82E3Fe2BF7eCC; // UBERx
-        raws[83] = 0x167A6375DA1eFc4a5BE0f470E73eCEfd66245048; wrappers[83] = 0x1F652b05eFB825a068304972BC506Fb43Fac4D6F; // UNHx
-        raws[84] = 0xbD730E618bcD88C82dDeE52e10275CF2f88A4777; wrappers[84] = 0x2eE96832126dC446808BaBcbCc9A04905114f880; // VTIx
-        raws[85] = 0x6d5edEEbBc6A4099Eb8bb289EB3b80D799f7b28C; wrappers[85] = 0x0e61556b8c1CfE86257003B2F3d689FF875911D4; // VTx
-        raws[86] = 0x2363FD1235C1B6d3A5088DdF8dF3A0b3A30C5293; wrappers[86] = 0x11704Bb8fDf32Af2f70fB3F085d437b9b3E66a94; // Vx
-        raws[87] = 0x7AEfc9965699fBea943e03264d96e50CD4A97b21; wrappers[87] = 0x3b4336e3958913984C2E36b8Ed0E7C87a5bDee33; // WMTx
-        raws[88] = 0x6F75AC3b1b6Fbe8Bb5F948e25aF03620f26Ae838; wrappers[88] = 0x577954fcDb16755d2AC02a5a0F305E45AD13Fcff; // XLEx
-        raws[89] = 0xEEdb0273c5Af792745180e9fF568cD01550fFA13; wrappers[89] = 0xe407Ca0C99338d210Ca06Aa9E4A5Eada8BE442de; // XOMx
+        raws[73] = 0x4833e7f4f0460f4B72A3a5879A6C9841bCC5B58B; wrappers[73] = 0xB842EacB35Fd9c1bEDA53749072Ef22823f2cA8c; // SLVx
+        raws[74] = 0xb63EFBc28860c8097e341DE1fCF59456161E9D98; wrappers[74] = 0x75e82E2884Ea10f72FCA777449B73377f4646219; // SNDKx
+        raws[75] = 0x7F8ba411ECBC0A135d669d5EaE5D15b0Ca0b0ea1; wrappers[75] = 0x705c971E9F919b36AB396C76EE02BBAA07b0862E; // SPCEx
+        raws[76] = 0x68fa48B1C2FE52b3D776E1953e0E782b5044Ce28; wrappers[76] = 0x8e2eeD8b8B5E13Ea7BF38e50d7821d2C57309072; // SPCXx
+        raws[77] = 0x1Aad217B8F78dbA5E6693460e8470F8b1A3977f3; wrappers[77] = 0x0B2456017C5Df2dFc0289740C4b352049892780C; // STRCx
+        raws[78] = 0xAF072F109A2C173D822a4fe9af311A1B18F83d19; wrappers[78] = 0x5C730581A6a33c64c26Eb06014A5fd163Ba71ab4; // TMOx
+        raws[79] = 0xe95ab205e333443D7970336D5fD827eF9eD97608; wrappers[79] = 0xf0ad3df8643b2f8554DB983529CD3f4A892748b0; // TONXx
+        raws[80] = 0xfDDDb57878eF9D6f681Ec4381DCB626b9E69AC86; wrappers[80] = 0x0b6cEC8Ded816651dB478411fDc2c5bFc269b1e1; // TQQQx
+        raws[81] = 0x8aD3c73F833d3F9A523aB01476625F269aEB7Cf0; wrappers[81] = 0xc3FdBe3A68EE5dE461D30415a8165cf9Aefe1171; // TSLAx
+        raws[82] = 0x9e3bf4Ecfc44EeDD624F26656B6736a3F093b073; wrappers[82] = 0x27D62249488fc66ECBb92C8da3F56f700B8e8501; // TSMx
+        raws[83] = 0xdb9783Ca04bBD64fe2c6d7B9503A979b3DE30729; wrappers[83] = 0x1789a222C560DDd62E7E422d64D82E3Fe2BF7eCC; // UBERx
+        raws[84] = 0x167A6375DA1eFc4a5BE0f470E73eCEfd66245048; wrappers[84] = 0x1F652b05eFB825a068304972BC506Fb43Fac4D6F; // UNHx
+        raws[85] = 0xbD730E618bcD88C82dDeE52e10275CF2f88A4777; wrappers[85] = 0x2eE96832126dC446808BaBcbCc9A04905114f880; // VTIx
+        raws[86] = 0x6d5edEEbBc6A4099Eb8bb289EB3b80D799f7b28C; wrappers[86] = 0x0e61556b8c1CfE86257003B2F3d689FF875911D4; // VTx
+        raws[87] = 0x2363FD1235C1B6d3A5088DdF8dF3A0b3A30C5293; wrappers[87] = 0x11704Bb8fDf32Af2f70fB3F085d437b9b3E66a94; // Vx
+        raws[88] = 0x7AEfc9965699fBea943e03264d96e50CD4A97b21; wrappers[88] = 0x3b4336e3958913984C2E36b8Ed0E7C87a5bDee33; // WMTx
+        raws[89] = 0x6F75AC3b1b6Fbe8Bb5F948e25aF03620f26Ae838; wrappers[89] = 0x577954fcDb16755d2AC02a5a0F305E45AD13Fcff; // XLEx
+        raws[90] = 0xEEdb0273c5Af792745180e9fF568cD01550fFA13; wrappers[90] = 0xe407Ca0C99338d210Ca06Aa9E4A5Eada8BE442de; // XOMx
     }
 }
