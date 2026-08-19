@@ -310,6 +310,29 @@ contract TopUpWrapStocksTest is Test {
         assertEq(wrapper.balanceOf(address(topUp)), 0);
     }
 
+    function test_wrapStocks_afterRetiringTheRawTopupRoute() public {
+        // The rollout for a stock moving off the raw-bridge rail onto the wrap rail: while the raw
+        // stock still has a topup route of its own the wrap is refused, and retiring that route is
+        // what opens it.
+        MockWrappedToken wrapper = _registerWrapper(stock);
+        _markTokenSupported(address(stock));
+
+        vm.prank(stranger);
+        vm.expectRevert(TopUpFactory.OnlyUnsupportedTokens.selector);
+        factory.wrapStocks(address(topUp), _arr(address(stock)));
+
+        uint256[] memory chainIds = new uint256[](1);
+        chainIds[0] = 10;
+        vm.prank(owner);
+        factory.removeTokenConfig(_arr(address(stock)), chainIds);
+
+        vm.prank(stranger);
+        factory.wrapStocks(address(topUp), _arr(address(stock)));
+
+        assertEq(wrapper.balanceOf(address(topUp)), 1_000e18, "wrap blocked after the route was retired");
+        assertEq(stock.balanceOf(address(topUp)), 0);
+    }
+
     // ---- Helpers ----
 
     function _arr(address a) internal pure returns (address[] memory arr) {

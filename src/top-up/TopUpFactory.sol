@@ -90,6 +90,12 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /// @param config Array of TokenConfig struct
     event TokenConfigSet(address[] tokens, uint256[] chainIds, TokenConfig[] config);
 
+    /// @notice Emitted when tokens are retired from the topup lane — their route for the paired
+    ///         chain cleared and the token dropped from the supported set.
+    /// @param tokens Tokens retired.
+    /// @param chainIds Per-entry destination chain whose route was cleared.
+    event TokenConfigRemoved(address[] tokens, uint256[] chainIds);
+
     /// @notice Emitted when the destination-chain TradingSafeFactory address is updated.
     /// @param oldFactory Previous address (zero on first set).
     /// @param newFactory New address.
@@ -332,6 +338,55 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
         }
 
         emit TokenConfigSet(tokens, chainIds, configs);
+    }
+
+    /**
+     * @notice Takes each `tokens[i]` off the topup lane for `chainIds[i]`: clears its bridge
+     *         configuration for that destination and drops it from the supported set.
+     * @dev Admin-only, and the inverse of `setTokenConfig`, which is otherwise a one-way door —
+     *      it only ever adds to `supportedTokens`, and rejects a zeroed config, so before this
+     *      there was no way to retire an asset from the lane at all.
+     *
+     *      Both halves matter and neither is sufficient alone. `bridge` gates on
+     *      `tokenChainConfig[token][destChainId].bridgeAdapter`, never on the supported set, so
+     *      leaving the config in place would keep the route open to the bridger role; while
+     *      `processTopUp`, `recoverFunds`, the redirects and `wrapStocks` all gate on the set, so
+     *      leaving the token in it would keep sweeping the asset the config no longer routes.
+     *
+     *      A token leaves the supported set as soon as one of its routes is removed, because the
+     *      set has no per-chain granularity and the chains a token is configured for are not
+     *      enumerable on-chain. A token with routes on several destinations must therefore have
+     *      all of them passed in — otherwise the leftover routes stay bridgeable while sweeping
+     *      stops, which is a half-retired asset. Removing a route that was never configured
+     *      reverts rather than passing silently, so a mistyped chain id can't read as a closed
+     *      route.
+     * @param tokens Tokens to retire.
+     * @param chainIds Per-entry destination chain whose route is being cleared.
+     * @custom:throws ArrayLengthMismatch If the two arrays don't agree on length.
+     * @custom:throws TokenCannotBeZeroAddress If any `tokens[i]` is the zero address.
+     * @custom:throws ChainIdCannotBeZero If any `chainIds[i]` is zero.
+     * @custom:throws TokenConfigNotSet If any `(tokens[i], chainIds[i])` has no configured route.
+     * @custom:emits TokenConfigRemoved
+     */
+    function removeTokenConfig(address[] calldata tokens, uint256[] calldata chainIds) external onlyRoleRegistryOwner {
+        TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
+        uint256 len = tokens.length;
+        if (len != chainIds.length) revert ArrayLengthMismatch();
+
+        for (uint256 i = 0; i < len;) {
+            address token = tokens[i];
+            if (token == address(0)) revert TokenCannotBeZeroAddress();
+            if (chainIds[i] == 0) revert ChainIdCannotBeZero();
+            if ($.tokenChainConfig[token][chainIds[i]].bridgeAdapter == address(0)) revert TokenConfigNotSet();
+
+            delete $.tokenChainConfig[token][chainIds[i]];
+            $.supportedTokens.remove(token);
+            unchecked {
+                ++i;
+            }
+        }
+
+        emit TokenConfigRemoved(tokens, chainIds);
     }
 
     /**
