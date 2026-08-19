@@ -24,6 +24,9 @@ contract TopUp is Constants, Ownable {
     error EthTransferFailed();
     /// @notice Reverts when `redirectToTradingSafe` is called with zero amount.
     error InvalidAmount();
+    /// @notice Reverts when `wrap` is called for a token the factory has registered no ERC-4626
+    ///         wrapper for — there is nothing to deposit into.
+    error WrapperNotSet();
 
     /// @notice Emitted when funds are processed
     /// @param token Address of the token processed
@@ -108,10 +111,8 @@ contract TopUp is Constants, Ownable {
      *      per-token state.
      *
      *      On the wrap leg the vault mints straight to `tradingSafe`, so the shares never touch
-     *      this contract, and the allowance is granted per call and zeroed after — no standing
-     *      approval survives, and a vault that pulls less than `amount` leaves no remainder
-     *      behind to spend. The factory validated the pairing when it configured the wrapper, so
-     *      the approve/deposit target is never an arbitrary address.
+     *      this contract. The deposit itself is `_wrap`, shared with the in-place `wrap` — the
+     *      two differ only in who receives the shares.
      *
      * @param token ERC20 to redirect — always the token this TopUp holds, never its wrapper.
      * @param tradingSafe Destination TradingSafe (resolved and supplied by the factory).
@@ -130,8 +131,60 @@ contract TopUp is Constants, Ownable {
             return;
         }
 
+        _wrap(token, wrapper, tradingSafe, amount);
+    }
+
+    /**
+     * @notice Wraps `amount` of `token` into the ERC-4626 wrapper the factory has registered for
+     *         it, crediting the shares to this same TopUp.
+     *
+     * @dev Nothing leaves this contract: the raw Backed xStock (TSLAx) a user sent to their TopUp
+     *      address becomes the wrapper (wTSLAx) at that same address, which is the form both the
+     *      topup and trading catalogs actually list. The raw stock is listed in neither, so until
+     *      it is converted it can be neither swept nor redirected — this is what unsticks it, and
+     *      it is deliberately not a transfer of any kind.
+     *
+     *      Which vault a token may be deposited into is the factory's `wrapperFor(token)`, the
+     *      same admin-curated mapping the redirect path reads, so the approve/deposit target is
+     *      never an arbitrary address and this contract keeps no per-token state. Unlike the
+     *      redirect, a token with no registered wrapper reverts here: there is no as-is fallback
+     *      for a wrap, and silently doing nothing would hide the missing registration.
+     *
+     * @param token Raw ERC20 this TopUp holds — never its wrapper.
+     * @param amount Amount of `token` to wrap.
+     * @custom:throws OnlyOwner If caller is not the owner.
+     * @custom:throws InvalidAmount If `amount == 0`.
+     * @custom:throws WrapperNotSet If the factory has no wrapper registered for `token`.
+     */
+    function wrap(address token, uint256 amount) external {
+        address _owner = owner();
+        if (_owner != msg.sender) revert OnlyOwner();
+        if (amount == 0) revert InvalidAmount();
+
+        address wrapper = ITopUpFactory(_owner).wrapperFor(token);
+        if (wrapper == address(0)) revert WrapperNotSet();
+
+        _wrap(token, wrapper, address(this), amount);
+    }
+
+    /**
+     * @dev The ERC-4626 deposit both wrap paths share: `wrap` passes this contract as `receiver`
+     *      and `redirectToTradingSafe` passes the destination safe, and that is the only
+     *      difference between them.
+     *
+     *      The allowance is granted per call and zeroed after, so no standing approval survives
+     *      and a vault that pulls less than `amount` leaves no remainder behind to spend. Callers
+     *      resolve `wrapper` off the factory's `wrapperFor`, which validated the `asset()` pairing
+     *      when it was registered, so the approve/deposit target is never an arbitrary address —
+     *      this helper takes it as given and must not be reached with an unvalidated one.
+     * @param token Raw ERC20 being deposited.
+     * @param wrapper The token's registered ERC-4626 vault. Never the zero address.
+     * @param receiver Who the vault mints the shares to.
+     * @param amount Amount of `token` to deposit.
+     */
+    function _wrap(address token, address wrapper, address receiver, uint256 amount) internal {
         IERC20(token).forceApprove(wrapper, amount);
-        IERC4626(wrapper).deposit(amount, tradingSafe);
+        IERC4626(wrapper).deposit(amount, receiver);
         IERC20(token).forceApprove(wrapper, 0);
     }
 

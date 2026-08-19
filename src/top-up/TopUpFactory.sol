@@ -120,6 +120,16 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /// @param newWrapper New vault, or zero to go back to a plain transfer.
     event RedirectWrapperSet(address indexed token, address oldWrapper, address newWrapper);
 
+    /// @notice Emitted for each token `wrapStocks` converted in place at a TopUp. Distinct from
+    ///         `WrapOnRedirect`: nothing left the TopUp here, so there is no accompanying
+    ///         `RedirectFunds` — the TopUp simply holds the wrapper instead of the raw stock.
+    /// @param topUp The TopUp whose raw stock was wrapped, and the receiver of the shares.
+    /// @param wrapper The ERC-4626 vault the stock was deposited into.
+    /// @param underlying The raw stock that was wrapped.
+    /// @param assets Amount of `underlying` deposited — the TopUp's entire balance of it.
+    /// @param shares Amount of `wrapper` the TopUp was credited.
+    event WrapStock(address indexed topUp, address indexed wrapper, address indexed underlying, uint256 assets, uint256 shares);
+
     /// @notice Error thrown when a non-admin tries to deploy a topUp contract
     error OnlyAdmin();
     /// @notice Error thrown when trying to pull funds from an address not registered as deployedAddresses
@@ -169,6 +179,10 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     error InvalidRedirectWrapper();
     /// @notice Reverts when the wrap leg credited the TradingSafe no shares at all.
     error WrapMintedNothing();
+    /// @notice Reverts when `wrapStocks` is asked to wrap a token with no registered wrapper —
+    ///         there is nothing to deposit into, and silently skipping would hide the missing
+    ///         `setRedirectWrappers` entry.
+    error RedirectWrapperNotSet();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -613,6 +627,67 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
 
         emit WrapOnRedirect(topUp, wrapper, token, amount, shares);
         emit RedirectFunds(topUp, tradingSafe, wrapper, shares);
+    }
+
+    /**
+     * @notice Wraps every `tokens[i]` a TopUp holds into that token's registered ERC-4626
+     *         wrapper, in place — the TopUp itself receives the shares.
+     * @dev Permissionless. Nothing leaves the TopUp: a raw Backed xStock (TSLAx) it was sent
+     *      becomes the wrapper (wTSLAx) held by the same TopUp, at the same address, so there is
+     *      no recipient for a caller to choose and nothing to gain from calling it. What may be
+     *      wrapped is fixed by `setRedirectWrappers`, which is admin-curated and validates the
+     *      `asset()` pairing, so the deposit target is never an arbitrary address.
+     *
+     *      The point is the raw stock's dead end: it is trading-supported in no form of its own
+     *      and topup-supported in none either, so left as-is it can neither be swept by
+     *      `processTopUp` nor redirected. Converting it to the form the catalogs do list hands it
+     *      back to whichever rail should carry it — and that rail runs its own support checks, so
+     *      this one deliberately asserts nothing about the wrapper beyond the vault minting.
+     *
+     *      Each entry wraps the TopUp's whole balance, so the caller needs no amounts and the
+     *      TopUp is left holding none of the raw stock. A zero balance is skipped rather than
+     *      reverted: the caller can pass a user's full stock list without knowing which of them
+     *      actually arrived. Shares are read as the TopUp's own balance delta rather than the
+     *      vault's return value, the same way `_executeRedirect` does it.
+     *
+     *      The conversion itself is `TopUp.wrap`, which has no recipient parameter at all: the
+     *      shares can only ever be credited to the TopUp doing the wrapping, so no caller of this
+     *      function — and no future caller of the TopUp's own entry point — can route them
+     *      anywhere. Moving funds off a TopUp remains the redirect path's job alone.
+     * @param topUp The TopUp instance holding the raw stocks. Must be factory-deployed.
+     * @param tokens Raw stocks to wrap. Each must NOT be topup-supported and MUST have a wrapper
+     *               registered via `setRedirectWrappers`.
+     * @custom:throws InvalidTopUpAddress If `topUp` was not deployed by this factory.
+     * @custom:throws OnlyUnsupportedTokens If any `tokens[i]` has a topup configuration on this
+     *                factory (it belongs on the `processTopUp` rail, unwrapped).
+     * @custom:throws RedirectWrapperNotSet If any `tokens[i]` has no registered wrapper.
+     * @custom:throws WrapMintedNothing If a wrap credited the TopUp no shares.
+     */
+    function wrapStocks(address topUp, address[] calldata tokens) external nonReentrant whenNotPaused {
+        TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
+        if (!$.deployedAddresses.contains(topUp)) revert InvalidTopUpAddress();
+
+        uint256 len = tokens.length;
+
+        for (uint256 i = 0; i < len;) {
+            address token = tokens[i];
+            if ($.supportedTokens.contains(token)) revert OnlyUnsupportedTokens();
+
+            address wrapper = $.redirectWrapper[token];
+            if (wrapper == address(0)) revert RedirectWrapperNotSet();
+
+            uint256 amount = IERC20(token).balanceOf(topUp);
+            if (amount != 0) {
+                uint256 balanceBefore = IERC20(wrapper).balanceOf(topUp);
+                TopUp(payable(topUp)).wrap(token, amount);
+                uint256 shares = IERC20(wrapper).balanceOf(topUp) - balanceBefore;
+                if (shares == 0) revert WrapMintedNothing();
+
+                emit WrapStock(topUp, wrapper, token, amount, shares);
+            }
+
+            unchecked { ++i; }
+        }
     }
 
     receive() external payable { }
