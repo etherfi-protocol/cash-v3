@@ -23,11 +23,11 @@ import { Utils } from "../utils/Utils.sol";
 ///           2. DebtManager.supportBorrowToken    (apyPerSec=1, minShares=type(uint128).max)
 ///           3. CashModule.configureWithdrawAssets        ([LiquidEUR] => true)
 ///           4. EtherFiDataProvider.configureDefaultModules ([MidasModule] => true)
-///           5. RoleRegistry.grantRole                    (MIDAS_MODULE_ADMIN => AAC4 safe)
+///           5. RoleRegistry.grantRole                    (MULTISIG_ADMIN_ROLE => AAC4 safe)
 ///           6. MidasModule.addMidasVaults                (liquidEUR -> deposit + redemption vaults)
 ///           7. SettlementDispatcher{Reap,Rain,Pix,CardOrder}.setMidasRedemptionVault(liquidEUR, vault)
 ///
-///         Step 5 must precede step 6 because addMidasVaults requires MIDAS_MODULE_ADMIN,
+///         Step 5 must precede step 6 because addMidasVaults requires MULTISIG_ADMIN_ROLE,
 ///         which is held by the bundle executor (CashController Safe / AAC4).
 ///
 /// Prerequisites:
@@ -45,7 +45,7 @@ contract SupportLiquidEurGnosis is GnosisHelpers, Utils {
     address constant LIQUID_EUR_DEPOSIT_VAULT    = 0xF1b45eE795C8e1B858e191654C95A1B33c573632; // depositVault
     address constant LIQUID_EUR_REDEMPTION_VAULT = 0xDC87653FCc5c16407Cd2e199d5Db48BaB71e7861; // redemptionVaultSwapper
 
-    bytes32 constant MIDAS_MODULE_ADMIN = keccak256("MIDAS_MODULE_ADMIN");
+    bytes32 constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
 
     // ─── Risk parameters (ticket) ──────────────────────────────────
     uint80 constant LTV                   = 70e18; // 70%
@@ -117,10 +117,10 @@ contract SupportLiquidEurGnosis is GnosisHelpers, Utils {
             txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), data, "0", false)));
         }
 
-        // 1.5 — grantRole(MIDAS_MODULE_ADMIN, CASH_CONTROLLER_SAFE)
+        // 1.5 — grantRole(MULTISIG_ADMIN_ROLE, CASH_CONTROLLER_SAFE)
         {
             string memory data = iToHex(abi.encodeWithSelector(
-                RoleRegistry.grantRole.selector, MIDAS_MODULE_ADMIN, CASH_CONTROLLER_SAFE
+                RoleRegistry.grantRole.selector, MULTISIG_ADMIN_ROLE, CASH_CONTROLLER_SAFE
             ));
             txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), data, "0", false)));
         }
@@ -181,10 +181,10 @@ contract SupportLiquidEurGnosis is GnosisHelpers, Utils {
         console.log("  [OK] MidasModule whitelisted as default module");
 
         require(
-            RoleRegistry(roleRegistry).hasRole(MIDAS_MODULE_ADMIN, CASH_CONTROLLER_SAFE),
-            "MIDAS_MODULE_ADMIN not granted to safe"
+            RoleRegistry(roleRegistry).hasRole(MULTISIG_ADMIN_ROLE, CASH_CONTROLLER_SAFE),
+            "MULTISIG_ADMIN_ROLE not granted to safe"
         );
-        console.log("  [OK] MIDAS_MODULE_ADMIN granted to AAC4 safe");
+        console.log("  [OK] MULTISIG_ADMIN_ROLE granted to AAC4 safe");
 
         require(SettlementDispatcherV2(payable(reap)).getMidasRedemptionVault(LIQUID_EUR)      == LIQUID_EUR_REDEMPTION_VAULT, "Reap vault mismatch");
         require(SettlementDispatcherV2(payable(rain)).getMidasRedemptionVault(LIQUID_EUR)      == LIQUID_EUR_REDEMPTION_VAULT, "Rain vault mismatch");

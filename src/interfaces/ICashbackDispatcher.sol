@@ -47,10 +47,16 @@ interface ICashbackDispatcher {
     error InvalidCashbackToken();
 
     /**
-     * @notice Function to fetch the admin role
-     * @return CASHBACK_DISPATCHER_ADMIN_ROLE
+     * @notice Function to fetch the fast multisig admin role
+     * @return MULTISIG_ADMIN_ROLE
      */
-    function CASHBACK_DISPATCHER_ADMIN_ROLE() external view returns (bytes32);
+    function MULTISIG_ADMIN_ROLE() external view returns (bytes32);
+
+    /**
+     * @notice Function to fetch the operating-timelock role
+     * @return OPERATING_TIMELOCK_ROLE
+     */
+    function OPERATING_TIMELOCK_ROLE() external view returns (bytes32);
 
     /**
      * @notice Returns true if the token is a whitelisted cashback token, false otherwise

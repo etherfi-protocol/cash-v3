@@ -70,6 +70,8 @@ contract StockOFTBridgeAdapterTest is Test, Constants {
             maxSlippageInBps: MAX_SLIPPAGE_BPS,
             additionalData: abi.encode(WSPYX_ADAPTER, OP_EID, LZ_RECEIVE_GAS)
         });
+        roleRegistry.grantRole(keccak256("OPERATING_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("MULTISIG_ADMIN_ROLE"), owner);
         factory.setTokenConfig(tokens, chainIds, configs);
 
         roleRegistry.grantRole(factory.TOPUP_FACTORY_BRIDGER_ROLE(), address(this));

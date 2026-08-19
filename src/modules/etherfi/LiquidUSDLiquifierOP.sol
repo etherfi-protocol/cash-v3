@@ -37,6 +37,9 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
     
     /// @notice Role identifier for Settlement Dispatcher Bridger
     bytes32 public constant SETTLEMENT_DISPATCHER_BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
+
+    /// @notice Operating-timelock role that can withdraw funds from this contract
+    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
     
     /// @notice Address of the Debt Manager
     IDebtManager public immutable debtManager;
@@ -207,7 +210,7 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
      * @param recipient Address to receive the withdrawn funds
      * @param amount Amount of tokens to withdraw
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRoleRegistryOwner() {
+    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         if (recipient == address(0)) revert InvalidValue();
         amount = _withdrawFunds(token, recipient, amount);
         emit FundsWithdrawn(token, amount, recipient);

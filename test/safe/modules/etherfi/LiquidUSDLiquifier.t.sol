@@ -246,7 +246,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
     function test_withdrawFunds_OnlyRoleRegistryOwner() public {
         vm.prank(makeAddr("notRoleRegistryOwner"));
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         liquidUSDLiquifier.withdrawFunds(address(USDC), owner, 100e6);
     }
 

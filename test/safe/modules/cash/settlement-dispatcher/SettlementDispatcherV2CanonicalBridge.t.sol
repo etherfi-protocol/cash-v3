@@ -53,6 +53,7 @@ contract SettlementDispatcherV2CanonicalBridgeTest is Test, Constants {
         ))));
 
         roleRegistry.grantRole(BRIDGER_ROLE, owner);
+        roleRegistry.grantRole(keccak256("OPERATING_TIMELOCK_ROLE"), owner);
         roleRegistry.grantRole(BRIDGER_ROLE, bridger);
 
         vm.stopPrank();

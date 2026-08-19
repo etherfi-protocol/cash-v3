@@ -83,6 +83,7 @@ contract TopUpDestTest is Utils, Constants {
         // Grant roles
         roleRegistry.grantRole(TOP_UP_DEPOSITOR_ROLE, depositor);
         roleRegistry.grantRole(TOP_UP_ROLE, topUpRole);
+        roleRegistry.grantRole(keccak256("OPERATING_TIMELOCK_ROLE"), owner);
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
@@ -162,7 +163,7 @@ contract TopUpDestTest is Utils, Constants {
 
         vm.startPrank(nonUser);
 
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 2);
 
         vm.stopPrank();

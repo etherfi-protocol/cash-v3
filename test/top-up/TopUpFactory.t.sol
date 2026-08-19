@@ -103,6 +103,8 @@ contract TopUpFactoryTest is Test, Constants {
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
+        roleRegistry.grantRole(keccak256("OPERATING_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("MULTISIG_ADMIN_ROLE"), owner);
 
         implementation = new TopUp(address(weth));
         address factoryImpl = address(new TopUpFactory());
@@ -236,7 +238,7 @@ contract TopUpFactoryTest is Test, Constants {
 
     function test_setRecoveryWallet_reverts_whenCalledByNonOwner() public {
         vm.prank(user);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         factory.setRecoveryWallet(makeAddr("recovery"));
     }
 
@@ -514,7 +516,7 @@ contract TopUpFactoryTest is Test, Constants {
         configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
 
         vm.prank(user);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
     }
 
@@ -882,6 +884,7 @@ contract TopUpFactoryTest is Test, Constants {
         address cctpAdapter = address(new CCTPAdapter());
         address roleRegistryImpl = address(new RoleRegistry(dataProvider));
         roleRegistry = RoleRegistry(address(new UUPSProxy(roleRegistryImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
+        roleRegistry.grantRole(keccak256("OPERATING_TIMELOCK_ROLE"), owner);
 
         implementation = new TopUp(address(weth));
         address factoryImpl = address(new TopUpFactory());

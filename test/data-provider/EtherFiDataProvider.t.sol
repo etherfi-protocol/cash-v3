@@ -58,7 +58,8 @@ contract EtherFiDataProviderTest is Test {
 
         provider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), cashLens, initialModules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
 
-        roleRegistry.grantRole(provider.DATA_PROVIDER_ADMIN_ROLE(), admin);
+        roleRegistry.grantRole(provider.MULTISIG_ADMIN_ROLE(), admin);
+        roleRegistry.grantRole(provider.OPERATING_TIMELOCK_ROLE(), admin);
         vm.stopPrank();
     }
 

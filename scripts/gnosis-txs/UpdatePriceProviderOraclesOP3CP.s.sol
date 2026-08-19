@@ -14,7 +14,7 @@ import { OpOracleFeedUpdate } from "../oracle-updates/OpOracleFeedUpdate.sol";
  * @notice Generates the OP 3CP JSON to repoint the prod PriceProviderV2 (used by the DebtManager,
  *         CashLens and every other cash price consumer) off Pyth onto official Chainlink
  *         aggregator proxies for wHYPE / beHYPE / ETHFI / EURC, and frxUSD onto its new Chainlink
- *         feed. Single tx from the OperatingSafe (holds PRICE_PROVIDER_ADMIN_ROLE):
+ *         feed. Single tx from the OperatingSafe (holds OPERATING_TIMELOCK_ROLE):
  *
  *           PriceProviderV2.setTokenConfig([wHYPE, beHYPE, ETHFI, EURC, frxUSD], configs)
  *

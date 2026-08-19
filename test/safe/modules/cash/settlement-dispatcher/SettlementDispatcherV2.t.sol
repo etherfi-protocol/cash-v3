@@ -151,7 +151,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_setRefundWallet_reverts_whenNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         v2.setRefundWallet(makeAddr("newWallet"));
     }
 
@@ -605,7 +605,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockERC20 token = new MockERC20("USDC", "USDC", 6);
 
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         _setRecipient(address(token), alice);
     }
 

@@ -56,7 +56,7 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
         gw = LendGateway(address(new UUPSProxy(gwImpl, abi.encodeWithSelector(LendGateway.initialize.selector, address(roleRegistry)))));
 
         vm.startPrank(owner);
-        roleRegistry.grantRole(gw.LEND_GATEWAY_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(gw.MULTISIG_ADMIN_ROLE(), owner);
         gw.setReserveId(address(weETH), weethReserveId);
         gw.setReserveId(address(usdc), usdcReserveId);
         // USDC is the card settlement token; weETH is collateral-only and never a debit-spend asset

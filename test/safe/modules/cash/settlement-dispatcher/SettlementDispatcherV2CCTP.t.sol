@@ -81,6 +81,7 @@ contract SettlementDispatcherV2CCTPTest is Test, Constants {
         ))));
 
         roleRegistry.grantRole(BRIDGER_ROLE, owner);
+        roleRegistry.grantRole(keccak256("OPERATING_TIMELOCK_ROLE"), owner);
         roleRegistry.grantRole(BRIDGER_ROLE, bridger);
 
         // Configure CCTP
@@ -127,7 +128,7 @@ contract SettlementDispatcherV2CCTPTest is Test, Constants {
 
     function test_cctp_setCCTPConfig_reverts_whenNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         dispatcher.setCCTPConfig(address(mockMessenger), DEST_DOMAIN_ETHEREUM, 0, 2000);
     }
 

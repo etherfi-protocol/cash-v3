@@ -216,8 +216,8 @@ contract DeployOptimismDevModules is Utils {
             SALT_LIQUID_MODULE_REFERRER
         );
 
-        bytes32 ETHERFI_LIQUID_MODULE_ADMIN = keccak256("ETHERFI_LIQUID_MODULE_ADMIN");
-        RoleRegistry(d.roleRegistry).grantRole(ETHERFI_LIQUID_MODULE_ADMIN, deployer);
+        bytes32 MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+        RoleRegistry(d.roleRegistry).grantRole(MULTISIG_ADMIN_ROLE, deployer);
 
         // Set boring queues on EtherFiLiquidModuleWithReferrer
         EtherFiLiquidModuleWithReferrer(d.liquidModuleReferrer).setLiquidAssetWithdrawQueue(sethfi, sETHFIBoringQueue);

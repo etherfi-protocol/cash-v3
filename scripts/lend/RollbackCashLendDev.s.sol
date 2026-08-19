@@ -114,9 +114,10 @@ contract RollbackCashLendDev is Utils {
     function _validateDevAdmin(Deployment memory d, address sender) internal view {
         RoleRegistry registry = RoleRegistry(d.roleRegistry);
         require(registry.owner() == sender, "sender is not Cash dev admin");
-        require(registry.hasRole(ICashModule(d.cashModule).CASH_MODULE_CONTROLLER_ROLE(), sender), "dev admin missing CashModule controller role");
-        require(registry.hasRole(keccak256("DATA_PROVIDER_ADMIN_ROLE"), sender), "dev admin missing DataProvider admin role");
-        require(registry.hasRole(keccak256("LEND_GATEWAY_ADMIN_ROLE"), sender), "dev admin missing LendGateway admin role");
+        require(registry.hasRole(ICashModule(d.cashModule).MULTISIG_ADMIN_ROLE(), sender), "dev admin missing CashModule multisig admin role");
+        require(registry.hasRole(ICashModule(d.cashModule).OPERATING_TIMELOCK_ROLE(), sender), "dev admin missing CashModule operating timelock role");
+        require(registry.hasRole(keccak256("OPERATING_TIMELOCK_ROLE"), sender), "dev admin missing DataProvider operating timelock role");
+        require(registry.hasRole(keccak256("MULTISIG_ADMIN_ROLE"), sender), "dev admin missing LendGateway admin role");
     }
 
     /// @dev Loads proxies from the base file, Lend addresses from the record, and targets from the baseline.

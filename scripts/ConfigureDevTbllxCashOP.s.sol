@@ -45,8 +45,8 @@ interface IOracleSinkPrice {
  *         need a delivered rate; the post-state price cross-check below is skipped, loudly, until
  *         one lands.
  *
- * Usage (simulate by dropping --broadcast; the broadcast wallet must hold PRICE_PROVIDER_ADMIN_ROLE,
- * CASH_MODULE_CONTROLLER_ROLE and STARGATE_MODULE_ADMIN_ROLE on the dev RoleRegistry):
+ * Usage (simulate by dropping --broadcast; the broadcast wallet must hold OPERATING_TIMELOCK_ROLE,
+ * MULTISIG_ADMIN_ROLE and OPERATING_TIMELOCK_ROLE on the dev RoleRegistry):
  *   source .env && ENV=dev forge script \
  *     scripts/ConfigureDevTbllxCashOP.s.sol:ConfigureDevTbllxCashOP \
  *     --rpc-url $OPTIMISM_RPC --broadcast -vvvv
@@ -81,9 +81,10 @@ contract ConfigureDevTbllxCashOP is Utils {
         IRoleRegistry roleRegistry = IRoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
 
         address sender = vm.addr(vm.envUint("PRIVATE_KEY"));
-        require(roleRegistry.hasRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), sender), "sender lacks PRICE_PROVIDER_ADMIN_ROLE");
-        require(roleRegistry.hasRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), sender), "sender lacks CASH_MODULE_CONTROLLER_ROLE");
-        require(roleRegistry.hasRole(stargateModule.STARGATE_MODULE_ADMIN_ROLE(), sender), "sender lacks STARGATE_MODULE_ADMIN_ROLE");
+        require(roleRegistry.hasRole(priceProvider.OPERATING_TIMELOCK_ROLE(), sender), "sender lacks OPERATING_TIMELOCK_ROLE");
+        require(roleRegistry.hasRole(cashModule.MULTISIG_ADMIN_ROLE(), sender), "sender lacks MULTISIG_ADMIN_ROLE");
+        require(roleRegistry.hasRole(cashModule.OPERATING_TIMELOCK_ROLE(), sender), "sender lacks OPERATING_TIMELOCK_ROLE");
+        require(roleRegistry.hasRole(stargateModule.OPERATING_TIMELOCK_ROLE(), sender), "sender lacks OPERATING_TIMELOCK_ROLE");
 
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
 

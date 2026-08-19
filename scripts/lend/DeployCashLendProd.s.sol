@@ -372,7 +372,7 @@ contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
         _push(c.safeFactory, abi.encodeWithSelector(BeaconFactory.upgradeBeaconImplementation.selector, d.safeImpl));
 
         // Gateway configuration. The Safe grants itself the (new) gateway admin role first.
-        _push(c.roleRegistry, abi.encodeWithSignature("grantRole(bytes32,address)", keccak256("LEND_GATEWAY_ADMIN_ROLE"), SAFE));
+        _push(c.roleRegistry, abi.encodeWithSignature("grantRole(bytes32,address)", keccak256("MULTISIG_ADMIN_ROLE"), SAFE));
         _push(c.dataProvider, abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, _singleton(d.gatewayProxy), _bools(1, true)));
 
         uint256 reserveCount = spoke.getReserveCount();
@@ -396,7 +396,7 @@ contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
         _push(d.gatewayProxy, abi.encodeWithSelector(LendGateway.setDriver.selector, c.across, true));
 
         // Withdraw queues are post-constructor state, so copy them onto the new liquid modules
-        // (the Safe holds ETHERFI_LIQUID_MODULE_ADMIN).
+        // (the Safe holds MULTISIG_ADMIN_ROLE).
         _pushQueueCopies(EtherFiLiquidModule(c.modules[1]), d.modules[1]);
         _pushQueueCopies(EtherFiLiquidModule(c.modules[2]), d.modules[2]);
 

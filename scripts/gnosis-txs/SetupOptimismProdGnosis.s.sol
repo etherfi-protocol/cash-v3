@@ -87,7 +87,7 @@ contract SetupOptimismProdGnosis is GnosisHelpers, Utils {
     uint80 constant liquidationThreshold_usdt = 95e18;
     uint96 constant liquidationBonus_usdt = 1e18;
 
-    bytes32 constant DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
+    bytes32 constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
     bytes32 constant CASH_MODULE_CONTROLLER_ROLE = keccak256("CASH_MODULE_CONTROLLER_ROLE");
     bytes32 constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
     bytes32 constant ETHERFI_SAFE_FACTORY_ADMIN_ROLE = keccak256("ETHERFI_SAFE_FACTORY_ADMIN_ROLE");
@@ -204,11 +204,11 @@ contract SetupOptimismProdGnosis is GnosisHelpers, Utils {
         // Admin roles for the Safe itself
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("PAUSER"), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("UNPAUSER"), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (EtherFiDataProvider(dataProvider).DATA_PROVIDER_ADMIN_ROLE(), cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (EtherFiDataProvider(dataProvider).MULTISIG_ADMIN_ROLE(), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (CASH_MODULE_CONTROLLER_ROLE, cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (IPriceProvider(priceProvider).PRICE_PROVIDER_ADMIN_ROLE(), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (ICashbackDispatcher(cashbackDispatcher).CASHBACK_DISPATCHER_ADMIN_ROLE(), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (DEBT_MANAGER_ADMIN_ROLE, cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (IPriceProvider(priceProvider).OPERATING_TIMELOCK_ROLE(), cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (ICashbackDispatcher(cashbackDispatcher).MULTISIG_ADMIN_ROLE(), cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (MULTISIG_ADMIN_ROLE, cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (TopUpDest(topUpDest).TOP_UP_DEPOSITOR_ROLE(), cashControllerSafe)), false);
 
         // EtherFi wallet roles

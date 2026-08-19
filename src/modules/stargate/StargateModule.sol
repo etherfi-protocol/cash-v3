@@ -61,7 +61,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
     bytes32 private constant StargateModuleStorageLocation = 0xeafa2356b7fab3fae77872025a25cb67884d7667f22b14ae60e3f63732a39c00;
 
     /// @notice The ADMIN role for the Stargate module
-    bytes32 public constant STARGATE_MODULE_ADMIN_ROLE = keccak256("STARGATE_MODULE_ADMIN_ROLE");
+    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
 
     /// @notice TypeHash for request bridge function signature 
     bytes32 public constant REQUEST_BRIDGE_SIG = keccak256("requestBridge");
@@ -168,7 +168,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
 
     /**
      * @notice Sets configuration for multiple assets
-     * @dev Only callable by addresses with STARGATE_MODULE_ADMIN_ROLE
+     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
      * @param assets Array of asset addresses to configure
      * @param assetConfigs Array of corresponding asset configurations
      * @custom:throws Unauthorized if caller doesn't have admin role
@@ -178,7 +178,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      */
     function setAssetConfig(address[] memory assets, AssetConfig[] memory assetConfigs) external {
         IRoleRegistry roleRegistry = IRoleRegistry(etherFiDataProvider.roleRegistry());
-        if (!roleRegistry.hasRole(STARGATE_MODULE_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        if (!roleRegistry.hasRole(OPERATING_TIMELOCK_ROLE, msg.sender)) revert Unauthorized();
 
         _setAssetConfigs(assets, assetConfigs);
     }

@@ -18,7 +18,7 @@ import { Utils } from "../utils/Utils.sol";
 ///
 /// Bundle transactions (all executed by the Safe):
 ///   1. `EtherFiDataProvider.configureDefaultModules` — register MidasModule as default.
-///   2. `RoleRegistry.grantRole(MIDAS_MODULE_ADMIN, safe)` — grant admin role.
+///   2. `RoleRegistry.grantRole(MULTISIG_ADMIN_ROLE, safe)` — grant admin role.
 ///   3. `MidasModule.addMidasVaults` — set deposit/redemption vaults for liquidRESERVE.
 ///   4. `PriceProvider.setTokenConfig` — configure price oracle.
 ///   5. `DebtManager.supportCollateralToken` + `supportBorrowToken`.
@@ -38,7 +38,7 @@ contract DeployMidasModuleLiquidReserveOPGnosis is GnosisHelpers, Utils, Test {
     address constant DEPOSIT_VAULT = 0x1561eC30da97108Df46535CBd9bAD8C8d8611B3a;
     address constant REDEMPTION_VAULT = 0xC87b51735ea5Eeee59D3e12601dC931F77F2837a;
 
-    bytes32 constant MIDAS_MODULE_ADMIN = 0x57bb90935cfaf88839f01bfa8de28ad30d80741c4cc93a5d12373ddbb95c68c0;
+    bytes32 constant MULTISIG_ADMIN_ROLE = 0x57bb90935cfaf88839f01bfa8de28ad30d80741c4cc93a5d12373ddbb95c68c0;
 
     uint80 constant LTV = 80e18;
     uint80 constant LIQUIDATION_THRESHOLD = 90e18;
@@ -75,7 +75,7 @@ contract DeployMidasModuleLiquidReserveOPGnosis is GnosisHelpers, Utils, Test {
 
         assert(EtherFiDataProvider(dataProvider).isDefaultModule(MIDAS_MODULE));
         assert(IDebtManager(debtManager).isCollateralToken(MIDAS_TOKEN));
-        assert(RoleRegistry(roleRegistryAddr).hasRole(MIDAS_MODULE_ADMIN, CASH_CONTROLLER_SAFE));
+        assert(RoleRegistry(roleRegistryAddr).hasRole(MULTISIG_ADMIN_ROLE, CASH_CONTROLLER_SAFE));
 
         (address dv, address rv) = MidasModule(MIDAS_MODULE).vaults(MIDAS_TOKEN);
         assert(dv == DEPOSIT_VAULT);
@@ -94,7 +94,7 @@ contract DeployMidasModuleLiquidReserveOPGnosis is GnosisHelpers, Utils, Test {
     }
 
     function _grantMidasModuleAdminTx(address roleRegistryAddr) internal pure returns (string memory) {
-        bytes memory data = abi.encodeWithSelector(RoleRegistry.grantRole.selector, MIDAS_MODULE_ADMIN, CASH_CONTROLLER_SAFE);
+        bytes memory data = abi.encodeWithSelector(RoleRegistry.grantRole.selector, MULTISIG_ADMIN_ROLE, CASH_CONTROLLER_SAFE);
         return _getGnosisTransaction(addressToHex(roleRegistryAddr), iToHex(data), "0", false);
     }
 

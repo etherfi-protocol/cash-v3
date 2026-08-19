@@ -11,7 +11,7 @@ import { TradingAccountProdConfig as Prod } from "./TradingAccountProdConfig.sol
  * @notice Reconciles the Ethereum dev `TradingLens` with `TradingAccountProdConfig.supportedTokens()`
  *         minus the top-up assets, broadcasting directly from the dev admin EOA.
  * @dev The prod counterpart (`gnosis-txs/AddTradingTokensEth3CP`) emits a Safe bundle because
- *      `TRADING_LENS_ADMIN_ROLE` there belongs to a multisig; on dev the role sits on `DEV_ADMIN`,
+ *      `MULTISIG_ADMIN_ROLE` there belongs to a multisig; on dev the role sits on `DEV_ADMIN`,
  *      so the calls are broadcast one by one.
  *      Tokens already in the right state are skipped because `addSupportedToken` reverts
  *      `TokenAlreadySupported` and `removeSupportedToken` reverts `TokenNotSupported` rather than

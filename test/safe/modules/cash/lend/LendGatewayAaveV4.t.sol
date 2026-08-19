@@ -295,7 +295,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         vm.expectRevert(abi.encodeWithSelector(LendGateway.AssetNotRegistered.selector, address(0xdead)));
         gw.setSpendAsset(address(0xdead), true);
 
-        vm.expectRevert(); // caller lacks LEND_GATEWAY_ADMIN_ROLE
+        vm.expectRevert(); // caller lacks MULTISIG_ADMIN_ROLE
         gw.setSpendAsset(address(usdc), false);
 
         // _addAaveReserve manages its own aaveAdmin prank, so list the idle USDT reserve before pranking owner

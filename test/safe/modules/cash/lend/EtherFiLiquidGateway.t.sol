@@ -84,7 +84,7 @@ contract EtherFiLiquidGatewayTest is CashGatewayTestSetup {
         gw.setReserveId(address(liquidVault), liquidReserveId);
         // The sandwich drives gateway withdraw / supply on the safe's behalf, so it must be an authorized driver.
         gw.setDriver(address(liquidModule), true);
-        roleRegistry.grantRole(liquidModule.ETHERFI_LIQUID_MODULE_ADMIN(), owner);
+        roleRegistry.grantRole(liquidModule.MULTISIG_ADMIN_ROLE(), owner);
         liquidModule.setLiquidAssetWithdrawQueue(address(liquidVault), address(boringQueue));
         vm.stopPrank();
     }

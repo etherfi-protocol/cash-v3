@@ -51,7 +51,7 @@ import { Utils } from "../utils/Utils.sol";
  *      not share one:
  *        - `TopUpFactory.setRedirectWrappers` is `onlyRoleRegistryOwner` on the TopUpFactory's
  *          OWN RoleRegistry (`factory.roleRegistry()`); that registry's `owner()` is the Safe.
- *        - `TradingLens.addSupportedToken` checks `TRADING_LENS_ADMIN_ROLE` on the TradingLens's
+ *        - `TradingLens.addSupportedToken` checks `MULTISIG_ADMIN_ROLE` on the TradingLens's
  *          OWN RoleRegistry (`lens.roleRegistry()`) — a different deployed instance — on which
  *          the Safe separately holds that role directly.
  *      Both are asserted on-chain below rather than assumed identical.
@@ -84,7 +84,7 @@ import { Utils } from "../utils/Utils.sol";
 contract ListSlvxEth3CP is Utils, GnosisHelpers, StdCheats {
     using stdJson for string;
 
-    /// @notice Prod Safe (OperatingSafe). Holds `TRADING_LENS_ADMIN_ROLE` on the TradingLens's
+    /// @notice Prod Safe (OperatingSafe). Holds `MULTISIG_ADMIN_ROLE` on the TradingLens's
     ///         RoleRegistry directly, and is the owner of the TopUpFactory's RoleRegistry — so it
     ///         can sign both calls with no timelock.
     address internal constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
@@ -143,8 +143,8 @@ contract ListSlvxEth3CP is Utils, GnosisHelpers, StdCheats {
             "TopUpFactory's RoleRegistry owner is not the Safe - setRedirectWrappers would revert"
         );
         require(
-            lens.roleRegistry().hasRole(lens.TRADING_LENS_ADMIN_ROLE(), SAFE),
-            "Safe lacks TRADING_LENS_ADMIN_ROLE on the TradingLens's RoleRegistry - addSupportedToken would revert"
+            lens.roleRegistry().hasRole(lens.MULTISIG_ADMIN_ROLE(), SAFE),
+            "Safe lacks MULTISIG_ADMIN_ROLE on the TradingLens's RoleRegistry - addSupportedToken would revert"
         );
     }
 

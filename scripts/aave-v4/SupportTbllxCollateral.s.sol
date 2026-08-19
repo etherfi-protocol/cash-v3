@@ -52,7 +52,7 @@ import { AddSummerLendCollateral } from "./AddSummerLendCollateral.s.sol";
  *         before any broadcast, if it is not.
  *
  * Usage (simulate by dropping --broadcast; the broadcast wallet must hold the instance admin,
- * LEND_GATEWAY_ADMIN_ROLE and DEBT_MANAGER_ADMIN_ROLE roles):
+ * MULTISIG_ADMIN_ROLE and MULTISIG_ADMIN_ROLE roles):
  *   source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
  *     scripts/aave-v4/SupportTbllxCollateral.s.sol:SupportTbllxCollateral \
  *     --rpc-url $OPTIMISM_RPC --broadcast -vvvv

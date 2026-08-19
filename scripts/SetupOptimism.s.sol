@@ -109,7 +109,7 @@ contract SetupOptimism is Utils {
     uint80 constant liquidationThreshold = 80e18;
     uint96 constant liquidationBonus = 1e18;
     uint64 constant borrowApyPerSecond = 1;
-    bytes32 public constant DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
+    bytes32 public constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
 
     function deployCreate3(bytes memory creationCode, bytes32 salt) internal returns (address deployed) {
         deployed = CREATE3.predictDeterministicAddress(salt, NICKS_FACTORY);
@@ -287,7 +287,7 @@ contract SetupOptimism is Utils {
 
         _writeDeployments();
 
-        roleRegistry.revokeRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
+        roleRegistry.revokeRole(MULTISIG_ADMIN_ROLE, deployer);
 
         vm.stopBroadcast();
     }
@@ -449,7 +449,8 @@ contract SetupOptimism is Utils {
     }
 
     function _configureWithdrawTokens() internal {
-        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
+        roleRegistry.grantRole(cashModule.MULTISIG_ADMIN_ROLE(), deployer);
+        roleRegistry.grantRole(cashModule.OPERATING_TIMELOCK_ROLE(), deployer);
 
         address[] memory tokens = new address[](2);
         tokens[0] = usdc;
@@ -460,17 +461,16 @@ contract SetupOptimism is Utils {
         shouldWhitelist[1] = true;
 
         cashModule.configureWithdrawAssets(tokens, shouldWhitelist);
-        roleRegistry.revokeRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
+        roleRegistry.revokeRole(cashModule.MULTISIG_ADMIN_ROLE(), deployer);
+        roleRegistry.revokeRole(cashModule.OPERATING_TIMELOCK_ROLE(), deployer);
     }
 
     function _grantRoles() internal {
         roleRegistry.grantRole(roleRegistry.PAUSER(), deployer);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), deployer);
-        roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), deployer);
-        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
-        roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), deployer);
-        roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), deployer);
-        roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
+        roleRegistry.grantRole(dataProvider.MULTISIG_ADMIN_ROLE(), deployer);
+        roleRegistry.grantRole(dataProvider.OPERATING_TIMELOCK_ROLE(), deployer);
+        roleRegistry.grantRole(MULTISIG_ADMIN_ROLE, deployer);
         roleRegistry.grantRole(settlementDispatcherReap.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), deployer);
         roleRegistry.grantRole(settlementDispatcherRain.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), deployer);
         roleRegistry.grantRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), deployer);

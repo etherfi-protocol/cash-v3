@@ -55,6 +55,11 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
     bytes32 public constant SETTLEMENT_DISPATCHER_BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
 
     /**
+     * @notice Operating-timelock role that configures destinations, bridge configs and fund withdrawals
+     */
+    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+
+    /**
      * @notice Address of the OP Stack L2 Standard Bridge
      */
     address public constant L2_STANDARD_BRIDGE = 0x4200000000000000000000000000000000000010;
@@ -388,26 +393,26 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Function to set the destination data for an array of tokens
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (OPERATING_TIMELOCK_ROLE)
      * @param tokens Addresses of tokens to configure
      * @param destDatas Destination data structs for respective tokens
      * @custom:throws ArrayLengthMismatch If arrays have different lengths
      * @custom:throws InvalidValue If any address parameter is zero
      * @custom:throws StargateValueInvalid If the Stargate router doesn't support the token
      */
-    function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external virtual onlyRoleRegistryOwner {
+    function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external virtual onlyRole(OPERATING_TIMELOCK_ROLE) {
         _setDestinationData(tokens, destDatas);
     }
 
     /**
      * @notice Function to set the liquid asset withdraw queue 
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (OPERATING_TIMELOCK_ROLE)
      * @param asset Address of the liquid asset
      * @param boringQueue Address of the boring queue
      * @custom:throws InvalidValue If any address parameter is zero
      * @custom:throws InvalidBoringQueue If the queue does not belong to the liquid asset
      */
-    function setLiquidAssetWithdrawQueue(address asset, address boringQueue) external onlyRoleRegistryOwner {
+    function setLiquidAssetWithdrawQueue(address asset, address boringQueue) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         if (asset == address(0) || boringQueue == address(0)) revert InvalidValue();
         if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();
 
@@ -427,10 +432,10 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets the configurable refund wallet address
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (OPERATING_TIMELOCK_ROLE)
      * @param _refundWallet Address of the refund wallet to set (can be address(0) to clear and use data provider)
      */
-    function setRefundWallet(address _refundWallet) external onlyRoleRegistryOwner {
+    function setRefundWallet(address _refundWallet) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         _getSettlementDispatcherV2Storage().refundWallet = _refundWallet;
         emit RefundWalletSet(_refundWallet);
     }
@@ -451,14 +456,14 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets the Frax config for sync and async redeem
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (OPERATING_TIMELOCK_ROLE)
      * @param _fraxUsd Address of the Frax USD token
      * @param _fraxCustodian Address of the Frax custodian (for sync redeem)
      * @param _fraxRemoteHop Address of the Frax RemoteHop contract (for async redeem via LayerZero OFT)
      * @param _fraxAsyncRedeemRecipient Recipient address on Ethereum for async Frax redemptions
      * @custom:throws InvalidValue If fraxUsd or fraxCustodian is zero
      */
-    function setFraxConfig(address _fraxUsd, address _fraxCustodian, address _fraxRemoteHop, address _fraxAsyncRedeemRecipient) external onlyRoleRegistryOwner {
+    function setFraxConfig(address _fraxUsd, address _fraxCustodian, address _fraxRemoteHop, address _fraxAsyncRedeemRecipient) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         if (_fraxUsd == address(0) || _fraxCustodian == address(0)) revert InvalidValue();
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
         $.fraxUsd = _fraxUsd;
@@ -482,12 +487,12 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets the Midas redemption vault for a Midas token (e.g. Liquid Reserve)
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (OPERATING_TIMELOCK_ROLE)
      * @param midasToken Address of the Midas token
      * @param redemptionVault Address of the redemption vault
      * @custom:throws InvalidValue If any address is zero
      */
-    function setMidasRedemptionVault(address midasToken, address redemptionVault) external onlyRoleRegistryOwner {
+    function setMidasRedemptionVault(address midasToken, address redemptionVault) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         if (midasToken == address(0) || redemptionVault == address(0)) revert InvalidValue();
         _getSettlementDispatcherV2Storage().midasRedemptionVault[midasToken] = redemptionVault;
         emit MidasRedemptionVaultSet(midasToken, redemptionVault);
@@ -772,7 +777,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Withdraws tokens or ETH from the contract
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (OPERATING_TIMELOCK_ROLE)
      * @param token Address of the token to withdraw (address(0) for ETH)
      * @param recipient Address to receive the withdrawn funds
      * @param amount Amount to withdraw (0 to withdraw all)
@@ -780,7 +785,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
      * @custom:throws WithdrawFundsFailed If ETH transfer fails
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external nonReentrant onlyRoleRegistryOwner() {
+    function withdrawFunds(address token, address recipient, uint256 amount) external nonReentrant onlyRole(OPERATING_TIMELOCK_ROLE) {
         if (recipient == address(0)) revert InvalidValue();
         amount = _withdrawFunds(token, recipient, amount);
         emit FundsWithdrawn(token, amount, recipient);
@@ -881,13 +886,13 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets CCTP configuration for cross-chain USDC bridging
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (OPERATING_TIMELOCK_ROLE)
      * @param _tokenMessenger Address of the CCTP TokenMessenger contract
      * @param _destinationDomain CCTP destination domain (e.g. 0 for Ethereum)
      * @param _maxFee Maximum fee in burn token units (0 for standard transfer)
      * @param _minFinalityThreshold Minimum finality threshold for attestation
      */
-    function setCCTPConfig(address _tokenMessenger, uint32 _destinationDomain, uint256 _maxFee, uint32 _minFinalityThreshold) external onlyRoleRegistryOwner {
+    function setCCTPConfig(address _tokenMessenger, uint32 _destinationDomain, uint256 _maxFee, uint32 _minFinalityThreshold) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         if (_tokenMessenger == address(0)) revert InvalidValue();
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
         $.cctpTokenMessenger = _tokenMessenger;
@@ -934,11 +939,11 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets settlement recipients for multiple tokens at once
-     * @dev Only callable by the role registry owner. Each token can have a different recipient.
+     * @dev Only callable by the operating timelock (OPERATING_TIMELOCK_ROLE). Each token can have a different recipient.
      * @param tokens Array of token addresses to configure
      * @param recipients Array of recipient addresses corresponding to each token
      */
-    function setSettlementRecipients(address[] calldata tokens, address[] calldata recipients) external onlyRoleRegistryOwner {
+    function setSettlementRecipients(address[] calldata tokens, address[] calldata recipients) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         if (tokens.length != recipients.length) revert ArrayLengthMismatch();
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
         for (uint256 i = 0; i < tokens.length;) {

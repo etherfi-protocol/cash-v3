@@ -15,8 +15,8 @@ import { TradingAccountGnosisHelpers } from "./TradingAccountGnosisHelpers.sol";
 contract ConfigureTradingAccountOptimism is TradingAccountGnosisHelpers, Utils, TradingAccountCreate3 {
     using stdJson for string;
 
-    bytes32 private constant ACROSS_ADMIN_ROLE = keccak256("ACROSS_SWAP_MODULE_ADMIN_ROLE");
-    bytes32 private constant ENSO_ADMIN_ROLE = keccak256("ENSO_SWAP_MODULE_ADMIN_ROLE");
+    bytes32 private constant ACROSS_ADMIN_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 private constant ENSO_ADMIN_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
 
     function run() external {
         require(block.chainid == 10, "must run on Optimism");

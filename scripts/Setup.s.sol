@@ -84,7 +84,7 @@ contract Setup is Utils {
     address stargateEthPool = 0xC2b638Cb5042c1B3c5d5C969361fB50569840583;
     address openOceanSwapRouter = 0x6352a56caadC4F1E25CD6c75970Fa768A3304e64;
 
-    bytes32 public DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
+    bytes32 public MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
 
     function run() public {
         // uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -186,7 +186,7 @@ contract Setup is Utils {
             addressOutput
         );
 
-        roleRegistry.revokeRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
+        roleRegistry.revokeRole(MULTISIG_ADMIN_ROLE, deployer);
         if (deployer != owner) roleRegistry.transferOwnership(owner);
 
         writeDeploymentFile(finalJson);
@@ -195,7 +195,8 @@ contract Setup is Utils {
     }
 
     function _configureWithdrawTokens() internal {
-        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
+        roleRegistry.grantRole(cashModule.MULTISIG_ADMIN_ROLE(), deployer);
+        roleRegistry.grantRole(cashModule.OPERATING_TIMELOCK_ROLE(), deployer);
         address[] memory tokens = new address[](3);
         tokens[0] = address(usdcScroll);
         tokens[1] = address(weETHScroll);
@@ -208,18 +209,17 @@ contract Setup is Utils {
 
         cashModule.configureWithdrawAssets(tokens, shouldWhitelist);
 
-        roleRegistry.revokeRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
+        roleRegistry.revokeRole(cashModule.MULTISIG_ADMIN_ROLE(), deployer);
+        roleRegistry.revokeRole(cashModule.OPERATING_TIMELOCK_ROLE(), deployer);
     }
 
     function _grantRoles() internal {
         roleRegistry.grantRole(roleRegistry.PAUSER(), owner);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), owner);
-        roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
-        roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, owner);
-        roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
+        roleRegistry.grantRole(dataProvider.MULTISIG_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(dataProvider.OPERATING_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(MULTISIG_ADMIN_ROLE, owner);
+        roleRegistry.grantRole(MULTISIG_ADMIN_ROLE, deployer);
         roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
         roleRegistry.grantRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), owner);
 

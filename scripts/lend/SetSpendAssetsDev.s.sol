@@ -18,7 +18,7 @@ import { Utils } from "../utils/Utils.sol";
  *      underlying) before being flagged spendable. Idempotent: assets already registered and
  *      spendable are skipped, so the script can be re-run after a partial broadcast.
  *
- *      The CLI sender must hold LEND_GATEWAY_ADMIN_ROLE (the dev admin from DeployCashLendDev).
+ *      The CLI sender must hold MULTISIG_ADMIN_ROLE (the dev admin from DeployCashLendDev).
  *
  * Usage (drop --broadcast for simulation):
  *   source .env && ENV=dev forge script \
@@ -45,7 +45,7 @@ contract SetSpendAssetsDev is Utils {
         string memory deployments = readDeploymentFile();
         RoleRegistry registry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
         address deployer = vm.addr(vm.envUint("PRIVATE_KEY"));
-        require(registry.hasRole(gateway.LEND_GATEWAY_ADMIN_ROLE(), deployer), "sender missing LendGateway admin role");
+        require(registry.hasRole(gateway.MULTISIG_ADMIN_ROLE(), deployer), "sender missing LendGateway admin role");
 
         address[6] memory assets = [USDT, FRXUSD, LIQUID_USD, LIQUID_RESERVE, EURC, LIQUID_EUR];
         string[6] memory names = ["USDT", "frxUSD", "liquidUSD", "liquidRESERVE", "EURC", "liquidEUR"];

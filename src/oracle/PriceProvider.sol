@@ -68,7 +68,7 @@ contract PriceProvider is UpgradeableProxy {
     /**
      * @notice Role identifier for administrative privileges over the price provider
      */
-    bytes32 public constant PRICE_PROVIDER_ADMIN_ROLE = keccak256("PRICE_PROVIDER_ADMIN_ROLE");
+    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
     
     /**
      * @notice Special address used to request ETH/USD price
@@ -181,12 +181,12 @@ contract PriceProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the price oracle configurations for multiple tokens
-     * @dev Only callable by addresses with PRICE_PROVIDER_ADMIN_ROLE
+     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
      * @param _tokens Array of token addresses to configure
      * @param _configs Array of configurations corresponding to each token
      * @custom:throws ArrayLengthMismatch If arrays have different lengths
      */
-    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyRole(PRICE_PROVIDER_ADMIN_ROLE) {
+    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         _setTokenConfig(_tokens, _configs);
     }
 

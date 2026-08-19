@@ -150,7 +150,7 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
         string memory removeOldOpenOceanModule = iToHex(abi.encodeWithSelector(EtherFiDataProvider.configureModules.selector, dewhitelistModules, dewhitelistModuleShouldWhitelist));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(dataProvider), removeOldOpenOceanModule, "0", false)));
 
-        string memory roleForLiquid = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, liquidModule.ETHERFI_LIQUID_MODULE_ADMIN(), cashControllerSafe));
+        string memory roleForLiquid = iToHex(abi.encodeWithSelector(IRoleRegistry.grantRole.selector, liquidModule.MULTISIG_ADMIN_ROLE(), cashControllerSafe));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(roleRegistry)), roleForLiquid, "0", true)));
 
         return txs;

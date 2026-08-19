@@ -228,18 +228,18 @@ contract DeployOptimismProdModules is GnosisHelpers, Utils, Test {
     }
 
     function _buildRoleGrantTxs(string memory txs) internal view returns (string memory) {
-        bytes32 ETHERFI_LIQUID_MODULE_ADMIN = keccak256("ETHERFI_LIQUID_MODULE_ADMIN");
-        bytes32 STARGATE_MODULE_ADMIN_ROLE = keccak256("STARGATE_MODULE_ADMIN_ROLE");
+        bytes32 MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+        bytes32 OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
 
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(
             addressToHex(roleRegistry),
-            iToHex(abi.encodeWithSelector(RoleRegistry.grantRole.selector, ETHERFI_LIQUID_MODULE_ADMIN, cashControllerSafe)),
+            iToHex(abi.encodeWithSelector(RoleRegistry.grantRole.selector, MULTISIG_ADMIN_ROLE, cashControllerSafe)),
             "0", false
         )));
 
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(
             addressToHex(roleRegistry),
-            iToHex(abi.encodeWithSelector(RoleRegistry.grantRole.selector, STARGATE_MODULE_ADMIN_ROLE, cashControllerSafe)),
+            iToHex(abi.encodeWithSelector(RoleRegistry.grantRole.selector, OPERATING_TIMELOCK_ROLE, cashControllerSafe)),
             "0", false
         )));
 

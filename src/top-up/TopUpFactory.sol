@@ -69,6 +69,12 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /// @notice Role allowed to drive `redirectToTradingSafe`
     bytes32 public constant TOPUP_FACTORY_REDIRECT_ROLE = keccak256("TOPUP_FACTORY_REDIRECT_ROLE");
 
+    /// @notice Operating-timelock role that configures bridge destinations and the recovery wallet
+    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+
+    /// @notice Fast multisig role for incident recovery and contract-pointer maintenance
+    bytes32 public constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+
     /// @notice Emitted when tokens are bridged to the destination chain
     /// @param token The address of the token being bridged
     /// @param amount The amount of tokens being bridged
@@ -261,7 +267,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      *      Naming one here pulls it into this factory instead, where the redirect can no longer
      *      see it: the pending `redirectToTradingSafe` reverts on the drained balance, and because
      *      the batch variant is all-or-nothing one griefed entry fails the whole batch. What is
-     *      left is an `onlyRoleRegistryOwner` `recoverFunds` per incident to get the user made
+     *      left is a multisig-gated `recoverFunds` per incident to get the user made
      *      whole off-chain. The range variant walks every deployed TopUp, so one transaction could
      *      do this to every user holding a misrouted stock at once — cheap for the caller, who
      *      gains nothing by it, and expensive for us.
@@ -300,7 +306,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      *   - maxSlippageInBps exceeds MAX_ALLOWED_SLIPPAGE
      * @custom:emits TokenConfigSet when configs are updated
      */
-    function setTokenConfig(address[] calldata tokens, uint256[] calldata chainIds, TokenConfig[] calldata configs) external onlyRoleRegistryOwner {
+    function setTokenConfig(address[] calldata tokens, uint256[] calldata chainIds, TokenConfig[] calldata configs) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
         if (len != configs.length || len != chainIds.length) revert ArrayLengthMismatch();
@@ -360,7 +366,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @custom:throws OnlyUnsupportedTokens if token is a supported bridge asset
      * @custom:throws RecoveryWalletNotSet if recovery wallet is not configured
      */
-    function recoverFunds(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner {
+    function recoverFunds(address token, uint256 amount) external nonReentrant onlyRole(MULTISIG_ADMIN_ROLE) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
@@ -382,7 +388,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @custom:throws OnlyAdmin if caller doesn't have admin role
      * @custom:throws RecoveryWalletCannotBeZeroAddress if provided address is zero
      */
-    function setRecoveryWallet(address _recoveryWallet) external onlyRoleRegistryOwner {
+    function setRecoveryWallet(address _recoveryWallet) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (_recoveryWallet == address(0)) revert RecoveryWalletCannotBeZeroAddress();
@@ -398,7 +404,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @param _tradingSafeFactory Address of the destination-chain TradingSafeFactory.
      * @custom:throws TradingSafeFactoryCannotBeZeroAddress If `_tradingSafeFactory == address(0)`.
      */
-    function setTradingSafeFactory(address _tradingSafeFactory) external onlyRoleRegistryOwner {
+    function setTradingSafeFactory(address _tradingSafeFactory) external onlyRole(MULTISIG_ADMIN_ROLE) {
         if (_tradingSafeFactory == address(0)) revert TradingSafeFactoryCannotBeZeroAddress();
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         emit TradingSafeFactorySet($.tradingSafeFactory, _tradingSafeFactory);
@@ -435,7 +441,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @custom:throws InvalidRedirectWrapper If any non-zero `wrappers[i]` is not an ERC-4626
      *                whose `asset()` is `tokens[i]`.
      */
-    function setRedirectWrappers(address[] calldata tokens, address[] calldata wrappers) external onlyRoleRegistryOwner {
+    function setRedirectWrappers(address[] calldata tokens, address[] calldata wrappers) external onlyRole(OPERATING_TIMELOCK_ROLE) {
         uint256 len = tokens.length;
         if (len != wrappers.length) revert ArrayLengthMismatch();
 

@@ -12,7 +12,7 @@ interface IPriceProvider {
 
     /**
      * @notice Function to fetch the admin role
-     * @return PRICE_PROVIDER_ADMIN_ROLE
+     * @return OPERATING_TIMELOCK_ROLE
      */
-    function PRICE_PROVIDER_ADMIN_ROLE() external view returns (bytes32);
+    function OPERATING_TIMELOCK_ROLE() external view returns (bytes32);
 }
