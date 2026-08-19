@@ -435,6 +435,59 @@ contract TopUpFactoryTest is Test, Constants {
         factory.processTopUp(tokens, 100, 1);
     }
 
+    /// @dev Both sweep entry points are permissionless, so the only thing keeping them off tokens
+    ///      the redirect path owns is the topup-supported check.
+    function test_processTopUp_reverts_whenTokenIsNotSupported() public {
+        bytes32 salt = bytes32(uint256(7));
+        vm.prank(admin);
+        factory.deployTopUpContract(salt);
+
+        MockERC20 stray = new MockERC20("Stray", "STRAY", 18);
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(stray);
+
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUp(tokens, 0, 1);
+
+        address[] memory topUpContracts = new address[](1);
+        topUpContracts[0] = factory.getDeterministicAddress(salt);
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUpFromContracts(tokens, topUpContracts);
+    }
+
+    /// @dev On mainnet the native-ETH sentinel carries no token config of its own — WETH does, and
+    ///      `TopUp.processTopUp` converts before it transfers. The sweep guard has to let the
+    ///      sentinel through on that basis, or native top-ups stop being collectable. This builds
+    ///      a factory shaped like prod (WETH configured, ETH not) to pin that down; the shared
+    ///      `factory` in this suite happens to configure ETH too, which would hide the case.
+    function test_processTopUp_sweepsEthSentinel_whenOnlyWethIsConfigured() public {
+        TopUpFactory freshFactory = TopUpFactory(payable(address(new UUPSProxy(
+            address(new TopUpFactory()),
+            abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), address(implementation))
+        ))));
+
+        address[] memory wethOnly = new address[](1);
+        wethOnly[0] = address(weth);
+        TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
+        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool, uint32(30214)) });
+        vm.prank(owner);
+        freshFactory.setTokenConfig(wethOnly, _chainIds(1), configs);
+
+        assertFalse(freshFactory.isTokenSupported(ETH), "ETH sentinel must be unconfigured for this test to mean anything");
+
+        bytes32 salt = bytes32(uint256(42));
+        freshFactory.deployTopUpContract(salt);
+        address topUpAddr = freshFactory.getDeterministicAddress(salt);
+        deal(topUpAddr, 1 ether);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = ETH;
+        freshFactory.processTopUp(tokens, 0, 1);
+
+        assertEq(topUpAddr.balance, 0, "native ETH not swept out of the TopUp");
+        assertEq(weth.balanceOf(address(freshFactory)), 1 ether, "factory should have received the wrapped ETH");
+    }
+
     /// @dev Test token configuration validation
     function test_setTokenConfig_succeeds_whenCalledByAdmin() public {
         address[] memory tokens = new address[](1);

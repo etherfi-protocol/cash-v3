@@ -150,6 +150,130 @@ contract ContractCodeChecker {
         verifyFullMatch(deployedImpl, localDeployed);
     }
 
+    // ─────────────────────── strict (reverting) comparisons ───────────────────────
+    //
+    // The three functions above only console.log Success/Fail, which is right for an
+    // exploratory run but useless as a gate: a verification script must revert so its exit
+    // code can be trusted. These two do that. Both take a label so a red run names the
+    // contract that failed.
+
+    /// @dev local address => on-chain address bindings found in the contract being compared.
+    ///      Shared scratch space, reset at the start of every top-level comparison.
+    address[] private bindingLocal;
+    address[] private bindingOnchain;
+
+    /**
+     * @notice Byte-for-byte runtime code equality, metadata included, or revert.
+     * @dev Use for contracts that embed no addresses in their code: constructor-arg immutables
+     *      bake identically into a local redeploy, so exact equality is the right bar. For a UUPS
+     *      implementation or a contract calling linked libraries, use
+     *      `requireCodeMatchAllowingAddressEmbeds` instead — this one will reject a CORRECT
+     *      deployment.
+     * @param label Name used in log lines and revert messages.
+     * @param onchain The deployed address being verified.
+     * @param local A fresh local deploy from current source with the same constructor args.
+     */
+    function requireExactCodeMatch(string memory label, address onchain, address local) internal {
+        require(onchain.code.length != 0, string.concat(label, ": not deployed on-chain"));
+        require(local.code.length != 0, string.concat(label, ": local reference has no code"));
+        console2.log(string.concat("-------------- ", label, " ----------------"));
+        verifyContractByteCodeMatch(onchain, local);
+        require(keccak256(onchain.code) == keccak256(local.code), string.concat(label, ": bytecode mismatch - source drift since broadcast"));
+        console2.log(string.concat("  [OK] ", label, " exact match"));
+    }
+
+    /**
+     * @notice Runtime code equality except for embedded ADDRESSES, or revert.
+     * @dev Required for any OZ `UUPSUpgradeable` implementation: it embeds its own deploy address
+     *      (`__self`, for the delegatecall guard), so a correct deployment can never byte-match a
+     *      local redeploy. Same for contracts linked against libraries, whose addresses differ
+     *      between the broadcast and the local simulation.
+     *
+     *      The rule: equality everywhere except 20-byte windows forming a CONSISTENT
+     *      (localAddr => onchainAddr) binding where localAddr holds code in the simulation. The
+     *      code-bearing requirement is what pins window alignment — sliding the window off a real
+     *      PUSH20 operand yields a garbage address with no code, so the mismatch stays
+     *      unexplained and reverts. The contract's own binding must map local=>onchain exactly;
+     *      every other binding is a linked library and is verified recursively under the same
+     *      rules. A contract with no embeds finds no bindings and degenerates to exact equality,
+     *      so this is always the safe choice when unsure.
+     * @param label Name used in log lines and revert messages.
+     * @param onchain The deployed address being verified.
+     * @param local A fresh local deploy from current source with the same constructor args.
+     */
+    function requireCodeMatchAllowingAddressEmbeds(string memory label, address onchain, address local) internal {
+        delete bindingLocal;
+        delete bindingOnchain;
+        _requireCodeMatch(label, onchain, local);
+        console2.log(string.concat("  [OK] ", label, " matches (address embeds reconciled)"));
+    }
+
+    function _requireCodeMatch(string memory label, address onchain, address local) private {
+        bytes memory oc = onchain.code;
+        bytes memory lc = local.code;
+        require(oc.length != 0, string.concat(label, ": not deployed on-chain"));
+        require(lc.length != 0, string.concat(label, ": local reference has no code"));
+        require(oc.length == lc.length, string.concat(label, ": bytecode length mismatch - source drift since broadcast"));
+
+        uint256 i;
+        while (i < lc.length) {
+            if (lc[i] == oc[i]) {
+                ++i;
+                continue;
+            }
+            i = _consumeBindingWindow(label, lc, oc, i);
+        }
+
+        // Snapshot before recursion — the recursive call reuses the shared binding arrays.
+        address[] memory locals = bindingLocal;
+        address[] memory onchains = bindingOnchain;
+        for (uint256 j = 0; j < locals.length; ++j) {
+            if (locals[j] == local) {
+                require(onchains[j] == onchain, string.concat(label, ": self-address binding mismatch"));
+            } else {
+                _requireCodeMatch(string.concat(label, ".lib"), onchains[j], locals[j]);
+            }
+        }
+    }
+
+    /// @dev Interprets the mismatch at index `i` as part of a 20-byte embedded address. Scans the
+    ///      candidate window starts (the address must begin at or up to 19 bytes before `i`, since
+    ///      every byte before `i` matched) and accepts the first alignment whose local 20 bytes are
+    ///      a code-bearing address with a consistent binding. Returns the index after the window.
+    function _consumeBindingWindow(string memory label, bytes memory lc, bytes memory oc, uint256 i) private returns (uint256) {
+        uint256 sMin = i >= 19 ? i - 19 : 0;
+        for (uint256 s = i + 1; s > sMin;) {
+            --s;
+            if (s + 20 > lc.length) continue;
+            address la = _addrAt(lc, s);
+            if (la == address(0) || la.code.length == 0) continue;
+            address oa = _addrAt(oc, s);
+            (bool known, address expected) = _binding(la);
+            if (known && expected != oa) continue;
+            if (!known) {
+                bindingLocal.push(la);
+                bindingOnchain.push(oa);
+            }
+            return s + 20;
+        }
+        revert(string.concat(label, ": unexplained bytecode mismatch - source drift since broadcast"));
+    }
+
+    function _binding(address localAddr) private view returns (bool, address) {
+        for (uint256 j = 0; j < bindingLocal.length; ++j) {
+            if (bindingLocal[j] == localAddr) return (true, bindingOnchain[j]);
+        }
+        return (false, address(0));
+    }
+
+    function _addrAt(bytes memory code, uint256 offset) private pure returns (address) {
+        uint256 value;
+        for (uint256 k = 0; k < 20; ++k) {
+            value = (value << 8) | uint8(code[offset + k]);
+        }
+        return address(uint160(value));
+    }
+
     // A helper function to remove metadata (CBOR encoded) from the end of the bytecode.
     // This is a heuristic based on known patterns in the metadata.
     function trimMetadata(bytes memory code) internal pure returns (bytes memory) {

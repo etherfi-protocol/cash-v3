@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { Ownable } from "solady/auth/Ownable.sol";
 
+import { ITopUpFactory } from "../interfaces/ITopUpFactory.sol";
 import { IWETH } from "../interfaces/IWETH.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -92,21 +94,45 @@ contract TopUp is Constants, Ownable {
     }
 
     /**
-     * @notice Transfers `amount` of `token` from this TopUp to `tradingSafe`. Recovery path
+     * @notice Moves `amount` of `token` from this TopUp to `tradingSafe`. Recovery path
      *         for trading-supported, not-topup-supported tokens (e.g. Ondo SPY) that landed
      *         at the TopUp address by mistake.
      *
-     * @param token ERC20 to redirect.
+     * @dev Whether the token travels as-is or gets wrapped on the way out is configuration, not
+     *      a parameter: the factory's `wrapperFor(token)` names the ERC-4626 vault a raw Backed
+     *      xStock must be deposited into, because the destination TradingSafe's catalog lists the
+     *      wrapper (wTSLAx) and not the raw stock (TSLAx) a user actually sends to a TopUp
+     *      address. An unconfigured token — every token today — is the plain transfer this has
+     *      always been. Reading the mapping off the owner rather than taking it as an argument
+     *      keeps the redirect a single call shape for the backend and this contract free of
+     *      per-token state.
+     *
+     *      On the wrap leg the vault mints straight to `tradingSafe`, so the shares never touch
+     *      this contract, and the allowance is granted per call and zeroed after — no standing
+     *      approval survives, and a vault that pulls less than `amount` leaves no remainder
+     *      behind to spend. The factory validated the pairing when it configured the wrapper, so
+     *      the approve/deposit target is never an arbitrary address.
+     *
+     * @param token ERC20 to redirect — always the token this TopUp holds, never its wrapper.
      * @param tradingSafe Destination TradingSafe (resolved and supplied by the factory).
-     * @param amount Amount to transfer.
+     * @param amount Amount of `token` to move.
      * @custom:throws OnlyOwner If caller is not the owner.
      * @custom:throws InvalidAmount If `amount == 0`.
      */
     function redirectToTradingSafe(address token, address tradingSafe, uint256 amount) external {
-        if (owner() != msg.sender) revert OnlyOwner();
+        address _owner = owner();
+        if (_owner != msg.sender) revert OnlyOwner();
         if (amount == 0) revert InvalidAmount();
 
-        IERC20(token).safeTransfer(tradingSafe, amount);
+        address wrapper = ITopUpFactory(_owner).wrapperFor(token);
+        if (wrapper == address(0)) {
+            IERC20(token).safeTransfer(tradingSafe, amount);
+            return;
+        }
+
+        IERC20(token).forceApprove(wrapper, amount);
+        IERC4626(wrapper).deposit(amount, tradingSafe);
+        IERC20(token).forceApprove(wrapper, 0);
     }
 
     /**
