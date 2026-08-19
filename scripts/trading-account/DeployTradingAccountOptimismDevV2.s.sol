@@ -32,6 +32,7 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
     EtherFiDeployer private constant DEPLOYER = EtherFiDeployer(0xFCD957b5913d607BF2222280093421B1e2Af6f30);
     address private constant DEV_ADMIN = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
     bytes32 private constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+    address private constant WETH = 0x4200000000000000000000000000000000000006;
 
     EtherFiDataProvider private dataProvider;
     RoleRegistry private roleRegistry;
@@ -69,7 +70,7 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
         dataProviderImpl = _deployOrReuse("Cash.DevV2.EtherFiDataProviderImpl.NoBridge", type(EtherFiDataProvider).creationCode, "");
         if (_implOf(address(dataProvider)) != dataProviderImpl) dataProvider.upgradeToAndCall(dataProviderImpl, "");
 
-        safeImpl = _deployOrReuse("Cash.DevV2.EtherFiSafeImpl.NoBridge", type(EtherFiSafe).creationCode, abi.encode(address(dataProvider)));
+        safeImpl = _deployOrReuse("Cash.DevV2.EtherFiSafeImpl.NoBridge", type(EtherFiSafe).creationCode, abi.encode(address(dataProvider), WETH));
         if (UpgradeableBeaconLike(safeFactory.beacon()).implementation() != safeImpl) safeFactory.upgradeBeaconImplementation(safeImpl);
     }
 

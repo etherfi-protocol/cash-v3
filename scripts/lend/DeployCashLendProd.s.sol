@@ -247,7 +247,7 @@ contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
         d.liquifierImpl = _create3("LiquifierImpl", abi.encodePacked(type(LiquidUSDLiquifierOPModule).creationCode, abi.encode(c.debtManager, c.dataProvider)));
         d.ensoImpl = _create3("EnsoImpl", abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(c.dataProvider)));
         d.acrossImpl = _create3("AcrossImpl", abi.encodePacked(type(AcrossSwapModule).creationCode, abi.encode(c.dataProvider)));
-        d.safeImpl = _create3("EtherFiSafeImpl", abi.encodePacked(type(EtherFiSafe).creationCode, abi.encode(c.dataProvider)));
+        d.safeImpl = _create3("EtherFiSafeImpl", abi.encodePacked(type(EtherFiSafe).creationCode, abi.encode(c.dataProvider, weth)));
 
         d.gatewayImpl = _create3("LendGatewayImpl", abi.encodePacked(type(LendGateway).creationCode, abi.encode(c.dataProvider, spoke)));
         d.gatewayProxy = _create3(

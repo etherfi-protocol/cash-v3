@@ -79,7 +79,7 @@ contract UpgradeDefaultModules is GnosisHelpers, Utils {
         ));
 
         dataProviderImpl = new EtherFiDataProvider();
-        safeImpl = new EtherFiSafe(dataProvider);
+        safeImpl = new EtherFiSafe(dataProvider, address(weth));
         stakeModule = new EtherFiStakeModule(dataProvider, weEthSyncPool, address(weth), address(weEth));
 
         address[] memory assets = new address[](4);

@@ -226,7 +226,7 @@ contract SafeFactoryTest is SafeTestSetup {
     function test_upgradeBeaconImplementation_succeeds() public {
         vm.startPrank(owner);
         
-        address newImplementation = address(new EtherFiSafe(address(dataProvider)));
+        address newImplementation = address(new EtherFiSafe(address(dataProvider), chainConfig.weth));
         // Get the current implementation before upgrade
         address oldImpl = UpgradeableBeacon(safeFactory.beacon()).implementation();
         
@@ -250,7 +250,7 @@ contract SafeFactoryTest is SafeTestSetup {
     function test_upgradeBeaconImplementation_reverts_whenCallerIsNotOwner() public {
         vm.startPrank(notOwner);
         
-        address newImplementation = address(new EtherFiSafe(address(dataProvider)));
+        address newImplementation = address(new EtherFiSafe(address(dataProvider), chainConfig.weth));
         // Expect the upgrade to revert because caller is not the owner
         vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         safeFactory.upgradeBeaconImplementation(newImplementation);
@@ -270,7 +270,7 @@ contract SafeFactoryTest is SafeTestSetup {
     
     function test_upgradeBeaconImplementation_affectsNewDeployments() public {
         // First upgrade the implementation
-        address newImplementation = address(new EtherFiSafe(address(dataProvider)));
+        address newImplementation = address(new EtherFiSafe(address(dataProvider), chainConfig.weth));
         vm.startPrank(owner);
         safeFactory.upgradeBeaconImplementation(newImplementation);
         vm.stopPrank();
@@ -303,7 +303,7 @@ contract SafeFactoryTest is SafeTestSetup {
         // Set up the initial state
         vm.startPrank(owner);
 
-        address newImplementation = address(new EtherFiSafe(address(dataProvider)));
+        address newImplementation = address(new EtherFiSafe(address(dataProvider), chainConfig.weth));
         
         // Deploy a safe with minimum configuration
         bytes32 testSalt = keccak256("storageTestSafe");

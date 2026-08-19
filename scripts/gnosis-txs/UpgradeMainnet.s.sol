@@ -117,7 +117,7 @@ contract UpgradeMainnet is GnosisHelpers, Utils {
         );
 
         factoryImpl = address(new EtherFiSafeFactory());
-        safeImpl = address(new EtherFiSafe(dataProvider));
+        safeImpl = address(new EtherFiSafe(dataProvider, address(weth)));
         cashModuleCoreImpl = address(new CashModuleCore(dataProvider));
         cashModuleSettersImpl = address(new CashModuleSetters(dataProvider));
         cashEventEmitterImpl = address(new CashEventEmitter(cashModule));

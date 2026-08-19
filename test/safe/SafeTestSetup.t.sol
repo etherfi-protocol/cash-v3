@@ -172,7 +172,7 @@ contract SafeTestSetup is Utils {
         address[] memory defaultModules = new address[](1);
         defaultModules[0] = address(cashModule);
 
-        address safeImpl = address(new EtherFiSafe(address(dataProvider)));
+        address safeImpl = address(new EtherFiSafe(address(dataProvider), chainConfig.weth));
         address safeFactoryImpl = address(new EtherFiSafeFactory());
         safeFactory = EtherFiSafeFactory(address(new UUPSProxy(safeFactoryImpl, abi.encodeWithSelector(EtherFiSafeFactory.initialize.selector, address(roleRegistry), safeImpl))));
 

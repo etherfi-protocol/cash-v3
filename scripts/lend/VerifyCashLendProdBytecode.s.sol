@@ -98,7 +98,7 @@ contract VerifyCashLendProdBytecode is Utils, ContractCodeChecker, CashLendProdC
         _checkWithBindings("AaveV4LensImpl", address(new AaveV4Lens()));
 
         // ── Beacon impl and proxies: no self-embeds, standard pattern applies ──
-        _checkStandard("EtherFiSafeImpl", address(new EtherFiSafe(dataProvider)));
+        _checkStandard("EtherFiSafeImpl", address(new EtherFiSafe(dataProvider, weth)));
         _checkStandard("LendGatewayProxy", address(new UUPSProxy(_predicted("LendGatewayImpl"), "")));
         _checkStandard("AaveV4LensProxy", address(new UUPSProxy(_predicted("AaveV4LensImpl"), "")));
 

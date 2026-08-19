@@ -167,7 +167,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
         // bytecode no longer matches the deployed pre-fix OP implementation. Re-enable after the
         // next safe-implementation deployment.
         vm.skip(true);
-        address local = address(new EtherFiSafe(dataProviderProxy));
+        address local = address(new EtherFiSafe(dataProviderProxy, cc.weth));
         _verify("EtherFiSafe", safeImpl, local);
     }
 

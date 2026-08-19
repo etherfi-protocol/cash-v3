@@ -124,7 +124,7 @@ contract Setup is Utils {
 
         openOceanSwapModule = OpenOceanSwapModule(deployWithCreate3(abi.encodePacked(type(OpenOceanSwapModule).creationCode, abi.encode(openOceanSwapRouter, address(dataProvider))), getSalt(OPEN_OCEAN_SWAP_MODULE)));
 
-        safeImpl = EtherFiSafe(payable(deployWithCreate3(abi.encodePacked(type(EtherFiSafe).creationCode, abi.encode(address(dataProvider))), getSalt(ETHER_FI_SAFE_IMPL))));
+        safeImpl = EtherFiSafe(payable(deployWithCreate3(abi.encodePacked(type(EtherFiSafe).creationCode, abi.encode(address(dataProvider), chainConfig.weth)), getSalt(ETHER_FI_SAFE_IMPL))));
         address safeFactoryImpl = deployWithCreate3(abi.encodePacked(type(EtherFiSafeFactory).creationCode, ""), getSalt(ETHER_FI_SAFE_FACTORY_IMPL));
         safeFactory = EtherFiSafeFactory(deployWithCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(safeFactoryImpl, "")), getSalt(ETHER_FI_SAFE_FACTORY_PROXY)));
         safeFactory.initialize(address(roleRegistry), address(safeImpl));
