@@ -204,15 +204,26 @@ contract UpgradeSafeImplOP3CP is Utils, GnosisHelpers {
         if (liveSafe != address(0)) {
             require(EtherFiSafe(payable(liveSafe)).getOwners().length == ownersBefore, "SIM FAILED: live safe lost its owners");
 
+            // `receive` wraps only msg.value, so ETH already stranded here stays native until
+            // `wrapEth` sweeps it. Assert the two mechanisms separately rather than assuming the
+            // safe started empty - a stranded balance is the very thing this upgrade exists to clear.
             uint256 wethBefore = IERC20(OP_WETH).balanceOf(liveSafe);
+            uint256 strandedBefore = liveSafe.balance;
+
             address sender = address(uint160(uint256(keccak256("UpgradeSafeImpl.sim.sender"))));
             vm.deal(sender, 1 ether);
             vm.prank(sender);
             (bool ok,) = liveSafe.call{ value: 1 ether }("");
 
             require(ok, "SIM FAILED: live safe rejected an ETH transfer");
-            require(liveSafe.balance == 0, "SIM FAILED: ETH stayed native on a live safe");
-            require(IERC20(OP_WETH).balanceOf(liveSafe) == wethBefore + 1 ether, "SIM FAILED: ETH was not wrapped into WETH");
+            require(liveSafe.balance == strandedBefore, "SIM FAILED: incoming ETH was not wrapped on arrival");
+            require(IERC20(OP_WETH).balanceOf(liveSafe) == wethBefore + 1 ether, "SIM FAILED: incoming ETH did not land as WETH");
+
+            EtherFiSafe(payable(liveSafe)).wrapEth();
+            require(liveSafe.balance == 0, "SIM FAILED: wrapEth left native ETH on the safe");
+            require(IERC20(OP_WETH).balanceOf(liveSafe) == wethBefore + 1 ether + strandedBefore, "SIM FAILED: wrapEth did not sweep the stranded balance");
+
+            console.log("  [OK] stranded ETH swept from the sampled safe (wei):", strandedBefore);
         }
 
         require(roleRegistry.owner() == ownerBefore, "SIM FAILED: RoleRegistry owner changed");
@@ -220,7 +231,7 @@ contract UpgradeSafeImplOP3CP is Utils, GnosisHelpers {
 
         console.log("");
         console.log("  [OK] beacon implementation:", newImpl);
-        console.log("  [OK] live safe kept its owners and now wraps incoming ETH into WETH");
+        console.log("  [OK] live safe kept its owners, wraps incoming ETH, and sweeps via wrapEth");
         console.log("  [OK] RoleRegistry ownership and safe count unchanged");
         console.log("");
         console.log("Simulation passed. Sign step 1, wait for it to EXECUTE, then wait 8h before step 2.");
