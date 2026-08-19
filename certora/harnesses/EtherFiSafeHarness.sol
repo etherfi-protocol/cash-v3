@@ -4,7 +4,7 @@ import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract EtherFiSafeHarness is EtherFiSafe {
-    constructor (address _dataProvider, address _weth) payable EtherFiSafe(_dataProvider, _weth) {}
+    constructor (address _dataProvider) payable EtherFiSafe(_dataProvider) {}
 
     // Getters
     function getSafeAdminRole(address safe) external view returns (uint256) {

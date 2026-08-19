@@ -15,7 +15,7 @@ contract SafeWethAndErc1271Test is SafeTestSetup {
 
     function setUp() public override {
         super.setUp();
-        weth = chainConfig.weth;
+        weth = safe.WETH();
     }
 
     // ── native ETH ──────────────────────────────────────────────────────────

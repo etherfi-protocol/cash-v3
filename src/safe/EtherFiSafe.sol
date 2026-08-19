@@ -16,7 +16,8 @@ import { ArrayDeDupLib } from "../libraries/ArrayDeDupLib.sol";
  *         there is no cross-chain owner synchronization.
  */
 contract EtherFiSafe is EtherFiSafeCore {
-    address public immutable weth;
+    /// @notice WETH on Optimism, the only chain with a live Cash stack
+    address public constant WETH = 0x4200000000000000000000000000000000000006;
 
     bytes4 internal constant ERC1271_MAGIC_VALUE = 0x1626ba7e;
     bytes4 internal constant ERC1271_INVALID = 0xffffffff;
@@ -24,9 +25,10 @@ contract EtherFiSafe is EtherFiSafeCore {
     /// @dev keccak256("EtherFiSafeMessage(bytes32 message)")
     bytes32 public constant SAFE_MESSAGE_TYPEHASH = 0x495d7dd69491a2fa17065d54c9718fb3a33740030f8b939b73026ffbb07640ba;
 
-    constructor(address _dataProvider, address _weth) payable EtherFiSafeCore(_dataProvider) {
-        if (_weth == address(0)) revert InvalidInput();
-        weth = _weth;
+    /// @dev Fails the deploy on any chain where WETH is not at that address, rather than shipping a safe
+    ///      that reverts on every incoming ETH transfer
+    constructor(address _dataProvider) payable EtherFiSafeCore(_dataProvider) {
+        if (WETH.code.length == 0) revert InvalidInput();
     }
 
     /// @notice Wraps the safe's native ETH into WETH, the only form CashModule withdrawals can move
@@ -35,7 +37,7 @@ contract EtherFiSafe is EtherFiSafeCore {
         if (inModuleBatch()) return;
 
         uint256 balance = address(this).balance;
-        if (balance != 0) IWETH(weth).deposit{ value: balance }();
+        if (balance != 0) IWETH(WETH).deposit{ value: balance }();
     }
 
     /// @notice ERC-1271 validation; `signature` is abi.encode(bytes message, address[] signers, bytes[] sigs)
@@ -57,7 +59,7 @@ contract EtherFiSafe is EtherFiSafeCore {
     ///      it as call value — Enso, BeHYPE), and anything mid-batch (a module may be measuring native
     ///      balance across the call — OpenOcean, ModuleCheckBalance). `wrapEth` sweeps what this lets by.
     receive() external payable override {
-        if (msg.sender == weth || isModuleEnabled(msg.sender) || inModuleBatch()) return;
-        IWETH(weth).deposit{ value: msg.value }();
+        if (msg.sender == WETH || isModuleEnabled(msg.sender) || inModuleBatch()) return;
+        IWETH(WETH).deposit{ value: msg.value }();
     }
 }

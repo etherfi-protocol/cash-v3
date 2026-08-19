@@ -21,7 +21,7 @@ contract UpgradeSafeImpl is Utils {
             string.concat(".", "addresses", ".", "EtherFiDataProvider")
         );
 
-        EtherFiSafe safeImpl = new EtherFiSafe(dataProvider, vm.envAddress("WETH"));
+        EtherFiSafe safeImpl = new EtherFiSafe(dataProvider);
 
         EtherFiSafeFactory safeFactory = EtherFiSafeFactory(stdJson.readAddress(
             deployments, 

@@ -251,7 +251,7 @@ contract SetupOptimism is Utils {
         openOceanSwapModule = OpenOceanSwapModule(deployCreate3(abi.encodePacked(type(OpenOceanSwapModule).creationCode, abi.encode(openOceanSwapRouter, p.dataProvider)), SALT_OPEN_OCEAN_SWAP_MODULE));
 
         console.log("Deploying EtherFiSafe + Factory...");
-        safeImpl = EtherFiSafe(payable(deployCreate3(abi.encodePacked(type(EtherFiSafe).creationCode, abi.encode(p.dataProvider, weth)), SALT_SAFE_IMPL)));
+        safeImpl = EtherFiSafe(payable(deployCreate3(abi.encodePacked(type(EtherFiSafe).creationCode, abi.encode(p.dataProvider)), SALT_SAFE_IMPL)));
         address safeFactoryImpl = deployCreate3(abi.encodePacked(type(EtherFiSafeFactory).creationCode, ""), SALT_SAFE_FACTORY_IMPL);
         safeFactory = EtherFiSafeFactory(deployCreate3(
             abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(safeFactoryImpl, abi.encodeCall(EtherFiSafeFactory.initialize, (p.roleRegistry, address(safeImpl))))),

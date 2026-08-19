@@ -34,7 +34,6 @@ import { BinSponsor } from "../src/interfaces/ICashModule.sol";
 ///   forge script scripts/VerifyOptimismProdBytecode.s.sol --rpc-url <OP_RPC> -vvv
 contract VerifyOptimismProdBytecode is Script, ContractCodeChecker {
     address constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
-    address constant WETH = 0x4200000000000000000000000000000000000006;
 
     bytes32 constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
@@ -121,7 +120,7 @@ contract VerifyOptimismProdBytecode is Script, ContractCodeChecker {
         verifyContractByteCodeMatch(_proxy(SALT_OPEN_OCEAN_SWAP_MODULE), address(new OpenOceanSwapModule(openOceanSwapRouter, dp)));
 
         console2.log("10. EtherFiSafe");
-        verifyContractByteCodeMatch(_proxy(SALT_SAFE_IMPL), address(new EtherFiSafe(dp, WETH)));
+        verifyContractByteCodeMatch(_proxy(SALT_SAFE_IMPL), address(new EtherFiSafe(dp)));
 
         console2.log("11. EtherFiSafeFactory (impl: 0xAE143062)");
         verifyContractByteCodeMatch(0xAE143062e65EDBEBfc4EdED8a31092e3FdB496B8, address(new EtherFiSafeFactory()));
