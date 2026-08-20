@@ -2,7 +2,20 @@
 
 Raises **every** price-feed staleness bound on the prod Aave v4 instance to a uniform minimum of 7 days, and rebuilds every cap adapter that bakes a changed leg in immutably.
 
-**Status: NOT DEPLOYED.** Script only. The 37 contracts have not been broadcast, so no `output/` manifest is committed — the dry-run manifest holds simulated addresses. Once broadcast, the repoint bundle is queued as 3CP-secure `queued/657/` for the Lend Owner Safe at **nonce 12**.
+**Status: NOT DEPLOYED.** Script only. Nothing has been broadcast, so no `output/` manifest is committed — dry-run manifests hold simulated addresses. Once broadcast, the repoint bundle is queued as 3CP-secure `queued/657/` for the Lend Owner Safe at **nonce 12**.
+
+## Two phases, separate entrypoints
+
+The two clock families have opposite risk profiles and only one has an observed problem, so they ship independently:
+
+| entrypoint | scope | contracts | reserves |
+|---|---|---|---|
+| `runKeeperPhase()` | the 6 Veda accountant rate legs + the 6 adapters above them | 12 | 6, 7, 9, 13, 14, 15 |
+| `runAllPhase()` | every bounded leg below the floor | 37 | 20 of 23 |
+
+`runKeeperPhase()` fixes observed outages and costs single-digit bps. `runAllPhase()` additionally widens 17 market legs that have **never breached even their current bound**, which is an explicit economic-risk acceptance rather than a liveness fix — see the cost table below. Run it only with that sign-off recorded.
+
+Post-execution verification is phase-matched: `verifyKeeperPhase()` / `verifyAllPhase()`. The distinction is load-bearing, because after the keeper phase the market legs are still legitimately at 36h/48h/72h and a global-floor assertion would fail on a correct deployment.
 
 ## Scope
 
@@ -88,7 +101,8 @@ Every check runs on a mainnet fork before the script writes any JSON. Verified g
 - **Caps are clones, not re-tunes** — snapshot ratio, timestamp, growth percent, derived growth-per-second and ratio decimals asserted equal to the live adapter's; par caps and cap ratios likewise.
 - **Dress rehearsal** — all 20 repoints execute as the Owner Safe against the real instance and real roles, post-state verified, then rolled back with the rollback asserted. Pranking as the Safe bypasses the signature threshold but not the configurator's role check, so a green rehearsal proves the Safe holds role 400.
 - **The bound moved, proven on all 25 legs, both directions.** Per leg: warp just past its **own old** bound and assert the old leg reverts while the new one still prices; then assert the new leg prices at exactly 7d and reverts at 7d+1s. Output: `bound proven on 25 of 25 legs`.
-- **Post-state check walks the live graph**, not a hardcoded list, so a leg left behind below the floor is caught even if it was never in scope. Returns a count so a zero-iteration pass cannot read as success.
+- **Post-state check covers every reserve on the instance** — it enumerates `0 .. getReserveCount()-1` (23), not a hardcoded subset, and walks each source's whole graph. It also asserts adapter **type** and every reviewed immutable cap value (snapshot ratio, snapshot timestamp, growth rate, par cap, EUR cap ratio and ratio decimals), so the standalone post-Safe run proves the executed bundle preserved cap semantics rather than only that a price came back. The three untouched reserves (16, 17, 18) are asserted to still read their reviewed source. Returns a count the caller compares against `getReserveCount()`, so a partial-iteration pass cannot read as success.
+- **Fail-closed on config drift** — before deploying anything, `_assertPreState` requires all 23 reserves to still read the exact source recorded at review time and every adapter to still carry its reviewed cap parameters. Two oracle graphs can return the same spot price while being semantically different, so price equality alone cannot prove nothing moved. If another governance action repointed a reserve or re-snapshotted a cap, the run aborts instead of overwriting the newer config from stale constants.
 
 ### Two traps this had to dodge
 
@@ -102,6 +116,10 @@ Every check runs on a mainnet fork before the script writes any JSON. Verified g
 | shared ETH/USD leg not reused (sharing graph broken) | `leg below the 7d floor: 0x62B6153a…0d16 bound=172800` |
 | sink feed left pointing at the old 72h underlying | `leg below the 7d floor: 0x045ACc54…4C38 bound=259200` |
 | `TARGET = 5 days` | `leg below the 7d floor: … bound=432000` |
+| a reserve repointed since review (drift) | `sETHFI: reserve source drifted from the reviewed one … re-review required` |
+| a cap re-snapshotted since review | `liquidUSD: live growth percent is not the reviewed value` |
+| keeper phase checked against all-phase scope | `leg below the 7d floor: 0xADfA1a2B…a19b bound=172800` |
+| `maxYearlyRatioGrowthPercent + 100` | `weETH: growth percent changed` |
 
 ## Running it
 
@@ -109,28 +127,29 @@ Dry run first — executes every assertion above without spending gas:
 
 ```sh
 source .env && FOUNDRY_PROFILE=aave-deploy forge script \
-  scripts/aave-v4/RaiseAllStalenessBoundsTo7d.s.sol:RaiseAllStalenessBoundsTo7d \
-  --rpc-url $OPTIMISM_RPC --sender 0xf8a86ea1Ac39EC529814c377Bd484387D395421e -vvv
+  scripts/aave-v4/RaiseStalenessBoundsTo7d.s.sol:RaiseStalenessBoundsTo7d \
+  --sig 'runKeeperPhase()' --rpc-url $OPTIMISM_RPC \
+  --sender 0xf8a86ea1Ac39EC529814c377Bd484387D395421e -vvv
 ```
 
 Then broadcast and verify:
 
 ```sh
 source .env && FOUNDRY_PROFILE=aave-deploy forge script \
-  scripts/aave-v4/RaiseAllStalenessBoundsTo7d.s.sol:RaiseAllStalenessBoundsTo7d \
-  --rpc-url $OPTIMISM_RPC --account etherfi-deployer \
+  scripts/aave-v4/RaiseStalenessBoundsTo7d.s.sol:RaiseStalenessBoundsTo7d \
+  --sig 'runKeeperPhase()' --rpc-url $OPTIMISM_RPC --account etherfi-deployer \
   --sender 0xf8a86ea1Ac39EC529814c377Bd484387D395421e \
   --broadcast --verify --etherscan-api-key $ETHERSCAN_KEY -vvv
 ```
 
-**Deployer.** `0xf8a86ea1Ac39EC529814c377Bd484387D395421e` is the CAPO-rollout deployer: it created 7 of the contracts this replaces, consecutively at nonces 72–78. Confirmed by deriving `keccak(rlp([sender, nonce]))[12:]` across its nonce range and matching live addresses, rather than trusting an explorer.
+**Deployer.** `0xf8a86ea1Ac39EC529814c377Bd484387D395421e` is the CAPO-rollout deployer: it created **23 of the 37** contracts this replaces, spanning nonces 46–81 (current nonce 82). Confirmed by deriving `keccak(rlp([sender, nonce]))[12:]` across its nonce range and matching live addresses, rather than trusting an explorer.
 
 After the Owner Safe executes:
 
 ```sh
 source .env && FOUNDRY_PROFILE=aave-deploy forge script \
-  scripts/aave-v4/RaiseAllStalenessBoundsTo7d.s.sol:RaiseAllStalenessBoundsTo7d \
-  --sig 'verifyLive()' --rpc-url $OPTIMISM_RPC -v
+  scripts/aave-v4/RaiseStalenessBoundsTo7d.s.sol:RaiseStalenessBoundsTo7d \
+  --sig 'verifyKeeperPhase()' --rpc-url $OPTIMISM_RPC -v
 ```
 
 ## Execution note for the Safe batch
