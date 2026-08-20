@@ -19,8 +19,15 @@ import { Utils } from "./utils/Utils.sol";
  *      that owner is the 8h `EtherFiTimelock` — use scripts/gnosis-txs/UpgradeSafeImplOP3CP.s.sol
  *      there. The ENV guard below is what stops this being run against prod by accident.
  *
+ * @dev NEEDS A LINKED LIBRARY. `EtherFiSafe.isValidSignature` delegates to `SafeErc1271Lib`, a deployed
+ *      library, so the implementation cannot be built without an address for it. Run
+ *      scripts/DeploySafeErc1271Lib.s.sol first and pass the result via `--libraries`. Omitting it does
+ *      not fail the build — forge deploys a throwaway library and links to that instead — so the
+ *      post-deploy check below exercises the ERC-1271 path to prove the link actually resolves.
+ *
  * Usage:
- *   ENV=dev PRIVATE_KEY=0x... forge script scripts/UpgradeSafeImpl.s.sol --rpc-url $RPC --broadcast
+ *   ENV=dev PRIVATE_KEY=0x... forge script scripts/UpgradeSafeImpl.s.sol --rpc-url $RPC --broadcast \
+ *     --libraries src/libraries/SafeErc1271Lib.sol:SafeErc1271Lib:$SAFE_ERC1271_LIB
  */
 contract UpgradeSafeImpl is Utils {
     using stdJson for string;
@@ -48,11 +55,24 @@ contract UpgradeSafeImpl is Utils {
 
         require(UpgradeableBeacon(safeFactory.beacon()).implementation() == address(safeImpl), "beacon did not move to the new implementation");
         require(address(safeImpl.dataProvider()) == dataProvider, "implementation bound to a different EtherFiDataProvider");
+        _assertErc1271LibraryIsLinked(address(safeImpl));
 
         console.log("old EtherFiSafe impl:", oldImpl);
         console.log("new EtherFiSafe impl:", address(safeImpl));
         console.log("WETH:                ", safeImpl.WETH());
         console.log("");
         console.log("Record the new impl under .addresses.EtherFiSafeImpl in the deployments file.");
+    }
+
+    /// @dev Proves the `SafeErc1271Lib` link resolves to live code. An empty signer set makes the library's
+    ///      internal try/catch answer INVALID, which needs no owners and so works against a bare
+    ///      implementation. If the linked address held no code the DELEGATECALL would return nothing and
+    ///      decoding a bytes4 from it would revert, so this fails loudly either way.
+    function _assertErc1271LibraryIsLinked(address impl) internal view {
+        bytes memory message = "SafeErc1271Lib link check";
+        bytes32 hash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n25", message));
+        bytes memory blob = abi.encode(message, new address[](0), new bytes[](0));
+
+        require(EtherFiSafe(payable(impl)).isValidSignature(hash, blob) == bytes4(0xffffffff), "ERC-1271 path did not answer - SafeErc1271Lib is not linked to live code");
     }
 }

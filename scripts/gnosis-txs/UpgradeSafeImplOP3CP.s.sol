@@ -6,6 +6,7 @@ import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
 
 import { UpgradeableBeacon } from "../../src/beacon-factory/BeaconFactory.sol";
+import { IEtherFiDataProvider } from "../../src/interfaces/IEtherFiDataProvider.sol";
 import { EtherFiSafe } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiSafeFactory } from "../../src/safe/EtherFiSafeFactory.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
@@ -38,10 +39,20 @@ import { Utils } from "../utils/Utils.sol";
  *      upgrade gets a distinct operation id. `TimelockController` marks an id `isOperation`
  *      forever, so a fixed salt would make the second upgrade unschedulable.
  *
- * Prerequisite: the new implementation is deployed on OP and its address is in `SAFE_IMPL`.
+ * @dev THE LIBRARY LINK IS PART OF THE BYTECODE CHECK. `EtherFiSafe.isValidSignature` delegates to
+ *      `SafeErc1271Lib`, a deployed library, and its address is baked into the implementation's runtime
+ *      code. So `--libraries` MUST name the same library the on-chain `SAFE_IMPL` was built against, or
+ *      the local build links elsewhere and `_assertImplementation` fails. That is the check working, not
+ *      a false alarm: it now pins the library address too, so a `SAFE_IMPL` wired to a rogue library is
+ *      rejected here. Without `--libraries` forge links a throwaway library and the check always fails.
+ *
+ * Prerequisites:
+ *   - `SafeErc1271Lib` is deployed on OP and recorded under `.addresses.SafeErc1271Lib`
+ *   - the new implementation is deployed on OP, built against that library, and its address is in `SAFE_IMPL`
  *
  * Usage (no broadcast — writes ./output/*.json and simulates):
- *   SAFE_IMPL=0x... forge script scripts/gnosis-txs/UpgradeSafeImplOP3CP.s.sol --rpc-url $OPTIMISM_RPC
+ *   SAFE_IMPL=0x... forge script scripts/gnosis-txs/UpgradeSafeImplOP3CP.s.sol --rpc-url $OPTIMISM_RPC \
+ *     --libraries src/libraries/SafeErc1271Lib.sol:SafeErc1271Lib:$SAFE_ERC1271_LIB
  */
 contract UpgradeSafeImplOP3CP is Utils, GnosisHelpers {
     using stdJson for string;
@@ -61,6 +72,7 @@ contract UpgradeSafeImplOP3CP is Utils, GnosisHelpers {
     address internal dataProvider;
     address internal newImpl;
     address internal currentImpl;
+    address internal erc1271Lib;
 
     function run() public {
         require(block.chainid == 10, "UpgradeSafeImpl: Optimism only");
@@ -83,6 +95,10 @@ contract UpgradeSafeImplOP3CP is Utils, GnosisHelpers {
         dataProvider = deployments.readAddress(".addresses.EtherFiDataProvider");
         timelockController = EtherFiTimelock(payable(ETHERFI_TIMELOCK));
 
+        // Reverts if the key is absent, which is the right outcome: the library must be deployed and
+        // recorded before an implementation that delegates to it can be installed.
+        erc1271Lib = deployments.readAddress(".addresses.SafeErc1271Lib");
+
         newImpl = vm.envAddress("SAFE_IMPL");
         currentImpl = UpgradeableBeacon(safeFactory.beacon()).implementation();
     }
@@ -102,12 +118,24 @@ contract UpgradeSafeImplOP3CP is Utils, GnosisHelpers {
         require(newImpl.code.length > 0, "SAFE_IMPL has no code");
         require(newImpl != currentImpl, "beacon already points at SAFE_IMPL - upgrade already done?");
 
+        // Must hold code before the equality check below, or a matching bytecode would only prove both
+        // sides point at the same dead address.
+        require(erc1271Lib.code.length > 0, "SafeErc1271Lib has no code at the recorded address");
+
+        // Equality now covers the linked SafeErc1271Lib address too, since solc bakes it into the runtime
+        // code. A mismatch therefore means one of: stale build, dev-bound impl, hijacked address, or
+        // `--libraries` naming a different library than SAFE_IMPL was built against. Check that flag first.
         address local = address(new EtherFiSafe(dataProvider));
-        require(keccak256(newImpl.code) == keccak256(local.code), "SAFE_IMPL bytecode != local EtherFiSafe build bound to the prod dataProvider");
+        require(keccak256(newImpl.code) == keccak256(local.code), "SAFE_IMPL bytecode != local EtherFiSafe build - check --libraries matches .addresses.SafeErc1271Lib");
 
         require(address(EtherFiSafe(payable(newImpl)).dataProvider()) == dataProvider, "SAFE_IMPL bound to a different EtherFiDataProvider");
         require(EtherFiSafe(payable(newImpl)).WETH() == OP_WETH, "SAFE_IMPL WETH is not the OP predeploy");
         require(OP_WETH.code.length > 0, "no WETH at the OP predeploy address");
+
+        // The data provider's pause is the kill switch for ETH wrapping: paused, `receive` passes ETH
+        // through and `wrapEth` reverts. Upgrading into that state is legal but the simulation below
+        // asserts the wrapping behaviour, so fail here with the reason rather than there without one.
+        require(!IEtherFiDataProvider(dataProvider).paused(), "EtherFiDataProvider is paused - ETH wrapping would be off on arrival");
     }
 
     /// @dev Bytecode alone does not prove configuration — the delay and proposer/executor roles live
@@ -224,16 +252,41 @@ contract UpgradeSafeImplOP3CP is Utils, GnosisHelpers {
             require(IERC20(OP_WETH).balanceOf(liveSafe) == wethBefore + 1 ether + strandedBefore, "SIM FAILED: wrapEth did not sweep the stranded balance");
 
             console.log("  [OK] stranded ETH swept from the sampled safe (wei):", strandedBefore);
+
+            _assertErc1271Answers(liveSafe);
         }
 
         require(roleRegistry.owner() == ownerBefore, "SIM FAILED: RoleRegistry owner changed");
         require(safeFactory.numContractsDeployed() == safesBefore, "SIM FAILED: deployed safe count changed");
 
+
         console.log("");
         console.log("  [OK] beacon implementation:", newImpl);
         console.log("  [OK] live safe kept its owners, wraps incoming ETH, and sweeps via wrapEth");
+        console.log("  [OK] ERC-1271 answers through the linked SafeErc1271Lib:", erc1271Lib);
         console.log("  [OK] RoleRegistry ownership and safe count unchanged");
         console.log("");
         console.log("Simulation passed. Sign step 1, wait for it to EXECUTE, then wait 8h before step 2.");
+    }
+
+    /// @dev Exercises the ERC-1271 path on a real upgraded safe. The bytecode check proves the linked
+    ///      library ADDRESS is the expected one; this proves the code behind it is reachable and behaves —
+    ///      the two failure modes a DELEGATECALL to a library introduces.
+    ///
+    ///      Two cases, both reachable without owner keys:
+    ///        - an undecodable blob must answer INVALID, which only happens if the library's try/catch runs
+    ///        - a foreign EIP-712 digest must answer INVALID, the LendGateway invariant, asserted on a live
+    ///          safe rather than only in unit tests
+    ///
+    ///      A missing library would DELEGATECALL into empty code, return nothing, and revert while decoding
+    ///      a bytes4 from it — so this fails loudly either way rather than reporting a wrong answer.
+    function _assertErc1271Answers(address liveSafe) internal view {
+        bytes4 invalid = bytes4(0xffffffff);
+
+        require(EtherFiSafe(payable(liveSafe)).isValidSignature(keccak256("probe"), hex"deadbeef") == invalid, "SIM FAILED: ERC-1271 did not answer for an undecodable blob - SafeErc1271Lib unreachable");
+
+        bytes memory foreignPreimage = abi.encodePacked(hex"1901", keccak256("AaveV4Spoke"), keccak256("SetUserPositionManagers(address user,...)"));
+        bytes memory blob = abi.encode(foreignPreimage, new address[](0), new bytes[](0));
+        require(EtherFiSafe(payable(liveSafe)).isValidSignature(keccak256(foreignPreimage), blob) == invalid, "SIM FAILED: ERC-1271 accepted a foreign EIP-712 digest");
     }
 }
