@@ -3,7 +3,6 @@ pragma solidity ^0.8.28;
 
 import { console } from "forge-std/console.sol";
 
-import { SafeErc1271Lib } from "../src/libraries/SafeErc1271Lib.sol";
 import { Utils } from "./utils/Utils.sol";
 
 /**
@@ -28,14 +27,13 @@ import { Utils } from "./utils/Utils.sol";
  *      a non-OP fork. Pass `--libraries` per invocation instead.
  *
  * Usage:
- *   PRIVATE_KEY=0x... forge script scripts/DeploySafeErc1271Lib.s.sol --rpc-url $RPC --broadcast --verify
+ *   forge script scripts/DeploySafeErc1271Lib.s.sol --rpc-url $RPC --account etherfi-dev --broadcast --verify
  */
 contract DeploySafeErc1271Lib is Utils {
     function run() public {
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-
-        vm.startBroadcast(deployerPrivateKey);
-        address lib = address(new SafeErc1271Lib());
+        // A library cannot be instantiated with `new` (solc 1130), so deploy it from its artifact.
+        vm.startBroadcast();
+        address lib = vm.deployCode("SafeErc1271Lib.sol:SafeErc1271Lib");
         vm.stopBroadcast();
 
         require(lib.code.length > 0, "SafeErc1271Lib deployed without code");
