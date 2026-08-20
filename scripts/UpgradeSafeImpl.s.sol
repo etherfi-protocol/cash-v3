@@ -26,7 +26,7 @@ import { Utils } from "./utils/Utils.sol";
  *      post-deploy check below exercises the ERC-1271 path to prove the link actually resolves.
  *
  * Usage:
- *   ENV=dev PRIVATE_KEY=0x... forge script scripts/UpgradeSafeImpl.s.sol --rpc-url $RPC --broadcast \
+ *   ENV=dev forge script scripts/UpgradeSafeImpl.s.sol --rpc-url $RPC --account etherfi-dev --broadcast \
  *     --libraries src/libraries/SafeErc1271Lib.sol:SafeErc1271Lib:$SAFE_ERC1271_LIB
  */
 contract UpgradeSafeImpl is Utils {
@@ -39,16 +39,16 @@ contract UpgradeSafeImpl is Utils {
         address dataProvider = deployments.readAddress(".addresses.EtherFiDataProvider");
         EtherFiSafeFactory safeFactory = EtherFiSafeFactory(deployments.readAddress(".addresses.EtherFiSafeFactory"));
 
-        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerPrivateKey);
+        // Resolved by forge from --account / --private-key / --ledger.
+        address deployer = msg.sender;
 
         // Fail before spending gas on an implementation the deployer cannot install.
         address owner = address(safeFactory.roleRegistry().owner());
-        require(owner == deployer, "deployer is not the RoleRegistry owner - it cannot upgrade the beacon");
+        require(owner == deployer, "signer is not the RoleRegistry owner - it cannot upgrade the beacon");
 
         address oldImpl = UpgradeableBeacon(safeFactory.beacon()).implementation();
 
-        vm.startBroadcast(deployerPrivateKey);
+        vm.startBroadcast();
         EtherFiSafe safeImpl = new EtherFiSafe(dataProvider);
         safeFactory.upgradeBeaconImplementation(address(safeImpl));
         vm.stopBroadcast();
