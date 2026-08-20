@@ -156,7 +156,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
     /// @notice Sets the pinned Enso Router address used on this chain.
     function setEnsoRouter(address _ensoRouter) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         if (_ensoRouter == address(0)) revert InvalidInput();
         EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
         emit EnsoRouterSet($.ensoRouter, _ensoRouter);
@@ -434,7 +434,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         return keccak256(abi.encodePacked(CANCEL_SWAP_SIG, block.chainid, address(this), nonce, safe)).toEthSignedMessageHash();
     }
 
-    function _onlyAdmin() internal view {
+    function _onlyAdminTimelock() internal view {
         IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdminTimelock(msg.sender);
     }
 

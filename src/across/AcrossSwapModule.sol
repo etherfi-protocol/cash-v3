@@ -175,7 +175,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
 
     /// @notice Sets the Across `SpokePool` address used on this chain.
     function setSpokePool(address _spokePool) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         if (_spokePool == address(0)) revert InvalidInput();
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         emit SpokePoolSet($.spokePool, _spokePool);
@@ -185,7 +185,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @notice Sets the Across `MulticallHandler` address used as the destination
     ///         recipient on every `depositV3` call.
     function setMulticallHandler(address _multicallHandler) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         if (_multicallHandler == address(0)) revert InvalidInput();
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         emit MulticallHandlerSet($.multicallHandler, _multicallHandler);
@@ -195,7 +195,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @notice Sets the allowlisted Across periphery used for origin-swap (anyToBridgeable)
     ///         routes on this chain. Zero means origin-swaps are not enabled here.
     function setPeriphery(address _periphery) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         emit PeripherySet($.peripheryAddress, _periphery);
         $.peripheryAddress = _periphery;
@@ -577,7 +577,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         return ($.peripheryAddress, address(0));
     }
 
-    function _onlyAdmin() internal view {
+    function _onlyAdminTimelock() internal view {
         IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdminTimelock(msg.sender);
     }
 
