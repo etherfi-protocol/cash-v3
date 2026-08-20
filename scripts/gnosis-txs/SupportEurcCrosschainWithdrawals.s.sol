@@ -23,7 +23,7 @@ contract SupportEurcCrosschainWithdrawals is GnosisHelpers, Utils, Test {
 
     address cashControllerSafe = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 public constant STARGATE_MODULE_ADMIN_ROLE = keccak256("STARGATE_MODULE_ADMIN_ROLE");
 
     address eurc = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
     
@@ -57,7 +57,7 @@ contract SupportEurcCrosschainWithdrawals is GnosisHelpers, Utils, Test {
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
-        string memory grantRole = iToHex(abi.encodeWithSelector(RoleRegistry.grantRole.selector, OPERATING_TIMELOCK_ROLE, cashControllerSafe));
+        string memory grantRole = iToHex(abi.encodeWithSelector(RoleRegistry.grantRole.selector, STARGATE_MODULE_ADMIN_ROLE, cashControllerSafe));
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(roleRegistry), grantRole, "0", false)));
 
         string memory setEurcStargateConfig = iToHex(abi.encodeWithSelector(StargateModule.setAssetConfig.selector, assets, eurcStargateConfigs));

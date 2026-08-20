@@ -70,7 +70,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
     bytes32 public constant CANCEL_BRIDGE_SIG = keccak256("cancelBridge");
 
     /// @notice Role identifier for admins of the Liquid Module
-    bytes32 public constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     /// @notice Emitted when new liquid assets and their tellers are added to the module
     event LiquidAssetsAdded(address[] liquidAssets, address[] tellers);
@@ -549,14 +549,14 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @notice Adds new liquid assets and their corresponding tellers to the module
      * @param liquidAssets Array of liquid asset addresses to add
      * @param tellers Array of teller addresses corresponding to the liquid assets
-     * @dev Only callable by accounts with the MULTISIG_ADMIN_ROLE role
+     * @dev Only callable by accounts with the ADMIN_ROLE role
      * @custom:throws Unauthorized If caller doesn't have the admin role
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
      * @custom:throws InvalidConfiguration If a teller's vault doesn't match the expected liquid asset
      */
     function addLiquidAssets(address[] calldata liquidAssets, address[] calldata tellers) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(MULTISIG_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        if (!etherFiDataProvider.roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert Unauthorized();
 
         uint256 len = liquidAssets.length;
         if (len != tellers.length) revert ArrayLengthMismatch();
@@ -579,12 +579,12 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
     /**
      * @notice Removes liquid assets from the module
      * @param liquidAssets Array of liquid asset addresses to remove
-     * @dev Only callable by accounts with the MULTISIG_ADMIN_ROLE role
+     * @dev Only callable by accounts with the ADMIN_ROLE role
      * @custom:throws Unauthorized If caller doesn't have the admin role
      * @custom:throws InvalidInput If the array is empty
      */
     function removeLiquidAsset(address[] calldata liquidAssets) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(MULTISIG_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        if (!etherFiDataProvider.roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert Unauthorized();
 
         uint256 len = liquidAssets.length;
         if (len == 0) revert InvalidInput();
@@ -608,7 +608,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @custom:throws InvalidBoringQueue If the queue does not belong to the liquid asset
      */
     function setLiquidAssetWithdrawQueue(address asset, address boringQueue) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(MULTISIG_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        if (!etherFiDataProvider.roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert Unauthorized();
         
         if (asset == address(0) ||  boringQueue == address(0)) revert InvalidValue();
         if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();

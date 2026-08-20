@@ -23,21 +23,21 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
 
     /**
      * @notice Adds a new collateral token with its configuration
-     * @dev Can only be called by accounts with MULTISIG_ADMIN_ROLE
+     * @dev Can only be called by accounts with ADMIN_ROLE
      * @param token Address of the token to add as collateral
      * @param config Configuration parameters for the collateral token
      */
-    function supportCollateralToken(address token, CollateralTokenConfig calldata config) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function supportCollateralToken(address token, CollateralTokenConfig calldata config) external onlyRole(ADMIN_ROLE) {
         _supportCollateralToken(token);
         _setCollateralTokenConfig(token, config);
     }
 
     /**
      * @notice Removes a collateral token from the supported list
-     * @dev Can only be called by accounts with MULTISIG_ADMIN_ROLE
+     * @dev Can only be called by accounts with ADMIN_ROLE
      * @param token Address of the collateral token to remove
      */
-    function unsupportCollateralToken(address token) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function unsupportCollateralToken(address token) external onlyRole(ADMIN_ROLE) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
 
         if (token == address(0)) revert InvalidValue();
@@ -57,7 +57,7 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
      * @param borrowApy Annual percentage yield for borrowing this token (per second)
      * @param minShares Minimum shares required for this token
      */
-    function supportBorrowToken(address token, uint64 borrowApy, uint128 minShares) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function supportBorrowToken(address token, uint64 borrowApy, uint128 minShares) external onlyRole(ADMIN_ROLE) {
         if (!isCollateralToken(token)) revert NotACollateralToken();
         _supportBorrowToken(token);
         _setBorrowTokenConfig(token, borrowApy, minShares);
@@ -68,7 +68,7 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
      * @dev All borrowed tokens must be repaid before removal
      * @param token Address of the borrow token to remove
      */
-    function unsupportBorrowToken(address token) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function unsupportBorrowToken(address token) external onlyRole(ADMIN_ROLE) {
         DebtManagerStorage storage $ = _getDebtManagerStorage();
         if (!isBorrowToken(token)) revert NotABorrowToken();
 
@@ -87,31 +87,31 @@ contract DebtManagerAdmin is DebtManagerStorageContract {
 
     /**
      * @notice Updates the configuration for a collateral token
-     * @dev Can only be called by accounts with MULTISIG_ADMIN_ROLE
+     * @dev Can only be called by accounts with ADMIN_ROLE
      * @param __collateralToken Address of the collateral token to update
      * @param __config New configuration parameters for the collateral token
      */
-    function setCollateralTokenConfig(address __collateralToken, CollateralTokenConfig memory __config) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function setCollateralTokenConfig(address __collateralToken, CollateralTokenConfig memory __config) external onlyRole(ADMIN_ROLE) {
         _setCollateralTokenConfig(__collateralToken, __config);
     }
 
     /**
      * @notice Updates the borrow APY for a token
-     * @dev Can only be called by accounts with MULTISIG_ADMIN_ROLE
+     * @dev Can only be called by accounts with ADMIN_ROLE
      * @param token Address of the token to update
      * @param apy New annual percentage yield (per second)
      */
-    function setBorrowApy(address token, uint64 apy) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function setBorrowApy(address token, uint64 apy) external onlyRole(ADMIN_ROLE) {
         _setBorrowApy(token, apy);
     }
 
     /**
      * @notice Updates the minimum required shares for a borrow token
-     * @dev Can only be called by accounts with MULTISIG_ADMIN_ROLE
+     * @dev Can only be called by accounts with ADMIN_ROLE
      * @param token Address of the token to update
      * @param shares New minimum shares value
      */
-    function setMinBorrowTokenShares(address token, uint128 shares) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function setMinBorrowTokenShares(address token, uint128 shares) external onlyRole(ADMIN_ROLE) {
         _setMinBorrowTokenShares(token, shares);
     }
 

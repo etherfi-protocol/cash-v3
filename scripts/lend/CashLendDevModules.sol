@@ -141,7 +141,7 @@ library CashLendDevModules {
     /// @dev Copies withdrawal queues to the new liquid modules, using the module-admin role only briefly.
     function copyLiquidQueues(address roleRegistry, OldModules memory old, NewModules memory next) internal {
         RoleRegistry registry = RoleRegistry(roleRegistry);
-        bytes32 role = keccak256("MULTISIG_ADMIN_ROLE");
+        bytes32 role = keccak256("ETHERFI_LIQUID_MODULE_ADMIN");
         bool alreadyAdmin = registry.hasRole(role, tx.origin);
 
         if (!alreadyAdmin) registry.grantRole(role, tx.origin);

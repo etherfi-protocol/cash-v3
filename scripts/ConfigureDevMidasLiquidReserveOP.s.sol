@@ -45,8 +45,7 @@ contract ConfigureDevMidasLiquidReserveOP is Utils {
     address constant DEPOSIT_VAULT = 0x1561eC30da97108Df46535CBd9bAD8C8d8611B3a;
     address constant REDEMPTION_VAULT = 0xC87b51735ea5Eeee59D3e12601dC931F77F2837a;
 
-    // Legacy MIDAS_MODULE_ADMIN hash: the deployed dev module pre-dates the role consolidation.
-    bytes32 constant LEGACY_MIDAS_MODULE_ADMIN = 0x57bb90935cfaf88839f01bfa8de28ad30d80741c4cc93a5d12373ddbb95c68c0;
+    bytes32 constant MIDAS_MODULE_ADMIN = 0x57bb90935cfaf88839f01bfa8de28ad30d80741c4cc93a5d12373ddbb95c68c0;
 
     uint80 constant LTV = 80e18;
     uint80 constant LIQUIDATION_THRESHOLD = 90e18;

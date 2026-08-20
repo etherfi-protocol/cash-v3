@@ -76,7 +76,7 @@ contract PriceProviderV2 is UpgradeableProxy {
     /**
      * @notice Role identifier for administrative privileges over the price provider
      */
-    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
 
     /**
      * @notice Decimal precision used for all price outputs from this contract
@@ -208,20 +208,20 @@ contract PriceProviderV2 is UpgradeableProxy {
 
     /**
      * @notice Updates the price oracle configurations for multiple tokens
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param _tokens Array of token addresses to configure
      * @param _configs Array of configurations corresponding to each token
      */
-    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyRole(OPERATING_TIMELOCK_ROLE) {
+    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyRole(ADMIN_TIMELOCK_ROLE) {
         _setTokenConfig(_tokens, _configs);
     }
 
     /**
      * @notice Removes the price oracle configuration for a token
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param _token Address of the token to remove the config for
      */
-    function removeTokenConfig(address _token) external onlyRole(OPERATING_TIMELOCK_ROLE) {
+    function removeTokenConfig(address _token) external onlyRole(ADMIN_TIMELOCK_ROLE) {
         PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
         if ($.isBaseAsset[_token]) revert BaseAssetCannotBeRemoved();
         if ($.tokenConfig[_token].oracle == address(0)) revert TokenConfigNotSet();
@@ -231,10 +231,10 @@ contract PriceProviderV2 is UpgradeableProxy {
 
     /**
      * @notice Sets a base asset to true or false
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param _baseAsset Address of the base asset
      */
-    function setBaseAsset(address _baseAsset, bool _isBaseAsset) external onlyRole(OPERATING_TIMELOCK_ROLE) {
+    function setBaseAsset(address _baseAsset, bool _isBaseAsset) external onlyRole(ADMIN_TIMELOCK_ROLE) {
         PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
         $.isBaseAsset[_baseAsset] = _isBaseAsset;
         emit BaseAssetSet(_baseAsset, _isBaseAsset);

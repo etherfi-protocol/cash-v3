@@ -72,7 +72,7 @@ contract ConfigureHypeOFTsStargateModule is GnosisHelpers, Utils, Test {
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 
-        bytes32 stargateModuleAdminRole = keccak256("OPERATING_TIMELOCK_ROLE");
+        bytes32 stargateModuleAdminRole = keccak256("STARGATE_MODULE_ADMIN_ROLE");
         string memory grantRoleData = iToHex(abi.encodeWithSelector(
             IRoleRegistry.grantRole.selector,
             stargateModuleAdminRole,

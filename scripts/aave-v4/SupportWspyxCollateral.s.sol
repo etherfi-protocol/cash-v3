@@ -25,7 +25,7 @@ import { AddSummerLendCollateral } from "./AddSummerLendCollateral.s.sol";
  *         already a collateral token.
  *
  * Usage (simulate by dropping --broadcast; the broadcast wallet must hold the instance admin,
- * MULTISIG_ADMIN_ROLE and MULTISIG_ADMIN_ROLE roles):
+ * LEND_GATEWAY_ADMIN_ROLE and DEBT_MANAGER_ADMIN_ROLE roles):
  *   source .env && ENV=dev FOUNDRY_PROFILE=aave-deploy forge script \
  *     scripts/aave-v4/SupportWspyxCollateral.s.sol:SupportWspyxCollateral \
  *     --rpc-url $OPTIMISM_RPC --broadcast -vvvv

@@ -19,7 +19,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  * @author ether.fi
  * @notice 3CP-647 — the ENTIRE Ethereum leg of the xStock rollout, in ONE bundle:
  *
- *           1. RoleRegistry.grantRole(OPERATING_TIMELOCK_ROLE, SAFE)
+ *           1. RoleRegistry.grantRole(STOCK_UNWRAPPER_ADMIN_ROLE, SAFE)
  *           2. TopUpFactory.setTokenConfig([SPYx, QQQx, TBLLx], [10, 10, 10], [cfg, cfg, cfg])
  *
  *         Call 1 gives the Safe admin control of the `StockUnwrapper`, the destination half of
@@ -105,7 +105,7 @@ contract ConfigureStockRailEth3CP is StockWithdrawConfig, StockTopupConfig, Gnos
         roleRegistry = RoleRegistry(deployments.readAddress(".addresses.RoleRegistry"));
         unwrapper = StockUnwrapper(deployments.readAddress(".addresses.StockUnwrapper"));
         factory = TopUpFactory(payable(deployments.readAddress(".addresses.TopUpSourceFactory")));
-        adminRole = unwrapper.OPERATING_TIMELOCK_ROLE();
+        adminRole = unwrapper.ADMIN_TIMELOCK_ROLE();
         bridgeAdapter = _adapterAddress();
         recipient = _topUpDestOptimism();
 
@@ -129,7 +129,7 @@ contract ConfigureStockRailEth3CP is StockWithdrawConfig, StockTopupConfig, Gnos
         require(roleRegistry.owner() == SAFE, "Ethereum RoleRegistry owner is not the Safe - both calls would revert; use the owner's governance path");
         require(address(factory.roleRegistry()) == address(roleRegistry), "TopUpFactory reads a different RoleRegistry than the one being granted on");
 
-        require(!roleRegistry.hasRole(adminRole, SAFE), "Safe already holds OPERATING_TIMELOCK_ROLE - grant already done?");
+        require(!roleRegistry.hasRole(adminRole, SAFE), "Safe already holds STOCK_UNWRAPPER_ADMIN_ROLE - grant already done?");
 
         // Emergency stop on both contracts, which is why call 1 is not launch-blocking.
         require(roleRegistry.hasRole(roleRegistry.PAUSER(), SAFE), "Safe lacks PAUSER on the Ethereum registry");
@@ -143,7 +143,7 @@ contract ConfigureStockRailEth3CP is StockWithdrawConfig, StockTopupConfig, Gnos
         _assertProdAddresses();
         require(address(unwrapper).code.length > 0, "StockUnwrapper has no code at the recorded address");
         require(address(unwrapper) == _predictAddress(_unwrapperProxySalt()), "recorded unwrapper != Prod.StockWithdraw.StockUnwrapperProxy.V2 CREATE3 address");
-        require(adminRole == keccak256("OPERATING_TIMELOCK_ROLE"), "unwrapper reports an unexpected admin role - wrong address?");
+        require(adminRole == keccak256("STOCK_UNWRAPPER_ADMIN_ROLE"), "unwrapper reports an unexpected admin role - wrong address?");
 
         address storedRegistry = address(uint160(uint256(vm.load(address(unwrapper), UPGRADEABLE_PROXY_STORAGE_SLOT))));
         require(storedRegistry == address(roleRegistry), "unwrapper roleRegistry mismatch - possible hijack");
@@ -246,7 +246,7 @@ contract ConfigureStockRailEth3CP is StockWithdrawConfig, StockTopupConfig, Gnos
     /// @dev Leg 1. A matching role hash is not proof the role WORKS, so drive a real admin setter
     ///      as the Safe — re-registering the already-registered adapters, so config cannot change.
     function _assertGrantLeg(uint256 adaptersBefore) internal {
-        require(roleRegistry.hasRole(adminRole, SAFE), "SIM FAILED: Safe did not receive OPERATING_TIMELOCK_ROLE");
+        require(roleRegistry.hasRole(adminRole, SAFE), "SIM FAILED: Safe did not receive STOCK_UNWRAPPER_ADMIN_ROLE");
 
         (address[] memory adapters, bool[] memory registered) = _adapters();
         vm.prank(SAFE);
@@ -254,7 +254,7 @@ contract ConfigureStockRailEth3CP is StockWithdrawConfig, StockTopupConfig, Gnos
         require(unwrapper.getRegisteredAdapters().length == adaptersBefore, "SIM FAILED: the no-op admin call changed the adapter set");
 
         console.log("");
-        console.log("  [OK] OPERATING_TIMELOCK_ROLE held by the Safe, setters callable");
+        console.log("  [OK] STOCK_UNWRAPPER_ADMIN_ROLE held by the Safe, setters callable");
     }
 
     /// @dev Leg 2. Storage equality per field, then the thing that actually matters: the route has

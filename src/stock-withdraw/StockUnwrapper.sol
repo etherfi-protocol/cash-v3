@@ -50,7 +50,7 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
     bytes32 private constant StockUnwrapperStorageLocation = 0x6e9822439d6ab393c03c3490c3eb1d75bff2e8473b0dc1e0a74b73fd90a39c00;
 
     /// @notice Role allowed to configure adapters/source module and rescue stranded tokens.
-    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
 
     /**
      * @notice Emitted when OFTAdapters are registered/unregistered.
@@ -151,7 +151,7 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
      * @notice Registers/unregisters mainnet OFTAdapters allowed to compose into this contract.
      * @param adapters The adapter addresses to configure.
      * @param registered Registration flag per adapter; same length as `adapters`.
-     * @custom:throws OnlyAdmin If the caller lacks `OPERATING_TIMELOCK_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_TIMELOCK_ROLE`.
      * @custom:throws ArrayLengthMismatch If the arrays diverge in length or are empty.
      * @custom:throws InvalidInput If any adapter is zero or exposes no token.
      */
@@ -163,7 +163,7 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
     /**
      * @notice Updates the trusted OP source module (e.g. after an OP-side redeploy).
      * @param _srcModule The new OP `StockWithdrawModule` proxy address.
-     * @custom:throws OnlyAdmin If the caller lacks `OPERATING_TIMELOCK_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_TIMELOCK_ROLE`.
      * @custom:throws InvalidInput If the module address is zero.
      */
     function setSrcModule(address _srcModule) external {
@@ -182,7 +182,7 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
      * @param token The token to rescue.
      * @param to The rescue recipient.
      * @param amount The amount to rescue.
-     * @custom:throws OnlyAdmin If the caller lacks `OPERATING_TIMELOCK_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_TIMELOCK_ROLE`.
      * @custom:throws InvalidInput If any parameter is zero.
      */
     function rescueTokens(address token, address to, uint256 amount) external {
@@ -296,9 +296,9 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
         emit AdaptersConfigured(adapters, registered);
     }
 
-    /// @dev Reverts unless the caller holds `OPERATING_TIMELOCK_ROLE`.
+    /// @dev Reverts unless the caller holds `ADMIN_TIMELOCK_ROLE`.
     function _onlyAdmin() internal view {
-        if (!roleRegistry().hasRole(OPERATING_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
     }
 
     /// @dev Returns the storage struct from the ERC-7201 namespaced slot.

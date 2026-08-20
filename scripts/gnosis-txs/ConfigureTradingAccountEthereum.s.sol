@@ -21,14 +21,14 @@ import { TradingAccountGnosisHelpers } from "./TradingAccountGnosisHelpers.sol";
 contract ConfigureTradingAccountEthereum is TradingAccountGnosisHelpers, Utils, TradingAccountCreate3 {
     using stdJson for string;
 
-    bytes32 private constant ACROSS_ADMIN_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
-    bytes32 private constant ENSO_ADMIN_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 private constant ACROSS_ADMIN_ROLE = keccak256("ACROSS_SWAP_MODULE_ADMIN_ROLE");
+    bytes32 private constant ENSO_ADMIN_ROLE = keccak256("ENSO_SWAP_MODULE_ADMIN_ROLE");
     bytes32 private constant TRADING_FACTORY_ADMIN_ROLE = keccak256("TRADING_SAFE_FACTORY_ADMIN_ROLE");
     bytes32 private constant TRADING_REDIRECT_ROLE = keccak256("TRADING_SAFE_REDIRECT_ROLE");
     bytes32 private constant TOPUP_REDIRECT_ROLE = keccak256("TOPUP_FACTORY_REDIRECT_ROLE");
-    bytes32 private constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+    bytes32 private constant TRADING_LENS_ADMIN_ROLE = keccak256("TRADING_LENS_ADMIN_ROLE");
     bytes32 private constant DATA_PROVIDER_ADMIN_ROLE = keccak256("DATA_PROVIDER_ADMIN_ROLE");
-    bytes32 private constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 private constant PRICE_PROVIDER_ADMIN_ROLE = keccak256("PRICE_PROVIDER_ADMIN_ROLE");
 
     function run() external {
         require(block.chainid == 1, "must run on Ethereum");
@@ -69,9 +69,9 @@ contract ConfigureTradingAccountEthereum is TradingAccountGnosisHelpers, Utils, 
         txs = _appendRole(txs, roleRegistry, TRADING_REDIRECT_ROLE, C.OPERATING_ADMIN);
         txs = _appendRole(txs, roleRegistry, ACROSS_ADMIN_ROLE, C.OPERATING_SAFE);
         txs = _appendRole(txs, roleRegistry, ENSO_ADMIN_ROLE, C.OPERATING_SAFE);
-        txs = _appendRole(txs, roleRegistry, MULTISIG_ADMIN_ROLE, C.OPERATING_SAFE);
+        txs = _appendRole(txs, roleRegistry, TRADING_LENS_ADMIN_ROLE, C.OPERATING_SAFE);
         txs = _appendRole(txs, roleRegistry, DATA_PROVIDER_ADMIN_ROLE, C.OPERATING_SAFE);
-        txs = _appendRole(txs, roleRegistry, OPERATING_TIMELOCK_ROLE, C.OPERATING_SAFE);
+        txs = _appendRole(txs, roleRegistry, PRICE_PROVIDER_ADMIN_ROLE, C.OPERATING_SAFE);
 
         txs = _append(txs, across, abi.encodeWithSelector(AcrossSwapModule.setPeriphery.selector, C.ACROSS_PERIPHERY));
 

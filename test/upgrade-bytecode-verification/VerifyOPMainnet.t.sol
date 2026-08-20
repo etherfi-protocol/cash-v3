@@ -223,7 +223,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashbackDispatcher() public {
-        // Admin roles were consolidated into MULTISIG_ADMIN_ROLE / OPERATING_TIMELOCK_ROLE and the
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
         // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
         // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
         vm.skip(true);
@@ -259,7 +259,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Settlement dispatchers ----
 
     function test_verifyBytecode_SettlementDispatcherReap() public {
-        // Admin roles were consolidated into MULTISIG_ADMIN_ROLE / OPERATING_TIMELOCK_ROLE and the
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
         // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
         // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
         vm.skip(true);
@@ -268,7 +268,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_SettlementDispatcherRain() public {
-        // Admin roles were consolidated into MULTISIG_ADMIN_ROLE / OPERATING_TIMELOCK_ROLE and the
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
         // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
         // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
         vm.skip(true);
@@ -277,7 +277,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_SettlementDispatcherPix() public {
-        // Admin roles were consolidated into MULTISIG_ADMIN_ROLE / OPERATING_TIMELOCK_ROLE and the
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
         // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
         // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
         vm.skip(true);
@@ -286,7 +286,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_SettlementDispatcherCardOrder() public {
-        // Admin roles were consolidated into MULTISIG_ADMIN_ROLE / OPERATING_TIMELOCK_ROLE and the
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
         // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
         // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
         vm.skip(true);
@@ -348,7 +348,7 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_StargateModule() public {
-        // Admin roles were consolidated into MULTISIG_ADMIN_ROLE / OPERATING_TIMELOCK_ROLE and the
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
         // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
         // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
         vm.skip(true);

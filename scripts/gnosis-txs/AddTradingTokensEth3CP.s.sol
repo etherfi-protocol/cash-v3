@@ -11,7 +11,7 @@ import { TradingAccountGnosisHelpers } from "./TradingAccountGnosisHelpers.sol";
 /**
  * @notice Generates the Ethereum 3CP JSON that reconciles the prod `TradingLens` allowlist with
  *         `TradingAccountProdConfig.supportedTokens()` minus the top-up assets. From the
- *         OperatingSafe (holds MULTISIG_ADMIN_ROLE), one tx per token that is out of sync:
+ *         OperatingSafe (holds TRADING_LENS_ADMIN_ROLE), one tx per token that is out of sync:
  *
  *           TradingLens.addSupportedToken(token)     — config token missing from the lens
  *           TradingLens.removeSupportedToken(token)  — top-up asset still on the lens

@@ -81,7 +81,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         dataProvider.configureModules(mods, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(mods, shouldWhitelist);
 
-        roleRegistry.grantRole(module.OPERATING_TIMELOCK_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(module.ADMIN_TIMELOCK_ROLE(), moduleAdmin);
         vm.stopPrank();
 
         bytes[] memory setupData = new bytes[](1);

@@ -29,7 +29,7 @@ import { LendCapacityLib } from "./LendCapacityLib.sol";
  *         break until re-approved). This is enforced by Aave, not re-implemented here.
  *      2. Cash side: mutating ops only target factory-registered Cash Safes and only an authorized driver may
  *         call them. Public suppliers use the Aave Spoke directly. The CashModule is always a driver (resolved
- *         live from the data provider); further drivers are added by an OPERATING_TIMELOCK_ROLE holder. A position
+ *         live from the data provider); further drivers are added by an ADMIN_TIMELOCK_ROLE holder. A position
  *         manager can move user funds, so who may drive it is the most security-critical surface in this contract.
  *
  *      Invariant: assets only leave a safe's position through this gateway, so every exit lands in the safe
@@ -63,10 +63,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     IAaveV4Spoke public immutable spoke;
 
     /// @notice Fast multisig role that registers reserves and tunes risk parameters
-    bytes32 public constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     /// @notice Operating-timelock role that manages the driver allowlist
-    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
 
     /// @notice 100% in the ILendGateway ltv scale (100e18 == 100%)
     uint256 internal constant HUNDRED_PERCENT = 100e18;
@@ -187,7 +187,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId for the asset
      */
-    function setReserveId(address asset, uint256 reserveId) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function setReserveId(address asset, uint256 reserveId) external onlyRole(ADMIN_ROLE) {
         if (asset == address(0)) revert ZeroAddress();
         if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
 
@@ -219,7 +219,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * required and the pin is harmless. See audit L-01.
      * @param asset The asset to remove from the registry
      */
-    function removeReserve(address asset) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function removeReserve(address asset) external onlyRole(ADMIN_ROLE) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
 
@@ -245,7 +245,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param value The floor in WAD (1e18); 0 disables the check, otherwise bounded to [1e18, 2e18]
      * @custom:throws InvalidMinHealthFactor if value is non-zero and outside [1e18, 2e18]
      */
-    function setMinHealthFactor(uint256 value) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function setMinHealthFactor(uint256 value) external onlyRole(ADMIN_ROLE) {
         if (value != 0 && (value < 1e18 || value > 2e18)) revert InvalidMinHealthFactor();
         _getLendGatewayStorage().minHealthFactor = value;
         emit MinHealthFactorSet(value);
@@ -256,7 +256,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param driver The driver contract (e.g. an auto-supply or migration module)
      * @param authorized True to authorize, false to revoke
      */
-    function setDriver(address driver, bool authorized) external onlyRole(OPERATING_TIMELOCK_ROLE) {
+    function setDriver(address driver, bool authorized) external onlyRole(ADMIN_TIMELOCK_ROLE) {
         if (driver == address(0)) revert ZeroAddress();
         _getLendGatewayStorage().isDriver[driver] = authorized;
         emit DriverSet(driver, authorized);
@@ -270,7 +270,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param asset The registered asset
      * @param spendable True to add to the set, false to remove
      */
-    function setSpendAsset(address asset, bool spendable) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function setSpendAsset(address asset, bool spendable) external onlyRole(ADMIN_ROLE) {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (spendable) {
             if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);

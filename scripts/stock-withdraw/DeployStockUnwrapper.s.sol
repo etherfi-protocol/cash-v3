@@ -13,7 +13,7 @@ import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
  * @title DeployStockUnwrapper
  * @notice Deploys the Ethereum-side StockUnwrapper (CREATE3 impl + CREATE3 UUPS proxy with
  *         atomic init) through the on-chain EtherFiDeployer, and grants
- *         OPERATING_TIMELOCK_ROLE.
+ *         STOCK_UNWRAPPER_ADMIN_ROLE.
  *
  *         The unwrapper initialises with the FULL config from `StockWithdrawConfig`: the
  *         OFTAdapter allowlist, and the trusted OP StockWithdrawModule PREDICTED from its
@@ -120,6 +120,6 @@ contract DeployStockUnwrapper is StockWithdrawConfig {
     /// @dev DEV ONLY: on dev the broadcaster owns the RoleRegistry, so the grant rides along
     ///      with the deploy. On prod it is its own 3CP (see the contract docs).
     function _grantRoleData() internal view returns (bytes memory) {
-        return abi.encodeWithSignature("grantRole(bytes32,address)", StockUnwrapper(proxy).OPERATING_TIMELOCK_ROLE(), unwrapperAdmin);
+        return abi.encodeWithSignature("grantRole(bytes32,address)", StockUnwrapper(proxy).ADMIN_TIMELOCK_ROLE(), unwrapperAdmin);
     }
 }

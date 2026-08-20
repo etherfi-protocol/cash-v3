@@ -78,7 +78,7 @@ contract VerifyOptimismProd is Script {
     address constant weETH = 0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF;
     address constant weth = 0x4200000000000000000000000000000000000006;
 
-    bytes32 constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+    bytes32 constant DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
 
     // Computed at runtime
     address SETTLEMENT_PIX;

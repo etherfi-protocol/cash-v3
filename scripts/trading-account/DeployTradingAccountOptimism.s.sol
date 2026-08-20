@@ -86,7 +86,7 @@ contract DeployTradingAccountOptimism is Utils {
         cashModule.configureModulesCanRequestWithdraw(modules, enable);
 
         // 4. Roles.
-        roleRegistry.grantRole(acrossModule.OPERATING_TIMELOCK_ROLE(), deployer);
+        roleRegistry.grantRole(acrossModule.ADMIN_TIMELOCK_ROLE(), deployer);
         // Periphery isn't part of initialize() — set it post-grant so origin-swap (Sell) routes work.
         acrossModule.setPeriphery(PERIPHERY);
 
@@ -109,7 +109,7 @@ contract DeployTradingAccountOptimism is Utils {
         modules[0] = address(ensoModule);
         dataProvider.configureDefaultModules(modules, enable);
         cashModule.configureModulesCanRequestWithdraw(modules, enable);
-        roleRegistry.grantRole(ensoModule.OPERATING_TIMELOCK_ROLE(), deployer);
+        roleRegistry.grantRole(ensoModule.ADMIN_TIMELOCK_ROLE(), deployer);
 
         vm.stopBroadcast();
 

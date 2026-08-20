@@ -61,8 +61,8 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
         0x0a93d51b2793ea18ce510da8b8cb57b59048d8c53342680b2f2da35f6fe69600;
 
     /// @notice The ADMIN role for the Wormhole module
-    bytes32 public constant OPERATING_TIMELOCK_ROLE =
-        keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 public constant ADMIN_TIMELOCK_ROLE =
+        keccak256("ADMIN_TIMELOCK_ROLE");
 
     /// @notice TypeHash for request bridge function signature
     bytes32 public constant REQUEST_BRIDGE_SIG = keccak256("requestBridge");
@@ -164,7 +164,7 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      */
     function setAssetConfig(address[] memory assets, AssetConfig[] memory assetConfigs) external {
         IRoleRegistry roleRegistry = IRoleRegistry(etherFiDataProvider.roleRegistry());
-        if (!roleRegistry.hasRole(OPERATING_TIMELOCK_ROLE, msg.sender)) revert Unauthorized();
+        if (!roleRegistry.hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert Unauthorized();
 
         _setAssetConfigs(assets, assetConfigs);
     }

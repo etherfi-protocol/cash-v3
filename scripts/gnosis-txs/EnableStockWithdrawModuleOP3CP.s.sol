@@ -21,19 +21,19 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *         Both calls here are ROLE-gated and the Safe holds both roles directly, so this
  *         bundle needs NO timelock:
  *
- *           EtherFiDataProvider.configureDefaultModules([module], [true])   OPERATING_TIMELOCK_ROLE
- *           CashModule.configureModulesCanRequestWithdraw([module], [true]) OPERATING_TIMELOCK_ROLE
+ *           EtherFiDataProvider.configureDefaultModules([module], [true])   DATA_PROVIDER_ADMIN_ROLE
+ *           CashModule.configureModulesCanRequestWithdraw([module], [true]) CASH_MODULE_CONTROLLER_ROLE
  *
  *         `configureDefaultModules(true)` adds to the whitelist AND the default set in one
  *         call, so every existing EtherFiSafe picks the module up without a per-safe tx.
  *
  * @dev This is one of three independent 3CPs, deliberately not batched:
  *        - 3CP-646 (this one, OP)  — enable the module. No timelock.
- *        - 3CP-647 (Ethereum)      — the whole Ethereum leg in one bundle: OPERATING_TIMELOCK_ROLE
+ *        - 3CP-647 (Ethereum)      — the whole Ethereum leg in one bundle: STOCK_UNWRAPPER_ADMIN_ROLE
  *                                    to the Safe, plus the raw-stock top-up token configs. No
  *                                    timelock: the Safe owns the Ethereum RoleRegistry directly,
  *                                    so both calls are plain Safe transactions.
- *        - 3CP-648 (OP)            — grant MULTISIG_ADMIN_ROLE to the Safe. Two
+ *        - 3CP-648 (OP)            — grant STOCK_WITHDRAW_MODULE_ADMIN_ROLE to the Safe. Two
  *                                    bundles 8h apart, because `grantRole` on OP is owner-gated
  *                                    and the owner is the EtherFiTimelock.
  *
@@ -130,8 +130,8 @@ contract EnableStockWithdrawModuleOP3CP is StockWithdrawConfig, GnosisHelpers {
         require(!dataProvider.isDefaultModule(address(module)), "module already a default module - enable already done?");
 
         // The Safe signs both calls directly; without these roles its own txs revert.
-        require(roleRegistry.hasRole(dataProvider.OPERATING_TIMELOCK_ROLE(), SAFE), "Safe lacks OPERATING_TIMELOCK_ROLE");
-        require(roleRegistry.hasRole(cashModule.OPERATING_TIMELOCK_ROLE(), SAFE), "Safe lacks OPERATING_TIMELOCK_ROLE");
+        require(roleRegistry.hasRole(dataProvider.ADMIN_TIMELOCK_ROLE(), SAFE), "Safe lacks DATA_PROVIDER_ADMIN_ROLE");
+        require(roleRegistry.hasRole(cashModule.ADMIN_TIMELOCK_ROLE(), SAFE), "Safe lacks CASH_MODULE_CONTROLLER_ROLE");
     }
 
     // ── Bundle construction ───────────────────────────────────────────────────────

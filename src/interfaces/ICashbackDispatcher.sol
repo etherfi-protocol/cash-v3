@@ -48,15 +48,15 @@ interface ICashbackDispatcher {
 
     /**
      * @notice Function to fetch the fast multisig admin role
-     * @return MULTISIG_ADMIN_ROLE
+     * @return ADMIN_ROLE
      */
-    function MULTISIG_ADMIN_ROLE() external view returns (bytes32);
+    function ADMIN_ROLE() external view returns (bytes32);
 
     /**
      * @notice Function to fetch the operating-timelock role
-     * @return OPERATING_TIMELOCK_ROLE
+     * @return ADMIN_TIMELOCK_ROLE
      */
-    function OPERATING_TIMELOCK_ROLE() external view returns (bytes32);
+    function ADMIN_TIMELOCK_ROLE() external view returns (bytes32);
 
     /**
      * @notice Returns true if the token is a whitelisted cashback token, false otherwise

@@ -13,7 +13,7 @@ import { Utils } from "../utils/Utils.sol";
  * @notice Generates a Gnosis bundle (and simulates execution on the current fork) for the
  *         cash controller safe to:
  *           - whitelist the BeHYPEStakeModule as a default module on EtherFiDataProvider
- *           - grant MULTISIG_ADMIN_ROLE to the cash controller safe
+ *           - grant BEHYPE_STAKE_MODULE_ADMIN_ROLE to the cash controller safe
  *
  *         wHYPE and beHYPE are already whitelisted as withdraw assets on CashModule
  *         (both dev and mainnet, verified on-chain).
@@ -51,7 +51,7 @@ contract ConfigureBeHYPEStakeModuleAndWithdraws is GnosisHelpers, Utils {
         bool[] memory whitelistModule = new bool[](1);
         whitelistModule[0] = true;
 
-        bytes32 adminRole = BeHYPEStakeModule(beHypeStakeModule).MULTISIG_ADMIN_ROLE();
+        bytes32 adminRole = BeHYPEStakeModule(beHypeStakeModule).ADMIN_ROLE();
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 

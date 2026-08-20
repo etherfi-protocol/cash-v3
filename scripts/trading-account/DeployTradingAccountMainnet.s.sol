@@ -219,14 +219,14 @@ contract DeployTradingAccountMainnet is Utils {
     ///      TradingSafeFactory and grant `TOPUP_FACTORY_REDIRECT_ROLE`. All owner-gated — on
     ///      dev the deployer owns both the trading and topup stacks.
     function _configureRolesAndAcross() internal {
-        roleRegistry.grantRole(acrossModule.OPERATING_TIMELOCK_ROLE(), deployer);
+        roleRegistry.grantRole(acrossModule.ADMIN_TIMELOCK_ROLE(), deployer);
         // Periphery isn't part of initialize() — set it post-grant so origin-swap (Sell) routes work.
         acrossModule.setPeriphery(PERIPHERY);
         // Enso router rides in initialize(); only the admin role is granted here so the router
         // can be repointed later (e.g. an Enso V3 deployment).
-        roleRegistry.grantRole(ensoModule.OPERATING_TIMELOCK_ROLE(), deployer);
+        roleRegistry.grantRole(ensoModule.ADMIN_TIMELOCK_ROLE(), deployer);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), keeper);
-        roleRegistry.grantRole(lens.MULTISIG_ADMIN_ROLE(), deployer);
+        roleRegistry.grantRole(lens.ADMIN_ROLE(), deployer);
 
         // Safe → TopUp redirect wiring. The TopUp source factory is deployed separately and
         // recorded in this chain's deployments.json.

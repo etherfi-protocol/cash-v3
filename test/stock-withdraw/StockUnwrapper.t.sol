@@ -71,7 +71,7 @@ contract StockUnwrapperTest is SafeTestSetup {
         )));
 
         vm.startPrank(owner);
-        roleRegistry.grantRole(unwrapper.OPERATING_TIMELOCK_ROLE(), unwrapperAdmin);
+        roleRegistry.grantRole(unwrapper.ADMIN_TIMELOCK_ROLE(), unwrapperAdmin);
         vm.stopPrank();
 
         // Simulate the OFTAdapter having credited wrapped tokens to the unwrapper

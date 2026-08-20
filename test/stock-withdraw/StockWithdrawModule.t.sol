@@ -158,8 +158,8 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         vm.startPrank(owner);
         dataProvider.configureModules(mods, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(mods, shouldWhitelist);
-        roleRegistry.grantRole(module.MULTISIG_ADMIN_ROLE(), moduleAdmin);
-        roleRegistry.grantRole(module.OPERATING_TIMELOCK_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(module.ADMIN_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(module.ADMIN_TIMELOCK_ROLE(), moduleAdmin);
 
         // Whitelist the iToken as a withdrawable asset in CashModule
         address[] memory withdrawAssets = new address[](1);

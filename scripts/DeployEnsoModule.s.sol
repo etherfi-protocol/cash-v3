@@ -20,7 +20,7 @@ import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
  *         CashModule registration is skipped — the module then executes swaps immediately.
  *
  *         The Enso Router address is baked into initialize(); repoint it later via
- *         `setEnsoRouter` (guarded by OPERATING_TIMELOCK_ROLE) if Enso ships a new router.
+ *         `setEnsoRouter` (guarded by ENSO_SWAP_MODULE_ADMIN_ROLE) if Enso ships a new router.
  *
  * Run:
  *   source .env && ENV=dev forge script scripts/DeployEnsoModule.s.sol --rpc-url optimism --broadcast -vvv --verify
@@ -63,7 +63,7 @@ contract DeployEnsoModule is Utils {
             ICashModule(cashModule).configureModulesCanRequestWithdraw(modules, enable);
         }
 
-        roleRegistry.grantRole(enso.OPERATING_TIMELOCK_ROLE(), deployer);
+        roleRegistry.grantRole(enso.ADMIN_TIMELOCK_ROLE(), deployer);
 
         vm.stopBroadcast();
 

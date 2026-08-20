@@ -123,8 +123,8 @@ contract TradingSafeWithdrawModuleTest is TradingSafeTestBase {
         _initDataProvider(address(factory));
 
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(dataProvider.MULTISIG_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(dataProvider.OPERATING_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(dataProvider.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(dataProvider.ADMIN_TIMELOCK_ROLE(), owner);
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 

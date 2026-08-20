@@ -81,7 +81,7 @@ contract SettlementDispatcherV2CCTPTest is Test, Constants {
         ))));
 
         roleRegistry.grantRole(BRIDGER_ROLE, owner);
-        roleRegistry.grantRole(keccak256("OPERATING_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
         roleRegistry.grantRole(BRIDGER_ROLE, bridger);
 
         // Configure CCTP

@@ -15,7 +15,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  * @title GrantStockWithdrawAdminRoleOP3CP
  * @author ether.fi
  * @notice 3CP-648 — the last leg of the stock-withdraw launch: grants
- *         `MULTISIG_ADMIN_ROLE` to the OperatingSafe on the deployed OP
+ *         `STOCK_WITHDRAW_MODULE_ADMIN_ROLE` to the OperatingSafe on the deployed OP
  *         `StockWithdrawModule`, through the 8h `EtherFiTimelock`. Two bundles, then a fork
  *         simulation of the whole lifecycle.
  *
@@ -23,7 +23,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *           Step 2 (Safe, 1 tx, >= 8h after step 1 EXECUTES): timelock.execute(grantRole)
  *
  *         The single call the TIMELOCK runs:
- *           RoleRegistry.grantRole(MULTISIG_ADMIN_ROLE, SAFE)
+ *           RoleRegistry.grantRole(STOCK_WITHDRAW_MODULE_ADMIN_ROLE, SAFE)
  *
  * @dev WHY THE TIMELOCK. `grantRole` is `onlyOwner` and since the governance handover the OP
  *      RoleRegistry owner is the `EtherFiTimelock` (8h), not the Safe. There is no fallback path:
@@ -96,7 +96,7 @@ contract GrantStockWithdrawAdminRoleOP3CP is StockWithdrawConfig, GnosisHelpers 
         dataProvider = EtherFiDataProvider(deployments.readAddress(".addresses.EtherFiDataProvider"));
         module = StockWithdrawModule(payable(deployments.readAddress(".addresses.StockWithdrawModule")));
         timelockController = EtherFiTimelock(payable(ETHERFI_TIMELOCK));
-        adminRole = module.MULTISIG_ADMIN_ROLE();
+        adminRole = module.ADMIN_ROLE();
     }
 
     // ── Preconditions ─────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ contract GrantStockWithdrawAdminRoleOP3CP is StockWithdrawConfig, GnosisHelpers 
     function _assertModule() internal view {
         require(address(module).code.length > 0, "StockWithdrawModule has no code at the recorded address");
         require(address(module) == _predictAddress(_moduleProxySalt()), "recorded module != Prod.StockWithdraw.StockWithdrawModuleProxy.V2 CREATE3 address");
-        require(adminRole == keccak256("MULTISIG_ADMIN_ROLE"), "module reports an unexpected admin role - wrong address?");
+        require(adminRole == keccak256("STOCK_WITHDRAW_MODULE_ADMIN_ROLE"), "module reports an unexpected admin role - wrong address?");
         require(address(module.etherFiDataProvider()) == address(dataProvider), "module is bound to a different EtherFiDataProvider");
 
         address storedRegistry = address(uint160(uint256(vm.load(address(module), UPGRADEABLE_PROXY_STORAGE_SLOT))));
@@ -132,7 +132,7 @@ contract GrantStockWithdrawAdminRoleOP3CP is StockWithdrawConfig, GnosisHelpers 
     ///      roles live in storage, so re-assert the full expected config before routing a
     ///      privileged payload through this address.
     function _assertGovernance() internal view {
-        require(!roleRegistry.hasRole(adminRole, SAFE), "Safe already holds MULTISIG_ADMIN_ROLE - grant already done?");
+        require(!roleRegistry.hasRole(adminRole, SAFE), "Safe already holds STOCK_WITHDRAW_MODULE_ADMIN_ROLE - grant already done?");
 
         require(ETHERFI_TIMELOCK.code.length > 0, "EtherFiTimelock not deployed");
         require(keccak256(ETHERFI_TIMELOCK.code) == keccak256(type(EtherFiTimelock).runtimeCode), "timelock bytecode != local EtherFiTimelock build");
@@ -217,7 +217,7 @@ contract GrantStockWithdrawAdminRoleOP3CP is StockWithdrawConfig, GnosisHelpers 
         executeGnosisTransactionBundle(step2Path);
 
         require(timelockController.isOperationDone(opId), "SIM FAILED: timelock operation not done");
-        require(roleRegistry.hasRole(adminRole, SAFE), "SIM FAILED: Safe did not receive MULTISIG_ADMIN_ROLE");
+        require(roleRegistry.hasRole(adminRole, SAFE), "SIM FAILED: Safe did not receive STOCK_WITHDRAW_MODULE_ADMIN_ROLE");
 
         // Hash equality is not proof: drive the real admin setters as the Safe, with the CURRENT
         // values so the calls cannot change config. `setLzGasLimits` specifically, because that
@@ -237,7 +237,7 @@ contract GrantStockWithdrawAdminRoleOP3CP is StockWithdrawConfig, GnosisHelpers 
         require(dataProvider.isDefaultModule(address(module)) == defaultBefore, "SIM FAILED: module default status changed");
 
         console.log("");
-        console.log("  [OK] MULTISIG_ADMIN_ROLE held by the Safe:", SAFE);
+        console.log("  [OK] STOCK_WITHDRAW_MODULE_ADMIN_ROLE held by the Safe:", SAFE);
         console.log("  [OK] admin setters callable by the Safe (setProviderFee + setLzGasLimits verified)");
         console.log("  [OK] module config and enabled state unchanged");
         console.log("");

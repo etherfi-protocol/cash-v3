@@ -69,7 +69,7 @@ contract StargateModuleTest is SafeTestSetup {
 
         _configureModules(modules, shouldWhitelist, setupData);
 
-        bytes32 role = stargateModule.OPERATING_TIMELOCK_ROLE();
+        bytes32 role = stargateModule.ADMIN_TIMELOCK_ROLE();
         vm.startPrank(owner);
         roleRegistry.grantRole(role, owner);
         vm.stopPrank();
@@ -433,8 +433,8 @@ contract StargateModuleTest is SafeTestSetup {
     }
 
     function test_setAssetConfig_invalidPool() public {
-        // Add OPERATING_TIMELOCK_ROLE to owner
-        bytes32 role = stargateModule.OPERATING_TIMELOCK_ROLE();
+        // Add ADMIN_TIMELOCK_ROLE to owner
+        bytes32 role = stargateModule.ADMIN_TIMELOCK_ROLE();
         vm.startPrank(owner);
         roleRegistry.grantRole(role, owner);
         vm.stopPrank();

@@ -85,8 +85,8 @@ contract TopUpRedirectToTradingSafeTest is Test {
         )));
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
-        roleRegistry.grantRole(keccak256("OPERATING_TIMELOCK_ROLE"), owner);
-        roleRegistry.grantRole(keccak256("MULTISIG_ADMIN_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
 
         // TopUp impl + factory proxy
         implementation = new TopUp(weth);

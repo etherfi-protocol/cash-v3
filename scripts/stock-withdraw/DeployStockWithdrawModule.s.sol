@@ -16,7 +16,7 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
  * @notice Deploys the OP-side StockWithdrawModule (CREATE3 impl + CREATE3 UUPS proxy with
  *         atomic init) through the on-chain EtherFiDeployer. On DEV it also wires the module
  *         up as a DEFAULT module on the EtherFiDataProvider, as a withdraw-requester on the
- *         CashModule, and grants MULTISIG_ADMIN_ROLE.
+ *         CashModule, and grants STOCK_WITHDRAW_MODULE_ADMIN_ROLE.
  *
  *         The module initialises with the FULL config from `StockWithdrawConfig`: the
  *         supported ShadowOFTs and the Ethereum route pointing at the StockUnwrapper's
@@ -51,7 +51,7 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
  *
  * Env: PRIVATE_KEY (must be a registered EtherFiDeployer deployer), ENV (dev|mainnet)
  *
- * MULTISIG_ADMIN_ROLE goes to the broadcaster on dev, and to the prod Safe on
+ * STOCK_WITHDRAW_MODULE_ADMIN_ROLE goes to the broadcaster on dev, and to the prod Safe on
  * mainnet.
  *
  * After broadcast (and bundle execution on prod), run VerifyStockWithdrawModule.s.sol.
@@ -146,7 +146,7 @@ contract DeployStockWithdrawModule is StockWithdrawConfig {
         targets[1] = address(cashModule);
         payloads[1] = abi.encodeWithSelector(ICashModule.configureModulesCanRequestWithdraw.selector, modules, enable);
         targets[2] = address(roleRegistry);
-        payloads[2] = abi.encodeWithSignature("grantRole(bytes32,address)", StockWithdrawModule(payable(proxy)).MULTISIG_ADMIN_ROLE(), moduleAdmin);
+        payloads[2] = abi.encodeWithSignature("grantRole(bytes32,address)", StockWithdrawModule(payable(proxy)).ADMIN_ROLE(), moduleAdmin);
     }
 
     /// @dev Dev: the broadcaster holds the roles — execute the wiring in-broadcast.

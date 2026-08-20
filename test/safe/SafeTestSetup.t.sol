@@ -98,7 +98,7 @@ contract SafeTestSetup is Utils {
     int256 timezoneOffset = 4 * 60 * 60; // Dubai timezone
     uint128 minShares;
 
-    bytes32 public MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+    bytes32 public ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     address refundWallet;
     // User recovery signers
@@ -153,8 +153,8 @@ contract SafeTestSetup is Utils {
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
-        roleRegistry.grantRole(dataProvider.MULTISIG_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(dataProvider.OPERATING_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(dataProvider.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(dataProvider.ADMIN_TIMELOCK_ROLE(), owner);
 
         address cashModuleSettersImpl = address(new CashModuleSetters(address(dataProvider)));
         address cashModuleCoreImpl = address(new CashModuleCore(address(dataProvider)));
@@ -208,8 +208,8 @@ contract SafeTestSetup is Utils {
         );
 
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
-        roleRegistry.grantRole(cashModule.MULTISIG_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashModule.OPERATING_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(cashModule.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(cashModule.ADMIN_TIMELOCK_ROLE(), owner);
 
         _wireDefaultGateway();
 
@@ -312,7 +312,7 @@ contract SafeTestSetup is Utils {
                 initialTokensConfig
             )
         )));
-        roleRegistry.grantRole(priceProvider.OPERATING_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(priceProvider.ADMIN_TIMELOCK_ROLE(), owner);
     }
 
     function _setupCashbackDispatcher() internal {
@@ -337,8 +337,8 @@ contract SafeTestSetup is Utils {
 
         deal(chainConfig.weth, address(cashbackDispatcher), 100000 ether);
 
-        roleRegistry.grantRole(cashbackDispatcher.MULTISIG_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashbackDispatcher.OPERATING_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(cashbackDispatcher.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(cashbackDispatcher.ADMIN_TIMELOCK_ROLE(), owner);
     }
 
     function _setupSettlementDispatcher() internal {
@@ -415,7 +415,7 @@ contract SafeTestSetup is Utils {
         address debtManagerInitializer = address(new DebtManagerInitializer(address(dataProvider)));
         address debtManagerProxy = address(new UUPSProxy(debtManagerInitializer, abi.encodeWithSelector(DebtManagerInitializer.initialize.selector, address(roleRegistry))));
 
-        roleRegistry.grantRole(MULTISIG_ADMIN_ROLE, owner);
+        roleRegistry.grantRole(ADMIN_ROLE, owner);
 
         UUPSUpgradeable(debtManagerProxy).upgradeToAndCall(debtManagerCoreImpl, "");
         debtManager = IDebtManager(address(debtManagerProxy));

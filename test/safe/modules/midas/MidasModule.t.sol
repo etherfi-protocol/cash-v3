@@ -429,7 +429,7 @@ contract MidasModuleTest is SafeTestSetup {
     // Admin function tests
     function test_addMidasVaults_success() public {
         vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.MULTISIG_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(midasModule.ADMIN_ROLE(), owner);
         vm.stopPrank();
 
         address newMidasToken = makeAddr("newMidasToken");
@@ -474,7 +474,7 @@ contract MidasModuleTest is SafeTestSetup {
 
     function test_addMidasVaults_revertsWithArrayLengthMismatch() public {
         vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.MULTISIG_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(midasModule.ADMIN_ROLE(), owner);
         vm.stopPrank();
 
         address[] memory midasTokens = new address[](1);
@@ -494,7 +494,7 @@ contract MidasModuleTest is SafeTestSetup {
 
     function test_addMidasVaults_revertsWithZeroAddress() public {
         vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.MULTISIG_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(midasModule.ADMIN_ROLE(), owner);
         vm.stopPrank();
 
         address[] memory midasTokens = new address[](1);
@@ -513,7 +513,7 @@ contract MidasModuleTest is SafeTestSetup {
 
     function test_removeMidasVaults_success() public {
         vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.MULTISIG_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(midasModule.ADMIN_ROLE(), owner);
         vm.stopPrank();
 
         address[] memory midasTokens = new address[](1);

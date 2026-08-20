@@ -49,10 +49,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
     bytes32 private constant EtherFiDataProviderStorageLocation = 0xb3086c0036ec0314dd613f04f2c0b41c0567e73b5b69f0a0d6acdbce48020e00;
 
     /// @notice Fast multisig role for low-risk operational configuration
-    bytes32 public constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     /// @notice Operating-timelock role for trust-changing configuration (modules, oracle, signers, core pointers)
-    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
 
     /** 
      * @notice Struct for intiialize params
@@ -201,7 +201,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Cash Lens
-     * @dev Only callable by addresses with MULTISIG_ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_ROLE
      * @param cashLens New cash lens address to set
      */
     function setCashLens(address cashLens) external {
@@ -211,7 +211,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Configures multiple modules' whitelist status
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
      */
@@ -222,7 +222,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Configures multiple modules' whitelist status
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
      */
@@ -233,7 +233,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Price Provider
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param _priceProvider New price provider address to set
      */
     function setPriceProvider(address _priceProvider) external {
@@ -243,7 +243,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the hook address
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param hook New hook address to set
      */
     function setHookAddress(address hook) external {
@@ -253,7 +253,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the etherFiSafeFactory instance address
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param factory New factory address to set
      */
     function setEtherFiSafeFactory(address factory) external {
@@ -263,7 +263,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the EtherFi Recovery Signer address
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE    
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE    
      * @param signer Address of the new signer
      */
     function setEtherFiRecoverySigner(address signer) external {
@@ -273,7 +273,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the EtherFi Recovery Signer address
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE    
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE    
      * @param signer Address of the new signer
      */
     function setThirdPartyRecoverySigner(address signer) external {
@@ -283,7 +283,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the EtherFi Refund Wallet address
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE    
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE    
      * @param wallet Address of the new wallet
      */
     function setRefundWallet(address wallet) external {
@@ -293,7 +293,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the Recovery delay period
-     * @dev Only callable by addresses with MULTISIG_ADMIN_ROLE    
+     * @dev Only callable by addresses with ADMIN_ROLE    
      * @param period Recovery timelock period in seconds
      * @custom:throws InvalidInput when period is 0
      */
@@ -309,7 +309,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Cash Module
-     * @dev Only callable by addresses with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param cashModule New cash module address to set
      */
     function setCashModule(address cashModule) external {
@@ -650,13 +650,13 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @dev Internal function to verify caller has the fast multisig admin role
      */
     function _onlyMultisigAdmin() private view {
-        if (!roleRegistry().hasRole(MULTISIG_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
     }
 
     /**
      * @dev Internal function to verify caller has the operating-timelock role
      */
     function _onlyOperatingTimelock() private view {
-        if (!roleRegistry().hasRole(OPERATING_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!roleRegistry().hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
     }
 }

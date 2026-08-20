@@ -18,7 +18,7 @@ contract TradingSafeFactoryTest is TradingSafeTestBase {
         factory = _deployFactory();
         _initDataProvider(address(factory));
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(factory.MULTISIG_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(factory.ADMIN_ROLE(), owner);
         vm.stopPrank();
     }
 

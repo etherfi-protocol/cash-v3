@@ -46,7 +46,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
     bytes32 public constant TRADING_SAFE_REDIRECT_ROLE = keccak256("TRADING_SAFE_REDIRECT_ROLE");
 
     /// @notice Fast multisig role that maintains the factory's contract pointers.
-    bytes32 public constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     /// @notice Reverts when `deployTradingSafe` is called by an account lacking the admin role.
     error OnlyAdmin();
@@ -220,7 +220,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
      * @param _topUpFactory Address of the `TopUpFactory` on this chain.
      * @custom:throws TopUpFactoryCannotBeZeroAddress If `_topUpFactory == address(0)`.
      */
-    function setTopUpFactory(address _topUpFactory) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function setTopUpFactory(address _topUpFactory) external onlyRole(ADMIN_ROLE) {
         if (_topUpFactory == address(0)) revert TopUpFactoryCannotBeZeroAddress();
         TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
         emit TopUpFactorySet($.topUpFactory, _topUpFactory);
@@ -241,7 +241,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
      * @param _tradingLens Address of the `TradingLens` on this chain.
      * @custom:throws TradingLensCannotBeZeroAddress If `_tradingLens == address(0)`.
      */
-    function setTradingLens(address _tradingLens) external onlyRole(MULTISIG_ADMIN_ROLE) {
+    function setTradingLens(address _tradingLens) external onlyRole(ADMIN_ROLE) {
         if (_tradingLens == address(0)) revert TradingLensCannotBeZeroAddress();
         TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
         emit TradingLensSet($.tradingLens, _tradingLens);

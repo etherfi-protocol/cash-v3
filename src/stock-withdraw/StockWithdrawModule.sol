@@ -111,10 +111,10 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     ICashModule public immutable cashModule;
 
     /// @notice Fast multisig role for token support, gas limits and provider fee.
-    bytes32 public constant MULTISIG_ADMIN_ROLE = keccak256("MULTISIG_ADMIN_ROLE");
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     /// @notice Operating-timelock role for the destination unwrapper configuration.
-    bytes32 public constant OPERATING_TIMELOCK_ROLE = keccak256("OPERATING_TIMELOCK_ROLE");
+    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
 
     /// @notice 100% in basis points.
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
@@ -293,7 +293,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         invariant `IOFT(iToken).token() == iToken` on registration.
      * @param iTokens Array of iToken addresses to configure.
      * @param supported Support flag per iToken; same length as `iTokens`.
-     * @custom:throws OnlyAdmin If the caller lacks `MULTISIG_ADMIN_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_ROLE`.
      * @custom:throws ArrayLengthMismatch If the arrays diverge in length or are empty.
      * @custom:throws InvalidInput If any iToken address is zero.
      * @custom:throws InvalidOFT If a registered iToken is not its own OFT.
@@ -308,7 +308,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         new requests for that endpoint.
      * @param dstEids Destination endpoint IDs to configure.
      * @param unwrappers StockUnwrapper per endpoint; same length as `dstEids`.
-     * @custom:throws OnlyAdmin If the caller lacks `OPERATING_TIMELOCK_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_TIMELOCK_ROLE`.
      * @custom:throws ArrayLengthMismatch If the arrays diverge in length or are empty.
      * @custom:throws InvalidInput If any endpoint ID is zero.
      */
@@ -323,7 +323,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         bump gas for stuck sends.
      * @param _lzReceiveGasLimit The new lzReceive executor gas limit; must be non-zero.
      * @param _composeGasLimit The new compose executor gas limit; must be non-zero.
-     * @custom:throws OnlyAdmin If the caller lacks `MULTISIG_ADMIN_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_ROLE`.
      * @custom:throws InvalidInput If either gas limit is zero.
      */
     function setLzGasLimits(uint128 _lzReceiveGasLimit, uint128 _composeGasLimit) external {
@@ -338,7 +338,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         in-flight order, and `minReturn` still protects the user on the destination.
      * @param _providerFeeBps Fee in basis points; zero disables the fee.
      * @param _feeReceiver Recipient of the fee; may be zero only when the fee is zero.
-     * @custom:throws OnlyAdmin If the caller lacks `MULTISIG_ADMIN_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_ROLE`.
      * @custom:throws ProviderFeeTooHigh If the fee exceeds `MAX_PROVIDER_FEE_BPS`.
      * @custom:throws InvalidInput If the receiver is zero while the fee is non-zero.
      */
@@ -783,14 +783,14 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         }
     }
 
-    /// @dev Reverts unless the caller holds `MULTISIG_ADMIN_ROLE`.
+    /// @dev Reverts unless the caller holds `ADMIN_ROLE`.
     function _onlyAdmin() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(MULTISIG_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
     }
 
-    /// @dev Reverts unless the caller holds `OPERATING_TIMELOCK_ROLE`.
+    /// @dev Reverts unless the caller holds `ADMIN_TIMELOCK_ROLE`.
     function _onlyOperatingTimelock() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(OPERATING_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
+        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
     }
 
     /// @dev Returns the storage struct from the ERC-7201 namespaced slot.

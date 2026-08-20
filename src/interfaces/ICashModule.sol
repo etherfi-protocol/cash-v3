@@ -312,13 +312,13 @@ interface ICashModule {
      * @notice Role identifier for the fast multisig admin
      * @return The role identifier as bytes32
      */
-    function MULTISIG_ADMIN_ROLE() external pure returns (bytes32);
+    function ADMIN_ROLE() external pure returns (bytes32);
 
     /**
      * @notice Role identifier for the operating timelock
      * @return The role identifier as bytes32
      */
-    function OPERATING_TIMELOCK_ROLE() external pure returns (bytes32);
+    function ADMIN_TIMELOCK_ROLE() external pure returns (bytes32);
 
     /**
      * @notice Maximum allowed cashback percentage (10%)
@@ -535,7 +535,7 @@ interface ICashModule {
 
     /**
      * @notice Configures which modules can request withdrawals
-     * @dev Can only be called by the OPERATING_TIMELOCK_ROLE
+     * @dev Can only be called by the ADMIN_TIMELOCK_ROLE
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether to whitelist each module
      */
@@ -543,10 +543,10 @@ interface ICashModule {
 
     /**
      * @notice Configures the withdraw assets whitelist
-     * @dev Only callable by accounts with MULTISIG_ADMIN_ROLE
+     * @dev Only callable by accounts with ADMIN_ROLE
      * @param assets Array of asset addresses to configure
      * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
-     * @custom:throws OnlyCashModuleController if the caller does not have MULTISIG_ADMIN_ROLE role
+     * @custom:throws OnlyCashModuleController if the caller does not have ADMIN_ROLE role
      * @custom:throws InvalidInput If the arrays are empty
      * @custom:throws ArrayLengthMismatch If the arrays have different lengths
      * @custom:throws InvalidAddress If any address is the zero address
@@ -556,7 +556,7 @@ interface ICashModule {
 
     /**
      * @notice Sets the settlement dispatcher address for a bin sponsor
-     * @dev Only callable by accounts with OPERATING_TIMELOCK_ROLE
+     * @dev Only callable by accounts with ADMIN_TIMELOCK_ROLE
      * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
      * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
      * @custom:throws InvalidInput if caller doesn't have the controller role
@@ -565,7 +565,7 @@ interface ICashModule {
 
     /**
      * @notice Sets the Aave gateway address for the initial Lend deployment
-     * @dev Only callable by accounts with OPERATING_TIMELOCK_ROLE while no gateway is configured
+     * @dev Only callable by accounts with ADMIN_TIMELOCK_ROLE while no gateway is configured
      * @param gateway Address of the gateway contract
      * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
      * @custom:throws InvalidInput if gateway = address(0)
@@ -587,7 +587,7 @@ interface ICashModule {
 
     /**
      * @notice Sets the time delays for withdrawals, spending limit changes, and mode changes
-     * @dev Only callable by accounts with MULTISIG_ADMIN_ROLE
+     * @dev Only callable by accounts with ADMIN_ROLE
      * @param withdrawalDelay Delay in seconds before a withdrawal can be finalized
      * @param spendLimitDelay Delay in seconds before spending limit changes take effect
      * @param modeDelay Delay in seconds before a mode change takes effect

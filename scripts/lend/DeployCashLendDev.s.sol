@@ -134,9 +134,8 @@ contract DeployCashLendDev is Utils {
         address cashAdmin = registry.owner();
         require(deployer == cashAdmin, "sender is not Cash dev admin");
         require(stdJson.readAddress(aaveJson, ".admin") == cashAdmin, "Cash and Aave dev admins differ");
-        require(registry.hasRole(ICashModule(existing.cashModule).MULTISIG_ADMIN_ROLE(), deployer), "dev admin missing CashModule multisig admin role");
-        require(registry.hasRole(ICashModule(existing.cashModule).OPERATING_TIMELOCK_ROLE(), deployer), "dev admin missing CashModule operating timelock role");
-        require(registry.hasRole(EtherFiDataProvider(existing.dataProvider).OPERATING_TIMELOCK_ROLE(), deployer), "dev admin missing DataProvider operating timelock role");
+        require(registry.hasRole(ICashModule(existing.cashModule).ADMIN_TIMELOCK_ROLE(), deployer), "dev admin missing CashModule controller role");
+        require(registry.hasRole(EtherFiDataProvider(existing.dataProvider).ADMIN_TIMELOCK_ROLE(), deployer), "dev admin missing DataProvider admin role");
     }
 
     /// @dev Loads the existing Optimism dev Cash proxy addresses from the base deployment file.
@@ -268,7 +267,7 @@ contract DeployCashLendDev is Utils {
         LendGateway gateway = LendGateway(gatewayAddress);
         RoleRegistry registry = RoleRegistry(c.roleRegistry);
         address admin = registry.owner();
-        bytes32 adminRole = gateway.MULTISIG_ADMIN_ROLE();
+        bytes32 adminRole = gateway.ADMIN_ROLE();
         if (!registry.hasRole(adminRole, admin)) registry.grantRole(adminRole, admin);
 
         // The gateway executes Safe calls when pulling funds and granting Aave position-manager

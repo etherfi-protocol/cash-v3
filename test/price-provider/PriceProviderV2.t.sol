@@ -136,7 +136,7 @@ contract PriceProviderV2Test is Test {
             )
         )));
 
-        roleRegistry.grantRole(priceProvider.OPERATING_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(priceProvider.ADMIN_TIMELOCK_ROLE(), owner);
 
         vm.stopPrank();
     }
