@@ -32,6 +32,14 @@ interface IEtherFiDataProvider {
     function setCashModule(address cashModule) external;
 
     /**
+     * @notice Whether the data provider is paused
+     * @dev Inherited from UpgradeableProxy's PausableUpgradeable and toggled by the RoleRegistry
+     *      pauser/unpauser roles. EtherFiSafe reads it as the kill switch for ETH wrapping.
+     * @return bool True if paused, false otherwise
+     */
+    function paused() external view returns (bool);
+
+    /**
      * @notice Checks if a module address is whitelisted
      * @param module Address to check
      * @return bool True if the module is whitelisted, false otherwise
