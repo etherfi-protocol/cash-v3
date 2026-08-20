@@ -80,7 +80,7 @@ contract TradingLensTest is Test {
             abi.encodeWithSelector(TradingLens.initialize.selector, address(roleRegistry))
         )));
 
-        bytes32 adminRole = lens.ADMIN_ROLE();
+        bytes32 adminRole = keccak256("ADMIN_ROLE");
         vm.prank(owner);
         roleRegistry.grantRole(adminRole, admin);
 

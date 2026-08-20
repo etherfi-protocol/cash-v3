@@ -80,10 +80,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Role identifier for EtherFi wallet access control
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
-    /// @notice Fast multisig role for cash config tuning (delays, withdraw assets)
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    /// @notice Operating-timelock role for trust-changing cash config (dispatchers, gateway, withdraw-capable modules)
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
     /// @notice Limit for maximum cashback percentage at 10%
     uint256 public constant MAX_CASHBACK_PERCENTAGE = 1000; // 10%
     /// @notice 100% in bps

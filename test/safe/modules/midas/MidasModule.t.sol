@@ -14,6 +14,7 @@ import { IAggregatorV3 } from "../../../../src/oracle/PriceProvider.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { MessageHashUtils, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 import { ChainConfig } from "../../../utils/Utils.sol";
+import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
 
 contract MidasModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -429,7 +430,7 @@ contract MidasModuleTest is SafeTestSetup {
     // Admin function tests
     function test_addMidasVaults_success() public {
         vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
         vm.stopPrank();
 
         address newMidasToken = makeAddr("newMidasToken");
@@ -467,14 +468,14 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = makeAddr("redemptionVault");
 
-        vm.expectRevert(MidasModule.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         vm.prank(owner1);
         midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
     }
 
     function test_addMidasVaults_revertsWithArrayLengthMismatch() public {
         vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
         vm.stopPrank();
 
         address[] memory midasTokens = new address[](1);
@@ -494,7 +495,7 @@ contract MidasModuleTest is SafeTestSetup {
 
     function test_addMidasVaults_revertsWithZeroAddress() public {
         vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
         vm.stopPrank();
 
         address[] memory midasTokens = new address[](1);
@@ -513,7 +514,7 @@ contract MidasModuleTest is SafeTestSetup {
 
     function test_removeMidasVaults_success() public {
         vm.startPrank(owner);
-        roleRegistry.grantRole(midasModule.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
         vm.stopPrank();
 
         address[] memory midasTokens = new address[](1);
@@ -534,7 +535,7 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory midasTokens = new address[](1);
         midasTokens[0] = address(midasToken);
 
-        vm.expectRevert(MidasModule.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         vm.prank(owner1);
         midasModule.removeMidasVaults(midasTokens);
     }

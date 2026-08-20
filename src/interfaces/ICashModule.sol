@@ -309,18 +309,6 @@ interface ICashModule {
     function ETHER_FI_WALLET_ROLE() external pure returns (bytes32);
 
     /**
-     * @notice Role identifier for the fast multisig admin
-     * @return The role identifier as bytes32
-     */
-    function ADMIN_ROLE() external pure returns (bytes32);
-
-    /**
-     * @notice Role identifier for the operating timelock
-     * @return The role identifier as bytes32
-     */
-    function ADMIN_TIMELOCK_ROLE() external pure returns (bytes32);
-
-    /**
      * @notice Maximum allowed cashback percentage (10%)
      * @return The maximum percentage in basis points
      */

@@ -36,9 +36,6 @@ contract TradingLens is UpgradeableProxy, Constants {
         uint256 valueUsd;
     }
 
-    /// @notice Role allowed to add / remove supported trading tokens.
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
     /// @notice Price source for supported tokens.
     IPriceProvider public immutable priceProvider;
 
@@ -100,7 +97,7 @@ contract TradingLens is UpgradeableProxy, Constants {
      * @custom:throws TokenAlreadySupported If `token` is already in the set.
      */
     function addSupportedToken(address token) external {
-        if (!roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        roleRegistry().onlyAdmin(msg.sender);
         if (token == address(0)) revert InvalidToken();
 
         if (!_getTradingLensStorage().supportedTokens.add(token)) revert TokenAlreadySupported(token);
@@ -114,7 +111,7 @@ contract TradingLens is UpgradeableProxy, Constants {
      * @custom:throws TokenNotSupported If `token` isn't in the set.
      */
     function removeSupportedToken(address token) external {
-        if (!roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        roleRegistry().onlyAdmin(msg.sender);
 
         if (!_getTradingLensStorage().supportedTokens.remove(token)) revert TokenNotSupported(token);
         emit SupportedTokenRemoved(token);

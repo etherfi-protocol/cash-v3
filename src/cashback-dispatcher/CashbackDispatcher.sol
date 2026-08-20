@@ -26,12 +26,6 @@ contract CashbackDispatcher is UpgradeableProxy {
     /// @notice Constant representing 100% in basis points (10,000)
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
     
-    /// @notice Fast multisig role for cashback token and module configuration
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
-    /// @notice Operating-timelock role for oracle changes and fund withdrawals
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-    
     /// @notice Reference to the ether.fi data provider contract
     IEtherFiDataProvider public immutable etherFiDataProvider;
 
@@ -278,7 +272,7 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @param _cashModule New Cash Module address
      * @custom:throws InvalidValue When the provided address is zero
      */
-    function setCashModule(address _cashModule) external onlyRole(ADMIN_ROLE) {
+    function setCashModule(address _cashModule) external onlyAdmin {
         if (_cashModule == address(0)) revert InvalidValue();
 
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
@@ -294,7 +288,7 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @custom:throws InvalidValue When the provided address is zero
      * @custom:throws CashbackTokenPriceNotConfigured When the new provider has no price for the cashback token
      */
-    function setPriceProvider(address _priceProvider) external onlyRole(ADMIN_TIMELOCK_ROLE) {
+    function setPriceProvider(address _priceProvider) external onlyAdminTimelock {
         if (_priceProvider == address(0)) revert InvalidValue();
 
         address[] memory cashbackTokens = getCashbackTokens();
@@ -320,7 +314,7 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @param shouldWhitelist Whether to whitelist the respective token
      * @custom:throws CashbackTokenPriceNotConfigured When the price provider has no price for the new token
      */
-    function configureCashbackToken(address[] calldata tokens, bool[] calldata shouldWhitelist) external onlyRole(ADMIN_ROLE) {
+    function configureCashbackToken(address[] calldata tokens, bool[] calldata shouldWhitelist) external onlyAdmin {
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();
         
         uint256 len = tokens.length;
@@ -344,7 +338,7 @@ contract CashbackDispatcher is UpgradeableProxy {
      * @custom:throws CannotWithdrawZeroAmount When attempting to withdraw zero tokens or ETH
      * @custom:throws WithdrawFundsFailed When ETH transfer fails
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRole(ADMIN_TIMELOCK_ROLE) {
+    function withdrawFunds(address token, address recipient, uint256 amount) external onlyAdminTimelock {
         if (recipient == address(0)) revert InvalidValue();
 
         if (token == address(0)) {

@@ -204,10 +204,10 @@ contract SetupOptimismProdGnosis is GnosisHelpers, Utils {
         // Admin roles for the Safe itself
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("PAUSER"), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("UNPAUSER"), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (EtherFiDataProvider(dataProvider).ADMIN_TIMELOCK_ROLE(), cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("ADMIN_TIMELOCK_ROLE"), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (CASH_MODULE_CONTROLLER_ROLE, cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (IPriceProvider(priceProvider).ADMIN_TIMELOCK_ROLE(), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (ICashbackDispatcher(cashbackDispatcher).ADMIN_ROLE(), cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("ADMIN_TIMELOCK_ROLE"), cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("ADMIN_ROLE"), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (DEBT_MANAGER_ADMIN_ROLE, cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (TopUpDest(topUpDest).TOP_UP_DEPOSITOR_ROLE(), cashControllerSafe)), false);
 

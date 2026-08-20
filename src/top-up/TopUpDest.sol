@@ -24,9 +24,6 @@ contract TopUpDest is UpgradeableProxy {
     /// @notice Role identifier for accounts authorized to top up user safes
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
-    /// @notice Operating-timelock role that can withdraw deposited funds
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
     IWETH public immutable weth;
 
     IEtherFiDataProvider public immutable etherFiDataProvider;
@@ -147,7 +144,7 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws AmountCannotBeZero if amount is zero
      * @custom:throws AmountGreaterThanDeposit if amount exceeds available deposit
      */
-    function withdraw(address token, uint256 amount) external nonReentrant onlyRole(ADMIN_TIMELOCK_ROLE) {
+    function withdraw(address token, uint256 amount) external nonReentrant onlyAdminTimelock {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
         if (amount == 0) revert AmountCannotBeZero();

@@ -238,7 +238,7 @@ contract TopUpFactoryTest is Test, Constants {
 
     function test_setRecoveryWallet_reverts_whenCalledByNonOwner() public {
         vm.prank(user);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         factory.setRecoveryWallet(makeAddr("recovery"));
     }
 
@@ -516,7 +516,7 @@ contract TopUpFactoryTest is Test, Constants {
         configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(oftBridgeAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(weETHOftAddress, uint32(30214)) });
 
         vm.prank(user);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
     }
 

@@ -13,6 +13,7 @@ import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../../../src/interfaces/IBridgeModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -53,7 +54,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         address alice = makeAddr("alice");
 
         vm.prank(alice);
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         cashModule.configureWithdrawAssets(asset, whitelist);
     }
 
@@ -818,7 +819,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         dataProvider.configureModules(modules, shouldWhitelist);
 
         vm.prank(alice);
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
 
         vm.prank(owner);

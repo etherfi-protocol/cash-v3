@@ -105,7 +105,7 @@ contract ConfigureStockRailEth3CP is StockWithdrawConfig, StockTopupConfig, Gnos
         roleRegistry = RoleRegistry(deployments.readAddress(".addresses.RoleRegistry"));
         unwrapper = StockUnwrapper(deployments.readAddress(".addresses.StockUnwrapper"));
         factory = TopUpFactory(payable(deployments.readAddress(".addresses.TopUpSourceFactory")));
-        adminRole = unwrapper.ADMIN_TIMELOCK_ROLE();
+        adminRole = keccak256("ADMIN_TIMELOCK_ROLE");
         bridgeAdapter = _adapterAddress();
         recipient = _topUpDestOptimism();
 

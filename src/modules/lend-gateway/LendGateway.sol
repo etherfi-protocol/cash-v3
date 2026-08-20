@@ -62,12 +62,6 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     /// @notice The ether.fi-managed Aave v4 Spoke this gateway manages positions on
     IAaveV4Spoke public immutable spoke;
 
-    /// @notice Fast multisig role that registers reserves and tunes risk parameters
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
-    /// @notice Operating-timelock role that manages the driver allowlist
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
     /// @notice 100% in the ILendGateway ltv scale (100e18 == 100%)
     uint256 internal constant HUNDRED_PERCENT = 100e18;
     /// @notice Converts Aave's BPS collateralFactor to the 100e18 ltv scale (bps * 1e16; 10_000 * 1e16 == 100e18)
@@ -187,7 +181,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId for the asset
      */
-    function setReserveId(address asset, uint256 reserveId) external onlyRole(ADMIN_ROLE) {
+    function setReserveId(address asset, uint256 reserveId) external onlyAdmin {
         if (asset == address(0)) revert ZeroAddress();
         if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
 
@@ -219,7 +213,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * required and the pin is harmless. See audit L-01.
      * @param asset The asset to remove from the registry
      */
-    function removeReserve(address asset) external onlyRole(ADMIN_ROLE) {
+    function removeReserve(address asset) external onlyAdmin {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
 
@@ -245,7 +239,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param value The floor in WAD (1e18); 0 disables the check, otherwise bounded to [1e18, 2e18]
      * @custom:throws InvalidMinHealthFactor if value is non-zero and outside [1e18, 2e18]
      */
-    function setMinHealthFactor(uint256 value) external onlyRole(ADMIN_ROLE) {
+    function setMinHealthFactor(uint256 value) external onlyAdmin {
         if (value != 0 && (value < 1e18 || value > 2e18)) revert InvalidMinHealthFactor();
         _getLendGatewayStorage().minHealthFactor = value;
         emit MinHealthFactorSet(value);
@@ -256,7 +250,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param driver The driver contract (e.g. an auto-supply or migration module)
      * @param authorized True to authorize, false to revoke
      */
-    function setDriver(address driver, bool authorized) external onlyRole(ADMIN_TIMELOCK_ROLE) {
+    function setDriver(address driver, bool authorized) external onlyAdminTimelock {
         if (driver == address(0)) revert ZeroAddress();
         _getLendGatewayStorage().isDriver[driver] = authorized;
         emit DriverSet(driver, authorized);
@@ -270,7 +264,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param asset The registered asset
      * @param spendable True to add to the set, false to remove
      */
-    function setSpendAsset(address asset, bool spendable) external onlyRole(ADMIN_ROLE) {
+    function setSpendAsset(address asset, bool spendable) external onlyAdmin {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (spendable) {
             if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);

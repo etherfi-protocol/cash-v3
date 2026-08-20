@@ -48,12 +48,6 @@ contract EtherFiDataProvider is UpgradeableProxy {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant EtherFiDataProviderStorageLocation = 0xb3086c0036ec0314dd613f04f2c0b41c0567e73b5b69f0a0d6acdbce48020e00;
 
-    /// @notice Fast multisig role for low-risk operational configuration
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
-    /// @notice Operating-timelock role for trust-changing configuration (modules, oracle, signers, core pointers)
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
     /** 
      * @notice Struct for intiialize params
      * @param _roleRegistry Address of the role registry contract
@@ -205,7 +199,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param cashLens New cash lens address to set
      */
     function setCashLens(address cashLens) external {
-        _onlyMultisigAdmin();
+        _onlyAdmin();
         _setCashLens(cashLens);
     }
 
@@ -216,7 +210,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
      */
     function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _configureModules(modules, shouldWhitelist);
     }
 
@@ -227,7 +221,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
      */
     function configureDefaultModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _configureDefaultModules(modules, shouldWhitelist);
     }
 
@@ -237,7 +231,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param _priceProvider New price provider address to set
      */
     function setPriceProvider(address _priceProvider) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _setPriceProvider(_priceProvider);
     }
 
@@ -247,7 +241,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param hook New hook address to set
      */
     function setHookAddress(address hook) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _setHookAddress(hook);
     }
 
@@ -257,7 +251,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param factory New factory address to set
      */
     function setEtherFiSafeFactory(address factory) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _setEtherFiSafeFactory(factory);
     }
 
@@ -267,7 +261,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param signer Address of the new signer
      */
     function setEtherFiRecoverySigner(address signer) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _setEtherFiRecoverySigner(signer);
     }
 
@@ -277,7 +271,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param signer Address of the new signer
      */
     function setThirdPartyRecoverySigner(address signer) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _setThirdPartyRecoverySigner(signer);
     }
 
@@ -287,7 +281,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param wallet Address of the new wallet
      */
     function setRefundWallet(address wallet) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _setRefundWallet(wallet);
     }
 
@@ -298,7 +292,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @custom:throws InvalidInput when period is 0
      */
     function setRecoveryDelayPeriod(uint256 period) external {
-        _onlyMultisigAdmin();
+        _onlyAdmin();
         if (period == 0) revert InvalidInput();
 
         EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
@@ -313,7 +307,7 @@ contract EtherFiDataProvider is UpgradeableProxy {
      * @param cashModule New cash module address to set
      */
     function setCashModule(address cashModule) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _setCashModule(cashModule);
     }
 
@@ -649,14 +643,14 @@ contract EtherFiDataProvider is UpgradeableProxy {
     /**
      * @dev Internal function to verify caller has the fast multisig admin role
      */
-    function _onlyMultisigAdmin() private view {
-        if (!roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+    function _onlyAdmin() private view {
+        roleRegistry().onlyAdmin(msg.sender);
     }
 
     /**
      * @dev Internal function to verify caller has the operating-timelock role
      */
-    function _onlyOperatingTimelock() private view {
-        if (!roleRegistry().hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
+    function _onlyAdminTimelock() private view {
+        roleRegistry().onlyAdminTimelock(msg.sender);
     }
 }

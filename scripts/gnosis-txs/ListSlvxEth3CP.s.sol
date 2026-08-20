@@ -143,7 +143,7 @@ contract ListSlvxEth3CP is Utils, GnosisHelpers, StdCheats {
             "TopUpFactory's RoleRegistry owner is not the Safe - setRedirectWrappers would revert"
         );
         require(
-            lens.roleRegistry().hasRole(lens.ADMIN_ROLE(), SAFE),
+            lens.roleRegistry().hasRole(keccak256("ADMIN_ROLE"), SAFE),
             "Safe lacks TRADING_LENS_ADMIN_ROLE on the TradingLens's RoleRegistry - addSupportedToken would revert"
         );
     }

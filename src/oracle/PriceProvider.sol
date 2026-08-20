@@ -66,11 +66,6 @@ contract PriceProvider is UpgradeableProxy {
     bytes32 private constant PriceProviderStorageLocation = 0x41562816b7fe3348550ae5f01054abee62ae4ec684cc33be93b5202283b5ba00;
 
     /**
-     * @notice Role identifier for administrative privileges over the price provider
-     */
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-    
-    /**
      * @notice Special address used to request ETH/USD price
      * @dev This is not a real token address but a marker for the ETH/USD price request
      */
@@ -186,7 +181,7 @@ contract PriceProvider is UpgradeableProxy {
      * @param _configs Array of configurations corresponding to each token
      * @custom:throws ArrayLengthMismatch If arrays have different lengths
      */
-    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyRole(ADMIN_TIMELOCK_ROLE) {
+    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyAdminTimelock {
         _setTokenConfig(_tokens, _configs);
     }
 

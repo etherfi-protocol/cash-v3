@@ -74,11 +74,6 @@ contract PriceProviderV2 is UpgradeableProxy {
     bytes32 private constant PriceProviderV2StorageLocation = 0x8f2acf35259c059f6119c1863bba219d395429d54dbfcce655d5bf4a17660700;
 
     /**
-     * @notice Role identifier for administrative privileges over the price provider
-     */
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
-    /**
      * @notice Decimal precision used for all price outputs from this contract
      */
     uint8 public constant DECIMALS = 6;
@@ -212,7 +207,7 @@ contract PriceProviderV2 is UpgradeableProxy {
      * @param _tokens Array of token addresses to configure
      * @param _configs Array of configurations corresponding to each token
      */
-    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyRole(ADMIN_TIMELOCK_ROLE) {
+    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyAdminTimelock {
         _setTokenConfig(_tokens, _configs);
     }
 
@@ -221,7 +216,7 @@ contract PriceProviderV2 is UpgradeableProxy {
      * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param _token Address of the token to remove the config for
      */
-    function removeTokenConfig(address _token) external onlyRole(ADMIN_TIMELOCK_ROLE) {
+    function removeTokenConfig(address _token) external onlyAdminTimelock {
         PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
         if ($.isBaseAsset[_token]) revert BaseAssetCannotBeRemoved();
         if ($.tokenConfig[_token].oracle == address(0)) revert TokenConfigNotSet();
@@ -234,7 +229,7 @@ contract PriceProviderV2 is UpgradeableProxy {
      * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param _baseAsset Address of the base asset
      */
-    function setBaseAsset(address _baseAsset, bool _isBaseAsset) external onlyRole(ADMIN_TIMELOCK_ROLE) {
+    function setBaseAsset(address _baseAsset, bool _isBaseAsset) external onlyAdminTimelock {
         PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
         $.isBaseAsset[_baseAsset] = _isBaseAsset;
         emit BaseAssetSet(_baseAsset, _isBaseAsset);

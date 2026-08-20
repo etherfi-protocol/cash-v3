@@ -128,7 +128,7 @@ contract SettlementDispatcherV2CCTPTest is Test, Constants {
 
     function test_cctp_setCCTPConfig_reverts_whenNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         dispatcher.setCCTPConfig(address(mockMessenger), DEST_DOMAIN_ETHEREUM, 0, 2000);
     }
 

@@ -145,11 +145,11 @@ contract DeployTradingAccountEthereumDevV2 is Utils {
         // grantRole is idempotent, so re-granting roles the original deployment already set is safe.
         registry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), DEV_ADMIN);
         registry.grantRole(factory.TRADING_SAFE_REDIRECT_ROLE(), DEV_ADMIN);
-        registry.grantRole(lens.ADMIN_ROLE(), DEV_ADMIN);
-        registry.grantRole(provider.ADMIN_TIMELOCK_ROLE(), DEV_ADMIN);
-        registry.grantRole(PriceProviderV2(priceProviderProxy).ADMIN_TIMELOCK_ROLE(), DEV_ADMIN);
-        registry.grantRole(AcrossSwapModule(acrossProxy).ADMIN_TIMELOCK_ROLE(), DEV_ADMIN);
-        registry.grantRole(EnsoSwapModule(ensoProxy).ADMIN_TIMELOCK_ROLE(), DEV_ADMIN);
+        registry.grantRole(keccak256("ADMIN_ROLE"), DEV_ADMIN);
+        registry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN);
+        registry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN);
+        registry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN);
+        registry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN);
 
         AcrossSwapModule(acrossProxy).setPeriphery(Prod.ACROSS_PERIPHERY);
 
@@ -226,11 +226,11 @@ contract DeployTradingAccountEthereumDevV2 is Utils {
         // Roles.
         require(registry.hasRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), DEV_ADMIN), "missing factory admin role");
         require(registry.hasRole(factory.TRADING_SAFE_REDIRECT_ROLE(), DEV_ADMIN), "missing trading redirect role");
-        require(registry.hasRole(lens.ADMIN_ROLE(), DEV_ADMIN), "missing lens admin role");
-        require(registry.hasRole(provider.ADMIN_TIMELOCK_ROLE(), DEV_ADMIN), "missing data provider admin role");
-        require(registry.hasRole(priceProvider.ADMIN_TIMELOCK_ROLE(), DEV_ADMIN), "missing price provider admin role");
-        require(registry.hasRole(across.ADMIN_TIMELOCK_ROLE(), DEV_ADMIN), "missing Across admin role");
-        require(registry.hasRole(enso.ADMIN_TIMELOCK_ROLE(), DEV_ADMIN), "missing Enso admin role");
+        require(registry.hasRole(keccak256("ADMIN_ROLE"), DEV_ADMIN), "missing lens admin role");
+        require(registry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN), "missing data provider admin role");
+        require(registry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN), "missing price provider admin role");
+        require(registry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN), "missing Across admin role");
+        require(registry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN), "missing Enso admin role");
 
         // New modules configured and default; init constants pinned.
         require(provider.isDefaultModule(acrossProxy), "new Across not default");

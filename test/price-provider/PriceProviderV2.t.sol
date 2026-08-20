@@ -136,7 +136,7 @@ contract PriceProviderV2Test is Test {
             )
         )));
 
-        roleRegistry.grantRole(priceProvider.ADMIN_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
 
         vm.stopPrank();
     }
@@ -563,7 +563,7 @@ contract PriceProviderV2Test is Test {
 
         address notOwner = makeAddr("notOwner");
         vm.prank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         priceProvider.setTokenConfig(tokens, configs);
     }
 
@@ -888,7 +888,7 @@ contract PriceProviderV2Test is Test {
     function test_removeTokenConfig_reverts_unauthorized() public {
         address notOwner = makeAddr("notOwner");
         vm.prank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         priceProvider.removeTokenConfig(eth);
     }
 
@@ -1071,7 +1071,7 @@ contract PriceProviderV2Test is Test {
     function test_setBaseAsset_reverts_unauthorized() public {
         address notOwner = makeAddr("notOwner");
         vm.prank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         priceProvider.setBaseAsset(eth, false);
     }
 

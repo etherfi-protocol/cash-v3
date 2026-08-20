@@ -115,7 +115,7 @@ contract EtherFiLiquidModuleWithReferrerTest is SafeTestSetup {
         dataProvider.configureModules(modules, shouldWhitelist);
         _configureModules(modules, shouldWhitelist, moduleSetupData);
 
-        roleRegistry.grantRole(liquidModule.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
 
         liquidModule.setLiquidAssetWithdrawQueue(address(sethfi), address(sETHFIBoringQueue));
         liquidModule.setLiquidAssetWithdrawQueue(address(liquidEth), address(liquidEthBoringQueue));

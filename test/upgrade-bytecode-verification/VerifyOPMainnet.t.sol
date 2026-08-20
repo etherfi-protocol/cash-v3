@@ -158,6 +158,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // }
 
     function test_verifyBytecode_RoleRegistry() public {
+        // The admin roles now live on the RoleRegistry (onlyAdmin/onlyAdminTimelock, STAKE-1889),
+        // so the bytecode no longer matches the deployed implementation. Re-enable after the
+        // timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new RoleRegistry(dataProviderProxy));
         _verify("RoleRegistry", roleRegistryImpl, local);
     }
@@ -252,6 +256,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Oracle ----
 
     function test_verifyBytecode_PriceProvider() public {
+        // The admin roles now live on the RoleRegistry (onlyAdmin/onlyAdminTimelock, STAKE-1889),
+        // so the bytecode no longer matches the deployed implementation. Re-enable after the
+        // timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new PriceProviderV2());
         _verify("PriceProvider", priceProviderImpl, local);
     }

@@ -81,9 +81,9 @@ contract ConfigureDevTbllxCashOP is Utils {
         IRoleRegistry roleRegistry = IRoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
 
         address sender = vm.addr(vm.envUint("PRIVATE_KEY"));
-        require(roleRegistry.hasRole(priceProvider.ADMIN_TIMELOCK_ROLE(), sender), "sender lacks PRICE_PROVIDER_ADMIN_ROLE");
-        require(roleRegistry.hasRole(cashModule.ADMIN_TIMELOCK_ROLE(), sender), "sender lacks CASH_MODULE_CONTROLLER_ROLE");
-        require(roleRegistry.hasRole(stargateModule.ADMIN_TIMELOCK_ROLE(), sender), "sender lacks STARGATE_MODULE_ADMIN_ROLE");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), sender), "sender lacks PRICE_PROVIDER_ADMIN_ROLE");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), sender), "sender lacks CASH_MODULE_CONTROLLER_ROLE");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), sender), "sender lacks STARGATE_MODULE_ADMIN_ROLE");
 
         vm.startBroadcast(vm.envUint("PRIVATE_KEY"));
 

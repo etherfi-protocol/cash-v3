@@ -130,8 +130,8 @@ contract EnableStockWithdrawModuleOP3CP is StockWithdrawConfig, GnosisHelpers {
         require(!dataProvider.isDefaultModule(address(module)), "module already a default module - enable already done?");
 
         // The Safe signs both calls directly; without these roles its own txs revert.
-        require(roleRegistry.hasRole(dataProvider.ADMIN_TIMELOCK_ROLE(), SAFE), "Safe lacks DATA_PROVIDER_ADMIN_ROLE");
-        require(roleRegistry.hasRole(cashModule.ADMIN_TIMELOCK_ROLE(), SAFE), "Safe lacks CASH_MODULE_CONTROLLER_ROLE");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), SAFE), "Safe lacks DATA_PROVIDER_ADMIN_ROLE");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), SAFE), "Safe lacks CASH_MODULE_CONTROLLER_ROLE");
     }
 
     // ── Bundle construction ───────────────────────────────────────────────────────

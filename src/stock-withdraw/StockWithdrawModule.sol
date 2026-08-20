@@ -110,12 +110,6 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     /// @notice CashModule that holds, delays and processes the withdrawal requests.
     ICashModule public immutable cashModule;
 
-    /// @notice Fast multisig role for token support, gas limits and provider fee.
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
-    /// @notice Operating-timelock role for the destination unwrapper configuration.
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
     /// @notice 100% in basis points.
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
     /// @notice Maximum provider fee (10%).
@@ -313,7 +307,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      * @custom:throws InvalidInput If any endpoint ID is zero.
      */
     function configureUnwrappers(uint32[] calldata dstEids, address[] calldata unwrappers) external {
-        _onlyOperatingTimelock();
+        _onlyAdminTimelock();
         _configureUnwrappers(dstEids, unwrappers);
     }
 
@@ -785,12 +779,12 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
 
     /// @dev Reverts unless the caller holds `ADMIN_ROLE`.
     function _onlyAdmin() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdmin(msg.sender);
     }
 
     /// @dev Reverts unless the caller holds `ADMIN_TIMELOCK_ROLE`.
-    function _onlyOperatingTimelock() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
+    function _onlyAdminTimelock() internal view {
+        IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdminTimelock(msg.sender);
     }
 
     /// @dev Returns the storage struct from the ERC-7201 namespaced slot.

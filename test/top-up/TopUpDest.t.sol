@@ -163,7 +163,7 @@ contract TopUpDestTest is Utils, Constants {
 
         vm.startPrank(nonUser);
 
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         topUpDest.withdraw(address(token1), DEPOSIT_AMOUNT / 2);
 
         vm.stopPrank();

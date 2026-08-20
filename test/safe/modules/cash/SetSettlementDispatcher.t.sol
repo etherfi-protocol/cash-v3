@@ -5,6 +5,7 @@ import { Test } from "forge-std/Test.sol";
 
 import { ICashModule, Mode, BinSponsor, Cashback } from "../../../../src/interfaces/ICashModule.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
+import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
 
 contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
     function setUp() public override {
@@ -53,7 +54,7 @@ contract CashModuleSetSettlementDispatcherTest is CashModuleTestSetup {
         
         // Attempt to set new settlement dispatcher with non-controller account
         vm.prank(nonController);
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cashModule.setSettlementDispatcher(BinSponsor.Rain, newDispatcher);
     }
     

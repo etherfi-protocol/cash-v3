@@ -95,10 +95,6 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.AcrossSwapModule")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant AcrossSwapModuleStorageLocation = 0x59f3e7eaaef5f4e4dfa17cb74cd92a8efd7c6a7e08e5b3e1da26c8dec61cda00;
 
-    /// @notice Role allowed to configure per-chain constants (`spokePool`,
-    ///         `multicallHandler`).
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("AcrossSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("AcrossSwapModule.cancelSwap");
@@ -582,7 +578,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     }
 
     function _onlyAdmin() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
+        IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdminTimelock(msg.sender);
     }
 
     function _getAcrossSwapModuleStorage() internal pure returns (AcrossSwapModuleStorage storage $) {

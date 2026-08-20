@@ -52,7 +52,7 @@ pragma solidity ^0.8.28;
 //         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
 //         cashModule.configureWithdrawAssets(assets, shouldWhitelist);
 
-//         bytes32 role = wormholeModule.ADMIN_TIMELOCK_ROLE();
+//         bytes32 role = keccak256("ADMIN_TIMELOCK_ROLE");
 //         roleRegistry.grantRole(role, owner);
 //         vm.stopPrank();
 //     }
@@ -371,7 +371,7 @@ pragma solidity ^0.8.28;
 
 //     function test_setAssetConfig_invalidInput() public {
 //         // Add ADMIN_TIMELOCK_ROLE to owner
-//         bytes32 role = wormholeModule.ADMIN_TIMELOCK_ROLE();
+//         bytes32 role = keccak256("ADMIN_TIMELOCK_ROLE");
 //         vm.startPrank(owner);
 //         roleRegistry.grantRole(role, owner);
 //         vm.stopPrank();

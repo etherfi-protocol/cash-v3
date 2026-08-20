@@ -49,9 +49,6 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockUnwrapper")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant StockUnwrapperStorageLocation = 0x6e9822439d6ab393c03c3490c3eb1d75bff2e8473b0dc1e0a74b73fd90a39c00;
 
-    /// @notice Role allowed to configure adapters/source module and rescue stranded tokens.
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
     /**
      * @notice Emitted when OFTAdapters are registered/unregistered.
      * @param adapters The adapter addresses configured.
@@ -156,7 +153,7 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
      * @custom:throws InvalidInput If any adapter is zero or exposes no token.
      */
     function configureAdapters(address[] calldata adapters, bool[] calldata registered) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         _configureAdapters(adapters, registered);
     }
 
@@ -167,7 +164,7 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
      * @custom:throws InvalidInput If the module address is zero.
      */
     function setSrcModule(address _srcModule) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         if (_srcModule == address(0)) revert InvalidInput();
         StockUnwrapperStorage storage $ = _getStockUnwrapperStorage();
         bytes32 newSrcModule = OFTComposeMsgCodec.addressToBytes32(_srcModule);
@@ -186,7 +183,7 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
      * @custom:throws InvalidInput If any parameter is zero.
      */
     function rescueTokens(address token, address to, uint256 amount) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         if (token == address(0) || to == address(0) || amount == 0) revert InvalidInput();
         IERC20(token).safeTransfer(to, amount);
         emit TokensRescued(token, to, amount);
@@ -297,8 +294,8 @@ contract StockUnwrapper is UpgradeableProxy, ILayerZeroComposer {
     }
 
     /// @dev Reverts unless the caller holds `ADMIN_TIMELOCK_ROLE`.
-    function _onlyAdmin() internal view {
-        if (!roleRegistry().hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
+    function _onlyAdminTimelock() internal view {
+        roleRegistry().onlyAdminTimelock(msg.sender);
     }
 
     /// @dev Returns the storage struct from the ERC-7201 namespaced slot.

@@ -15,6 +15,7 @@ import { PriceProvider } from "../../../../src/oracle/PriceProvider.sol";
 import { AccountantWithRateProviders } from "../../../../src/interfaces/ILayerZeroTeller.sol";
 import { ILayerZeroTeller } from "../../../../src/interfaces/ILayerZeroTeller.sol";
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
+import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
 
 contract LiquidUSDLiquifierTest is SafeTestSetup {
     using SafeERC20 for IERC20;
@@ -246,7 +247,7 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
 
     function test_withdrawFunds_OnlyRoleRegistryOwner() public {
         vm.prank(makeAddr("notRoleRegistryOwner"));
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         liquidUSDLiquifier.withdrawFunds(address(USDC), owner, 100e6);
     }
 

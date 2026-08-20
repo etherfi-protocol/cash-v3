@@ -9,6 +9,7 @@ import { StockUnwrapper } from "../../src/stock-withdraw/StockUnwrapper.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 
 contract TestERC20 is ERC20 {
     constructor() ERC20("SPY Stock", "SPYx") { }
@@ -71,7 +72,7 @@ contract StockUnwrapperTest is SafeTestSetup {
         )));
 
         vm.startPrank(owner);
-        roleRegistry.grantRole(unwrapper.ADMIN_TIMELOCK_ROLE(), unwrapperAdmin);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), unwrapperAdmin);
         vm.stopPrank();
 
         // Simulate the OFTAdapter having credited wrapped tokens to the unwrapper
@@ -236,7 +237,7 @@ contract StockUnwrapperTest is SafeTestSetup {
     }
 
     function test_rescueTokens_adminOnly() public {
-        vm.expectRevert(StockUnwrapper.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         unwrapper.rescueTokens(address(wrapper), owner, AMOUNT);
 
         vm.prank(unwrapperAdmin);
@@ -248,7 +249,7 @@ contract StockUnwrapperTest is SafeTestSetup {
         address[] memory adapters = new address[](1);
         adapters[0] = address(adapter);
         bool[] memory registered = new bool[](1);
-        vm.expectRevert(StockUnwrapper.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         unwrapper.configureAdapters(adapters, registered);
     }
 
@@ -267,7 +268,7 @@ contract StockUnwrapperTest is SafeTestSetup {
 
     function test_setSrcModule_adminOnlyAndStores() public {
         address newModule = makeAddr("newModule");
-        vm.expectRevert(StockUnwrapper.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         unwrapper.setSrcModule(newModule);
 
         vm.prank(unwrapperAdmin);

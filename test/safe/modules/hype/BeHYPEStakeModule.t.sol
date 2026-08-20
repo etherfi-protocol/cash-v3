@@ -59,7 +59,7 @@ contract BeHYPEStakeModuleTest is SafeTestSetup {
 
         vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
-        roleRegistry.grantRole(stakeModule.ADMIN_ROLE(), address(this));
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), address(this));
         vm.stopPrank();
 
         _configureModules(modules, shouldWhitelist, setupData);

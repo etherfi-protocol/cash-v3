@@ -45,7 +45,7 @@ contract SetSpendAssetsDev is Utils {
         string memory deployments = readDeploymentFile();
         RoleRegistry registry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
         address deployer = vm.addr(vm.envUint("PRIVATE_KEY"));
-        require(registry.hasRole(gateway.ADMIN_ROLE(), deployer), "sender missing LendGateway admin role");
+        require(registry.hasRole(keccak256("ADMIN_ROLE"), deployer), "sender missing LendGateway admin role");
 
         address[6] memory assets = [USDT, FRXUSD, LIQUID_USD, LIQUID_RESERVE, EURC, LIQUID_EUR];
         string[6] memory names = ["USDT", "frxUSD", "liquidUSD", "liquidRESERVE", "EURC", "liquidEUR"];

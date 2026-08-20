@@ -91,9 +91,6 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EnsoSwapModule")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant EnsoSwapModuleStorageLocation = 0x5a12820f7ccffa3b7965b81854504b7b9081737c3d6393e92a0a755ce6314400;
 
-    /// @notice Role allowed to configure the pinned Enso Router address.
-    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("EnsoSwapModule.requestSwap");
     bytes32 private constant REQUEST_SWAP_WITH_NATIVE_FEE_SIG = keccak256("EnsoSwapModule.requestSwapWithNativeFee");
@@ -438,7 +435,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     }
 
     function _onlyAdmin() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyAdmin();
+        IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdminTimelock(msg.sender);
     }
 
     function _getEnsoSwapModuleStorage() internal pure returns (EnsoSwapModuleStorage storage $) {

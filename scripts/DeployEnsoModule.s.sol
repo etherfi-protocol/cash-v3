@@ -63,7 +63,7 @@ contract DeployEnsoModule is Utils {
             ICashModule(cashModule).configureModulesCanRequestWithdraw(modules, enable);
         }
 
-        roleRegistry.grantRole(enso.ADMIN_TIMELOCK_ROLE(), deployer);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployer);
 
         vm.stopBroadcast();
 

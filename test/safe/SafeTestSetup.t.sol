@@ -153,8 +153,8 @@ contract SafeTestSetup is Utils {
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
-        roleRegistry.grantRole(dataProvider.ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(dataProvider.ADMIN_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
 
         address cashModuleSettersImpl = address(new CashModuleSetters(address(dataProvider)));
         address cashModuleCoreImpl = address(new CashModuleCore(address(dataProvider)));
@@ -208,8 +208,8 @@ contract SafeTestSetup is Utils {
         );
 
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), etherFiWallet);
-        roleRegistry.grantRole(cashModule.ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashModule.ADMIN_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
 
         _wireDefaultGateway();
 
@@ -312,7 +312,7 @@ contract SafeTestSetup is Utils {
                 initialTokensConfig
             )
         )));
-        roleRegistry.grantRole(priceProvider.ADMIN_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
     }
 
     function _setupCashbackDispatcher() internal {
@@ -337,8 +337,8 @@ contract SafeTestSetup is Utils {
 
         deal(chainConfig.weth, address(cashbackDispatcher), 100000 ether);
 
-        roleRegistry.grantRole(cashbackDispatcher.ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashbackDispatcher.ADMIN_TIMELOCK_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
     }
 
     function _setupSettlementDispatcher() internal {

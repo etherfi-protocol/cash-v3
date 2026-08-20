@@ -43,7 +43,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @custom:throws InvalidInput if caller doesn't have the controller role
      */
     function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external {
-        if (!roleRegistry().hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyCashModuleController();
+        roleRegistry().onlyAdminTimelock(msg.sender);
         if (dispatcher == address(0)) revert InvalidInput();
 
         CashModuleStorage storage $ = _getCashModuleStorage();
@@ -72,7 +72,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @custom:throws GatewayAlreadySet if the gateway has already been configured
      */
     function setLendGateway(address gateway) external {
-        if (!roleRegistry().hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyCashModuleController();
+        roleRegistry().onlyAdminTimelock(msg.sender);
         // One-time bootstrap that can't be repointed, so guard against a mistyped EOA or undeployed address.
         if (gateway.code.length == 0) revert InvalidInput();
 
@@ -109,7 +109,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @custom:throws DuplicateElementFound If any address appears more than once in the addrs array
      */
     function configureWithdrawAssets(address[] calldata assets, bool[] calldata shouldWhitelist) external {
-        if (!roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert OnlyCashModuleController();
+        roleRegistry().onlyAdmin(msg.sender);
 
         CashModuleStorage storage $ = _getCashModuleStorage();
 
@@ -154,7 +154,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      */
 
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {
-        if (!roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert OnlyCashModuleController();
+        roleRegistry().onlyAdmin(msg.sender);
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         $.withdrawalDelay = withdrawalDelay;
@@ -295,7 +295,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param shouldWhitelist Array of boolean values indicating whether to whitelist each module
      */
     function configureModulesCanRequestWithdraw(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        if (!roleRegistry().hasRole(ADMIN_TIMELOCK_ROLE, msg.sender)) revert OnlyCashModuleController();
+        roleRegistry().onlyAdminTimelock(msg.sender);
 
         CashModuleStorage storage $ = _getCashModuleStorage();
 

@@ -69,9 +69,6 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
     /// @notice TypeHash for cancel bridge function signature
     bytes32 public constant CANCEL_BRIDGE_SIG = keccak256("cancelBridge");
 
-    /// @notice Role identifier for admins of the Liquid Module
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
     /// @notice Emitted when new liquid assets and their tellers are added to the module
     event LiquidAssetsAdded(address[] liquidAssets, address[] tellers);
     
@@ -556,7 +553,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @custom:throws InvalidConfiguration If a teller's vault doesn't match the expected liquid asset
      */
     function addLiquidAssets(address[] calldata liquidAssets, address[] calldata tellers) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        etherFiDataProvider.roleRegistry().onlyAdmin(msg.sender);
 
         uint256 len = liquidAssets.length;
         if (len != tellers.length) revert ArrayLengthMismatch();
@@ -584,7 +581,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @custom:throws InvalidInput If the array is empty
      */
     function removeLiquidAsset(address[] calldata liquidAssets) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        etherFiDataProvider.roleRegistry().onlyAdmin(msg.sender);
 
         uint256 len = liquidAssets.length;
         if (len == 0) revert InvalidInput();
@@ -608,7 +605,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @custom:throws InvalidBoringQueue If the queue does not belong to the liquid asset
      */
     function setLiquidAssetWithdrawQueue(address asset, address boringQueue) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        etherFiDataProvider.roleRegistry().onlyAdmin(msg.sender);
         
         if (asset == address(0) ||  boringQueue == address(0)) revert InvalidValue();
         if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();
