@@ -766,7 +766,7 @@ interface ICashModule {
 
     /**
      * @notice Sets the new CashModuleSetters implementation address
-     * @dev Only callable by the RoleRegistry owner (upgrade timelock)
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param newCashModuleSetters Address of the new CashModuleSetters implementation
      * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
      * @custom:throws InvalidInput if newCashModuleSetters = address(0)

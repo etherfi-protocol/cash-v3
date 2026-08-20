@@ -95,13 +95,12 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Sets the new CashModuleSetters implementation address
-     * @dev Swaps delegated implementation logic, so it is gated like an upgrade: only the
-     *      RoleRegistry owner (the upgrade timelock) may call it
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param newCashModuleSetters Address of the new CashModuleSetters implementation
-     * @custom:throws OnlyRoleRegistryOwner if caller is not the RoleRegistry owner
+     * @custom:throws OnlyAdminTimelock if caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws InvalidInput if newCashModuleSetters = address(0)
      */
-    function setCashModuleSettersAddress(address newCashModuleSetters) external onlyRoleRegistryOwner {
+    function setCashModuleSettersAddress(address newCashModuleSetters) external onlyAdminTimelock {
         if (newCashModuleSetters == address(0)) revert InvalidInput();
         _getCashModuleStorage().cashModuleSetters = newCashModuleSetters;
     }
