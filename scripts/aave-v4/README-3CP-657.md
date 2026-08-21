@@ -71,6 +71,34 @@ Against bad-debt tolerance `1 - 1/(1+bonus)` from the LT trigger: **13.04%** on 
 
 So on a dead market feed a 7d bound can serve a stale price past the point where liquidations stop covering the position. **This design relies on the off-chain monitor catching a dead feed long before 7 days.** That is the accepted trade, stated explicitly rather than buried.
 
+## Per-asset ceiling after the change: 7 days, not 14
+
+A cap adapter's price is `base x ratio` and each leg carries its own bound, which invites the
+assumption that the windows add. **They do not.** Both legs re-check
+`block.timestamp > updatedAt + bound` inside the *same* `latestAnswer()` call, so they are
+independent simultaneous checks rather than sequential hops. The call dies at
+`min(baseDeadline, ratioDeadline)` — the tighter leg binds — and the oldest datum ever served is
+bounded by `max(baseBound, ratioBound)`.
+
+With a uniform 7-day floor that means **every one of the 23 reserves tolerates a maximum served
+price age of exactly 7 days.** No composed asset gets 14.
+
+Proven on a fork rather than reasoned about, in
+`test/safe/modules/cash/lend/ComposedStalenessIsMaxNotSum.t.sol`. Measured on the live liquidETH
+adapter `0x48420d70…dd1` (base ETH/USD + Veda ratio leg, both 48h today): the adapter prices at the
+earlier of the two deadlines, reverts one second later **while the other leg is still fresh**, and
+cannot be reached at the later deadline at all. Oldest datum age at death 172801s = `max + 1`, not
+the 345600s sum. An `OracleSinkPriceFeed` composing an `underlyingUsdFeed` behaves identically — it
+dies the instant its underlying goes stale, whatever its own window is.
+
+The distinction matters operationally: a keeper alarm should be set against the **tightest** leg,
+because that is where the brownout happens.
+
+> The additive rule does exist, but for a different topology: a value **stamped** at one time and
+> **consumed** later (an L1 keeper pokes a relay, LayerZero delivers to an L2 sink). There the
+> relayed datum may already be near its source bound when stamped and the sink permits its own
+> window on top, so those accumulate. Nothing in this batch has that shape.
+
 ## Why a redeploy and not a setter
 
 `rateMaxStaleness` is immutable on all three of our feed types (`ChainlinkPriceFeed`, `VedaAccountantPriceFeed`, `OracleSinkPriceFeed`), and Aave's cap adapters hold their legs immutable with the cap setters permanently unreachable on this instance — the ACL manager is the AccessManager, which implements neither `isRiskAdmin` nor `isPoolAdmin`. A new bound needs a new leg, and a new leg needs a rebuild of every adapter sitting on it.
@@ -102,6 +130,7 @@ Every check runs on a mainnet fork before the script writes any JSON. Verified g
 - **Dress rehearsal** — all 20 repoints execute as the Owner Safe against the real instance and real roles, post-state verified, then rolled back with the rollback asserted. Pranking as the Safe bypasses the signature threshold but not the configurator's role check, so a green rehearsal proves the Safe holds role 400.
 - **The bound moved, proven on all 25 legs, both directions.** Per leg: warp just past its **own old** bound and assert the old leg reverts while the new one still prices; then assert the new leg prices at exactly 7d and reverts at 7d+1s. Output: `bound proven on 25 of 25 legs`.
 - **Post-state check covers every reserve on the instance** — it enumerates `0 .. getReserveCount()-1` (23), not a hardcoded subset, and walks each source's whole graph. It also asserts adapter **type** and every reviewed immutable cap value (snapshot ratio, snapshot timestamp, growth rate, par cap, EUR cap ratio and ratio decimals), so the standalone post-Safe run proves the executed bundle preserved cap semantics rather than only that a price came back. The three untouched reserves (16, 17, 18) are asserted to still read their reviewed source. Returns a count the caller compares against `getReserveCount()`, so a partial-iteration pass cannot read as success.
+- **Composed bounds are MAX, not SUM** — proven on a fork, so the per-asset ceiling is 7 days rather than 14. See the section above.
 - **Fail-closed on config drift** — before deploying anything, `_assertPreState` requires all 23 reserves to still read the exact source recorded at review time and every adapter to still carry its reviewed cap parameters. Two oracle graphs can return the same spot price while being semantically different, so price equality alone cannot prove nothing moved. If another governance action repointed a reserve or re-snapshotted a cap, the run aborts instead of overwriting the newer config from stale constants.
 
 ### Two traps this had to dodge
