@@ -1,4 +1,29 @@
 {
+  "100": {
+    "weth": "0x6A023CCd1ff6F2045C3309768eAd9E68F978f6e1",
+    "owner": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
+    "recoveryWallet": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E",
+    "bridgers": [
+      "0x0313721c2863254B0A091E8390521229b4170e5e",
+      "0xAec5b6044649dDC8aE0D090CA32438ecAeA7e83C",
+      "0x743efb843b9f4D1eEf06f3F3Ad2cdEe108869A3B"
+    ],
+    "destChainIds": [
+      "10"
+    ],
+    "tokenConfigs": {
+      "10": [
+        {
+          "address": "0x2a22f9c3b484c3629090FeED35F17Ff8F88f76F0",
+          "name": "usdc.e",
+          "bridge": "stargate",
+          "maxSlippageInBps": "50",
+          "stargatePool": "0xB1EeAD6959cb5bB9B20417d6689922523B2B86C3",
+          "destEid": "30111"
+        }
+      ]
+    }
+  },
   "534352": {
     "owner": "0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E"
   },

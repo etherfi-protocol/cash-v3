@@ -55,6 +55,15 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
         ///         the token itself. Set only for raw Backed xStocks whose trading-catalog form
         ///         is the wrapper; zero (the default, and every other token) means transfer as-is.
         mapping(address token => address wrapper) redirectWrapper;
+        /// @notice Per-vault ERC-4626 this factory may redeem out of, mapped to the underlying the
+        ///         admin verified it pays out. Zero (the default, and every other address) means the
+        ///         vault cannot be unwrapped. Set for wrapped forms that reach the factory with no
+        ///         bridge rail of their own — svZCHF, whose underlying ZCHF is the bridgeable asset.
+        ///         Deliberately NOT the inverse of `redirectWrapper`: that curates which raw tokens
+        ///         wrap on the way to a TradingSafe, this curates which vaults the factory may redeem
+        ///         on the way to a bridge. Sharing one mapping would let either config authorise the
+        ///         other.
+        mapping(address vault => address asset) unwrapAsset;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpFactory")) - 1)) & ~bytes32(uint256(0xff))
@@ -136,6 +145,20 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /// @param shares Amount of `wrapper` the TopUp was credited.
     event WrapStock(address indexed topUp, address indexed wrapper, address indexed underlying, uint256 assets, uint256 shares);
 
+    /// @notice Emitted when a vault's unwrap registration is set or cleared.
+    /// @param vault The ERC-4626 vault being registered.
+    /// @param oldAsset Previous registered underlying (zero when the vault was not unwrappable).
+    /// @param newAsset New registered underlying, or zero to make the vault unwrappable no longer.
+    event UnwrapVaultSet(address indexed vault, address oldAsset, address newAsset);
+
+    /// @notice Emitted when a TopUp's vault shares are redeemed into their underlying, in place.
+    /// @param topUp The TopUp whose shares were redeemed and which received the proceeds.
+    /// @param vault The ERC-4626 vault redeemed from.
+    /// @param asset The underlying credited to `topUp`.
+    /// @param shares Amount of vault shares burned.
+    /// @param assets Amount of `asset` actually received.
+    event Unwrap(address indexed topUp, address indexed vault, address indexed asset, uint256 shares, uint256 assets);
+
     /// @notice Error thrown when a non-admin tries to deploy a topUp contract
     error OnlyAdmin();
     /// @notice Error thrown when trying to pull funds from an address not registered as deployedAddresses
@@ -154,6 +177,12 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     error RecoveryWalletCannotBeZeroAddress();
     /// @notice Error thrown when attempting to recover token which is a supported asset
     error OnlyUnsupportedTokens();
+    /// @notice Reverts when unwrapping a vault that has no registered underlying.
+    error VaultNotUnwrappable();
+    /// @notice Reverts when a registration's claimed underlying is not the vault's own `asset()`.
+    error InvalidUnwrapVault();
+    /// @notice Reverts when a redemption credits the TopUp no underlying at all.
+    error UnwrapRedeemedNothing();
     /// @notice Reverts when a sweep entry point is handed a token this factory has no topup
     ///         configuration for — the redirect path owns those, not `processTopUp`.
     error OnlySupportedTokens();
@@ -529,6 +558,100 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      */
     function wrapperFor(address token) external view returns (address) {
         return _getTopUpFactoryStorage().redirectWrapper[token];
+    }
+
+    /**
+     * @notice Registers which ERC-4626 vaults this factory may redeem, and the underlying each
+     *         one pays out. Zero in `assets` clears an entry.
+     * @dev `processTopUp` sweeps whatever a TopUp holds, with no supported-token filter, so a
+     *      wrapped form can reach this factory with no bridge rail of its own. `unwrap` turns it
+     *      into something bridgeable; this registry is what says which vaults that is allowed for.
+     *
+     *      The pairing is verified rather than trusted, exactly as `setRedirectWrappers` does it:
+     *      `asset()` must name the token the admin claims, which both proves the vault is the right
+     *      one and that it is a vault at all (a non-4626 target reverts the call). Curating this per
+     *      vault — rather than probing `asset()` at unwrap time — keeps an arbitrary 4626 from
+     *      becoming a redemption target just because it reports a plausible underlying.
+     * @param vaults ERC-4626 vaults being registered.
+     * @param assets Per-entry underlying `vaults[i]` must pay out, or zero to deregister.
+     * @custom:throws ArrayLengthMismatch If the two arrays don't agree on length.
+     * @custom:throws TokenCannotBeZeroAddress If any `vaults[i]` is the zero address.
+     * @custom:throws InvalidUnwrapVault If any non-zero `assets[i]` is not `vaults[i]`'s `asset()`.
+     * @custom:emits UnwrapVaultSet per entry.
+     */
+    function setUnwrapVaults(address[] calldata vaults, address[] calldata assets) external onlyRoleRegistryOwner {
+        uint256 len = vaults.length;
+        if (len != assets.length) revert ArrayLengthMismatch();
+
+        TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
+
+        for (uint256 i = 0; i < len;) {
+            address vault = vaults[i];
+            address asset = assets[i];
+            if (vault == address(0)) revert TokenCannotBeZeroAddress();
+            if (asset != address(0) && IERC4626(vault).asset() != asset) revert InvalidUnwrapVault();
+
+            emit UnwrapVaultSet(vault, $.unwrapAsset[vault], asset);
+            $.unwrapAsset[vault] = asset;
+            unchecked { ++i; }
+        }
+    }
+
+    /**
+     * @notice Returns the underlying `vault` is registered to be redeemed into, or zero when the
+     *         vault cannot be unwrapped.
+     */
+    function unwrapAssetFor(address vault) external view returns (address) {
+        return _getTopUpFactoryStorage().unwrapAsset[vault];
+    }
+
+    /**
+     * @notice Redeems `amount` of an ERC-4626 `vault` held by `topUp` into the vault's underlying,
+     *         credited back to that same TopUp so the ordinary sweep can carry it onward.
+     * @dev The unwrap counterpart of `redirectToTradingSafe`'s wrap leg, and shaped the same way:
+     *      the factory validates, the TopUp acts, and the pairing is configuration rather than a
+     *      parameter.
+     *
+     *      Deliberately permissionless, for the same reason the sweeps are — anyone may pay the gas
+     *      to move a user's asset along its intended path. There is nothing here for a caller to
+     *      gain or redirect: the registry fixes which vault redeems into which underlying, and the
+     *      proceeds can land nowhere but the TopUp that already held the shares. What it unlocks is
+     *      a wrapped form that would otherwise be stuck — the sweep only accepts tokens this factory
+     *      bridges, so the wrapped form can never leave as itself.
+     *
+     *      Only vaults that are NOT themselves configured topup assets may be unwrapped: anything
+     *      with a bridge config of its own must be bridged, not redeemed. That is the same
+     *      `supportedTokens` guard `recoverFunds` and `redirectToTradingSafe` apply.
+     *
+     *      The credited amount is measured from the TopUp's own balance rather than taken from the
+     *      vault's return value, and a redemption that credits nothing reverts — mirroring the
+     *      `WrapMintedNothing` check on the wrap leg. There is no caller-supplied minimum: on a
+     *      permissionless entry point any caller would simply pass zero, so a floor would be
+     *      decoration rather than protection.
+     * @param topUp The TopUp instance holding the vault shares.
+     * @param vault The registered ERC-4626 vault to redeem.
+     * @param amount Amount of vault shares to redeem.
+     * @custom:throws InvalidTopUpAddress If `topUp` is not a TopUp deployed by this factory.
+     * @custom:throws OnlyUnsupportedTokens If `vault` is itself a configured topup asset.
+     * @custom:throws VaultNotUnwrappable If `vault` has no registered underlying.
+     * @custom:throws UnwrapRedeemedNothing If the redemption credits the TopUp nothing.
+     * @custom:emits Unwrap on success.
+     */
+    function unwrap(address topUp, address vault, uint256 amount) external nonReentrant whenNotPaused {
+        TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
+
+        if (!$.deployedAddresses.contains(topUp)) revert InvalidTopUpAddress();
+        if ($.supportedTokens.contains(vault)) revert OnlyUnsupportedTokens();
+
+        address asset = $.unwrapAsset[vault];
+        if (asset == address(0)) revert VaultNotUnwrappable();
+
+        uint256 assetsBefore = IERC20(asset).balanceOf(topUp);
+        TopUp(payable(topUp)).unwrap(vault, amount);
+        uint256 assetsReceived = IERC20(asset).balanceOf(topUp) - assetsBefore;
+        if (assetsReceived == 0) revert UnwrapRedeemedNothing();
+
+        emit Unwrap(topUp, vault, asset, amount, assetsReceived);
     }
 
     /**
