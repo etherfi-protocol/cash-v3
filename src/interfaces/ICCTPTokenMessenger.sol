@@ -28,4 +28,6 @@ interface ICCTPTokenMessenger {
         uint256 maxFee,
         uint32 minFinalityThreshold
     ) external;
+
+    function localMinter() external view returns (address);
 }
