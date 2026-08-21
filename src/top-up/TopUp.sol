@@ -22,8 +22,10 @@ contract TopUp is Constants, Ownable {
     error OnlyOwner();
     /// @notice Error thrown when ETH transfer fails
     error EthTransferFailed();
-    /// @notice Reverts when `redirectToTradingSafe` is called with zero amount.
+    /// @notice Reverts when `redirectToTradingSafe` or `unwrap` is called with zero amount.
     error InvalidAmount();
+    /// @notice Reverts when `unwrap` names a vault the factory has not registered.
+    error VaultNotUnwrappable();
 
     /// @notice Emitted when funds are processed
     /// @param token Address of the token processed
@@ -133,6 +135,40 @@ contract TopUp is Constants, Ownable {
         IERC20(token).forceApprove(wrapper, amount);
         IERC4626(wrapper).deposit(amount, tradingSafe);
         IERC20(token).forceApprove(wrapper, 0);
+    }
+
+    /**
+     * @notice Redeems `amount` of an ERC-4626 `vault` this TopUp holds into the vault's underlying,
+     *         credited back to this same contract.
+     *
+     * @dev The mirror of the wrap leg above, and configuration in the same way: which vaults may be
+     *      redeemed, and what each pays out, is read from the factory's `unwrapAssetFor(vault)`
+     *      rather than taken as an argument, so this contract stays free of per-vault state and the
+     *      redemption target is never an arbitrary address.
+     *
+     *      Why the proceeds stay here rather than going to the factory: a wrapped form reaching a
+     *      TopUp has no topup configuration of its own, and the sweep only accepts tokens this
+     *      factory bridges — so the wrapped form can never leave as itself. Redeeming in place turns
+     *      it into the underlying, which IS a configured topup asset, and the ordinary sweep then
+     *      moves it along with everything else. Nothing here needs to know about bridging.
+     *
+     *      No approval leg at all, unlike the wrap: this contract is both the shares' owner and the
+     *      caller, so ERC-4626 `redeem` needs no allowance and leaves none behind.
+     *
+     * @param vault ERC-4626 vault to redeem — always a vault this TopUp holds shares of.
+     * @param amount Amount of vault shares to redeem.
+     * @custom:throws OnlyOwner If caller is not the owner.
+     * @custom:throws InvalidAmount If `amount == 0`.
+     * @custom:throws VaultNotUnwrappable If the factory has not registered `vault`.
+     */
+    function unwrap(address vault, uint256 amount) external {
+        address _owner = owner();
+        if (_owner != msg.sender) revert OnlyOwner();
+        if (amount == 0) revert InvalidAmount();
+
+        if (ITopUpFactory(_owner).unwrapAssetFor(vault) == address(0)) revert VaultNotUnwrappable();
+
+        IERC4626(vault).redeem(amount, address(this), address(this));
     }
 
     /**
