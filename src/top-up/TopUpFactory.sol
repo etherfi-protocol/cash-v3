@@ -368,7 +368,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @custom:throws TokenConfigNotSet If any `(tokens[i], chainIds[i])` has no configured route.
      * @custom:emits TokenConfigRemoved
      */
-    function removeTokenConfig(address[] calldata tokens, uint256[] calldata chainIds) external onlyRoleRegistryOwner {
+    function removeTokenConfig(address[] calldata tokens, uint256[] calldata chainIds) external onlyAdminTimelock {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
         if (len != chainIds.length) revert ArrayLengthMismatch();

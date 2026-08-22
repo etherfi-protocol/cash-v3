@@ -654,7 +654,7 @@ contract TopUpFactoryTest is Test, Constants {
         tokens[0] = address(ethfi);
 
         vm.prank(user);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         factory.removeTokenConfig(tokens, _chainIds(1));
     }
 
