@@ -86,13 +86,17 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
 
     /// @dev Invariant I17 (spec 7.3.5, "Migration exclusion"): the cashback fold consumes exactly six events
     ///      (LendBorrowed, Spend, Repay, RepayDebtManager, Liquidated, LiquidationCall) and migration must
-    ///      reach a real, successful outcome without emitting any of the two events a debt migration could
-    ///      plausibly trigger. `_gateway.borrow(...)` bypasses `CashLendLib.borrow()` (the only emitter of
-    ///      `LendBorrowed`), and `_clearLegacyDebt` emits no `Repay`. Asserted on recorded log selectors, not
-    ///      `expectEmit` absence, so this test also catches an entirely new emission point a refactor might add.
-    ///      Guards against a refactor that routes the Aave re-borrow through `CashLendLib.borrow()` or emits
-    ///      `Repay` while clearing the legacy debt — either would let a migrated account silently earn borrow
-    ///      cashback on debt that predates the gateway.
+    ///      reach a real, successful outcome without emitting any fold input the Cash/DebtManager stack could
+    ///      plausibly produce. `_gateway.borrow(...)` bypasses `CashLendLib.borrow()` (the only emitter of
+    ///      `LendBorrowed`), and `_clearLegacyDebt` emits no `Repay`/`RepayDebtManager`/`Spend`/`Liquidated`.
+    ///      Asserted on recorded log selectors, not `expectEmit` absence, so this test also catches an entirely
+    ///      new emission point a refactor might add. Guards against, e.g., a refactor that routes the Aave
+    ///      re-borrow through `CashLendLib.borrow()`, emits `Repay` or `RepayDebtManager` while clearing the
+    ///      legacy debt (`RepayDebtManager` — CashEventEmitter.sol:87 — is the natural event `_clearLegacyDebt`
+    ///      would gain), or folds the debt clear into a `Spend`-shaped or `Liquidated`-shaped emission — any of
+    ///      which would let a migrated account silently earn borrow cashback on debt that predates the gateway.
+    ///      `LiquidationCall` (Aave's own Spoke event) is excluded: migration never calls Aave's liquidation
+    ///      path, so there is no code path in this function that could ever reach it.
     function test_migrateToLendGateway_emitsNeitherLendBorrowedNorRepay() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
@@ -112,12 +116,25 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "legacy debt actually cleared");
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 1e6, "debt actually re-homed on Aave");
 
+        // Every fold input the emitter stack can produce (spec 7.3.5's six events, minus Aave-native
+        // LiquidationCall, which migration structurally cannot reach). Selectors are computed from the live
+        // event declarations via `.selector`, never hand-copied, so a signature change can't silently desync
+        // the guard from what the fold — and the indexer — actually decode.
+        bytes32[5] memory forbidden = [
+            CashEventEmitter.LendBorrowed.selector,
+            CashEventEmitter.Repay.selector,
+            CashEventEmitter.RepayDebtManager.selector,
+            CashEventEmitter.Spend.selector,
+            DebtManagerStorageContract.Liquidated.selector
+        ];
+
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertGt(logs.length, 0, "sanity: a real migration must emit something (e.g. MigratedToLendGateway)");
         for (uint256 i = 0; i < logs.length; i++) {
             if (logs[i].topics.length == 0) continue; // anonymous log, cannot match a named event's selector
-            assertTrue(logs[i].topics[0] != CashEventEmitter.LendBorrowed.selector, "migration must not emit LendBorrowed");
-            assertTrue(logs[i].topics[0] != CashEventEmitter.Repay.selector, "migration must not emit Repay");
+            for (uint256 j = 0; j < forbidden.length; j++) {
+                assertTrue(logs[i].topics[0] != forbidden[j], "migration emitted a cashback-fold input event");
+            }
         }
     }
 
