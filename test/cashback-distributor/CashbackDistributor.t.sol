@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
 import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -21,6 +22,8 @@ contract CashbackDistributorTest is Test {
     address public recipient3 = makeAddr("recipient3");
     address public stranger = makeAddr("stranger");
     address public dataProviderMock = makeAddr("dataProvider");
+    address public pauser = makeAddr("pauser");
+    address public unpauser = makeAddr("unpauser");
 
     bytes32 internal constant CLAIM_1 = keccak256("claim-1");
     bytes32 internal constant CLAIM_2 = keccak256("claim-2");
@@ -40,6 +43,8 @@ contract CashbackDistributorTest is Test {
         distributor = CashbackDistributor(address(new UUPSProxy(distributorImpl, abi.encodeWithSelector(CashbackDistributor.initialize.selector, address(roleRegistry)))));
 
         roleRegistry.grantRole(distributor.CASHBACK_DISTRIBUTOR_ROLE(), payoutWallet);
+        roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
+        roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
         vm.stopPrank();
 
         token = new MockERC20("Mock USD", "mUSD", 6);
@@ -103,6 +108,31 @@ contract CashbackDistributorTest is Test {
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         vm.prank(stranger);
         distributor.award(CLAIM_1, recipient, address(token), 100e6);
+    }
+
+    // --- award: pause gate ---
+
+    function test_award_revertsWhenPaused() public {
+        vm.prank(pauser);
+        distributor.pause();
+
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), 100e6);
+    }
+
+    function test_award_succeedsAfterUnpause() public {
+        vm.prank(pauser);
+        distributor.pause();
+
+        vm.prank(unpauser);
+        distributor.unpause();
+
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), 100e6);
+
+        assertTrue(distributor.settled(CLAIM_1));
+        assertEq(token.balanceOf(recipient), 100e6);
     }
 
     // --- awardBatch: happy path ---
@@ -219,6 +249,49 @@ contract CashbackDistributorTest is Test {
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
         vm.prank(stranger);
         distributor.awardBatch(claimIds, recipients, address(token), amounts);
+    }
+
+    // --- awardBatch: pause gate ---
+
+    function test_awardBatch_revertsWhenPaused() public {
+        vm.prank(pauser);
+        distributor.pause();
+
+        bytes32[] memory claimIds = new bytes32[](1);
+        claimIds[0] = CLAIM_1;
+
+        address[] memory recipients = new address[](1);
+        recipients[0] = recipient;
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 10e6;
+
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(payoutWallet);
+        distributor.awardBatch(claimIds, recipients, address(token), amounts);
+    }
+
+    function test_awardBatch_succeedsAfterUnpause() public {
+        vm.prank(pauser);
+        distributor.pause();
+
+        vm.prank(unpauser);
+        distributor.unpause();
+
+        bytes32[] memory claimIds = new bytes32[](1);
+        claimIds[0] = CLAIM_1;
+
+        address[] memory recipients = new address[](1);
+        recipients[0] = recipient;
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 10e6;
+
+        vm.prank(payoutWallet);
+        distributor.awardBatch(claimIds, recipients, address(token), amounts);
+
+        assertTrue(distributor.settled(CLAIM_1));
+        assertEq(token.balanceOf(recipient), 10e6);
     }
 
     // --- no funds held, no rescue path ---

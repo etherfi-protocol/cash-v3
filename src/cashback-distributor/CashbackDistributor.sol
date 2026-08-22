@@ -73,7 +73,7 @@ contract CashbackDistributor is UpgradeableProxy {
      * @param token The token to pay out.
      * @param amount The amount to pay out.
      */
-    function award(bytes32 claimId, address recipient, address token, uint256 amount) external onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
+    function award(bytes32 claimId, address recipient, address token, uint256 amount) external whenNotPaused onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
         _award(claimId, recipient, token, amount);
     }
 
@@ -87,7 +87,7 @@ contract CashbackDistributor is UpgradeableProxy {
      * @param token The token to pay out for every claim in the batch.
      * @param amounts The amounts to pay out, one per claim.
      */
-    function awardBatch(bytes32[] calldata claimIds, address[] calldata recipients, address token, uint256[] calldata amounts) external onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
+    function awardBatch(bytes32[] calldata claimIds, address[] calldata recipients, address token, uint256[] calldata amounts) external whenNotPaused onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
         uint256 len = claimIds.length;
         if (recipients.length != len || amounts.length != len) revert ArrayLengthMismatch();
 
