@@ -6,6 +6,7 @@ import { IAaveV4Spoke } from "../../../../../src/interfaces/IAaveV4Spoke.sol";
 import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
 import { ModuleBase } from "../../../../../src/modules/ModuleBase.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
@@ -406,7 +407,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
 
     function test_setReserveId_requiresGatewayAdminRole() public {
         vm.prank(makeAddr("notAdmin"));
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         gw.setReserveId(address(weETH), weethReserveId);
     }
 
@@ -443,7 +444,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         gw.removeReserve(never);
 
         vm.prank(makeAddr("notAdmin"));
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         gw.removeReserve(address(weETH));
     }
 
@@ -527,7 +528,7 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         gw.setDriver(address(0), true);
 
         vm.prank(makeAddr("notAdmin"));
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         gw.setDriver(makeAddr("d"), true);
     }
 
