@@ -16,6 +16,14 @@ import { ChainConfig, Utils } from "./utils/Utils.sol";
  *      multisig/governance (prod), drop the grantRole line and grant via scripts/gnosis-txs/.
  *      Env: PRIVATE_KEY (deployer), CASHBACK_DISTRIBUTOR_RELAYER (relayer to authorize), plus
  *      ENV + chain so readDeploymentFile() resolves the RoleRegistry address.
+ *
+ *      Post-deploy steps (this script only completes the first):
+ *      1. Grant `CASHBACK_DISTRIBUTOR_ROLE` to the relayer (done above).
+ *      2. Fund the payout wallet with the ETHFI and sETHFI that `award`/`awardBatch` will pay out.
+ *      3. From the payout wallet, `approve` the deployed CashbackDistributor proxy to spend ETHFI.
+ *      4. From the payout wallet, `approve` the deployed CashbackDistributor proxy to spend sETHFI.
+ *      `award`/`awardBatch` pull funds via `transferFrom(msg.sender, ...)`; without steps 3-4 the
+ *      first claim for a token reverts `ERC20InsufficientAllowance` and burns the retry cap.
  */
 contract DeployCashbackDistributor is Utils {
     function run() public {

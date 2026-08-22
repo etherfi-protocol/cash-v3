@@ -97,7 +97,15 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
     ///      which would let a migrated account silently earn borrow cashback on debt that predates the gateway.
     ///      `LiquidationCall` (Aave's own Spoke event) is excluded: migration never calls Aave's liquidation
     ///      path, so there is no code path in this function that could ever reach it.
-    function test_migrateToLendGateway_emitsNeitherLendBorrowedNorRepay() public {
+    /// @dev Migration DOES legitimately emit two events not in the forbidden set below, both emitted by
+    ///      design and intentionally excluded: (1) Aave's own Spoke `Borrow`, via `_gateway.borrow(...)`
+    ///      (DebtManagerCore.sol:768), and (2) DebtManager's own `Repaid` (DebtManagerCore.sol:824,
+    ///      declared DebtManagerStorageContract.sol:172), emitted by `_clearLegacyDebt` when it closes the
+    ///      legacy position. Neither is decoded by cash-event-indexer today, so neither feeds the cashback
+    ///      fold, and neither belongs in the `forbidden` array above. They must never become fold inputs:
+    ///      teaching the indexer to decode Aave's Spoke `Borrow` would double-count borrow cashback for
+    ///      every migrated safe by attributing the one-time re-home borrow as new borrowing activity.
+    function test_migrateToLendGateway_emitsNoCashbackFoldInputEvents() public {
         _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
 
         // Real legacy position carrying debt, so both suspect paths actually run: the legacy debt is cleared
@@ -120,13 +128,7 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         // LiquidationCall, which migration structurally cannot reach). Selectors are computed from the live
         // event declarations via `.selector`, never hand-copied, so a signature change can't silently desync
         // the guard from what the fold — and the indexer — actually decode.
-        bytes32[5] memory forbidden = [
-            CashEventEmitter.LendBorrowed.selector,
-            CashEventEmitter.Repay.selector,
-            CashEventEmitter.RepayDebtManager.selector,
-            CashEventEmitter.Spend.selector,
-            DebtManagerStorageContract.Liquidated.selector
-        ];
+        bytes32[5] memory forbidden = [CashEventEmitter.LendBorrowed.selector, CashEventEmitter.Repay.selector, CashEventEmitter.RepayDebtManager.selector, CashEventEmitter.Spend.selector, DebtManagerStorageContract.Liquidated.selector];
 
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertGt(logs.length, 0, "sanity: a real migration must emit something (e.g. MigratedToLendGateway)");

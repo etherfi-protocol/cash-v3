@@ -24,8 +24,20 @@ contract CashbackDistributor is UpgradeableProxy {
     /// @notice Role authorized to settle cashback claims (granted to the backend relayer).
     bytes32 public constant CASHBACK_DISTRIBUTOR_ROLE = keccak256("CASHBACK_DISTRIBUTOR_ROLE");
 
-    /// @notice Tracks which claims have already been settled, keyed on `cashback_claim.id`.
-    mapping(bytes32 => bool) public settled;
+    /**
+     * @dev Storage structure for CashbackDistributor using the ERC-7201 namespaced diamond storage pattern.
+     * @custom:storage-location erc7201:etherfi.storage.CashbackDistributor
+     */
+    struct CashbackDistributorStorage {
+        /// @notice Tracks which claims have already been settled, keyed on `cashback_claim.id`.
+        mapping(bytes32 claimId => bool isSettled) settled;
+    }
+
+    /**
+     * @notice Storage location for CashbackDistributor (ERC-7201 compliant)
+     * @dev keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashbackDistributor")) - 1)) & ~bytes32(uint256(0xff))
+     */
+    bytes32 private constant CashbackDistributorStorageLocation = 0x661a32922cf88012d1662d523c67828e796d955a6aa33bf39e0da3bcf6c7ad00;
 
     /**
      * @notice Emitted when a single cashback claim is settled.
@@ -60,6 +72,25 @@ contract CashbackDistributor is UpgradeableProxy {
      */
     function initialize(address _roleRegistry) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
+    }
+
+    /**
+     * @dev Returns the storage struct for CashbackDistributorStorage
+     * @return $ Reference to the CashbackDistributorStorage struct
+     */
+    function _getCashbackDistributorStorage() internal pure returns (CashbackDistributorStorage storage $) {
+        assembly {
+            $.slot := CashbackDistributorStorageLocation
+        }
+    }
+
+    /**
+     * @notice Returns whether a cashback claim has already been settled.
+     * @param claimId The claim identifier (`cashback_claim.id`).
+     * @return True if the claim has already been settled.
+     */
+    function settled(bytes32 claimId) external view returns (bool) {
+        return _getCashbackDistributorStorage().settled[claimId];
     }
 
     /**
@@ -108,8 +139,10 @@ contract CashbackDistributor is UpgradeableProxy {
      * @dev Settles one claim: marks it settled, moves the tokens, and emits the per-claim event.
      */
     function _award(bytes32 claimId, address recipient, address token, uint256 amount) internal {
-        if (settled[claimId]) revert AlreadySettled(claimId);
-        settled[claimId] = true;
+        CashbackDistributorStorage storage $ = _getCashbackDistributorStorage();
+
+        if ($.settled[claimId]) revert AlreadySettled(claimId);
+        $.settled[claimId] = true;
 
         IERC20(token).safeTransferFrom(msg.sender, recipient, amount);
 
