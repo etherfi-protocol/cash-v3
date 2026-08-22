@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { Vm } from "forge-std/Vm.sol";
 
 import { DebtManagerCore } from "../../../../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerStorageContract } from "../../../../../src/debt-manager/DebtManagerStorageContract.sol";
@@ -81,6 +82,43 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         assertEq(weETH.balanceOf(address(gw)), 0, "no stranded weETH");
         assertEq(usdc.balanceOf(address(gw)), 0, "no stranded USDC");
         assertApproxEqAbs(usdc.balanceOf(address(debtManager)), dmUsdcBefore + borrowAmt, 1e6, "DebtManager USDC replenished");
+    }
+
+    /// @dev Invariant I17 (spec 7.3.5, "Migration exclusion"): the cashback fold consumes exactly six events
+    ///      (LendBorrowed, Spend, Repay, RepayDebtManager, Liquidated, LiquidationCall) and migration must
+    ///      reach a real, successful outcome without emitting any of the two events a debt migration could
+    ///      plausibly trigger. `_gateway.borrow(...)` bypasses `CashLendLib.borrow()` (the only emitter of
+    ///      `LendBorrowed`), and `_clearLegacyDebt` emits no `Repay`. Asserted on recorded log selectors, not
+    ///      `expectEmit` absence, so this test also catches an entirely new emission point a refactor might add.
+    ///      Guards against a refactor that routes the Aave re-borrow through `CashLendLib.borrow()` or emits
+    ///      `Repay` while clearing the legacy debt — either would let a migrated account silently earn borrow
+    ///      cashback on debt that predates the gateway.
+    function test_migrateToLendGateway_emitsNeitherLendBorrowedNorRepay() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+
+        // Real legacy position carrying debt, so both suspect paths actually run: the legacy debt is cleared
+        // AND the gateway is made to re-borrow the same amount on Aave.
+        deal(address(weETH), address(safe), 10 ether);
+        uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        vm.recordLogs();
+        vm.prank(migrator);
+        dm.migrateToLendGateway(address(safe));
+
+        // Prove this is a real, successful migration, not a revert that trivially emitted nothing.
+        assertTrue(dm.hasMigratedToLendGateway(address(safe)), "migration actually succeeded");
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "legacy debt actually cleared");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 1e6, "debt actually re-homed on Aave");
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertGt(logs.length, 0, "sanity: a real migration must emit something (e.g. MigratedToLendGateway)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length == 0) continue; // anonymous log, cannot match a named event's selector
+            assertTrue(logs[i].topics[0] != CashEventEmitter.LendBorrowed.selector, "migration must not emit LendBorrowed");
+            assertTrue(logs[i].topics[0] != CashEventEmitter.Repay.selector, "migration must not emit Repay");
+        }
     }
 
     // ----------------------------------------------------------------- reverts
