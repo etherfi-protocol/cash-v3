@@ -10,6 +10,7 @@ import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { SendParam, MessagingFee, MessagingReceipt, OFTLimit, OFTFeeDetail, OFTReceipt } from "../../src/interfaces/IOFT.sol";
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 
 /// @dev ShadowOFT stand-in: an ERC20 that is its own OFT (token() == address(this),
 ///      approvalRequired() == false), recording the last send() for assertions. Faithful to
@@ -158,7 +159,8 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         vm.startPrank(owner);
         dataProvider.configureModules(mods, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(mods, shouldWhitelist);
-        roleRegistry.grantRole(module.STOCK_WITHDRAW_MODULE_ADMIN_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), moduleAdmin);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), moduleAdmin);
 
         // Whitelist the iToken as a withdrawable asset in CashModule
         address[] memory withdrawAssets = new address[](1);
@@ -748,7 +750,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         address[] memory unwrappers = new address[](1);
         unwrappers[0] = makeAddr("otherUnwrapper");
 
-        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.configureUnwrappers(dstEids, unwrappers);
 
         vm.prank(moduleAdmin);

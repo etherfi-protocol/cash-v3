@@ -95,13 +95,12 @@ contract CashModuleCore is CashModuleStorageContract {
 
     /**
      * @notice Sets the new CashModuleSetters implementation address
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param newCashModuleSetters Address of the new CashModuleSetters implementation
-     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws OnlyAdminTimelock if caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws InvalidInput if newCashModuleSetters = address(0)
      */
-    function setCashModuleSettersAddress(address newCashModuleSetters) external {
-        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+    function setCashModuleSettersAddress(address newCashModuleSetters) external onlyAdminTimelock {
         if (newCashModuleSetters == address(0)) revert InvalidInput();
         _getCashModuleStorage().cashModuleSetters = newCashModuleSetters;
     }

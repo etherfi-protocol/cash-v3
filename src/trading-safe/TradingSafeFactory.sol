@@ -217,7 +217,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
      * @param _topUpFactory Address of the `TopUpFactory` on this chain.
      * @custom:throws TopUpFactoryCannotBeZeroAddress If `_topUpFactory == address(0)`.
      */
-    function setTopUpFactory(address _topUpFactory) external onlyRoleRegistryOwner {
+    function setTopUpFactory(address _topUpFactory) external onlyAdmin {
         if (_topUpFactory == address(0)) revert TopUpFactoryCannotBeZeroAddress();
         TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
         emit TopUpFactorySet($.topUpFactory, _topUpFactory);
@@ -238,7 +238,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
      * @param _tradingLens Address of the `TradingLens` on this chain.
      * @custom:throws TradingLensCannotBeZeroAddress If `_tradingLens == address(0)`.
      */
-    function setTradingLens(address _tradingLens) external onlyRoleRegistryOwner {
+    function setTradingLens(address _tradingLens) external onlyAdmin {
         if (_tradingLens == address(0)) revert TradingLensCannotBeZeroAddress();
         TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
         emit TradingLensSet($.tradingLens, _tradingLens);

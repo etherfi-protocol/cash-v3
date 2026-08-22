@@ -120,6 +120,6 @@ contract DeployStockUnwrapper is StockWithdrawConfig {
     /// @dev DEV ONLY: on dev the broadcaster owns the RoleRegistry, so the grant rides along
     ///      with the deploy. On prod it is its own 3CP (see the contract docs).
     function _grantRoleData() internal view returns (bytes memory) {
-        return abi.encodeWithSignature("grantRole(bytes32,address)", StockUnwrapper(proxy).STOCK_UNWRAPPER_ADMIN_ROLE(), unwrapperAdmin);
+        return abi.encodeWithSignature("grantRole(bytes32,address)", keccak256("ADMIN_TIMELOCK_ROLE"), unwrapperAdmin);
     }
 }

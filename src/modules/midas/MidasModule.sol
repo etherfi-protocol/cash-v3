@@ -41,9 +41,6 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /// @notice TypeHash for withdraw function signature
     bytes32 public constant WITHDRAW_SIG = keccak256("withdraw");
 
-    /// @notice Role identifier for admins of the Midas Module
-    bytes32 public constant MIDAS_MODULE_ADMIN = keccak256("MIDAS_MODULE_ADMIN");
-
     /// @notice Emitted when new Midas vaults are added to the module
     event MidasVaultsAdded(address[] midasTokens, address[] depositVaults, address[] redemptionVaults);
 
@@ -276,13 +273,13 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param midasTokens Array of Midas token addresses to add
      * @param depositVaults Array of deposit vault addresses corresponding to the Midas tokens
      * @param redemptionVaults Array of redemption vault addresses corresponding to the Midas tokens
-     * @dev Only callable by accounts with the MIDAS_MODULE_ADMIN role
+     * @dev Only callable by accounts with the ADMIN_ROLE role
      * @custom:throws Unauthorized If caller doesn't have the admin role
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
      */
     function addMidasVaults(address[] calldata midasTokens, address[] calldata depositVaults, address[] calldata redemptionVaults) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(MIDAS_MODULE_ADMIN, msg.sender)) revert Unauthorized();
+        etherFiDataProvider.roleRegistry().onlyAdmin(msg.sender);
 
         uint256 len = midasTokens.length;
         if (len != depositVaults.length || len != redemptionVaults.length) revert ArrayLengthMismatch();
@@ -308,12 +305,12 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /**
      * @notice Removes Midas vaults from the module
      * @param midasTokens Array of Midas token addresses to remove
-     * @dev Only callable by accounts with the MIDAS_MODULE_ADMIN role
+     * @dev Only callable by accounts with the ADMIN_ROLE role
      * @custom:throws Unauthorized If caller doesn't have the admin role
      * @custom:throws InvalidInput If the array is empty
      */
     function removeMidasVaults(address[] calldata midasTokens) external {
-        if (!etherFiDataProvider.roleRegistry().hasRole(MIDAS_MODULE_ADMIN, msg.sender)) revert Unauthorized();
+        etherFiDataProvider.roleRegistry().onlyAdmin(msg.sender);
 
         uint256 len = midasTokens.length;
         if (len == 0) revert InvalidInput();

@@ -195,7 +195,7 @@ contract Setup is Utils {
     }
 
     function _configureWithdrawTokens() internal {
-        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployer);
         address[] memory tokens = new address[](3);
         tokens[0] = address(usdcScroll);
         tokens[1] = address(weETHScroll);
@@ -208,16 +208,16 @@ contract Setup is Utils {
 
         cashModule.configureWithdrawAssets(tokens, shouldWhitelist);
 
-        roleRegistry.revokeRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
+        roleRegistry.revokeRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployer);
     }
 
     function _grantRoles() internal {
         roleRegistry.grantRole(roleRegistry.PAUSER(), owner);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), owner);
-        roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
-        roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, owner);
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
         roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);

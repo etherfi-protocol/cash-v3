@@ -36,9 +36,6 @@ contract TradingLens is UpgradeableProxy, Constants {
         uint256 valueUsd;
     }
 
-    /// @notice Role allowed to add / remove supported trading tokens.
-    bytes32 public constant TRADING_LENS_ADMIN_ROLE = keccak256("TRADING_LENS_ADMIN_ROLE");
-
     /// @notice Price source for supported tokens.
     IPriceProvider public immutable priceProvider;
 
@@ -59,7 +56,7 @@ contract TradingLens is UpgradeableProxy, Constants {
     /// @param token The token contract address.
     event SupportedTokenRemoved(address indexed token);
 
-    /// @notice Reverts when the caller doesn't hold `TRADING_LENS_ADMIN_ROLE`.
+    /// @notice Reverts when the caller doesn't hold `ADMIN_ROLE`.
     error OnlyAdmin();
 
     /// @notice Reverts when a zero-address token is passed to `addSupportedToken`.
@@ -95,12 +92,12 @@ contract TradingLens is UpgradeableProxy, Constants {
      * @notice Adds `token` to the supported-trading-token set. Idempotent across deploys —
      *         reverts if the token is already present (callers don't want silent no-ops).
      * @param token The token contract to support.
-     * @custom:throws OnlyAdmin If caller lacks `TRADING_LENS_ADMIN_ROLE`.
+     * @custom:throws OnlyAdmin If caller lacks `ADMIN_ROLE`.
      * @custom:throws InvalidToken If `token == address(0)`.
      * @custom:throws TokenAlreadySupported If `token` is already in the set.
      */
     function addSupportedToken(address token) external {
-        if (!roleRegistry().hasRole(TRADING_LENS_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        roleRegistry().onlyAdmin(msg.sender);
         if (token == address(0)) revert InvalidToken();
 
         if (!_getTradingLensStorage().supportedTokens.add(token)) revert TokenAlreadySupported(token);
@@ -110,11 +107,11 @@ contract TradingLens is UpgradeableProxy, Constants {
     /**
      * @notice Removes `token` from the supported-trading-token set.
      * @param token The token contract to drop.
-     * @custom:throws OnlyAdmin If caller lacks `TRADING_LENS_ADMIN_ROLE`.
+     * @custom:throws OnlyAdmin If caller lacks `ADMIN_ROLE`.
      * @custom:throws TokenNotSupported If `token` isn't in the set.
      */
     function removeSupportedToken(address token) external {
-        if (!roleRegistry().hasRole(TRADING_LENS_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        roleRegistry().onlyAdmin(msg.sender);
 
         if (!_getTradingLensStorage().supportedTokens.remove(token)) revert TokenNotSupported(token);
         emit SupportedTokenRemoved(token);

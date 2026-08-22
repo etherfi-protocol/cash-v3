@@ -56,9 +56,6 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
     /// @notice Thrown when caller lacks the required module admin role
     error Unauthorized();
 
-    /// @notice Role identifier for BeHYPE stake module administrators
-    bytes32 public constant BEHYPE_STAKE_MODULE_ADMIN_ROLE = keccak256("BEHYPE_STAKE_MODULE_ADMIN_ROLE");
-
     /**
      * @notice Contract constructor
      * @param _dataProvider Address of the EtherFiDataProvider contract
@@ -104,7 +101,7 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
      */
     function setRefundGasLimit(uint32 refundGasLimit) external {
         IRoleRegistry roleRegistry = IRoleRegistry(etherFiDataProvider.roleRegistry());
-        if (!roleRegistry.hasRole(BEHYPE_STAKE_MODULE_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        roleRegistry.onlyAdmin(msg.sender);
 
         _getBeHYPEStakeModuleStorage().refundGasLimit = refundGasLimit;
         emit RefundGasLimitUpdated(refundGasLimit);

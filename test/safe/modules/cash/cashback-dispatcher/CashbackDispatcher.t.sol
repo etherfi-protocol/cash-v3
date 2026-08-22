@@ -17,6 +17,7 @@ import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { EnumerableAddressWhitelistLib } from "../../../../../src/libraries/EnumerableAddressWhitelistLib.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 
 contract CashbackDispatcherTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -264,7 +265,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
     function test_setPriceProvider_reverts_whenCallerNotOwner() public {
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cashbackDispatcher.setPriceProvider(address(priceProvider));
         vm.stopPrank();
     }
@@ -304,7 +305,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
         shouldWhitelist[0] = false;
 
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         cashbackDispatcher.configureCashbackToken(tokens, shouldWhitelist);
         vm.stopPrank();
     }
@@ -491,7 +492,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
     function test_setCashModule_reverts_whenCallerNotOwner() public {
         vm.prank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         cashbackDispatcher.setCashModule(newCashModuleAddress);
     }
 

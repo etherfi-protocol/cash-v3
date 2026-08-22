@@ -95,10 +95,6 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.AcrossSwapModule")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant AcrossSwapModuleStorageLocation = 0x59f3e7eaaef5f4e4dfa17cb74cd92a8efd7c6a7e08e5b3e1da26c8dec61cda00;
 
-    /// @notice Role allowed to configure per-chain constants (`spokePool`,
-    ///         `multicallHandler`).
-    bytes32 public constant ACROSS_SWAP_MODULE_ADMIN_ROLE = keccak256("ACROSS_SWAP_MODULE_ADMIN_ROLE");
-
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("AcrossSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("AcrossSwapModule.cancelSwap");
@@ -179,7 +175,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
 
     /// @notice Sets the Across `SpokePool` address used on this chain.
     function setSpokePool(address _spokePool) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         if (_spokePool == address(0)) revert InvalidInput();
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         emit SpokePoolSet($.spokePool, _spokePool);
@@ -189,7 +185,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @notice Sets the Across `MulticallHandler` address used as the destination
     ///         recipient on every `depositV3` call.
     function setMulticallHandler(address _multicallHandler) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         if (_multicallHandler == address(0)) revert InvalidInput();
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         emit MulticallHandlerSet($.multicallHandler, _multicallHandler);
@@ -199,7 +195,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @notice Sets the allowlisted Across periphery used for origin-swap (anyToBridgeable)
     ///         routes on this chain. Zero means origin-swaps are not enabled here.
     function setPeriphery(address _periphery) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         emit PeripherySet($.peripheryAddress, _periphery);
         $.peripheryAddress = _periphery;
@@ -581,8 +577,8 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         return ($.peripheryAddress, address(0));
     }
 
-    function _onlyAdmin() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(ACROSS_SWAP_MODULE_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+    function _onlyAdminTimelock() internal view {
+        IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdminTimelock(msg.sender);
     }
 
     function _getAcrossSwapModuleStorage() internal pure returns (AcrossSwapModuleStorage storage $) {

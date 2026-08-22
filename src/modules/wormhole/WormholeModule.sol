@@ -60,10 +60,6 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
     bytes32 private constant WormholeModuleStorageLocation =
         0x0a93d51b2793ea18ce510da8b8cb57b59048d8c53342680b2f2da35f6fe69600;
 
-    /// @notice The ADMIN role for the Wormhole module
-    bytes32 public constant WORMHOLE_MODULE_ADMIN_ROLE =
-        keccak256("WORMHOLE_MODULE_ADMIN_ROLE");
-
     /// @notice TypeHash for request bridge function signature
     bytes32 public constant REQUEST_BRIDGE_SIG = keccak256("requestBridge");
 
@@ -164,7 +160,7 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      */
     function setAssetConfig(address[] memory assets, AssetConfig[] memory assetConfigs) external {
         IRoleRegistry roleRegistry = IRoleRegistry(etherFiDataProvider.roleRegistry());
-        if (!roleRegistry.hasRole(WORMHOLE_MODULE_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        roleRegistry.onlyAdminTimelock(msg.sender);
 
         _setAssetConfigs(assets, assetConfigs);
     }
