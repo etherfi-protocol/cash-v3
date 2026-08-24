@@ -36,6 +36,7 @@ contract EnforcedOptionsTest is Test {
     uint32 internal constant ETHEREUM_EID = 30_101;
     uint32 internal constant OPTIMISM_EID = 30_111;
     uint32 internal constant BASE_EID = 30_184;
+    uint32 internal constant SCROLL_EID = 30_214;
 
     /// @notice Checks the live routes withdrawals have actually used on the Optimism USDC pool.
     function test_optimismUsdcPoolQuotesTaxiForUsedRoutes() public {
@@ -64,12 +65,15 @@ contract EnforcedOptionsTest is Test {
         _checkTaxiRoutes(OPTIMISM_ETH_POOL, eids, 1 ether, true);
     }
 
-    /// @notice Checks the live Base ETH pool top-up route. Scroll is no longer a top-up destination.
-    function test_baseEthPoolQuotesTaxiForTopUpRoute() public {
+    /// @notice Checks the live Base ETH pool top-up routes. Scroll is retired product-side but
+    ///         stays configured until the factory upgrade that enables route removal, so it must
+    ///         keep taxi coverage.
+    function test_baseEthPoolQuotesTaxiForTopUpRoutes() public {
         vm.createSelectFork(vm.envOr("BASE_RPC", string("https://mainnet.base.org")));
 
-        uint32[] memory eids = new uint32[](1);
-        eids[0] = OPTIMISM_EID;
+        uint32[] memory eids = new uint32[](2);
+        eids[0] = SCROLL_EID;
+        eids[1] = OPTIMISM_EID;
         _checkTaxiRoutes(BASE_ETH_POOL, eids, 1 ether, true);
     }
 
