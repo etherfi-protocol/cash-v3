@@ -30,6 +30,7 @@ contract EnforcedOptionsTest is Test {
     address internal constant OPTIMISM_USDC_POOL = 0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0;
     address internal constant OPTIMISM_ETH_POOL = 0xe8CDF27AcD73a434D661C84887215F7598e7d0d3;
     address internal constant BASE_ETH_POOL = 0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7;
+    address internal constant SCROLL_USDC_POOL = 0x3Fc69CC4A842838bCDC9499178740226062b14E4;
 
     uint32 internal constant ETHEREUM_EID = 30_101;
     uint32 internal constant OPTIMISM_EID = 30_111;
@@ -51,6 +52,14 @@ contract EnforcedOptionsTest is Test {
 
         _assertTaxiRoute(BASE_ETH_POOL, SCROLL_EID, 1 ether);
         _assertTaxiRoute(BASE_ETH_POOL, OPTIMISM_EID, 1 ether);
+    }
+
+    /// @notice Checks the live Scroll USDC pool routes used by the deployed Scroll StargateModule.
+    function test_scrollUsdcPoolQuotesTaxiForExistingRoutes() public {
+        vm.createSelectFork(vm.envOr("SCROLL_RPC", string("https://rpc.scroll.io")));
+
+        _assertTaxiRoute(SCROLL_USDC_POOL, ETHEREUM_EID, 1e6);
+        _assertTaxiRoute(SCROLL_USDC_POOL, BASE_EID, 1e6);
     }
 
     /// @dev Confirms taxi gas options exist, then obtains a live taxi quote without caller supplied extra options.

@@ -7,6 +7,7 @@ import { StargateModule, ModuleBase } from "../../../../src/modules/stargate/Sta
 import { ArrayDeDupLib, ICashModule, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
 import { ChainConfig } from "../../../utils/Utils.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
+import { SendParam } from "../../../../src/interfaces/IOFT.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 
 contract StargateModuleTest is SafeTestSetup {
@@ -181,6 +182,113 @@ contract StargateModuleTest is SafeTestSetup {
 
         uint256 usdcBalAfterExecution = usdc.balanceOf(address(safe));
         assertEq(usdcBalAfterExecution, usdcBalBefore - amount);
+    }
+
+    /// @dev Confirms an ERC20 taxi bridge returns the caller's unused fee payment.
+    function test_executeBridge_refundsUnusedNativeFeeForErc20() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+
+        (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+        stargateModule.requestBridge(address(safe), mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage, signers, signatures);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+        (, uint256 bridgeFee) = stargateModule.getBridgeFee(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+
+        uint256 surplus = bridgeFee / 2;
+        deal(sender, bridgeFee + surplus);
+        uint256 senderBalanceBefore = sender.balance;
+        uint256 moduleBalanceBefore = address(stargateModule).balance;
+
+        vm.expectEmit(true, true, true, true, address(stargateModule));
+        emit StargateModule.UnusedNativeFeeRefunded(sender, surplus);
+        vm.prank(sender);
+        stargateModule.executeBridge{ value: bridgeFee + surplus }(address(safe));
+
+        assertEq(sender.balance, senderBalanceBefore - bridgeFee);
+        assertEq(address(stargateModule).balance, moduleBalanceBefore);
+    }
+
+    /// @dev Confirms a native taxi bridge excludes the bridged amount when it calculates the fee refund.
+    function test_executeBridge_refundsUnusedNativeFeeForNativeAsset() public {
+        address nativeAsset = stargateModule.ETH();
+        uint256 amount = 1 ether;
+
+        address[] memory assets = new address[](1);
+        assets[0] = nativeAsset;
+        StargateModule.AssetConfig[] memory assetConfigs = new StargateModule.AssetConfig[](1);
+        assetConfigs[0] = StargateModule.AssetConfig({ isOFT: false, pool: ethStargatePool });
+
+        vm.prank(owner);
+        stargateModule.setAssetConfig(assets, assetConfigs);
+        deal(address(safe), amount);
+
+        (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, nativeAsset, amount, destRecipientAddr, maxSlippage);
+        stargateModule.requestBridge(address(safe), mainnetDestEid, nativeAsset, amount, destRecipientAddr, maxSlippage, signers, signatures);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+        (, uint256 bridgeFee) = stargateModule.getBridgeFee(mainnetDestEid, nativeAsset, amount, destRecipientAddr, maxSlippage);
+
+        uint256 surplus = bridgeFee / 2;
+        deal(sender, bridgeFee + surplus);
+        uint256 senderBalanceBefore = sender.balance;
+
+        vm.expectEmit(true, true, true, true, address(stargateModule));
+        emit StargateModule.UnusedNativeFeeRefunded(sender, surplus);
+        vm.prank(sender);
+        stargateModule.executeBridge{ value: bridgeFee + surplus }(address(safe));
+
+        assertEq(sender.balance, senderBalanceBefore - bridgeFee);
+        assertEq(address(stargateModule).balance, 0);
+    }
+
+    /// @dev Confirms the module can cover a fee increase without refunding its existing native balance.
+    function test_executeBridge_usesPrefundedModuleBalanceWhenFeeExceedsCallerPayment() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+
+        (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+        stargateModule.requestBridge(address(safe), mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage, signers, signatures);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+        (, uint256 bridgeFee) = stargateModule.getBridgeFee(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+
+        uint256 callerPayment = bridgeFee / 2;
+        uint256 prefundedBalance = bridgeFee - callerPayment;
+        deal(address(stargateModule), prefundedBalance);
+        deal(sender, callerPayment);
+        uint256 senderBalanceBefore = sender.balance;
+
+        vm.prank(sender);
+        stargateModule.executeBridge{ value: callerPayment }(address(safe));
+
+        assertEq(sender.balance, senderBalanceBefore - callerPayment);
+        assertEq(address(stargateModule).balance, 0);
+    }
+
+    /// @dev Confirms a zero-value executor cannot receive the module's existing native balance.
+    function test_executeBridge_zeroValueCallerCannotDrainPrefundedModuleBalance() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+
+        (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+        stargateModule.requestBridge(address(safe), mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage, signers, signatures);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+        (, uint256 bridgeFee) = stargateModule.getBridgeFee(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+
+        deal(address(stargateModule), bridgeFee);
+        uint256 senderBalanceBefore = sender.balance;
+
+        vm.prank(sender);
+        stargateModule.executeBridge(address(safe));
+
+        assertEq(sender.balance, senderBalanceBefore);
+        assertEq(address(stargateModule).balance, 0);
     }
 
     function test_executeBridge_reverts_ifWithdrawalDelayIsNotOver() public {
@@ -476,7 +584,14 @@ contract StargateModuleTest is SafeTestSetup {
         // assertTrue(fee3 > 0, "Bridge fee should be greater than zero");
     }
 
-    function test_prepareRideBus_insufficientMinAmount() public {
+    function test_prepareTakeTaxi_usesEmptyCommandAndExtraOptions() public view {
+        (,, SendParam memory sendParam,,) = stargateModule.prepareTakeTaxi(mainnetDestEid, address(usdc), 100e6, destRecipientAddr, 0);
+
+        assertEq(sendParam.oftCmd.length, 0);
+        assertEq(sendParam.extraOptions.length, 0);
+    }
+
+    function test_prepareTakeTaxi_insufficientMinAmount() public {
         uint256 amount = 100e6;
         
         // Set min amount very high (greater than what would be received after fees)
@@ -484,7 +599,7 @@ contract StargateModuleTest is SafeTestSetup {
         
         // Should revert with InsufficientMinAmount
         vm.expectRevert(StargateModule.InsufficientMinAmount.selector);
-        stargateModule.prepareRideBus(mainnetDestEid, address(usdc), amount, destRecipientAddr, minAmount);
+        stargateModule.prepareTakeTaxi(mainnetDestEid, address(usdc), amount, destRecipientAddr, minAmount);
     }
 
     function _bridge(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps) internal {
