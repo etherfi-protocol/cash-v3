@@ -13,7 +13,8 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 
 /**
  * @title DeployStargateTaxiBase
- * @notice Deploys the Base taxi adapter and updates only the existing WETH routes.
+ * @notice Deploys the Base taxi adapter, removes the retired WETH to Scroll route,
+ *         and points the WETH to Optimism route at the new adapter.
  *
  * Usage:
  *   ENV=mainnet forge script scripts/stargate-taxi/DeployBase.s.sol \
@@ -78,21 +79,23 @@ contract DeployStargateTaxiBase is EtherFiDeployerHelper, GnosisHelpers, Contrac
         requireExactCodeMatch("StargateAdapter", adapter, address(new StargateAdapter(WETH)));
     }
 
-    /// @dev Copies both live route configs and changes only their adapter address.
+    /// @dev Removes the retired Scroll route, then points the Optimism route at the new adapter.
+    ///      Removal drops WETH from the supported set, so the set call must come second to re-add it.
     function _writeRouteSwitchBundle() internal returns (string memory path) {
-        address[] memory tokens = new address[](2);
+        address[] memory tokens = new address[](1);
         tokens[0] = WETH;
-        tokens[1] = WETH;
-        uint256[] memory chainIds = new uint256[](2);
-        chainIds[0] = 534_352;
-        chainIds[1] = 10;
-        TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](2);
-        configs[0] = _routeConfig(adapter, SCROLL_EID);
-        configs[1] = _routeConfig(adapter, OPTIMISM_EID);
+        uint256[] memory removeChainIds = new uint256[](1);
+        removeChainIds[0] = 534_352;
+        uint256[] memory chainIds = new uint256[](1);
+        chainIds[0] = 10;
+        TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
+        configs[0] = _routeConfig(adapter, OPTIMISM_EID);
 
-        bytes memory data = abi.encodeCall(TopUpFactory.setTokenConfig, (tokens, chainIds, configs));
+        bytes memory removeData = abi.encodeCall(TopUpFactory.removeTokenConfig, (tokens, removeChainIds));
+        bytes memory setData = abi.encodeCall(TopUpFactory.setTokenConfig, (tokens, chainIds, configs));
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(SAFE));
-        txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(factory)), iToHex(data), "0", true));
+        txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(factory)), iToHex(removeData), "0", false));
+        txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(factory)), iToHex(setData), "0", true));
 
         path = "./output/StargateTaxi-Base-route-switch.json";
         vm.createDir("./output", true);
@@ -100,11 +103,13 @@ contract DeployStargateTaxiBase is EtherFiDeployerHelper, GnosisHelpers, Contrac
         console.log("Wrote", path);
     }
 
-    /// @dev Simulates the bundle and confirms that both existing routes use the new adapter.
+    /// @dev Simulates the bundle, then confirms the Scroll route is gone, the Optimism route uses
+    ///      the new adapter, and WETH is still a supported (sweepable) token.
     function _simulate(string memory bundle) internal {
         executeGnosisTransactionBundle(bundle);
-        _checkRoute(factory.getTokenConfig(WETH, 534_352), adapter, SCROLL_EID);
+        require(factory.getTokenConfig(WETH, 534_352).bridgeAdapter == address(0), "Scroll route not removed");
         _checkRoute(factory.getTokenConfig(WETH, 10), adapter, OPTIMISM_EID);
+        require(factory.isTokenSupported(WETH), "WETH dropped from supported set");
         console.log("Stargate taxi Base bundle simulation passed");
     }
 
