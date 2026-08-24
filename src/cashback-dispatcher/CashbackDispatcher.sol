@@ -268,11 +268,12 @@ contract CashbackDispatcher is UpgradeableProxy {
 
     /**
      * @notice Updates the Cash Module address
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Routes cashback execution, so it is gated like an upgrade: only the
+     *      RoleRegistry owner (the upgrade timelock) may call it
      * @param _cashModule New Cash Module address
      * @custom:throws InvalidValue When the provided address is zero
      */
-    function setCashModule(address _cashModule) external onlyAdminTimelock {
+    function setCashModule(address _cashModule) external onlyRoleRegistryOwner {
         if (_cashModule == address(0)) revert InvalidValue();
 
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();

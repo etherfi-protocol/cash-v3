@@ -212,13 +212,13 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
 
     /**
      * @notice Sets the `TopUpFactory` whose `isTokenSupported` gates `redirectToTopUp`.
-     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE). Mirrors how
-     *      `TopUpFactory` holds a mutable `tradingSafeFactory`
+     * @dev Routes user-fund redirects, so it is gated like an upgrade: only the RoleRegistry
+     *      owner (the upgrade timelock) may call it. Mirrors how `TopUpFactory` holds a mutable `tradingSafeFactory`
      *      reference, so the supported-asset source can change without a beacon upgrade.
      * @param _topUpFactory Address of the `TopUpFactory` on this chain.
      * @custom:throws TopUpFactoryCannotBeZeroAddress If `_topUpFactory == address(0)`.
      */
-    function setTopUpFactory(address _topUpFactory) external onlyAdminTimelock {
+    function setTopUpFactory(address _topUpFactory) external onlyRoleRegistryOwner {
         if (_topUpFactory == address(0)) revert TopUpFactoryCannotBeZeroAddress();
         TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
         emit TopUpFactorySet($.topUpFactory, _topUpFactory);
