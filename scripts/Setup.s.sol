@@ -186,7 +186,7 @@ contract Setup is Utils {
             addressOutput
         );
 
-        roleRegistry.revokeRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
+        roleRegistry.revokeRole(keccak256("ADMIN_ROLE"), deployer);
         if (deployer != owner) roleRegistry.transferOwnership(owner);
 
         writeDeploymentFile(finalJson);
