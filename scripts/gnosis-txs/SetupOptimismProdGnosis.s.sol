@@ -208,7 +208,6 @@ contract SetupOptimismProdGnosis is GnosisHelpers, Utils {
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (CASH_MODULE_CONTROLLER_ROLE, cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("ADMIN_TIMELOCK_ROLE"), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("ADMIN_ROLE"), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (DEBT_MANAGER_ADMIN_ROLE, cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (TopUpDest(topUpDest).TOP_UP_DEPOSITOR_ROLE(), cashControllerSafe)), false);
 
         // EtherFi wallet roles

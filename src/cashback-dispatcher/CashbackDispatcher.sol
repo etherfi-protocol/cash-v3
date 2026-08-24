@@ -268,11 +268,11 @@ contract CashbackDispatcher is UpgradeableProxy {
 
     /**
      * @notice Updates the Cash Module address
-     * @dev Only callable by addresses with ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param _cashModule New Cash Module address
      * @custom:throws InvalidValue When the provided address is zero
      */
-    function setCashModule(address _cashModule) external onlyAdmin {
+    function setCashModule(address _cashModule) external onlyAdminTimelock {
         if (_cashModule == address(0)) revert InvalidValue();
 
         CashbackDispatcherStorage storage $ = _getCashbackDispatcherStorage();

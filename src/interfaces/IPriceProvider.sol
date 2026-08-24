@@ -10,9 +10,4 @@ interface IPriceProvider {
 
     function price(address token) external view returns (uint256);
 
-    /**
-     * @notice Function to fetch the admin role
-     * @return ADMIN_TIMELOCK_ROLE
-     */
-    function ADMIN_TIMELOCK_ROLE() external view returns (bytes32);
 }

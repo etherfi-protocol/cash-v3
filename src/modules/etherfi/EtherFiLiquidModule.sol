@@ -598,14 +598,14 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
 
     /**
      * @notice Function to set the liquid asset withdraw queue
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param asset Address of the liquid asset
      * @param boringQueue Address of the boring queue
      * @custom:throws InvalidValue If any address parameter is zero
      * @custom:throws InvalidBoringQueue If the queue does not belong to the liquid asset
      */
     function setLiquidAssetWithdrawQueue(address asset, address boringQueue) external {
-        etherFiDataProvider.roleRegistry().onlyAdmin(msg.sender);
+        etherFiDataProvider.roleRegistry().onlyAdminTimelock(msg.sender);
         
         if (asset == address(0) ||  boringQueue == address(0)) revert InvalidValue();
         if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();

@@ -462,12 +462,13 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /**
      * @notice Sets the destination-chain `TradingSafeFactory` address used by every TopUp
      *         instance when computing the redirect destination.
-     * @dev Admin-only. Read by `TopUp.redirectToTradingSafe` via the `tradingSafeFactory()`
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE). Read by
+     *      `TopUp.redirectToTradingSafe` via the `tradingSafeFactory()`
      *      view below.
      * @param _tradingSafeFactory Address of the destination-chain TradingSafeFactory.
      * @custom:throws TradingSafeFactoryCannotBeZeroAddress If `_tradingSafeFactory == address(0)`.
      */
-    function setTradingSafeFactory(address _tradingSafeFactory) external onlyAdmin {
+    function setTradingSafeFactory(address _tradingSafeFactory) external onlyAdminTimelock {
         if (_tradingSafeFactory == address(0)) revert TradingSafeFactoryCannotBeZeroAddress();
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         emit TradingSafeFactorySet($.tradingSafeFactory, _tradingSafeFactory);

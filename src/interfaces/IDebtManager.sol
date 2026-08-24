@@ -95,12 +95,6 @@ interface IDebtManager {
     error BorrowTokenCannotBeRemovedFromCollateral();
 
     /**
-     * @notice Function to fetch the admin role
-     * @return ADMIN_ROLE
-     */
-    function ADMIN_ROLE() external view returns (bytes32);
-
-    /**
      * @notice Returns the max borrow apy
      * @return Max borrow APY
      */
@@ -442,7 +436,7 @@ interface IDebtManager {
 
     /**
      * @notice Sets a new DebtManagerAdmin implementation
-     * @dev Can only be called by an address with the ADMIN_ROLE.
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock).
      * @param newImpl Address of the new DebtManagerAdmin implementation
      */
     function setAdminImpl(address newImpl) external;
