@@ -255,21 +255,29 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Settlement dispatchers ----
 
     function test_verifyBytecode_SettlementDispatcherReap() public {
+        // Taxi mode changes this implementation bytecode. Re-enable after the taxi deployment.
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.Reap, dataProviderProxy));
         _verify("SettlementDispatcherReap", settlementReapImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherRain() public {
+        // Taxi mode changes this implementation bytecode. Re-enable after the taxi deployment.
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.Rain, dataProviderProxy));
         _verify("SettlementDispatcherRain", settlementRainImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherPix() public {
+        // Taxi mode changes this implementation bytecode. Re-enable after the taxi deployment.
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.PIX, dataProviderProxy));
         _verify("SettlementDispatcherPix", settlementPixImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherCardOrder() public {
+        // Taxi mode changes this implementation bytecode. Re-enable after the taxi deployment.
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.CardOrder, dataProviderProxy));
         _verify("SettlementDispatcherCardOrder", settlementCardOrderImpl, local);
     }
@@ -328,6 +336,8 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_StargateModule() public {
+        // Taxi mode changes this module bytecode. Re-enable after the taxi deployment.
+        vm.skip(true);
         address[] memory assets = new address[](2);
         assets[0] = cc.usdc;
         assets[1] = cc.weETH;

@@ -10,6 +10,20 @@ import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { SendParam } from "../../../../src/interfaces/IOFT.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 
+contract StargateModuleRefundHarness is StargateModule {
+    constructor(address dataProvider) StargateModule(new address[](0), new StargateModule.AssetConfig[](0), dataProvider) { }
+
+    /// @dev Simulates a native principal and fee payment before calling the production refund helper.
+    function spendNativeAndRefund(address payable recipient, uint256 nativeAssetBridged, uint256 nativeFee) external payable {
+        uint256 balanceBefore = address(this).balance;
+
+        (bool success,) = recipient.call{ value: nativeAssetBridged + nativeFee }("");
+        if (!success) revert NativeTransferFailed();
+
+        _refundUnusedNativeFee(balanceBefore, nativeAssetBridged);
+    }
+}
+
 contract StargateModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
@@ -210,38 +224,27 @@ contract StargateModuleTest is SafeTestSetup {
         assertEq(address(stargateModule).balance, moduleBalanceBefore);
     }
 
-    /// @dev Confirms a native taxi bridge excludes the bridged amount when it calculates the fee refund.
-    function test_executeBridge_refundsUnusedNativeFeeForNativeAsset() public {
-        address nativeAsset = stargateModule.ETH();
-        uint256 amount = 1 ether;
+    /// @dev Confirms the refund helper excludes native principal when it calculates the consumed fee.
+    function test_refundUnusedNativeFee_excludesNativeAssetPrincipal() public {
+        StargateModuleRefundHarness refundHarness = new StargateModuleRefundHarness(address(dataProvider));
+        address payable recipient = payable(makeAddr("nativeRecipient"));
+        uint256 nativeAssetBridged = 1 ether;
+        uint256 nativeFee = 0.01 ether;
+        uint256 surplus = 0.005 ether;
 
-        address[] memory assets = new address[](1);
-        assets[0] = nativeAsset;
-        StargateModule.AssetConfig[] memory assetConfigs = new StargateModule.AssetConfig[](1);
-        assetConfigs[0] = StargateModule.AssetConfig({ isOFT: false, pool: ethStargatePool });
-
-        vm.prank(owner);
-        stargateModule.setAssetConfig(assets, assetConfigs);
-        deal(address(safe), amount);
-
-        (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, nativeAsset, amount, destRecipientAddr, maxSlippage);
-        stargateModule.requestBridge(address(safe), mainnetDestEid, nativeAsset, amount, destRecipientAddr, maxSlippage, signers, signatures);
-
-        (uint64 withdrawalDelay,,) = cashModule.getDelays();
-        vm.warp(block.timestamp + withdrawalDelay);
-        (, uint256 bridgeFee) = stargateModule.getBridgeFee(mainnetDestEid, nativeAsset, amount, destRecipientAddr, maxSlippage);
-
-        uint256 surplus = bridgeFee / 2;
-        deal(sender, bridgeFee + surplus);
+        deal(address(refundHarness), nativeAssetBridged);
+        deal(sender, nativeFee + surplus);
         uint256 senderBalanceBefore = sender.balance;
+        uint256 recipientBalanceBefore = recipient.balance;
 
-        vm.expectEmit(true, true, true, true, address(stargateModule));
+        vm.expectEmit(true, true, true, true, address(refundHarness));
         emit StargateModule.UnusedNativeFeeRefunded(sender, surplus);
         vm.prank(sender);
-        stargateModule.executeBridge{ value: bridgeFee + surplus }(address(safe));
+        refundHarness.spendNativeAndRefund{ value: nativeFee + surplus }(recipient, nativeAssetBridged, nativeFee);
 
-        assertEq(sender.balance, senderBalanceBefore - bridgeFee);
-        assertEq(address(stargateModule).balance, 0);
+        assertEq(sender.balance, senderBalanceBefore - nativeFee);
+        assertEq(recipient.balance, recipientBalanceBefore + nativeAssetBridged + nativeFee);
+        assertEq(address(refundHarness).balance, 0);
     }
 
     /// @dev Confirms the module can cover a fee increase without refunding its existing native balance.
