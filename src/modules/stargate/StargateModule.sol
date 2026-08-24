@@ -210,7 +210,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @param signers Array of addresses that signed the transaction
      * @param signatures Array of signatures from the signers
      * @custom:throws InvalidSignatures if the signatures are invalid
-     * @custom:throws InvalidInput if destination, asset, amount or slippage is invalid
+     * @custom:throws InvalidInput if destination, asset, amount or slippage is invalid, or if ETH is sent with a request that queues
      */
     function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps, address[] calldata signers, bytes[] calldata signatures) external payable nonReentrant onlyEtherFiSafe(safe) {
         if (destRecipient == address(0) || asset == address(0) || asset == ETH || amount == 0 || maxSlippageInBps > 10_000) revert InvalidInput();
@@ -226,6 +226,8 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
             _bridge(destEid, asset, amount, destRecipient, maxSlippageInBps);
             emit BridgeWithStargate(safe, destEid, asset, amount, destRecipient, maxSlippageInBps);
         } else {
+            // The fee is paid on executeBridge, so ETH sent now would be stuck in the module.
+            if (msg.value != 0) revert InvalidInput();
             _getStargateModuleStorage().withdrawals[safe] = CrossChainWithdrawal({
                 destEid: destEid,
                 asset: asset,

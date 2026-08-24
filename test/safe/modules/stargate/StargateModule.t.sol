@@ -196,6 +196,17 @@ contract StargateModuleTest is SafeTestSetup {
         assertEq(usdcBalAfterExecution, usdcBalBefore - amount);
     }
 
+    /// @dev Confirms a queued request rejects ETH, since the fee is paid on executeBridge.
+    function test_requestBridge_revertsWhenEthSentWithQueuedRequest() public {
+        uint256 amount = 100e6;
+        deal(address(usdc), address(safe), amount);
+
+        (address[] memory signers, bytes[] memory signatures) = _getSignatures(mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage);
+
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        stargateModule.requestBridge{ value: 1 }(address(safe), mainnetDestEid, address(usdc), amount, destRecipientAddr, maxSlippage, signers, signatures);
+    }
+
     /// @dev Confirms an ERC20 taxi bridge returns the caller's unused fee payment.
     function test_executeBridge_refundsUnusedNativeFeeForErc20() public {
         uint256 amount = 100e6;
