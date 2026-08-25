@@ -14,21 +14,26 @@ import { ChainConfig, Utils } from "./utils/Utils.sol";
  *         relayer CASHBACK_DISTRIBUTOR_ROLE.
  * @dev grantRole must be sent by the RoleRegistry owner. On networks where the owner is a
  *      multisig/governance (prod), drop the grantRole line and grant via scripts/gnosis-txs/.
- *      Env: PRIVATE_KEY (deployer), CASHBACK_DISTRIBUTOR_RELAYER (relayer to authorize), plus
+ *      Env: PRIVATE_KEY (deployer), CASHBACK_DISTRIBUTOR_RELAYER (relayer to authorize),
+ *      CASHBACK_DISTRIBUTOR_ETHFI (ETHFI token), CASHBACK_DISTRIBUTOR_SETHFI (sETHFI liquid-
+ *      vault share token) -- both immutable on the implementation, so they must be correct at
+ *      deploy time; changing them later requires a new implementation and an upgrade -- plus
  *      ENV + chain so readDeploymentFile() resolves the RoleRegistry address.
  *
  *      Post-deploy steps (this script only completes the first):
  *      1. Grant `CASHBACK_DISTRIBUTOR_ROLE` to the relayer (done above).
- *      2. Fund the payout wallet with the ETHFI and sETHFI that `award`/`awardBatch` will pay out.
- *      3. From the payout wallet, `approve` the deployed CashbackDistributor proxy to spend ETHFI.
- *      4. From the payout wallet, `approve` the deployed CashbackDistributor proxy to spend sETHFI.
- *      `award`/`awardBatch` pull funds via `transferFrom(msg.sender, ...)`; without steps 3-4 the
- *      first claim for a token reverts `ERC20InsufficientAllowance` and burns the retry cap.
+ *      2. Fund the CashbackDistributor proxy itself with the ETHFI/other tokens that
+ *         `award`/`awardBatch`/`awardStaked` pay out -- the contract custodies these funds
+ *         directly and pays from its own balance; there is no payout-wallet allowance anymore.
+ *      3. If cashback will be settled via `awardStaked`, call `setTeller` (role registry owner)
+ *         with the BoringVault-style teller for staking ETHFI into sETHFI.
  */
 contract DeployCashbackDistributor is Utils {
     function run() public {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address relayer = vm.envAddress("CASHBACK_DISTRIBUTOR_RELAYER");
+        address ethfi = vm.envAddress("CASHBACK_DISTRIBUTOR_ETHFI");
+        address sEthfi = vm.envAddress("CASHBACK_DISTRIBUTOR_SETHFI");
 
         string memory deployments = readDeploymentFile();
         address roleRegistry = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "RoleRegistry"));
@@ -36,7 +41,7 @@ contract DeployCashbackDistributor is Utils {
         vm.startBroadcast(deployerPrivateKey);
 
         bytes memory initData = abi.encodeWithSelector(CashbackDistributor.initialize.selector, roleRegistry);
-        address impl = address(new CashbackDistributor());
+        address impl = address(new CashbackDistributor(ethfi, sEthfi));
         address proxy = address(new UUPSProxy(impl, initData));
 
         RoleRegistry(roleRegistry).grantRole(CashbackDistributor(proxy).CASHBACK_DISTRIBUTOR_ROLE(), relayer);
