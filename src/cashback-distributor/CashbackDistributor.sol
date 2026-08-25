@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
 import { ILayerZeroTellerWithReferrer } from "../interfaces/ILayerZeroTellerWithReferrer.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
@@ -13,8 +14,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @notice On-chain settlement gate for ETHFI cashback claims. Custodies the payout funds
  *         itself: `award`/`awardBatch` pay from the contract's own balance, and `awardStaked`
  *         stakes ETHFI into the sETHFI liquid vault before paying out the minted shares. Every
- *         path records the claim as settled, so a claim can be retried after any failure
- *         (network error, unknown broadcast outcome, etc.) without ever paying twice.
+ *         path records the claim as settled. 
  */
 contract CashbackDistributor is UpgradeableProxy {
     using SafeERC20 for IERC20;
@@ -27,6 +27,9 @@ contract CashbackDistributor is UpgradeableProxy {
 
     /// @notice Address of the sETHFI liquid-vault share token.
     address public immutable sEthfi;
+
+    /// @notice Data provider used to check that every cashback recipient is an EtherFiSafe.
+    IEtherFiDataProvider public immutable etherFiDataProvider;
 
     /**
      * @dev Storage structure for CashbackDistributor using the ERC-7201 namespaced diamond storage pattern.
@@ -62,10 +65,12 @@ contract CashbackDistributor is UpgradeableProxy {
     event CashbackAwarded(bytes32 indexed claimId, address indexed recipient, address indexed token, uint256 amount, uint256 sEthfiAmount);
 
     /**
-     * @notice Emitted once per `awardBatch` call, summarizing the batch.
+     * @notice Emitted once per `awardBatch`/`awardStakedBatch` call, summarizing the batch.
      * @param count Number of claims settled in the batch.
-     * @param token The token paid out for every claim in the batch.
-     * @param total Sum of amounts paid out across the batch.
+     * @param token The token paid out for every claim in the batch; the sETHFI address for
+     *        `awardStakedBatch`, mirroring the per-claim staked event convention.
+     * @param total Sum of amounts paid out across the batch; for `awardStakedBatch` this is
+     *        the total ETHFI deposited, not the shares minted.
      */
     event CashbackBatchAwarded(uint256 count, address token, uint256 total);
 
@@ -120,28 +125,44 @@ contract CashbackDistributor is UpgradeableProxy {
     /// @notice Thrown by `setTeller` when the teller's `vault()` is not the sETHFI token.
     error TellerVaultMismatch(address expected, address actual);
 
+    /// @notice Thrown when a cashback recipient is not a registered EtherFiSafe.
+    error NotAnEtherFiSafe(address recipient);
+
     /**
-     * @dev Sets the immutable ETHFI/sETHFI addresses and disables initializers on the
-     *      implementation contract.
+     * @dev Sets the immutable ETHFI/sETHFI/data-provider addresses and disables initializers
+     *      on the implementation contract.
      * @param _ethfi Address of the ETHFI token.
      * @param _sEthfi Address of the sETHFI liquid-vault share token.
-     * @custom:throws InvalidValue If either address is the zero address.
+     * @param _dataProvider Address of the EtherFiDataProvider used to check that every
+     *        cashback recipient is a registered EtherFiSafe.
+     * @custom:throws InvalidValue If any address is the zero address.
      */
-    constructor(address _ethfi, address _sEthfi) {
-        if (_ethfi == address(0) || _sEthfi == address(0)) revert InvalidValue();
+    constructor(address _ethfi, address _sEthfi, address _dataProvider) {
+        if (_ethfi == address(0) || _sEthfi == address(0) || _dataProvider == address(0)) revert InvalidValue();
 
         ethfi = _ethfi;
         sEthfi = _sEthfi;
+        etherFiDataProvider = IEtherFiDataProvider(_dataProvider);
 
         _disableInitializers();
     }
 
     /**
-     * @notice Initializes the proxy with the role registry.
+     * @notice Initializes the proxy with the role registry and, optionally, the teller.
+     * @dev A nonzero `_teller` goes through the exact same validation as `setTeller`
+     *      (vault match, no share lock), so a proxy can launch with `awardStaked` live from
+     *      its first block. Passing the zero address leaves the teller unset — `awardStaked`
+     *      reverts `TellerNotSet` until the role registry owner calls `setTeller`.
      * @param _roleRegistry Address of the role registry contract.
+     * @param _teller Address of the BoringVault-style teller used by `awardStaked`, or the
+     *        zero address to leave it unset.
+     * @custom:throws TellerVaultMismatch If `_teller` is nonzero and its `vault()` is not the sETHFI token.
+     * @custom:throws TellerSharesLocked If `_teller` is nonzero and reports a nonzero `shareLockPeriod()`.
      */
-    function initialize(address _roleRegistry) external initializer {
+    function initialize(address _roleRegistry, address _teller) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
+
+        if (_teller != address(0)) _setTeller(_teller);
     }
 
     /**
@@ -183,6 +204,7 @@ contract CashbackDistributor is UpgradeableProxy {
      * @param recipient The account to pay the cashback to.
      * @param token The token to pay out.
      * @param amount The amount to pay out.
+     * @custom:throws NotAnEtherFiSafe If `recipient` is not a registered EtherFiSafe.
      * @custom:throws InsufficientBalance If this contract's own `token` balance is below `amount`.
      */
     function award(bytes32 claimId, address recipient, address token, uint256 amount) external whenNotPaused onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
@@ -201,6 +223,7 @@ contract CashbackDistributor is UpgradeableProxy {
      * @param recipients The accounts to pay the cashback to, one per claim.
      * @param token The token to pay out for every claim in the batch.
      * @param amounts The amounts to pay out, one per claim.
+     * @custom:throws NotAnEtherFiSafe If any recipient in the batch is not a registered EtherFiSafe.
      * @custom:throws InsufficientBalance If this contract's own `token` balance is below the batch total.
      */
     function awardBatch(bytes32[] calldata claimIds, address[] calldata recipients, address token, uint256[] calldata amounts) external whenNotPaused onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
@@ -247,36 +270,75 @@ contract CashbackDistributor is UpgradeableProxy {
      * @param recipient The account to pay the minted sETHFI shares to.
      * @param ethfiAmount The amount of ETHFI to stake.
      * @param minShares The minimum acceptable amount of sETHFI shares to mint.
+     * @custom:throws NotAnEtherFiSafe If `recipient` is not a registered EtherFiSafe.
      * @custom:throws TellerNotSet If the teller has not been set.
      * @custom:throws InsufficientBalance If this contract's own ETHFI balance is below `ethfiAmount`.
      * @custom:throws InsufficientSharesMinted If the sETHFI shares minted are below `minShares`.
      */
     function awardStaked(bytes32 claimId, address recipient, uint256 ethfiAmount, uint256 minShares) external whenNotPaused onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
-        CashbackDistributorStorage storage $ = _getCashbackDistributorStorage();
+        address tellerAddr = _getTellerOrRevert();
 
-        if ($.settled[claimId]) revert AlreadySettled(claimId);
-
-        address tellerAddr = $.teller;
-        if (tellerAddr == address(0)) revert TellerNotSet();
-
-        uint256 available = IERC20(ethfi).balanceOf(address(this));
-        if (available < ethfiAmount) revert InsufficientBalance(ethfi, ethfiAmount, available);
-
-        $.settled[claimId] = true;
+        _checkBalance(ethfi, ethfiAmount);
 
         IERC20(ethfi).forceApprove(tellerAddr, ethfiAmount);
 
-        uint256 sharesBefore = IERC20(sEthfi).balanceOf(address(this));
-        ILayerZeroTellerWithReferrer(tellerAddr).deposit(ERC20(ethfi), ethfiAmount, minShares, address(0));
-        uint256 sharesMinted = IERC20(sEthfi).balanceOf(address(this)) - sharesBefore;
+        _awardStaked(tellerAddr, claimId, recipient, ethfiAmount, minShares);
+
+        IERC20(ethfi).forceApprove(tellerAddr, 0);
+    }
+
+    /**
+     * @notice Settles many staked cashback claims in one transaction, staking each claim's
+     *         ETHFI into the sETHFI liquid vault and paying the minted shares to its recipient.
+     * @dev The batch is all-or-nothing, exactly like `awardBatch`: mismatched array lengths
+     *      revert `ArrayLengthMismatch`, an already-settled `claimId` reverts `AlreadySettled`,
+     *      and a non-safe recipient reverts `NotAnEtherFiSafe` -- any of them unwinds the whole
+     *      batch. This contract's own ETHFI balance is checked against the sum of
+     *      `ethfiAmounts` before any claim settles. The teller is approved once for the batch
+     *      total, each claim deposits and measures its own sETHFI balance delta against its own
+     *      `minShares` (see `awardStaked`), and the approval is reset to zero after the last
+     *      deposit. Emits one `CashbackAwarded` per claim plus a single `CashbackBatchAwarded`
+     *      carrying the sETHFI address and the total ETHFI deposited -- the same
+     *      token/amount convention as the per-claim staked event.
+     * @param claimIds The claim identifiers (`cashback_claim.id`) to settle.
+     * @param recipients The accounts to pay the minted sETHFI shares to, one per claim.
+     * @param ethfiAmounts The amounts of ETHFI to stake, one per claim.
+     * @param minShares The minimum acceptable sETHFI shares to mint, one per claim.
+     * @custom:throws NotAnEtherFiSafe If any recipient in the batch is not a registered EtherFiSafe.
+     * @custom:throws TellerNotSet If the teller has not been set.
+     * @custom:throws InsufficientBalance If this contract's own ETHFI balance is below the batch total.
+     * @custom:throws InsufficientSharesMinted If any claim's minted shares are below its `minShares`.
+     */
+    function awardStakedBatch(bytes32[] calldata claimIds, address[] calldata recipients, uint256[] calldata ethfiAmounts, uint256[] calldata minShares) external whenNotPaused onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
+        uint256 len = claimIds.length;
+        if (recipients.length != len || ethfiAmounts.length != len || minShares.length != len) revert ArrayLengthMismatch();
+
+        address tellerAddr = _getTellerOrRevert();
+
+        uint256 total;
+        for (uint256 i = 0; i < len;) {
+            total += ethfiAmounts[i];
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        _checkBalance(ethfi, total);
+
+        IERC20(ethfi).forceApprove(tellerAddr, total);
+
+        for (uint256 i = 0; i < len;) {
+            _awardStaked(tellerAddr, claimIds[i], recipients[i], ethfiAmounts[i], minShares[i]);
+
+            unchecked {
+                ++i;
+            }
+        }
 
         IERC20(ethfi).forceApprove(tellerAddr, 0);
 
-        if (sharesMinted < minShares) revert InsufficientSharesMinted(minShares, sharesMinted);
-
-        IERC20(sEthfi).safeTransfer(recipient, sharesMinted);
-
-        emit CashbackAwarded(claimId, recipient, sEthfi, ethfiAmount, sharesMinted);
+        emit CashbackBatchAwarded(len, sEthfi, total);
     }
 
     /**
@@ -303,6 +365,15 @@ contract CashbackDistributor is UpgradeableProxy {
     function setTeller(address _teller) external onlyRoleRegistryOwner {
         if (_teller == address(0)) revert InvalidValue();
 
+        _setTeller(_teller);
+    }
+
+    /**
+     * @dev Shared teller validation + store, used by both `initialize` and `setTeller` so the
+     *      teller passes the same checks no matter which path sets it. See `setTeller` for the
+     *      rationale behind each check.
+     */
+    function _setTeller(address _teller) internal {
         address actualVault = ILayerZeroTellerWithReferrer(_teller).vault();
         if (actualVault != sEthfi) revert TellerVaultMismatch(sEthfi, actualVault);
 
@@ -373,6 +444,8 @@ contract CashbackDistributor is UpgradeableProxy {
      *      `awardStaked` populates it.
      */
     function _award(bytes32 claimId, address recipient, address token, uint256 amount) internal {
+        _checkRecipientIsSafe(recipient);
+
         CashbackDistributorStorage storage $ = _getCashbackDistributorStorage();
 
         if ($.settled[claimId]) revert AlreadySettled(claimId);
@@ -384,11 +457,56 @@ contract CashbackDistributor is UpgradeableProxy {
     }
 
     /**
+     * @dev Settles one staked claim: checks the recipient is a safe, marks the claim settled,
+     *      deposits `ethfiAmount` into the sETHFI liquid vault via
+     *      `ILayerZeroTellerWithReferrer.deposit` -- passing `address(0)` as the referral
+     *      (hardcoded: cashback deposits are never referred) -- measures shares minted by the
+     *      balance delta of the sETHFI token (rather than trusting the teller's return value),
+     *      pays them to `recipient` and emits the per-claim event. The caller is responsible
+     *      for the ETHFI balance check and the teller approval/reset, so a batch can approve
+     *      its total once instead of once per claim.
+     */
+    function _awardStaked(address tellerAddr, bytes32 claimId, address recipient, uint256 ethfiAmount, uint256 minShares) internal {
+        _checkRecipientIsSafe(recipient);
+
+        CashbackDistributorStorage storage $ = _getCashbackDistributorStorage();
+
+        if ($.settled[claimId]) revert AlreadySettled(claimId);
+        $.settled[claimId] = true;
+
+        uint256 sharesBefore = IERC20(sEthfi).balanceOf(address(this));
+        ILayerZeroTellerWithReferrer(tellerAddr).deposit(ERC20(ethfi), ethfiAmount, minShares, address(0));
+        uint256 sharesMinted = IERC20(sEthfi).balanceOf(address(this)) - sharesBefore;
+
+        if (sharesMinted < minShares) revert InsufficientSharesMinted(minShares, sharesMinted);
+
+        IERC20(sEthfi).safeTransfer(recipient, sharesMinted);
+
+        emit CashbackAwarded(claimId, recipient, sEthfi, ethfiAmount, sharesMinted);
+    }
+
+    /// @dev Returns the configured teller, reverting `TellerNotSet` when it is unset.
+    function _getTellerOrRevert() internal view returns (address tellerAddr) {
+        tellerAddr = _getCashbackDistributorStorage().teller;
+        if (tellerAddr == address(0)) revert TellerNotSet();
+    }
+
+    /**
      * @dev Reverts if this contract's own `token` balance is below `required`.
      *      Read-only: performs no state changes, so a revert here never affects settlement.
      */
     function _checkBalance(address token, uint256 required) internal view {
         uint256 available = IERC20(token).balanceOf(address(this));
         if (available < required) revert InsufficientBalance(token, required, available);
+    }
+
+    /**
+     * @dev Reverts `NotAnEtherFiSafe` unless `recipient` is a registered EtherFiSafe on the
+     *      data provider. Cashback settles only into EtherFiSafes — never arbitrary addresses —
+     *      so a relayer key compromise (or a typo'd recipient) cannot drain the payout funds
+     *      outside the protocol.
+     */
+    function _checkRecipientIsSafe(address recipient) internal view {
+        if (!etherFiDataProvider.isEtherFiSafe(recipient)) revert NotAnEtherFiSafe(recipient);
     }
 }

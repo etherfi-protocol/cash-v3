@@ -25,7 +25,7 @@ contract CashbackDistributorTest is Test {
     address public recipient2 = makeAddr("recipient2");
     address public recipient3 = makeAddr("recipient3");
     address public stranger = makeAddr("stranger");
-    address public dataProviderMock = makeAddr("dataProvider");
+    MockEtherFiDataProvider public dataProvider;
     address public pauser = makeAddr("pauser");
     address public unpauser = makeAddr("unpauser");
 
@@ -41,18 +41,28 @@ contract CashbackDistributorTest is Test {
     event TellerSet(address indexed teller);
 
     function setUp() public {
-        // ETHFI/sETHFI are immutable, set at implementation deploy, so the mocks must exist first.
+        // ETHFI/sETHFI/data-provider are immutable, set at implementation deploy, so the mocks
+        // must exist first.
         ethfi = new MockERC20("ETHFI", "ETHFI", 18);
         sEthfi = new MockERC20("Staked ETHFI", "sETHFI", 18);
         teller = new MockTeller(sEthfi);
+        dataProvider = new MockEtherFiDataProvider();
+
+        // Cashback settles only into registered EtherFiSafes, so the recipients used across
+        // these tests must be registered. `stranger` deliberately is not.
+        dataProvider.setEtherFiSafe(recipient, true);
+        dataProvider.setEtherFiSafe(recipient2, true);
+        dataProvider.setEtherFiSafe(recipient3, true);
 
         vm.startPrank(owner);
 
-        address rrImpl = address(new RoleRegistry(dataProviderMock));
+        address rrImpl = address(new RoleRegistry(address(dataProvider)));
         roleRegistry = RoleRegistry(address(new UUPSProxy(rrImpl, abi.encodeWithSelector(RoleRegistry.initialize.selector, owner))));
 
-        address distributorImpl = address(new CashbackDistributor(address(ethfi), address(sEthfi)));
-        distributor = CashbackDistributor(address(new UUPSProxy(distributorImpl, abi.encodeWithSelector(CashbackDistributor.initialize.selector, address(roleRegistry)))));
+        address distributorImpl = address(new CashbackDistributor(address(ethfi), address(sEthfi), address(dataProvider)));
+        // Teller left unset at init here so setTeller/TellerNotSet behavior stays testable;
+        // initialize-with-teller has its own tests below.
+        distributor = CashbackDistributor(address(new UUPSProxy(distributorImpl, abi.encodeWithSelector(CashbackDistributor.initialize.selector, address(roleRegistry), address(0)))));
 
         roleRegistry.grantRole(distributor.CASHBACK_DISTRIBUTOR_ROLE(), payoutWallet);
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
@@ -83,19 +93,25 @@ contract CashbackDistributorTest is Test {
 
     // --- constructor ---
 
-    function test_constructor_setsImmutableEthfiAndSEthfi() public view {
+    function test_constructor_setsImmutableEthfiAndSEthfiAndDataProvider() public view {
         assertEq(distributor.ethfi(), address(ethfi));
         assertEq(distributor.sEthfi(), address(sEthfi));
+        assertEq(address(distributor.etherFiDataProvider()), address(dataProvider));
     }
 
     function test_constructor_revertsForZeroEthfi() public {
         vm.expectRevert(CashbackDistributor.InvalidValue.selector);
-        new CashbackDistributor(address(0), address(sEthfi));
+        new CashbackDistributor(address(0), address(sEthfi), address(dataProvider));
     }
 
     function test_constructor_revertsForZeroSEthfi() public {
         vm.expectRevert(CashbackDistributor.InvalidValue.selector);
-        new CashbackDistributor(address(ethfi), address(0));
+        new CashbackDistributor(address(ethfi), address(0), address(dataProvider));
+    }
+
+    function test_constructor_revertsForZeroDataProvider() public {
+        vm.expectRevert(CashbackDistributor.InvalidValue.selector);
+        new CashbackDistributor(address(ethfi), address(sEthfi), address(0));
     }
 
     // --- role constant ---
@@ -629,6 +645,64 @@ contract CashbackDistributorTest is Test {
         assertEq(token.balanceOf(recipient), 0);
     }
 
+    // --- recipient gate: cashback settles only into registered EtherFiSafes ---
+
+    function test_award_revertsWhenRecipientNotAnEtherFiSafe() public {
+        _fundContract(token, 100e6);
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.NotAnEtherFiSafe.selector, stranger));
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, stranger, address(token), 100e6);
+
+        assertFalse(distributor.settled(CLAIM_1));
+    }
+
+    function test_award_revertsWhenRecipientDeregistered() public {
+        _fundContract(token, 100e6);
+
+        // A recipient that was a safe but got deregistered must stop receiving cashback.
+        dataProvider.setEtherFiSafe(recipient, false);
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.NotAnEtherFiSafe.selector, recipient));
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), 100e6);
+    }
+
+    function test_awardBatch_revertsWhenAnyRecipientNotAnEtherFiSafe() public {
+        _fundContract(token, 30e6);
+
+        bytes32[] memory claimIds = new bytes32[](2);
+        claimIds[0] = CLAIM_1;
+        claimIds[1] = CLAIM_2;
+
+        address[] memory recipients = new address[](2);
+        recipients[0] = recipient;
+        recipients[1] = stranger;
+
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 10e6;
+        amounts[1] = 20e6;
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.NotAnEtherFiSafe.selector, stranger));
+        vm.prank(payoutWallet);
+        distributor.awardBatch(claimIds, recipients, address(token), amounts);
+
+        // The batch is all-or-nothing: the safe recipient earlier in the batch settled nothing.
+        assertFalse(distributor.settled(CLAIM_1));
+        assertEq(token.balanceOf(recipient), 0);
+    }
+
+    function test_awardStaked_revertsWhenRecipientNotAnEtherFiSafe() public {
+        _setTeller();
+        _fundContract(ethfi, 100 ether);
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.NotAnEtherFiSafe.selector, stranger));
+        vm.prank(payoutWallet);
+        distributor.awardStaked(CLAIM_1, stranger, 100 ether, 100 ether);
+
+        assertFalse(distributor.settled(CLAIM_1));
+    }
+
     // --- setTeller ---
 
     function test_setTeller_byOwner_setsTellerAndEmits() public {
@@ -868,24 +942,267 @@ contract CashbackDistributorTest is Test {
         assertEq(sEthfi.balanceOf(recipient), 100 ether);
     }
 
+    // --- awardStakedBatch ---
+
+    function test_awardStakedBatch_happyPath_depositsSharesAndSettlesAllAndEmits() public {
+        _setTeller();
+        _fundContract(ethfi, 60 ether);
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+
+        vm.expectEmit(true, true, true, true, address(distributor));
+        emit CashbackAwarded(CLAIM_1, recipient, address(sEthfi), 10 ether, 10 ether);
+        vm.expectEmit(true, true, true, true, address(distributor));
+        emit CashbackAwarded(CLAIM_2, recipient2, address(sEthfi), 20 ether, 20 ether);
+        vm.expectEmit(true, true, true, true, address(distributor));
+        emit CashbackAwarded(CLAIM_3, recipient3, address(sEthfi), 30 ether, 30 ether);
+        vm.expectEmit(true, true, true, true, address(distributor));
+        emit CashbackBatchAwarded(3, address(sEthfi), 60 ether);
+
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+
+        assertTrue(distributor.settled(CLAIM_1));
+        assertTrue(distributor.settled(CLAIM_2));
+        assertTrue(distributor.settled(CLAIM_3));
+        assertEq(sEthfi.balanceOf(recipient), 10 ether);
+        assertEq(sEthfi.balanceOf(recipient2), 20 ether);
+        assertEq(sEthfi.balanceOf(recipient3), 30 ether);
+        assertEq(ethfi.balanceOf(address(distributor)), 0);
+        assertEq(sEthfi.balanceOf(address(distributor)), 0);
+    }
+
+    function test_awardStakedBatch_appliesPerClaimMinShares_withTellerPremium() public {
+        _setTeller();
+        // 5% premium/fee taken by the teller -- each claim's minShares must be measured
+        // against its own deposit, not the batch total.
+        teller.setPremiumBps(500);
+        _fundContract(ethfi, 30 ether);
+
+        bytes32[] memory claimIds = new bytes32[](2);
+        claimIds[0] = CLAIM_1;
+        claimIds[1] = CLAIM_2;
+
+        address[] memory recipients = new address[](2);
+        recipients[0] = recipient;
+        recipients[1] = recipient2;
+
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 10 ether;
+        amounts[1] = 20 ether;
+
+        uint256[] memory minShares = new uint256[](2);
+        minShares[0] = 9.5 ether;
+        minShares[1] = 19 ether;
+
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+
+        assertEq(sEthfi.balanceOf(recipient), 9.5 ether);
+        assertEq(sEthfi.balanceOf(recipient2), 19 ether);
+    }
+
+    function test_awardStakedBatch_resetsApprovalToZero() public {
+        _setTeller();
+        _fundContract(ethfi, 60 ether);
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+
+        assertEq(ethfi.allowance(address(distributor), address(teller)), 0);
+    }
+
+    function test_awardStakedBatch_revertsWhenTellerNotSet() public {
+        _fundContract(ethfi, 60 ether);
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+
+        vm.expectRevert(CashbackDistributor.TellerNotSet.selector);
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+    }
+
+    function test_awardStakedBatch_revertsWithInsufficientBalance_totalAcrossBatch() public {
+        _setTeller();
+        // One claim's worth short of the 60 ether batch total.
+        _fundContract(ethfi, 60 ether - 1);
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.InsufficientBalance.selector, address(ethfi), 60 ether, 60 ether - 1));
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+
+        assertFalse(distributor.settled(CLAIM_1));
+        assertFalse(distributor.settled(CLAIM_2));
+        assertFalse(distributor.settled(CLAIM_3));
+    }
+
+    function test_awardStakedBatch_revertsWhenOneClaimAlreadySettled() public {
+        _setTeller();
+        // Cover the standalone award plus the batch total so the balance pre-check does not
+        // mask the AlreadySettled revert being tested.
+        _fundContract(ethfi, 80 ether);
+
+        vm.prank(payoutWallet);
+        distributor.awardStaked(CLAIM_2, recipient2, 20 ether, 20 ether);
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.AlreadySettled.selector, CLAIM_2));
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+
+        // All-or-nothing: the claim earlier in the batch settled nothing.
+        assertFalse(distributor.settled(CLAIM_1));
+        assertEq(sEthfi.balanceOf(recipient), 0);
+    }
+
+    function test_awardStakedBatch_revertsWhenAnyRecipientNotAnEtherFiSafe() public {
+        _setTeller();
+        _fundContract(ethfi, 60 ether);
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+        recipients[2] = stranger;
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.NotAnEtherFiSafe.selector, stranger));
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+
+        assertFalse(distributor.settled(CLAIM_1));
+        assertEq(sEthfi.balanceOf(recipient), 0);
+    }
+
+    function test_awardStakedBatch_revertsOnLengthMismatch() public {
+        _setTeller();
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+
+        address[] memory shortRecipients = new address[](2);
+        shortRecipients[0] = recipient;
+        shortRecipients[1] = recipient2;
+        vm.expectRevert(CashbackDistributor.ArrayLengthMismatch.selector);
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, shortRecipients, amounts, minShares);
+
+        uint256[] memory shortAmounts = new uint256[](2);
+        vm.expectRevert(CashbackDistributor.ArrayLengthMismatch.selector);
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, shortAmounts, minShares);
+
+        uint256[] memory shortMinShares = new uint256[](2);
+        vm.expectRevert(CashbackDistributor.ArrayLengthMismatch.selector);
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, shortMinShares);
+    }
+
+    function test_awardStakedBatch_revertsForNonRoleCaller() public {
+        _setTeller();
+        _fundContract(ethfi, 60 ether);
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+
+        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.prank(stranger);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+    }
+
+    function test_awardStakedBatch_revertsWhenPaused() public {
+        _setTeller();
+        _fundContract(ethfi, 60 ether);
+
+        vm.prank(pauser);
+        distributor.pause();
+
+        (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) = _stakedBatch();
+
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(payoutWallet);
+        distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
+    }
+
+    /// @dev The canonical 3-claim staked batch used across the awardStakedBatch tests:
+    ///      10/20/30 ETHFI to recipient/recipient2/recipient3, minShares == amounts (the mock
+    ///      teller mints 1:1 unless a premium is set).
+    function _stakedBatch() internal view returns (bytes32[] memory claimIds, address[] memory recipients, uint256[] memory amounts, uint256[] memory minShares) {
+        claimIds = new bytes32[](3);
+        claimIds[0] = CLAIM_1;
+        claimIds[1] = CLAIM_2;
+        claimIds[2] = CLAIM_3;
+
+        recipients = new address[](3);
+        recipients[0] = recipient;
+        recipients[1] = recipient2;
+        recipients[2] = recipient3;
+
+        amounts = new uint256[](3);
+        amounts[0] = 10 ether;
+        amounts[1] = 20 ether;
+        amounts[2] = 30 ether;
+
+        minShares = new uint256[](3);
+        minShares[0] = 10 ether;
+        minShares[1] = 20 ether;
+        minShares[2] = 30 ether;
+    }
+
     // --- initializer ---
 
     function test_initialize_revertsOnSecondCall() public {
         vm.expectRevert(abi.encodeWithSignature("InvalidInitialization()"));
-        distributor.initialize(address(roleRegistry));
+        distributor.initialize(address(roleRegistry), address(0));
+    }
+
+    function test_initialize_withTeller_setsTellerAndEmits() public {
+        address impl = address(new CashbackDistributor(address(ethfi), address(sEthfi), address(dataProvider)));
+
+        vm.expectEmit(true, true, true, true);
+        emit TellerSet(address(teller));
+
+        CashbackDistributor fresh = CashbackDistributor(address(new UUPSProxy(impl, abi.encodeWithSelector(CashbackDistributor.initialize.selector, address(roleRegistry), address(teller)))));
+
+        assertEq(fresh.teller(), address(teller));
+    }
+
+    function test_initialize_withZeroTeller_leavesTellerUnset() public view {
+        // The setUp fixture initializes with the zero teller -- the deferred-set path.
+        assertEq(distributor.teller(), address(0));
+    }
+
+    function test_initialize_withTeller_revertsOnVaultMismatch() public {
+        // The initializer must run the same teller validation as setTeller: a teller whose
+        // vault() is not the sEthfi immutable kills the whole (atomic) proxy deploy + init.
+        MockERC20 wrongShareToken = new MockERC20("Wrong Share", "wSHARE", 18);
+        MockTeller wrongTeller = new MockTeller(wrongShareToken);
+        address impl = address(new CashbackDistributor(address(ethfi), address(sEthfi), address(dataProvider)));
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.TellerVaultMismatch.selector, address(sEthfi), address(wrongShareToken)));
+        new UUPSProxy(impl, abi.encodeWithSelector(CashbackDistributor.initialize.selector, address(roleRegistry), address(wrongTeller)));
+    }
+
+    function test_initialize_withTeller_revertsWhenSharesLocked() public {
+        uint64 lockPeriod = 1 days;
+        MockTeller lockedTeller = new MockTeller(sEthfi);
+        lockedTeller.setShareLockPeriod(lockPeriod);
+        address impl = address(new CashbackDistributor(address(ethfi), address(sEthfi), address(dataProvider)));
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.TellerSharesLocked.selector, lockPeriod));
+        new UUPSProxy(impl, abi.encodeWithSelector(CashbackDistributor.initialize.selector, address(roleRegistry), address(lockedTeller)));
     }
 
     // --- upgrade authorization ---
 
     function test_upgrade_succeedsForRoleRegistryOwner() public {
-        address newImpl = address(new CashbackDistributor(address(ethfi), address(sEthfi)));
+        address newImpl = address(new CashbackDistributor(address(ethfi), address(sEthfi), address(dataProvider)));
 
         vm.prank(owner);
         distributor.upgradeToAndCall(newImpl, "");
     }
 
     function test_upgrade_revertsForNonOwner() public {
-        address newImpl = address(new CashbackDistributor(address(ethfi), address(sEthfi)));
+        address newImpl = address(new CashbackDistributor(address(ethfi), address(sEthfi), address(dataProvider)));
 
         vm.prank(stranger);
         vm.expectRevert(RoleRegistry.OnlyUpgrader.selector);
@@ -908,5 +1225,22 @@ contract MockTellerWithoutShareLock {
 
     function vault() external view returns (address) {
         return _vault;
+    }
+}
+
+/**
+ * @dev Minimal EtherFiDataProvider stand-in exposing just `isEtherFiSafe`, which is the only
+ *      surface CashbackDistributor touches: the recipient gate that keeps cashback settling
+ *      only into registered EtherFiSafes.
+ */
+contract MockEtherFiDataProvider {
+    mapping(address account => bool isSafe) private _safes;
+
+    function setEtherFiSafe(address account, bool isSafe) external {
+        _safes[account] = isSafe;
+    }
+
+    function isEtherFiSafe(address account) external view returns (bool) {
+        return _safes[account];
     }
 }
