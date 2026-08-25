@@ -21,6 +21,13 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
     IEtherFiDataProvider public immutable etherFiDataProvider;
 
     /**
+     * @notice The only address allowed to call revokeFast (the RevokeAdmin contract)
+     * @dev The emergency valve that complements the timelocked role admin: it can
+     *      instantly revoke operational/guardian roles but never the admin roles
+     */
+    address public revokeAdmin;
+
+    /**
      * @notice Role identifier for pausing operations
      * @dev Used for emergency protocol pause functionality
      */
@@ -75,6 +82,30 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
      * @notice Thrown when an account without the admin-timelock role attempts a timelocked admin operation
      */
     error OnlyAdminTimelock();
+
+    /**
+     * @notice Thrown when an account other than the revoke admin calls revokeFast
+     */
+    error OnlyRevokeAdmin();
+
+    /**
+     * @notice Thrown when revokeFast targets a protected role (ADMIN_ROLE or ADMIN_TIMELOCK_ROLE)
+     */
+    error InvalidRoleToRevoke();
+
+    /**
+     * @notice Emitted when the revoke admin is updated
+     * @param oldRevokeAdmin Previous revoke admin address
+     * @param newRevokeAdmin New revoke admin address
+     */
+    event RevokeAdminSet(address oldRevokeAdmin, address newRevokeAdmin);
+
+    /**
+     * @notice Emitted when a role is instantly revoked via revokeFast
+     * @param role The role that was revoked
+     * @param account The account the role was revoked from
+     */
+    event RoleRevokedFast(bytes32 indexed role, address indexed account);
 
     /**
      * @notice Thrown when an invalid input is passed as argument
@@ -277,6 +308,33 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
      */
     function onlyUnpauser(address account) external view {
         if (!hasRole(UNPAUSER, account)) revert OnlyUnpauser();
+    }
+
+    /**
+     * @notice Sets the address allowed to call revokeFast
+     * @dev Only callable by the owner (the upgrade timelock after cutover)
+     * @param _revokeAdmin Address of the RevokeAdmin contract (zero disables fast revokes)
+     */
+    function setRevokeAdmin(address _revokeAdmin) external onlyOwner {
+        emit RevokeAdminSet(revokeAdmin, _revokeAdmin);
+        revokeAdmin = _revokeAdmin;
+    }
+
+    /**
+     * @notice Instantly revokes an operational/guardian role from an account
+     * @dev The emergency valve for leaked keys: bypasses the timelocked role admin.
+     *      Cannot revoke ADMIN_ROLE or ADMIN_TIMELOCK_ROLE - those changes stay
+     *      behind the owner (upgrade timelock)
+     * @param role The role to revoke
+     * @param account The account to revoke the role from
+     * @custom:throws OnlyRevokeAdmin if the caller is not the revoke admin
+     * @custom:throws InvalidRoleToRevoke if the role is ADMIN_ROLE or ADMIN_TIMELOCK_ROLE
+     */
+    function revokeFast(bytes32 role, address account) external {
+        if (msg.sender != revokeAdmin) revert OnlyRevokeAdmin();
+        if (role == ADMIN_ROLE || role == ADMIN_TIMELOCK_ROLE) revert InvalidRoleToRevoke();
+        _setRole(account, uint256(role), false);
+        emit RoleRevokedFast(role, account);
     }
 
     /**
