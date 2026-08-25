@@ -12,9 +12,11 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         wallet to the recipient and records the claim as settled, so a claim can be retried
  *         after any failure (network error, unknown broadcast outcome, etc.) without ever
  *         paying twice.
- * @dev Holds no funds: `award`/`awardBatch` move tokens with `transferFrom(msg.sender, ...)`,
- *      so value stays in the payout wallet at all times. There is no balance to secure here,
- *      so there is no `withdrawFunds` and no rescue path. A claim spans multiple sources, so
+ * @dev Holds no funds in normal operation: `award`/`awardBatch` move tokens with
+ *      `transferFrom(msg.sender, ...)`, so value stays in the payout wallet at all times.
+ *      `rescueERC20`/`rescueETH` exist only to recover tokens or ETH accidentally sent
+ *      directly to this contract's address; they are not part of the normal award flow and
+ *      are callable only by the role registry owner. A claim spans multiple sources, so
  *      neither the functions nor the events carry a source field; per-source attribution lives
  *      only in the off-chain ledger.
  */
@@ -56,11 +58,38 @@ contract CashbackDistributor is UpgradeableProxy {
      */
     event CashbackBatchAwarded(uint256 count, address token, uint256 total);
 
+    /**
+     * @notice Emitted when ERC20 tokens accidentally sent to this contract are rescued.
+     * @param token The token rescued.
+     * @param to The rescue recipient.
+     * @param amount The amount rescued.
+     */
+    event RescueERC20(address indexed token, address indexed to, uint256 amount);
+
+    /**
+     * @notice Emitted when native ETH accidentally sent to this contract is rescued.
+     * @param to The rescue recipient.
+     * @param amount The amount rescued.
+     */
+    event RescueETH(address indexed to, uint256 amount);
+
     /// @notice Thrown when a claim has already been settled.
     error AlreadySettled(bytes32 claimId);
 
     /// @notice Thrown when `awardBatch` input arrays have mismatched lengths.
     error ArrayLengthMismatch();
+
+    /// @notice Thrown when a rescue's recipient is the zero address.
+    error InvalidRecipient();
+
+    /// @notice Thrown when a native ETH rescue transfer fails.
+    error EthTransferFailed();
+
+    /// @notice Thrown when the payout wallet's token balance is below the amount required to settle.
+    error InsufficientBalance(address token, uint256 required, uint256 available);
+
+    /// @notice Thrown when the payout wallet's allowance to this contract is below the amount required to settle.
+    error InsufficientAllowance(address token, uint256 required, uint256 allowance);
 
     constructor() {
         _disableInitializers();
@@ -98,13 +127,18 @@ contract CashbackDistributor is UpgradeableProxy {
      *         (the payout wallet) to `recipient`.
      * @dev Reverts `AlreadySettled` if `claimId` was already settled, so re-broadcasting a
      *      claim whose outcome is unknown is always safe. `amount` of zero is allowed and
-     *      still settles the claim.
+     *      still settles the claim. Checks the caller's balance and allowance before touching
+     *      any state, so a revert here never marks the claim settled and it remains awardable
+     *      once the payout wallet is funded/approved.
      * @param claimId The claim identifier (`cashback_claim.id`).
      * @param recipient The account to pay the cashback to.
      * @param token The token to pay out.
      * @param amount The amount to pay out.
+     * @custom:throws InsufficientBalance If the caller's `token` balance is below `amount`.
+     * @custom:throws InsufficientAllowance If the caller's allowance to this contract is below `amount`.
      */
     function award(bytes32 claimId, address recipient, address token, uint256 amount) external whenNotPaused onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
+        _checkBalanceAndAllowance(token, amount);
         _award(claimId, recipient, token, amount);
     }
 
@@ -112,11 +146,15 @@ contract CashbackDistributor is UpgradeableProxy {
      * @notice Settles many cashback claims for the same token in one transaction.
      * @dev `recipients` and `amounts` must be the same length as `claimIds`, or the whole call
      *      reverts `ArrayLengthMismatch`. If any `claimId` in the batch was already settled, the
-     *      whole call reverts `AlreadySettled` for that id, so a batch is all-or-nothing.
+     *      whole call reverts `AlreadySettled` for that id, so a batch is all-or-nothing. The
+     *      caller's balance and allowance are checked against the sum of `amounts` before any
+     *      claim in the batch is settled.
      * @param claimIds The claim identifiers (`cashback_claim.id`) to settle.
      * @param recipients The accounts to pay the cashback to, one per claim.
      * @param token The token to pay out for every claim in the batch.
      * @param amounts The amounts to pay out, one per claim.
+     * @custom:throws InsufficientBalance If the caller's `token` balance is below the batch total.
+     * @custom:throws InsufficientAllowance If the caller's allowance to this contract is below the batch total.
      */
     function awardBatch(bytes32[] calldata claimIds, address[] calldata recipients, address token, uint256[] calldata amounts) external whenNotPaused onlyRole(CASHBACK_DISTRIBUTOR_ROLE) {
         uint256 len = claimIds.length;
@@ -124,7 +162,6 @@ contract CashbackDistributor is UpgradeableProxy {
 
         uint256 total;
         for (uint256 i = 0; i < len;) {
-            _award(claimIds[i], recipients[i], token, amounts[i]);
             total += amounts[i];
 
             unchecked {
@@ -132,7 +169,55 @@ contract CashbackDistributor is UpgradeableProxy {
             }
         }
 
+        _checkBalanceAndAllowance(token, total);
+
+        for (uint256 i = 0; i < len;) {
+            _award(claimIds[i], recipients[i], token, amounts[i]);
+
+            unchecked {
+                ++i;
+            }
+        }
+
         emit CashbackBatchAwarded(len, token, total);
+    }
+
+    /**
+     * @notice Rescues ERC20 tokens accidentally sent directly to this contract.
+     * @dev The contract never holds funds in normal operation, so this is not part of the award
+     *      flow: `award`/`awardBatch` move tokens straight from the payout wallet to the
+     *      recipient via `transferFrom`. This exists solely to recover tokens mistakenly sent
+     *      to this contract's address, and is callable only by the role registry owner.
+     * @param token The token to rescue.
+     * @param to The address to send the rescued tokens to.
+     * @param amount The amount to rescue.
+     * @custom:throws OnlyRoleRegistryOwner If the caller is not the role registry owner.
+     * @custom:throws InvalidRecipient If `to` is the zero address.
+     */
+    function rescueERC20(address token, address to, uint256 amount) external onlyRoleRegistryOwner {
+        if (to == address(0)) revert InvalidRecipient();
+
+        IERC20(token).safeTransfer(to, amount);
+
+        emit RescueERC20(token, to, amount);
+    }
+
+    /**
+     * @notice Rescues native ETH accidentally sent directly to this contract.
+     * @dev The contract never holds funds in normal operation. See `rescueERC20`.
+     * @param to The address to send the rescued ETH to.
+     * @param amount The amount of ETH to rescue.
+     * @custom:throws OnlyRoleRegistryOwner If the caller is not the role registry owner.
+     * @custom:throws InvalidRecipient If `to` is the zero address.
+     * @custom:throws EthTransferFailed If the ETH transfer fails.
+     */
+    function rescueETH(address to, uint256 amount) external onlyRoleRegistryOwner {
+        if (to == address(0)) revert InvalidRecipient();
+
+        (bool success,) = payable(to).call{ value: amount }("");
+        if (!success) revert EthTransferFailed();
+
+        emit RescueETH(to, amount);
     }
 
     /**
@@ -147,5 +232,19 @@ contract CashbackDistributor is UpgradeableProxy {
         IERC20(token).safeTransferFrom(msg.sender, recipient, amount);
 
         emit CashbackAwarded(claimId, recipient, token, amount);
+    }
+
+    /**
+     * @dev Reverts if the caller's balance or allowance to this contract is below `required`.
+     *      Read-only: performs no state changes, so a revert here never affects settlement.
+     */
+    function _checkBalanceAndAllowance(address token, uint256 required) internal view {
+        IERC20 erc20 = IERC20(token);
+
+        uint256 balance = erc20.balanceOf(msg.sender);
+        if (balance < required) revert InsufficientBalance(token, required, balance);
+
+        uint256 allowed = erc20.allowance(msg.sender, address(this));
+        if (allowed < required) revert InsufficientAllowance(token, required, allowed);
     }
 }

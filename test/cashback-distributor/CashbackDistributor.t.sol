@@ -32,6 +32,8 @@ contract CashbackDistributorTest is Test {
     // Mirror of the contract event for vm.expectEmit.
     event CashbackAwarded(bytes32 indexed claimId, address indexed recipient, address indexed token, uint256 amount);
     event CashbackBatchAwarded(uint256 count, address token, uint256 total);
+    event RescueERC20(address indexed token, address indexed to, uint256 amount);
+    event RescueETH(address indexed to, uint256 amount);
 
     function setUp() public {
         vm.startPrank(owner);
@@ -294,13 +296,203 @@ contract CashbackDistributorTest is Test {
         assertEq(token.balanceOf(recipient), 10e6);
     }
 
-    // --- no funds held, no rescue path ---
+    // --- no funds held in normal operation ---
 
     function test_contractHoldsNoBalanceAfterAward() public {
         vm.prank(payoutWallet);
         distributor.award(CLAIM_1, recipient, address(token), 100e6);
 
         assertEq(token.balanceOf(address(distributor)), 0);
+    }
+
+    // --- rescueERC20 ---
+
+    function test_rescueERC20_byOwner_movesTokensAndEmits() public {
+        uint256 amount = 42e6;
+        token.mint(address(distributor), amount);
+
+        uint256 toBalanceBefore = token.balanceOf(recipient);
+
+        vm.expectEmit(true, true, true, true, address(distributor));
+        emit RescueERC20(address(token), recipient, amount);
+
+        vm.prank(owner);
+        distributor.rescueERC20(address(token), recipient, amount);
+
+        assertEq(token.balanceOf(address(distributor)), 0);
+        assertEq(token.balanceOf(recipient), toBalanceBefore + amount);
+    }
+
+    function test_rescueERC20_revertsForNonOwner() public {
+        token.mint(address(distributor), 42e6);
+
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.prank(stranger);
+        distributor.rescueERC20(address(token), recipient, 42e6);
+    }
+
+    function test_rescueERC20_revertsForZeroAddressTo() public {
+        token.mint(address(distributor), 42e6);
+
+        vm.expectRevert(CashbackDistributor.InvalidRecipient.selector);
+        vm.prank(owner);
+        distributor.rescueERC20(address(token), address(0), 42e6);
+    }
+
+    // --- rescueETH ---
+
+    function test_rescueETH_byOwner_movesEthAndEmits() public {
+        uint256 amount = 3 ether;
+        vm.deal(address(distributor), amount);
+
+        uint256 toBalanceBefore = recipient.balance;
+
+        vm.expectEmit(true, true, true, true, address(distributor));
+        emit RescueETH(recipient, amount);
+
+        vm.prank(owner);
+        distributor.rescueETH(recipient, amount);
+
+        assertEq(address(distributor).balance, 0);
+        assertEq(recipient.balance, toBalanceBefore + amount);
+    }
+
+    function test_rescueETH_revertsForNonOwner() public {
+        vm.deal(address(distributor), 3 ether);
+
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.prank(stranger);
+        distributor.rescueETH(recipient, 3 ether);
+    }
+
+    function test_rescueETH_revertsForZeroAddressTo() public {
+        vm.deal(address(distributor), 3 ether);
+
+        vm.expectRevert(CashbackDistributor.InvalidRecipient.selector);
+        vm.prank(owner);
+        distributor.rescueETH(address(0), 3 ether);
+    }
+
+    // --- award: insufficient balance / allowance pre-checks ---
+
+    function test_award_revertsWithInsufficientBalance() public {
+        uint256 balance = token.balanceOf(payoutWallet);
+        uint256 amount = balance + 1;
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.InsufficientBalance.selector, address(token), amount, balance));
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), amount);
+    }
+
+    function test_award_revertsWithInsufficientAllowance() public {
+        uint256 allowed = 50e6;
+        uint256 amount = 100e6;
+
+        vm.prank(payoutWallet);
+        token.approve(address(distributor), allowed);
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.InsufficientAllowance.selector, address(token), amount, allowed));
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), amount);
+    }
+
+    function test_award_insufficientBalance_doesNotSettleClaim_thenSucceedsAfterFunding() public {
+        uint256 balance = token.balanceOf(payoutWallet);
+        uint256 amount = balance + 1;
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.InsufficientBalance.selector, address(token), amount, balance));
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), amount);
+
+        assertFalse(distributor.settled(CLAIM_1));
+
+        token.mint(payoutWallet, 1);
+
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), amount);
+
+        assertTrue(distributor.settled(CLAIM_1));
+        assertEq(token.balanceOf(recipient), amount);
+    }
+
+    function test_award_insufficientAllowance_doesNotSettleClaim_thenSucceedsAfterApproval() public {
+        uint256 allowed = 50e6;
+        uint256 amount = 100e6;
+
+        vm.prank(payoutWallet);
+        token.approve(address(distributor), allowed);
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.InsufficientAllowance.selector, address(token), amount, allowed));
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), amount);
+
+        assertFalse(distributor.settled(CLAIM_1));
+
+        vm.prank(payoutWallet);
+        token.approve(address(distributor), amount);
+
+        vm.prank(payoutWallet);
+        distributor.award(CLAIM_1, recipient, address(token), amount);
+
+        assertTrue(distributor.settled(CLAIM_1));
+        assertEq(token.balanceOf(recipient), amount);
+    }
+
+    // --- awardBatch: insufficient balance / allowance pre-checks (total) ---
+
+    function test_awardBatch_revertsWithInsufficientBalance_totalAcrossBatch() public {
+        uint256 balance = token.balanceOf(payoutWallet);
+
+        bytes32[] memory claimIds = new bytes32[](2);
+        claimIds[0] = CLAIM_1;
+        claimIds[1] = CLAIM_2;
+
+        address[] memory recipients = new address[](2);
+        recipients[0] = recipient;
+        recipients[1] = recipient2;
+
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = balance;
+        amounts[1] = 1;
+
+        uint256 total = balance + 1;
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.InsufficientBalance.selector, address(token), total, balance));
+        vm.prank(payoutWallet);
+        distributor.awardBatch(claimIds, recipients, address(token), amounts);
+
+        assertFalse(distributor.settled(CLAIM_1));
+        assertFalse(distributor.settled(CLAIM_2));
+        assertEq(token.balanceOf(recipient), 0);
+    }
+
+    function test_awardBatch_revertsWithInsufficientAllowance_totalAcrossBatch() public {
+        uint256 allowed = 15e6;
+
+        vm.prank(payoutWallet);
+        token.approve(address(distributor), allowed);
+
+        bytes32[] memory claimIds = new bytes32[](2);
+        claimIds[0] = CLAIM_1;
+        claimIds[1] = CLAIM_2;
+
+        address[] memory recipients = new address[](2);
+        recipients[0] = recipient;
+        recipients[1] = recipient2;
+
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 10e6;
+        amounts[1] = 10e6;
+
+        uint256 total = 20e6;
+
+        vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.InsufficientAllowance.selector, address(token), total, allowed));
+        vm.prank(payoutWallet);
+        distributor.awardBatch(claimIds, recipients, address(token), amounts);
+
+        assertFalse(distributor.settled(CLAIM_1));
+        assertFalse(distributor.settled(CLAIM_2));
+        assertEq(token.balanceOf(recipient), 0);
     }
 
     // --- initializer ---
