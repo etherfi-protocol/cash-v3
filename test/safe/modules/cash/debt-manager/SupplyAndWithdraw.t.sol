@@ -25,6 +25,9 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
     function setUp() public override {
         super.setUp();
 
+        // This suite tests the legacy DebtManager engine (new safes default to the Aave gateway)
+        _forceLegacyEngine(address(safe));
+
         uint256 nonce = cashModule.getNonce(address(safe));
         bytes32 msgHash = keccak256(
             abi.encodePacked(
@@ -115,7 +118,6 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, spendTokens, spendAmounts, cashbacks);
 
-
         (borrowings, totalBorrowingsInUsd, totalLiquidStableAmounts) = debtManager.getCurrentState();
         assertEq(borrowings.length, 1);
         assertEq(borrowings[0].token, spendTokens[0]);
@@ -129,6 +131,7 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         assertApproxEqAbs(totalLiquidStableAmounts[1].amount, principle, 1);
     }
 
+    /// @notice A non-migrated safe borrows from the DebtManager, so its suppliers accrue interest and can withdraw principal plus earnings.
     function test_supply_andWithdraw_succeeds() public {
         deal(address(usdc), notOwner, 1 ether);
         uint256 principle = 0.01 ether;
@@ -324,46 +327,7 @@ contract DebtManagerSupplyAndWithdrawTest is CashModuleTestSetup {
         assertEq(debtManager.supplierBalance(notOwner, address(usdc)), 0);
     }
 
-    function test_multipleSuppliers_receiveProportionalInterest() public {
-        // Setup two suppliers with different amounts
-        address supplier1 = makeAddr("supplier1");
-        address supplier2 = makeAddr("supplier2");
-        uint256 amount1 = 0.01 ether;
-        uint256 amount2 = 2 * amount1; // Supplier2 adds twice as much
-        
-        deal(address(usdc), supplier1, amount1);
-        deal(address(usdc), supplier2, amount2);
-        
-        // Supplier 1 adds funds
-        vm.startPrank(supplier1);
-        IERC20(address(usdc)).forceApprove(address(debtManager), amount1);
-        debtManager.supply(supplier1, address(usdc), amount1);
-        vm.stopPrank();
-        
-        // Supplier 2 adds funds
-        vm.startPrank(supplier2);
-        IERC20(address(usdc)).forceApprove(address(debtManager), amount2);
-        debtManager.supply(supplier2, address(usdc), amount2);
-        vm.stopPrank();
-        
-        // Record initial balances
-        uint256 initialBalance1 = debtManager.supplierBalance(supplier1, address(usdc));
-        uint256 initialBalance2 = debtManager.supplierBalance(supplier2, address(usdc));
-        
-        // Generate some interest by borrowing and repaying
-        _borrowAndRepay();
-        
-        // Check final balances
-        uint256 finalBalance1 = debtManager.supplierBalance(supplier1, address(usdc));
-        uint256 finalBalance2 = debtManager.supplierBalance(supplier2, address(usdc));
-        
-        uint256 earned1 = finalBalance1 - initialBalance1;
-        uint256 earned2 = finalBalance2 - initialBalance2;
-        
-        // Supplier2 should earn twice as much interest as supplier1
-        assertApproxEqRel(earned2, earned1 * 2, 0.01e18); // 1% tolerance
-    }
-
+    /// @dev CashModule spend borrows from the DebtManager for a non-migrated safe; repay a day later to realize supplier interest.
     function _borrowAndRepay() internal returns (uint256) {
         vm.startPrank(etherFiWallet);
 

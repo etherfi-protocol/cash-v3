@@ -25,6 +25,9 @@ interface ICashEventEmitter {
      */
     function emitSettlementDispatcherUpdated(BinSponsor binSponsor, address oldDispatcher, address newDispatcher) external;
 
+    /// @notice Emits the LendGatewaySet event
+    function emitLendGatewaySet(address gateway) external;
+
     /**
      * @notice Emits an event when pending cashback is cleared
      * @param recipient Address receiving the cashback
@@ -123,6 +126,58 @@ interface ICashEventEmitter {
      * @param amountInUsd USD value of the amount repaid
      */
     function emitRepayDebtManager(address safe, address token, uint256 amount, uint256 amountInUsd) external;
+
+    /**
+     * @notice Emits an event when a migrated safe repays debt on Aave via the gateway
+     * @param safe Address of the safe whose debt was repaid
+     * @param token Address of the token repaid
+     * @param amount Amount of token actually repaid (net of any refunded dust)
+     * @param amountInUsd USD value of the debt actually repaid
+     */
+    function emitRepay(address safe, address token, uint256 amount, uint256 amountInUsd) external;
+
+    /**
+     * @notice Emits an event when Aave debt is repaid using a token-denominated amount
+     * @param safe Address of the safe whose debt was repaid
+     * @param token Address of the token repaid
+     * @param amount Amount of token actually repaid
+     */
+    function emitRepayLendTokenAmount(address safe, address token, uint256 amount) external;
+
+    /**
+     * @notice Emits an event when loose collateral is supplied to cover a credit spend's borrowing shortfall
+     * @param safe Address of the safe
+     * @param token Collateral token supplied
+     * @param amount Token amount supplied
+     */
+    function emitCollateralResupplied(address safe, address token, uint256 amount) external;
+
+    /**
+     * @notice Emits an event when a best-effort lend supply fails
+     * @param safe Address of the safe
+     * @param token Token that could not be supplied as collateral
+     * @param amount Amount that remained loose in the safe
+     * @param reason Raw revert data from the lend gateway
+     */
+    function emitLendSupplyFailed(address safe, address token, uint256 amount, bytes calldata reason) external;
+
+    /**
+     * @notice Emits an event when a safe borrows from the lend market to itself (a borrow-page borrow)
+     * @param safe Address of the safe
+     * @param token Token borrowed
+     * @param amount Token amount borrowed
+     * @param amountInUsd USD value of the borrow
+     */
+    function emitLendBorrowed(address safe, address token, uint256 amount, uint256 amountInUsd) external;
+
+    /// @notice Emits the LendOptOutRequested event
+    function emitLendOptOutRequested(address safe, uint256 finalizeTime) external;
+
+    /// @notice Emits the LendOptOutExecuted event
+    function emitLendOptOutExecuted(address safe) external;
+
+    /// @notice Emits the LendOptedIn event
+    function emitLendOptedIn(address safe) external;
 
     /**
      * @notice Emits an event when spending limits are changed

@@ -134,7 +134,7 @@ abstract contract RecoveryManager is EtherFiSafeBase {
         
         RecoveryManagerStorage storage $ = _getRecoveryManagerStorage();
 
-        if (threshold > 2 && threshold - 2 > $.userRecoverySigners.length()) revert RecoverySignersLengthLessThanThreshold();
+        if (threshold == 0 || (threshold > 2 && threshold - 2 > $.userRecoverySigners.length())) revert RecoverySignersLengthLessThanThreshold();
 
         emit RecoveryThresholdSet($.recoveryThreshold, threshold);
         $.recoveryThreshold = threshold;
@@ -217,7 +217,7 @@ abstract contract RecoveryManager is EtherFiSafeBase {
         if (len < $.recoveryThreshold) revert InsufficientRecoverySignatures();
 
         recoverySigners.checkDuplicates();
-        
+
         bytes32 structHash = keccak256(abi.encode(RECOVER_SAFE_TYPEHASH, newOwner, _useNonce()));
         bytes32 digestHash = _hashTypedDataV4(structHash);
         uint256 validSignatures = 0;
@@ -226,7 +226,7 @@ abstract contract RecoveryManager is EtherFiSafeBase {
             if (!isRecoverySigner(recoverySigners[i])) revert InvalidRecoverySigner(i);
             if (digestHash.isValidSignature(recoverySigners[i], signatures[i])) validSignatures++;
 
-            if (validSignatures == $.recoveryThreshold) break;   
+            if (validSignatures == $.recoveryThreshold) break;
             unchecked {
                 ++i;
             }

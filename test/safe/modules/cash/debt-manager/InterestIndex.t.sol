@@ -38,6 +38,7 @@ contract DebtManagerInterestIndexTest is CashModuleTestSetup {
     }
 
     function test_getCurrentIndex_updatesCorrectly_afterBorrow() public {
+        _forceLegacyEngine(address(safe));
         deal(address(weETH), address(safe), 10 ether);
         // Borrow to trigger an index update
         uint256 borrowAmt = 1000e6; // 1000 USDC

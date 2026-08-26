@@ -1,0 +1,5 @@
+{
+    "hub": "0x66753c4e3fC84f1eD0e3C267C927284E9d90C572",
+    "spoke": "0xdffcC3536D932eb51Df51a7F5FA407c4270d5308",
+    "skipPositionManagerTx": true
+}

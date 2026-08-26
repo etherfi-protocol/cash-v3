@@ -7,6 +7,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 import { IL2BeHYPEOAppStaker } from "../../interfaces/IL2BeHYPEOAppStaker.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
@@ -16,9 +17,11 @@ import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
  * @author ether.fi
  * @notice Module for staking WHYPE tokens to receive beHYPE through cross-chain messaging
  * @dev Extends ModuleBase to provide async staking functionality for Safes
- *      beHYPE tokens are delivered asynchronously via LayerZero to the safe
+ *      beHYPE tokens are delivered asynchronously via LayerZero to the safe. A gateway safe's WHYPE may be
+ *      supplied to Aave, so the stake withdraws any shortfall of the input from the safe's Aave position
+ *      first. There is no re-supply bookend because the beHYPE output arrives asynchronously, not in this call.
  */
-contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
+contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
 
     /// @notice Reference to the L2BeHYPEOAppStaker contract for staking operations
@@ -134,7 +137,10 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
      */
     function _stake(address safe, uint256 amountToStake) internal {
         if (amountToStake == 0) revert InvalidInput();
-        _checkAmountAvailable(safe, whype, amountToStake);
+
+        // Pull any shortfall of the WHYPE input out of the safe's Aave position, then confirm the safe holds
+        // the full amount loose.
+        uint256 healthFactorBefore = _pullAndRequire(safe, whype, amountToStake);
 
         uint256 quotedFee = staker.quoteStake(amountToStake, safe);
         if (msg.value < quotedFee) revert InsufficientFee();
@@ -161,6 +167,10 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance {
         if (excessFee > 0) {
             _refundExcessFee(msg.sender, excessFee);
         }
+
+        // Risk-increasing flow with no resupply (the beHYPE output arrives later, loose): the end state
+        // takes the gateway's health-factor floor
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit StakeDeposit(safe, whype, beHYPE, amountToStake);
     }

@@ -47,10 +47,6 @@ BASESCAN_KEY=
 
 ```
 
-## Audits
-
-- Fully audited by Certora & Nethermind
-
 ### Testing
 
 Run the test suite with Forge:
@@ -68,6 +64,14 @@ For specific test files:
 
 ```bash
 forge test --match-path test/path/to/file.t.sol -vvv
+```
+
+The real-gateway tests (`test/safe/modules/cash/lend/**`) deploy a real Aave v4 instance in-test,
+so they are skipped by the default profile and run under the `lend` profile against an Optimism
+fork. Run them with:
+
+```bash
+source .env && FOUNDRY_PROFILE=lend TEST_CHAIN=10 TEST_RPC="$OPTIMISM_RPC" forge test
 ```
 
 ### Deployment

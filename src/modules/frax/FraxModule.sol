@@ -13,14 +13,19 @@ import { IFraxCustodian } from "../../interfaces/IFraxCustodian.sol";
 import { IFraxRemoteHop, MessagingFee } from "../../interfaces/IFraxRemoteHop.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../ModuleLendGatewaySandwich.sol";
 
 /**
  * @title FraxModule
  * @author ether.fi
  * @notice Module for interacting with FraxUSD
- * @dev Extends ModuleBase to provide FraxUSD integration for Safes
+ * @dev Extends ModuleBase to provide FraxUSD integration for Safes. A gateway safe's assets may be supplied
+ *      to Aave, so the synchronous deposit and withdraw withdraw any shortfall of the input from the safe's
+ *      Aave position first and re-supply the output when the gateway lists it as a reserve. The async
+ *      withdraw leg goes through the Cash withdrawal flow, which already sources from Aave, so it is not
+ *      sandwiched here.
  */
-contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule {
+contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient, IBridgeModule, ModuleLendGatewaySandwich {
     using MessageHashUtils for bytes32;
     using SafeCast for uint256;
 
@@ -163,7 +168,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     function _deposit(address safe, address assetToDeposit, uint256 amountToDeposit, uint256 minReturnAmount) internal {
         if (amountToDeposit == 0 || assetToDeposit == address(0)) revert InvalidInput();
 
-        _checkAmountAvailable(safe, assetToDeposit, amountToDeposit);
+        // Pull any shortfall of the input out of the safe's Aave position, then confirm the safe holds the
+        // full amount loose.
+        uint256 healthFactorBefore = _pullAndRequire(safe, assetToDeposit, amountToDeposit);
 
         // Validate that custodian has sufficient balance for synchronous deposit
         // The custodian needs at least minReturnAmount of fraxusd tokens to fulfill the deposit synchronously
@@ -188,6 +195,11 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         uint256 fraxUSDTokenReceived = ERC20(fraxusd).balanceOf(safe) - fraxUSDTokenBefore;
 
         if (fraxUSDTokenReceived < minReturnAmount) revert InsufficientReturnAmount();
+
+        // Re-supply the fraxUSD output as collateral when the gateway lists it; an unlisted output stays loose.
+        _resupplyToGateway(safe, fraxusd, fraxUSDTokenReceived);
+
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit Deposit(safe, assetToDeposit, amountToDeposit, fraxUSDTokenReceived);
     }
@@ -235,7 +247,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     function _withdraw(address safe, uint128 amountToWithdraw, address outputAsset, uint256 minReceiveAmount) internal {
         if (amountToWithdraw == 0 || outputAsset == address(0)) revert InvalidInput();
 
-        _checkAmountAvailable(safe, fraxusd, amountToWithdraw);
+        // Pull any shortfall of the fraxUSD input out of the safe's Aave position, then confirm the safe holds
+        // the full amount loose.
+        uint256 healthFactorBefore = _pullAndRequire(safe, fraxusd, amountToWithdraw);
 
         address[] memory to = new address[](2);
         bytes[] memory data = new bytes[](2);
@@ -254,6 +268,12 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         uint256 assetReceived = ERC20(outputAsset).balanceOf(safe) - assetBefore;
 
         if (assetReceived < minReceiveAmount) revert InsufficientReturnAmount();
+
+        // Re-supply the output as collateral when the gateway lists it; an unlisted output stays loose.
+        _resupplyToGateway(safe, outputAsset, assetReceived);
+
+        // Risk-increasing flow: the end state takes the gateway's health-factor floor
+        _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit Withdrawal(safe, outputAsset, amountToWithdraw, assetReceived);
     }
@@ -283,12 +303,13 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @param safe Address for user safe
      * @param _recipient Recipient address from Frax api
      * @param _withdrawAmount Amount to withdraw asynchronously
-     * @param signer The address that signed the transaction
-     * @param signature The signature authorizing this transaction
+     * @param signers Array of addresses of safe owners that signed the transaction
+     * @param signatures Array of signatures from the signers
+     * @dev Requires the Safe's owner quorum because funds exit to an arbitrary recipient
      */
-    function requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount, address signer, bytes calldata signature) external payable onlyEtherFiSafe(safe) onlySafeAdmin(safe, signer) {
+    function requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
         bytes32 digestHash = _getRequestAsyncWithdrawDigestHash(safe, _recipient, _withdrawAmount);
-        _verifyAdminSig(digestHash, signer, signature);
+        if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _requestAsyncWithdraw(safe, _recipient, _withdrawAmount);
     }
 
@@ -357,7 +378,7 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @return The digest hash for signature verification
      */
     function _getRequestAsyncWithdrawDigestHash(address safe, address _recipient, uint256 _withdrawAmount) internal returns (bytes32) {
-        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), _useNonce(safe), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(REQUEST_ASYNC_WITHDRAW_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe, abi.encode(fraxusd, _recipient, _withdrawAmount))).toEthSignedMessageHash();
     }
 
     /**
