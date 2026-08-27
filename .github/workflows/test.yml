@@ -45,6 +45,9 @@ jobs:
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Foundry 1.8.0 probes fork RPCs with anvil_nodeInfo, which our gateways reject.
+          version: 1.7.1
 
       - name: Show Forge version
         run: forge --version
