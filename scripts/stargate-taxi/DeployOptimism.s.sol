@@ -111,6 +111,7 @@ contract DeployStargateTaxiOptimism is EtherFiDeployerHelper, GnosisHelpers, Con
         require(timelockController.hasRole(timelockController.PROPOSER_ROLE(), SAFE), "Safe is not a proposer");
         require(timelockController.hasRole(timelockController.EXECUTOR_ROLE(), SAFE) || timelockController.hasRole(timelockController.EXECUTOR_ROLE(), address(0)), "Safe is not an executor");
         _checkModuleConfig(OLD_STARGATE_MODULE);
+        require(_canRequestWithdraw(OLD_STARGATE_MODULE), "old module is not an active withdrawal requester");
     }
 
     /// @dev Deploys all five contracts through the permissioned EtherFi CREATE3 deployer.
@@ -152,18 +153,23 @@ contract DeployStargateTaxiOptimism is EtherFiDeployerHelper, GnosisHelpers, Con
         requireCodeMatchAllowingAddressEmbeds("SettlementDispatcherCardOrderImpl", cardOrderImpl, address(new SettlementDispatcherV2(BinSponsor.CardOrder, address(dataProvider))));
     }
 
-    /// @dev Replaces the default requester while leaving the old module whitelisted for queued withdrawals.
+    /// @dev Replaces the default module while preserving the old module's exclusive right to drain its queued withdrawals.
     function _writeModuleSwitchBundle() internal returns (string memory path) {
-        address[] memory modules = new address[](2);
-        modules[0] = module;
-        modules[1] = OLD_STARGATE_MODULE;
-        bool[] memory enabled = new bool[](2);
-        enabled[0] = true;
-        enabled[1] = false;
+        address[] memory defaultModules = new address[](2);
+        defaultModules[0] = module;
+        defaultModules[1] = OLD_STARGATE_MODULE;
+        bool[] memory defaultEnabled = new bool[](2);
+        defaultEnabled[0] = true;
+        defaultEnabled[1] = false;
+
+        address[] memory requestModules = new address[](1);
+        requestModules[0] = module;
+        bool[] memory requestEnabled = new bool[](1);
+        requestEnabled[0] = true;
 
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(SAFE));
-        txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(dataProvider)), iToHex(abi.encodeCall(EtherFiDataProvider.configureDefaultModules, (modules, enabled))), "0", false));
-        txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(cashModule)), iToHex(abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (modules, enabled))), "0", true));
+        txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(dataProvider)), iToHex(abi.encodeCall(EtherFiDataProvider.configureDefaultModules, (defaultModules, defaultEnabled))), "0", false));
+        txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(cashModule)), iToHex(abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (requestModules, requestEnabled))), "0", true));
 
         path = "./output/StargateTaxi-Optimism-module-switch.json";
         vm.createDir("./output", true);
@@ -198,7 +204,7 @@ contract DeployStargateTaxiOptimism is EtherFiDeployerHelper, GnosisHelpers, Con
         require(!dataProvider.isDefaultModule(OLD_STARGATE_MODULE), "old module is still default");
         require(dataProvider.isWhitelistedModule(OLD_STARGATE_MODULE), "old module must remain whitelisted until drain");
         require(_canRequestWithdraw(module), "new module cannot request withdrawals");
-        require(!_canRequestWithdraw(OLD_STARGATE_MODULE), "old module can still request withdrawals");
+        require(_canRequestWithdraw(OLD_STARGATE_MODULE), "old module cannot drain queued withdrawals");
 
         executeGnosisTransactionBundle(scheduleBundle);
         vm.warp(block.timestamp + TIMELOCK_DELAY + 1);
