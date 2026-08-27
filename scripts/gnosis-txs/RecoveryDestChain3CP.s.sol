@@ -46,7 +46,7 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
     // Fill each after DeployTopUpV2Impl.s.sol runs on that chain (asserted non-zero below).
     address constant TOPUP_V2_GNOSIS   = address(0); // TODO: Gnosis (100)
     address constant TOPUP_V2_POLYGON  = address(0); // TODO: Polygon (137)
-    address constant TOPUP_V2_OPBNB    = address(0); // TODO: opBNB (204)
+    address constant TOPUP_V2_OPBNB    = 0x5c301EF3307c9E2430c11e596e0306136B72f92D; // opBNB (204)
 
     function run() public {
         string memory chainId = vm.toString(block.chainid);

@@ -1,8 +1,9 @@
 {
   "_note": "opBNB (chainId 204) Asset Recovery deployment. Canonical CREATE3 addresses (TopUpSourceFactory, AssetRecoveryDispatcher) are deterministic and pre-filled — the deploy scripts assert the proxies land here. RoleRegistry is a fresh deploy (owner = operating safe); fill its address after Phase 1. Wrapped native = WBNB 0x4200000000000000000000000000000000000006. LZ v2 EID 30202.",
   "addresses": {
-    "RoleRegistry": "0x0000000000000000000000000000000000000000",
+    "RoleRegistry": "0x2D604F9B049CB2722844d81C4002aC37324d2A76",
     "TopUpSourceFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
-    "AssetRecoveryDispatcher": "0x418e0af7c750Ba5cbffC5C2a8398591755926A29"
+    "AssetRecoveryDispatcher": "0x418e0af7c750Ba5cbffC5C2a8398591755926A29",
+    "TopUpV2Impl": "0x5c301EF3307c9E2430c11e596e0306136B72f92D"
   }
 }

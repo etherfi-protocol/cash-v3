@@ -51,8 +51,11 @@ contract RecoveryOPAddChains3CP is GnosisHelpers, Utils, Test {
         string memory safe = addressToHex(RecoveryDeployConfig.OPERATING_SAFE);
         string memory txs = _getGnosisHeader("10", safe);
 
-        txs = _appendSetPeer(txs, module, POLYGON_EID, peer, false);
-        txs = _appendSetPeer(txs, module, GNOSIS_EID,  peer, false);
+        // ponytail: opBNB-only this round — its dest side is deployed + wired. Uncomment each peer
+        // when that chain's dispatcher is deployed and its dest 3CP is ready (setting a peer for an
+        // undeployed dispatcher is harmless but noise at the ceremony).
+        // txs = _appendSetPeer(txs, module, POLYGON_EID, peer, false);
+        // txs = _appendSetPeer(txs, module, GNOSIS_EID,  peer, false);
         txs = _appendSetPeer(txs, module, OPBNB_EID,   peer, false);
 
         // opBNB: pin the LZ Labs DVN on the module's SEND config (no default DVN pathway).

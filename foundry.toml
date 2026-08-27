@@ -34,7 +34,7 @@ tempo = "${TEMPO_RPC}"
 mainnet = { key = "${ETHERSCAN_KEY}" }
 scroll = { key = "${ETHERSCAN_KEY}" }
 base = { key = "${ETHERSCAN_KEY}" }
-optimism = { key = "${ETHERSCAN_KEY}" }
+optimism = { key = "${ETHERSCAN_KEY}", chain = 10, url = "https://api.etherscan.io/v2/api?chainid=10" }
 hyperevm  = { key = "${ETHERSCAN_KEY}", chain = 999 }
 polygon = { key = "${ETHERSCAN_KEY}" }
 linea = { key = "${ETHERSCAN_KEY}" }
