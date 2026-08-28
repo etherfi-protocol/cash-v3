@@ -6,6 +6,7 @@ import { Test } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { CashbackDistributor } from "../../src/cashback-distributor/CashbackDistributor.sol";
+import { MockBoringVault } from "../../src/mocks/MockBoringVault.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { MockTeller } from "../../src/mocks/MockTeller.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
@@ -16,7 +17,7 @@ contract CashbackDistributorTest is Test {
     RoleRegistry public roleRegistry;
     MockERC20 public token;
     MockERC20 public ethfi;
-    MockERC20 public sEthfi;
+    MockBoringVault public sEthfi;
     MockTeller public teller;
 
     address public owner = makeAddr("owner");
@@ -44,7 +45,7 @@ contract CashbackDistributorTest is Test {
         // ETHFI/sETHFI/data-provider are immutable, set at implementation deploy, so the mocks
         // must exist first.
         ethfi = new MockERC20("ETHFI", "ETHFI", 18);
-        sEthfi = new MockERC20("Staked ETHFI", "sETHFI", 18);
+        sEthfi = new MockBoringVault("Staked ETHFI", "sETHFI", 18);
         teller = new MockTeller(sEthfi);
         dataProvider = new MockEtherFiDataProvider();
 
@@ -729,7 +730,7 @@ contract CashbackDistributorTest is Test {
 
     function test_setTeller_revertsWhenVaultMismatch() public {
         // A teller whose vault() is a different token than the sEthfi immutable.
-        MockERC20 wrongShareToken = new MockERC20("Wrong Share", "wSHARE", 18);
+        MockBoringVault wrongShareToken = new MockBoringVault("Wrong Share", "wSHARE", 18);
         MockTeller wrongTeller = new MockTeller(wrongShareToken);
 
         vm.expectRevert(abi.encodeWithSelector(CashbackDistributor.TellerVaultMismatch.selector, address(sEthfi), address(wrongShareToken)));
@@ -790,7 +791,7 @@ contract CashbackDistributorTest is Test {
 
         assertTrue(distributor.settled(CLAIM_1));
         assertEq(ethfi.balanceOf(address(distributor)), 0);
-        assertEq(ethfi.balanceOf(address(teller)), ethfiAmount);
+        assertEq(ethfi.balanceOf(address(sEthfi)), ethfiAmount);
         assertEq(sEthfi.balanceOf(recipient), minShares);
         assertEq(sEthfi.balanceOf(address(distributor)), 0);
     }
@@ -823,7 +824,7 @@ contract CashbackDistributorTest is Test {
         vm.prank(payoutWallet);
         distributor.awardStaked(CLAIM_1, recipient, ethfiAmount, ethfiAmount);
 
-        assertEq(ethfi.allowance(address(distributor), address(teller)), 0);
+        assertEq(ethfi.allowance(address(distributor), address(sEthfi)), 0);
     }
 
     // --- awardStaked: insufficient ETHFI balance pre-check ---
@@ -1011,7 +1012,7 @@ contract CashbackDistributorTest is Test {
         vm.prank(payoutWallet);
         distributor.awardStakedBatch(claimIds, recipients, amounts, minShares);
 
-        assertEq(ethfi.allowance(address(distributor), address(teller)), 0);
+        assertEq(ethfi.allowance(address(distributor), address(sEthfi)), 0);
     }
 
     function test_awardStakedBatch_revertsWhenTellerNotSet() public {
@@ -1174,7 +1175,7 @@ contract CashbackDistributorTest is Test {
     function test_initialize_withTeller_revertsOnVaultMismatch() public {
         // The initializer must run the same teller validation as setTeller: a teller whose
         // vault() is not the sEthfi immutable kills the whole (atomic) proxy deploy + init.
-        MockERC20 wrongShareToken = new MockERC20("Wrong Share", "wSHARE", 18);
+        MockBoringVault wrongShareToken = new MockBoringVault("Wrong Share", "wSHARE", 18);
         MockTeller wrongTeller = new MockTeller(wrongShareToken);
         address impl = address(new CashbackDistributor(address(ethfi), address(sEthfi), address(dataProvider)));
 

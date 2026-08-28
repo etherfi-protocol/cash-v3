@@ -14,7 +14,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @notice On-chain settlement gate for ETHFI cashback claims. Custodies the payout funds
  *         itself: `award`/`awardBatch` pay from the contract's own balance, and `awardStaked`
  *         stakes ETHFI into the sETHFI liquid vault before paying out the minted shares. Every
- *         path records the claim as settled. 
+ *         path records the claim as settled.
  */
 contract CashbackDistributor is UpgradeableProxy {
     using SafeERC20 for IERC20;
@@ -257,14 +257,14 @@ contract CashbackDistributor is UpgradeableProxy {
      *         sETHFI liquid vault and paying the minted shares to `recipient`.
      * @dev Reverts `AlreadySettled` if `claimId` was already settled, and `TellerNotSet` if the
      *      teller has not been set. Checks this contract's own ETHFI balance before touching
-     *      any state, so a revert here never marks the claim settled. Approves the teller for
-     *      exactly `ethfiAmount`, deposits into the sETHFI liquid vault via
+     *      any state, so a revert here never marks the claim settled. Approves the sETHFI vault
+     *      for exactly `ethfiAmount`, deposits into it via
      *      `ILayerZeroTellerWithReferrer.deposit` -- passing `address(0)` as the referral
      *      (hardcoded: cashback deposits are never referred) -- and measures shares minted by
      *      the balance delta of the sETHFI token (rather than trusting the teller's return
      *      value) -- reverting `InsufficientSharesMinted` if the delta is below `minShares`,
      *      though a compliant teller is expected to enforce its own minimum-mint slippage check
-     *      and revert first. The ETHFI approval to the teller is reset to zero once the deposit
+     *      and revert first. The ETHFI approval to the sETHFI vault is reset to zero once the deposit
      *      completes.
      * @param claimId The claim identifier (`cashback_claim.id`).
      * @param recipient The account to pay the minted sETHFI shares to.
@@ -280,11 +280,11 @@ contract CashbackDistributor is UpgradeableProxy {
 
         _checkBalance(ethfi, ethfiAmount);
 
-        IERC20(ethfi).forceApprove(tellerAddr, ethfiAmount);
+        IERC20(ethfi).forceApprove(sEthfi, ethfiAmount);
 
         _awardStaked(tellerAddr, claimId, recipient, ethfiAmount, minShares);
 
-        IERC20(ethfi).forceApprove(tellerAddr, 0);
+        IERC20(ethfi).forceApprove(sEthfi, 0);
     }
 
     /**
@@ -294,8 +294,8 @@ contract CashbackDistributor is UpgradeableProxy {
      *      revert `ArrayLengthMismatch`, an already-settled `claimId` reverts `AlreadySettled`,
      *      and a non-safe recipient reverts `NotAnEtherFiSafe` -- any of them unwinds the whole
      *      batch. This contract's own ETHFI balance is checked against the sum of
-     *      `ethfiAmounts` before any claim settles. The teller is approved once for the batch
-     *      total, each claim deposits and measures its own sETHFI balance delta against its own
+     *      `ethfiAmounts` before any claim settles. The sETHFI vault is approved once for the
+     *      batch total, each claim deposits and measures its own sETHFI balance delta against its own
      *      `minShares` (see `awardStaked`), and the approval is reset to zero after the last
      *      deposit. Emits one `CashbackAwarded` per claim plus a single `CashbackBatchAwarded`
      *      carrying the sETHFI address and the total ETHFI deposited -- the same
@@ -326,7 +326,7 @@ contract CashbackDistributor is UpgradeableProxy {
 
         _checkBalance(ethfi, total);
 
-        IERC20(ethfi).forceApprove(tellerAddr, total);
+        IERC20(ethfi).forceApprove(sEthfi, total);
 
         for (uint256 i = 0; i < len;) {
             _awardStaked(tellerAddr, claimIds[i], recipients[i], ethfiAmounts[i], minShares[i]);
@@ -336,7 +336,7 @@ contract CashbackDistributor is UpgradeableProxy {
             }
         }
 
-        IERC20(ethfi).forceApprove(tellerAddr, 0);
+        IERC20(ethfi).forceApprove(sEthfi, 0);
 
         emit CashbackBatchAwarded(len, sEthfi, total);
     }
@@ -463,7 +463,7 @@ contract CashbackDistributor is UpgradeableProxy {
      *      (hardcoded: cashback deposits are never referred) -- measures shares minted by the
      *      balance delta of the sETHFI token (rather than trusting the teller's return value),
      *      pays them to `recipient` and emits the per-claim event. The caller is responsible
-     *      for the ETHFI balance check and the teller approval/reset, so a batch can approve
+     *      for the ETHFI balance check and the sETHFI vault approval/reset, so a batch can approve
      *      its total once instead of once per claim.
      */
     function _awardStaked(address tellerAddr, bytes32 claimId, address recipient, uint256 ethfiAmount, uint256 minShares) internal {

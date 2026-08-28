@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { MockBoringVault } from "./MockBoringVault.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-
-import { MockERC20 } from "./MockERC20.sol";
 
 /**
  * @title MockTeller
@@ -14,9 +11,10 @@ import { MockERC20 } from "./MockERC20.sol";
  *         teller.
  * @dev Mirrors `ILayerZeroTellerWithReferrer`'s 4-arg `deposit` signature (depositAsset,
  *      depositAmount, minimumMint, referralAddress) plus its `vault()`/`shareLockPeriod()`/
- *      `isPaused()` getters, so it can be called through that interface. Pulls `depositAsset`
- *      from the caller and mints `shareToken` back at a configurable `rate`, net of an
- *      optional `premiumBps`, to simulate a teller-side share premium/fee. Enforces its own
+ *      `isPaused()` getters, so it can be called through that interface. Delegates the asset
+ *      pull and share mint to `shareToken.enter`, matching the real teller-to-vault flow, and
+ *      computes shares at a configurable `rate`, net of an optional `premiumBps`, to simulate
+ *      a teller-side share premium/fee. Enforces its own
  *      `minimumMint` check by default (mirroring the real teller), but that check can be
  *      disabled via `setEnforceMinimumMint` so tests can exercise the caller's own
  *      post-deposit slippage check instead. `shareLockPeriod`/`isPaused` are plain
@@ -24,10 +22,8 @@ import { MockERC20 } from "./MockERC20.sol";
  *      best-effort share-lock guard.
  */
 contract MockTeller {
-    using SafeERC20 for IERC20;
-
     /// @notice The share token minted on deposit.
-    MockERC20 public immutable shareToken;
+    MockBoringVault public immutable shareToken;
 
     /// @notice Shares minted per unit of deposit asset, scaled by 1e18 (1e18 == 1:1 rate).
     uint256 public rate = 1e18;
@@ -44,7 +40,7 @@ contract MockTeller {
     /// @notice Mirrors the real teller's `isPaused()` getter.
     bool public isPaused;
 
-    constructor(MockERC20 _shareToken) {
+    constructor(MockBoringVault _shareToken) {
         shareToken = _shareToken;
     }
 
@@ -76,13 +72,11 @@ contract MockTeller {
     function deposit(ERC20 depositAsset, uint256 depositAmount, uint256 minimumMint, address referralAddress) external payable returns (uint256 shares) {
         referralAddress; // unused; mirrors the real teller's 4-arg signature
 
-        IERC20(address(depositAsset)).safeTransferFrom(msg.sender, address(this), depositAmount);
-
         shares = (depositAmount * rate) / 1e18;
         shares -= (shares * premiumBps) / 10_000;
 
         if (enforceMinimumMint && shares < minimumMint) revert("MockTeller: minimumMint not met");
 
-        shareToken.mint(msg.sender, shares);
+        shareToken.enter(msg.sender, depositAsset, depositAmount, msg.sender, shares);
     }
 }
