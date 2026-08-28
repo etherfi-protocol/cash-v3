@@ -24,9 +24,13 @@ import { RecoverySetConfigLib } from "../recovery/RecoverySetConfigLib.sol";
  *         per chain on that chain's RPC. Addresses come from deployments.json; the per-chain TopUpV2
  *         impl and the OP module are constants below.
  *
- *         opBNB/X-Layer additionally get a 5th call — a receive-ULN endpoint.setConfig() pinning the
- *         LZ Labs DVN (no default DVN pathway OP<->opBNB/X-Layer), see RecoverySetConfigLib. Gnosis/
- *         Polygon use the default pathway (4 calls, no setConfig).
+ *         opBNB additionally gets a 5th call — a receive-ULN endpoint.setConfig() pinning the 2-DVN
+ *         quorum (no default DVN pathway OP<->opBNB), see RecoverySetConfigLib.
+ *
+ *         Polygon (137) is special: its canonical factory slot is a *reserved EtherFiPlaceholder*, so the
+ *         bundle is prefixed with two atomic upgrades — placeholder -> TopUpFactory + reinitialize (wires
+ *         the beacon), then -> canonical master impl (so no reinitializer persists) — before the standard
+ *         calls (6 total). Default DVN, no setConfig.
  *
  * Usage:
  *   source .env && forge script scripts/gnosis-txs/RecoveryDestChain3CP.s.sol --rpc-url $<CHAIN>_RPC
@@ -48,6 +52,22 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
     address constant TOPUP_V2_POLYGON  = address(0); // TODO: Polygon (137)
     address constant TOPUP_V2_OPBNB    = 0x5c301EF3307c9E2430c11e596e0306136B72f92D; // opBNB (204)
 
+    // Polygon (137) only: its canonical factory slot (0xF4e147) is a reserved EtherFiPlaceholder, so the
+    // dest bundle first upgrades it to a TopUpFactory + reinitializes (wires the beacon), then upgrades
+    // back to the *current master* impl — atomically, so the reinitializer never persists on a live proxy.
+    // Fill after the Polygon deploy (asserted non-zero for 137 below).
+    //
+    // IMPL SOURCES (must match, or the 3CP is not lead-compliant):
+    //   POLYGON_REINIT_FACTORY_IMPL — TopUpFactory-with-reinitializer, deployed from the #136 branch
+    //       (audit/topup-factory-reinitializer). Throwaway; NOT merged; discarded by upgrade B.
+    //   POLYGON_MASTER_FACTORY_IMPL — CURRENT master TopUpFactory (no reinitializer), deployed via
+    //       `forge create` from an origin/master checkout. Its runtime codehash MUST equal
+    //       `forge inspect origin/master TopUpFactory` — this is the "upgrade back to current master".
+    //   POLYGON_TOPUP_IMPL — base TopUp(WPOL) impl (arg to reinitialize); also from origin/master.
+    address constant POLYGON_REINIT_FACTORY_IMPL = address(0); // from #136 (throwaway, not merged)
+    address constant POLYGON_MASTER_FACTORY_IMPL = address(0); // from origin/master (current master, upgrade-back target)
+    address constant POLYGON_TOPUP_IMPL          = address(0); // from origin/master (base TopUp, WPOL)
+
     function run() public {
         string memory chainId = vm.toString(block.chainid);
         string memory deployments = readDeploymentFile();
@@ -65,6 +85,35 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
 
         string memory safe = addressToHex(RecoveryDeployConfig.OPERATING_SAFE);
         string memory txs = _getGnosisHeader(chainId, safe);
+
+        // Polygon (137) only: reserved placeholder -> TopUpFactory, done atomically at the front of the
+        // bundle so no reinitializer ever lives on a persisted impl:
+        //   A. upgradeToAndCall(reinitImpl, reinitialize(topUpImpl))  -> wires the beacon
+        //   B. upgradeToAndCall(masterImpl, "")                       -> swaps to the canonical impl
+        if (block.chainid == 137) {
+            require(
+                POLYGON_REINIT_FACTORY_IMPL != address(0)
+                    && POLYGON_MASTER_FACTORY_IMPL != address(0)
+                    && POLYGON_TOPUP_IMPL != address(0),
+                "fill Polygon impl constants after deploy"
+            );
+            // A. upgrade placeholder -> reinit impl, and reinitialize(topUpImpl) atomically
+            txs = string(abi.encodePacked(txs, _getGnosisTransaction(
+                addressToHex(beaconFactory),
+                iToHex(abi.encodeWithSignature(
+                    "upgradeToAndCall(address,bytes)",
+                    POLYGON_REINIT_FACTORY_IMPL,
+                    abi.encodeWithSignature("reinitialize(address)", POLYGON_TOPUP_IMPL)
+                )),
+                "0", false
+            )));
+            // B. upgrade reinit impl -> canonical master TopUpFactory impl (reinitializer does not persist)
+            txs = string(abi.encodePacked(txs, _getGnosisTransaction(
+                addressToHex(beaconFactory),
+                iToHex(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", POLYGON_MASTER_FACTORY_IMPL, bytes(""))),
+                "0", false
+            )));
+        }
 
         // 1. grantRole(PAUSER, operatingSafe)
         txs = string(abi.encodePacked(txs, _getGnosisTransaction(
