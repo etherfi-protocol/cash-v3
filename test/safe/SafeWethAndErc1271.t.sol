@@ -113,13 +113,48 @@ contract SafeWethAndErc1271Test is SafeTestSetup {
         assertEq(IERC20(weth).balanceOf(address(safe)), 0);
     }
 
-    /// @dev Known ceiling: nothing here stipend-sends to a safe, and `wrapEth` recovers it if anything does.
-    function test_receive_revertsOnStipendSendFromNonWeth() public {
+    /// @dev A 2300-gas `transfer` cannot cover the wrap, so the ETH is taken native rather than the
+    ///      sender being reverted — the pre-wrap behaviour. `wrapEth` sweeps it afterwards. The safe is
+    ///      a proxy, so cold dispatch alone (~4700 gas) exceeds the stipend; a stipend send only ever
+    ///      reaches `receive` warm (any safe touched earlier in the tx, as WETH always is), so the
+    ///      probe below warms it first.
+    function test_receive_passesThroughStipendSendFromNonWeth() public {
         StipendSender sender = new StipendSender();
         vm.deal(address(sender), 1 ether);
+        safe.inModuleBatch();
 
-        vm.expectRevert();
+        vm.recordLogs();
         sender.send(payable(address(safe)), 1 ether);
+
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertEq(address(safe).balance, 1 ether);
+        assertEq(IERC20(weth).balanceOf(address(safe)), 0);
+
+        safe.wrapEth();
+        assertEq(IERC20(weth).balanceOf(address(safe)), 1 ether);
+    }
+
+    /// @dev Whatever gas a sender forwards past cold proxy dispatch, the send lands: below
+    ///      WRAP_GAS_FLOOR the ETH passes through native, above it the wrap completes. A revert
+    ///      anywhere in between would refuse the sender's payment.
+    function testFuzz_receive_acceptsAnyForwardedGas(uint256 gasLimit) public {
+        gasLimit = bound(gasLimit, 10_000, 200_000);
+        vm.deal(address(this), 1 ether);
+
+        (bool ok,) = address(safe).call{ value: 1 ether, gas: gasLimit }("");
+
+        assertTrue(ok);
+        assertEq(address(safe).balance + IERC20(weth).balanceOf(address(safe)), 1 ether);
+    }
+
+    /// @dev Nothing arrives on a zero-value call, so nothing is wrapped and nothing is logged.
+    function test_receive_isNoOpOnZeroValue() public {
+        vm.recordLogs();
+        (bool ok,) = address(safe).call{ value: 0 }("");
+
+        assertTrue(ok);
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertEq(IERC20(weth).balanceOf(address(safe)), 0);
     }
 
     // ── ERC-1271 ────────────────────────────────────────────────────────────
