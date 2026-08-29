@@ -92,13 +92,13 @@ contract EtherFiSafe is EtherFiSafeCore {
     }
 
     /// @dev Passes ETH through untouched for the senders that need it to stay native: WETH (unwrap would
-    ///      recurse), any sender forwarding less than WRAP_GAS_FLOOR (a contract's `transfer`/`send`
-    ///      gives 2300 gas — reverting would refuse their payment outright, where pre-wrap safes took
-    ///      it), anything mid-batch (a module may be measuring native balance across the call —
-    ///      OpenOcean, ModuleCheckBalance), an enabled module (pre-funds the safe then spends it as
-    ///      call value — Enso, BeHYPE), and everything while the data provider is paused. `wrapEth`
-    ///      sweeps what this lets by. Zero-value calls return before any of it: nothing to wrap, so
-    ///      no deposit and no event.
+    ///      recurse), any sender forwarding less than WRAP_GAS_FLOOR (reverting would refuse their
+    ///      payment outright — though whether a raw 2300-gas `transfer` even reaches this code is
+    ///      decided by beacon-proxy dispatch, not here), anything mid-batch (a module may be measuring
+    ///      native balance across the call — OpenOcean, ModuleCheckBalance), an enabled module (pre-funds
+    ///      the safe then spends it as call value — Enso, BeHYPE), and everything while the data provider
+    ///      is paused. `wrapEth` sweeps what this lets by. Zero-value calls return before any of it:
+    ///      nothing to wrap, so no deposit and no event.
     ///
     ///      A pause passes ETH through rather than rejecting it: that restores the exact pre-upgrade
     ///      behaviour, where a paused wrapper cannot strand an inbound transfer. Cheapest checks first —
