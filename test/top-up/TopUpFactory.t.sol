@@ -880,8 +880,10 @@ contract TopUpFactoryTest is Test, Constants {
         deal(token, address(factory), amount);
         (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
 
+        // fee / 2, not fee - 1: under isolation each call is its own tx, and Scroll's message fee
+        // oracle decays with time, so by the bridge call the re-quoted fee can dip below fee - 1.
         vm.expectRevert(TopUpFactory.InsufficientFeePassed.selector);
-        factory.bridge{ value: fee - 1 }(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee / 2 }(token, amount, DEST_CHAIN_ID);
     }
 
     /// @dev Test bridging when paused
