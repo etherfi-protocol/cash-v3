@@ -1,64 +1,64 @@
 {
   "details": {
     "BTC": {
-      "oracle": "0xd85031243f5c9CeFf5a976f509de65D0E12aec59"
+      "oracle": "0x00cb3f2A553E0b641877e9C4E7eBbf64c277f492"
     },
     "ETH": {
-      "oracle": "0xCFe45EF2B9E138E5A2e1C25592441D5c556B3ca3"
+      "oracle": "0x4060F7d705A32DfC7B96f352e62589c25007e16B"
     },
     "ETHFI": {
-      "oracle": "0x89AB0BeEF8f88933f4724a2D0C4a149c644a8a80"
+      "oracle": "0x1fcD5397C65CE3aB3314416cc64c66128123b56a"
     },
     "EURC": {
-      "oracle": "0xcBF18F68e2aBd480231241fa97BD41aE556433A0"
+      "oracle": "0xDf1150433D0d7eb7913dc8D60687D3977C3C5FA9"
     },
     "OP": {
-      "oracle": "0x6D53a69EBC75cFeDf319F77569a4F732f75AED79"
+      "oracle": "0x8774f71894A10056f7C7AC5E6863FF092BA7a3B5"
     },
     "PAXG": {
-      "oracle": "0x7DC0EAff1ECaED8A8A5aDC07dEe1997fF4617800"
+      "oracle": "0xaC28d7fe39d16aa0d35CDCc8cE939125cB3f091b"
     },
     "QQQ": {
-      "oracle": "0x459E1D5e587eB81bA25C6AA1e817e40bd36fb2F4"
+      "oracle": "0x2cD17B00f5E2C0613323C2fdB9709d54d958AFEb"
     },
     "SPY": {
-      "oracle": "0x045ACc54e73f93c5b9B4F20Fa01931cB23234C38"
+      "oracle": "0xf41eBb842D8e2e2ea818BC6f27497fEF97FAe68F"
     },
     "TBLL": {
-      "oracle": "0x1A74F66b6CF21b582C316398925b24D3D04C8C7D"
+      "oracle": "0xeb1A9eBBe265E3f0Bd69d0eF27536cD1DC77Bc73"
     },
     "USDC": {
-      "oracle": "0xE55eacdC1EC9dA0f33B9CEa7D136a47CC6008C69"
+      "oracle": "0x5B057985496A6ff09bf62C9Ba867Ae5dDEAFA4E0"
     },
     "USDT": {
-      "oracle": "0x6a6B2529c1BC14f0A062D7903B4894B477BfFc92"
+      "oracle": "0x7579977643ee68946DB95d9Cb5fF582674619025"
     },
     "beHYPE": {
-      "oracle": "0xefeDBa79436767AAfcF7902C66383d4735DacA50"
+      "oracle": "0x0547C7F5E4923895C5516D57aaE108fDb943933F"
     },
     "eBTC": {
-      "oracle": "0xFa80bA4b7aC946F3b45DC8ED537b1BEbD8eC860f"
+      "oracle": "0x24a0f20d45d044640Ab1cdcBCD23195AB2b4a810"
     },
     "eUSD": {
-      "oracle": "0xD617E1D59aA992D985c07ADC48c36aD2a00E751b"
+      "oracle": "0xD7b9c2d4ed89298433aA8CE035D9F593068ED34f"
     },
     "frxUSD": {
-      "oracle": "0x859c126dad6952a798ecdc5c06f7063B8a9FCC31"
+      "oracle": "0x41D2200dbad68710C74E5a8E515D883b6177acf7"
     },
     "iwQQQx": {
-      "oracle": "0xb5f61BDfCa60c02d13377d4386288FE143b9d6bE"
+      "oracle": "0x7106e8D7f272BAa57dbB99372FBBC7FDD06D29DC"
     },
     "iwSPYx": {
-      "oracle": "0x253F4Fb7082e314430972A2B783aD7514D20d64c"
+      "oracle": "0x8b44f7Acf288ea79795223dDfd5F872f51d33fb9"
     },
     "iwTBLLx": {
-      "oracle": "0x1cee92F999D536320aFb740b2ea5318C45d9C93B"
+      "oracle": "0x81D0305B9DC94f8f177Bbf6DbEB0278D7afF22Df"
     },
     "liquidBTC": {
-      "oracle": "0xD60ec8fCba09c7642099eA89A9D58721B00277C7"
+      "oracle": "0x16e73C673C09bD02098535D98DbD825E63f086D2"
     },
     "liquidETH": {
-      "oracle": "0x48420d702a3190235B5A5D123ca82f876752add1"
+      "oracle": "0xb23A64323F7D8C31d28F8d5a7592b8914d881d0f"
     },
     "liquidRESERVE": {
       "oracle": "0x6b5C6155A07A5E3af6591d48571FC1BdFEc929BC"
@@ -67,19 +67,19 @@
       "oracle": "0x6Bf29C9bec671EE7787352EBc42c2151a7BC2854"
     },
     "liquidUSD": {
-      "oracle": "0x17DdE04d8Ff1024D3076944658ED9B6bd5F51451"
+      "oracle": "0x672e7e070E49FaC6e26b3FEC912C328d15859CF6"
     },
     "sETHFI": {
-      "oracle": "0xaF8749C3DC1Fc0592f21c2593204C45D3bE0d322"
+      "oracle": "0x5924194Cf0d39b8eAE66aFe52ef80A027F3DC39f"
     },
     "wHYPE": {
-      "oracle": "0x7405E1C9a5AdC2A1730f38186f5845EC54Cd1B22"
+      "oracle": "0xA9D5227D0063904Cb20d0fC9a2e71dd4cb19F8cD"
     },
     "weETH": {
-      "oracle": "0x81ED135fc10FF855202E582d8cfd50E8A5533fd9"
+      "oracle": "0x6D6afbc1579EB8e17C170Fc60a67161bc9F44874"
     },
     "weEUR": {
-      "oracle": "0x7605dbe2948C99a559B9a065881916Ef043dA567"
+      "oracle": "0xFA239571dDa672A935Fb7962513b37b1CfF280cb"
     }
   }
 }
