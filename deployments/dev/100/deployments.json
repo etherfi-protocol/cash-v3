@@ -1,0 +1,7 @@
+{
+  "addresses": {
+    "RoleRegistry": "0xf8D1e66850888b97A99c482862211F043E2eC530",
+    "StargateAdapter": "0x8ce5845979B6a3f2766b04eE92062F02C783ad52",
+    "TopUpSourceFactory": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B"
+  }
+}

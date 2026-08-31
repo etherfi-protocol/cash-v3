@@ -27,6 +27,14 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
 
     uint256 internal constant FLOOR = 1.05e18;
 
+    uint256 internal constant UNBOUNDED_DAILY_LIMIT = 10_000_000e6;
+    uint256 internal constant UNBOUNDED_MONTHLY_LIMIT = 100_000_000e6;
+
+    function setUp() public virtual override {
+        super.setUp();
+        _updateSpendingLimit(UNBOUNDED_DAILY_LIMIT, UNBOUNDED_MONTHLY_LIMIT);
+    }
+
     function _setFloor(uint256 value) internal {
         vm.prank(owner);
         gw.setMinHealthFactor(value);

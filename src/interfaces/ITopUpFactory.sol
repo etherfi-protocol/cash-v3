@@ -34,4 +34,13 @@ interface ITopUpFactory {
      * @param token Address of the ERC20 being redirected.
      */
     function wrapperFor(address token) external view returns (address);
+
+    /**
+     * @notice Returns the underlying an ERC-4626 `vault` is registered to be redeemed into, or
+     *         the zero address when the vault may not be unwrapped.
+     * @dev Read by `TopUp.unwrap`, so which vaults a TopUp may redeem stays configuration on the
+     *      factory rather than state on each instance — the same arrangement as `wrapperFor`.
+     * @param vault Address of the ERC-4626 vault being redeemed.
+     */
+    function unwrapAssetFor(address vault) external view returns (address);
 }
