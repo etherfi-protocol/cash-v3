@@ -144,7 +144,7 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws AmountCannotBeZero if amount is zero
      * @custom:throws AmountGreaterThanDeposit if amount exceeds available deposit
      */
-    function withdraw(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner() {
+    function withdraw(address token, uint256 amount) external nonReentrant onlyAdminTimelock {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
         if (amount == 0) revert AmountCannotBeZero();

@@ -27,6 +27,13 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
 
     uint256 internal constant FLOOR = 1.05e18;
 
+    function setUp() public virtual override {
+        super.setUp();
+        // Quotes and spends here scale with the live weETH price on the unpinned fork; keep the
+        // spending limit from binding before the health-factor floor under test does.
+        _updateSpendingLimit(1_000_000_000e6, 1_000_000_000e6);
+    }
+
     function _setFloor(uint256 value) internal {
         vm.prank(owner);
         gw.setMinHealthFactor(value);

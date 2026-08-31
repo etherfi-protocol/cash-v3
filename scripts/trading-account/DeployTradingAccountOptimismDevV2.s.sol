@@ -53,8 +53,8 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
         safeFactory = EtherFiSafeFactory(deployments.readAddress(".addresses.EtherFiSafeFactory"));
 
         require(roleRegistry.owner() == DEV_ADMIN, "dev admin is not RoleRegistry owner");
-        require(roleRegistry.hasRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), DEV_ADMIN), "dev admin lacks DataProvider role");
-        require(roleRegistry.hasRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), DEV_ADMIN), "dev admin lacks CashModule role");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN), "dev admin lacks DataProvider role");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN), "dev admin lacks CashModule role");
 
         _startBroadcast();
         _removeOwnershipBridge();
@@ -91,8 +91,8 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
         // new modules. Pre-existing modules are never touched here.
         dataProvider.configureDefaultModules(modules, enable);
         cashModule.configureModulesCanRequestWithdraw(modules, enable);
-        roleRegistry.grantRole(AcrossSwapModule(acrossProxy).ACROSS_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN);
-        roleRegistry.grantRole(EnsoSwapModule(ensoProxy).ENSO_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN);
         AcrossSwapModule(acrossProxy).setPeriphery(Prod.ACROSS_PERIPHERY);
     }
 
@@ -127,8 +127,8 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
         // Module registration + roles.
         require(dataProvider.isDefaultModule(acrossProxy), "Across not default");
         require(dataProvider.isDefaultModule(ensoProxy), "Enso not default");
-        require(roleRegistry.hasRole(across.ACROSS_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN), "missing Across admin role");
-        require(roleRegistry.hasRole(enso.ENSO_SWAP_MODULE_ADMIN_ROLE(), DEV_ADMIN), "missing Enso admin role");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN), "missing Across admin role");
+        require(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), DEV_ADMIN), "missing Enso admin role");
 
         address[] memory withdrawModules = cashModule.getWhitelistedModulesCanRequestWithdraw();
         require(_contains(withdrawModules, acrossProxy), "Across cannot request withdrawals");

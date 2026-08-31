@@ -14,6 +14,7 @@ import { IOFT, MessagingFee, SendParam } from "../../../../../src/interfaces/IOF
 import { Constants } from "../../../../../src/utils/Constants.sol";
 import { IMidasVault } from "../../../../../src/interfaces/IMidasVault.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 
 /**
  * @notice Mock Frax custodian: pulls fraxUsd from owner, sends usdc to receiver. Returns configurable amountOut.
@@ -151,7 +152,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_setRefundWallet_reverts_whenNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         v2.setRefundWallet(makeAddr("newWallet"));
     }
 
@@ -605,7 +606,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockERC20 token = new MockERC20("USDC", "USDC", 6);
 
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         _setRecipient(address(token), alice);
     }
 

@@ -48,9 +48,6 @@ contract EtherFiDataProvider is UpgradeableProxy {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EtherFiDataProvider")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant EtherFiDataProviderStorageLocation = 0xb3086c0036ec0314dd613f04f2c0b41c0567e73b5b69f0a0d6acdbce48020e00;
 
-    /// @notice Role identifier for administrative privileges
-    bytes32 public constant DATA_PROVIDER_ADMIN_ROLE = keccak256("DATA_PROVIDER_ADMIN_ROLE");
-
     /** 
      * @notice Struct for intiialize params
      * @param _roleRegistry Address of the role registry contract
@@ -198,104 +195,104 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Cash Lens
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_ROLE
      * @param cashLens New cash lens address to set
      */
     function setCashLens(address cashLens) external {
-        _onlyDataProviderAdmin();
+        _onlyAdmin();
         _setCashLens(cashLens);
     }
 
     /**
      * @notice Configures multiple modules' whitelist status
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
      */
     function configureModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _configureModules(modules, shouldWhitelist);
     }
 
     /**
      * @notice Configures multiple modules' whitelist status
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
      */
     function configureDefaultModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _configureDefaultModules(modules, shouldWhitelist);
     }
 
     /**
      * @notice Updates the address of the Price Provider
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param _priceProvider New price provider address to set
      */
     function setPriceProvider(address _priceProvider) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _setPriceProvider(_priceProvider);
     }
 
     /**
      * @notice Updates the hook address
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param hook New hook address to set
      */
     function setHookAddress(address hook) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _setHookAddress(hook);
     }
 
     /**
      * @notice Updates the etherFiSafeFactory instance address
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param factory New factory address to set
      */
     function setEtherFiSafeFactory(address factory) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _setEtherFiSafeFactory(factory);
     }
 
     /**
      * @notice Updates the EtherFi Recovery Signer address
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE    
      * @param signer Address of the new signer
      */
     function setEtherFiRecoverySigner(address signer) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _setEtherFiRecoverySigner(signer);
     }
 
     /**
      * @notice Updates the EtherFi Recovery Signer address
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE    
      * @param signer Address of the new signer
      */
     function setThirdPartyRecoverySigner(address signer) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _setThirdPartyRecoverySigner(signer);
     }
 
     /**
      * @notice Updates the EtherFi Refund Wallet address
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE    
      * @param wallet Address of the new wallet
      */
     function setRefundWallet(address wallet) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _setRefundWallet(wallet);
     }
 
     /**
      * @notice Updates the Recovery delay period
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE    
+     * @dev Only callable by addresses with ADMIN_ROLE    
      * @param period Recovery timelock period in seconds
      * @custom:throws InvalidInput when period is 0
      */
     function setRecoveryDelayPeriod(uint256 period) external {
-        _onlyDataProviderAdmin();
+        _onlyAdmin();
         if (period == 0) revert InvalidInput();
 
         EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
@@ -306,11 +303,11 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Cash Module
-     * @dev Only callable by addresses with DATA_PROVIDER_ADMIN_ROLE
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param cashModule New cash module address to set
      */
     function setCashModule(address cashModule) external {
-        _onlyDataProviderAdmin();
+        _onlyAdminTimelock();
         _setCashModule(cashModule);
     }
 
@@ -644,9 +641,16 @@ contract EtherFiDataProvider is UpgradeableProxy {
     }
 
     /**
-     * @dev Internal function to verify caller has admin role
+     * @dev Internal function to verify caller has the fast multisig admin role
      */
-    function _onlyDataProviderAdmin() private view {
-        if (!roleRegistry().hasRole(DATA_PROVIDER_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+    function _onlyAdmin() private view {
+        roleRegistry().onlyAdmin(msg.sender);
+    }
+
+    /**
+     * @dev Internal function to verify caller has the operating-timelock role
+     */
+    function _onlyAdminTimelock() private view {
+        roleRegistry().onlyAdminTimelock(msg.sender);
     }
 }

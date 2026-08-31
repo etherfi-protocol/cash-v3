@@ -40,6 +40,8 @@ contract TopUpWrapStocksTest is Test {
         )));
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
 
         implementation = new TopUp(weth);
         address factoryImpl = address(new TopUpFactory());

@@ -34,6 +34,8 @@ contract TradingSafeRedirectToTopUpTest is TradingSafeTestBase {
         factory = _deployFactory();
         _initDataProvider(address(factory));
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
         roleRegistry.grantRole(factory.TRADING_SAFE_REDIRECT_ROLE(), backend);
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
 
@@ -105,6 +107,8 @@ contract TradingSafeRedirectToTopUpTest is TradingSafeTestBase {
         TradingSafeFactory bareFactory = _deployFactory();
         _initDataProvider(address(bareFactory));
         roleRegistry.grantRole(bareFactory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
         roleRegistry.grantRole(bareFactory.TRADING_SAFE_REDIRECT_ROLE(), backend);
         address[] memory owners = new address[](1);
         owners[0] = ownerA;

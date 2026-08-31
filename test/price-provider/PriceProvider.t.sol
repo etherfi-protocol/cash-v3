@@ -136,7 +136,7 @@ contract PriceProviderTest is Test {
             )
         )));
 
-        roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
 
         vm.stopPrank();
     }
@@ -202,7 +202,7 @@ contract PriceProviderTest is Test {
         address notOwner = makeAddr("notOwner");
 
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         priceProvider.setTokenConfig(tokens, tokensConfig);
         vm.stopPrank();
     }
