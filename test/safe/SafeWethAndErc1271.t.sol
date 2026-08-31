@@ -113,13 +113,47 @@ contract SafeWethAndErc1271Test is SafeTestSetup {
         assertEq(IERC20(weth).balanceOf(address(safe)), 0);
     }
 
-    /// @dev Known ceiling: nothing here stipend-sends to a safe, and `wrapEth` recovers it if anything does.
-    function test_receive_revertsOnStipendSendFromNonWeth() public {
-        StipendSender sender = new StipendSender();
-        vm.deal(address(sender), 1 ether);
+    /// @dev A sender forwarding too little gas for the wrap has the ETH taken native rather than
+    ///      being reverted, and `wrapEth` sweeps it afterwards. Whether a raw 2300-gas `transfer`
+    ///      even reaches `receive` is decided by beacon-proxy dispatch — outside this contract and
+    ///      compiler-sensitive — so the test pins the guarantee `receive` itself makes, at a gas
+    ///      amount that clears dispatch under any codegen but sits far below WRAP_GAS_FLOOR.
+    function test_receive_passesThroughLowGasSend() public {
+        vm.deal(address(this), 1 ether);
 
-        vm.expectRevert();
-        sender.send(payable(address(safe)), 1 ether);
+        vm.recordLogs();
+        (bool ok,) = address(safe).call{ value: 1 ether, gas: 30_000 }("");
+
+        assertTrue(ok);
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertEq(address(safe).balance, 1 ether);
+        assertEq(IERC20(weth).balanceOf(address(safe)), 0);
+
+        safe.wrapEth();
+        assertEq(IERC20(weth).balanceOf(address(safe)), 1 ether);
+    }
+
+    /// @dev Whatever gas a sender forwards past proxy dispatch, the send lands: below
+    ///      WRAP_GAS_FLOOR the ETH passes through native, above it the wrap completes. A revert
+    ///      anywhere in between would refuse the sender's payment.
+    function testFuzz_receive_acceptsAnyForwardedGas(uint256 gasLimit) public {
+        gasLimit = bound(gasLimit, 20_000, 200_000);
+        vm.deal(address(this), 1 ether);
+
+        (bool ok,) = address(safe).call{ value: 1 ether, gas: gasLimit }("");
+
+        assertTrue(ok);
+        assertEq(address(safe).balance + IERC20(weth).balanceOf(address(safe)), 1 ether);
+    }
+
+    /// @dev Nothing arrives on a zero-value call, so nothing is wrapped and nothing is logged.
+    function test_receive_isNoOpOnZeroValue() public {
+        vm.recordLogs();
+        (bool ok,) = address(safe).call{ value: 0 }("");
+
+        assertTrue(ok);
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertEq(IERC20(weth).balanceOf(address(safe)), 0);
     }
 
     // ── ERC-1271 ────────────────────────────────────────────────────────────
@@ -502,12 +536,6 @@ contract NestedBatcher is ModuleBase {
         data[0] = abi.encodeCall(BatchFlagProbe.record, (safe));
 
         EtherFiSafe(payable(safe)).execTransactionFromModule(to, new uint256[](1), data);
-    }
-}
-
-contract StipendSender {
-    function send(address payable to, uint256 amount) external {
-        to.transfer(amount);
     }
 }
 
