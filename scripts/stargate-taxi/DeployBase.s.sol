@@ -13,10 +13,9 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 
 /**
  * @title DeployStargateTaxiBase
- * @notice Deploys the Base taxi adapter and points both existing WETH routes at it.
- *         The Scroll route is retired product-side but stays configured for now: the live
- *         factory implementation predates removeTokenConfig, so removal needs a factory
- *         upgrade first and is handled as a follow-up.
+ * @notice Deploys the Base taxi adapter and points the WETH -> Optimism route at it.
+ *         Scroll is deprecated completely: its route is left untouched on the retired
+ *         bus adapter and gets removed outright once the factory supports removeTokenConfig.
  *
  * Usage:
  *   ENV=mainnet forge script scripts/stargate-taxi/DeployBase.s.sol \
@@ -66,32 +65,32 @@ contract DeployStargateTaxiBase is EtherFiDeployerHelper, GnosisHelpers, Contrac
     }
 
     /// @dev Deploys the adapter through the permissioned EtherFi CREATE3 deployer.
+    ///      Skipped entirely when it already exists, so bundle regeneration needs no key.
     function _deploy() internal {
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address broadcaster = vm.addr(privateKey);
-        require(address(DEPLOYER).code.length > 0, "EtherFiDeployer is not deployed");
-        require(DEPLOYER.isDeployer(broadcaster), "broadcaster is not an approved deployer");
+        adapter = _predictAddress(ADAPTER_SALT);
+        if (adapter.code.length == 0) {
+            uint256 privateKey = vm.envUint("PRIVATE_KEY");
+            require(address(DEPLOYER).code.length > 0, "EtherFiDeployer is not deployed");
+            require(DEPLOYER.isDeployer(vm.addr(privateKey)), "broadcaster is not an approved deployer");
 
-        vm.startBroadcast(privateKey);
-        adapter = _create3(ADAPTER_SALT, type(StargateAdapter).creationCode, abi.encode(WETH));
-        vm.stopBroadcast();
+            vm.startBroadcast(privateKey);
+            adapter = _create3(ADAPTER_SALT, type(StargateAdapter).creationCode, abi.encode(WETH));
+            vm.stopBroadcast();
+        }
 
-        require(_predictAddress(ADAPTER_SALT) == EXPECTED_ADAPTER && adapter == EXPECTED_ADAPTER, "adapter address mismatch");
+        require(adapter == EXPECTED_ADAPTER, "adapter address mismatch");
         require(StargateAdapter(payable(adapter)).weth() == WETH, "adapter WETH mismatch");
         requireExactCodeMatch("StargateAdapter", adapter, address(new StargateAdapter(WETH)));
     }
 
-    /// @dev Copies both live route configs and changes only their adapter address.
+    /// @dev Copies the live Optimism route config and changes only its adapter address.
     function _writeRouteSwitchBundle() internal returns (string memory path) {
-        address[] memory tokens = new address[](2);
+        address[] memory tokens = new address[](1);
         tokens[0] = WETH;
-        tokens[1] = WETH;
-        uint256[] memory chainIds = new uint256[](2);
-        chainIds[0] = 534_352;
-        chainIds[1] = 10;
-        TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](2);
-        configs[0] = _routeConfig(adapter, SCROLL_EID);
-        configs[1] = _routeConfig(adapter, OPTIMISM_EID);
+        uint256[] memory chainIds = new uint256[](1);
+        chainIds[0] = 10;
+        TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
+        configs[0] = _routeConfig(adapter, OPTIMISM_EID);
 
         bytes memory data = abi.encodeCall(TopUpFactory.setTokenConfig, (tokens, chainIds, configs));
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(SAFE));
@@ -103,11 +102,11 @@ contract DeployStargateTaxiBase is EtherFiDeployerHelper, GnosisHelpers, Contrac
         console.log("Wrote", path);
     }
 
-    /// @dev Simulates the bundle and confirms that both existing routes use the new adapter.
+    /// @dev Simulates the bundle: the Optimism route moves, the deprecated Scroll route does not.
     function _simulate(string memory bundle) internal {
         executeGnosisTransactionBundle(bundle);
-        _checkRoute(factory.getTokenConfig(WETH, 534_352), adapter, SCROLL_EID);
         _checkRoute(factory.getTokenConfig(WETH, 10), adapter, OPTIMISM_EID);
+        _checkRoute(factory.getTokenConfig(WETH, 534_352), OLD_STARGATE_ADAPTER, SCROLL_EID);
         console.log("Stargate taxi Base bundle simulation passed");
     }
 
