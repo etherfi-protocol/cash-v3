@@ -126,11 +126,12 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
     /// A credit spend goes through even when it leaves the health factor below the floor: card
     /// settlement must never fail on the buffer.
     function test_spendCredit_alwaysGoesThroughBelowFloor() public {
-        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
         _setModeCredit();
         _setFloor(FLOOR);
 
         uint256 amountInUsd = (gw.getAccountData(address(safe)).availableBorrowsUsd * 97) / 100; // HF ~1.03
+        assertLt(amountInUsd, dailyLimitInUsd, "test premise: declined by borrow power, not the limit");
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, _addr1(address(usdc)), _uint1(amountInUsd), _noCashback());
 
@@ -239,9 +240,12 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
     /// The lens quotes credit capacity buffered by the floor: an amount inside the buffer is approved and
     /// settles landing above the floor; between the buffer and Aave's raw bound it is declined.
     function test_lens_creditQuoteBuffered() public {
-        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        // 1 weETH, not 5: every amount probed here must sit under the daily spending limit, or the
+        // spends decline on the limit instead of the borrow power under test.
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
         _setModeCredit();
         uint256 rawMax = cashLens.getMaxSpendCredit(address(safe));
+        assertLt(rawMax, dailyLimitInUsd, "test premise: declined by borrow power, not the limit");
 
         _setFloor(FLOOR);
         uint256 bufferedMax = cashLens.getMaxSpendCredit(address(safe));
@@ -263,11 +267,12 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
     /// Soft enforcement: an amount the lens declines (between the buffer and Aave's raw bound) still
     /// SETTLES if it was authorized earlier — spend execution keeps the raw bound.
     function test_lens_declinedCreditSpendStillSettles() public {
-        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
         _setModeCredit();
         _setFloor(FLOOR);
 
         uint256 amount = (gw.getAccountData(address(safe)).availableBorrowsUsd * 97) / 100; // inside raw, past buffer
+        assertLt(amount, dailyLimitInUsd, "test premise: declined by borrow power, not the limit");
         (bool ok,) = cashLens.canSpend(address(safe), txId, _addr1(address(usdc)), _uint1(amount));
         assertFalse(ok, "new auths at this size are declined");
 
