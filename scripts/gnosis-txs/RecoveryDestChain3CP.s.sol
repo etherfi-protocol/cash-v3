@@ -49,7 +49,7 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
     address constant TOPUP_V2_HYPEREVM = 0x1abfE5B356e8D735D3e363b5DF5995A2a1012D0E;
     // Fill each after DeployTopUpV2Impl.s.sol runs on that chain (asserted non-zero below).
     address constant TOPUP_V2_GNOSIS   = address(0); // TODO: Gnosis (100)
-    address constant TOPUP_V2_POLYGON  = address(0); // TODO: Polygon (137)
+    address constant TOPUP_V2_POLYGON  = 0xCB160aF093564E44Dc4c07bc03b828354E0fee77; // Polygon (137)
     address constant TOPUP_V2_OPBNB    = 0x5c301EF3307c9E2430c11e596e0306136B72f92D; // opBNB (204)
 
     // Polygon (137) only: its canonical factory slot (0xF4e147) is a reserved EtherFiPlaceholder, so the
@@ -64,9 +64,9 @@ contract RecoveryDestChain3CP is GnosisHelpers, Utils, Test {
     //       `forge create` from an origin/master checkout. Its runtime codehash MUST equal
     //       `forge inspect origin/master TopUpFactory` — this is the "upgrade back to current master".
     //   POLYGON_TOPUP_IMPL — base TopUp(WPOL) impl (arg to reinitialize); also from origin/master.
-    address constant POLYGON_REINIT_FACTORY_IMPL = address(0); // from #136 (throwaway, not merged)
-    address constant POLYGON_MASTER_FACTORY_IMPL = address(0); // from origin/master (current master, upgrade-back target)
-    address constant POLYGON_TOPUP_IMPL          = address(0); // from origin/master (base TopUp, WPOL)
+    address constant POLYGON_REINIT_FACTORY_IMPL = 0x706bF65A7B963C9e8ef81Ea41529eC7B0C1B9499; // from #136 (throwaway, not merged)
+    address constant POLYGON_MASTER_FACTORY_IMPL = 0x70d7E0C93D8443325550Ba3F71576F5f346b8aA9; // from origin/master (current master, upgrade-back target)
+    address constant POLYGON_TOPUP_IMPL          = 0xde8A2C33655ACA88f258988ED74D1511876343D1; // from origin/master (base TopUp, WPOL)
 
     function run() public {
         string memory chainId = vm.toString(block.chainid);
