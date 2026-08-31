@@ -18,6 +18,11 @@ contract EtherFiSafe is EtherFiSafeCore {
     /// @notice WETH on Optimism, the only chain with a live Cash stack
     address public constant WETH = 0x4200000000000000000000000000000000000006;
 
+    /// @dev Cold-path cost of `receive`'s checks plus the WETH deposit and event — ~64k measured on an
+    ///      Optimism fork — with margin. A sender forwarding less gets the ETH passed through native
+    ///      rather than an out-of-gas revert; `wrapEth` sweeps it later.
+    uint256 internal constant WRAP_GAS_FLOOR = 90_000;
+
     bytes4 internal constant ERC1271_INVALID = 0xffffffff;
 
     /// @dev keccak256("EtherFiSafeMessage(bytes32 message)")
@@ -87,19 +92,23 @@ contract EtherFiSafe is EtherFiSafeCore {
     }
 
     /// @dev Passes ETH through untouched for the senders that need it to stay native: WETH (unwrap would
-    ///      recurse, and only carries a 2300-gas stipend), anything mid-batch (a module may be measuring
+    ///      recurse), any sender forwarding less than WRAP_GAS_FLOOR (reverting would refuse their
+    ///      payment outright — though whether a raw 2300-gas `transfer` even reaches this code is
+    ///      decided by beacon-proxy dispatch, not here), anything mid-batch (a module may be measuring
     ///      native balance across the call — OpenOcean, ModuleCheckBalance), an enabled module (pre-funds
     ///      the safe then spends it as call value — Enso, BeHYPE), and everything while the data provider
-    ///      is paused. `wrapEth` sweeps what this lets by.
+    ///      is paused. `wrapEth` sweeps what this lets by. Zero-value calls return before any of it:
+    ///      nothing to wrap, so no deposit and no event.
     ///
     ///      A pause passes ETH through rather than rejecting it: that restores the exact pre-upgrade
     ///      behaviour, where a paused wrapper cannot strand an inbound transfer. Cheapest checks first —
-    ///      the WETH compare has to fit a 2300-gas stipend, and `inModuleBatch` is a 100-gas tload,
-    ///      so neither the module lookup nor the pause read is reached on the hot paths.
+    ///      the value and WETH compares have to fit a 2300-gas stipend, `gasleft` is 2 gas, and
+    ///      `inModuleBatch` is a 100-gas tload, so neither the module lookup nor the pause read is
+    ///      reached on the hot paths.
     receive() external payable override {
-        if (msg.sender == WETH) return;
+        if (msg.value == 0 || msg.sender == WETH) return;
 
-        if (inModuleBatch() || isModuleEnabled(msg.sender) || dataProvider.paused()) return;
+        if (gasleft() < WRAP_GAS_FLOOR || inModuleBatch() || isModuleEnabled(msg.sender) || dataProvider.paused()) return;
 
         IWETH(WETH).deposit{ value: msg.value }();
         emit EthWrapped(msg.sender, msg.value);
