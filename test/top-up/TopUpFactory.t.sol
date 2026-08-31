@@ -875,15 +875,17 @@ contract TopUpFactoryTest is Test, Constants {
     // }
 
     function test_bridge_reverts_whenInsufficientFeeIsPassed() public {
-        address token = address(usdc);
-        uint256 amount = 100e6;
+        // weETH -> OP via OFT: a live route with a real nonzero fee. The USDC -> OP native bridge
+        // quotes fee 0, and fee / 2 (not fee - 1) keeps the value short even if the quote drifts
+        // between the isolated quote and bridge transactions.
+        address token = address(weETH);
+        uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, OP_CHAIN_ID);
+        assertGt(fee, 0, "test premise: the route charges a fee");
 
-        // fee / 2, not fee - 1: under isolation each call is its own tx, and Scroll's message fee
-        // oracle decays with time, so by the bridge call the re-quoted fee can dip below fee - 1.
         vm.expectRevert(TopUpFactory.InsufficientFeePassed.selector);
-        factory.bridge{ value: fee / 2 }(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee / 2 }(token, amount, OP_CHAIN_ID);
     }
 
     /// @dev Test bridging when paused
