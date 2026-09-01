@@ -247,6 +247,7 @@
           "address": "0x4200000000000000000000000000000000000006",
           "name": "weth",
           "bridge": "stargate",
+          "bridgeAdapter": "0x51dD76A7081c7b84e410A77968a72EEeE1Caf4C3",
           "maxSlippageInBps": "50",
           "stargatePool": "0xdc181Bd607330aeeBEF6ea62e03e5e1Fb4B6F7C7",
           "destEid": "30214"

@@ -69,7 +69,7 @@
       "EtherFiLiquidModule",
       "EtherFiLiquidModuleWithReferrer",
       "FraxModule",
-      "StargateModule",
+      "ActiveStargateModule",
       "EtherFiStakeModule",
       "LiquidUSDLiquifierModule"
     ]
@@ -107,7 +107,7 @@
       "EtherFiLiquidModuleWithReferrer",
       "EtherFiLiquidModule",
       "FraxModule",
-      "StargateModule"
+      "ActiveStargateModule"
     ]
   },
   "cashbackDispatcher": {

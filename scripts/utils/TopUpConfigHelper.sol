@@ -65,6 +65,12 @@ abstract contract TopUpConfigHelper is Utils {
                 string memory bridge = stdJson.readString(fixtures, string.concat(base, ".bridge"));
                 _parseBridgeConfig(configs[idx], bridge, fixtures, base);
 
+                // A migration can leave different routes on different versions of one adapter.
+                // Use the deployment address by default, but allow a route-specific override.
+                if (_hasBridgeAdapter(fixtures, base)) {
+                    configs[idx].bridgeAdapter = stdJson.readAddress(fixtures, string.concat(base, ".bridgeAdapter"));
+                }
+
                 // Override recipient if destRecipient is specified in the fixture
                 if (_hasDestRecipient(fixtures, base)) {
                     configs[idx].recipientOnDestChain = address(topUpFactory);
@@ -221,6 +227,11 @@ abstract contract TopUpConfigHelper is Utils {
 
     function _hasDestRecipient(string memory json, string memory base) internal pure returns (bool) {
         try vm.parseJsonString(json, string.concat(base, ".destRecipient")) returns (string memory) { return true; }
+        catch { return false; }
+    }
+
+    function _hasBridgeAdapter(string memory json, string memory base) internal pure returns (bool) {
+        try vm.parseJsonAddress(json, string.concat(base, ".bridgeAdapter")) returns (address) { return true; }
         catch { return false; }
     }
 
