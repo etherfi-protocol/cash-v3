@@ -57,7 +57,7 @@ contract DeployStargateTaxiBase is EtherFiDeployerHelper, GnosisHelpers, Contrac
         string memory deployments = readDeploymentFile();
         factory = TopUpFactory(payable(deployments.readAddress(".addresses.TopUpSourceFactory")));
         roleRegistry = RoleRegistry(deployments.readAddress(".addresses.RoleRegistry"));
-        require(deployments.readAddress(".addresses.StargateAdapter") == OLD_STARGATE_ADAPTER, "unexpected old StargateAdapter");
+        require(deployments.readAddress(".addresses.StargateAdapter") == EXPECTED_ADAPTER, "unexpected StargateAdapter deployment");
         require(roleRegistry.owner() == SAFE, "Safe is not RoleRegistry owner");
 
         _checkRoute(factory.getTokenConfig(WETH, 534_352), OLD_STARGATE_ADAPTER, SCROLL_EID);

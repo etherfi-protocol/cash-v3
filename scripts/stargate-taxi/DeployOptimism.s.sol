@@ -98,7 +98,7 @@ contract DeployStargateTaxiOptimism is EtherFiDeployerHelper, GnosisHelpers, Con
         roleRegistry = RoleRegistry(deployments.readAddress(".addresses.RoleRegistry"));
         timelockController = EtherFiTimelock(payable(ETHERFI_TIMELOCK));
 
-        require(deployments.readAddress(".addresses.StargateModule") == OLD_STARGATE_MODULE, "unexpected old StargateModule");
+        require(deployments.readAddress(".addresses.StargateModule") == EXPECTED_MODULE, "unexpected StargateModule deployment");
         require(deployments.readAddress(".addresses.SettlementDispatcherReap") == REAP_PROXY, "unexpected Reap proxy");
         require(deployments.readAddress(".addresses.SettlementDispatcherRain") == RAIN_PROXY, "unexpected Rain proxy");
         require(deployments.readAddress(".addresses.SettlementDispatcherPix") == PIX_PROXY, "unexpected PIX proxy");
