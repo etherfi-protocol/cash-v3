@@ -13,6 +13,23 @@ contract ContractCodeChecker {
         bytes bSegment
     );
 
+    /// @dev Returns whether deployed runtime code contains the supplied embedded address.
+    function _codeContainsAddress(address target, address needle) internal view returns (bool) {
+        bytes memory code = target.code;
+        bytes20 expected = bytes20(needle);
+        for (uint256 i = 0; i + 20 <= code.length; i++) {
+            bool matched = true;
+            for (uint256 j = 0; j < 20; j++) {
+                if (code[i + j] != expected[j]) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return true;
+        }
+        return false;
+    }
+
     function compareBytes(bytes memory a, bytes memory b) internal returns (bool) {
         if (a.length != b.length) {
             // Length mismatch, emit one big segment for the difference if that’s desirable

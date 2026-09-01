@@ -5,6 +5,7 @@ import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
 
 import { EtherFiSafe } from "../src/safe/EtherFiSafe.sol";
+import { ContractCodeChecker } from "./utils/ContractCodeChecker.sol";
 import { Utils } from "./utils/Utils.sol";
 
 /**
@@ -23,7 +24,7 @@ import { Utils } from "./utils/Utils.sol";
  *   forge script scripts/DeploySafeImpl.s.sol --rpc-url $RPC --account etherfi-dev --broadcast --verify \
  *     --libraries src/libraries/SafeErc1271Lib.sol:SafeErc1271Lib:<.addresses.SafeErc1271Lib>
  */
-contract DeploySafeImpl is Utils {
+contract DeploySafeImpl is Utils, ContractCodeChecker {
     using stdJson for string;
 
     function run() public {
@@ -43,23 +44,5 @@ contract DeploySafeImpl is Utils {
         console.log("linked SafeErc1271Lib:", erc1271Lib);
         console.log("");
         console.log("The beacon still points at the old implementation until the upgrade step runs.");
-    }
-
-    /// @dev The linked library address appears verbatim in the runtime code at every call site, so a
-    ///      plain byte search proves which library this build was linked against.
-    function _codeContainsAddress(address target, address needle) internal view returns (bool) {
-        bytes memory code = target.code;
-        bytes20 want = bytes20(needle);
-        for (uint256 i = 0; i + 20 <= code.length; i++) {
-            bool matched = true;
-            for (uint256 j = 0; j < 20; j++) {
-                if (code[i + j] != want[j]) {
-                    matched = false;
-                    break;
-                }
-            }
-            if (matched) return true;
-        }
-        return false;
     }
 }
