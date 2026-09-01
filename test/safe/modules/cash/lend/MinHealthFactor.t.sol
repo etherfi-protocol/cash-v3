@@ -27,12 +27,14 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
 
     uint256 internal constant FLOOR = 1.05e18;
 
-    uint256 internal constant UNBOUNDED_DAILY_LIMIT = 10_000_000e6;
-    uint256 internal constant UNBOUNDED_MONTHLY_LIMIT = 100_000_000e6;
-
+    /// @dev These tests measure the health-factor floor, never the spending limit -- but their
+    ///      spend amounts derive from the LIVE value of the weETH collateral (unpinned fork), so
+    ///      the base $10k daily cap starts binding whenever weETH's price drifts high enough
+    ///      (CI flaked exactly this way: ExceededDailySpendingLimit / declined buffered quotes).
+    ///      Size the limits out of the way so only the floor ever decides these outcomes.
     function setUp() public virtual override {
         super.setUp();
-        _updateSpendingLimit(UNBOUNDED_DAILY_LIMIT, UNBOUNDED_MONTHLY_LIMIT);
+        _updateSpendingLimit(1_000_000e6, 10_000_000e6);
     }
 
     function _setFloor(uint256 value) internal {
