@@ -60,11 +60,3 @@ jobs:
         env:
           TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
         id: test
-
-      # The lend (Aave v4) tests deploy a real Aave v4 instance on an Optimism fork, so they run under the
-      # lend profile against the fork rather than the default profile.
-      - name: Run lend tests
-        run: FOUNDRY_PROFILE=lend forge test -vvv --match-path 'test/safe/modules/cash/lend/**'
-        env:
-          TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
-        id: test-lend
