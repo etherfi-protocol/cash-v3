@@ -265,7 +265,7 @@ contract CashbackDispatcherTest is CashModuleTestSetup {
 
     function test_setPriceProvider_reverts_whenCallerNotOwner() public {
         vm.startPrank(notOwner);
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         cashbackDispatcher.setPriceProvider(address(priceProvider));
         vm.stopPrank();
     }

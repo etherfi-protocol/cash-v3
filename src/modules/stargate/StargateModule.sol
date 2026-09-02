@@ -168,7 +168,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      * @param assets Array of asset addresses to configure
      * @param assetConfigs Array of corresponding asset configurations
-     * @custom:throws Unauthorized if caller doesn't have admin role
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws InvalidInput if any asset address is zero
      * @custom:throws InvalidStargatePool if pool doesn't match the token

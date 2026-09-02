@@ -56,9 +56,6 @@ contract TradingLens is UpgradeableProxy, Constants {
     /// @param token The token contract address.
     event SupportedTokenRemoved(address indexed token);
 
-    /// @notice Reverts when the caller doesn't hold `ADMIN_ROLE`.
-    error OnlyAdmin();
-
     /// @notice Reverts when a zero-address token is passed to `addSupportedToken`.
     error InvalidToken();
 

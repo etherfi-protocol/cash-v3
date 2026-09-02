@@ -136,8 +136,6 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /// @param shares Amount of `wrapper` the TopUp was credited.
     event WrapStock(address indexed topUp, address indexed wrapper, address indexed underlying, uint256 assets, uint256 shares);
 
-    /// @notice Error thrown when a non-admin tries to deploy a topUp contract
-    error OnlyAdmin();
     /// @notice Error thrown when trying to pull funds from an address not registered as deployedAddresses
     error InvalidTopUpAddress();
     /// @notice Error thrown when zero address is provided for a token
@@ -343,7 +341,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /**
      * @notice Takes each `tokens[i]` off the topup lane for `chainIds[i]`: clears its bridge
      *         configuration for that destination and drops it from the supported set.
-     * @dev Admin-only, and the inverse of `setTokenConfig`, which is otherwise a one-way door —
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      *      it only ever adds to `supportedTokens`, and rejects a zeroed config, so before this
      *      there was no way to retire an asset from the lane at all.
      *
@@ -448,7 +446,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @notice Sets the recovery wallet address for emergency fund recovery
      * @dev Only callable by admin role
      * @param _recoveryWallet The new recovery wallet address
-     * @custom:throws OnlyAdmin if caller doesn't have admin role
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws RecoveryWalletCannotBeZeroAddress if provided address is zero
      */
     function setRecoveryWallet(address _recoveryWallet) external onlyAdminTimelock {
@@ -485,7 +483,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /**
      * @notice Registers, for each `tokens[i]`, the ERC-4626 vault a redirect must deposit it
      *         into instead of transferring it — or clears that with the zero address.
-     * @dev Admin-only. This is the whole of the stock-wrapping feature's configuration: the
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      *      tokenized equities a TradingSafe can hold are `WrappedBackedToken` vaults (wTSLAx),
      *      while what a user sends to a TopUp address is the raw Backed xStock underneath
      *      (TSLAx), which is trading-supported in no form of its own and would otherwise be

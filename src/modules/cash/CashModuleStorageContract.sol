@@ -112,9 +112,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when a recipient address is set to zero
     error RecipientCannotBeAddressZero();
 
-    /// @notice Error thrown when a function restricted to the Cash Module Controller is called by another address
-    error OnlyCashModuleController();
-
     /// @notice Error thrown when attempting to process a withdrawal before the delay period has elapsed
     error CannotWithdrawYet();
 

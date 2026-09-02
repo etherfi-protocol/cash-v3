@@ -197,8 +197,6 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      */
     event ProviderFeeSet(uint16 oldFeeBps, uint16 newFeeBps, address oldFeeReceiver, address newFeeReceiver);
 
-    /// @notice Reverts when a non-admin calls an admin function.
-    error OnlyAdmin();
     /// @notice Reverts when the iToken is not on the supported list.
     error TokenNotSupported();
     /// @notice Reverts when a supported iToken is not its own OFT (ShadowOFT invariant).
@@ -332,12 +330,12 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         in-flight order, and `minReturn` still protects the user on the destination.
      * @param _providerFeeBps Fee in basis points; zero disables the fee.
      * @param _feeReceiver Recipient of the fee; may be zero only when the fee is zero.
-     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_ROLE`.
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws ProviderFeeTooHigh If the fee exceeds `MAX_PROVIDER_FEE_BPS`.
      * @custom:throws InvalidInput If the receiver is zero while the fee is non-zero.
      */
     function setProviderFee(uint16 _providerFeeBps, address _feeReceiver) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         _setProviderFee(_providerFeeBps, _feeReceiver);
     }
 
@@ -777,7 +775,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         }
     }
 
-    /// @dev Reverts unless the caller holds `ADMIN_ROLE`.
+    /// @dev Reverts unless the caller holds `ADMIN_TIMELOCK_ROLE`.
     function _onlyAdmin() internal view {
         IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdmin(msg.sender);
     }

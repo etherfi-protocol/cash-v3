@@ -125,8 +125,6 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     event MulticallHandlerSet(address oldMulticallHandler, address newMulticallHandler);
     event PeripherySet(address oldPeriphery, address newPeriphery);
 
-    /// @notice Reverts when a non-admin tries to set per-chain constants.
-    error OnlyAdmin();
     /// @notice Reverts when `requestSwap` is called on a safe with an active swap.
     error OrderAlreadyActive();
     /// @notice Reverts when `executeSwap` / `cancelSwap` finds no stored swap.

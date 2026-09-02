@@ -468,7 +468,7 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = makeAddr("redemptionVault");
 
-        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         vm.prank(owner1);
         midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
     }

@@ -102,7 +102,7 @@ contract TradingLensTest is Test {
     }
 
     function test_addSupportedToken_revertsWhen_notAdmin() public {
-        vm.expectRevert(TradingLens.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         vm.prank(stranger);
         lens.addSupportedToken(address(tokenA));
     }
@@ -135,7 +135,7 @@ contract TradingLensTest is Test {
         vm.prank(admin);
         lens.addSupportedToken(address(tokenA));
 
-        vm.expectRevert(TradingLens.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         vm.prank(stranger);
         lens.removeSupportedToken(address(tokenA));
     }

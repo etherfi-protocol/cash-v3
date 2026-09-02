@@ -37,13 +37,12 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Sets the settlement dispatcher address for a bin sponsor
-     * @dev Only callable by accounts with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
      * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
      * @custom:throws InvalidInput if caller doesn't have the controller role
      */
-    function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external {
-        roleRegistry().onlyAdminTimelock(msg.sender);
+    function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external onlyRoleRegistryOwner {
         if (dispatcher == address(0)) revert InvalidInput();
 
         CashModuleStorage storage $ = _getCashModuleStorage();
@@ -65,14 +64,13 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Sets the Aave gateway address for the initial Lend deployment
-     * @dev Only callable by accounts with ADMIN_TIMELOCK_ROLE while no gateway is configured
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param gateway Address of the gateway contract
-     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws OnlyRoleRegistryOwner if the caller is not the RoleRegistry owner
      * @custom:throws InvalidInput if gateway has no contract code (also rejects address(0))
      * @custom:throws GatewayAlreadySet if the gateway has already been configured
      */
-    function setLendGateway(address gateway) external {
-        roleRegistry().onlyAdminTimelock(msg.sender);
+    function setLendGateway(address gateway) external onlyRoleRegistryOwner {
         // One-time bootstrap that can't be repointed, so guard against a mistyped EOA or undeployed address.
         if (gateway.code.length == 0) revert InvalidInput();
 
@@ -102,7 +100,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @dev Only callable by accounts with ADMIN_ROLE
      * @param assets Array of asset addresses to configure
      * @param shouldWhitelist Array of boolean suggesting whether to whitelist the assets
-     * @custom:throws OnlyCashModuleController if the caller does not have ADMIN_ROLE role
+     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
      * @custom:throws InvalidInput If the arrays are empty
      * @custom:throws ArrayLengthMismatch If the arrays have different lengths
      * @custom:throws InvalidAddress If any address is the zero address
@@ -150,7 +148,7 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param withdrawalDelay Delay in seconds before a withdrawal can be finalized
      * @param spendLimitDelay Delay in seconds before spending limit changes take effect
      * @param modeDelay Delay in seconds before a mode change takes effect
-     * @custom:throws OnlyCashModuleController if caller doesn't have the controller role
+     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
      */
 
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {

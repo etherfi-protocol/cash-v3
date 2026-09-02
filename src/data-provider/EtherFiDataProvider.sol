@@ -85,8 +85,6 @@ contract EtherFiDataProvider is UpgradeableProxy {
     error InvalidCashModule();
     /// @notice Thrown when an invalid Cash lens address is provided
     error InvalidCashLens();
-    /// @notice Thrown when a non-admin address attempts to perform an admin-only operation
-    error OnlyAdmin();
     /// @notice Throws when trying to reinit the modules
     error ModulesAlreadySetup();
 
@@ -195,11 +193,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Cash Lens
-     * @dev Only callable by addresses with ADMIN_ROLE
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param cashLens New cash lens address to set
      */
-    function setCashLens(address cashLens) external {
-        _onlyAdmin();
+    function setCashLens(address cashLens) external onlyRoleRegistryOwner {
         _setCashLens(cashLens);
     }
 
@@ -227,31 +224,28 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Price Provider
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param _priceProvider New price provider address to set
      */
-    function setPriceProvider(address _priceProvider) external {
-        _onlyAdminTimelock();
+    function setPriceProvider(address _priceProvider) external onlyRoleRegistryOwner {
         _setPriceProvider(_priceProvider);
     }
 
     /**
      * @notice Updates the hook address
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param hook New hook address to set
      */
-    function setHookAddress(address hook) external {
-        _onlyAdminTimelock();
+    function setHookAddress(address hook) external onlyRoleRegistryOwner {
         _setHookAddress(hook);
     }
 
     /**
      * @notice Updates the etherFiSafeFactory instance address
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param factory New factory address to set
      */
-    function setEtherFiSafeFactory(address factory) external {
-        _onlyAdminTimelock();
+    function setEtherFiSafeFactory(address factory) external onlyRoleRegistryOwner {
         _setEtherFiSafeFactory(factory);
     }
 
@@ -303,11 +297,10 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the address of the Cash Module
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param cashModule New cash module address to set
      */
-    function setCashModule(address cashModule) external {
-        _onlyAdminTimelock();
+    function setCashModule(address cashModule) external onlyRoleRegistryOwner {
         _setCashModule(cashModule);
     }
 

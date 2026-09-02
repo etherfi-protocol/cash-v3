@@ -546,14 +546,14 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @notice Adds new liquid assets and their corresponding tellers to the module
      * @param liquidAssets Array of liquid asset addresses to add
      * @param tellers Array of teller addresses corresponding to the liquid assets
-     * @dev Only callable by accounts with the ADMIN_ROLE role
-     * @custom:throws Unauthorized If caller doesn't have the admin role
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
      * @custom:throws InvalidConfiguration If a teller's vault doesn't match the expected liquid asset
      */
     function addLiquidAssets(address[] calldata liquidAssets, address[] calldata tellers) external {
-        etherFiDataProvider.roleRegistry().onlyAdmin(msg.sender);
+        etherFiDataProvider.roleRegistry().onlyAdminTimelock(msg.sender);
 
         uint256 len = liquidAssets.length;
         if (len != tellers.length) revert ArrayLengthMismatch();
@@ -577,7 +577,7 @@ contract EtherFiLiquidModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardT
      * @notice Removes liquid assets from the module
      * @param liquidAssets Array of liquid asset addresses to remove
      * @dev Only callable by accounts with the ADMIN_ROLE role
-     * @custom:throws Unauthorized If caller doesn't have the admin role
+     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
      * @custom:throws InvalidInput If the array is empty
      */
     function removeLiquidAsset(address[] calldata liquidAssets) external {

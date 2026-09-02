@@ -203,20 +203,20 @@ contract PriceProviderV2 is UpgradeableProxy {
 
     /**
      * @notice Updates the price oracle configurations for multiple tokens
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_ROLE
      * @param _tokens Array of token addresses to configure
      * @param _configs Array of configurations corresponding to each token
      */
-    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyAdminTimelock {
+    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyAdmin {
         _setTokenConfig(_tokens, _configs);
     }
 
     /**
      * @notice Removes the price oracle configuration for a token
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_ROLE
      * @param _token Address of the token to remove the config for
      */
-    function removeTokenConfig(address _token) external onlyAdminTimelock {
+    function removeTokenConfig(address _token) external onlyAdmin {
         PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
         if ($.isBaseAsset[_token]) revert BaseAssetCannotBeRemoved();
         if ($.tokenConfig[_token].oracle == address(0)) revert TokenConfigNotSet();
@@ -226,10 +226,10 @@ contract PriceProviderV2 is UpgradeableProxy {
 
     /**
      * @notice Sets a base asset to true or false
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_ROLE
      * @param _baseAsset Address of the base asset
      */
-    function setBaseAsset(address _baseAsset, bool _isBaseAsset) external onlyAdminTimelock {
+    function setBaseAsset(address _baseAsset, bool _isBaseAsset) external onlyAdmin {
         PriceProviderV2Storage storage $ = _getPriceProviderV2Storage();
         $.isBaseAsset[_baseAsset] = _isBaseAsset;
         emit BaseAssetSet(_baseAsset, _isBaseAsset);
