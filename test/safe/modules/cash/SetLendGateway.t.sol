@@ -13,6 +13,7 @@ import { CashModuleCore } from "../../../../src/modules/cash/CashModuleCore.sol"
 import { CashModuleSetters } from "../../../../src/modules/cash/CashModuleSetters.sol";
 import { CashEventEmitter, CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
 import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
+import { UpgradeableProxy } from "../../../../src/utils/UpgradeableProxy.sol";
 
 contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -99,7 +100,7 @@ contract CashModuleSetLendGatewayTest is CashModuleTestSetup {
         MockLendGateway newGateway = new MockLendGateway();
 
         vm.prank(notOwner);
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         cashModule.setLendGateway(address(newGateway));
 
         vm.prank(owner);

@@ -719,7 +719,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         bool[] memory supported = new bool[](1);
         supported[0] = true;
 
-        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         module.configureTokens(iTokens, supported);
 
         // a token whose OFT.token() != itself must be rejected
@@ -768,7 +768,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     }
 
     function test_setLzGasLimits_adminOnlyValidatesAndStores() public {
-        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         module.setLzGasLimits(80_000, 500_000);
 
         vm.startPrank(moduleAdmin);
@@ -788,7 +788,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     // ---- provider fee ----
 
     function test_setProviderFee_adminOnlyCapAndValidation() public {
-        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setProviderFee(100, feeReceiver);
 
         vm.startPrank(moduleAdmin);

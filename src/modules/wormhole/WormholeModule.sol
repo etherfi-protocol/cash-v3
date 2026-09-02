@@ -156,7 +156,7 @@ contract WormholeModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @notice Sets the asset configuration for a given asset
      * @param assets Array of asset addresses to configure
      * @param assetConfigs Array of corresponding asset configurations
-     * @custom:throws Unauthorized If the caller is not the ADMIN role
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      */
     function setAssetConfig(address[] memory assets, AssetConfig[] memory assetConfigs) external {
         IRoleRegistry roleRegistry = IRoleRegistry(etherFiDataProvider.roleRegistry());

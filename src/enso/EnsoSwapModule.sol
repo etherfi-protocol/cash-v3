@@ -105,8 +105,6 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     event SwapCancelled(address indexed safe, bytes32 indexed swapId);
     event EnsoRouterSet(address oldEnsoRouter, address newEnsoRouter);
 
-    /// @notice Reverts when a non-admin tries to set the Enso Router.
-    error OnlyAdmin();
     /// @notice Reverts when `requestSwap` is called on a safe with an active swap.
     error OrderAlreadyActive();
     /// @notice Reverts when `executeSwap` / `cancelSwap` finds no stored swap.

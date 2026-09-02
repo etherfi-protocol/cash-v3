@@ -176,12 +176,12 @@ contract PriceProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the price oracle configurations for multiple tokens
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by addresses with ADMIN_ROLE
      * @param _tokens Array of token addresses to configure
      * @param _configs Array of configurations corresponding to each token
      * @custom:throws ArrayLengthMismatch If arrays have different lengths
      */
-    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyAdminTimelock {
+    function setTokenConfig(address[] calldata _tokens, Config[] calldata _configs) external onlyAdmin {
         _setTokenConfig(_tokens, _configs);
     }
 

@@ -234,12 +234,12 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
 
     /**
      * @notice Sets the `TradingLens` registry backing `isSupportedToken`.
-     * @dev Admin-only. The lens owns the supported-trading-token set; the factory exposes it
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      *      so cross-chain callers (the TopUp source factory) can gate redirects on it.
      * @param _tradingLens Address of the `TradingLens` on this chain.
      * @custom:throws TradingLensCannotBeZeroAddress If `_tradingLens == address(0)`.
      */
-    function setTradingLens(address _tradingLens) external onlyAdmin {
+    function setTradingLens(address _tradingLens) external onlyRoleRegistryOwner {
         if (_tradingLens == address(0)) revert TradingLensCannotBeZeroAddress();
         TradingSafeFactoryStorage storage $ = _getTradingSafeFactoryStorage();
         emit TradingLensSet($.tradingLens, _tradingLens);

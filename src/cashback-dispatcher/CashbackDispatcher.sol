@@ -284,12 +284,12 @@ contract CashbackDispatcher is UpgradeableProxy {
 
     /**
      * @notice Updates the Price Provider address
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      * @param _priceProvider New Price Provider address
      * @custom:throws InvalidValue When the provided address is zero
      * @custom:throws CashbackTokenPriceNotConfigured When the new provider has no price for the cashback token
      */
-    function setPriceProvider(address _priceProvider) external onlyAdminTimelock {
+    function setPriceProvider(address _priceProvider) external onlyRoleRegistryOwner {
         if (_priceProvider == address(0)) revert InvalidValue();
 
         address[] memory cashbackTokens = getCashbackTokens();

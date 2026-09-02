@@ -273,13 +273,13 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param midasTokens Array of Midas token addresses to add
      * @param depositVaults Array of deposit vault addresses corresponding to the Midas tokens
      * @param redemptionVaults Array of redemption vault addresses corresponding to the Midas tokens
-     * @dev Only callable by accounts with the ADMIN_ROLE role
-     * @custom:throws Unauthorized If caller doesn't have the admin role
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
      */
     function addMidasVaults(address[] calldata midasTokens, address[] calldata depositVaults, address[] calldata redemptionVaults) external {
-        etherFiDataProvider.roleRegistry().onlyAdmin(msg.sender);
+        etherFiDataProvider.roleRegistry().onlyAdminTimelock(msg.sender);
 
         uint256 len = midasTokens.length;
         if (len != depositVaults.length || len != redemptionVaults.length) revert ArrayLengthMismatch();
@@ -306,7 +306,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @notice Removes Midas vaults from the module
      * @param midasTokens Array of Midas token addresses to remove
      * @dev Only callable by accounts with the ADMIN_ROLE role
-     * @custom:throws Unauthorized If caller doesn't have the admin role
+     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
      * @custom:throws InvalidInput If the array is empty
      */
     function removeMidasVaults(address[] calldata midasTokens) external {
