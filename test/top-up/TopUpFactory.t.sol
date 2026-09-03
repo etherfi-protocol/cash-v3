@@ -15,6 +15,7 @@ import { TopUp } from "../../src/top-up/TopUp.sol";
 import { BeaconFactory, TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { EtherFiOFTBridgeAdapter } from "../../src/top-up/bridge/EtherFiOFTBridgeAdapter.sol";
 import { ScrollERC20BridgeAdapter } from "../../src/top-up/bridge/ScrollERC20BridgeAdapter.sol";
+import { SendParam } from "../../src/interfaces/IOFT.sol";
 import { StargateAdapter } from "../../src/top-up/bridge/StargateAdapter.sol";
 import { EtherFiLiquidBridgeAdapter } from "../../src/top-up/bridge/EtherFiLiquidBridgeAdapter.sol";
 import {NTTAdapter} from "../../src/top-up/bridge/NTTAdapter.sol";
@@ -784,6 +785,14 @@ contract TopUpFactoryTest is Test, Constants {
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
         factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
+    }
+
+    /// @dev Confirms empty taxi parameters select Stargate's enforced destination options.
+    function test_prepareTakeTaxi_usesEmptyCommandAndExtraOptions() public view {
+        (, SendParam memory sendParam,,) = stargateAdapter.prepareTakeTaxi(ethStargatePool, uint32(30_214), 1 ether, alice, 0);
+
+        assertEq(sendParam.oftCmd.length, 0);
+        assertEq(sendParam.extraOptions.length, 0);
     }
 
     function test_bridge_succeeds_withLiquidEth() public {

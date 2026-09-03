@@ -130,7 +130,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @notice Emitted when funds are successfully bridged via Stargate
      * @param token Address of the token that was bridged
      * @param amount Amount of tokens that were bridged
-     * @param ticket Stargate ticket containing details of the bridge transaction
+     * @param ticket Empty in taxi mode and retained for event ABI compatibility
      */
     event FundsBridgedWithStargate(address indexed token, uint256 amount, Ticket ticket);
 
@@ -676,7 +676,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
             emit FundsBridgedWithOFT(token, amount);
         } else {
             (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) =
-                prepareRideBus(token, amount);
+                prepareTakeTaxi(token, amount);
 
             if (minReturnLD > minReturnFromStargate) revert InsufficientMinReturn();
             if (address(this).balance < valueToSend) revert InsufficientFeeToCoverCost();
@@ -689,7 +689,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Prepares parameters for the Stargate bridge transaction
-     * @dev Uses Stargate's "Ride the Bus" pattern for token bridging
+     * @dev Uses taxi mode. Empty extraOptions use the pool's enforced destination gas options.
      * @param token Address of the token to bridge
      * @param amount Amount of the token to bridge
      * @return stargate Address of the Stargate router to use
@@ -701,7 +701,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws InsufficientBalance If the contract doesn't have enough tokens
      * @custom:throws DestinationDataNotSet If destination data is not set for the token
      */
-    function prepareRideBus(
+    function prepareTakeTaxi(
         address token,
         uint256 amount
     ) public view virtual returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
@@ -717,7 +717,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
             minAmountLD: amount,
             extraOptions: new bytes(0),
             composeMsg: new bytes(0),
-            oftCmd: new bytes(1)
+            oftCmd: new bytes(0)
         });
 
         (, , OFTReceipt memory receipt) = IStargate(stargate).quoteOFT(sendParam);
@@ -982,4 +982,3 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      */
     receive() external payable {}
 }
-

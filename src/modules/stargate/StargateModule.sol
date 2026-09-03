@@ -138,6 +138,13 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
     event BridgeCancelled(address indexed safe, uint32 indexed destEid, address indexed asset, uint256 amount, address destRecipient);
 
     /**
+     * @notice Emitted when unused native bridge fees are returned to the payer
+     * @param to Address that receives the refund
+     * @param amount Amount of native tokens refunded
+     */
+    event UnusedNativeFeeRefunded(address indexed to, uint256 amount);
+
+    /**
      * @notice Constructor for StargateModule
      * @param _assets Array of asset addresses to configure
      * @param _assetConfigs Array of corresponding asset configurations
@@ -173,7 +180,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @param assetConfigs Array of corresponding asset configurations
      * @custom:throws Unauthorized if caller doesn't have admin role
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
-     * @custom:throws InvalidInput if any asset address is zero
+     * @custom:throws InvalidInput if any asset is zero or native ETH
      * @custom:throws InvalidStargatePool if pool doesn't match the token
      */
     function setAssetConfig(address[] memory assets, AssetConfig[] memory assetConfigs) external {
@@ -203,10 +210,10 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @param signers Array of addresses that signed the transaction
      * @param signatures Array of signatures from the signers
      * @custom:throws InvalidSignatures if the signatures are invalid
-     * @custom:throws InvalidInput if destination, asset, amount or slippage is invalid
+     * @custom:throws InvalidInput if destination, asset, amount or slippage is invalid, or if ETH is sent with a request that queues
      */
     function requestBridge(address safe, uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps, address[] calldata signers, bytes[] calldata signatures) external payable nonReentrant onlyEtherFiSafe(safe) {
-        if (destRecipient == address(0) || asset == address(0) || amount == 0 || maxSlippageInBps > 10_000) revert InvalidInput();
+        if (destRecipient == address(0) || asset == address(0) || asset == ETH || amount == 0 || maxSlippageInBps > 10_000) revert InvalidInput();
 
         _checkSignature(safe, destEid, asset, amount, destRecipient, maxSlippageInBps, signers, signatures);
         
@@ -219,6 +226,8 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
             _bridge(destEid, asset, amount, destRecipient, maxSlippageInBps);
             emit BridgeWithStargate(safe, destEid, asset, amount, destRecipient, maxSlippageInBps);
         } else {
+            // The fee is paid on executeBridge, so ETH sent now would be stuck in the module.
+            if (msg.value != 0) revert InvalidInput();
             _getStargateModuleStorage().withdrawals[safe] = CrossChainWithdrawal({
                 destEid: destEid,
                 asset: asset,
@@ -314,10 +323,13 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
     function _bridge(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippageInBps) internal {
         _checkBalance(asset, amount);
 
+        uint256 balanceBefore = address(this).balance;
         uint256 minAmount = _deductSlippage(amount, maxSlippageInBps);
 
         if (_getStargateModuleStorage().assetConfig[asset].isOFT) _bridgeOft(destEid, asset, amount, destRecipient, minAmount);
         else _bridgeNonOft(destEid, asset, amount, destRecipient, minAmount);
+
+        _refundUnusedNativeFee(balanceBefore);
     }
 
     /**
@@ -328,22 +340,15 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @param destRecipient Recipient address on the destination chain
      * @param minReturnAmount Minimum amount to receive after slippage
      * @custom:throws InsufficientNativeFee if not enough native tokens for fees
-     * @custom:throws NativeTransferFailed if native token transfer fails
      * @custom:throws InvalidStargatePool if pool configuration is invalid
      */
     function _bridgeNonOft(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 minReturnAmount) internal {
-        (IStargate stargate, uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) = prepareRideBus(destEid, asset, amount, destRecipient, minReturnAmount);
-        if (address(this).balance < messagingFee.nativeFee) revert InsufficientNativeFee();
+        (IStargate stargate, uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) = prepareTakeTaxi(destEid, asset, amount, destRecipient, minReturnAmount);
+        if (address(this).balance < valueToSend) revert InsufficientNativeFee();
+        if (poolToken != asset) revert InvalidStargatePool();
 
-        if (asset != ETH) {
-            if (poolToken != asset) revert InvalidStargatePool();
-
-            IERC20(asset).forceApprove(address(stargate), amount);
-            IStargate(stargate).sendToken{value: valueToSend}(sendParam, messagingFee, payable(address(this)));
-        } else {
-            if (poolToken != address(0)) revert InvalidStargatePool();
-            IStargate(address(stargate)).sendToken{value: valueToSend}(sendParam, messagingFee, payable(address(this)));
-        }
+        IERC20(asset).forceApprove(address(stargate), amount);
+        IStargate(stargate).sendToken{value: valueToSend}(sendParam, messagingFee, payable(address(this)));
     }
 
     /**
@@ -431,29 +436,29 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      */
     function _getNonOftBridgeFee(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 maxSlippage) internal view returns (address, uint256) {
         uint256 minAmount = _deductSlippage(amount, maxSlippage);
-        (, , , MessagingFee memory messagingFee,) = prepareRideBus(destEid, asset, amount, destRecipient, minAmount);
+        (, , , MessagingFee memory messagingFee,) = prepareTakeTaxi(destEid, asset, amount, destRecipient, minAmount);
 
         return (ETH, messagingFee.nativeFee);
     }
 
     /**
      * @notice Prepares parameters for Stargate bridging
-     * @dev Implements the "Ride the Bus" pattern from Stargate documentation
+     * @dev Uses taxi mode. Empty extraOptions use the pool's enforced destination gas options.
      * @param destEid Destination chain ID
      * @param asset Address of the asset to bridge
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
      * @param minAmount Minimum amount to receive after slippage
      * @return stargate The instance of the stargate pool
-     * @return valueToSend Total native token value needed for the transaction
+     * @return valueToSend LayerZero native fee needed for the transaction
      * @return sendParam Stargate bridging parameters
      * @return messagingFee LayerZero messaging fee details
      * @return poolToken Address of the token accepted by the Stargate pool
      * @custom:throws InsufficientMinAmount if expected received amount is below minimum
      */
-    function prepareRideBus(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 minAmount) public view returns (IStargate stargate, uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) {
+    function prepareTakeTaxi(uint32 destEid, address asset, uint256 amount, address destRecipient, uint256 minAmount) public view returns (IStargate stargate, uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) {
         stargate = IStargate(_getStargateModuleStorage().assetConfig[asset].pool);
-        sendParam = SendParam({ dstEid: destEid, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: amount, extraOptions: new bytes(0), composeMsg: new bytes(0), oftCmd: new bytes(1) });
+        sendParam = SendParam({ dstEid: destEid, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: amount, extraOptions: new bytes(0), composeMsg: new bytes(0), oftCmd: new bytes(0) });
 
         ( , , OFTReceipt memory receipt) = stargate.quoteOFT(sendParam);
         sendParam.minAmountLD = receipt.amountReceivedLD;
@@ -462,9 +467,20 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
         messagingFee = stargate.quoteSend(sendParam, false);
         valueToSend = messagingFee.nativeFee;
         poolToken = stargate.token();
-        if (poolToken == address(0)) {
-            valueToSend += sendParam.amountLD;
-        }
+    }
+
+    /// @dev Returns the caller's unused fee payment without refunding the module's existing native balance.
+    function _refundUnusedNativeFee(uint256 balanceBefore) internal {
+        uint256 balanceAfter = address(this).balance;
+        uint256 feeConsumed = balanceBefore > balanceAfter ? balanceBefore - balanceAfter : 0;
+        uint256 refund = msg.value > feeConsumed ? msg.value - feeConsumed : 0;
+
+        if (refund == 0) return;
+
+        (bool success,) = payable(msg.sender).call{ value: refund }("");
+        if (!success) revert NativeTransferFailed();
+
+        emit UnusedNativeFeeRefunded(msg.sender, refund);
     }
 
     /**
@@ -483,7 +499,7 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @param assets Array of asset addresses to configure
      * @param assetConfigs Array of corresponding asset configurations
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
-     * @custom:throws InvalidInput if any asset address is zero
+     * @custom:throws InvalidInput if any asset is zero or native ETH
      * @custom:throws InvalidStargatePool if pool doesn't match the token
      */
     function _setAssetConfigs(address[] memory assets, AssetConfig[] memory assetConfigs) internal {
@@ -494,13 +510,10 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
         address poolToken;
 
         for (uint256 i = 0; i < len; ) {
-            if (assets[i] == address(0)) revert InvalidInput();
+            if (assets[i] == address(0) || assets[i] == ETH) revert InvalidInput();
 
             poolToken = IStargate(assetConfigs[i].pool).token();
-            if (
-                (assets[i] != ETH && poolToken != assets[i]) || 
-                (assets[i] == ETH && poolToken != address(0))
-            ) revert InvalidStargatePool();
+            if (poolToken != assets[i]) revert InvalidStargatePool();
 
             $.assetConfig[assets[i]] = assetConfigs[i];
             unchecked {
@@ -518,16 +531,12 @@ contract StargateModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransi
      * @custom:throws InsufficientAmount if the module doesn't have enough assets
      */
     function _checkBalance(address asset, uint256 amount) internal view {
-        if (asset == ETH) {
-            if (address(this).balance < amount) revert InsufficientAmount();    
-        } else {
-            if (IERC20(asset).balanceOf(address(this)) < amount) revert InsufficientAmount();
-        }
+        if (IERC20(asset).balanceOf(address(this)) < amount) revert InsufficientAmount();
     }
 
     /**
      * @notice Allows the contract to receive ETH
-     * @dev Required to handle native token operations
+     * @dev Required to receive LayerZero fee payments and protocol refunds
      */
     receive() external payable {}
 }
