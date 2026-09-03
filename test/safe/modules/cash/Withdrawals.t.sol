@@ -285,6 +285,43 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(weETH.balanceOf(withdrawRecipient), weETHAmount);
     }
 
+    /// @dev The reason `EtherFiSafe.receive` wraps at all. `_processWithdrawal` only ever encodes
+    ///      `IERC20.transfer` and passes a zero call value, so native ETH sent to a safe had no exit.
+    ///      Wrapping on arrival puts it in the one form this path can move — end to end, not just wrapped.
+    function test_processWithdrawals_movesEthThatArrivedAsWeth() external {
+        address weth = safe.WETH();
+        uint256 withdrawalAmount = 1 ether;
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = weth;
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+
+        vm.prank(owner);
+        cashModule.configureWithdrawAssets(tokens, whitelist);
+
+        uint256 safeWethBefore = IERC20(weth).balanceOf(address(safe));
+        uint256 recipientWethBefore = IERC20(weth).balanceOf(withdrawRecipient);
+
+        (bool ok,) = address(safe).call{ value: withdrawalAmount }("");
+        assertTrue(ok);
+        assertEq(address(safe).balance, 0, "ETH did not wrap on arrival");
+        assertEq(IERC20(weth).balanceOf(address(safe)) - safeWethBefore, withdrawalAmount);
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        vm.warp(block.timestamp + withdrawalDelay);
+
+        cashModule.processWithdrawal(address(safe));
+
+        assertEq(IERC20(weth).balanceOf(address(safe)), safeWethBefore, "the wrapped ETH did not leave the safe");
+        assertEq(IERC20(weth).balanceOf(withdrawRecipient) - recipientWethBefore, withdrawalAmount, "it did not reach the recipient");
+    }
+
     function test_processWithdrawals_fails_whenAssetIsNotWhitelistedWithdrawAsset() external {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdc), address(safe), withdrawalAmount);
