@@ -163,10 +163,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiSafe() public {
-        // RecoveryManager (compiled into EtherFiSafe) now rejects setRecoveryThreshold(0), so its
-        // bytecode no longer matches the deployed pre-fix OP implementation. Re-enable after the
-        // next safe-implementation deployment.
-        vm.skip(true);
         address local = address(new EtherFiSafe(dataProviderProxy));
         _verify("EtherFiSafe", safeImpl, local);
     }
@@ -181,9 +177,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiHook() public {
-        // EtherFiHook skips the health hook for gateway safes in Lend, so its bytecode no longer
-        // matches the deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new EtherFiHook(dataProviderProxy));
         _verify("EtherFiHook", hookImpl, local);
     }
@@ -191,33 +184,21 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Cash module ----
 
     function test_verifyBytecode_CashModuleCore() public {
-        // CashModule drops the preLiquidate/postLiquidate callbacks for Lend, so its bytecode no longer
-        // matches the deployed pre-Lend version. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new CashModuleCore(dataProviderProxy));
         _verify("CashModuleCore", cashModuleCoreImpl, local);
     }
 
     function test_verifyBytecode_CashModuleSetters() public {
-        // CashModuleSetters gains gateway wiring plus the lend opt-out (setLendGateway/toggleLend) for Lend, so
-        // its bytecode no longer matches the deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new CashModuleSetters(dataProviderProxy));
         _verify("CashModuleSetters", cashModuleSettersImpl, local);
     }
 
     function test_verifyBytecode_CashLens() public {
-        // CashLens is rewritten for Lend (reads the Aave gateway through CashModule), so its
-        // bytecode no longer matches the deployed pre-Lend version. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new CashLens(cashModuleProxy, dataProviderProxy));
         _verify("CashLens", cashLensImpl, local);
     }
 
     function test_verifyBytecode_CashEventEmitter() public {
-        // CashEventEmitter gains the gateway update and Repay events for Lend, so its bytecode no longer
-        // matches the deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new CashEventEmitter(cashModuleProxy));
         _verify("CashEventEmitter", cashEventEmitterImpl, local);
     }
@@ -230,17 +211,11 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Debt manager ----
 
     function test_verifyBytecode_DebtManagerCore() public {
-        // DebtManager's liquidation path is removed for Lend, so its bytecode no longer matches the
-        // deployed pre-Lend version. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new DebtManagerCore(dataProviderProxy));
         _verify("DebtManagerCore", debtManagerCoreImpl, local);
     }
 
     function test_verifyBytecode_DebtManagerAdmin() public {
-        // The shared DebtManager storage contract gains the ETHER_FI_WALLET_ROLE getter for Lend, so
-        // the bytecode no longer matches the deployed pre-Lend version. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new DebtManagerAdmin(dataProviderProxy));
         _verify("DebtManagerAdmin", debtManagerAdminImpl, local);
     }
@@ -277,9 +252,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Top up ----
 
     function test_verifyBytecode_TopUpDest() public {
-        // TopUpDest supplies topups into the lend gateway for Lend, so its bytecode no longer
-        // matches the deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new TopUpDest(dataProviderProxy, cc.weth));
         _verify("TopUpDest", topUpDestImpl, local);
     }
@@ -287,17 +259,11 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Modules (non-proxy, deployed via CREATE3) ----
 
     function test_verifyBytecode_OpenOceanSwapModule() public {
-        // OpenOceanSwapModule gains the Aave sandwich for Lend, so its bytecode no longer matches the deployed
-        // pre-Lend OP implementation. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new OpenOceanSwapModule(cc.swapRouterOpenOcean, dataProviderProxy));
         _verify("OpenOceanSwapModule", openOceanSwapModule, local);
     }
 
     function test_verifyBytecode_EtherFiLiquidModule() public {
-        // The liquid modules gain the Aave sandwich for Lend, so their bytecode no longer matches the deployed
-        // pre-Lend OP implementations. Re-enable after the Lend deployment.
-        vm.skip(true);
         address[] memory assets = new address[](4);
         assets[0] = cc.liquidEth;
         assets[1] = cc.liquidBtc;
@@ -315,8 +281,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiLiquidModuleWithReferrer() public {
-        // Skipped for the same Lend bytecode change as EtherFiLiquidModule above.
-        vm.skip(true);
         address[] memory assets = new address[](1);
         assets[0] = cc.sethfi;
 
@@ -341,25 +305,16 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_FraxModule() public {
-        // FraxModule gains the Aave sandwich for Lend, so its bytecode no longer matches the deployed
-        // pre-Lend OP implementation. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new FraxModule(dataProviderProxy, cc.fraxusd, cc.fraxCustodian, cc.fraxRemoteHop));
         _verify("FraxModule", fraxModule, local);
     }
 
     function test_verifyBytecode_EtherFiStakeModule() public {
-        // EtherFiStakeModule gains the Aave sandwich for Lend, so its bytecode no longer matches the deployed
-        // pre-Lend OP implementation. Re-enable after the Lend deployment.
-        vm.skip(true);
         address local = address(new EtherFiStakeModule(dataProviderProxy, cc.syncPool, cc.weth, cc.weETH));
         _verify("EtherFiStakeModule", etherFiStakeModule, local);
     }
 
     function test_verifyBytecode_LiquidUSDLiquifierModule() public {
-        // The liquifier gains the dual-engine gateway repay for Lend, so its bytecode no longer matches the
-        // deployed pre-Lend OP implementation. Re-enable after the Lend deployment.
-        vm.skip(true);
         address liquifierImpl = _getImpl(liquidUsdLiquifierProxy);
         address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));
         _verify("LiquidUSDLiquifierModule", liquifierImpl, local);
