@@ -1,0 +1,794 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.28;
+
+import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
+import { EnumerableMapLib } from "solady/utils/EnumerableMapLib.sol";
+import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
+
+import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
+import { EnumerableAddressWhitelistLib } from "../libraries/EnumerableAddressWhitelistLib.sol";
+import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
+import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
+import { IOFT, MessagingFee, OFTReceipt, SendParam } from "../interfaces/IOFT.sol";
+import { ICashModule, WithdrawalRequest } from "../interfaces/ICashModule.sol";
+import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
+import { ModuleBase } from "../modules/ModuleBase.sol";
+import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
+
+/**
+ * @title StockWithdrawModule
+ * @author ether.fi
+ * @notice Cross-chain wrapped-stock withdrawal module installed on the OP `EtherFiSafe`. The
+ *         user signs ONE intent at `requestWithdrawal` — `(iToken, amount, minReturn, deadline,
+ *         recipient, dstEid)` — which places a CashModule withdrawal hold (recipient = this module).
+ *         After the withdrawal delay matures, the permissionless, payable
+ *         `executeWithdrawal(safe)` processes the withdrawal (iTOKEN lands here) and OFT-sends
+ *         it to the mainnet `StockUnwrapper` with a composeMsg carrying the order terms. On
+ *         Ethereum the unwrapper redeems the Backed ERC-4626 wrapper to `recipient` (reverting
+ *         if output < `minReturn`, which parks the LZ compose message for retry) or, past
+ *         `deadline`, delivers the wrapped token to the safe's own deterministic mainnet
+ *         address (the CREATE3-derived TopUp address, recoverable via the TopUp redirect flow).
+ * @dev Funds route through the module (Stargate pattern) because the OFT send needs
+ *      `msg.value` for the LayerZero fee, which the execute caller supplies — that cannot be
+ *      injected into a safe-originated call. iTOKENs are ShadowOFTs (the OFT IS the token,
+ *      mint/burn), so no residual approvals are left behind.
+ *
+ *      The send amount and `minAmountLD` are pinned to `quoteOFT`'s `amountSentLD` /
+ *      `amountReceivedLD` (the OFT truncates dust below its shared-decimal precision; the
+ *      truncated remainder is returned to the safe). Economic slippage protection is
+ *      exclusively `minReturn`, enforced against the actual redeem output on Ethereum.
+ */
+contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
+    using MessageHashUtils for bytes32;
+    using Math for uint256;
+    using SafeERC20 for IERC20;
+    using EnumerableSetLib for EnumerableSetLib.AddressSet;
+    using EnumerableMapLib for EnumerableMapLib.Uint256ToAddressMap;
+    using EnumerableAddressWhitelistLib for EnumerableSetLib.AddressSet;
+    using OptionsBuilder for bytes;
+
+    /// @notice User-signed withdrawal intent. One per safe at a time.
+    /// @dev `minReturn` is denominated in the UNDERLYING stock (e.g. SPYx), not the wrapper.
+    ///      `deadline` is evaluated on the destination chain at lzCompose time (and gates
+    ///      execute here). `dstEid` is the user-chosen destination endpoint; the unwrapper
+    ///      for it is resolved from `stockUnwrappers[dstEid]` at execute time.
+    struct Order {
+        address iToken;
+        uint256 amount;
+        uint256 minReturn;
+        uint256 deadline;
+        address recipient;
+        uint32 dstEid;
+    }
+
+    /// @notice Everything `executeWithdrawal` needs, captured at `requestWithdrawal`.
+    /// @dev The unwrapper address and the LZ gas limits are deliberately NOT snapshotted:
+    ///      they are read live at execute time (keyed by the signed `order.dstEid`) so the
+    ///      admin can repoint a redeployed unwrapper or bump compose gas for in-flight orders
+    ///      without users having to cancel and re-sign. The admin role and the module's
+    ///      upgrade authority sit behind the same role registry, so snapshotting would add
+    ///      no real protection.
+    ///
+    ///      `providerFeeBps` IS snapshotted, because unlike those it changes the user's signed
+    ///      economics: raising the live fee after signing shrinks the bridged shares, which can
+    ///      push an order sized near its `minReturn` floor into reverting at `lzCompose` and
+    ///      settling through the expired path instead of unwrapping.
+    struct StoredWithdrawal {
+        Order order;
+        bytes32 withdrawalId;
+        uint16 providerFeeBps;
+    }
+
+    /// @custom:storage-location erc7201:etherfi.storage.StockWithdrawModule
+    struct StockWithdrawModuleStorage {
+        /// @notice Mapping of safe address to its single active stored withdrawal.
+        mapping(address safe => StoredWithdrawal withdrawal) withdrawals;
+        /// @notice Enumerable set of wrapped-stock ShadowOFTs (iTOKENs) this module may bridge.
+        EnumerableSetLib.AddressSet supportedTokens;
+        /// @notice Enumerable map of destination endpoint ID => `StockUnwrapper` composed receiver.
+        EnumerableMapLib.Uint256ToAddressMap stockUnwrappers;
+        /// @notice Executor gas limit for the destination lzCompose call.
+        uint128 composeGasLimit;
+        /// @notice Provider (exit) fee in basis points, taken from the wrapped-stock amount
+        ///         at execute time. Capped at `MAX_PROVIDER_FEE_BPS`; zero disables the fee.
+        uint16 providerFeeBps;
+        /// @notice Recipient of the provider fee.
+        address feeReceiver;
+        /// @notice Executor gas limit for the destination lzReceive call (the OFTAdapter
+        ///         credit that precedes the compose). The executor rejects options that
+        ///         carry no lzReceive gas, so this cannot be left to the OFT's enforced
+        ///         options (the ShadowOFTs are third-party contracts).
+        uint128 lzReceiveGasLimit;
+    }
+
+    // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockWithdrawModule")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant StockWithdrawModuleStorageLocation = 0x79b068f9b079c00932ab348c89f00dce3855a0360decf75df1474e5e0fccf900;
+
+    /// @notice CashModule that holds, delays and processes the withdrawal requests.
+    ICashModule public immutable cashModule;
+
+    /// @notice Role allowed to configure supported tokens, destination and compose gas.
+    bytes32 public constant STOCK_WITHDRAW_MODULE_ADMIN_ROLE = keccak256("STOCK_WITHDRAW_MODULE_ADMIN_ROLE");
+
+    /// @notice 100% in basis points.
+    uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
+    /// @notice Maximum provider fee (10%).
+    uint16 public constant MAX_PROVIDER_FEE_BPS = 1000;
+
+    /// @notice Minimum time that must remain before `order.deadline` for `executeWithdrawal`
+    ///         to be allowed, so the destination `lzCompose` still lands on the unwrap branch.
+    /// @dev `deadline` is evaluated TWICE against two different clocks: here on OP at execute
+    ///      time, and again on Ethereum minutes later at lzCompose time. Without this buffer,
+    ///      any execute in the final seconds before `deadline` — malicious OR simply a slow
+    ///      keeper — deterministically lands in the expired branch on the destination, which
+    ///      skips the ERC-4626 redeem and therefore the user's signed `minReturn` entirely,
+    ///      shipping wrapped shares to the safe's mainnet address instead. Since
+    ///      `executeWithdrawal` is permissionless and only costs the LZ fee, that was a cheap
+    ///      grief. Sized well above typical OP->Ethereum LZ latency; an order that ages past
+    ///      this window simply expires and is released on OP by `cancelExpiredWithdrawal`
+    ///      (funds never leave the safe), which is a strictly better outcome for the user.
+    uint256 public constant MIN_ARRIVAL_BUFFER = 30 minutes;
+
+    /// @dev Domain-separator-style prefixes for the digests the user signs.
+    bytes32 private constant REQUEST_WITHDRAWAL_SIG = keccak256("StockWithdrawModule.requestWithdrawal");
+    bytes32 private constant CANCEL_WITHDRAWAL_SIG = keccak256("StockWithdrawModule.cancelWithdrawal");
+
+    /**
+     * @notice Emitted when a withdrawal is requested.
+     * @param safe The safe that requested the withdrawal.
+     * @param withdrawalId The ID of the withdrawal.
+     * @param iToken The iToken that is being withdrawn.
+     * @param amount The amount of the iToken that is being withdrawn.
+     * @param minReturn The minimum return that is expected from the withdrawal.
+     * @param deadline The deadline for the withdrawal.
+     * @param recipient The recipient of the withdrawal.
+     * @param dstEid The destination endpoint ID of the withdrawal.
+     */
+    event WithdrawalRequested(address indexed safe, bytes32 indexed withdrawalId, address iToken, uint256 amount, uint256 minReturn, uint256 deadline, address recipient, uint32 dstEid);
+
+    /**
+     * @notice Emitted when a withdrawal is executed.
+     * @param safe The safe that executed the withdrawal.
+     * @param withdrawalId The ID of the withdrawal.
+     * @param iToken The iToken that is being withdrawn.
+     * @param amount The amount of the iToken that is being withdrawn (gross, incl. fee).
+     * @param providerFee The provider fee taken from `amount` (in iToken units).
+     * @param recipient The recipient of the withdrawal.
+     * @param dstEid The destination endpoint ID of the withdrawal.
+     */
+    event WithdrawalExecuted(address indexed safe, bytes32 indexed withdrawalId, address iToken, uint256 amount, uint256 providerFee, address recipient, uint32 dstEid);
+
+    /**
+     * @notice Emitted when a withdrawal is cancelled.
+     * @param safe The safe that cancelled the withdrawal.
+     * @param withdrawalId The ID of the withdrawal.
+     */
+    event WithdrawalCancelled(address indexed safe, bytes32 indexed withdrawalId);
+
+    /**
+     * @notice Emitted when tokens are configured.
+     * @param iTokens The iTokens that are being configured.
+     * @param supported Whether the iTokens are supported.
+     */
+    event TokensConfigured(address[] iTokens, bool[] supported);
+
+    /**
+     * @notice Emitted when unwrappers are configured for destination endpoints.
+     * @param dstEids The destination endpoint IDs.
+     * @param unwrappers The StockUnwrapper for each endpoint (zero disables the route).
+     */
+    event UnwrappersConfigured(uint32[] dstEids, address[] unwrappers);
+
+    /**
+     * @notice Emitted when the LayerZero executor gas limits are set.
+     * @param oldLzReceiveGasLimit The old lzReceive gas limit.
+     * @param newLzReceiveGasLimit The new lzReceive gas limit.
+     * @param oldComposeGasLimit The old compose gas limit.
+     * @param newComposeGasLimit The new compose gas limit.
+     */
+    event LzGasLimitsSet(uint128 oldLzReceiveGasLimit, uint128 newLzReceiveGasLimit, uint128 oldComposeGasLimit, uint128 newComposeGasLimit);
+
+    /**
+     * @notice Emitted when the provider fee config is set.
+     * @param oldFeeBps The old provider fee in basis points.
+     * @param newFeeBps The new provider fee in basis points.
+     * @param oldFeeReceiver The old fee receiver.
+     * @param newFeeReceiver The new fee receiver.
+     */
+    event ProviderFeeSet(uint16 oldFeeBps, uint16 newFeeBps, address oldFeeReceiver, address newFeeReceiver);
+
+    /// @notice Reverts when a non-admin calls an admin function.
+    error OnlyAdmin();
+    /// @notice Reverts when the iToken is not on the supported list.
+    error TokenNotSupported();
+    /// @notice Reverts when a supported iToken is not its own OFT (ShadowOFT invariant).
+    error InvalidOFT();
+    /// @notice Reverts when `requestWithdrawal` is called on a safe with an active order.
+    error OrderAlreadyActive();
+    /// @notice Reverts when execute/cancel finds no stored withdrawal.
+    error NoActiveOrder();
+    /// @notice Reverts when the user's signature doesn't meet the safe's threshold.
+    error InvalidSignatures();
+    /// @notice Reverts when `executeWithdrawal` runs after `order.deadline`.
+    error OrderExpired();
+    /// @notice Reverts when `executeWithdrawal` runs within `MIN_ARRIVAL_BUFFER` of
+    ///         `order.deadline`, where the destination compose would take the expired branch.
+    error InsufficientArrivalBuffer();
+    /// @notice Reverts when `cancelExpiredWithdrawal` runs while the order is still executable
+    ///         (more than `MIN_ARRIVAL_BUFFER` remains before `order.deadline`).
+    error OrderNotExpired();
+    /// @notice Reverts when `msg.value` doesn't cover the quoted LayerZero native fee.
+    error InsufficientNativeFee();
+    /// @notice Reverts when refunding excess `msg.value` to the caller fails.
+    error NativeTransferFailed();
+    /// @notice Reverts when the pending CashModule withdrawal doesn't match the stored order.
+    error CannotFindMatchingWithdrawal();
+    /// @notice Reverts when destination config (dstEid / unwrapper / composeGas) is unset.
+    error MissingConfig();
+    /// @notice Reverts when CashModule would process the withdrawal immediately.
+    error ZeroWithdrawalDelay();
+    /// @notice Reverts when the order expires before the CashModule withdrawal delay elapses.
+    error DeadlineBeforeWithdrawalDelay();
+    /// @notice Reverts when the provider fee exceeds `MAX_PROVIDER_FEE_BPS`.
+    error ProviderFeeTooHigh();
+    /// @notice Reverts when the bridge amount (net of the provider fee) truncates to zero at
+    ///         the OFT's shared-decimal precision — the send would bridge nothing.
+    error AmountTooSmall();
+
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule`) live in the IMPLEMENTATION's code —
+    ///      every upgrade impl must be constructed with the same data provider.
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
+        cashModule = ICashModule(IEtherFiDataProvider(_etherFiDataProvider).getCashModule());
+        _disableInitializers();
+    }
+
+    /// @notice Full module config passed to `initialize`, packed as a struct to stay under
+    ///         the legacy codegen stack limit.
+    /// @param roleRegistry Role registry (upgrade authority + pause control + admin role).
+    /// @param lzReceiveGasLimit Executor gas for the destination lzReceive (OFTAdapter credit) call.
+    /// @param composeGasLimit Executor gas for the destination lzCompose call.
+    /// @param providerFeeBps Provider (exit) fee in basis points; zero disables the fee.
+    /// @param feeReceiver Recipient of the provider fee; may be zero only when the fee is zero.
+    /// @param iTokens Wrapped-stock ShadowOFTs to register.
+    /// @param supported Support flag per iToken; same length as `iTokens`.
+    /// @param dstEids Destination endpoint IDs to configure unwrappers for.
+    /// @param unwrappers StockUnwrapper per endpoint; same length as `dstEids`.
+    struct InitParams {
+        address roleRegistry;
+        uint128 lzReceiveGasLimit;
+        uint128 composeGasLimit;
+        uint16 providerFeeBps;
+        address feeReceiver;
+        address[] iTokens;
+        bool[] supported;
+        uint32[] dstEids;
+        address[] unwrappers;
+    }
+
+    /**
+     * @notice Initialises the proxy with the full module config. Any of the config arrays may
+     *         be empty and set later via the admin setters (requests revert `MissingConfig` /
+     *         `TokenNotSupported` until the route they need is configured).
+     * @param params The full module config (see `InitParams`).
+     */
+    function initialize(InitParams calldata params) external initializer {
+        __UpgradeableProxy_init(params.roleRegistry);
+        _setLzGasLimits(params.lzReceiveGasLimit, params.composeGasLimit);
+        _setProviderFee(params.providerFeeBps, params.feeReceiver);
+        if (params.iTokens.length > 0) _configureTokens(params.iTokens, params.supported);
+        if (params.dstEids.length > 0) _configureUnwrappers(params.dstEids, params.unwrappers);
+    }
+
+    // ---- Admin config ----
+
+    /**
+     * @notice Registers/unregisters wrapped-stock ShadowOFTs. Enforces the ShadowOFT
+     *         invariant `IOFT(iToken).token() == iToken` on registration.
+     * @param iTokens Array of iToken addresses to configure.
+     * @param supported Support flag per iToken; same length as `iTokens`.
+     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws ArrayLengthMismatch If the arrays diverge in length or are empty.
+     * @custom:throws InvalidInput If any iToken address is zero.
+     * @custom:throws InvalidOFT If a registered iToken is not its own OFT.
+     */
+    function configureTokens(address[] calldata iTokens, bool[] calldata supported) external {
+        _onlyAdmin();
+        _configureTokens(iTokens, supported);
+    }
+
+    /**
+     * @notice Sets the StockUnwrapper per destination endpoint. A zero unwrapper disables
+     *         new requests for that endpoint.
+     * @param dstEids Destination endpoint IDs to configure.
+     * @param unwrappers StockUnwrapper per endpoint; same length as `dstEids`.
+     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws ArrayLengthMismatch If the arrays diverge in length or are empty.
+     * @custom:throws InvalidInput If any endpoint ID is zero.
+     */
+    function configureUnwrappers(uint32[] calldata dstEids, address[] calldata unwrappers) external {
+        _onlyAdmin();
+        _configureUnwrappers(dstEids, unwrappers);
+    }
+
+    /**
+     * @notice Sets the executor gas limits for the destination lzReceive (OFTAdapter credit)
+     *         and lzCompose calls. Read live at execute time (not snapshotted) so admins can
+     *         bump gas for stuck sends.
+     * @param _lzReceiveGasLimit The new lzReceive executor gas limit; must be non-zero.
+     * @param _composeGasLimit The new compose executor gas limit; must be non-zero.
+     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws InvalidInput If either gas limit is zero.
+     */
+    function setLzGasLimits(uint128 _lzReceiveGasLimit, uint128 _composeGasLimit) external {
+        _onlyAdmin();
+        _setLzGasLimits(_lzReceiveGasLimit, _composeGasLimit);
+    }
+
+    /**
+     * @notice Sets the provider (exit) fee taken from the wrapped-stock amount at execute
+     *         time, and its receiver. Read live at execute (not snapshotted per order);
+     *         the `MAX_PROVIDER_FEE_BPS` cap bounds what a config change can cost an
+     *         in-flight order, and `minReturn` still protects the user on the destination.
+     * @param _providerFeeBps Fee in basis points; zero disables the fee.
+     * @param _feeReceiver Recipient of the fee; may be zero only when the fee is zero.
+     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws ProviderFeeTooHigh If the fee exceeds `MAX_PROVIDER_FEE_BPS`.
+     * @custom:throws InvalidInput If the receiver is zero while the fee is non-zero.
+     */
+    function setProviderFee(uint16 _providerFeeBps, address _feeReceiver) external {
+        _onlyAdmin();
+        _setProviderFee(_providerFeeBps, _feeReceiver);
+    }
+
+    // ---- Views ----
+
+    /**
+     * @notice Returns the active order for a safe (zeroed struct if none).
+     * @param safe The safe to query.
+     * @return The stored user-signed order.
+     */
+    function getOrder(address safe) external view returns (Order memory) {
+        return _getStockWithdrawModuleStorage().withdrawals[safe].order;
+    }
+
+    /**
+     * @notice Returns the full stored withdrawal for a safe (zeroed struct if none).
+     * @param safe The safe to query.
+     * @return The stored withdrawal (order + withdrawalId).
+     */
+    function getWithdrawal(address safe) external view returns (StoredWithdrawal memory) {
+        return _getStockWithdrawModuleStorage().withdrawals[safe];
+    }
+
+    /**
+     * @notice Returns whether an iToken is registered for bridging.
+     * @param iToken The ShadowOFT address to query.
+     * @return True if the token is supported.
+     */
+    function isTokenSupported(address iToken) external view returns (bool) {
+        return _getStockWithdrawModuleStorage().supportedTokens.contains(iToken);
+    }
+
+    /**
+     * @notice Returns all registered wrapped-stock ShadowOFTs.
+     * @return The supported iToken addresses.
+     */
+    function getSupportedTokens() external view returns (address[] memory) {
+        return _getStockWithdrawModuleStorage().supportedTokens.values();
+    }
+
+    /**
+     * @notice Returns the StockUnwrapper configured for a destination endpoint.
+     * @param dstEid The destination endpoint ID to query.
+     * @return The unwrapper address (zero if the route is not configured).
+     */
+    function getStockUnwrapper(uint32 dstEid) external view returns (address) {
+        (, address unwrapper) = _getStockWithdrawModuleStorage().stockUnwrappers.tryGet(uint256(dstEid));
+        return unwrapper;
+    }
+
+    /**
+     * @notice Returns every configured destination route.
+     * @return dstEids The configured destination endpoint IDs.
+     * @return unwrappers The StockUnwrapper for each endpoint; same order as `dstEids`.
+     */
+    function getConfiguredUnwrappers() external view returns (uint32[] memory dstEids, address[] memory unwrappers) {
+        EnumerableMapLib.Uint256ToAddressMap storage map = _getStockWithdrawModuleStorage().stockUnwrappers;
+        uint256 len = map.length();
+        dstEids = new uint32[](len);
+        unwrappers = new address[](len);
+        for (uint256 i = 0; i < len;) {
+            (uint256 dstEid, address unwrapper) = map.at(i);
+            dstEids[i] = uint32(dstEid);
+            unwrappers[i] = unwrapper;
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /**
+     * @notice Returns the executor gas limits used for the destination lzReceive and
+     *         lzCompose calls.
+     * @return lzReceiveGasLimit The lzReceive gas limit.
+     * @return composeGasLimit The compose gas limit.
+     */
+    function getLzGasLimits() external view returns (uint128 lzReceiveGasLimit, uint128 composeGasLimit) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        return ($.lzReceiveGasLimit, $.composeGasLimit);
+    }
+
+    /**
+     * @notice Returns the provider fee config.
+     * @return providerFeeBps The fee in basis points (zero = disabled).
+     * @return feeReceiver The fee recipient.
+     */
+    function getProviderFee() external view returns (uint16 providerFeeBps, address feeReceiver) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        return ($.providerFeeBps, $.feeReceiver);
+    }
+
+    /**
+     * @notice Quotes the LayerZero native fee for the stored withdrawal.
+     * @param safe The safe whose stored withdrawal to quote.
+     * @return feeToken Always `Constants.ETH`.
+     * @return amount The native fee the `executeWithdrawal` caller must supply.
+     * @custom:throws NoActiveOrder If the safe has no stored withdrawal.
+     * @custom:throws MissingConfig If the order's destination route was disabled.
+     */
+    function getWithdrawalFee(address safe) external view returns (address feeToken, uint256 amount) {
+        StoredWithdrawal memory withdrawal = _getStockWithdrawModuleStorage().withdrawals[safe];
+        if (withdrawal.order.iToken == address(0)) revert NoActiveOrder();
+        uint256 bridgeAmount = withdrawal.order.amount - _effectiveProviderFee(withdrawal.order.amount, withdrawal.providerFeeBps);
+        (SendParam memory sendParam,) = _quotedSendParam(safe, withdrawal, bridgeAmount);
+        MessagingFee memory fee = IOFT(withdrawal.order.iToken).quoteSend(sendParam, false);
+        return (ETH, fee.nativeFee);
+    }
+
+    // ---- Lifecycle ----
+
+    /**
+     * @notice Stores a user-signed withdrawal intent for `safe` and places a CashModule
+     *         withdrawal hold with this module as recipient. CashModule sources the iTOKEN
+     *         from the Aave lend gateway if it is currently supplied as collateral.
+     * @dev One active withdrawal per safe. The signature binds the full order (including the
+     *      destination `dstEid`); the unwrapper for that endpoint is resolved live from
+     *      storage at execute time.
+     * @param safe Address of the EtherFiSafe withdrawing.
+     * @param order The user-signed withdrawal intent.
+     * @param signers Safe owners that signed the request digest.
+     * @param signatures Signatures corresponding to `signers`.
+     * @custom:throws InvalidSignatures If the signatures don't meet the safe's threshold.
+     * @custom:throws OrderAlreadyActive If the safe already has a stored withdrawal.
+     * @custom:throws TokenNotSupported If `order.iToken` is not registered.
+     * @custom:throws MissingConfig If no unwrapper is configured for `order.dstEid`.
+     * @custom:throws DeadlineBeforeWithdrawalDelay If the deadline can't outlive the delay.
+     */
+    function requestWithdrawal(address safe, Order calldata order, address[] calldata signers, bytes[] calldata signatures) external nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        _validateRequest($, safe, order);
+
+        uint256 nonce = IEtherFiSafe(safe).useNonce();
+        if (!IEtherFiSafe(safe).checkSignatures(_requestDigest(safe, order, nonce), signers, signatures)) revert InvalidSignatures();
+
+        bytes32 withdrawalId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
+        $.withdrawals[safe] = StoredWithdrawal({ order: order, withdrawalId: withdrawalId, providerFeeBps: $.providerFeeBps });
+
+        _emitWithdrawalRequested(safe, withdrawalId, order);
+
+        cashModule.requestWithdrawalByModule(safe, order.iToken, order.amount);
+    }
+
+    /// @dev Split out of `requestWithdrawal` to keep the 8-arg emit under the legacy stack limit.
+    function _emitWithdrawalRequested(address safe, bytes32 withdrawalId, Order calldata order) internal {
+        emit WithdrawalRequested(safe, withdrawalId, order.iToken, order.amount, order.minReturn, order.deadline, order.recipient, order.dstEid);
+    }
+
+    /**
+     * @notice Executes the stored withdrawal for `safe`: processes the matured CashModule
+     *         withdrawal (iTOKEN lands in this module) and OFT-sends it to the mainnet
+     *         unwrapper with the composed order terms.
+     * @dev Permissionless and payable: any caller merely replays what the user signed and
+     *      pays the LayerZero native fee (`getWithdrawalFee`); excess msg.value is refunded.
+     *      CashModule enforces the withdrawal delay inside `processWithdrawal`.
+     * @param safe Address of the EtherFiSafe whose stored withdrawal to execute.
+     * @custom:throws NoActiveOrder If the safe has no stored withdrawal.
+     * @custom:throws OrderExpired If the order deadline has passed (use `cancelExpiredWithdrawal`).
+     * @custom:throws InsufficientArrivalBuffer If less than `MIN_ARRIVAL_BUFFER` remains before
+     *                the deadline, where the destination compose would take the expired branch.
+     * @custom:throws TokenNotSupported If `order.iToken` has since been de-listed.
+     * @custom:throws CannotFindMatchingWithdrawal If the CashModule hold doesn't match the order.
+     * @custom:throws InsufficientNativeFee If `msg.value` doesn't cover the LayerZero fee.
+     */
+    function executeWithdrawal(address safe) external payable nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        StoredWithdrawal memory withdrawal = $.withdrawals[safe];
+        if (withdrawal.order.iToken == address(0)) revert NoActiveOrder();
+        if (block.timestamp > withdrawal.order.deadline) revert OrderExpired();
+        // Leave enough runway for the destination compose to still see an unexpired deadline.
+        if (block.timestamp + MIN_ARRIVAL_BUFFER > withdrawal.order.deadline) revert InsufficientArrivalBuffer();
+        // Re-checked (not just at request time) so de-listing a compromised iTOKEN immediately
+        // halts in-flight orders. Their CashModule hold is still releasable: owners can
+        // `cancelWithdrawal` at once, or anyone can `cancelExpiredWithdrawal` once the order
+        // falls inside `MIN_ARRIVAL_BUFFER` of its deadline.
+        if (!$.supportedTokens.contains(withdrawal.order.iToken)) revert TokenNotSupported();
+
+        WithdrawalRequest memory pending = cashModule.getData(safe).pendingWithdrawalRequest;
+        if (pending.recipient != address(this) || pending.tokens.length != 1 || pending.tokens[0] != withdrawal.order.iToken || pending.amounts[0] != withdrawal.order.amount) {
+            revert CannotFindMatchingWithdrawal();
+        }
+
+        delete $.withdrawals[safe];
+        cashModule.processWithdrawal(safe);
+
+        // Provider (exit) fee is carved out of the wrapped-stock amount before bridging, at the
+        // rate snapshotted when the user signed.
+        uint256 providerFee = _takeProviderFee(withdrawal.order.iToken, withdrawal.order.amount, withdrawal.providerFeeBps);
+        _sendOft(safe, withdrawal, withdrawal.order.amount - providerFee);
+
+        emit WithdrawalExecuted(safe, withdrawal.withdrawalId, withdrawal.order.iToken, withdrawal.order.amount, providerFee, withdrawal.order.recipient, withdrawal.order.dstEid);
+    }
+
+    /**
+     * @notice Cancels the stored withdrawal for `safe`, releasing the CashModule hold.
+     *         Signed by the safe's owners (same threshold as `requestWithdrawal`).
+     * @dev `cancelWithdrawalByModule` calls back into `cancelBridgeByCashModule`, which
+     *      clears state and emits.
+     * @param safe Address of the EtherFiSafe whose stored withdrawal to cancel.
+     * @param signers Safe owners that signed the cancel digest.
+     * @param signatures Signatures corresponding to `signers`.
+     * @custom:throws NoActiveOrder If the safe has no stored withdrawal.
+     * @custom:throws InvalidSignatures If the signatures don't meet the safe's threshold.
+     */
+    function cancelWithdrawal(address safe, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        if ($.withdrawals[safe].order.iToken == address(0)) revert NoActiveOrder();
+
+        bytes32 digest = keccak256(abi.encodePacked(CANCEL_WITHDRAWAL_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)).toEthSignedMessageHash();
+        if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
+
+        cashModule.cancelWithdrawalByModule(safe);
+    }
+
+    /**
+     * @notice Permissionlessly cancels a no-longer-executable stored withdrawal, releasing its
+     *         CashModule hold WITHOUT an owner signature.
+     * @dev Opens the moment `executeWithdrawal` closes — at `order.deadline - MIN_ARRIVAL_BUFFER`,
+     *      not at `order.deadline`. The two windows are exactly complementary: execute requires
+     *      `block.timestamp + MIN_ARRIVAL_BUFFER <= deadline`, this requires the negation. Gating
+     *      on the raw deadline instead would leave a `MIN_ARRIVAL_BUFFER`-wide dead zone in which
+     *      the order can neither be executed nor permissionlessly released, stranding the hold
+     *      until an owner signs. Authorization is purely the elapsed clock: this merely releases
+     *      the safe's own funds back to the safe — no fund-movement authority to abuse.
+     * @param safe Address of the EtherFiSafe whose expired withdrawal to cancel.
+     * @custom:throws NoActiveOrder If the safe has no stored withdrawal.
+     * @custom:throws OrderNotExpired If the order is still executable.
+     */
+    function cancelExpiredWithdrawal(address safe) external nonReentrant onlyEtherFiSafe(safe) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        StoredWithdrawal memory withdrawal = $.withdrawals[safe];
+        if (withdrawal.order.iToken == address(0)) revert NoActiveOrder();
+        // Written as an addition rather than `deadline - MIN_ARRIVAL_BUFFER` to avoid underflow.
+        if (block.timestamp + MIN_ARRIVAL_BUFFER <= withdrawal.order.deadline) revert OrderNotExpired();
+
+        cashModule.cancelWithdrawalByModule(safe);
+    }
+
+    /**
+     * @notice Hook called by `CashModule.cancelWithdrawalByModule` to keep our state in sync.
+     *         Clears the stored withdrawal and emits if one is still present. No-op if already
+     *         cleared (`executeWithdrawal` deletes its own record before processing).
+     * @param safe Address of the EtherFiSafe whose stored withdrawal to clear.
+     * @custom:throws Unauthorized If the caller is not the CashModule.
+     */
+    function cancelBridgeByCashModule(address safe) external {
+        if (msg.sender != address(cashModule)) revert Unauthorized();
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        if ($.withdrawals[safe].order.iToken == address(0)) return;
+        bytes32 withdrawalId = $.withdrawals[safe].withdrawalId;
+        delete $.withdrawals[safe];
+        emit WithdrawalCancelled(safe, withdrawalId);
+    }
+
+    /// @notice Accepts LayerZero fee refunds.
+    receive() external payable { }
+
+    // ---- Internals ----
+
+    /// @dev Split out of `requestWithdrawal` to stay under the legacy stack limit.
+    function _validateRequest(StockWithdrawModuleStorage storage $, address safe, Order calldata order) internal view {
+        if (order.amount == 0 || order.recipient == address(0) || order.minReturn == 0 || order.deadline <= block.timestamp) revert InvalidInput();
+        if (!$.supportedTokens.contains(order.iToken)) revert TokenNotSupported();
+        if ($.withdrawals[safe].order.iToken != address(0)) revert OrderAlreadyActive();
+        (, address unwrapper) = $.stockUnwrappers.tryGet(uint256(order.dstEid));
+        if (unwrapper == address(0) || $.composeGasLimit == 0 || address(cashModule) == address(0)) revert MissingConfig();
+
+        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
+        // `MIN_ARRIVAL_BUFFER` is included so an order that passes validation here is always
+        // executable once the delay matures — otherwise a deadline sitting just past the delay
+        // would be signable but could never clear `executeWithdrawal`'s buffer check.
+        if (order.deadline <= block.timestamp + withdrawalDelay + MIN_ARRIVAL_BUFFER) revert DeadlineBeforeWithdrawalDelay();
+    }
+
+    /// @dev Digest the safe owners sign over the full order (incl. `dstEid`), bound to the
+    ///      safe nonce for replay protection.
+    function _requestDigest(address safe, Order calldata order, uint256 nonce) internal view returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            REQUEST_WITHDRAWAL_SIG,
+            block.chainid,
+            address(this),
+            nonce,
+            safe,
+            abi.encode(order)
+        )).toEthSignedMessageHash();
+    }
+
+    /// @dev Provider fee owed on `amount` (in wrapped-stock units) at `feeBps`. Callers pass the
+    ///      rate snapshotted on the order, so a later `setProviderFee` cannot change the
+    ///      economics of an order the user has already signed.
+    function _providerFeeAmount(uint256 amount, uint16 feeBps) internal pure returns (uint256) {
+        return amount.mulDiv(feeBps, HUNDRED_PERCENT_IN_BPS);
+    }
+
+    /// @dev The fee actually owed on `amount`: the snapshotted rate, waived entirely when no fee
+    ///      receiver is configured.
+    /// @dev `feeReceiver` IS read live: it is the protocol's own fee destination, so redirecting
+    ///      it cannot disadvantage the user the way changing the rate would. But a snapshotted
+    ///      rate can outlive its receiver — `setProviderFee(0, address(0))` legitimately clears
+    ///      both at once — and an order signed while the fee was live would then owe a fee with
+    ///      nowhere to send it. Waiving beats reverting: a transfer to the zero address would
+    ///      brick the order until its deadline. Kept in one helper so `getWithdrawalFee` quotes
+    ///      the same bridge amount `executeWithdrawal` sends.
+    function _effectiveProviderFee(uint256 amount, uint16 feeBps) internal view returns (uint256) {
+        if (_getStockWithdrawModuleStorage().feeReceiver == address(0)) return 0;
+        return _providerFeeAmount(amount, feeBps);
+    }
+
+    /// @dev Carves the provider fee out of the just-processed withdrawal and transfers it to
+    ///      the fee receiver. Returns the fee taken (zero when the fee is disabled or waived).
+    function _takeProviderFee(address iToken, uint256 amount, uint16 feeBps) internal returns (uint256 providerFee) {
+        providerFee = _effectiveProviderFee(amount, feeBps);
+        if (providerFee > 0) IERC20(iToken).safeTransfer(_getStockWithdrawModuleStorage().feeReceiver, providerFee);
+    }
+
+    /// @dev Builds the SendParam for the stored withdrawal, bridging `amountLD` (the order
+    ///      amount net of the provider fee). The unwrapper is resolved LIVE from
+    ///      `stockUnwrappers[order.dstEid]` (reverting `MissingConfig` if the route was
+    ///      disabled after request). `minAmountLD` is left at zero — `quoteOFT` enforces the
+    ///      caller's `minAmountLD` against its dust-truncated amount, so a non-zero value
+    ///      here would make the quote itself revert `SlippageExceeded` for any amount that
+    ///      isn't a multiple of the OFT's decimal conversion rate. `_quotedSendParam` pins
+    ///      both amounts to the quote before anything is sent.
+    function _buildSendParam(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal view returns (SendParam memory) {
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        (, address unwrapper) = $.stockUnwrappers.tryGet(uint256(withdrawal.order.dstEid));
+        if (unwrapper == address(0)) revert MissingConfig();
+
+        return SendParam({
+            dstEid: withdrawal.order.dstEid,
+            to: bytes32(uint256(uint160(unwrapper))),
+            amountLD: amountLD,
+            minAmountLD: 0,
+            extraOptions: _lzOptions($.lzReceiveGasLimit, $.composeGasLimit),
+            composeMsg: abi.encode(safe, withdrawal.order.recipient, withdrawal.order.minReturn, withdrawal.order.deadline),
+            oftCmd: new bytes(0)
+        });
+    }
+
+    /// @dev Builds the SendParam and pins its amounts to `quoteOFT`: `amountLD` to
+    ///      `amountSentLD` (what the OFT will actually debit after truncating dust below its
+    ///      shared-decimal precision) and `minAmountLD` to `amountReceivedLD` (dust rounding
+    ///      only — economic slippage is `minReturn`, enforced on the destination chain).
+    ///      Returns the truncated dust so `_sendOft` can return it to the safe.
+    function _quotedSendParam(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal view returns (SendParam memory sendParam, uint256 dust) {
+        sendParam = _buildSendParam(safe, withdrawal, amountLD);
+        (,, OFTReceipt memory receipt) = IOFT(withdrawal.order.iToken).quoteOFT(sendParam);
+        if (receipt.amountSentLD == 0) revert AmountTooSmall();
+        sendParam.amountLD = receipt.amountSentLD;
+        sendParam.minAmountLD = receipt.amountReceivedLD;
+        dust = amountLD - receipt.amountSentLD;
+    }
+
+    /// @dev LayerZero TYPE_3 options carrying the executor lzReceive gas (the OFTAdapter
+    ///      credit on the destination — the executor REVERTS quotes whose options carry no
+    ///      lzReceive gas, and the third-party ShadowOFTs cannot be assumed to enforce it)
+    ///      followed by the executor lzCompose gas, built with LayerZero's `OptionsBuilder`.
+    function _lzOptions(uint128 lzReceiveGas, uint128 composeGas) internal pure returns (bytes memory) {
+        return OptionsBuilder.newOptions().addExecutorLzReceiveOption(lzReceiveGas, 0).addExecutorLzComposeOption(0, composeGas, 0);
+    }
+
+    /// @dev Shared by `initialize` and `configureTokens`. Validates the ShadowOFT invariant
+    ///      (`IOFT(iToken).token() == iToken`) on every registration, then delegates the
+    ///      set mutation (zero/duplicate checks included) to `EnumerableAddressWhitelistLib`.
+    function _configureTokens(address[] calldata iTokens, bool[] calldata supported) internal {
+        uint256 len = iTokens.length;
+        if (len == 0 || len != supported.length) revert ArrayLengthMismatch();
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        for (uint256 i = 0; i < len;) {
+            if (iTokens[i] == address(0)) revert InvalidInput();
+            if (supported[i] && IOFT(iTokens[i]).token() != iTokens[i]) revert InvalidOFT();
+            unchecked {
+                ++i;
+            }
+        }
+        $.supportedTokens.configure(iTokens, supported);
+        emit TokensConfigured(iTokens, supported);
+    }
+
+    /// @dev Shared by `initialize` and `configureUnwrappers`. A zero unwrapper removes the
+    ///      route (new requests for that eid revert `MissingConfig`).
+    function _configureUnwrappers(uint32[] calldata dstEids, address[] calldata unwrappers) internal {
+        uint256 len = dstEids.length;
+        if (len == 0 || len != unwrappers.length) revert ArrayLengthMismatch();
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        for (uint256 i = 0; i < len;) {
+            if (dstEids[i] == 0) revert InvalidInput();
+            if (unwrappers[i] == address(0)) $.stockUnwrappers.remove(uint256(dstEids[i]));
+            else $.stockUnwrappers.set(uint256(dstEids[i]), unwrappers[i]);
+            unchecked {
+                ++i;
+            }
+        }
+        emit UnwrappersConfigured(dstEids, unwrappers);
+    }
+
+    /// @dev Shared by `initialize` and `setLzGasLimits`.
+    function _setLzGasLimits(uint128 _lzReceiveGasLimit, uint128 _composeGasLimit) internal {
+        if (_lzReceiveGasLimit == 0 || _composeGasLimit == 0) revert InvalidInput();
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        emit LzGasLimitsSet($.lzReceiveGasLimit, _lzReceiveGasLimit, $.composeGasLimit, _composeGasLimit);
+        $.lzReceiveGasLimit = _lzReceiveGasLimit;
+        $.composeGasLimit = _composeGasLimit;
+    }
+
+    /// @dev Shared by `initialize` and `setProviderFee`. Zero bps disables the fee (the
+    ///      receiver may then be zero too); a non-zero fee requires a real receiver.
+    function _setProviderFee(uint16 _providerFeeBps, address _feeReceiver) internal {
+        if (_providerFeeBps > MAX_PROVIDER_FEE_BPS) revert ProviderFeeTooHigh();
+        if (_providerFeeBps > 0 && _feeReceiver == address(0)) revert InvalidInput();
+        StockWithdrawModuleStorage storage $ = _getStockWithdrawModuleStorage();
+        emit ProviderFeeSet($.providerFeeBps, _providerFeeBps, $.feeReceiver, _feeReceiver);
+        $.providerFeeBps = _providerFeeBps;
+        $.feeReceiver = _feeReceiver;
+    }
+
+    /// @dev Quotes, pays and dispatches the OFT send of `amountLD` from this module's
+    ///      balance. The OFT only debits `quoteOFT`'s `amountSentLD`; the sub-shared-decimal
+    ///      dust it truncates is returned to the safe rather than stranding here. The caller
+    ///      funds the LZ fee; excess is refunded to them (and they are the LZ refund address).
+    function _sendOft(address safe, StoredWithdrawal memory withdrawal, uint256 amountLD) internal {
+        IOFT oft = IOFT(withdrawal.order.iToken);
+        (SendParam memory sendParam, uint256 dust) = _quotedSendParam(safe, withdrawal, amountLD);
+
+        MessagingFee memory fee = oft.quoteSend(sendParam, false);
+        if (msg.value < fee.nativeFee) revert InsufficientNativeFee();
+
+        if (oft.approvalRequired()) IERC20(oft.token()).forceApprove(address(oft), sendParam.amountLD);
+        oft.send{ value: fee.nativeFee }(sendParam, fee, payable(msg.sender));
+
+        if (dust > 0) IERC20(withdrawal.order.iToken).safeTransfer(safe, dust);
+
+        uint256 excess = msg.value - fee.nativeFee;
+        if (excess > 0) {
+            (bool success,) = payable(msg.sender).call{ value: excess }("");
+            if (!success) revert NativeTransferFailed();
+        }
+    }
+
+    /// @dev Reverts unless the caller holds `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+    function _onlyAdmin() internal view {
+        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(STOCK_WITHDRAW_MODULE_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+    }
+
+    /// @dev Returns the storage struct from the ERC-7201 namespaced slot.
+    function _getStockWithdrawModuleStorage() internal pure returns (StockWithdrawModuleStorage storage $) {
+        assembly {
+            $.slot := StockWithdrawModuleStorageLocation
+        }
+    }
+}

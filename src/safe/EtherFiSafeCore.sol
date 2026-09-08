@@ -23,6 +23,9 @@ abstract contract EtherFiSafeCore is EtherFiSafeBase, ModuleManager, RecoveryMan
     using EnumerableSetLib for EnumerableSetLib.AddressSet;
     using ArrayDeDupLib for address[];
 
+    // keccak256(abi.encode(uint256(keccak256("etherfi.transient.EtherFiSafe.moduleBatch")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 private constant MODULE_BATCH_SLOT = 0xa13222fb5f5264a1719c1a1e99b175c2d8dc8f532b4e09d39e04a5d97b76b100;
+
     /**
      * @notice Contract constructor
      * @dev Sets the immutable data provider reference
@@ -30,6 +33,14 @@ abstract contract EtherFiSafeCore is EtherFiSafeBase, ModuleManager, RecoveryMan
      */
     constructor(address _dataProvider) payable EtherFiSafeBase(_dataProvider) {
         _disableInitializers();
+    }
+
+    /// @notice Whether a module-driven batch is currently executing on this safe
+    /// @dev Lets `receive` tell ETH moving through a module operation from ETH a third party sent
+    function inModuleBatch() public view returns (bool flag) {
+        assembly ("memory-safe") {
+            flag := tload(MODULE_BATCH_SLOT)
+        }
     }
 
     /**
@@ -186,11 +197,23 @@ abstract contract EtherFiSafeCore is EtherFiSafeBase, ModuleManager, RecoveryMan
 
         uint256 len = to.length;
 
+        // Restored, not cleared: a nested batch must not unset the outer one's flag
+        bool outerBatch = inModuleBatch();
+        assembly ("memory-safe") {
+            tstore(MODULE_BATCH_SLOT, 1)
+        }
+
         for (uint256 i = 0; i < len;) {
             (bool success,) = to[i].call{ value: values[i] }(data[i]);
             if (!success) revert CallFailed(i);
             unchecked {
                 ++i;
+            }
+        }
+
+        if (!outerBatch) {
+            assembly ("memory-safe") {
+                tstore(MODULE_BATCH_SLOT, 0)
             }
         }
 
@@ -237,5 +260,5 @@ abstract contract EtherFiSafeCore is EtherFiSafeBase, ModuleManager, RecoveryMan
         return (dataProvider.isWhitelistedModule(module), dataProvider.isDefaultModule(module));
     }
 
-    receive() external payable {}
+    receive() external payable virtual {}
 }

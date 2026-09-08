@@ -17,6 +17,7 @@
     "eUSD": 11,
     "frxUSD": 18,
     "iPAXG": 24,
+    "iwQQQx": 25,
     "iwSPYx": 23,
     "iwTBLLx": 26,
     "liquidBTC": 8,
@@ -29,86 +30,146 @@
     "weEUR": 13
   },
   "details": {
-    "weETH": {
-      "assetId": 0,
-      "oracle": "0x96A0bd28762FfFcAd61814480AdcF25852407575"
-    },
-    "USDC": {
-      "assetId": 1,
-      "oracle": "0x4AF1F64c2d3Af036f01E9312F5efbb03e6Fbb069"
-    },
     "ETHFI": {
       "assetId": 2,
-      "oracle": "0x5f3AB9C6827C327b7D0F472Eb9B48954bF8fB3CA"
-    },
-    "WHYPE": {
-      "assetId": 3,
-      "oracle": "0x5A0Cd4c7b56349030D8180358592A783F45cEE7a"
-    },
-    "beHYPE": {
-      "assetId": 4,
-      "oracle": "0xb4C086BD0C5Aa7ad39317B05378f392F72A07694"
+      "oracle": "0x1fcD5397C65CE3aB3314416cc64c66128123b56a",
+      "reserveId": 2,
+      "underlying": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f"
     },
     "EURC": {
       "assetId": 5,
-      "oracle": "0x5E169BFAacB0CA0d500459da652D33d962CD9cbA"
-    },
-    "sETHFI": {
-      "assetId": 6,
-      "oracle": "0x23fB1FcDeBa86AbAD98f05cD5e43471506771EFa"
-    },
-    "liquidETH": {
-      "assetId": 7,
-      "oracle": "0x679f9A5b3bce48EA1C23d212687CB42f68d69b09"
-    },
-    "liquidBTC": {
-      "assetId": 8,
-      "oracle": "0x7D699793abf8d0D7B564Fa7D691d8319402a865a"
-    },
-    "liquidUSD": {
-      "assetId": 9,
-      "oracle": "0x741e22029ff8e0f1dab6EaAf3534a78D378f3326"
-    },
-    "eBTC": {
-      "assetId": 10,
-      "oracle": "0x767c781d95102dAf6aF4d39A280A2D628569F12c"
-    },
-    "eUSD": {
-      "assetId": 11,
-      "oracle": "0x9ED5A183a8B6e1A57e7cB59414b163ba3cbEBA41"
-    },
-    "liquidRESERVE": {
-      "assetId": 19,
-      "oracle": "0x40b9592D149fA7e6f5BA1A5Cc323ef285C99d903"
-    },
-    "weEUR": {
-      "assetId": 13,
-      "oracle": "0xD83883E629880768cB34e0081C0307A0B1bb398e"
-    },
-    "liquidRWA": {
-      "assetId": 14,
-      "oracle": "0xB17c7d6d0EeF182CB3427934a585E13f3107fE95"
-    },
-    "USDT": {
-      "assetId": 15,
-      "oracle": "0xa5c7cBf2B6E4C709C53cE08d2335106022D6dc6e"
-    },
-    "WETH": {
-      "assetId": 16,
-      "oracle": "0xE38195823A53B9597cD82ABcB2c608CEa9A31540"
+      "oracle": "0xDf1150433D0d7eb7913dc8D60687D3977C3C5FA9",
+      "reserveId": 5,
+      "underlying": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11"
     },
     "OP": {
       "assetId": 17,
-      "oracle": "0xcAd11E8565B9Af9559F1C8AACdE3C523eC53DC1e"
+      "oracle": "0x8774f71894A10056f7C7AC5E6863FF092BA7a3B5",
+      "reserveId": 17,
+      "underlying": "0x4200000000000000000000000000000000000042"
+    },
+    "USDC": {
+      "assetId": 1,
+      "oracle": "0x5B057985496A6ff09bf62C9Ba867Ae5dDEAFA4E0",
+      "reserveId": 1,
+      "underlying": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+    },
+    "USDT": {
+      "assetId": 15,
+      "oracle": "0x7579977643ee68946DB95d9Cb5fF582674619025",
+      "reserveId": 15,
+      "underlying": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"
+    },
+    "WETH": {
+      "assetId": 16,
+      "oracle": "0x4060F7d705A32DfC7B96f352e62589c25007e16B",
+      "reserveId": 16,
+      "underlying": "0x4200000000000000000000000000000000000006"
+    },
+    "WHYPE": {
+      "assetId": 3,
+      "oracle": "0xA9D5227D0063904Cb20d0fC9a2e71dd4cb19F8cD",
+      "reserveId": 3,
+      "underlying": "0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E"
+    },
+    "beHYPE": {
+      "assetId": 4,
+      "oracle": "0x0547C7F5E4923895C5516D57aaE108fDb943933F",
+      "reserveId": 4,
+      "underlying": "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC"
+    },
+    "eBTC": {
+      "assetId": 10,
+      "oracle": "0x24a0f20d45d044640Ab1cdcBCD23195AB2b4a810",
+      "reserveId": 10,
+      "underlying": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642"
+    },
+    "eUSD": {
+      "assetId": 11,
+      "oracle": "0xD7b9c2d4ed89298433aA8CE035D9F593068ED34f",
+      "reserveId": 11,
+      "underlying": "0x939778D83b46B456224A33Fb59630B11DEC56663"
     },
     "frxUSD": {
       "assetId": 18,
-      "oracle": "0x29D41f740b21dd28E1627DF2cCd307E978A7A454"
+      "oracle": "0x41D2200dbad68710C74E5a8E515D883b6177acf7",
+      "reserveId": 18,
+      "underlying": "0x80Eede496655FB9047dd39d9f418d5483ED600df"
+    },
+    "iPAXG": {
+      "assetId": 24,
+      "oracle": "0xaC28d7fe39d16aa0d35CDCc8cE939125cB3f091b",
+      "reserveId": 24,
+      "underlying": "0x41a7f2bb9789199654c206f09392674c1Af6676c"
+    },
+    "iwQQQx": {
+      "assetId": 25,
+      "leg": "0x2cD17B00f5E2C0613323C2fdB9709d54d958AFEb",
+      "oracle": "0x7106e8D7f272BAa57dbB99372FBBC7FDD06D29DC",
+      "reserveId": 26,
+      "underlying": "0x3c99d3a81b27583B2E26dbd387C10411f2763516"
     },
     "iwSPYx": {
-      "oracle": "0x5ce12709a8881309580e6768d0111CD7526c6888",
-      "spyUsdLeg": "0x3184C90dAFbC13Eff2D402B84d341B2f71720140",
-      "assetId": 20
+      "assetId": 23,
+      "leg": "0xf41eBb842D8e2e2ea818BC6f27497fEF97FAe68F",
+      "oracle": "0x8b44f7Acf288ea79795223dDfd5F872f51d33fb9",
+      "reserveId": 23,
+      "underlying": "0xc1e636Aae7d6B46229FC2C362d562610519e8D7c"
+    },
+    "iwTBLLx": {
+      "assetId": 26,
+      "leg": "0xeb1A9eBBe265E3f0Bd69d0eF27536cD1DC77Bc73",
+      "oracle": "0x81D0305B9DC94f8f177Bbf6DbEB0278D7afF22Df",
+      "reserveId": 25,
+      "underlying": "0x5F8b2D2b97aD4d63188f44965778F6004D5bc387"
+    },
+    "liquidBTC": {
+      "assetId": 8,
+      "oracle": "0x16e73C673C09bD02098535D98DbD825E63f086D2",
+      "reserveId": 8,
+      "underlying": "0x5f46d540b6eD704C3c8789105F30E075AA900726"
+    },
+    "liquidETH": {
+      "assetId": 7,
+      "oracle": "0xb23A64323F7D8C31d28F8d5a7592b8914d881d0f",
+      "reserveId": 7,
+      "underlying": "0xf0bb20865277aBd641a307eCe5Ee04E79073416C"
+    },
+    "liquidRESERVE": {
+      "assetId": 19,
+      "oracle": "0x6b5C6155A07A5E3af6591d48571FC1BdFEc929BC",
+      "reserveId": 19,
+      "underlying": "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898"
+    },
+    "liquidRWA": {
+      "assetId": 14,
+      "oracle": "0x6Bf29C9bec671EE7787352EBc42c2151a7BC2854",
+      "reserveId": 14,
+      "underlying": "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e"
+    },
+    "liquidUSD": {
+      "assetId": 9,
+      "oracle": "0x672e7e070E49FaC6e26b3FEC912C328d15859CF6",
+      "reserveId": 9,
+      "underlying": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C"
+    },
+    "sETHFI": {
+      "assetId": 6,
+      "oracle": "0x5924194Cf0d39b8eAE66aFe52ef80A027F3DC39f",
+      "reserveId": 6,
+      "underlying": "0x86B5780b606940Eb59A062aA85a07959518c0161"
+    },
+    "weETH": {
+      "assetId": 0,
+      "oracle": "0x6D6afbc1579EB8e17C170Fc60a67161bc9F44874",
+      "reserveId": 0,
+      "underlying": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
+    },
+    "weEUR": {
+      "assetId": 13,
+      "oracle": "0xFA239571dDa672A935Fb7962513b37b1CfF280cb",
+      "reserveId": 13,
+      "underlying": "0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13"
     }
   },
   "hub": "0x03641abDa8BF0d9196CE44EbEd9f85ccCe3c5e1f",
@@ -127,6 +188,7 @@
     "eUSD": 11,
     "frxUSD": 18,
     "iPAXG": 24,
+    "iwQQQx": 26,
     "iwSPYx": 23,
     "iwTBLLx": 25,
     "liquidBTC": 8,
@@ -137,6 +199,35 @@
     "sETHFI": 6,
     "weETH": 0,
     "weEUR": 13
+  },
+  "shadowedReserves": {
+    "iPAXG#22": {
+      "assetId": 22,
+      "oracle": "0x7DC0EAff1ECaED8A8A5aDC07dEe1997fF4617800",
+      "reserveId": 22,
+      "underlying": "0x56904d70E597e1D2D40853c61B6aA95622c70B0e"
+    },
+    "iwSPYx#20": {
+      "assetId": 20,
+      "leg": "0x3184C90dAFbC13Eff2D402B84d341B2f71720140",
+      "oracle": "0x5ce12709a8881309580e6768d0111CD7526c6888",
+      "reserveId": 20,
+      "underlying": "0xc83305D859EAc5E34B6aa00b4a45bDC13b2F3869"
+    },
+    "iwSPYx#21": {
+      "assetId": 21,
+      "leg": "0xcA5bB551C8919B500C576d93042aA385E8F8a08A",
+      "oracle": "0xF81b2D32401fcd8E2d9649F15f809c72a5D574f5",
+      "reserveId": 21,
+      "underlying": "0xCb4Ee509849AC1101b16556c658d6c48e5862fFA"
+    },
+    "liquidRESERVE#12": {
+      "assetId": 12,
+      "leg": "0x8239C48ff262AffCBA90Cb36206539Bfecb8EA9a",
+      "oracle": "0xEaba9eb473b3D044B9D88A746e642c1DD67EAdB0",
+      "reserveId": 12,
+      "underlying": "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a"
+    }
   },
   "spoke": "0x7e99c7846df8527FFE510a2CA0215874052102ed",
   "spokeImpl": "0xd5a5efaA08f2DF808f2EA2dBFA82cfC0B0AfaF75",

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { Vm } from "forge-std/Vm.sol";
 
 import { DebtManagerCore } from "../../../../../src/debt-manager/DebtManagerCore.sol";
 import { DebtManagerStorageContract } from "../../../../../src/debt-manager/DebtManagerStorageContract.sol";
@@ -81,6 +82,62 @@ contract DebtManagerMigrationTest is CashGatewayTestSetup {
         assertEq(weETH.balanceOf(address(gw)), 0, "no stranded weETH");
         assertEq(usdc.balanceOf(address(gw)), 0, "no stranded USDC");
         assertApproxEqAbs(usdc.balanceOf(address(debtManager)), dmUsdcBefore + borrowAmt, 1e6, "DebtManager USDC replenished");
+    }
+
+    /// @dev Invariant I17 (spec 7.3.5, "Migration exclusion"): the cashback fold consumes exactly six events
+    ///      (LendBorrowed, Spend, Repay, RepayDebtManager, Liquidated, LiquidationCall) and migration must
+    ///      reach a real, successful outcome without emitting any fold input the Cash/DebtManager stack could
+    ///      plausibly produce. `_gateway.borrow(...)` bypasses `CashLendLib.borrow()` (the only emitter of
+    ///      `LendBorrowed`), and `_clearLegacyDebt` emits no `Repay`/`RepayDebtManager`/`Spend`/`Liquidated`.
+    ///      Asserted on recorded log selectors, not `expectEmit` absence, so this test also catches an entirely
+    ///      new emission point a refactor might add. Guards against, e.g., a refactor that routes the Aave
+    ///      re-borrow through `CashLendLib.borrow()`, emits `Repay` or `RepayDebtManager` while clearing the
+    ///      legacy debt (`RepayDebtManager` — CashEventEmitter.sol:87 — is the natural event `_clearLegacyDebt`
+    ///      would gain), or folds the debt clear into a `Spend`-shaped or `Liquidated`-shaped emission — any of
+    ///      which would let a migrated account silently earn borrow cashback on debt that predates the gateway.
+    ///      `LiquidationCall` (Aave's own Spoke event) is excluded: migration never calls Aave's liquidation
+    ///      path, so there is no code path in this function that could ever reach it.
+    /// @dev Migration DOES legitimately emit two events not in the forbidden set below, both emitted by
+    ///      design and intentionally excluded: (1) Aave's own Spoke `Borrow`, via `_gateway.borrow(...)`
+    ///      (DebtManagerCore.sol:768), and (2) DebtManager's own `Repaid` (DebtManagerCore.sol:824,
+    ///      declared DebtManagerStorageContract.sol:172), emitted by `_clearLegacyDebt` when it closes the
+    ///      legacy position. Neither is decoded by cash-event-indexer today, so neither feeds the cashback
+    ///      fold, and neither belongs in the `forbidden` array above. They must never become fold inputs:
+    ///      teaching the indexer to decode Aave's Spoke `Borrow` would double-count borrow cashback for
+    ///      every migrated safe by attributing the one-time re-home borrow as new borrowing activity.
+    function test_migrateToLendGateway_emitsNoCashbackFoldInputEvents() public {
+        _seedAaveLiquidity(usdcReserveId, address(usdc), 5_000_000e6);
+
+        // Real legacy position carrying debt, so both suspect paths actually run: the legacy debt is cleared
+        // AND the gateway is made to re-borrow the same amount on Aave.
+        deal(address(weETH), address(safe), 10 ether);
+        uint256 borrowAmt = dm.getMaxBorrowAmount(address(safe), true) / 4;
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), borrowAmt);
+
+        vm.recordLogs();
+        vm.prank(migrator);
+        dm.migrateToLendGateway(address(safe));
+
+        // Prove this is a real, successful migration, not a revert that trivially emitted nothing.
+        assertTrue(dm.hasMigratedToLendGateway(address(safe)), "migration actually succeeded");
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), 0, "legacy debt actually cleared");
+        assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), borrowAmt, 1e6, "debt actually re-homed on Aave");
+
+        // Every fold input the emitter stack can produce (spec 7.3.5's six events, minus Aave-native
+        // LiquidationCall, which migration structurally cannot reach). Selectors are computed from the live
+        // event declarations via `.selector`, never hand-copied, so a signature change can't silently desync
+        // the guard from what the fold — and the indexer — actually decode.
+        bytes32[5] memory forbidden = [CashEventEmitter.LendBorrowed.selector, CashEventEmitter.Repay.selector, CashEventEmitter.RepayDebtManager.selector, CashEventEmitter.Spend.selector, DebtManagerStorageContract.Liquidated.selector];
+
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertGt(logs.length, 0, "sanity: a real migration must emit something (e.g. MigratedToLendGateway)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length == 0) continue; // anonymous log, cannot match a named event's selector
+            for (uint256 j = 0; j < forbidden.length; j++) {
+                assertTrue(logs[i].topics[0] != forbidden[j], "migration emitted a cashback-fold input event");
+            }
+        }
     }
 
     // ----------------------------------------------------------------- reverts

@@ -25,4 +25,13 @@ interface ITopUpFactory {
      * @param topUp The per-user TopUp instance.
      */
     function redirectDestinationFor(address topUp) external view returns (address);
+
+    /**
+     * @notice Returns the ERC-4626 vault a redirect of `token` must deposit into instead of
+     *         transferring `token` itself, or the zero address when the token travels as-is.
+     * @dev Read by `TopUp.redirectToTradingSafe` so that wrapping stays configuration rather
+     *      than a parameter, leaving the redirect one call shape for every asset.
+     * @param token Address of the ERC20 being redirected.
+     */
+    function wrapperFor(address token) external view returns (address);
 }
