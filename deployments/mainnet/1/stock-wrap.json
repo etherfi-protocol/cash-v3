@@ -1,0 +1,13 @@
+{
+  "topUpFactoryImpl": "0x1FDCF3b1C84d7dC3dea820744162379F3425E7c6",
+  "topUpV2Impl": "0xcA4930163F2FEa9cebf9aEa437832c3C408A8491",
+  "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+  "dispatcher": "0x418e0af7c750Ba5cbffC5C2a8398591755926A29",
+  "topUpFactoryImplBlock": 25753870,
+  "topUpFactoryImplTx": "0xaff8c146f46b1ef986f8e0f4664a547fca60e6daf723efdd57f9b901eaeedf67",
+  "topUpV2ImplBlock": 25753168,
+  "topUpV2ImplTx": "0xe32c77791806bbc8f23fc5bd05123cdc01a92ebf9914d2e43a6c2a21c8cd4b13",
+  "beacon": "0x48e1630278D8310c86650405ebfbc110CdF3D1ec",
+  "previousBeaconImpl": "0x388729bd7F465e3756665be92440738ab37345EA",
+  "supersededTopUpFactoryImpl": "0x8546090Ad12bCF8ce0b0154d044792D4cd10714c"
+}

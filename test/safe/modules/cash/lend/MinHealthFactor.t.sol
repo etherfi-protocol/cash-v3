@@ -27,6 +27,16 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
 
     uint256 internal constant FLOOR = 1.05e18;
 
+    /// @dev These tests measure the health-factor floor, never the spending limit -- but their
+    ///      spend amounts derive from the LIVE value of the weETH collateral (unpinned fork), so
+    ///      the base $10k daily cap starts binding whenever weETH's price drifts high enough
+    ///      (CI flaked exactly this way: ExceededDailySpendingLimit / declined buffered quotes).
+    ///      Size the limits out of the way so only the floor ever decides these outcomes.
+    function setUp() public virtual override {
+        super.setUp();
+        _updateSpendingLimit(1_000_000e6, 10_000_000e6);
+    }
+
     function _setFloor(uint256 value) internal {
         vm.prank(owner);
         gw.setMinHealthFactor(value);
@@ -126,11 +136,12 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
     /// A credit spend goes through even when it leaves the health factor below the floor: card
     /// settlement must never fail on the buffer.
     function test_spendCredit_alwaysGoesThroughBelowFloor() public {
-        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
         _setModeCredit();
         _setFloor(FLOOR);
 
         uint256 amountInUsd = (gw.getAccountData(address(safe)).availableBorrowsUsd * 97) / 100; // HF ~1.03
+        assertLt(amountInUsd, dailyLimitInUsd, "test premise: declined by borrow power, not the limit");
         vm.prank(etherFiWallet);
         cashModule.spend(address(safe), txId, BinSponsor.Reap, _addr1(address(usdc)), _uint1(amountInUsd), _noCashback());
 
@@ -239,9 +250,12 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
     /// The lens quotes credit capacity buffered by the floor: an amount inside the buffer is approved and
     /// settles landing above the floor; between the buffer and Aave's raw bound it is declined.
     function test_lens_creditQuoteBuffered() public {
-        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        // 1 weETH, not 5: every amount probed here must sit under the daily spending limit, or the
+        // spends decline on the limit instead of the borrow power under test.
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
         _setModeCredit();
         uint256 rawMax = cashLens.getMaxSpendCredit(address(safe));
+        assertLt(rawMax, dailyLimitInUsd, "test premise: declined by borrow power, not the limit");
 
         _setFloor(FLOOR);
         uint256 bufferedMax = cashLens.getMaxSpendCredit(address(safe));
@@ -263,11 +277,12 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
     /// Soft enforcement: an amount the lens declines (between the buffer and Aave's raw bound) still
     /// SETTLES if it was authorized earlier — spend execution keeps the raw bound.
     function test_lens_declinedCreditSpendStillSettles() public {
-        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        _supplyToGateway(address(safe), address(weETH), 1 ether);
         _setModeCredit();
         _setFloor(FLOOR);
 
         uint256 amount = (gw.getAccountData(address(safe)).availableBorrowsUsd * 97) / 100; // inside raw, past buffer
+        assertLt(amount, dailyLimitInUsd, "test premise: declined by borrow power, not the limit");
         (bool ok,) = cashLens.canSpend(address(safe), txId, _addr1(address(usdc)), _uint1(amount));
         assertFalse(ok, "new auths at this size are declined");
 

@@ -21,7 +21,7 @@ contract StargateAdapter is BridgeAdapterBase {
      * @notice Emitted when tokens are bridged through Stargate
      * @param token The address of the token being bridged
      * @param amount The amount of tokens being bridged
-     * @param ticket The Stargate bridging ticket containing transaction details
+     * @param ticket Empty in taxi mode and retained for event ABI compatibility
      */
     event BridgeViaStargate(address indexed token, uint256 amount, Ticket ticket);
 
@@ -50,7 +50,7 @@ contract StargateAdapter is BridgeAdapterBase {
         (address stargatePool, uint32 destEid) = abi.decode(additionalData, (address, uint32));
         uint256 minAmount = deductSlippage(amount, maxSlippage);
 
-        (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) = prepareRideBus(stargatePool, destEid, amount, destRecipient, minAmount);
+        (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) = prepareTakeTaxi(stargatePool, destEid, amount, destRecipient, minAmount);
 
         if (token == weth) IWETH(weth).withdraw(amount);
         if (address(this).balance < valueToSend) revert InsufficientNativeFee();
@@ -64,10 +64,9 @@ contract StargateAdapter is BridgeAdapterBase {
         emit BridgeViaStargate(token, amount, ticket);
     }
 
-    // from https://stargateprotocol.gitbook.io/stargate/v/v2-developer-docs/integrate-with-stargate/how-to-swap#ride-the-bus
     /**
      * @notice Prepares parameters for Stargate bridging
-     * @dev Implements the "Ride the Bus" pattern from Stargate documentation
+     * @dev Uses taxi mode. Empty extraOptions use the pool's enforced destination gas options.
      * @param stargate The Stargate pool address
      * @param amount The amount of tokens to bridge
      * @param destRecipient The recipient address on the destination chain
@@ -78,8 +77,8 @@ contract StargateAdapter is BridgeAdapterBase {
      * @return poolToken Address of the token accepted by the Stargate pool
      * @custom:throws InsufficientMinAmount if expected received amount is below minimum
      */
-    function prepareRideBus(address stargate, uint32 destEid, uint256 amount, address destRecipient, uint256 minAmount) public view returns (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) {
-        sendParam = SendParam({ dstEid: destEid, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: amount, extraOptions: new bytes(0), composeMsg: new bytes(0), oftCmd: new bytes(1) });
+    function prepareTakeTaxi(address stargate, uint32 destEid, uint256 amount, address destRecipient, uint256 minAmount) public view returns (uint256 valueToSend, SendParam memory sendParam, MessagingFee memory messagingFee, address poolToken) {
+        sendParam = SendParam({ dstEid: destEid, to: bytes32(uint256(uint160(destRecipient))), amountLD: amount, minAmountLD: amount, extraOptions: new bytes(0), composeMsg: new bytes(0), oftCmd: new bytes(0) });
 
         (,, OFTReceipt memory receipt) = IStargate(stargate).quoteOFT(sendParam);
         sendParam.minAmountLD = receipt.amountReceivedLD;
@@ -110,7 +109,7 @@ contract StargateAdapter is BridgeAdapterBase {
         (address stargatePool, uint32 destEid) = abi.decode(additionalData, (address, uint32));
         uint256 minAmount = deductSlippage(amount, maxSlippage);
 
-        (,, MessagingFee memory messagingFee,) = prepareRideBus(stargatePool, destEid, amount, destRecipient, minAmount);
+        (,, MessagingFee memory messagingFee,) = prepareTakeTaxi(stargatePool, destEid, amount, destRecipient, minAmount);
 
         return (ETH, messagingFee.nativeFee);
     }

@@ -15,6 +15,7 @@ import { TopUp } from "../../src/top-up/TopUp.sol";
 import { BeaconFactory, TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { EtherFiOFTBridgeAdapter } from "../../src/top-up/bridge/EtherFiOFTBridgeAdapter.sol";
 import { ScrollERC20BridgeAdapter } from "../../src/top-up/bridge/ScrollERC20BridgeAdapter.sol";
+import { SendParam } from "../../src/interfaces/IOFT.sol";
 import { StargateAdapter } from "../../src/top-up/bridge/StargateAdapter.sol";
 import { EtherFiLiquidBridgeAdapter } from "../../src/top-up/bridge/EtherFiLiquidBridgeAdapter.sol";
 import {NTTAdapter} from "../../src/top-up/bridge/NTTAdapter.sol";
@@ -435,6 +436,59 @@ contract TopUpFactoryTest is Test, Constants {
         factory.processTopUp(tokens, 100, 1);
     }
 
+    /// @dev Both sweep entry points are permissionless, so the only thing keeping them off tokens
+    ///      the redirect path owns is the topup-supported check.
+    function test_processTopUp_reverts_whenTokenIsNotSupported() public {
+        bytes32 salt = bytes32(uint256(7));
+        vm.prank(admin);
+        factory.deployTopUpContract(salt);
+
+        MockERC20 stray = new MockERC20("Stray", "STRAY", 18);
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(stray);
+
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUp(tokens, 0, 1);
+
+        address[] memory topUpContracts = new address[](1);
+        topUpContracts[0] = factory.getDeterministicAddress(salt);
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUpFromContracts(tokens, topUpContracts);
+    }
+
+    /// @dev On mainnet the native-ETH sentinel carries no token config of its own — WETH does, and
+    ///      `TopUp.processTopUp` converts before it transfers. The sweep guard has to let the
+    ///      sentinel through on that basis, or native top-ups stop being collectable. This builds
+    ///      a factory shaped like prod (WETH configured, ETH not) to pin that down; the shared
+    ///      `factory` in this suite happens to configure ETH too, which would hide the case.
+    function test_processTopUp_sweepsEthSentinel_whenOnlyWethIsConfigured() public {
+        TopUpFactory freshFactory = TopUpFactory(payable(address(new UUPSProxy(
+            address(new TopUpFactory()),
+            abi.encodeWithSelector(TopUpFactory.initialize.selector, address(roleRegistry), address(implementation))
+        ))));
+
+        address[] memory wethOnly = new address[](1);
+        wethOnly[0] = address(weth);
+        TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
+        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(stargateAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(ethStargatePool, uint32(30214)) });
+        vm.prank(owner);
+        freshFactory.setTokenConfig(wethOnly, _chainIds(1), configs);
+
+        assertFalse(freshFactory.isTokenSupported(ETH), "ETH sentinel must be unconfigured for this test to mean anything");
+
+        bytes32 salt = bytes32(uint256(42));
+        freshFactory.deployTopUpContract(salt);
+        address topUpAddr = freshFactory.getDeterministicAddress(salt);
+        deal(topUpAddr, 1 ether);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = ETH;
+        freshFactory.processTopUp(tokens, 0, 1);
+
+        assertEq(topUpAddr.balance, 0, "native ETH not swept out of the TopUp");
+        assertEq(weth.balanceOf(address(freshFactory)), 1 ether, "factory should have received the wrapped ETH");
+    }
+
     /// @dev Test token configuration validation
     function test_setTokenConfig_succeeds_whenCalledByAdmin() public {
         address[] memory tokens = new address[](1);
@@ -506,6 +560,163 @@ contract TopUpFactoryTest is Test, Constants {
         factory.setTokenConfig(tokens, _chainIds(tokens.length), configs);
     }
 
+    /// @dev Retiring an asset from the topup lane — the inverse of setTokenConfig.
+    function test_removeTokenConfig_clearsRouteAndUnsupportsToken() public {
+        assertTrue(factory.isTokenSupported(address(ethfi)), "precondition: ETHFI is topup-supported");
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(ethfi);
+
+        vm.expectEmit(true, true, true, true, address(factory));
+        emit TopUpFactory.TokenConfigRemoved(tokens, _chainIds(1));
+
+        vm.prank(owner);
+        factory.removeTokenConfig(tokens, _chainIds(1));
+
+        assertFalse(factory.isTokenSupported(address(ethfi)), "token still in the supported set");
+        TopUpFactory.TokenConfig memory config = factory.getTokenConfig(address(ethfi), DEST_CHAIN_ID);
+        assertEq(config.bridgeAdapter, address(0), "bridge adapter not cleared");
+        assertEq(config.recipientOnDestChain, address(0), "recipient not cleared");
+        assertEq(config.maxSlippageInBps, 0, "slippage not cleared");
+        assertEq(config.additionalData.length, 0, "additionalData not cleared");
+    }
+
+    function test_removeTokenConfig_closesTheBridgeRoute() public {
+        // `bridge` gates on the config, never on the supported set, so clearing the config is the
+        // half that actually stops the route.
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(ethfi);
+        vm.prank(owner);
+        factory.removeTokenConfig(tokens, _chainIds(1));
+
+        vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
+        factory.bridge(address(ethfi), 1, DEST_CHAIN_ID);
+    }
+
+    function test_removeTokenConfig_closesTheSweepRail() public {
+        // And dropping it from the set is the half that stops `processTopUp` from pulling an asset
+        // the factory can no longer route anywhere.
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(ethfi);
+        vm.prank(owner);
+        factory.removeTokenConfig(tokens, _chainIds(1));
+
+        vm.expectRevert(TopUpFactory.OnlySupportedTokens.selector);
+        factory.processTopUp(tokens, 0, 1);
+    }
+
+    function test_removeTokenConfig_leavesOtherRoutesOfTheSameTokenUntouched() public {
+        // USDC is configured for Scroll and Optimism. Removing one route clears that route only,
+        // but the token leaves the supported set immediately — the documented consequence of the
+        // set having no per-chain granularity, and why every route must be passed in.
+        assertTrue(factory.isTokenSupported(address(usdc)));
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory scrollOnly = new uint256[](1);
+        scrollOnly[0] = DEST_CHAIN_ID;
+
+        vm.prank(owner);
+        factory.removeTokenConfig(tokens, scrollOnly);
+
+        assertFalse(factory.isTokenSupported(address(usdc)), "token should leave the set");
+        assertEq(factory.getTokenConfig(address(usdc), DEST_CHAIN_ID).bridgeAdapter, address(0), "scroll route not cleared");
+        assertTrue(factory.getTokenConfig(address(usdc), OP_CHAIN_ID).bridgeAdapter != address(0), "OP route must survive");
+
+        // Passing the remaining route finishes the job.
+        uint256[] memory opOnly = new uint256[](1);
+        opOnly[0] = OP_CHAIN_ID;
+        vm.prank(owner);
+        factory.removeTokenConfig(tokens, opOnly);
+        assertEq(factory.getTokenConfig(address(usdc), OP_CHAIN_ID).bridgeAdapter, address(0), "OP route not cleared");
+    }
+
+    function test_removeTokenConfig_canBeReconfiguredAfterwards() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(ethfi);
+
+        vm.prank(owner);
+        factory.removeTokenConfig(tokens, _chainIds(1));
+
+        TopUpFactory.TokenConfig[] memory configs = new TopUpFactory.TokenConfig[](1);
+        configs[0] = TopUpFactory.TokenConfig({ bridgeAdapter: address(nttAdapter), recipientOnDestChain: alice, maxSlippageInBps: maxSlippage, additionalData: abi.encode(nttManager, 10) });
+
+        vm.prank(owner);
+        factory.setTokenConfig(tokens, _chainIds(1), configs);
+
+        assertTrue(factory.isTokenSupported(address(ethfi)), "retiring an asset must not be permanent");
+        assertEq(factory.getTokenConfig(address(ethfi), DEST_CHAIN_ID).bridgeAdapter, address(nttAdapter));
+    }
+
+    function test_removeTokenConfig_reverts_whenCalledByNonOwner() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(ethfi);
+
+        vm.prank(user);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        factory.removeTokenConfig(tokens, _chainIds(1));
+    }
+
+    function test_removeTokenConfig_reverts_whenRouteNotConfigured() public {
+        // A mistyped chain id must not read as a closed route.
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(ethfi);
+        uint256[] memory wrongChain = new uint256[](1);
+        wrongChain[0] = OP_CHAIN_ID;
+
+        vm.prank(owner);
+        vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
+        factory.removeTokenConfig(tokens, wrongChain);
+
+        assertTrue(factory.isTokenSupported(address(ethfi)), "failed removal must not unsupport");
+    }
+
+    function test_removeTokenConfig_reverts_whenLengthMismatch() public {
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(ethfi);
+        tokens[1] = address(usdc);
+
+        vm.prank(owner);
+        vm.expectRevert(TopUpFactory.ArrayLengthMismatch.selector);
+        factory.removeTokenConfig(tokens, _chainIds(1));
+    }
+
+    function test_removeTokenConfig_reverts_whenZeroToken() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(0);
+
+        vm.prank(owner);
+        vm.expectRevert(TopUpFactory.TokenCannotBeZeroAddress.selector);
+        factory.removeTokenConfig(tokens, _chainIds(1));
+    }
+
+    function test_removeTokenConfig_reverts_whenZeroChainId() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(ethfi);
+        uint256[] memory zeroChain = new uint256[](1);
+
+        vm.prank(owner);
+        vm.expectRevert(TopUpFactory.ChainIdCannotBeZero.selector);
+        factory.removeTokenConfig(tokens, zeroChain);
+    }
+
+    function test_removeTokenConfig_isAtomicAcrossEntries() public {
+        // Second entry names a route that doesn't exist → the first removal rolls back.
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(ethfi);
+        tokens[1] = address(weth);
+        uint256[] memory chainIds = new uint256[](2);
+        chainIds[0] = DEST_CHAIN_ID;
+        chainIds[1] = OP_CHAIN_ID; // weth is Scroll-only
+
+        vm.prank(owner);
+        vm.expectRevert(TopUpFactory.TokenConfigNotSet.selector);
+        factory.removeTokenConfig(tokens, chainIds);
+
+        assertTrue(factory.isTokenSupported(address(ethfi)), "first entry must roll back");
+        assertTrue(factory.getTokenConfig(address(ethfi), DEST_CHAIN_ID).bridgeAdapter != address(0), "first entry must roll back");
+    }
+
     /// @dev Test bridging functionality
     function test_bridge_reverts_whenCallerNotBridger() public {
         vm.prank(user);
@@ -574,6 +785,14 @@ contract TopUpFactoryTest is Test, Constants {
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(token, amount, DEST_CHAIN_ID);
         factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
+    }
+
+    /// @dev Confirms empty taxi parameters select Stargate's enforced destination options.
+    function test_prepareTakeTaxi_usesEmptyCommandAndExtraOptions() public view {
+        (, SendParam memory sendParam,,) = stargateAdapter.prepareTakeTaxi(ethStargatePool, uint32(30_214), 1 ether, alice, 0);
+
+        assertEq(sendParam.oftCmd.length, 0);
+        assertEq(sendParam.extraOptions.length, 0);
     }
 
     function test_bridge_succeeds_withLiquidEth() public {
@@ -665,13 +884,17 @@ contract TopUpFactoryTest is Test, Constants {
     // }
 
     function test_bridge_reverts_whenInsufficientFeeIsPassed() public {
-        address token = address(usdc);
-        uint256 amount = 100e6;
+        // weETH -> OP via OFT: a live route with a real nonzero fee. The USDC -> OP native bridge
+        // quotes fee 0, and fee / 2 (not fee - 1) keeps the value short even if the quote drifts
+        // between the isolated quote and bridge transactions.
+        address token = address(weETH);
+        uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, OP_CHAIN_ID);
+        assertGt(fee, 0, "test premise: the route charges a fee");
 
         vm.expectRevert(TopUpFactory.InsufficientFeePassed.selector);
-        factory.bridge{ value: fee - 1 }(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee / 2 }(token, amount, OP_CHAIN_ID);
     }
 
     /// @dev Test bridging when paused
