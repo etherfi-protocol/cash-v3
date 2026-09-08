@@ -22,8 +22,8 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *           step 3  MultiSend batch, needs the role from step 2 for its last two calls:
  *                     dataProvider.configureDefaultModules([module], [true])
  *                     cashModule.configureModulesCanRequestWithdraw([module], [true])
- *                     module.setAllowedRoutes(USDC, [ETH, Base], [true, true])
- *                     module.setproviderFeeRecipient(Safe)
+ *                     module.setAllowedRoutes(USDC, [ETH, Arbitrum, Base, HyperEVM], all true)
+ *                     module.setproviderFeeRecipient(ops wallet)
  *
  *         Run against an OP fork with no broadcast. If the module is not deployed yet the
  *         simulation deploys it locally through the EtherFiDeployer with the exact args of
@@ -49,13 +49,16 @@ contract EnableCCTPModuleOptimism is EtherFiDeployerHelper, GnosisHelpers {
     uint256 internal constant MAX_FEE_BPS = 200;
     uint256 internal constant PROVIDER_FEE_BPS = 0;
 
-    // Circle CCTP v2 domains. 2 is OP itself and is never a destination.
+    // Circle CCTP v2 destination domains for the chains the app withdraws to. 2 is OP itself and is
+    // never a destination. Avalanche (1) is left closed and used as the negative check.
     uint32 internal constant DOMAIN_ETHEREUM = 0;
-    uint32 internal constant DOMAIN_BASE = 6;
     uint32 internal constant DOMAIN_ARBITRUM = 3;
+    uint32 internal constant DOMAIN_BASE = 6;
+    uint32 internal constant DOMAIN_HYPEREVM = 19;
+    uint32 internal constant DOMAIN_AVALANCHE = 1;
 
-    /// @dev providerFeeBps is 0 at launch; the recipient is set so a later fee change cannot brick requests.
-    address internal constant PROVIDER_FEE_RECIPIENT = SAFE;
+    /// @dev providerFeeBps is 0 at launch; the recipient (ops wallet Safe) is set so a later fee change cannot brick requests.
+    address internal constant PROVIDER_FEE_RECIPIENT = 0x86fBaEB3D6b5247F420590D303a6ffC9cd523790;
 
     string internal constant OUT_DIR = "./output/";
 
@@ -135,7 +138,10 @@ contract EnableCCTPModuleOptimism is EtherFiDeployerHelper, GnosisHelpers {
         require(cfg.providerFeeBps == PROVIDER_FEE_BPS, "module USDC providerFeeBps mismatch");
         require(module.CCTP_MODULE_ADMIN_ROLE() == role, "module admin role constant mismatch");
         require(module.getproviderFeeRecipient() == address(0), "fee recipient already set");
-        require(!module.isRouteAllowed(USDC, DOMAIN_ETHEREUM) && !module.isRouteAllowed(USDC, DOMAIN_BASE), "routes already allowed");
+        uint32[] memory domains = _domains();
+        for (uint256 i = 0; i < domains.length; i++) {
+            require(!module.isRouteAllowed(USDC, domains[i]), "route already allowed");
+        }
     }
 
     function _single(address to, bytes memory data) internal view returns (string memory) {
@@ -147,12 +153,11 @@ contract EnableCCTPModuleOptimism is EtherFiDeployerHelper, GnosisHelpers {
         modules[0] = MODULE;
         bool[] memory yes = new bool[](1);
         yes[0] = true;
-        uint32[] memory domains = new uint32[](2);
-        domains[0] = DOMAIN_ETHEREUM;
-        domains[1] = DOMAIN_BASE;
-        bool[] memory allowed = new bool[](2);
-        allowed[0] = true;
-        allowed[1] = true;
+        uint32[] memory domains = _domains();
+        bool[] memory allowed = new bool[](domains.length);
+        for (uint256 i = 0; i < allowed.length; i++) {
+            allowed[i] = true;
+        }
 
         txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(SAFE));
         txs = string.concat(txs, _getGnosisTransaction(addressToHex(address(dataProvider)), iToHex(abi.encodeCall(EtherFiDataProvider.configureDefaultModules, (modules, yes))), "0", false));
@@ -200,15 +205,27 @@ contract EnableCCTPModuleOptimism is EtherFiDeployerHelper, GnosisHelpers {
         require(dataProvider.isDefaultModule(MODULE), "SIM FAILED: module not default");
         require(dataProvider.getWhitelistedModules().length == whitelistedBefore + 1, "SIM FAILED: whitelist changed by more than one");
         require(_canRequestWithdraw(MODULE), "SIM FAILED: module cannot request withdrawals");
-        require(module.isRouteAllowed(USDC, DOMAIN_ETHEREUM), "SIM FAILED: ETH route not allowed");
-        require(module.isRouteAllowed(USDC, DOMAIN_BASE), "SIM FAILED: Base route not allowed");
-        require(!module.isRouteAllowed(USDC, DOMAIN_ARBITRUM), "SIM FAILED: Arbitrum route unexpectedly allowed");
+        uint32[] memory domains = _domains();
+        for (uint256 i = 0; i < domains.length; i++) {
+            require(module.isRouteAllowed(USDC, domains[i]), "SIM FAILED: route not allowed");
+        }
+        require(!module.isRouteAllowed(USDC, DOMAIN_AVALANCHE), "SIM FAILED: Avalanche route unexpectedly allowed");
+        require(!module.isRouteAllowed(USDC, 2), "SIM FAILED: OP self route unexpectedly allowed");
         require(module.getproviderFeeRecipient() == PROVIDER_FEE_RECIPIENT, "SIM FAILED: fee recipient not set");
         require(module.getproviderFee(USDC, 1_000_000e6) == 0, "SIM FAILED: provider fee is not zero");
         (address feeToken, uint256 providerFee, uint256 cctpMaxFee) = module.getBridgeFee(USDC, 1_000e6, module.FINALITY_CONFIRMED());
         require(feeToken == USDC && providerFee == 0 && cctpMaxFee == 1_000e6 * MAX_FEE_BPS / 10_000, "SIM FAILED: unexpected bridge fee quote");
 
-        console.log("[OK] all three bundles simulated; module whitelisted, default, can request withdrawals, ETH + Base routes open");
+        console.log("[OK] all three bundles simulated; module whitelisted, default, can request withdrawals, 4 USDC routes open");
+    }
+
+    function _domains() internal pure returns (uint32[] memory) {
+        uint32[] memory domains = new uint32[](4);
+        domains[0] = DOMAIN_ETHEREUM;
+        domains[1] = DOMAIN_ARBITRUM;
+        domains[2] = DOMAIN_BASE;
+        domains[3] = DOMAIN_HYPEREVM;
+        return domains;
     }
 
     function _canRequestWithdraw(address m) internal view returns (bool) {
