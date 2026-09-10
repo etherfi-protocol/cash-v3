@@ -95,12 +95,6 @@ interface IDebtManager {
     error BorrowTokenCannotBeRemovedFromCollateral();
 
     /**
-     * @notice Function to fetch the admin role
-     * @return DEBT_MANAGER_ADMIN_ROLE
-     */
-    function DEBT_MANAGER_ADMIN_ROLE() external view returns (bytes32);
-
-    /**
      * @notice Returns the max borrow apy
      * @return Max borrow APY
      */
@@ -171,7 +165,7 @@ interface IDebtManager {
 
     /**
      * @notice Function to add support for a new collateral token.
-     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE.
+     * @dev Can only be called by an address with the ADMIN_ROLE.
      * @param token Address of the token to be supported as collateral.
      * @param config Collateral token config.
      */
@@ -179,7 +173,7 @@ interface IDebtManager {
 
     /**
      * @notice Function to set the borrow APY per second for a borrow token.
-     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE.
+     * @dev Can only be called by an address with the ADMIN_ROLE.
      * @param token Address of the borrow token.
      * @param apy Borrow APY per seconds with 18 decimals.
      */
@@ -202,14 +196,14 @@ interface IDebtManager {
 
     /**
      * @notice Function to remove support for a collateral token.
-     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE.
+     * @dev Can only be called by an address with the ADMIN_ROLE.
      * @param token Address of the token to be unsupported as collateral.
      */
     function unsupportCollateralToken(address token) external;
 
     /**
      * @notice Function to add support for a new borrow token.
-     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE. 
+     * @dev Can only be called by an address with the ADMIN_ROLE. 
      * @param token Address of the token to be supported as borrow.
      * @param borrowApy Borrow APY per second in 18 decimals.
      */
@@ -217,7 +211,7 @@ interface IDebtManager {
 
     /**
      * @notice Function to remove support for a borrow token.
-     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE.
+     * @dev Can only be called by an address with the ADMIN_ROLE.
      * @param token Address of the token to be unsupported as borrow.
      */
     function unsupportBorrowToken(address token) external;
@@ -442,7 +436,7 @@ interface IDebtManager {
 
     /**
      * @notice Sets a new DebtManagerAdmin implementation
-     * @dev Can only be called by an address with the DEBT_MANAGER_ADMIN_ROLE.
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock).
      * @param newImpl Address of the new DebtManagerAdmin implementation
      */
     function setAdminImpl(address newImpl) external;

@@ -71,7 +71,7 @@ contract ConfigureDevBeHYPEStakeModule is Utils {
         enable[0] = true;
         EtherFiDataProvider(dataProvider).configureDefaultModules(modules, enable);
 
-        bytes32 adminRole = beHypeStakeModule.BEHYPE_STAKE_MODULE_ADMIN_ROLE();
+        bytes32 adminRole = keccak256("ADMIN_ROLE");
         IRoleRegistry(roleRegistry).grantRole(adminRole, deployer);
 
         vm.stopBroadcast();

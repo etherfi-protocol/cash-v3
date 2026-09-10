@@ -204,11 +204,10 @@ contract SetupOptimismProdGnosis is GnosisHelpers, Utils {
         // Admin roles for the Safe itself
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("PAUSER"), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("UNPAUSER"), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (EtherFiDataProvider(dataProvider).DATA_PROVIDER_ADMIN_ROLE(), cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("ADMIN_TIMELOCK_ROLE"), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (CASH_MODULE_CONTROLLER_ROLE, cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (IPriceProvider(priceProvider).PRICE_PROVIDER_ADMIN_ROLE(), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (ICashbackDispatcher(cashbackDispatcher).CASHBACK_DISPATCHER_ADMIN_ROLE(), cashControllerSafe)), false);
-        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (DEBT_MANAGER_ADMIN_ROLE, cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("ADMIN_TIMELOCK_ROLE"), cashControllerSafe)), false);
+        txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (keccak256("ADMIN_ROLE"), cashControllerSafe)), false);
         txs = _addTx(txs, roleRegistry, abi.encodeCall(IRoleRegistry.grantRole, (TopUpDest(topUpDest).TOP_UP_DEPOSITOR_ROLE(), cashControllerSafe)), false);
 
         // EtherFi wallet roles

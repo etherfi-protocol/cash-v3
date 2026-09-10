@@ -33,6 +33,20 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
     bytes32 public constant UNPAUSER = keccak256("UNPAUSER");
 
     /**
+     * @notice Role identifier for the fast admin multisig
+     * @dev Gates parameter tuning: risk params, token whitelists, delays, fees,
+     *      contract cross-pointers and incident recovery to pre-configured wallets
+     */
+    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
+
+    /**
+     * @notice Role identifier for the admin (operating) timelock
+     * @dev Gates trust changes: fund destinations, oracles, module whitelists,
+     *      recovery signers, drivers and arbitrary-recipient withdrawals
+     */
+    bytes32 public constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
+
+    /**
      * @notice Role type for safe admin
      */
     bytes32 public constant SAFE_ADMIN_ROLE_TYPE = keccak256("SAFE_ADMIN_ROLE");
@@ -51,6 +65,28 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
      * @notice Thrown when an account without unpauser role attempts to unpause operations
      */
     error OnlyUnpauser();
+
+    /**
+     * @notice Thrown when an account without the admin role attempts an admin operation
+     */
+    error OnlyAdmin();
+
+    /**
+     * @notice Thrown when an account without the admin-timelock role attempts a timelocked admin operation
+     */
+    error OnlyAdminTimelock();
+
+    /**
+     * @notice Thrown when revokeFast targets a protected role (ADMIN_ROLE or ADMIN_TIMELOCK_ROLE)
+     */
+    error InvalidRoleToRevoke();
+
+    /**
+     * @notice Emitted when a role is instantly revoked via revokeFast
+     * @param role The role that was revoked
+     * @param account The account the role was revoked from
+     */
+    event RoleRevokedFast(bytes32 indexed role, address indexed account);
 
     /**
      * @notice Thrown when an invalid input is passed as argument
@@ -253,6 +289,43 @@ contract RoleRegistry is Ownable, UUPSUpgradeable, EnumerableRoles {
      */
     function onlyUnpauser(address account) external view {
         if (!hasRole(UNPAUSER, account)) revert OnlyUnpauser();
+    }
+
+    /**
+     * @notice Instantly revokes an operational/guardian role from an account
+     * @dev The emergency valve for leaked keys: bypasses the timelocked role admin.
+     *      Only callable by the admin multisig (ADMIN_ROLE). Cannot revoke ADMIN_ROLE
+     *      or ADMIN_TIMELOCK_ROLE - those changes stay behind the owner (upgrade timelock)
+     * @param role The role to revoke
+     * @param account The account to revoke the role from
+     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
+     * @custom:throws InvalidRoleToRevoke if the role is ADMIN_ROLE or ADMIN_TIMELOCK_ROLE
+     */
+    function revokeFast(bytes32 role, address account) external {
+        if (!hasRole(ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        if (role == ADMIN_ROLE || role == ADMIN_TIMELOCK_ROLE) revert InvalidRoleToRevoke();
+        _setRole(account, uint256(role), false);
+        emit RoleRevokedFast(role, account);
+    }
+
+    /**
+     * @notice Verifies if an account has admin privileges
+     * @dev Reverts if the account does not have the ADMIN_ROLE
+     * @param account The address to check for the admin role
+     * @custom:throws OnlyAdmin if the account does not have the ADMIN_ROLE
+     */
+    function onlyAdmin(address account) external view {
+        if (!hasRole(ADMIN_ROLE, account)) revert OnlyAdmin();
+    }
+
+    /**
+     * @notice Verifies if an account has admin-timelock privileges
+     * @dev Reverts if the account does not have the ADMIN_TIMELOCK_ROLE
+     * @param account The address to check for the admin-timelock role
+     * @custom:throws OnlyAdminTimelock if the account does not have the ADMIN_TIMELOCK_ROLE
+     */
+    function onlyAdminTimelock(address account) external view {
+        if (!hasRole(ADMIN_TIMELOCK_ROLE, account)) revert OnlyAdminTimelock();
     }
 
     /**

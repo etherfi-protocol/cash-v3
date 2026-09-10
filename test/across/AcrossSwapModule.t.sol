@@ -10,6 +10,7 @@ import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 
 /// @dev Stub that captures the last `depositV3` call. We use `fallback` instead of an
 ///      explicit `depositV3` function because the legacy codegen can't generate the
@@ -83,7 +84,7 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         dataProvider.configureModules(mods, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(mods, shouldWhitelist);
 
-        roleRegistry.grantRole(module.ACROSS_SWAP_MODULE_ADMIN_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), moduleAdmin);
         vm.stopPrank();
 
         bytes[] memory setupData = new bytes[](1);
@@ -95,7 +96,7 @@ contract AcrossSwapModuleTest is SafeTestSetup {
     // ---- Admin setters ----
 
     function test_setSpokePool_revertsForNonAdmin() public {
-        vm.expectRevert(AcrossSwapModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setSpokePool(address(spokePool));
     }
 
@@ -498,7 +499,7 @@ contract AcrossSwapModuleTest is SafeTestSetup {
     // ---- origin-swap (anyToBridgeable) path ----
 
     function test_setPeriphery_revertsForNonAdmin() public {
-        vm.expectRevert(AcrossSwapModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setPeriphery(makeAddr("periphery"));
     }
 

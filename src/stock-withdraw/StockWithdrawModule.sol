@@ -110,9 +110,6 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
     /// @notice CashModule that holds, delays and processes the withdrawal requests.
     ICashModule public immutable cashModule;
 
-    /// @notice Role allowed to configure supported tokens, destination and compose gas.
-    bytes32 public constant STOCK_WITHDRAW_MODULE_ADMIN_ROLE = keccak256("STOCK_WITHDRAW_MODULE_ADMIN_ROLE");
-
     /// @notice 100% in basis points.
     uint256 public constant HUNDRED_PERCENT_IN_BPS = 10_000;
     /// @notice Maximum provider fee (10%).
@@ -200,8 +197,6 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      */
     event ProviderFeeSet(uint16 oldFeeBps, uint16 newFeeBps, address oldFeeReceiver, address newFeeReceiver);
 
-    /// @notice Reverts when a non-admin calls an admin function.
-    error OnlyAdmin();
     /// @notice Reverts when the iToken is not on the supported list.
     error TokenNotSupported();
     /// @notice Reverts when a supported iToken is not its own OFT (ShadowOFT invariant).
@@ -290,7 +285,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         invariant `IOFT(iToken).token() == iToken` on registration.
      * @param iTokens Array of iToken addresses to configure.
      * @param supported Support flag per iToken; same length as `iTokens`.
-     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_ROLE`.
      * @custom:throws ArrayLengthMismatch If the arrays diverge in length or are empty.
      * @custom:throws InvalidInput If any iToken address is zero.
      * @custom:throws InvalidOFT If a registered iToken is not its own OFT.
@@ -305,12 +300,12 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         new requests for that endpoint.
      * @param dstEids Destination endpoint IDs to configure.
      * @param unwrappers StockUnwrapper per endpoint; same length as `dstEids`.
-     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_TIMELOCK_ROLE`.
      * @custom:throws ArrayLengthMismatch If the arrays diverge in length or are empty.
      * @custom:throws InvalidInput If any endpoint ID is zero.
      */
     function configureUnwrappers(uint32[] calldata dstEids, address[] calldata unwrappers) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         _configureUnwrappers(dstEids, unwrappers);
     }
 
@@ -320,7 +315,7 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         bump gas for stuck sends.
      * @param _lzReceiveGasLimit The new lzReceive executor gas limit; must be non-zero.
      * @param _composeGasLimit The new compose executor gas limit; must be non-zero.
-     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws OnlyAdmin If the caller lacks `ADMIN_ROLE`.
      * @custom:throws InvalidInput If either gas limit is zero.
      */
     function setLzGasLimits(uint128 _lzReceiveGasLimit, uint128 _composeGasLimit) external {
@@ -335,12 +330,12 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
      *         in-flight order, and `minReturn` still protects the user on the destination.
      * @param _providerFeeBps Fee in basis points; zero disables the fee.
      * @param _feeReceiver Recipient of the fee; may be zero only when the fee is zero.
-     * @custom:throws OnlyAdmin If the caller lacks `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws ProviderFeeTooHigh If the fee exceeds `MAX_PROVIDER_FEE_BPS`.
      * @custom:throws InvalidInput If the receiver is zero while the fee is non-zero.
      */
     function setProviderFee(uint16 _providerFeeBps, address _feeReceiver) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         _setProviderFee(_providerFeeBps, _feeReceiver);
     }
 
@@ -780,9 +775,14 @@ contract StockWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
         }
     }
 
-    /// @dev Reverts unless the caller holds `STOCK_WITHDRAW_MODULE_ADMIN_ROLE`.
+    /// @dev Reverts unless the caller holds `ADMIN_TIMELOCK_ROLE`.
     function _onlyAdmin() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(STOCK_WITHDRAW_MODULE_ADMIN_ROLE, msg.sender)) revert OnlyAdmin();
+        IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdmin(msg.sender);
+    }
+
+    /// @dev Reverts unless the caller holds `ADMIN_TIMELOCK_ROLE`.
+    function _onlyAdminTimelock() internal view {
+        IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdminTimelock(msg.sender);
     }
 
     /// @dev Returns the storage struct from the ERC-7201 namespaced slot.
