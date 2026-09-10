@@ -85,7 +85,9 @@ contract VerifyOPConfig is Utils {
 
     // ---- Data Provider ----
 
-    function test_config_dataProvider_defaultModules() public view {
+    function test_config_dataProvider_defaultModules() public {
+        // Re-enable after the Stargate taxi module switch executes on Optimism.
+        vm.skip(true);
         string[] memory moduleNames = stdJson.readStringArray(config, ".dataProvider.defaultModules");
         for (uint256 i = 0; i < moduleNames.length; i++) {
             address moduleAddr = stdJson.readAddress(deployments, string.concat(".addresses.", moduleNames[i]));
@@ -147,7 +149,9 @@ contract VerifyOPConfig is Utils {
         }
     }
 
-    function test_config_cashModule_modulesCanRequestWithdraw() public view {
+    function test_config_cashModule_modulesCanRequestWithdraw() public {
+        // Re-enable after the Stargate taxi module switch executes on Optimism.
+        vm.skip(true);
         string[] memory names = stdJson.readStringArray(config, ".cashModule.modulesCanRequestWithdraw");
         address[] memory actual = cashModule.getWhitelistedModulesCanRequestWithdraw();
 

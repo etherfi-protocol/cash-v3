@@ -15,6 +15,7 @@ import { TopUp } from "../../src/top-up/TopUp.sol";
 import { BeaconFactory, TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { EtherFiOFTBridgeAdapter } from "../../src/top-up/bridge/EtherFiOFTBridgeAdapter.sol";
 import { ScrollERC20BridgeAdapter } from "../../src/top-up/bridge/ScrollERC20BridgeAdapter.sol";
+import { SendParam } from "../../src/interfaces/IOFT.sol";
 import { StargateAdapter } from "../../src/top-up/bridge/StargateAdapter.sol";
 import { EtherFiLiquidBridgeAdapter } from "../../src/top-up/bridge/EtherFiLiquidBridgeAdapter.sol";
 import {NTTAdapter} from "../../src/top-up/bridge/NTTAdapter.sol";
@@ -788,6 +789,14 @@ contract TopUpFactoryTest is Test, Constants {
         factory.bridge{ value: fee }(token, amount, DEST_CHAIN_ID);
     }
 
+    /// @dev Confirms empty taxi parameters select Stargate's enforced destination options.
+    function test_prepareTakeTaxi_usesEmptyCommandAndExtraOptions() public view {
+        (, SendParam memory sendParam,,) = stargateAdapter.prepareTakeTaxi(ethStargatePool, uint32(30_214), 1 ether, alice, 0);
+
+        assertEq(sendParam.oftCmd.length, 0);
+        assertEq(sendParam.extraOptions.length, 0);
+    }
+
     function test_bridge_succeeds_withLiquidEth() public {
         address token = address(liquidEth);
         uint256 amount = 1 ether;
@@ -877,13 +886,17 @@ contract TopUpFactoryTest is Test, Constants {
     // }
 
     function test_bridge_reverts_whenInsufficientFeeIsPassed() public {
-        address token = address(usdc);
-        uint256 amount = 100e6;
+        // weETH -> OP via OFT: a live route with a real nonzero fee. The USDC -> OP native bridge
+        // quotes fee 0, and fee / 2 (not fee - 1) keeps the value short even if the quote drifts
+        // between the isolated quote and bridge transactions.
+        address token = address(weETH);
+        uint256 amount = 1 ether;
         deal(token, address(factory), amount);
-        (, uint256 fee) = factory.getBridgeFee(token, amount, DEST_CHAIN_ID);
+        (, uint256 fee) = factory.getBridgeFee(token, amount, OP_CHAIN_ID);
+        assertGt(fee, 0, "test premise: the route charges a fee");
 
         vm.expectRevert(TopUpFactory.InsufficientFeePassed.selector);
-        factory.bridge{ value: fee - 1 }(token, amount, DEST_CHAIN_ID);
+        factory.bridge{ value: fee / 2 }(token, amount, OP_CHAIN_ID);
     }
 
     /// @dev Test bridging when paused
