@@ -14,6 +14,7 @@ interface IAssetRecoveryModule {
     error InvalidRecipient();
     error InvalidToken();
     error RefundFailed();
+    error RecoveryExpired();
     // InvalidSignature() comes from ModuleBase; redeclaring here would collide on inheritance.
 
     function recover(
@@ -22,6 +23,7 @@ interface IAssetRecoveryModule {
         address recipient,
         bytes32 safeSalt,
         uint32 destEid,
+        uint256 deadline,
         bytes calldata lzOptions,
         address[] calldata signers,
         bytes[] calldata signatures

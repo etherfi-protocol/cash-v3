@@ -37,6 +37,12 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
      *                  prevent gas-grief replays with cheaper options. Must be sized for the
      *                  worst case (deploy TopUp + sweep), since the sender doesn't know which
      *                  branch will run on the dest.
+     * @param deadline Unix timestamp after which the owner authorization is void. Bound into the
+     *                 signed digest so a relayer cannot stash the signature and replay it against a
+     *                 future deposit of the same token (audit I-04 — the destination sweeps the full
+     *                 balance present at delivery, and no amount is signed). Mirrors the deadline on
+     *                 `SafeAssetRecoveryModule.recover`; the per-safe nonce already makes a signature
+     *                 single-use, but without a deadline a valid signature never expires.
      * @return lzGuid LayerZero v2 message GUID for delivery tracking.
      */
     function recover(
@@ -45,6 +51,7 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
         address recipient,
         bytes32 safeSalt,
         uint32 destEid,
+        uint256 deadline,
         bytes calldata lzOptions,
         address[] calldata signers,
         bytes[] calldata signatures
@@ -52,8 +59,9 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
         if (recipient == address(0)) revert InvalidRecipient();
         if (token == address(0)) revert InvalidToken();
         if (peers[destEid] == bytes32(0)) revert InvalidDestEid();
+        if (block.timestamp > deadline) revert RecoveryExpired();
 
-        _verifyRecoverySignatures(safe, token, recipient, safeSalt, destEid, lzOptions, signers, signatures);
+        _verifyRecoverySignatures(safe, token, recipient, safeSalt, destEid, deadline, lzOptions, signers, signatures);
 
         lzGuid = _dispatchRecovery(safe, token, recipient, safeSalt, destEid, lzOptions);
 
@@ -108,6 +116,7 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
         address recipient,
         bytes32 safeSalt,
         uint32 destEid,
+        uint256 deadline,
         bytes calldata lzOptions,
         address[] calldata signers,
         bytes[] calldata signatures
@@ -121,6 +130,7 @@ contract AssetRecoveryModule is IAssetRecoveryModule, ModuleBase, OAppSender, Pa
             recipient,
             safeSalt,
             destEid,
+            deadline,
             keccak256(lzOptions)
         ));
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignature();
