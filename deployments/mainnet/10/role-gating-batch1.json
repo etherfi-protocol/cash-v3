@@ -1,0 +1,13 @@
+{
+  "block": 156737525,
+  "cashbackDispatcherImpl": "0xD5D37B89984A9b8Fe5B2690d32c05a4336bA0Cb5",
+  "commit": "2aed606 (Certora-approved) + master merge",
+  "liquidUsdLiquifierImpl": "0x4d99d736602e02a479e1e1a62d1F71C7F0c1e239",
+  "roleRegistryImpl": "0x08e5Cc67620Dc3268F5A8992A2992DAbBE581566",
+  "settlementDispatcherCardOrderImpl": "0x4bEcc1A98f008934463b7d1159E25a36d98Fea65",
+  "settlementDispatcherPixImpl": "0x514C4CFe19c63A4d9ad8d1750a9f8f48C286CF0f",
+  "settlementDispatcherRainImpl": "0x759fdBf74f34f66e0d1991e6edF55D1b828a4097",
+  "settlementDispatcherReapImpl": "0xe98320e0279aD1D2aFF2A01D89DB4276B8e0d681",
+  "topUpDestImpl": "0xD04da85c3e9CA24808fF6B202Ae7D02d9f3ac115",
+  "upgradeTimelock": "0x120F246e415Ceff6dA7a22AdA1A40ef4beD7d95d"
+}
