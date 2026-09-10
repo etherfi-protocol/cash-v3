@@ -49,51 +49,43 @@ contract DeployRoleGatingBatch1 is Utils {
 
     string outJson = "batch1";
 
+    struct Addrs {
+        address roleRegistry;
+        address dataProvider;
+        address debtManager;
+        address topUpDest;
+        address liquifier;
+        address weth;
+    }
+
     function run() public {
         require(block.chainid == 10, "DeployRoleGatingBatch1: Optimism only");
         require(address(DEPLOYER).code.length > 0, "EtherFiDeployer not deployed on this chain");
 
         // ── 1. Resolve live addresses and cross-check the world looks as reviewed ──
         string memory deployments = readDeploymentFile();
-        address roleRegistry = readAddr(deployments, "RoleRegistry");
-        address dataProvider = readAddr(deployments, "EtherFiDataProvider");
-        address debtManager = readAddr(deployments, "DebtManager");
-        address topUpDest = readAddr(deployments, "TopUpDest");
-        address cashbackDispatcher = readAddr(deployments, "CashbackDispatcher");
-        address liquifier = readAddr(deployments, "LiquidUSDLiquifierModule");
-
-        require(RoleRegistry(roleRegistry).owner() == OPERATING_TIMELOCK, "RoleRegistry owner != 8h operating timelock");
-        require(address(RoleRegistry(roleRegistry).etherFiDataProvider()) == dataProvider, "dataProvider mismatch vs live registry");
+        Addrs memory a = _resolveAndCheck(deployments);
 
         vm.startBroadcast();
-        (, address broadcaster,) = vm.readCallers();
-        require(DEPLOYER.isDeployer(broadcaster), "broadcaster is not in the EtherFiDeployer registry");
+        {
+            (, address broadcaster,) = vm.readCallers();
+            require(DEPLOYER.isDeployer(broadcaster), "broadcaster is not in the EtherFiDeployer registry");
+        }
 
         // ── 2. The 2-day upgrade timelock ──
         address timelock = _deployUpgradeTimelock();
 
         // ── 3. Impls for every contract currently gated on the RoleRegistry owner ──
-        address roleRegistryImpl = _deploy("roleRegistryImpl", "RoleGatingBatch1.RoleRegistry", abi.encodePacked(type(RoleRegistry).creationCode, abi.encode(dataProvider)));
-        require(address(RoleRegistry(roleRegistryImpl).etherFiDataProvider()) == dataProvider, "registry impl: dataProvider mismatch");
+        _deployRegistryImpl(a);
 
-        _deployDispatcherImpl(deployments, "SettlementDispatcherReap", "settlementDispatcherReapImpl", BinSponsor.Reap, dataProvider);
-        _deployDispatcherImpl(deployments, "SettlementDispatcherRain", "settlementDispatcherRainImpl", BinSponsor.Rain, dataProvider);
-        _deployDispatcherImpl(deployments, "SettlementDispatcherPix", "settlementDispatcherPixImpl", BinSponsor.PIX, dataProvider);
-        _deployDispatcherImpl(deployments, "SettlementDispatcherCardOrder", "settlementDispatcherCardOrderImpl", BinSponsor.CardOrder, dataProvider);
+        _deployDispatcherImpl(deployments, "SettlementDispatcherReap", "settlementDispatcherReapImpl", BinSponsor.Reap, a.dataProvider);
+        _deployDispatcherImpl(deployments, "SettlementDispatcherRain", "settlementDispatcherRainImpl", BinSponsor.Rain, a.dataProvider);
+        _deployDispatcherImpl(deployments, "SettlementDispatcherPix", "settlementDispatcherPixImpl", BinSponsor.PIX, a.dataProvider);
+        _deployDispatcherImpl(deployments, "SettlementDispatcherCardOrder", "settlementDispatcherCardOrderImpl", BinSponsor.CardOrder, a.dataProvider);
 
-        // TopUpDest keeps the live proxy's weth wiring
-        address weth = address(TopUpDest(payable(topUpDest)).weth());
-        address topUpDestImpl = _deploy("topUpDestImpl", "RoleGatingBatch1.TopUpDest", abi.encodePacked(type(TopUpDest).creationCode, abi.encode(dataProvider, weth)));
-        require(address(TopUpDest(payable(topUpDestImpl)).weth()) == weth, "topUpDest impl: weth mismatch");
-
-        address cashbackImpl = _deploy("cashbackDispatcherImpl", "RoleGatingBatch1.CashbackDispatcher", abi.encodePacked(type(CashbackDispatcher).creationCode, abi.encode(dataProvider)));
-        require(address(CashbackDispatcher(cashbackImpl).etherFiDataProvider()) == dataProvider, "cashback impl: dataProvider mismatch");
-        require(cashbackDispatcher != address(0), "cashback proxy missing");
-
-        // Liquifier keeps the live proxy's debtManager wiring
-        require(address(LiquidUSDLiquifierOPModule(liquifier).debtManager()) == debtManager, "liquifier proxy: debtManager mismatch");
-        address liquifierImpl = _deploy("liquidUsdLiquifierImpl", "RoleGatingBatch1.LiquidUSDLiquifierOP", abi.encodePacked(type(LiquidUSDLiquifierOPModule).creationCode, abi.encode(debtManager, dataProvider)));
-        require(address(LiquidUSDLiquifierOPModule(liquifierImpl).debtManager()) == debtManager, "liquifier impl: debtManager mismatch");
+        _deployTopUpDestImpl(a);
+        _deployCashbackImpl(a);
+        _deployLiquifierImpl(a);
 
         vm.stopBroadcast();
 
@@ -104,6 +96,41 @@ contract DeployRoleGatingBatch1 is Utils {
         vm.writeJson(finalJson, string.concat(vm.projectRoot(), "/deployments/mainnet/10/role-gating-batch1.json"));
 
         console.log("=== Batch-1 deployments complete. No state changed on live contracts. ===");
+    }
+
+    function _resolveAndCheck(string memory deployments) internal view returns (Addrs memory a) {
+        a.roleRegistry = readAddr(deployments, "RoleRegistry");
+        a.dataProvider = readAddr(deployments, "EtherFiDataProvider");
+        a.debtManager = readAddr(deployments, "DebtManager");
+        a.topUpDest = readAddr(deployments, "TopUpDest");
+        a.liquifier = readAddr(deployments, "LiquidUSDLiquifierModule");
+        a.weth = address(TopUpDest(payable(a.topUpDest)).weth());
+
+        require(RoleRegistry(a.roleRegistry).owner() == OPERATING_TIMELOCK, "RoleRegistry owner != 8h operating timelock");
+        require(address(RoleRegistry(a.roleRegistry).etherFiDataProvider()) == a.dataProvider, "dataProvider mismatch vs live registry");
+        // Liquifier keeps the live proxy's debtManager wiring
+        require(address(LiquidUSDLiquifierOPModule(a.liquifier).debtManager()) == a.debtManager, "liquifier proxy: debtManager mismatch");
+    }
+
+    function _deployRegistryImpl(Addrs memory a) internal {
+        address impl = _deploy("roleRegistryImpl", "RoleGatingBatch1.RoleRegistry", abi.encodePacked(type(RoleRegistry).creationCode, abi.encode(a.dataProvider)));
+        require(address(RoleRegistry(impl).etherFiDataProvider()) == a.dataProvider, "registry impl: dataProvider mismatch");
+    }
+
+    function _deployTopUpDestImpl(Addrs memory a) internal {
+        // TopUpDest keeps the live proxy's weth wiring
+        address impl = _deploy("topUpDestImpl", "RoleGatingBatch1.TopUpDest", abi.encodePacked(type(TopUpDest).creationCode, abi.encode(a.dataProvider, a.weth)));
+        require(address(TopUpDest(payable(impl)).weth()) == a.weth, "topUpDest impl: weth mismatch");
+    }
+
+    function _deployCashbackImpl(Addrs memory a) internal {
+        address impl = _deploy("cashbackDispatcherImpl", "RoleGatingBatch1.CashbackDispatcher", abi.encodePacked(type(CashbackDispatcher).creationCode, abi.encode(a.dataProvider)));
+        require(address(CashbackDispatcher(impl).etherFiDataProvider()) == a.dataProvider, "cashback impl: dataProvider mismatch");
+    }
+
+    function _deployLiquifierImpl(Addrs memory a) internal {
+        address impl = _deploy("liquidUsdLiquifierImpl", "RoleGatingBatch1.LiquidUSDLiquifierOP", abi.encodePacked(type(LiquidUSDLiquifierOPModule).creationCode, abi.encode(a.debtManager, a.dataProvider)));
+        require(address(LiquidUSDLiquifierOPModule(impl).debtManager()) == a.debtManager, "liquifier impl: debtManager mismatch");
     }
 
     function _deployUpgradeTimelock() internal returns (address) {
