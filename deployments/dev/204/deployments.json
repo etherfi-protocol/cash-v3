@@ -1,0 +1,7 @@
+{
+  "addresses": {
+    "RoleRegistry": "0xa322a04d1e2Cb44672473740F9F35B057FA29CFB",
+    "TopUpSourceFactory": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
+    "AssetRecoveryDispatcher": "0xeB58586Bc0C2D39E0ee83B8218B8Ba3c696B2d8e"
+  }
+}

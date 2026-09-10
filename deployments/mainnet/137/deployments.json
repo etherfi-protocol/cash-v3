@@ -1,6 +1,9 @@
 {
   "addresses": {
     "RoleRegistry": "0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B",
-    "EtherFiSafeFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF"
+    "EtherFiSafeFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
+    "TopUpSourceFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
+    "AssetRecoveryDispatcher": "0x418e0af7c750Ba5cbffC5C2a8398591755926A29",
+    "TopUpV2Impl": "0xCB160aF093564E44Dc4c07bc03b828354E0fee77"
   }
 }

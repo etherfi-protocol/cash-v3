@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../../src/UUPSProxy.sol";
 import { BeaconFactory } from "../../../src/top-up/TopUpFactory.sol";
@@ -25,6 +26,9 @@ import { Utils } from "../../utils/Utils.sol";
  */
 contract DeployRecoveryDevDest is Utils {
     uint32 internal constant OP_EID = 30_111;
+    address internal constant NICKS_FACTORY = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
+    // Dev dispatcher proxy via CREATE3 (raw call -> forge doesn't decode ctor args; also deterministic).
+    bytes32 internal constant SALT_DEV_DISPATCHER_PROXY = keccak256("etherfi.dev.recovery.dispatcher.v1");
 
     function run() external {
         require(block.chainid != 10, "must NOT be Optimism");
@@ -45,12 +49,17 @@ contract DeployRecoveryDevDest is Utils {
         vm.startBroadcast(deployerPk);
 
         AssetRecoveryDispatcher dispatcherImpl = new AssetRecoveryDispatcher(lzEndpoint, OP_EID, topUpFactory);
-        AssetRecoveryDispatcher dispatcher = AssetRecoveryDispatcher(address(
-            new UUPSProxy(
-                address(dispatcherImpl),
-                abi.encodeCall(AssetRecoveryDispatcher.initialize, (deployer, roleRegistry))
-            )
-        ));
+        address dispatcherProxy = _deployCreate3(
+            abi.encodePacked(
+                type(UUPSProxy).creationCode,
+                abi.encode(
+                    address(dispatcherImpl),
+                    abi.encodeCall(AssetRecoveryDispatcher.initialize, (deployer, roleRegistry))
+                )
+            ),
+            SALT_DEV_DISPATCHER_PROXY
+        );
+        AssetRecoveryDispatcher dispatcher = AssetRecoveryDispatcher(dispatcherProxy);
 
         TopUpV2 topUpV2Impl = new TopUpV2(weth, address(dispatcher));
 
@@ -71,5 +80,22 @@ contract DeployRecoveryDevDest is Utils {
         console.log("Owner / delegate    : %s (deployer EOA)", deployer);
         console.log("");
         console.log("Pass DISPATCHER=%s into WireRecoveryDevOp", address(dispatcher));
+    }
+
+    function _deployCreate3(bytes memory creationCode, bytes32 salt) internal returns (address deployed) {
+        deployed = CREATE3.predictDeterministicAddress(salt, NICKS_FACTORY);
+        if (deployed.code.length > 0) {
+            console.log("  [SKIP] already deployed at", deployed);
+            return deployed;
+        }
+        address proxy = address(uint160(uint256(keccak256(abi.encodePacked(hex"ff", NICKS_FACTORY, salt, CREATE3.PROXY_INITCODE_HASH)))));
+        bool ok;
+        if (proxy.code.length == 0) {
+            (ok,) = NICKS_FACTORY.call(abi.encodePacked(salt, hex"67363d3d37363d34f03d5260086018f3"));
+            require(ok, "CREATE3 proxy deploy failed");
+        }
+        (ok,) = proxy.call(creationCode);
+        require(ok, "CREATE3 contract deploy failed");
+        require(deployed.code.length > 0, "CREATE3 deployment verification failed");
     }
 }
