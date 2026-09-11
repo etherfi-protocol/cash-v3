@@ -9,17 +9,18 @@ import { CashbackDispatcher } from "../src/cashback-dispatcher/CashbackDispatche
 import { LiquidUSDLiquifierOPModule } from "../src/modules/etherfi/LiquidUSDLiquifierOP.sol";
 import { RoleRegistry } from "../src/role-registry/RoleRegistry.sol";
 import { SettlementDispatcherV2 } from "../src/settlement-dispatcher/SettlementDispatcherV2.sol";
-import { EtherFiTimelock } from "../src/timelock/EtherFiTimelock.sol";
 import { TopUpDest } from "../src/top-up/TopUpDest.sol";
 import { EtherFiDeployer } from "../src/utils/EtherFiDeployer.sol";
 import { Utils } from "./utils/Utils.sol";
 
 /// @title DeployRoleGatingBatch1
-/// @notice Batch-1 deployments for the role re-gating rollout (STAKE-1891), Optimism only:
-///         the 2-day upgrade EtherFiTimelock plus the audited impls of every contract
-///         currently gated on the RoleRegistry owner — RoleRegistry, the four
-///         SettlementDispatcherV2 instances (Reap, Rain, PIX, CardOrder), TopUpDest,
-///         CashbackDispatcher and LiquidUSDLiquifierOP.
+/// @notice Batch-1 impl deployments for the role re-gating rollout (STAKE-1891), Optimism
+///         only: the audited impls of every contract currently gated on the RoleRegistry
+///         owner — RoleRegistry, the four SettlementDispatcherV2 instances (Reap, Rain,
+///         PIX, CardOrder), TopUpDest, CashbackDispatcher and LiquidUSDLiquifierOP.
+///         The existing 8h timelock (current RoleRegistry owner) is raised to a 2-day
+///         delay in the cutover 3CP; the NEW 8h operating timelock deploys separately
+///         via DeployTimelock.s.sol.
 ///
 ///         Deployments only — no roles are granted, no proxy is upgraded and no ownership
 ///         moves here. That happens in the batch-1 3CP (STAKE-1925).
@@ -34,15 +35,6 @@ import { Utils } from "./utils/Utils.sol";
 contract DeployRoleGatingBatch1 is Utils {
     /// @dev Permissioned CREATE3 deployer — same address on every cash chain
     EtherFiDeployer constant DEPLOYER = EtherFiDeployer(0xFCD957b5913d607BF2222280093421B1e2Af6f30);
-
-    /// @dev Must stay identical across chains so the later multichain rollout lands the
-    ///      upgrade timelock at the same address everywhere
-    bytes32 constant SALT_UPGRADE_TIMELOCK = keccak256("DeployTimelock.EtherFiUpgradeTimelock");
-
-    uint256 constant TIMELOCK_DELAY = 2 days;
-
-    /// @dev Cash governance multisig (3/6) — sole proposer/executor/canceller of the new timelock
-    address constant GOVERNANCE_MULTISIG = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
     /// @dev The live 8h operating timelock — current owner of the Optimism RoleRegistry
     address constant OPERATING_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
@@ -72,10 +64,7 @@ contract DeployRoleGatingBatch1 is Utils {
             require(DEPLOYER.isDeployer(broadcaster), "broadcaster is not in the EtherFiDeployer registry");
         }
 
-        // ── 2. The 2-day upgrade timelock ──
-        address timelock = _deployUpgradeTimelock();
-
-        // ── 3. Impls for every contract currently gated on the RoleRegistry owner ──
+        // ── 2. Impls for every contract currently gated on the RoleRegistry owner ──
         _deployRegistryImpl(a);
 
         _deployDispatcherImpl(deployments, "SettlementDispatcherReap", "settlementDispatcherReapImpl", BinSponsor.Reap, a.dataProvider);
@@ -89,8 +78,7 @@ contract DeployRoleGatingBatch1 is Utils {
 
         vm.stopBroadcast();
 
-        // ── 4. Record addresses ──
-        vm.serializeAddress(outJson, "upgradeTimelock", timelock);
+        // ── 3. Record addresses ──
         vm.serializeUint(outJson, "block", block.number);
         string memory finalJson = vm.serializeString(outJson, "commit", "2aed606 (Certora-approved) + master merge");
         vm.writeJson(finalJson, string.concat(vm.projectRoot(), "/deployments/mainnet/10/role-gating-batch1.json"));
@@ -133,34 +121,6 @@ contract DeployRoleGatingBatch1 is Utils {
         require(address(LiquidUSDLiquifierOPModule(impl).debtManager()) == a.debtManager, "liquifier impl: debtManager mismatch");
     }
 
-    function _deployUpgradeTimelock() internal returns (address) {
-        address[] memory proposers = new address[](1);
-        proposers[0] = GOVERNANCE_MULTISIG;
-        address[] memory executors = new address[](1);
-        executors[0] = GOVERNANCE_MULTISIG;
-
-        bytes memory initCode = abi.encodePacked(type(EtherFiTimelock).creationCode, abi.encode(TIMELOCK_DELAY, proposers, executors, address(0)));
-
-        address predicted = DEPLOYER.getDeterministicAddress(SALT_UPGRADE_TIMELOCK);
-        if (predicted.code.length > 0) {
-            console.log("  [SKIP] upgrade timelock already deployed:", predicted);
-        } else {
-            require(DEPLOYER.deploy(SALT_UPGRADE_TIMELOCK, initCode) == predicted, "timelock: deployed != predicted");
-            console.log("  [OK] upgrade timelock:", predicted);
-        }
-
-        // EtherFiTimelock has no immutables, so the runtime code must match this build exactly
-        require(keccak256(predicted.code) == keccak256(type(EtherFiTimelock).runtimeCode), "timelock bytecode != local build");
-
-        EtherFiTimelock tl = EtherFiTimelock(payable(predicted));
-        require(tl.getMinDelay() == TIMELOCK_DELAY, "delay != 2 days");
-        require(tl.hasRole(tl.PROPOSER_ROLE(), GOVERNANCE_MULTISIG), "multisig is not proposer");
-        require(tl.hasRole(tl.EXECUTOR_ROLE(), GOVERNANCE_MULTISIG), "multisig is not executor");
-        require(tl.hasRole(tl.CANCELLER_ROLE(), GOVERNANCE_MULTISIG), "multisig is not canceller");
-        require(tl.hasRole(tl.DEFAULT_ADMIN_ROLE(), predicted), "timelock is not its own admin");
-        require(!tl.hasRole(tl.DEFAULT_ADMIN_ROLE(), GOVERNANCE_MULTISIG), "multisig must not be admin");
-        return predicted;
-    }
 
     function _deployDispatcherImpl(string memory deployments, string memory proxyKey, string memory jsonKey, BinSponsor binSponsor, address dataProvider) internal {
         // The impl must carry the same immutables as the live proxy it will replace
