@@ -3,6 +3,7 @@
   "cashbackDispatcherImpl": "0xD5D37B89984A9b8Fe5B2690d32c05a4336bA0Cb5",
   "commit": "2aed606 (Certora-approved) + master merge",
   "liquidUsdLiquifierImpl": "0x4d99d736602e02a479e1e1a62d1F71C7F0c1e239",
+  "operatingTimelock": "0x9AEb8eaa982084219d1A938D8F7B5040a1d47849",
   "roleRegistryImpl": "0x08e5Cc67620Dc3268F5A8992A2992DAbBE581566",
   "settlementDispatcherCardOrderImpl": "0x4bEcc1A98f008934463b7d1159E25a36d98Fea65",
   "settlementDispatcherPixImpl": "0x514C4CFe19c63A4d9ad8d1750a9f8f48C286CF0f",
