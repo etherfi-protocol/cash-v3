@@ -10,19 +10,29 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
 /// @title RoleGatingBatch2Cutover
-/// @notice Generates the ONE Gnosis Safe Transaction Builder JSON for the batch-2 cutover on
+/// @notice Generates the TWO Gnosis Safe Transaction Builder JSONs for the batch-2 cutover on
 ///         the current top-up source chain (ETH, Arbitrum, Base, BSC or HyperEVM), then
-///         simulates it on the fork and asserts the end state.
+///         simulates both on the fork and asserts the end state.
 ///
 ///         The RoleRegistry owner on these chains is the governance safe itself (the cash
-///         controller safe on HyperEVM), so unlike Optimism there is nothing to schedule —
-///         one immediate multisend of 5 calls:
-///           1. upgrade RoleRegistry to the audited impl
-///           2. grantRole(ADMIN_ROLE, governance safe)
-///           3. grantRole(ADMIN_TIMELOCK_ROLE, 8h operating timelock)
-///           4. upgrade TopUpFactory to the audited impl
-///           5. LAST: transferOwnership(2-day upgrade timelock) — after this, upgrades and
-///              role admin take 2 days; the safe keeps the fast lane through ADMIN_ROLE
+///         controller safe on HyperEVM). Ownership moves to the 2-day upgrade timelock via
+///         solady's TWO-STEP handover — the timelock itself must request the handover (which
+///         proves it can execute calls) and the safe then completes it:
+///
+///         multisend 1 (day 0) — 1 call:
+///           2-day timelock: schedule(registry.requestOwnershipHandover, delay = 2 days)
+///         multisend 2 (day 2+) — 6 calls, all direct from the safe:
+///           1. 2-day timelock: execute the scheduled requestOwnershipHandover
+///           2. upgrade RoleRegistry to the audited impl
+///           3. grantRole(ADMIN_ROLE, governance safe)
+///           4. grantRole(ADMIN_TIMELOCK_ROLE, 8h operating timelock)
+///           5. upgrade TopUpFactory to the audited impl
+///           6. LAST: registry.completeOwnershipHandover(2-day timelock)
+///
+///         The handover request and its completion land in the same multisend, so solady's
+///         48h request expiry can never bite; completing last keeps the safe as owner for
+///         every earlier call, and executing the batch before day 2 reverts atomically on
+///         call 1 (operation not ready).
 ///
 /// Usage (no broadcast — writes ./output/*.json and simulates):
 ///   forge script scripts/gnosis-txs/RoleGatingBatch2Cutover.s.sol --rpc-url <chain rpc>
@@ -39,6 +49,8 @@ contract RoleGatingBatch2Cutover is Utils, GnosisHelpers {
 
     uint256 constant UPGRADE_DELAY = 2 days;
     uint256 constant OPERATING_DELAY = 8 hours;
+    bytes32 constant TL_PREDECESSOR = bytes32(0);
+    bytes32 constant TL_SALT = keccak256("RoleGatingBatch2Cutover");
 
     bytes32 constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
@@ -70,23 +82,32 @@ contract RoleGatingBatch2Cutover is Utils, GnosisHelpers {
         _checkTimelock(UPGRADE_TIMELOCK, UPGRADE_DELAY);
         _checkTimelock(OPERATING_TIMELOCK, OPERATING_DELAY);
 
-        // ── 2. The multisend, in the order that matters ──
-        // Registry first (the re-gated factory impl calls check functions that only exist on
-        // the new registry), grants before the factory upgrade (nothing gated on an unheld
-        // role), ownership transfer LAST (every earlier call needs the safe to be owner).
-        string memory ms = _getGnosisHeader(vm.toString(block.chainid), addressToHex(governance));
-        ms = string(abi.encodePacked(ms, _getGnosisTransaction(addressToHex(roleRegistry), iToHex(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", registryImpl, bytes(""))), "0", false)));
-        ms = string(abi.encodePacked(ms, _getGnosisTransaction(addressToHex(roleRegistry), iToHex(abi.encodeWithSignature("grantRole(bytes32,address)", ADMIN_ROLE, governance)), "0", false)));
-        ms = string(abi.encodePacked(ms, _getGnosisTransaction(addressToHex(roleRegistry), iToHex(abi.encodeWithSignature("grantRole(bytes32,address)", ADMIN_TIMELOCK_ROLE, OPERATING_TIMELOCK)), "0", false)));
-        ms = string(abi.encodePacked(ms, _getGnosisTransaction(addressToHex(topUpFactory), iToHex(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", factoryImpl, bytes(""))), "0", false)));
-        ms = string(abi.encodePacked(ms, _getGnosisTransaction(addressToHex(roleRegistry), iToHex(abi.encodeWithSignature("transferOwnership(address)", UPGRADE_TIMELOCK)), "0", true)));
+        // ── 2. multisend 1: the 2-day timelock schedules its own handover request ──
+        bytes memory requestPayload = abi.encodeWithSignature("requestOwnershipHandover()");
+        string memory ms1 = _getGnosisHeader(vm.toString(block.chainid), addressToHex(governance));
+        ms1 = string(abi.encodePacked(ms1, _getGnosisTransaction(addressToHex(UPGRADE_TIMELOCK), iToHex(abi.encodeWithSignature("schedule(address,uint256,bytes,bytes32,bytes32,uint256)", roleRegistry, 0, requestPayload, TL_PREDECESSOR, TL_SALT, UPGRADE_DELAY)), "0", true)));
+        string memory ms1Path = _writeBundle("multisend1-schedule-request", ms1);
 
+        // ── 3. multisend 2 (day 2+): execute the request, upgrade, grant, complete ──
+        // Completion is LAST so the safe stays owner for every earlier call; executing this
+        // bundle before day 2 reverts atomically on the timelock execute (not ready).
+        string memory ms2 = _getGnosisHeader(vm.toString(block.chainid), addressToHex(governance));
+        ms2 = string(abi.encodePacked(ms2, _getGnosisTransaction(addressToHex(UPGRADE_TIMELOCK), iToHex(abi.encodeWithSignature("execute(address,uint256,bytes,bytes32,bytes32)", roleRegistry, 0, requestPayload, TL_PREDECESSOR, TL_SALT)), "0", false)));
+        ms2 = string(abi.encodePacked(ms2, _getGnosisTransaction(addressToHex(roleRegistry), iToHex(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", registryImpl, bytes(""))), "0", false)));
+        ms2 = string(abi.encodePacked(ms2, _getGnosisTransaction(addressToHex(roleRegistry), iToHex(abi.encodeWithSignature("grantRole(bytes32,address)", ADMIN_ROLE, governance)), "0", false)));
+        ms2 = string(abi.encodePacked(ms2, _getGnosisTransaction(addressToHex(roleRegistry), iToHex(abi.encodeWithSignature("grantRole(bytes32,address)", ADMIN_TIMELOCK_ROLE, OPERATING_TIMELOCK)), "0", false)));
+        ms2 = string(abi.encodePacked(ms2, _getGnosisTransaction(addressToHex(topUpFactory), iToHex(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", factoryImpl, bytes(""))), "0", false)));
+        ms2 = string(abi.encodePacked(ms2, _getGnosisTransaction(addressToHex(roleRegistry), iToHex(abi.encodeWithSignature("completeOwnershipHandover(address)", UPGRADE_TIMELOCK)), "0", true)));
+        string memory ms2Path = _writeBundle("multisend2-execute", ms2);
+
+        _simulateAndVerify(ms1Path, ms2Path);
+    }
+
+    function _writeBundle(string memory step, string memory txs) internal returns (string memory path) {
         vm.createDir("./output", true);
-        string memory path = string.concat("./output/RoleGatingBatch2Cutover-", vm.toString(block.chainid), "-multisend.json");
-        vm.writeFile(path, ms);
+        path = string.concat("./output/RoleGatingBatch2Cutover-", vm.toString(block.chainid), "-", step, ".json");
+        vm.writeFile(path, txs);
         console.log("Wrote", path);
-
-        _simulateAndVerify(path);
     }
 
     // ── Sanity checks ──────────────────────────────────────────────────────────────
@@ -104,14 +125,21 @@ contract RoleGatingBatch2Cutover is Utils, GnosisHelpers {
 
     // ── Fork simulation + end-state assertions ─────────────────────────────────────
 
-    function _simulateAndVerify(string memory path) internal {
+    function _simulateAndVerify(string memory ms1Path, string memory ms2Path) internal {
         RoleRegistry reg = RoleRegistry(roleRegistry);
 
         console.log("");
-        console.log("=== Simulating the multisend ===");
-        executeGnosisTransactionBundle(path);
+        console.log("=== Simulating multisend 1 (schedule the handover request) ===");
+        executeGnosisTransactionBundle(ms1Path);
+        require(reg.owner() == governance, "owner must not change in multisend 1");
 
-        // Ownership moved to the 2-day timelock; roles granted
+        console.log("=== Warping past the 2-day delay ===");
+        vm.warp(block.timestamp + UPGRADE_DELAY + 1);
+
+        console.log("=== Simulating multisend 2 (execute request, upgrade, grant, complete) ===");
+        executeGnosisTransactionBundle(ms2Path);
+
+        // Ownership moved via the two-step handover; roles granted
         require(reg.owner() == UPGRADE_TIMELOCK, "owner != 2-day upgrade timelock");
         require(reg.hasRole(ADMIN_ROLE, governance), "governance missing ADMIN_ROLE");
         require(reg.hasRole(ADMIN_TIMELOCK_ROLE, OPERATING_TIMELOCK), "operating timelock missing ADMIN_TIMELOCK_ROLE");
@@ -137,10 +165,10 @@ contract RoleGatingBatch2Cutover is Utils, GnosisHelpers {
         require(!ok, "safe can still grant roles directly");
         bytes memory probe = abi.encodeWithSignature("grantRole(bytes32,address)", keccak256("PROBE"), governance);
         vm.prank(governance);
-        (ok,) = UPGRADE_TIMELOCK.call(abi.encodeWithSignature("schedule(address,uint256,bytes,bytes32,bytes32,uint256)", roleRegistry, 0, probe, bytes32(0), keccak256("probe.fast"), OPERATING_DELAY));
+        (ok,) = UPGRADE_TIMELOCK.call(abi.encodeWithSignature("schedule(address,uint256,bytes,bytes32,bytes32,uint256)", roleRegistry, 0, probe, TL_PREDECESSOR, keccak256("probe.fast"), OPERATING_DELAY));
         require(!ok, "8h schedule on the 2-day timelock must be rejected");
         vm.prank(governance);
-        (ok,) = UPGRADE_TIMELOCK.call(abi.encodeWithSignature("schedule(address,uint256,bytes,bytes32,bytes32,uint256)", roleRegistry, 0, probe, bytes32(0), keccak256("probe.slow"), UPGRADE_DELAY));
+        (ok,) = UPGRADE_TIMELOCK.call(abi.encodeWithSignature("schedule(address,uint256,bytes,bytes32,bytes32,uint256)", roleRegistry, 0, probe, TL_PREDECESSOR, keccak256("probe.slow"), UPGRADE_DELAY));
         require(ok, "2-day schedule must work");
 
         // Re-gated factory setters answer only to the operating timelock
@@ -153,7 +181,7 @@ contract RoleGatingBatch2Cutover is Utils, GnosisHelpers {
         require(ok, "operating timelock must pass onlyAdminTimelock on the factory");
 
         console.log("");
-        console.log("  [OK] owner -> 2-day upgrade timelock; safe locked out of direct owner paths");
+        console.log("  [OK] two-step handover complete: owner -> 2-day upgrade timelock");
         console.log("  [OK] ADMIN_ROLE -> governance safe, ADMIN_TIMELOCK_ROLE -> operating timelock");
         console.log("  [OK] RoleRegistry + TopUpFactory upgraded to the audited impls");
         console.log("  [OK] revokeFast live and governance-tier-protected; factory setters re-gated");
