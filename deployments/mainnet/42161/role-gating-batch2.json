@@ -1,0 +1,8 @@
+{
+  "block": 25977070,
+  "commit": "2aed606 (Certora-approved) + master merge",
+  "operatingTimelock": "0x9AEb8eaa982084219d1A938D8F7B5040a1d47849",
+  "roleRegistryImpl": "0xCf2528791B914648C64F198642209a423363bd24",
+  "topUpFactoryImpl": "0x0681a8bB55f509c5952063163a1Dda710084B80C",
+  "upgradeTimelock": "0x9106cD76E10Ac60D1dd16144243416EbD2C64434"
+}
