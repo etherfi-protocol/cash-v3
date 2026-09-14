@@ -10,7 +10,7 @@ import { EtherFiDeployer } from "../src/utils/EtherFiDeployer.sol";
 import { Utils } from "./utils/Utils.sol";
 
 /// @title DeployTimelock
-/// @notice Deploys the EtherFiTimelock on Optimism through the permissioned EtherFiDeployer
+/// @notice Deploys the 8h OPERATING EtherFiTimelock (role re-gating batch 1) on Optimism through the permissioned EtherFiDeployer
 ///         (CREATE3), with an 8-hour min delay and the cash governance safe as the only
 ///         proposer, executor and canceller (TimelockController grants CANCELLER_ROLE to
 ///         proposers in the constructor); no admin, so the timelock administers its own roles
@@ -36,7 +36,7 @@ contract DeployTimelock is Utils {
     EtherFiDeployer constant DEPLOYER = EtherFiDeployer(0xFCD957b5913d607BF2222280093421B1e2Af6f30);
 
     /// @dev Must stay identical across chains — it alone (with the EtherFiDeployer) determines the address
-    bytes32 constant SALT_TIMELOCK = keccak256("DeployTimelock.EtherFiTimelock");
+    bytes32 constant SALT_TIMELOCK = keccak256("DeployTimelock.EtherFiOperatingTimelock");
 
     uint256 constant TIMELOCK_DELAY = 8 hours;
 
@@ -47,17 +47,17 @@ contract DeployTimelock is Utils {
         require(block.chainid == 10, "DeployTimelock: Optimism only");
         require(address(DEPLOYER).code.length > 0, "EtherFiDeployer not deployed on this chain");
 
-        // ── 1. Resolve governance from the RoleRegistry owner ──
+        // ── 1. Cross-check the world: the registry owner is the original 8h timelock
+        //       (which the cutover 3CP raises to a 2-day delay); this NEW timelock becomes
+        //       the 8h operating timelock and receives ADMIN_TIMELOCK_ROLE in that 3CP ──
         string memory deployments = readDeploymentFile();
         address roleRegistry = stdJson.readAddress(deployments, string.concat(".", "addresses", ".", "RoleRegistry"));
-        address governance = RoleRegistry(roleRegistry).owner();
-
-        // Manual cross-check: the live owner must match the reviewed expectation
-        require(governance == GOVERNANCE_MULTISIG, "RoleRegistry owner != expected governance");
+        require(RoleRegistry(roleRegistry).owner() == 0x9106cD76E10Ac60D1dd16144243416EbD2C64434, "RoleRegistry owner != original 8h timelock");
+        address governance = GOVERNANCE_MULTISIG;
 
         address predicted = DEPLOYER.getDeterministicAddress(SALT_TIMELOCK);
 
-        console.log("=== Deploy EtherFiTimelock (Optimism, 8h delay) ===");
+        console.log("=== Deploy operating EtherFiTimelock (Optimism, 8h delay) ===");
         console.log("Governance (proposer/executor/canceller):", governance);
         console.log("Predicted timelock:", predicted);
 
