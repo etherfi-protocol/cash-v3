@@ -32,10 +32,10 @@ import { Utils } from "./utils/Utils.sol";
 ///         re-verifies it. Timelocks require an exact runtime-bytecode match against this
 ///         build; impl immutables are read back and required to match the live proxy.
 ///
-/// @dev Prerequisite: the EtherFiDeployer (0xFCD9…6f30) must have code on the chain — as of
-///      2026-09-14 it is NOT deployed on Arbitrum or BSC. The broadcasting account must be
-///      in its deployer registry (isDeployer). On HyperEVM, deploys over 2M gas need big
-///      blocks enabled for the broadcaster on HyperCore (evmUserModify usingBigBlocks).
+/// @dev Prerequisite: the EtherFiDeployer (0xFCD9…6f30) must have code on the chain and the
+///      broadcasting account must be in its deployer registry (isDeployer) — both true on
+///      all five chains as of 2026-09-14. On HyperEVM, deploys over 2M gas need big blocks
+///      enabled for the broadcaster on HyperCore (evmUserModify usingBigBlocks).
 ///
 /// Usage (Ledger) — pass --sender so simulation and broadcast agree on the account:
 ///   forge script scripts/DeployRoleGatingBatch2.s.sol --rpc-url <chain rpc> --ledger --sender <ledger-addr> --broadcast
