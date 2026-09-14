@@ -43,9 +43,11 @@ contract DeployRoleGatingBatch2 is Utils {
     /// @dev Permissioned CREATE3 deployer — same address on every cash chain
     EtherFiDeployer constant DEPLOYER = EtherFiDeployer(0xFCD957b5913d607BF2222280093421B1e2Af6f30);
 
-    /// @dev Same salt as the (unused) Optimism deploy so the 2-day timelock lands at the
-    ///      same address on every chain (0x120F246e415Ceff6dA7a22AdA1A40ef4beD7d95d)
-    bytes32 constant SALT_UPGRADE_TIMELOCK = keccak256("DeployTimelock.EtherFiUpgradeTimelock");
+    /// @dev Same salt as the Optimism RoleRegistry owner timelock, so the registry owner
+    ///      lands at the same address on every chain (0x9106cD76E10Ac60D1dd16144243416EbD2C64434).
+    ///      On OP it was deployed at an 8h delay and raised to 2 days by the batch-1 cutover;
+    ///      here it deploys at 2 days directly (the delay is storage, not part of the address)
+    bytes32 constant SALT_UPGRADE_TIMELOCK = keccak256("DeployTimelock.EtherFiTimelock");
 
     /// @dev Same salt as the live Optimism operating timelock → same address on every
     ///      chain (0x9AEb8eaa982084219d1A938D8F7B5040a1d47849)
