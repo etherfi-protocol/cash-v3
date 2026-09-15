@@ -17,8 +17,8 @@ import { ISpokeConfiguratorMigrationLike, MigratedStock, StockMigration } from "
  *         every safe's wrapper is already supplied. That check, and the health-factor simulation, are the
  *         go/no-go for signing this.
  *
- *         Frozen blocks supply and borrow on the mirror reserve but leaves withdraw and repay open, so
- *         users can still pull the worthless mirror dust out.
+ *         The mirror reserves were paused on Friday and stay paused; frozen and 1 wei go on top so nothing
+ *         about them ever counts or moves again.
  *
  * Usage (after the listing bundle; the fork replays it if the wrappers are not yet listed live):
  *   forge script scripts/stock-migration/FlipStockReservesSummerLend3CP.s.sol --rpc-url $OPTIMISM_RPC -vvv
@@ -26,12 +26,14 @@ import { ISpokeConfiguratorMigrationLike, MigratedStock, StockMigration } from "
 contract FlipStockReservesSummerLend3CP is StockMigration3CPBase {
     string constant OUTPUT = "./output/FlipStockReservesSummerLend3CP-10.json";
     string constant LISTING_BUNDLE = "./output/ListStockWrappersSummerLend3CP-10.json";
+    string constant PAUSE_BUNDLE = "./output/PauseStockReservesSummerLend3CP-10.json";
 
     function run() public {
         _requireOptimismProd();
         MigrationFeeds memory feeds = _deployMigrationFeeds(true);
         MigratedStock[] memory stocks = StockMigration.all();
         uint256[] memory newIds = _newReserveIds(stocks);
+        _ensureMirrorsPaused(stocks);
 
         IAaveOracleLike oracle = IAaveOracleLike(LendRails.AAVE_ORACLE);
         uint256[] memory mirrorPrices = new uint256[](stocks.length);
@@ -55,6 +57,7 @@ contract FlipStockReservesSummerLend3CP is StockMigration3CPBase {
             assertEq(oracle.getReservePrice(s.oldReserveId), 1, "mirror price");
             assertApproxEqRel(oracle.getReservePrice(newIds[i]), mirrorPrices[i], 0.001e18, "wrapper price vs mirror before flip");
             assertTrue(spoke.getReserveConfig(s.oldReserveId).frozen, "mirror frozen");
+            assertTrue(spoke.getReserveConfig(s.oldReserveId).paused, "mirror must still be paused");
             assertFalse(spoke.getReserveConfig(newIds[i]).frozen, "wrapper frozen");
             console.log(string.concat("  ", s.symbol, ": wrapper reserve ", vm.toString(newIds[i]), " live at ", vm.toString(oracle.getReservePrice(newIds[i])), "; mirror reserve ", vm.toString(s.oldReserveId), " at 1 wei, frozen"));
         }
@@ -91,6 +94,19 @@ contract FlipStockReservesSummerLend3CP is StockMigration3CPBase {
             require(ids[i] != type(uint256).max, "listing bundle did not list the wrapper");
         }
         return ids;
+    }
+
+    /// @dev The Friday pause bundle must have executed; replays it on the fork when generated in one sitting.
+    function _ensureMirrorsPaused(MigratedStock[] memory stocks) internal {
+        ISpokeLike spoke = ISpokeLike(LendRails.CASH_SPOKE);
+        bool paused = true;
+        for (uint256 i = 0; i < stocks.length; ++i) {
+            paused = paused && spoke.getReserveConfig(stocks[i].oldReserveId).paused;
+        }
+        if (paused) return;
+        require(vm.exists(PAUSE_BUNDLE), "mirror reserves not paused; generate the Friday pause bundle first");
+        console.log("Mirror reserves not yet paused live; replaying the pause bundle on the fork");
+        executeGnosisTransactionBundle(PAUSE_BUNDLE);
     }
 
     /// @dev Informational: the hub's holdings show whether the lend sweep has moved the collateral over.

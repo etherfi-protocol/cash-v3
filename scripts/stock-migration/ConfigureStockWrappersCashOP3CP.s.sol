@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
 
+import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
@@ -17,9 +17,10 @@ import { MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
  * @notice OPERATING SAFE bundle that makes the three OP wrappers first-class Cash assets before the
  *         weekend, so the lend sweep can supply them and DebtManager can count them:
  *
- *           1. PriceProviderV2.setTokenConfig for wSPYx, wQQQx, wTBLLx: the wrapper's own
- *              `convertToAssets(1e18)` as the rate, composed on the existing <STOCK>/USD base entry.
- *              Read locally, no relay.
+ *           1. PriceProviderV2.setTokenConfig for wSPYx, wQQQx, wTBLLx at the constant 1 unit placeholder,
+ *              the same idea as the 1 wei Aave listing: the wrapper exists as collateral but counts for
+ *              0.000001 USD until the Cash-side flip, so a DebtManager safe never counts mirror and wrapper
+ *              at once.
  *           2. DebtManager.supportCollateralToken for each wrapper, parameters copied live from the mirror.
  *           3. LendGateway.setReserveId for each wrapper, the reserve id the listing bundle assigns.
  *           4. CashModule.configureWithdrawAssets whitelisting the raw stocks for OP withdrawals.
@@ -41,7 +42,7 @@ contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
     function run() public {
         _requireOptimismProd();
         _loadContracts();
-        _deployMigrationFeeds(true);
+        MigrationFeeds memory feeds = _deployMigrationFeeds(true);
 
         MigratedStock[] memory stocks = StockMigration.all();
         uint256[] memory newIds = _newReserveIds(stocks);
@@ -53,7 +54,7 @@ contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
             require(debtManager.isCollateralToken(s.iToken), string.concat(s.symbol, ": mirror is not a DebtManager collateral to copy from"));
         }
 
-        _writeBundle(stocks, newIds);
+        _writeBundle(stocks, newIds, feeds.oneUnit6);
         console.log("Written: %s", OUTPUT);
 
         executeGnosisTransactionBundle(OUTPUT);
@@ -71,9 +72,9 @@ contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
         cashModule = ICashModule(stdJson.readAddress(deployments, ".addresses.CashModule"));
     }
 
-    function _writeBundle(MigratedStock[] memory stocks, uint256[] memory newIds) internal {
+    function _writeBundle(MigratedStock[] memory stocks, uint256[] memory newIds, address oneUnit6) internal {
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(LendRails.OPERATING_SAFE));
-        txs = _append(txs, address(pp), _priceConfigCall(stocks), false);
+        txs = _append(txs, address(pp), _placeholderPriceCall(stocks, oneUnit6), false);
         for (uint256 i = 0; i < stocks.length; ++i) {
             txs = _append(txs, address(debtManager), abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, stocks[i].wrapper, debtManager.collateralTokenConfig(stocks[i].iToken)), false);
         }
@@ -86,14 +87,14 @@ contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
         vm.writeFile(OUTPUT, txs);
     }
 
-    /// @dev Wrapper price on the Cash side: its own redemption rate in 18 decimals, composed on the stock's
-    ///      existing 8-decimal USD base entry. No staleness of its own; the base entry carries it.
-    function _priceConfigCall(MigratedStock[] memory stocks) internal pure returns (bytes memory) {
+    /// @dev The 6-decimal placeholder: PriceProviderV2 reports 6 decimals and would floor an 8-decimal 1 wei
+    ///      to zero and revert, hence a constant 1 unit read through latestAnswer().
+    function _placeholderPriceCall(MigratedStock[] memory stocks, address oneUnit6) internal pure returns (bytes memory) {
         address[] memory tokens = new address[](stocks.length);
         PriceProviderV2.Config[] memory configs = new PriceProviderV2.Config[](stocks.length);
         for (uint256 i = 0; i < stocks.length; ++i) {
             tokens[i] = stocks[i].wrapper;
-            configs[i] = PriceProviderV2.Config({ oracle: stocks[i].wrapper, priceFunctionCalldata: abi.encodeCall(IERC4626.convertToAssets, (1e18)), isChainlinkType: false, oraclePriceDecimals: 18, maxStaleness: 0, dataType: PriceProviderV2.ReturnType.Uint256, isStableToken: false, baseAsset: stocks[i].stock });
+            configs[i] = PriceProviderV2.Config({ oracle: oneUnit6, priceFunctionCalldata: abi.encodeCall(IAaveV4PriceFeed.latestAnswer, ()), isChainlinkType: false, oraclePriceDecimals: 6, maxStaleness: 0, dataType: PriceProviderV2.ReturnType.Int256, isStableToken: false, baseAsset: address(0) });
         }
         return abi.encodeCall(PriceProviderV2.setTokenConfig, (tokens, configs));
     }
@@ -109,7 +110,7 @@ contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
     }
 
     function _assertConfigured(MigratedStock memory s, uint256 newId) internal view {
-        assertApproxEqRel(pp.price(s.wrapper), pp.price(s.iToken), 0.001e18, "wrapper Cash price vs mirror");
+        assertEq(pp.price(s.wrapper), 1, "wrapper Cash price is not the placeholder");
 
         IDebtManager.CollateralTokenConfig memory got = debtManager.collateralTokenConfig(s.wrapper);
         IDebtManager.CollateralTokenConfig memory want = debtManager.collateralTokenConfig(s.iToken);
@@ -120,7 +121,7 @@ contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
 
         assertEq(gateway.reserveIdOf(s.wrapper), newId, "gateway reserve id");
         assertTrue(_isWithdrawAsset(s.stock), "raw stock not a withdraw asset");
-        console.log(string.concat("  ", s.symbol, ": wrapper priced at ", vm.toString(pp.price(s.wrapper)), " (6 dec), gateway reserve ", vm.toString(newId)));
+        console.log(string.concat("  ", s.symbol, ": wrapper at the 1 unit placeholder, DebtManager collateral, gateway reserve ", vm.toString(newId)));
     }
 
     function _isWithdrawAsset(address token) internal view returns (bool) {
