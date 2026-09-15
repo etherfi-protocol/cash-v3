@@ -59,7 +59,7 @@ contract TopUpDest is UpgradeableProxy {
 
     /**
      * @notice Emitted when tokens are sent to a user's safe
-     * @param txId TxId created for deduplication = keccak256(txhash || token || user)
+     * @param txId TxId created for deduplication = keccak256(chainId || txhash || user || token)
      * @param user Address of the recipient safe
      * @param sourceTxHash Tx hash for the source tx
      * @param chainId ID of the blockchain where the user topped up
@@ -208,7 +208,7 @@ contract TopUpDest is UpgradeableProxy {
     function _topUp(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) internal {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
-        bytes32 txId = getTxId(txHash, user, token);
+        bytes32 txId = getChainAwareTxId(chainId, txHash, user, token);
         if (!etherFiDataProvider.isEtherFiSafe(user)) revert NotARegisteredSafe();
         if ($.transactionCompleted[txId]) revert TopUpAlreadyProcessed();
 
@@ -256,26 +256,53 @@ contract TopUpDest is UpgradeableProxy {
     }
 
     /**
-     * @notice Calculates txId based on the input parameters
+     * @notice Calculates the legacy txId based on the input parameters
+     * @dev Kept unchanged for backwards-compatible access to previously recorded transaction IDs.
+     *      New top-ups use getChainAwareTxId instead.
      * @param txHash Transaction hash on source chain
      * @param user Address of the safe to top up
      * @param token Address of the token to send
-     * @return bytes32 txId
+     * @return bytes32 legacy txId
      */
     function getTxId(bytes32 txHash, address user, address token) public pure returns (bytes32) {
         return keccak256(abi.encode(txHash, user, token));
     }
 
     /**
-     * @notice Checks if a transaction has been processed
-     * @dev Returns boolean indicating transaction status
+     * @notice Calculates the chain-aware transaction ID used for new top-ups
+     * @dev Source transaction hashes are only unique within a chain, so chainId is part of the identity.
+     * @param chainId ID of the source blockchain
      * @param txHash Transaction hash on source chain
      * @param user Address of the safe to top up
      * @param token Address of the token to send
-     * @return Boolean indicating whether the transaction has been processed
+     * @return bytes32 chain-aware txId
+     */
+    function getChainAwareTxId(uint256 chainId, bytes32 txHash, address user, address token) public pure returns (bytes32) {
+        return keccak256(abi.encode(chainId, txHash, user, token));
+    }
+
+    /**
+     * @notice Checks whether a legacy transaction ID has been processed
+     * @dev This query remains unchanged for backwards compatibility with historical records.
+     * @param txHash Transaction hash on source chain
+     * @param user Address of the safe to top up
+     * @param token Address of the token to send
+     * @return Boolean indicating whether the legacy transaction ID has been processed
      */
     function isTransactionCompleted(bytes32 txHash, address user, address token) external view returns (bool) {
         return _getTopUpDestStorage().transactionCompleted[getTxId(txHash, user, token)];
+    }
+
+    /**
+     * @notice Checks whether a chain-aware transaction has been processed
+     * @param chainId ID of the source blockchain
+     * @param txHash Transaction hash on source chain
+     * @param user Address of the safe to top up
+     * @param token Address of the token to send
+     * @return Boolean indicating whether the chain-aware transaction has been processed
+     */
+    function isChainAwareTransactionCompleted(uint256 chainId, bytes32 txHash, address user, address token) external view returns (bool) {
+        return _getTopUpDestStorage().transactionCompleted[getChainAwareTxId(chainId, txHash, user, token)];
     }
 
     /**
