@@ -195,7 +195,9 @@ contract TopUpDest is UpgradeableProxy {
 
     /**
      * @notice Internal implementation of top-up logic
-     * @dev Verifies the safe, transfers tokens, and updates transaction records
+     * @dev Verifies the safe, transfers tokens, and updates transaction records. Both the
+     *      chain-aware key and the legacy key are checked so an upgrade cannot replay a
+     *      top-up that was completed before chain-aware IDs were introduced.
      * @param txHash Transaction hash on source chain
      * @param user Address of the safe to top up
      * @param chainId Chain ID where the user topped-up
@@ -209,8 +211,9 @@ contract TopUpDest is UpgradeableProxy {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
         bytes32 txId = getChainAwareTxId(chainId, txHash, user, token);
+        bytes32 legacyTxId = getTxId(txHash, user, token);
         if (!etherFiDataProvider.isEtherFiSafe(user)) revert NotARegisteredSafe();
-        if ($.transactionCompleted[txId]) revert TopUpAlreadyProcessed();
+        if ($.transactionCompleted[txId] || $.transactionCompleted[legacyTxId]) revert TopUpAlreadyProcessed();
 
         $.transactionCompleted[txId] = true;
         _transfer(user, token, amount);
@@ -295,14 +298,17 @@ contract TopUpDest is UpgradeableProxy {
 
     /**
      * @notice Checks whether a chain-aware transaction has been processed
+     * @dev Returns true for either a chain-aware completion or a historical legacy completion.
+     *      This is intentionally fail-closed because the legacy key does not contain chainId.
      * @param chainId ID of the source blockchain
      * @param txHash Transaction hash on source chain
      * @param user Address of the safe to top up
      * @param token Address of the token to send
-     * @return Boolean indicating whether the chain-aware transaction has been processed
+     * @return Boolean indicating whether the transaction has been processed
      */
     function isChainAwareTransactionCompleted(uint256 chainId, bytes32 txHash, address user, address token) external view returns (bool) {
-        return _getTopUpDestStorage().transactionCompleted[getChainAwareTxId(chainId, txHash, user, token)];
+        TopUpDestStorage storage $ = _getTopUpDestStorage();
+        return $.transactionCompleted[getChainAwareTxId(chainId, txHash, user, token)] || $.transactionCompleted[getTxId(txHash, user, token)];
     }
 
     /**
