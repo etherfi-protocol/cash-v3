@@ -157,7 +157,9 @@ contract TopUpDestTest is Utils, Constants {
 
         bytes32 txHash = keccak256("legacy-top-up");
         bytes32 legacyTxId = topUpDest.getTxId(txHash, user1, address(token1));
-        bytes32 legacyMappingSlot = keccak256(abi.encode(legacyTxId, TOP_UP_DEST_STORAGE_LOCATION));
+        bytes32 legacyMappingSlot = keccak256(
+            abi.encode(legacyTxId, bytes32(uint256(TOP_UP_DEST_STORAGE_LOCATION) + 1))
+        );
         vm.store(address(topUpDest), legacyMappingSlot, bytes32(uint256(1)));
 
         assertTrue(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
