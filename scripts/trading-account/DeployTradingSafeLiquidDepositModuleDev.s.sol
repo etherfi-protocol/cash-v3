@@ -97,6 +97,8 @@ contract DeployTradingSafeLiquidDepositModuleDev is Utils {
         if (!wasDeployed) {
             bytes memory creationCode = abi.encodePacked(type(TradingSafeLiquidDepositModule).creationCode, abi.encode(liquidAssets, tellers, dataProvider));
             require(DEPLOYER.deploy(getSalt(SALT_NAME), creationCode) == moduleAddress, "deployed off predicted address");
+            // The constructor configured this exact route, so do not send a redundant setter tx.
+            routeConfigured = true;
         }
 
         if (!registry.hasRole(pauser, DEV_ADMIN)) registry.grantRole(pauser, DEV_ADMIN);
