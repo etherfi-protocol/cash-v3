@@ -1,0 +1,1 @@
+Temporary permission test. This file should be removed immediately if repository write access is working.
