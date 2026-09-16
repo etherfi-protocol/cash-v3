@@ -95,6 +95,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         cashModule.spend(address(safe), keccak256("txId"), BinSponsor.Reap, spendTokens, amountsInUsd, cashbacks);
     }
 
+    /// @notice Verifies legacy repayment reduces debt using the module's float and collects payment plus the proportional fee.
     function test_repay_reducesDebtAndTakesPaymentPlusFee() public {
         uint256 debtAmount = 10e6;
         uint256 expectedPayment = liquifier.convertDebtToPayment(address(mToken), debtAmount);
@@ -113,6 +114,30 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         assertEq(mToken.balanceOf(address(liquifier)), safeMTokenBefore - mToken.balanceOf(address(safe)), "payment not received");
     }
 
+    /// @notice Verifies that fees which leave a legacy Safe unhealthy revert repayment and restore debt and token balances.
+    function test_repay_revertsWhenFeeLeavesLegacySafeUnhealthy() public {
+        vm.startPrank(owner);
+        debtManager.supportCollateralToken(address(mToken), IDebtManager.CollateralTokenConfig({ ltv: 70e18, liquidationThreshold: 80e18, liquidationBonus: 4e18 }));
+        liquifier.setPair(address(mToken), address(USDC), address(redemptionVault), 0, 100e6);
+        vm.stopPrank();
+
+        // $200 collateral supports the existing $100 debt. Repaying $10 and charging $100 leaves
+        // $90 collateral against $90 debt, although the approval-time hook still sees $200 collateral.
+        deal(address(weETH), address(safe), 0);
+        deal(address(mToken), address(safe), 200e18);
+        debtManager.ensureHealth(address(safe));
+        uint256 debtBefore = debtManager.borrowingOf(address(safe), address(USDC));
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
+        liquifier.repay(address(safe), address(mToken), 10e6);
+
+        assertEq(debtManager.borrowingOf(address(safe), address(USDC)), debtBefore, "debt change not reverted");
+        assertEq(USDC.balanceOf(address(liquifier)), initialFloat, "float change not reverted");
+        assertEq(mToken.balanceOf(address(safe)), 200e18, "payment not reverted");
+    }
+
+    /// @notice Verifies an oversized legacy repayment clears outstanding debt and charges payment plus fees only on that debt.
     function test_repay_capsAtOutstandingDebt() public {
         uint256 requested = initialDebtAmount + 10e6;
         uint256 expectedPayment = liquifier.convertDebtToPayment(address(mToken), initialDebtAmount);
@@ -125,6 +150,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         assertApproxEqAbs(safeMTokenBefore - mToken.balanceOf(address(safe)), expectedPayment + expectedPayment * FEE_BPS / 10_000, 1e12, "charged beyond the debt");
     }
 
+    /// @notice Verifies an oversized request succeeds when the float covers the outstanding legacy debt.
     function test_repay_capsAtDebtBeforeCheckingFloat() public {
         uint256 debt = debtManager.borrowingOf(address(safe), address(USDC));
         deal(address(USDC), address(liquifier), debt);
@@ -134,6 +160,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1, "debt not cleared");
     }
 
+    /// @notice Verifies full repayment can clear an unhealthy legacy Safe's debt.
     function test_repay_worksWhenSafeIsUnhealthy() public {
         // Crash the collateral factor of weETH so the safe is underwater, then confirm de-risking still goes through.
         vm.prank(owner);
@@ -146,6 +173,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1);
     }
 
+    /// @notice Verifies legacy repayment reverts when the module has insufficient USDC float.
     function test_repay_revertsWhenFloatInsufficient() public {
         deal(address(USDC), address(liquifier), 0);
 
@@ -154,6 +182,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         liquifier.repay(address(safe), address(mToken), 10e6);
     }
 
+    /// @notice Verifies legacy repayment reverts when the Safe has no payment tokens.
     function test_repay_revertsWhenSafeCannotCoverPayment() public {
         deal(address(mToken), address(safe), 0);
 

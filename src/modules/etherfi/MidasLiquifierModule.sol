@@ -123,9 +123,12 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
 
         // Take payment plus fee out of the safe
         _reclaim(user, paymentToken, paymentAmount + feeAmount);
-        // At zero fee the collateral taken matches the debt repaid, so health cannot worsen and de-risking is
-        // never blocked. A fee takes more collateral than debt, so the end state must clear the gateway floor.
-        if (feeAmount > 0) _ensureGatewayFloor(user, healthFactorBefore);
+        // Fees can worsen health. Check after collection because the Safe's hook runs before transferFrom.
+        // Zero-fee repayments retain their existing de-risking behavior.
+        if (feeAmount > 0) {
+            if (cashModule.usesLendGateway(user)) _ensureGatewayFloor(user, healthFactorBefore);
+            else debtManager.ensureHealth(user);
+        }
 
         emit Repaid(user, paymentToken, pair.debtToken, debtRepaid, paymentAmount, feeAmount);
     }

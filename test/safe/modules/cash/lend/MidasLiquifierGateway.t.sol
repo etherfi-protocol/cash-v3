@@ -83,6 +83,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         return payment + payment * FEE_BPS / 10_000;
     }
 
+    /// @notice Verifies repayment uses the module's float and collects payment plus fees from Aave-supplied tokens.
     function test_repay_repaysAaveDebtAndReclaimsSuppliedPayment() public {
         _buildDebtAndSuppliedMToken(500e6, 1000e18);
 
@@ -102,6 +103,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertEq(usdc.balanceOf(address(safe)), 0, "USDC left loose in safe");
     }
 
+    /// @notice Verifies collection uses loose payment tokens first and withdraws only the shortfall from Aave.
     function test_repay_reclaimsLooseFirstThenSuppliedShortfall() public {
         _buildDebtAndSuppliedMToken(500e6, 1000e18);
         uint256 loose = 100e18;
@@ -117,6 +119,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(mToken)), 1000e18 - (expected - loose), 1e12, "only the shortfall should leave Aave");
     }
 
+    /// @notice Verifies repayment preserves the Safe's existing loose USDC balance.
     function test_repay_doesNotTouchSafesOwnLooseUsdc() public {
         _buildDebtAndSuppliedMToken(500e6, 1000e18);
         deal(address(usdc), address(safe), 300e6);
@@ -129,6 +132,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), debtBefore - 200e6, 1, "debt not reduced by the repaid amount");
     }
 
+    /// @notice Verifies repayment reverts when the Safe cannot cover the payment with its available tokens.
     function test_repay_revertsWhenSafeCannotCoverReclaim() public {
         _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 200e6);
         _supplyToGateway(address(safe), address(mToken), 10e18);
@@ -139,6 +143,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.repay(address(safe), address(mToken), 100e6);
     }
 
+    /// @notice Verifies an oversized repayment clears only outstanding debt without leaving float in the Safe.
     function test_repay_capsAtDebtAndStrandsNoFloat() public {
         _buildDebtAndSuppliedMToken(100e6, 1000e18);
         uint256 debt = gw.debtOf(address(safe), address(usdc));
@@ -152,6 +157,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertApproxEqAbs(floatBefore - usdc.balanceOf(address(liquifier)), debt, 1, "float spent beyond the debt");
     }
 
+    /// @notice Verifies repayment reverts when the Safe has no outstanding debt.
     function test_repay_revertsOnZeroDebt() public {
         deal(address(usdc), address(liquifier), 1000e6);
 
@@ -160,6 +166,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.repay(address(safe), address(mToken), 100e6);
     }
 
+    /// @notice Verifies repayment reverts when the module has insufficient USDC float.
     function test_repay_revertsWhenFloatInsufficient() public {
         _buildGatewayPosition(address(safe), address(weETH), 1 ether, address(usdc), 200e6);
         _supplyToGateway(address(safe), address(mToken), 1000e18);
@@ -169,6 +176,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.repay(address(safe), address(mToken), 100e6);
     }
 
+    /// @notice Verifies redemption transfers collected payment tokens from the module to the Midas vault.
     function test_redeemMidas_sendsAccumulatedPaymentToVault() public {
         _buildDebtAndSuppliedMToken(500e6, 1000e18);
         vm.prank(etherFiWallet);
@@ -185,6 +193,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- fee, roles, engine gate
 
+    /// @notice Verifies repayment emits Repaid with the expected Safe, payment token, and debt token.
     function test_repay_emitsRepaidWithFee() public {
         _buildDebtAndSuppliedMToken(500e6, 1000e18);
         uint256 debtAmount = 200e6;
@@ -197,6 +206,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.repay(address(safe), address(mToken), debtAmount);
     }
 
+    /// @notice Verifies zero-fee repayment collects only the converted payment amount.
     function test_repay_zeroFeeTakesExactConversion() public {
         _buildDebtAndSuppliedMToken(500e6, 1000e18);
         vm.prank(owner);
@@ -209,6 +219,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertApproxEqAbs(mToken.balanceOf(address(liquifier)), payment, 1e12, "fee charged at 0 bps");
     }
 
+    /// @notice Verifies repayment collects both proportional and converted flat fees.
     function test_repay_flatFeeAddsOnTopOfBps() public {
         _buildDebtAndSuppliedMToken(500e6, 1000e18);
         uint128 flatFee = 1e6; // 1 USDC per repayment
@@ -227,6 +238,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
     // A fee takes more collateral than the debt it clears, so it is the one part of a repayment that can
     // worsen health. From under the floor, a fee-heavy repay that lowers health is rejected, while a small
     // fee that still leaves health better than before goes through.
+    /// @notice Verifies repayment below the gateway floor rejects fees that worsen health but allows fees that improve health.
     function test_repay_feeTakesGatewayHealthFactorFloor() public {
         _supplyToGateway(address(safe), address(mToken), 10_000e18);
         _borrowOnGateway(address(safe), address(usdc), 6800e6, recipient);
@@ -252,6 +264,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
     }
 
     // Zero fee is the de-risking path and is never blocked by the floor, even from under it.
+    /// @notice Verifies zero-fee repayment remains available below the gateway health floor.
     function test_repay_zeroFeeIgnoresGatewayHealthFactorFloor() public {
         _supplyToGateway(address(safe), address(mToken), 10_000e18);
         _borrowOnGateway(address(safe), address(usdc), 6800e6, recipient);
@@ -266,24 +279,28 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertEq(gw.debtOf(address(safe), address(usdc)), 6700e6, "debt not reduced");
     }
 
+    /// @notice Verifies repayment rejects a payment token without a configured pair.
     function test_repay_revertsWhenPairNotSet() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.PairNotSet.selector);
         liquifier.repay(address(safe), address(usdc), 10e6);
     }
 
+    /// @notice Verifies repayment rejects a zero debt amount.
     function test_repay_revertsOnZeroAmount() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.AmountZero.selector);
         liquifier.repay(address(safe), address(mToken), 0);
     }
 
+    /// @notice Verifies repayment rejects callers without the EtherFi Wallet role.
     function test_repay_onlyEtherFiWallet() public {
         vm.prank(makeAddr("notEtherFiWallet"));
         vm.expectRevert(MidasLiquifierModule.OnlyEtherFiWallet.selector);
         liquifier.repay(address(safe), address(mToken), 10e6);
     }
 
+    /// @notice Verifies repayment rejects an account that is not an EtherFi Safe.
     function test_repay_onlyEtherFiSafe() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.OnlyEtherFiSafe.selector);
@@ -292,6 +309,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- conversions
 
+    /// @notice Verifies conversion between six-decimal debt and eighteen-decimal payment tokens preserves value within rounding tolerance.
     function test_conversions_roundTrip() public view {
         uint256 debtAmount = 123_456_789;
         uint256 payment = liquifier.convertDebtToPayment(address(mToken), debtAmount);
@@ -301,6 +319,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- pair config
 
+    /// @notice Verifies pair configuration stores every field and emits the matching PairSet event.
     function test_setPair_emitsAndStores() public {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
@@ -314,6 +333,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertEq(pair.flatFee, 2e6);
     }
 
+    /// @notice Verifies pair configuration rejects a zero payment token, debt token, or redemption vault address.
     function test_setPair_revertsOnZeroAddress() public {
         vm.startPrank(owner);
         vm.expectRevert(MidasLiquifierModule.InvalidValue.selector);
@@ -325,6 +345,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         vm.stopPrank();
     }
 
+    /// @notice Verifies pair configuration rejects proportional fees above MAX_FEE_BPS.
     function test_setPair_revertsOnFeeTooHigh() public {
         uint16 tooHigh = liquifier.MAX_FEE_BPS() + 1;
         vm.prank(owner);
@@ -332,12 +353,14 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), tooHigh, 0);
     }
 
+    /// @notice Verifies only the role registry owner can configure a pair.
     function test_setPair_onlyRoleRegistryOwner() public {
         vm.prank(makeAddr("notOwner"));
         vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 0);
     }
 
+    /// @notice Verifies pair removal clears its configuration, emits PairRemoved, and blocks subsequent repayment.
     function test_removePair_clearsAndBlocksRepay() public {
         vm.prank(owner);
         vm.expectEmit(true, true, true, true);
@@ -353,6 +376,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- redeemMidas
 
+    /// @notice Verifies redemption emits the payment token, output asset, and requested amount.
     function test_redeemMidas_emits() public {
         mToken.mint(address(liquifier), 500e18);
 
@@ -362,12 +386,14 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.redeemMidas(address(mToken), 500e18);
     }
 
+    /// @notice Verifies redemption rejects callers without the settlement dispatcher bridger role.
     function test_redeemMidas_onlySettlementDispatcherBridger() public {
         vm.prank(makeAddr("notBridger"));
         vm.expectRevert(MidasLiquifierModule.OnlySettlementDispatcherBridger.selector);
         liquifier.redeemMidas(address(mToken), 1e18);
     }
 
+    /// @notice Verifies redemption rejects a zero amount or an unconfigured pair.
     function test_redeemMidas_revertsOnZeroAmountAndUnknownPair() public {
         vm.startPrank(owner);
         vm.expectRevert(MidasLiquifierModule.AmountZero.selector);
@@ -379,6 +405,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
     // ----------------------------------------------------------------- withdrawFunds
 
+    /// @notice Verifies the owner can withdraw the full ERC20 balance and a specified ETH amount.
     function test_withdrawFunds_erc20AndNative() public {
         deal(address(usdc), address(liquifier), 1000e6);
         deal(address(liquifier), 1 ether);
@@ -395,6 +422,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertEq(recipient.balance, 0.5 ether);
     }
 
+    /// @notice Verifies withdrawals reject invalid recipients, empty balances, failed ETH transfers, and unauthorized callers.
     function test_withdrawFunds_reverts() public {
         address eth = liquifier.ETH();
         vm.startPrank(owner);
