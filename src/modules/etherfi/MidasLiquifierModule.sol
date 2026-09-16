@@ -145,8 +145,9 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
         }
 
         // Legacy safe: cap at the outstanding debt before checking the float, then let the DebtManager pull the
-        // repayment from this contract with an approval for exactly this call
-        uint256 legacyDebt = debtManager.borrowingOf(user, address(debtToken));
+        // repayment from this contract with an approval for exactly this call. borrowingOf is in USD, so convert
+        // it to debt token units the same way DebtManager.repay does
+        uint256 legacyDebt = debtManager.convertUsdToCollateralToken(address(debtToken), debtManager.borrowingOf(user, address(debtToken)));
         if (debtAmount > legacyDebt) debtAmount = legacyDebt;
         if (debtAmount == 0) revert AmountZero();
         uint256 balanceBefore = debtToken.balanceOf(address(this));
