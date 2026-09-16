@@ -32,7 +32,8 @@ contract DeployMidasLiquifierModuleDev is Utils {
         address roleRegistry = deployments.readAddress(".addresses.RoleRegistry");
         address lendGateway = deployments.readAddress(".addresses.LendGateway");
 
-        vm.startBroadcast();
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        vm.startBroadcast(deployerPrivateKey);
 
         address impl = deployWithCreate3(abi.encodePacked(type(MidasLiquifierModule).creationCode, abi.encode(debtManager, dataProvider)), SALT_IMPL);
         bytes memory init = abi.encodeWithSelector(MidasLiquifierModule.initialize.selector, roleRegistry);

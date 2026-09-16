@@ -24,7 +24,8 @@ contract EnableLiquidRwaSpendDev is Utils {
         LendGateway gateway = LendGateway(deployments.readAddress(".addresses.LendGateway"));
         address[4] memory dispatchers = [deployments.readAddress(".addresses.SettlementDispatcherRain"), deployments.readAddress(".addresses.SettlementDispatcherReap"), deployments.readAddress(".addresses.SettlementDispatcherPix"), deployments.readAddress(".addresses.SettlementDispatcherCardOrder")];
 
-        vm.startBroadcast();
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+        vm.startBroadcast(deployerPrivateKey);
         if (!gateway.isSpendAsset(LIQUID_RWA)) gateway.setSpendAsset(LIQUID_RWA, true);
         for (uint256 i = 0; i < dispatchers.length; i++) {
             SettlementDispatcherV2 dispatcher = SettlementDispatcherV2(payable(dispatchers[i]));
