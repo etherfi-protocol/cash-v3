@@ -125,6 +125,15 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         assertApproxEqAbs(safeMTokenBefore - mToken.balanceOf(address(safe)), expectedPayment + expectedPayment * FEE_BPS / 10_000, 1e12, "charged beyond the debt");
     }
 
+    function test_repay_capsAtDebtBeforeCheckingFloat() public {
+        uint256 debt = debtManager.borrowingOf(address(safe), address(USDC));
+        deal(address(USDC), address(liquifier), debt);
+
+        vm.prank(etherFiWallet);
+        liquifier.repay(address(safe), address(mToken), debt + 10e6);
+        assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1, "debt not cleared");
+    }
+
     function test_repay_worksWhenSafeIsUnhealthy() public {
         // Crash the collateral factor of weETH so the safe is underwater, then confirm de-risking still goes through.
         vm.prank(owner);

@@ -12,6 +12,7 @@ import { IMidasVault } from "../../../../../src/interfaces/IMidasVault.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { ModuleCheckBalance } from "../../../../../src/modules/ModuleCheckBalance.sol";
 import { MidasLiquifierModule } from "../../../../../src/modules/etherfi/MidasLiquifierModule.sol";
+import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
@@ -221,6 +222,48 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.repay(address(safe), address(mToken), 200e6);
 
         assertApproxEqAbs(mToken.balanceOf(address(liquifier)), expected, 1e12, "flat fee not charged");
+    }
+
+    // A fee takes more collateral than the debt it clears, so it is the one part of a repayment that can
+    // worsen health. From under the floor, a fee-heavy repay that lowers health is rejected, while a small
+    // fee that still leaves health better than before goes through.
+    function test_repay_feeTakesGatewayHealthFactorFloor() public {
+        _supplyToGateway(address(safe), address(mToken), 10_000e18);
+        _borrowOnGateway(address(safe), address(usdc), 6800e6, recipient);
+        deal(address(usdc), address(liquifier), 1000e6);
+        vm.prank(owner);
+        gw.setMinHealthFactor(1.05e18);
+        uint256 hfBefore = gw.healthFactor(address(safe));
+        assertLt(hfBefore, 1.05e18, "safe starts below the floor");
+
+        // 100 of debt cleared for 200 of collateral out: health drops, and it is under the floor
+        vm.prank(owner);
+        liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 100e6);
+        vm.prank(etherFiWallet);
+        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        liquifier.repay(address(safe), address(mToken), 100e6);
+
+        // 100 of debt cleared for 110 of collateral out: health still improves, so the floor does not apply
+        vm.prank(owner);
+        liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 10e6);
+        vm.prank(etherFiWallet);
+        liquifier.repay(address(safe), address(mToken), 100e6);
+        assertGt(gw.healthFactor(address(safe)), hfBefore, "health improved");
+    }
+
+    // Zero fee is the de-risking path and is never blocked by the floor, even from under it.
+    function test_repay_zeroFeeIgnoresGatewayHealthFactorFloor() public {
+        _supplyToGateway(address(safe), address(mToken), 10_000e18);
+        _borrowOnGateway(address(safe), address(usdc), 6800e6, recipient);
+        deal(address(usdc), address(liquifier), 1000e6);
+        vm.startPrank(owner);
+        gw.setMinHealthFactor(1.05e18);
+        liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 0);
+        vm.stopPrank();
+
+        vm.prank(etherFiWallet);
+        liquifier.repay(address(safe), address(mToken), 100e6);
+        assertEq(gw.debtOf(address(safe), address(usdc)), 6700e6, "debt not reduced");
     }
 
     function test_repay_revertsWhenPairNotSet() public {

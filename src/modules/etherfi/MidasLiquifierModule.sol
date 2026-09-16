@@ -112,6 +112,7 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
     function repay(address user, address paymentToken, uint256 debtAmount) external nonReentrant whenNotPaused onlyEtherFiSafe(user) onlyEtherFiWallet {
         if (debtAmount == 0) revert AmountZero();
         Pair memory pair = _getPair(paymentToken);
+        uint256 healthFactorBefore = _gatewayHealthFactor(user);
 
         // Pay the debt from the float first, then price what was actually repaid into the payment token
         uint256 debtRepaid = _repayDebt(user, IERC20(pair.debtToken), debtAmount);
@@ -122,6 +123,9 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
 
         // Take payment plus fee out of the safe
         _reclaim(user, paymentToken, paymentAmount + feeAmount);
+        // At zero fee the collateral taken matches the debt repaid, so health cannot worsen and de-risking is
+        // never blocked. A fee takes more collateral than debt, so the end state must clear the gateway floor.
+        if (feeAmount > 0) _ensureGatewayFloor(user, healthFactorBefore);
 
         emit Repaid(user, paymentToken, pair.debtToken, debtRepaid, paymentAmount, feeAmount);
     }
@@ -140,7 +144,11 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
             return gateway().repay(user, address(debtToken), debtAmount);
         }
 
-        // Legacy safe: the DebtManager pulls the repayment from this contract, so approve it for exactly this call
+        // Legacy safe: cap at the outstanding debt before checking the float, then let the DebtManager pull the
+        // repayment from this contract with an approval for exactly this call
+        uint256 legacyDebt = debtManager.borrowingOf(user, address(debtToken));
+        if (debtAmount > legacyDebt) debtAmount = legacyDebt;
+        if (debtAmount == 0) revert AmountZero();
         uint256 balanceBefore = debtToken.balanceOf(address(this));
         if (balanceBefore < debtAmount) revert InsufficientFloat();
 
@@ -156,8 +164,7 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
 
     function _reclaim(address user, address paymentToken, uint256 amount) internal {
         // A gateway safe keeps its tokens supplied to Aave, so withdraw the part not already loose in the safe,
-        // then require the full amount is there. The debt was repaid above, so this withdrawal cannot make the
-        // position less healthy than it started, and no post-op health floor check is applied.
+        // then require the full amount is there
         _pullAndRequire(user, paymentToken, amount);
 
         // Have the safe approve this contract for the amount, then pull it
