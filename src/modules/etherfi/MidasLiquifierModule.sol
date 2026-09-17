@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
@@ -116,10 +117,11 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
 
         // Pay the debt from the float first, then price what was actually repaid into the payment token
         uint256 debtRepaid = _repayDebt(user, IERC20(pair.debtToken), debtAmount);
-        uint256 paymentAmount = convertDebtToPayment(paymentToken, debtRepaid);
+        (uint256 scaleNum, uint256 scaleDen) = _debtToPaymentScale(pair, paymentToken);
+        uint256 paymentAmount = (debtRepaid * scaleNum) / scaleDen;
         if (paymentAmount == 0) revert PaymentAmountZero();
         // Proportional fee on the payment plus the flat fee, both kept by this contract in payment token
-        uint256 feeAmount = (paymentAmount * pair.feeBps) / BPS_DENOMINATOR + convertDebtToPayment(paymentToken, pair.flatFee);
+        uint256 feeAmount = (paymentAmount * pair.feeBps) / BPS_DENOMINATOR + (pair.flatFee * scaleNum) / scaleDen;
 
         // Take payment plus fee out of the safe
         _reclaim(user, paymentToken, paymentAmount + feeAmount);
@@ -147,20 +149,24 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
             return gateway().repay(user, address(debtToken), debtAmount);
         }
 
-        // Legacy safe: cap at the outstanding debt before checking the float, then let the DebtManager pull the
-        // repayment from this contract with an approval for exactly this call. borrowingOf is in USD, so convert
-        // it to debt token units the same way DebtManager.repay does
-        uint256 legacyDebt = debtManager.convertUsdToCollateralToken(address(debtToken), debtManager.borrowingOf(user, address(debtToken)));
-        if (debtAmount > legacyDebt) debtAmount = legacyDebt;
-        if (debtAmount == 0) revert AmountZero();
+        // Legacy safe: the DebtManager caps a request above the debt itself, so the request goes through unchanged
+        // and only the float check is sized at the debt. borrowingOf is in USD, so convert it to debt token units the
+        // same way DebtManager.repay does; that conversion needs the debt token to be legacy collateral, which holds
+        // for every legacy borrow token.
+        uint256 legacyDebtUsd = debtManager.borrowingOf(user, address(debtToken));
+        if (legacyDebtUsd == 0) revert AmountZero();
+        uint256 legacyDebt = debtManager.convertUsdToCollateralToken(address(debtToken), legacyDebtUsd);
+        // The float must cover what the DebtManager settles, min(request, debt), not the whole request
         uint256 balanceBefore = debtToken.balanceOf(address(this));
-        if (balanceBefore < debtAmount) revert InsufficientFloat();
+        if (balanceBefore < Math.min(debtAmount, legacyDebt)) revert InsufficientFloat();
 
+        // The DebtManager pulls the request unless its own rounding says the request exceeds the debt, so the
+        // request is the only amount the pull can never exceed. Approve it for this call only
         debtToken.forceApprove(address(debtManager), debtAmount);
         debtManager.repay(user, address(debtToken), debtAmount);
         debtToken.forceApprove(address(debtManager), 0);
 
-        // The DebtManager caps at the outstanding debt, so measure what actually left the float
+        // Charge for what actually left the float
         uint256 debtRepaid = balanceBefore - debtToken.balanceOf(address(this));
         if (debtRepaid > debtAmount) revert InvalidConversion();
         return debtRepaid;
@@ -223,20 +229,24 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
      * @notice Converts an amount of the pair's debt token into the payment token at PriceProvider prices, before fee
      */
     function convertDebtToPayment(address paymentToken, uint256 debtAmount) public view returns (uint256) {
-        Pair memory pair = _getPair(paymentToken);
-        IPriceProvider priceProvider = IPriceProvider(etherFiDataProvider.getPriceProvider());
-        uint256 debtValue = debtAmount * priceProvider.price(pair.debtToken) * 10 ** IERC20Metadata(paymentToken).decimals();
-        return debtValue / (priceProvider.price(paymentToken) * 10 ** IERC20Metadata(pair.debtToken).decimals());
+        (uint256 scaleNum, uint256 scaleDen) = _debtToPaymentScale(_getPair(paymentToken), paymentToken);
+        return (debtAmount * scaleNum) / scaleDen;
     }
 
     /**
      * @notice Converts an amount of the payment token into the pair's debt token at PriceProvider prices
      */
     function convertPaymentToDebt(address paymentToken, uint256 paymentAmount) public view returns (uint256) {
-        Pair memory pair = _getPair(paymentToken);
+        (uint256 scaleNum, uint256 scaleDen) = _debtToPaymentScale(_getPair(paymentToken), paymentToken);
+        return (paymentAmount * scaleDen) / scaleNum;
+    }
+
+    /// @dev Debt token units times num over den gives payment token units at PriceProvider prices (USD, both tokens)
+    function _debtToPaymentScale(Pair memory pair, address paymentToken) internal view returns (uint256, uint256) {
         IPriceProvider priceProvider = IPriceProvider(etherFiDataProvider.getPriceProvider());
-        uint256 paymentValue = paymentAmount * priceProvider.price(paymentToken) * 10 ** IERC20Metadata(pair.debtToken).decimals();
-        return paymentValue / (priceProvider.price(pair.debtToken) * 10 ** IERC20Metadata(paymentToken).decimals());
+        uint256 num = priceProvider.price(pair.debtToken) * 10 ** IERC20Metadata(paymentToken).decimals();
+        uint256 den = priceProvider.price(paymentToken) * 10 ** IERC20Metadata(pair.debtToken).decimals();
+        return (num, den);
     }
 
     function _getPair(address paymentToken) internal view returns (Pair memory) {

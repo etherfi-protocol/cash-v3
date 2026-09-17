@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
@@ -401,6 +402,26 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         vm.expectRevert(MidasLiquifierModule.PairNotSet.selector);
         liquifier.redeemMidas(address(usdc), 1e6);
         vm.stopPrank();
+    }
+
+    /// @notice Verifies repay and redeem both stop while the module is paused.
+    function test_pause_blocksRepayAndRedeem() public {
+        _buildDebtAndSuppliedMToken(500e6, 1000e18);
+        mToken.mint(address(liquifier), 1e18);
+        vm.prank(pauser);
+        liquifier.pause();
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        liquifier.repay(address(safe), address(mToken), 100e6);
+        vm.prank(owner);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        liquifier.redeemMidas(address(mToken), 1e18);
+
+        vm.prank(unpauser);
+        liquifier.unpause();
+        vm.prank(etherFiWallet);
+        liquifier.repay(address(safe), address(mToken), 100e6);
     }
 
     // ----------------------------------------------------------------- withdrawFunds

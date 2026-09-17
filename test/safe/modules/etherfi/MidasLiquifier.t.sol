@@ -146,6 +146,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         vm.prank(etherFiWallet);
         liquifier.repay(address(safe), address(mToken), requested);
 
+        // The DebtManager floors the normalized amount it clears, so a full repayment can leave one unit of USD dust
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1, "debt not cleared");
         assertApproxEqAbs(safeMTokenBefore - mToken.balanceOf(address(safe)), expectedPayment + expectedPayment * FEE_BPS / 10_000, 1e12, "charged beyond the debt");
     }
@@ -160,6 +161,35 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1, "debt not cleared");
     }
 
+    /// @notice Verifies payment tokens reserved by a pending withdrawal cannot be taken as repayment.
+    function test_repay_respectsPendingWithdrawalReservation() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(mToken);
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+        vm.prank(owner);
+        cashModule.configureWithdrawAssets(tokens, whitelist);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = initialMTokenBalance - 1e18;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        // 10 USDC of debt needs about 10.05 payment tokens, but only 1 is left unreserved
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
+        liquifier.repay(address(safe), address(mToken), 10e6);
+    }
+
+    /// @notice Verifies a pair whose debt token the Safe has never borrowed reverts before any conversion.
+    function test_repay_revertsWithoutLegacyDebtInPairToken() public {
+        MockERC20 otherDebt = new MockERC20("Other", "OTH", 6);
+        vm.prank(owner);
+        liquifier.setPair(address(mToken), address(otherDebt), address(redemptionVault), 0, 0);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(MidasLiquifierModule.AmountZero.selector);
+        liquifier.repay(address(safe), address(mToken), 10e6);
+    }
+
     /// @notice Verifies full repayment can clear an unhealthy legacy Safe's debt.
     function test_repay_worksWhenSafeIsUnhealthy() public {
         // Crash the collateral factor of weETH so the safe is underwater, then confirm de-risking still goes through.
@@ -170,7 +200,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         liquifier.repay(address(safe), address(mToken), initialDebtAmount);
-        assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1);
+        assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1, "debt not cleared");
     }
 
     /// @notice Verifies legacy repayment reverts when the module has insufficient USDC float.
