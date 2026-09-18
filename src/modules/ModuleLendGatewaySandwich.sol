@@ -63,6 +63,21 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     }
 
     /**
+     * @notice Whether moving `asset` can reduce the safe's borrowing capacity
+     * @dev Gateway safes use the reserve's live LTV as the collateral classification.
+     *      Legacy safes use DebtManager's collateral registry. Chains without CashModule
+     *      card spending do not need a solvency hold.
+     */
+    function _requiresSolvencyHold(address safe, address asset) internal view returns (bool) {
+        if (address(cashModule) == address(0)) return false;
+        if (_onGatewayEngine(safe)) {
+            ILendGateway lendGateway = gateway();
+            return address(lendGateway) != address(0) && lendGateway.ltv(asset) != 0;
+        }
+        return cashModule.getDebtManager().isCollateralToken(asset);
+    }
+
+    /**
      * @notice Pulls the part of `amount` not already loose in the safe out of its Aave position
      * @dev Withdraws min(amount - looseAvailable, supplied), so an unsupplied or unregistered asset (ETH
      *      included) is untouched. Aave rejects a withdraw that would push the health factor below 1.
@@ -127,7 +142,8 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
         if (!_lendActive(safe)) return;
         ILendGateway lendGateway = gateway();
         if (!lendGateway.isRegistered(asset)) return;
-        try lendGateway.supply(safe, asset, amount) { } catch (bytes memory reason) {
+        try lendGateway.supply(safe, asset, amount) { }
+        catch (bytes memory reason) {
             emit LendSupplyFailed(safe, asset, amount, reason);
         }
     }

@@ -7,6 +7,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { ISpokePool } from "../interfaces/ISpokePool.sol";
+import { ITradingSafeFactory } from "../interfaces/ITradingSafeFactory.sol";
 import { ModuleBase } from "../modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../modules/ModuleCheckBalance.sol";
 import { ModuleLendGatewaySandwich } from "../modules/ModuleLendGatewaySandwich.sol";
@@ -78,6 +79,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         bytes swapData;
         address target;
         address multicallHandler;
+        bool hasWithdrawalHold;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.AcrossSwapModule
@@ -90,6 +92,8 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         address multicallHandler;
         /// @notice Allowlisted Across SpokePoolPeriphery for origin-swap (anyToBridgeable) routes.
         address peripheryAddress;
+        /// @notice Factory used to derive the user's Cash Safe / Trading Safe counterpart.
+        address tradingSafeFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.AcrossSwapModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -106,28 +110,13 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id. `srcToken` / `dstChainId` are no longer
     ///      indexed to stay within the 3-topic limit; both remain in the event data.
-    event SwapRequested(
-        address indexed safe,
-        bytes32 indexed swapId,
-        address srcToken,
-        uint256 srcAmount,
-        uint256 dstChainId,
-        address dstToken,
-        address recipient,
-        uint256 minOut,
-        uint256 deadline
-    );
-    event SwapExecuted(
-        address indexed safe,
-        bytes32 indexed swapId,
-        uint256 dstChainId,
-        address indexed dstToken,
-        uint256 outputAmount
-    );
+    event SwapRequested(address indexed safe, bytes32 indexed swapId, address srcToken, uint256 srcAmount, uint256 dstChainId, address dstToken, address recipient, uint256 minOut, uint256 deadline);
+    event SwapExecuted(address indexed safe, bytes32 indexed swapId, uint256 dstChainId, address indexed dstToken, uint256 outputAmount);
     event SwapCancelled(address indexed safe, bytes32 indexed swapId);
     event SpokePoolSet(address oldSpokePool, address newSpokePool);
     event MulticallHandlerSet(address oldMulticallHandler, address newMulticallHandler);
     event PeripherySet(address oldPeriphery, address newPeriphery);
+    event TradingSafeFactorySet(address oldTradingSafeFactory, address newTradingSafeFactory);
 
     /// @notice Reverts when a non-admin tries to set per-chain constants.
     error OnlyAdmin();
@@ -153,6 +142,8 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     error ZeroWithdrawalDelay();
     /// @notice Reverts when an origin-swap request is made before the periphery is configured.
     error PeripheryNotAllowlisted();
+    /// @notice Reverts when the signed recipient is not one of the user's two safes.
+    error InvalidRecipient();
 
     /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
     ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
@@ -205,6 +196,15 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         $.peripheryAddress = _periphery;
     }
 
+    /// @notice Sets the factory used to derive each user's paired Cash Safe / Trading Safe.
+    function setTradingSafeFactory(address _tradingSafeFactory) external {
+        _onlyAdmin();
+        if (_tradingSafeFactory == address(0)) revert InvalidInput();
+        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
+        emit TradingSafeFactorySet($.tradingSafeFactory, _tradingSafeFactory);
+        $.tradingSafeFactory = _tradingSafeFactory;
+    }
+
     // ---- Views ----
 
     function getPeriphery() external view returns (address) {
@@ -227,6 +227,10 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         return _getAcrossSwapModuleStorage().multicallHandler;
     }
 
+    function getTradingSafeFactory() external view returns (address) {
+        return _getAcrossSwapModuleStorage().tradingSafeFactory;
+    }
+
     // ---- Lifecycle ----
 
     /**
@@ -239,15 +243,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
      *      `message` — so the keeper cannot substitute a different destination payload or
      *      relayer/quote terms at `executeSwap` than the user authorised.
      */
-    function requestSwap(
-        address safe,
-        Order calldata order,
-        DepositArgs calldata depositArgs,
-        bytes calldata message,
-        bytes calldata swapData,
-        address[] calldata signers,
-        bytes[] calldata signatures
-    ) external whenNotPaused onlyEtherFiSafe(safe) {
+    function requestSwap(address safe, Order calldata order, DepositArgs calldata depositArgs, bytes calldata message, bytes calldata swapData, address[] calldata signers, bytes[] calldata signatures) external whenNotPaused onlyEtherFiSafe(safe) {
         _validateRequest(safe, order, depositArgs, swapData);
 
         uint256 nonce = IEtherFiSafe(safe).useNonce();
@@ -260,64 +256,40 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     ///      classic bridge / destination-swap path; non-empty `swapData` is the origin-swap
     ///      (anyToBridgeable) path forwarded to the chain-global `peripheryAddress` — there
     ///      `depositArgs`/`message` are unused and the dst fields on `order` are carried for events.
-    function _validateRequest(
-        address safe,
-        Order calldata order,
-        DepositArgs calldata depositArgs,
-        bytes calldata swapData
-    ) internal view {
+    function _validateRequest(address safe, Order calldata order, DepositArgs calldata depositArgs, bytes calldata swapData) internal view {
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         if (swapData.length == 0) {
-            if (
-                order.srcToken == address(0) || order.srcAmount == 0 ||
-                order.dstToken == address(0) || order.dstChainId == 0 ||
-                order.recipient == address(0) || order.minOut == 0 ||
-                order.deadline <= block.timestamp
-            ) revert InvalidInput();
+            if (order.srcToken == address(0) || order.srcAmount == 0 || order.dstToken == address(0) || order.dstChainId == 0 || order.recipient == address(0) || order.minOut == 0 || order.deadline <= block.timestamp) revert InvalidInput();
             if (depositArgs.outputAmount < order.minOut) revert InsufficientOutputAmount();
         } else {
-            if (
-                order.srcToken == address(0) || order.srcAmount == 0 ||
-                order.recipient == address(0) || order.deadline <= block.timestamp
-            ) revert InvalidInput();
+            if (order.srcToken == address(0) || order.srcAmount == 0 || order.recipient == address(0) || order.deadline <= block.timestamp) revert InvalidInput();
             if ($.peripheryAddress == address(0)) revert PeripheryNotAllowlisted();
         }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
-        if ($.spokePool == address(0) || $.multicallHandler == address(0)) revert MissingConfig();
-        if (address(cashModule) != address(0)) {
-            (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        if ($.spokePool == address(0) || $.multicallHandler == address(0) || $.tradingSafeFactory == address(0)) {
+            revert MissingConfig();
+        }
+        _validateRecipient(safe, order.recipient, $.tradingSafeFactory);
+        if (_requiresSolvencyHold(safe, order.srcToken)) {
+            uint64 withdrawalDelay = cashModule.getWithdrawalDelayForModule(address(this));
             if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
             if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
         }
     }
 
-    /// @dev Stores the verified swap and either places the CashModule hold (OP) or executes
-    ///      immediately (mainnet, where `cashModule == 0`). Split out to keep `requestSwap`'s
-    ///      stack under the legacy limit.
-    function _storeAndDispatch(
-        address safe,
-        Order calldata order,
-        DepositArgs calldata depositArgs,
-        bytes calldata message,
-        bytes calldata swapData,
-        uint256 nonce
-    ) internal {
+    /// @dev Stores the verified swap and either places a CashModule solvency hold for a
+    ///      collateral input or executes immediately for a non-collateral input. Split out
+    ///      to keep `requestSwap`'s stack under the legacy limit.
+    function _storeAndDispatch(address safe, Order calldata order, DepositArgs calldata depositArgs, bytes calldata message, bytes calldata swapData, uint256 nonce) internal {
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         (address target, address multicallHandler) = _requestConfig(swapData);
         bytes32 swapId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
-        $.swaps[safe] = StoredSwap({
-            order: order,
-            depositArgs: depositArgs,
-            message: message,
-            swapId: swapId,
-            swapData: swapData,
-            target: target,
-            multicallHandler: multicallHandler
-        });
+        bool hasWithdrawalHold = _requiresSolvencyHold(safe, order.srcToken);
+        $.swaps[safe] = StoredSwap({ order: order, depositArgs: depositArgs, message: message, swapId: swapId, swapData: swapData, target: target, multicallHandler: multicallHandler, hasWithdrawalHold: hasWithdrawalHold });
 
         _emitSwapRequested(safe, swapId, order);
 
-        if (address(cashModule) != address(0)) {
+        if (hasWithdrawalHold) {
             cashModule.requestWithdrawalByModule(safe, order.srcToken, order.srcAmount);
         } else {
             executeSwap(safe);
@@ -325,17 +297,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     }
 
     function _emitSwapRequested(address safe, bytes32 swapId, Order calldata order) internal {
-        emit SwapRequested(
-            safe,
-            swapId,
-            order.srcToken,
-            order.srcAmount,
-            order.dstChainId,
-            order.dstToken,
-            order.recipient,
-            order.minOut,
-            order.deadline
-        );
+        emit SwapRequested(safe, swapId, order.srcToken, order.srcAmount, order.dstChainId, order.dstToken, order.recipient, order.minOut, order.deadline);
     }
 
     /**
@@ -356,7 +318,8 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         if (swap.target == address(0)) revert MissingConfig();
         if (swap.swapData.length == 0 && swap.multicallHandler == address(0)) revert MissingConfig();
 
-        if (address(cashModule) != address(0)) {
+        bool hasWithdrawalHold = _hasWithdrawalHold(safe, swap);
+        if (hasWithdrawalHold) {
             if (block.timestamp < cashModule.getData(safe).pendingWithdrawalRequest.finalizeTime) {
                 revert WithdrawalDelayNotElapsed();
             }
@@ -365,7 +328,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         delete $.swaps[safe];
         uint256 healthFactorBefore;
         if (address(cashModule) != address(0)) {
-            cashModule.cancelWithdrawalByModule(safe);
+            if (hasWithdrawalHold) cashModule.cancelWithdrawalByModule(safe);
             // Front bookend: request-time sourcing normally leaves the input loose through the delay;
             // this re-pulls any shortfall from the safe's Aave position and asserts the full input is
             // present before the safe approves the target. Runs after the cancel so the released
@@ -385,8 +348,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     }
 
     function _dispatchDeposit(address safe, StoredSwap memory swap) internal {
-        bytes memory depositData =
-            _encodeDepositV3(safe, swap.multicallHandler, swap.order, swap.depositArgs, swap.message);
+        bytes memory depositData = _encodeDepositV3(safe, swap.multicallHandler, swap.order, swap.depositArgs, swap.message);
         address spokePool = swap.target;
 
         address[] memory to = new address[](3);
@@ -426,30 +388,8 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     }
 
     /// @dev Encoded separately to dodge stack-too-deep on the 12-arg `depositV3` call.
-    function _encodeDepositV3(
-        address safe,
-        address multicallHandler,
-        Order memory order,
-        DepositArgs memory depositArgs,
-        bytes memory message
-    ) internal pure returns (bytes memory) {
-        return abi.encodeCall(
-            ISpokePool.depositV3,
-            (
-                safe,
-                multicallHandler,
-                order.srcToken,
-                order.dstToken,
-                order.srcAmount,
-                depositArgs.outputAmount,
-                order.dstChainId,
-                depositArgs.exclusiveRelayer,
-                depositArgs.quoteTimestamp,
-                depositArgs.fillDeadline,
-                depositArgs.exclusivityDeadline,
-                message
-            )
-        );
+    function _encodeDepositV3(address safe, address multicallHandler, Order memory order, DepositArgs memory depositArgs, bytes memory message) internal pure returns (bytes memory) {
+        return abi.encodeCall(ISpokePool.depositV3, (safe, multicallHandler, order.srcToken, order.dstToken, order.srcAmount, depositArgs.outputAmount, order.dstChainId, depositArgs.exclusiveRelayer, depositArgs.quoteTimestamp, depositArgs.fillDeadline, depositArgs.exclusivityDeadline, message));
     }
 
     /**
@@ -463,19 +403,17 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         if ($.swaps[safe].order.srcToken == address(0)) revert NoActiveOrder();
 
-        bytes32 digest = keccak256(
-            abi.encodePacked(CANCEL_SWAP_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)
-        ).toEthSignedMessageHash();
+        bytes32 digest = keccak256(abi.encodePacked(CANCEL_SWAP_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
 
-        bytes32 swapId = $.swaps[safe].swapId;
-        if (address(cashModule) != address(0)) {
+        StoredSwap memory swap = $.swaps[safe];
+        if (_hasWithdrawalHold(safe, swap)) {
             cashModule.cancelWithdrawalByModule(safe);
         } else {
-            // the if block cancelWithdrawalByModule calls the cancelBridgeByCashModule function 
+            // the if block cancelWithdrawalByModule calls the cancelBridgeByCashModule function
             // and cancels the swap already, so we need to delete the swap only in else block
             delete $.swaps[safe];
-            emit SwapCancelled(safe, swapId);
+            emit SwapCancelled(safe, swap.swapId);
         }
     }
 
@@ -496,7 +434,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         if (swap.order.srcToken == address(0)) revert NoActiveOrder();
         if (block.timestamp <= swap.order.deadline) revert OrderNotExpired();
 
-        if (address(cashModule) != address(0)) {
+        if (_hasWithdrawalHold(safe, swap)) {
             cashModule.cancelWithdrawalByModule(safe);
         } else {
             delete $.swaps[safe];
@@ -521,6 +459,25 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
 
     // ---- Internals ----
 
+    /// @dev The pending-request check preserves swaps stored before `hasWithdrawalHold` was added.
+    function _hasWithdrawalHold(address safe, StoredSwap memory swap) internal view returns (bool) {
+        if (swap.hasWithdrawalHold) return true;
+        if (address(cashModule) == address(0)) return false;
+        return cashModule.getData(safe).pendingWithdrawalRequest.recipient == address(this);
+    }
+
+    function _validateRecipient(address safe, address recipient, address tradingSafeFactory) internal view {
+        if (recipient == safe) return;
+
+        address pairedSafe;
+        if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
+            pairedSafe = ITradingSafeFactory(tradingSafeFactory).getTopUpAddress(safe);
+        } else {
+            pairedSafe = ITradingSafeFactory(tradingSafeFactory).getDeterministicAddress(safe);
+        }
+        if (recipient != pairedSafe) revert InvalidRecipient();
+    }
+
     /// @dev Extracted from `requestSwap` to keep that function's stack budget under the
     ///      legacy codegen limit. Verifies the user's signature over the FULL request —
     ///      the order AND the BE-supplied `depositArgs` + destination `message` — consuming
@@ -529,16 +486,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     ///      (`message` decides where the bridged funds land) or different relayer/quote
     ///      terms than the user actually authorised. The off-chain signer must therefore
     ///      sign over `(order, depositArgs, message)`.
-    function _verifyRequestSignature(
-        address safe,
-        Order calldata order,
-        DepositArgs calldata depositArgs,
-        bytes calldata message,
-        bytes calldata swapData,
-        uint256 nonce,
-        address[] calldata signers,
-        bytes[] calldata signatures
-    ) internal view {
+    function _verifyRequestSignature(address safe, Order calldata order, DepositArgs calldata depositArgs, bytes calldata message, bytes calldata swapData, uint256 nonce, address[] calldata signers, bytes[] calldata signatures) internal view {
         bytes32 digest = _requestDigest(safe, order, depositArgs, message, swapData, nonce);
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
     }
@@ -546,30 +494,9 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @dev Digest the safe owners sign over the FULL request (order + depositArgs + message +
     ///      swapData + route config), bound to the safe nonce. Split from signature verification
     ///      to keep both under the legacy stack limit.
-    function _requestDigest(
-        address safe,
-        Order calldata order,
-        DepositArgs calldata depositArgs,
-        bytes calldata message,
-        bytes calldata swapData,
-        uint256 nonce
-    ) internal view returns (bytes32) {
+    function _requestDigest(address safe, Order calldata order, DepositArgs calldata depositArgs, bytes calldata message, bytes calldata swapData, uint256 nonce) internal view returns (bytes32) {
         (address target, address multicallHandler) = _requestConfig(swapData);
-        return keccak256(
-            abi.encodePacked(
-                REQUEST_SWAP_SIG,
-                block.chainid,
-                address(this),
-                nonce,
-                safe,
-                abi.encode(order),
-                keccak256(abi.encode(depositArgs)),
-                keccak256(message),
-                keccak256(swapData),
-                target,
-                multicallHandler
-            )
-        ).toEthSignedMessageHash();
+        return keccak256(abi.encodePacked(REQUEST_SWAP_SIG, block.chainid, address(this), nonce, safe, abi.encode(order), keccak256(abi.encode(depositArgs)), keccak256(message), keccak256(swapData), target, multicallHandler)).toEthSignedMessageHash();
     }
 
     /// @dev Snapshots the live contracts that affect the selected route. The classic deposit

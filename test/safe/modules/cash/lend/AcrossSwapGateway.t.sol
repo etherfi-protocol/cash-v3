@@ -6,6 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../../../../src/across/AcrossSwapModule.sol";
+import { ITradingSafeFactory } from "../../../../../src/interfaces/ITradingSafeFactory.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /// @dev SpokePool stand-in that PULLS the deposit's input like the real one, so post-execute
@@ -40,8 +41,9 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
     PullingSpokePoolStub internal spokePool;
     address internal multicallHandler = makeAddr("multicallHandler");
     address internal keeper = makeAddr("keeper");
+    address internal tradingSafeFactory = makeAddr("tradingSafeFactory");
 
-    uint256 internal constant SRC_AMOUNT = 1_000e6;
+    uint256 internal constant SRC_AMOUNT = 1000e6;
     uint256 internal constant MIN_OUT = 990e6;
     bytes internal constant FAKE_MESSAGE = hex"cafebabe";
 
@@ -50,13 +52,13 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
 
         spokePool = new PullingSpokePoolStub();
         address impl = address(new AcrossSwapModule(address(dataProvider)));
-        swapModule = AcrossSwapModule(address(new UUPSProxy(
-            impl,
-            abi.encodeWithSelector(AcrossSwapModule.initialize.selector, address(roleRegistry), address(spokePool), multicallHandler)
-        )));
+        swapModule = AcrossSwapModule(address(new UUPSProxy(impl, abi.encodeWithSelector(AcrossSwapModule.initialize.selector, address(roleRegistry), address(spokePool), multicallHandler))));
         _enableModule(address(swapModule));
 
+        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(safe)), abi.encode(makeAddr("dstRecipient")));
         vm.startPrank(owner);
+        roleRegistry.grantRole(swapModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), owner);
+        swapModule.setTradingSafeFactory(tradingSafeFactory);
         cashModule.configureModulesCanRequestWithdraw(_addr1(address(swapModule)), _bool1(true));
         // The sandwich drives gateway withdraw / supply on the safe's behalf, so it must be an authorized driver.
         gw.setDriver(address(swapModule), true);
@@ -108,41 +110,15 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
     // ---- Helpers ----
 
     function _baseOrder() internal returns (AcrossSwapModule.Order memory) {
-        return AcrossSwapModule.Order({
-            srcToken: address(usdc),
-            srcAmount: SRC_AMOUNT,
-            dstChainId: 1,
-            dstToken: makeAddr("dstToken"),
-            recipient: makeAddr("dstRecipient"),
-            minOut: MIN_OUT,
-            deadline: block.timestamp + 3 days
-        });
+        return AcrossSwapModule.Order({ srcToken: address(usdc), srcAmount: SRC_AMOUNT, dstChainId: 1, dstToken: makeAddr("dstToken"), recipient: makeAddr("dstRecipient"), minOut: MIN_OUT, deadline: block.timestamp + 3 days });
     }
 
     function _baseDepositArgs() internal view returns (AcrossSwapModule.DepositArgs memory) {
-        return AcrossSwapModule.DepositArgs({
-            outputAmount: MIN_OUT,
-            quoteTimestamp: uint32(block.timestamp),
-            fillDeadline: uint32(block.timestamp + 30 minutes),
-            exclusivityDeadline: 0,
-            exclusiveRelayer: address(0)
-        });
+        return AcrossSwapModule.DepositArgs({ outputAmount: MIN_OUT, quoteTimestamp: uint32(block.timestamp), fillDeadline: uint32(block.timestamp + 30 minutes), exclusivityDeadline: 0, exclusiveRelayer: address(0) });
     }
 
     function _request(AcrossSwapModule.Order memory order) internal {
-        bytes32 digest = keccak256(abi.encodePacked(
-            keccak256("AcrossSwapModule.requestSwap"),
-            block.chainid,
-            address(swapModule),
-            safe.nonce(),
-            address(safe),
-            abi.encode(order),
-            keccak256(abi.encode(_baseDepositArgs())),
-            keccak256(FAKE_MESSAGE),
-            keccak256(""),
-            swapModule.getSpokePool(),
-            swapModule.getMulticallHandler()
-        )).toEthSignedMessageHash();
+        bytes32 digest = keccak256(abi.encodePacked(keccak256("AcrossSwapModule.requestSwap"), block.chainid, address(swapModule), safe.nonce(), address(safe), abi.encode(order), keccak256(abi.encode(_baseDepositArgs())), keccak256(FAKE_MESSAGE), keccak256(""), swapModule.getSpokePool(), swapModule.getMulticallHandler())).toEthSignedMessageHash();
         (address[] memory signers, bytes[] memory sigs) = _twoSig(digest);
         swapModule.requestSwap(address(safe), order, _baseDepositArgs(), FAKE_MESSAGE, "", signers, sigs);
     }

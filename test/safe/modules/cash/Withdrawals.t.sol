@@ -3,16 +3,16 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 
-import { Mode, BinSponsor, Cashback } from "../../../../src/interfaces/ICashModule.sol";
-import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
-import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
-import { CashEventEmitter, CashModuleTestSetup, CashVerificationLib, ICashModule, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
-import { EnumerableAddressWhitelistLib } from "../../../../src/libraries/EnumerableAddressWhitelistLib.sol";
-import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
-import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
-import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../../../src/interfaces/IBridgeModule.sol";
+import { BinSponsor, Cashback, Mode } from "../../../../src/interfaces/ICashModule.sol";
+import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
+import { ArrayDeDupLib } from "../../../../src/libraries/ArrayDeDupLib.sol";
+import { EnumerableAddressWhitelistLib } from "../../../../src/libraries/EnumerableAddressWhitelistLib.sol";
+import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
+import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
+import { CashEventEmitter, CashModuleTestSetup, CashVerificationLib, ICashModule, IDebtManager, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -90,7 +90,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.expectRevert(abi.encodeWithSelector(EnumerableAddressWhitelistLib.InvalidAddress.selector, 0));
         cashModule.configureWithdrawAssets(asset, whitelist);
     }
-    
+
     function test_configureWithdrawAssets_fails_whenAssetIsDuplicate() public {
         address[] memory asset = new address[](2);
         asset[0] = address(usdc);
@@ -396,7 +396,6 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.processWithdrawal(address(safe));
     }
 
-
     function test_processWithdrawals_fails_whenTheDelayIsNotOver() external {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdc), address(safe), withdrawalAmount);
@@ -487,7 +486,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), newWithdrawalAmt);
     }
-    
+
     function test_requestWithdrawal_fails_whenFundsAreInsufficient() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdc), address(safe), withdrawalAmount - 1);
@@ -645,7 +644,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         modules[0] = module;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
+
         vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
@@ -664,13 +663,48 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(request.recipient, module);
     }
 
+    function test_requestWithdrawalByModule_usesConfiguredModuleDelayAndCanRestoreGlobalDelay() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        vm.expectEmit(true, false, false, true);
+        emit CashEventEmitter.ModuleWithdrawalDelayConfigured(module, 3, true);
+        cashModule.configureModuleWithdrawalDelay(module, 3, true);
+        vm.stopPrank();
+
+        assertEq(cashModule.getWithdrawalDelayForModule(module), 3);
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdc), address(safe), withdrawalAmount);
+        vm.prank(module);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdc), withdrawalAmount);
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + 3);
+
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(module, 0, false);
+        (uint64 globalDelay,,) = cashModule.getDelays();
+        assertEq(cashModule.getWithdrawalDelayForModule(module), globalDelay);
+    }
+
+    function test_configureModuleWithdrawalDelay_revertsForNonController() public {
+        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        cashModule.configureModuleWithdrawalDelay(makeAddr("module"), 3, true);
+    }
+
     function test_cancelWithdrawalByModule_works() public {
         address module = makeAddr("module");
         address[] memory modules = new address[](1);
         modules[0] = module;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
+
         vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
@@ -709,7 +743,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         modules[0] = module;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
+
         vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
@@ -731,7 +765,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.expectRevert(ICashModule.OnlyModuleThatRequestedCanCancel.selector);
         cashModule.cancelWithdrawalByModule(address(safe));
     }
-    
+
     function test_cancelWithdrawalByModule_reverts_whenCreatedByNonModule() public {
         uint256 withdrawalAmount = 50e6;
         deal(address(usdc), address(safe), withdrawalAmount);
@@ -752,12 +786,12 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         modules[0] = module;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
+
         vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
         vm.stopPrank();
-        
+
         vm.prank(module);
         vm.expectRevert(ICashModule.InvalidWithdrawRequest.selector);
         cashModule.cancelWithdrawalByModule(address(safe));
@@ -769,7 +803,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         modules[0] = module;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
+
         vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
@@ -798,9 +832,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.cancelWithdrawalByModule(address(safe));
     }
 
-    function test_cancelWithdrawalByModule_reverts_whenModuleIsNotTheCaller() public {
-        
-    }
+    function test_cancelWithdrawalByModule_reverts_whenModuleIsNotTheCaller() public { }
 
     function test_requestWithdrawalByModule_revertsIfModuleIsNotWhitelistedOnDataProvider() public {
         address module = makeAddr("module");
@@ -808,7 +840,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         modules[0] = module;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
+
         vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
@@ -832,7 +864,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         modules[0] = module;
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
-        
+
         // only whitelist on data provider, not on cash module
         vm.prank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
@@ -905,13 +937,13 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         bool[] memory shouldWhitelist = new bool[](1);
         shouldWhitelist[0] = true;
 
-        vm.startPrank(owner);    
+        vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
         vm.stopPrank();
 
         shouldWhitelist[0] = false;
-        
+
         vm.startPrank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
 
@@ -956,7 +988,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         // Verify pending withdrawal is 0
         assertEq(cashModule.getPendingWithdrawalAmount(address(safe), address(usdc)), 0);
     }
-    
+
     function test_cancelWithdrawal_reverts_whenNoWithdrawalQueued() public {
         bytes32 digestHash = keccak256(abi.encodePacked(CashVerificationLib.CANCEL_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce())).toEthSignedMessageHash();
 
@@ -970,7 +1002,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         bytes[] memory signatures = new bytes[](2);
         signatures[0] = abi.encodePacked(r1, s1, v1);
         signatures[1] = abi.encodePacked(r2, s2, v2);
-        
+
         vm.expectRevert(ICashModule.WithdrawalDoesNotExist.selector);
         cashModule.cancelWithdrawal(address(safe), signers, signatures);
     }
