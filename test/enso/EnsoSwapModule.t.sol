@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Vm } from "forge-std/Vm.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
@@ -71,6 +72,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     function setUp() public override {
         super.setUp();
 
+        recipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         ensoRouter = new EnsoRouterStub();
         address moduleImpl = address(new EnsoSwapModule(address(dataProvider)));
         module = EnsoSwapModule(address(new UUPSProxy(moduleImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), address(ensoRouter)))));
@@ -87,7 +89,6 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         roleRegistry.grantRole(module.ENSO_SWAP_MODULE_ADMIN_ROLE(), moduleAdmin);
         vm.stopPrank();
 
-        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(safe)), abi.encode(recipient));
         vm.prank(moduleAdmin);
         module.setTradingSafeFactory(tradingSafeFactory);
 
@@ -234,6 +235,17 @@ contract EnsoSwapModuleTest is SafeTestSetup {
 
         vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
         module.requestSwap(address(safe), order, swapData, signers, sigs);
+    }
+
+    function test_requestSwap_allowsLocallyDerivedTradingSafeWhenFactoryHasNoCode() public {
+        assertEq(tradingSafeFactory.code.length, 0);
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        assertEq(module.getOrder(address(safe)).recipient, recipient);
     }
 
     function test_requestSwap_allowsCashSafeItselfAsRecipient() public {

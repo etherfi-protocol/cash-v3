@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
@@ -92,7 +93,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         address multicallHandler;
         /// @notice Allowlisted Across SpokePoolPeriphery for origin-swap (anyToBridgeable) routes.
         address peripheryAddress;
-        /// @notice Factory used to derive the user's Cash Safe / Trading Safe counterpart.
+        /// @notice CREATE3 deployer used to derive Trading Safes and reverse-map them to Cash Safes.
         address tradingSafeFactory;
     }
 
@@ -212,7 +213,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         $.peripheryAddress = _periphery;
     }
 
-    /// @notice Sets the factory used to derive each user's paired Cash Safe / Trading Safe.
+    /// @notice Sets the CREATE3 deployer used to derive and reverse-map each user's safe pair.
     function setTradingSafeFactory(address _tradingSafeFactory) external {
         _onlyAdmin();
         if (_tradingSafeFactory == address(0)) revert InvalidInput();
@@ -551,7 +552,8 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
             pairedSafe = ITradingSafeFactory(tradingSafeFactory).getTopUpAddress(safe);
         } else {
-            pairedSafe = ITradingSafeFactory(tradingSafeFactory).getDeterministicAddress(safe);
+            bytes32 salt = keccak256(abi.encode("TradingSafe", safe));
+            pairedSafe = CREATE3.predictDeterministicAddress(salt, tradingSafeFactory);
         }
         if (recipient != pairedSafe) revert InvalidRecipient();
     }

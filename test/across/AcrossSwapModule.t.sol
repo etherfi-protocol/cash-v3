@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Vm } from "forge-std/Vm.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
 import { IEtherFiDataProvider } from "../../src/interfaces/IEtherFiDataProvider.sol";
@@ -65,6 +66,7 @@ contract AcrossSwapModuleTest is SafeTestSetup {
     function setUp() public override {
         super.setUp();
 
+        recipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         spokePool = new SpokePoolStub();
         address moduleImpl = address(new AcrossSwapModule(address(dataProvider)));
         module = AcrossSwapModule(address(new UUPSProxy(
@@ -89,7 +91,6 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         roleRegistry.grantRole(module.ACROSS_SWAP_MODULE_ADMIN_ROLE(), moduleAdmin);
         vm.stopPrank();
 
-        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(safe)), abi.encode(recipient));
         vm.prank(moduleAdmin);
         module.setTradingSafeFactory(tradingSafeFactory);
 
@@ -185,6 +186,16 @@ contract AcrossSwapModuleTest is SafeTestSetup {
 
         vm.expectRevert(AcrossSwapModule.InvalidRecipient.selector);
         module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
+    }
+
+    function test_requestSwap_allowsLocallyDerivedTradingSafeWhenFactoryHasNoCode() public {
+        assertEq(tradingSafeFactory.code.length, 0);
+        AcrossSwapModule.Order memory order = _baseOrder();
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
+
+        module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
+
+        assertEq(module.getOrder(address(safe)).recipient, recipient);
     }
 
     function test_requestSwap_allowsCashSafeItselfAsRecipient() public {

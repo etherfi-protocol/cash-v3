@@ -3,10 +3,10 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../../../../src/across/AcrossSwapModule.sol";
-import { ITradingSafeFactory } from "../../../../../src/interfaces/ITradingSafeFactory.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /// @dev SpokePool stand-in that PULLS the deposit's input like the real one, so post-execute
@@ -42,6 +42,7 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
     address internal multicallHandler = makeAddr("multicallHandler");
     address internal keeper = makeAddr("keeper");
     address internal tradingSafeFactory = makeAddr("tradingSafeFactory");
+    address internal destinationRecipient;
 
     uint256 internal constant SRC_AMOUNT = 1_000e6;
     uint256 internal constant MIN_OUT = 990e6;
@@ -50,6 +51,7 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
     function setUp() public override {
         super.setUp();
 
+        destinationRecipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         spokePool = new PullingSpokePoolStub();
         address impl = address(new AcrossSwapModule(address(dataProvider)));
         swapModule = AcrossSwapModule(address(new UUPSProxy(
@@ -58,7 +60,6 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
         )));
         _enableModule(address(swapModule));
 
-        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(safe)), abi.encode(makeAddr("dstRecipient")));
         vm.startPrank(owner);
         roleRegistry.grantRole(swapModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), owner);
         swapModule.setTradingSafeFactory(tradingSafeFactory);
@@ -118,7 +119,7 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
             srcAmount: SRC_AMOUNT,
             dstChainId: 1,
             dstToken: makeAddr("dstToken"),
-            recipient: makeAddr("dstRecipient"),
+            recipient: destinationRecipient,
             minOut: MIN_OUT,
             deadline: block.timestamp + 3 days
         });

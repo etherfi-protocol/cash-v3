@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
@@ -87,7 +88,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         mapping(address safe => StoredSwap swap) swaps;
         /// @notice Pinned Enso Router address used on this chain; approved and called on every swap.
         address ensoRouter;
-        /// @notice Factory used to derive the user's Cash Safe / Trading Safe counterpart.
+        /// @notice CREATE3 deployer used to derive Trading Safes and reverse-map them to Cash Safes.
         address tradingSafeFactory;
     }
 
@@ -172,7 +173,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         $.ensoRouter = _ensoRouter;
     }
 
-    /// @notice Sets the factory used to derive each user's paired Cash Safe / Trading Safe.
+    /// @notice Sets the CREATE3 deployer used to derive and reverse-map each user's safe pair.
     function setTradingSafeFactory(address _tradingSafeFactory) external {
         _onlyAdmin();
         if (_tradingSafeFactory == address(0)) revert InvalidInput();
@@ -438,7 +439,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
             pairedSafe = ITradingSafeFactory(tradingSafeFactory).getTopUpAddress(safe);
         } else {
-            pairedSafe = ITradingSafeFactory(tradingSafeFactory).getDeterministicAddress(safe);
+            bytes32 salt = keccak256(abi.encode("TradingSafe", safe));
+            pairedSafe = CREATE3.predictDeterministicAddress(salt, tradingSafeFactory);
         }
         if (recipient != pairedSafe) revert InvalidRecipient();
     }
