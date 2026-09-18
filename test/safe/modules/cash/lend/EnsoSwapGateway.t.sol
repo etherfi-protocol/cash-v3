@@ -3,10 +3,10 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { EnsoSwapModule } from "../../../../../src/enso/EnsoSwapModule.sol";
-import { ITradingSafeFactory } from "../../../../../src/interfaces/ITradingSafeFactory.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /// @dev Minimal Enso Router stand-in: pulls the input from the caller (the safe) and, for the
@@ -37,6 +37,7 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
     EnsoRouterStub internal router;
     address internal keeper = makeAddr("keeper");
     address internal tradingSafeFactory = makeAddr("tradingSafeFactory");
+    address internal destinationRecipient;
 
     uint256 internal constant SRC_AMOUNT = 1_000e6;
     uint256 internal constant OUT_AMOUNT = 1 ether;
@@ -44,6 +45,7 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
     function setUp() public override {
         super.setUp();
 
+        destinationRecipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         router = new EnsoRouterStub();
         address impl = address(new EnsoSwapModule(address(dataProvider)));
         swapModule = EnsoSwapModule(address(new UUPSProxy(
@@ -52,7 +54,6 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
         )));
         _enableModule(address(swapModule));
 
-        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(safe)), abi.encode(makeAddr("dstRecipient")));
         vm.startPrank(owner);
         roleRegistry.grantRole(swapModule.ENSO_SWAP_MODULE_ADMIN_ROLE(), owner);
         swapModule.setTradingSafeFactory(tradingSafeFactory);
@@ -150,7 +151,7 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
             srcAmount: SRC_AMOUNT,
             dstChainId: 1,
             dstToken: makeAddr("dstToken"),
-            recipient: makeAddr("dstRecipient"),
+            recipient: destinationRecipient,
             minOut: 1,
             deadline: block.timestamp + 3 days
         });
