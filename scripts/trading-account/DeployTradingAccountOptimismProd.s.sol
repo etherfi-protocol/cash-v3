@@ -23,13 +23,14 @@ contract DeployTradingAccountOptimismProd is Utils, TradingAccountCreate3 {
         string memory deployments = readDeploymentFile();
         address dataProvider = deployments.readAddress(".addresses.EtherFiDataProvider");
         address roleRegistry = deployments.readAddress(".addresses.RoleRegistry");
+        address tradingSafeFactory = _predict(C.SALT_TRADING_SAFE_FACTORY_PROXY);
 
         vm.startBroadcast();
 
-        address acrossImpl = _deployCreate3(abi.encodePacked(type(AcrossSwapModule).creationCode, abi.encode(dataProvider)), C.SALT_ACROSS_IMPL);
+        address acrossImpl = _deployCreate3(abi.encodePacked(type(AcrossSwapModule).creationCode, abi.encode(dataProvider, tradingSafeFactory)), C.SALT_ACROSS_IMPL);
         address acrossProxy = _deployCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(acrossImpl, abi.encodeWithSelector(AcrossSwapModule.initialize.selector, roleRegistry, C.OP_SPOKE_POOL, C.MULTICALL_HANDLER))), C.SALT_ACROSS_PROXY);
 
-        address ensoImpl = _deployCreate3(abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(dataProvider)), C.SALT_ENSO_IMPL);
+        address ensoImpl = _deployCreate3(abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(dataProvider, tradingSafeFactory)), C.SALT_ENSO_IMPL);
         address ensoProxy = _deployCreate3(abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(ensoImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, roleRegistry, C.ENSO_ROUTER))), C.SALT_ENSO_PROXY);
 
         vm.stopBroadcast();

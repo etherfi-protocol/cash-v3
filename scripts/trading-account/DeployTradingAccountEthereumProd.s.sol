@@ -90,11 +90,11 @@ contract DeployTradingAccountEthereumProd is Script, TradingAccountCreate3 {
         );
         require(deployedDataProviderProxy == dataProviderProxy, "data provider prediction mismatch");
 
-        acrossImpl = _deployCreate3(abi.encodePacked(type(AcrossSwapModule).creationCode, abi.encode(dataProviderProxy)), C.SALT_ACROSS_IMPL);
+        acrossImpl = _deployCreate3(abi.encodePacked(type(AcrossSwapModule).creationCode, abi.encode(dataProviderProxy, factoryProxy)), C.SALT_ACROSS_IMPL);
         address deployedAcrossProxy = _deployProxy(C.SALT_ACROSS_PROXY, acrossImpl, abi.encodeWithSelector(AcrossSwapModule.initialize.selector, roleRegistryProxy, C.ETH_SPOKE_POOL, C.MULTICALL_HANDLER));
         require(deployedAcrossProxy == acrossProxy, "Across prediction mismatch");
 
-        ensoImpl = _deployCreate3(abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(dataProviderProxy)), C.SALT_ENSO_IMPL);
+        ensoImpl = _deployCreate3(abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(dataProviderProxy, factoryProxy)), C.SALT_ENSO_IMPL);
         address deployedEnsoProxy = _deployProxy(C.SALT_ENSO_PROXY, ensoImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, roleRegistryProxy, C.ENSO_ROUTER));
         require(deployedEnsoProxy == ensoProxy, "Enso prediction mismatch");
     }

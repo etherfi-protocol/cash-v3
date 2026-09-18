@@ -181,7 +181,7 @@ contract DeployTradingAccountMainnet is Utils {
         // Full Across config rides in the initialize calldata — atomic with the proxy
         // deploy. The module is Buy-only; there is no sell settlement on-chain anymore.
         address acrossImpl = _deploy(
-            "AcrossSwapModuleImplDev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider))
+            "AcrossSwapModuleImplDev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider), address(factory))
         );
         acrossModule = AcrossSwapModule(_deployProxy(
             "AcrossSwapModuleDev",
@@ -199,7 +199,7 @@ contract DeployTradingAccountMainnet is Utils {
         // Its constructor reads getCashModule() (0 on the mainnet trading DataProvider), so the
         // hold path is disabled and requestSwap executes immediately here.
         address ensoImpl = _deploy(
-            "EnsoSwapModuleImplDev", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider))
+            "EnsoSwapModuleImplDev", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider), address(factory))
         );
         ensoModule = EnsoSwapModule(_deployProxy(
             "EnsoSwapModuleDev",

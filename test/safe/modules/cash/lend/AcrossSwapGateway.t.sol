@@ -53,7 +53,7 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
 
         destinationRecipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         spokePool = new PullingSpokePoolStub();
-        address impl = address(new AcrossSwapModule(address(dataProvider)));
+        address impl = address(new AcrossSwapModule(address(dataProvider), tradingSafeFactory));
         swapModule = AcrossSwapModule(address(new UUPSProxy(
             impl,
             abi.encodeWithSelector(AcrossSwapModule.initialize.selector, address(roleRegistry), address(spokePool), multicallHandler)
@@ -61,8 +61,6 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
         _enableModule(address(swapModule));
 
         vm.startPrank(owner);
-        roleRegistry.grantRole(swapModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), owner);
-        swapModule.setTradingSafeFactory(tradingSafeFactory);
         cashModule.configureModulesCanRequestWithdraw(_addr1(address(swapModule)), _bool1(true));
         // The sandwich drives gateway withdraw / supply on the safe's behalf, so it must be an authorized driver.
         gw.setDriver(address(swapModule), true);
