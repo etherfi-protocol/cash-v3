@@ -68,7 +68,7 @@ contract AcrossSwapModuleTest is SafeTestSetup {
 
         recipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         spokePool = new SpokePoolStub();
-        address moduleImpl = address(new AcrossSwapModule(address(dataProvider)));
+        address moduleImpl = address(new AcrossSwapModule(address(dataProvider), tradingSafeFactory));
         module = AcrossSwapModule(address(new UUPSProxy(
             moduleImpl,
             abi.encodeWithSelector(
@@ -90,9 +90,6 @@ contract AcrossSwapModuleTest is SafeTestSetup {
 
         roleRegistry.grantRole(module.ACROSS_SWAP_MODULE_ADMIN_ROLE(), moduleAdmin);
         vm.stopPrank();
-
-        vm.prank(moduleAdmin);
-        module.setTradingSafeFactory(tradingSafeFactory);
 
         bytes[] memory setupData = new bytes[](1);
         _configureModules(mods, shouldWhitelist, setupData);
@@ -128,26 +125,13 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         assertEq(module.getSpokePool(), newAddr);
     }
 
-    function test_setTradingSafeFactory_storesAndEmits() public {
-        address newFactory = makeAddr("newTradingSafeFactory");
-        vm.expectEmit(false, false, false, true, address(module));
-        emit AcrossSwapModule.TradingSafeFactorySet(tradingSafeFactory, newFactory);
-        vm.prank(moduleAdmin);
-        module.setTradingSafeFactory(newFactory);
-        assertEq(module.getTradingSafeFactory(), newFactory);
-    }
-
-    function test_setTradingSafeFactory_revertsForNonAdminOrZeroAddress() public {
-        vm.expectRevert(AcrossSwapModule.OnlyAdmin.selector);
-        module.setTradingSafeFactory(makeAddr("newTradingSafeFactory"));
-
-        vm.prank(moduleAdmin);
+    function test_constructor_revertsForZeroTradingSafeFactory() public {
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        module.setTradingSafeFactory(address(0));
+        new AcrossSwapModule(address(dataProvider), address(0));
     }
 
     function test_initialize_revertsOnZeroConfig() public {
-        address impl = address(new AcrossSwapModule(address(dataProvider)));
+        address impl = address(new AcrossSwapModule(address(dataProvider), tradingSafeFactory));
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         new UUPSProxy(impl, abi.encodeWithSelector(
             AcrossSwapModule.initialize.selector,

@@ -39,6 +39,7 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
     EtherFiSafeFactory private safeFactory;
     address private dataProviderImpl;
     address private safeImpl;
+    address private tradingSafeFactory;
     address private acrossProxy;
     address private ensoProxy;
 
@@ -51,6 +52,7 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
         roleRegistry = RoleRegistry(deployments.readAddress(".addresses.RoleRegistry"));
         cashModule = ICashModule(deployments.readAddress(".addresses.CashModule"));
         safeFactory = EtherFiSafeFactory(deployments.readAddress(".addresses.EtherFiSafeFactory"));
+        tradingSafeFactory = vm.readFile(string.concat(vm.projectRoot(), "/deployments/dev/1/trading-account.json")).readAddress(".TradingSafeFactory");
 
         require(roleRegistry.owner() == DEV_ADMIN, "dev admin is not RoleRegistry owner");
         require(roleRegistry.hasRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), DEV_ADMIN), "dev admin lacks DataProvider role");
@@ -74,10 +76,10 @@ contract DeployTradingAccountOptimismDevV2 is Utils {
     }
 
     function _deployAndConfigureModules() private {
-        address acrossImpl = _deployOrReuse("TradingAccount.DevV2.AcrossSwapModuleImpl", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider)));
+        address acrossImpl = _deployOrReuse("TradingAccount.DevV2.AcrossSwapModuleImpl", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider), tradingSafeFactory));
         acrossProxy = _deployOrReuse("TradingAccount.DevV2.AcrossSwapModuleProxy", type(UUPSProxy).creationCode, abi.encode(acrossImpl, abi.encodeWithSelector(AcrossSwapModule.initialize.selector, address(roleRegistry), Prod.OP_SPOKE_POOL, Prod.MULTICALL_HANDLER)));
 
-        address ensoImpl = _deployOrReuse("TradingAccount.DevV2.EnsoSwapModuleImpl", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider)));
+        address ensoImpl = _deployOrReuse("TradingAccount.DevV2.EnsoSwapModuleImpl", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider), tradingSafeFactory));
         ensoProxy = _deployOrReuse("TradingAccount.DevV2.EnsoSwapModuleProxy", type(UUPSProxy).creationCode, abi.encode(ensoImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), Prod.ENSO_ROUTER)));
 
         address[] memory modules = new address[](2);

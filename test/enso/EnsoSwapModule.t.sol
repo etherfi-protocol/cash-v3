@@ -74,7 +74,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
 
         recipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         ensoRouter = new EnsoRouterStub();
-        address moduleImpl = address(new EnsoSwapModule(address(dataProvider)));
+        address moduleImpl = address(new EnsoSwapModule(address(dataProvider), tradingSafeFactory));
         module = EnsoSwapModule(address(new UUPSProxy(moduleImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), address(ensoRouter)))));
 
         address[] memory mods = new address[](1);
@@ -88,9 +88,6 @@ contract EnsoSwapModuleTest is SafeTestSetup {
 
         roleRegistry.grantRole(module.ENSO_SWAP_MODULE_ADMIN_ROLE(), moduleAdmin);
         vm.stopPrank();
-
-        vm.prank(moduleAdmin);
-        module.setTradingSafeFactory(tradingSafeFactory);
 
         bytes[] memory setupData = new bytes[](1);
         _configureModules(mods, shouldWhitelist, setupData);
@@ -120,26 +117,13 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         assertEq(module.getEnsoRouter(), newAddr);
     }
 
-    function test_setTradingSafeFactory_storesAndEmits() public {
-        address newFactory = makeAddr("newTradingSafeFactory");
-        vm.expectEmit(false, false, false, true, address(module));
-        emit EnsoSwapModule.TradingSafeFactorySet(tradingSafeFactory, newFactory);
-        vm.prank(moduleAdmin);
-        module.setTradingSafeFactory(newFactory);
-        assertEq(module.getTradingSafeFactory(), newFactory);
-    }
-
-    function test_setTradingSafeFactory_revertsForNonAdminOrZeroAddress() public {
-        vm.expectRevert(EnsoSwapModule.OnlyAdmin.selector);
-        module.setTradingSafeFactory(makeAddr("newTradingSafeFactory"));
-
-        vm.prank(moduleAdmin);
+    function test_constructor_revertsForZeroTradingSafeFactory() public {
         vm.expectRevert(ModuleBase.InvalidInput.selector);
-        module.setTradingSafeFactory(address(0));
+        new EnsoSwapModule(address(dataProvider), address(0));
     }
 
     function test_initialize_revertsOnZeroConfig() public {
-        address impl = address(new EnsoSwapModule(address(dataProvider)));
+        address impl = address(new EnsoSwapModule(address(dataProvider), tradingSafeFactory));
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         new UUPSProxy(impl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), address(0)));
     }
@@ -741,10 +725,8 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         address immediateDataProviderImpl = address(new EtherFiDataProvider());
         EtherFiDataProvider immediateDataProvider = EtherFiDataProvider(address(new UUPSProxy(immediateDataProviderImpl, abi.encodeCall(EtherFiDataProvider.initialize, (params)))));
 
-        address immediateModuleImpl = address(new EnsoSwapModule(address(immediateDataProvider)));
+        address immediateModuleImpl = address(new EnsoSwapModule(address(immediateDataProvider), tradingSafeFactory));
         immediateModule = EnsoSwapModule(address(new UUPSProxy(immediateModuleImpl, abi.encodeCall(EnsoSwapModule.initialize, (address(roleRegistry), address(ensoRouter))))));
-        vm.prank(moduleAdmin);
-        immediateModule.setTradingSafeFactory(tradingSafeFactory);
 
         address[] memory modules = new address[](1);
         modules[0] = address(immediateModule);

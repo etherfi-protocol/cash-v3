@@ -32,9 +32,10 @@ contract DeployEnsoNativeFeeImplProd is Script, TradingAccountCreate3 {
         address proxy = _predict(C.SALT_ENSO_PROXY);
         require(proxy.code.length > 0, "EnsoSwapModule proxy not deployed");
         address dataProvider = address(EnsoSwapModule(proxy).etherFiDataProvider());
+        address tradingSafeFactory = _predict(C.SALT_TRADING_SAFE_FACTORY_PROXY);
 
         vm.startBroadcast();
-        address impl = _deployCreate3(abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(dataProvider)), C.SALT_ENSO_IMPL_NATIVE_FEE);
+        address impl = _deployCreate3(abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(dataProvider, tradingSafeFactory)), C.SALT_ENSO_IMPL_NATIVE_FEE);
         vm.stopBroadcast();
 
         require(address(EnsoSwapModule(impl).etherFiDataProvider()) == dataProvider, "data provider mismatch");

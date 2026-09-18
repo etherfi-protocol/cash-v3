@@ -47,7 +47,7 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
 
         destinationRecipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         router = new EnsoRouterStub();
-        address impl = address(new EnsoSwapModule(address(dataProvider)));
+        address impl = address(new EnsoSwapModule(address(dataProvider), tradingSafeFactory));
         swapModule = EnsoSwapModule(address(new UUPSProxy(
             impl,
             abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), address(router))
@@ -55,8 +55,6 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
         _enableModule(address(swapModule));
 
         vm.startPrank(owner);
-        roleRegistry.grantRole(swapModule.ENSO_SWAP_MODULE_ADMIN_ROLE(), owner);
-        swapModule.setTradingSafeFactory(tradingSafeFactory);
         cashModule.configureModulesCanRequestWithdraw(_addr1(address(swapModule)), _bool1(true));
         // The sandwich drives gateway withdraw / supply on the safe's behalf, so it must be an authorized driver.
         gw.setDriver(address(swapModule), true);

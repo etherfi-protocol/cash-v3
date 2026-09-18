@@ -93,8 +93,6 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         address multicallHandler;
         /// @notice Allowlisted Across SpokePoolPeriphery for origin-swap (anyToBridgeable) routes.
         address peripheryAddress;
-        /// @notice CREATE3 deployer used to derive Trading Safes and reverse-map them to Cash Safes.
-        address tradingSafeFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.AcrossSwapModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -107,6 +105,9 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("AcrossSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("AcrossSwapModule.cancelSwap");
+
+    /// @notice Permanent CREATE3 deployer used to derive and reverse-map each user's safe pair.
+    ITradingSafeFactory private immutable tradingSafeFactory;
 
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id. `srcToken` / `dstChainId` are no longer
@@ -133,7 +134,6 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     event SpokePoolSet(address oldSpokePool, address newSpokePool);
     event MulticallHandlerSet(address oldMulticallHandler, address newMulticallHandler);
     event PeripherySet(address oldPeriphery, address newPeriphery);
-    event TradingSafeFactorySet(address oldTradingSafeFactory, address newTradingSafeFactory);
 
     /// @notice Reverts when a non-admin tries to set per-chain constants.
     error OnlyAdmin();
@@ -162,11 +162,14 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @notice Reverts when the signed recipient is not one of the user's two safes.
     error InvalidRecipient();
 
-    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
-    ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
-    ///      `cashModule` is zero where there is no card spending (and therefore no lend gateway).
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance, and
+    ///      `tradingSafeFactory`) live in the IMPLEMENTATION's code — every upgrade impl must
+    ///      be constructed with the same dependencies. `cashModule` is zero where there is no
+    ///      card spending (and therefore no lend gateway).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _tradingSafeFactory) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+        if (_tradingSafeFactory == address(0)) revert InvalidInput();
+        tradingSafeFactory = ITradingSafeFactory(_tradingSafeFactory);
         _disableInitializers();
     }
 
@@ -213,15 +216,6 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         $.peripheryAddress = _periphery;
     }
 
-    /// @notice Sets the CREATE3 deployer used to derive and reverse-map each user's safe pair.
-    function setTradingSafeFactory(address _tradingSafeFactory) external {
-        _onlyAdmin();
-        if (_tradingSafeFactory == address(0)) revert InvalidInput();
-        AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
-        emit TradingSafeFactorySet($.tradingSafeFactory, _tradingSafeFactory);
-        $.tradingSafeFactory = _tradingSafeFactory;
-    }
-
     // ---- Views ----
 
     function getPeriphery() external view returns (address) {
@@ -242,10 +236,6 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
 
     function getMulticallHandler() external view returns (address) {
         return _getAcrossSwapModuleStorage().multicallHandler;
-    }
-
-    function getTradingSafeFactory() external view returns (address) {
-        return _getAcrossSwapModuleStorage().tradingSafeFactory;
     }
 
     // ---- Lifecycle ----
@@ -304,10 +294,10 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
             if ($.peripheryAddress == address(0)) revert PeripheryNotAllowlisted();
         }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
-        if ($.spokePool == address(0) || $.multicallHandler == address(0) || $.tradingSafeFactory == address(0)) {
+        if ($.spokePool == address(0) || $.multicallHandler == address(0)) {
             revert MissingConfig();
         }
-        _validateRecipient(safe, order.recipient, $.tradingSafeFactory);
+        _validateRecipient(safe, order.recipient);
         if (address(cashModule) != address(0)) {
             (uint64 withdrawalDelay,,) = cashModule.getDelays();
             if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
@@ -545,15 +535,15 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
 
     // ---- Internals ----
 
-    function _validateRecipient(address safe, address recipient, address tradingSafeFactory) internal view {
+    function _validateRecipient(address safe, address recipient) internal view {
         if (recipient == safe) return;
 
         address pairedSafe;
-        if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
-            pairedSafe = ITradingSafeFactory(tradingSafeFactory).getTopUpAddress(safe);
+        if (etherFiDataProvider.getEtherFiSafeFactory() == address(tradingSafeFactory)) {
+            pairedSafe = tradingSafeFactory.getTopUpAddress(safe);
         } else {
             bytes32 salt = keccak256(abi.encode("TradingSafe", safe));
-            pairedSafe = CREATE3.predictDeterministicAddress(salt, tradingSafeFactory);
+            pairedSafe = CREATE3.predictDeterministicAddress(salt, address(tradingSafeFactory));
         }
         if (recipient != pairedSafe) revert InvalidRecipient();
     }

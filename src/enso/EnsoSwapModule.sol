@@ -88,8 +88,6 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         mapping(address safe => StoredSwap swap) swaps;
         /// @notice Pinned Enso Router address used on this chain; approved and called on every swap.
         address ensoRouter;
-        /// @notice CREATE3 deployer used to derive Trading Safes and reverse-map them to Cash Safes.
-        address tradingSafeFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EnsoSwapModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -104,6 +102,9 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("EnsoSwapModule.cancelSwap");
     address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
+    /// @notice Permanent CREATE3 deployer used to derive and reverse-map each user's safe pair.
+    ITradingSafeFactory private immutable tradingSafeFactory;
+
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id.
     event SwapRequested(address indexed safe, bytes32 indexed swapId, address srcToken, uint256 srcAmount, uint256 dstChainId, address dstToken, address recipient, uint256 minOut, uint256 deadline);
@@ -111,7 +112,6 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     event SwapExecuted(address indexed safe, bytes32 indexed swapId, uint256 dstChainId, address indexed dstToken, uint256 minOut);
     event SwapCancelled(address indexed safe, bytes32 indexed swapId);
     event EnsoRouterSet(address oldEnsoRouter, address newEnsoRouter);
-    event TradingSafeFactorySet(address oldTradingSafeFactory, address newTradingSafeFactory);
 
     /// @notice Reverts when a non-admin tries to set the Enso Router.
     error OnlyAdmin();
@@ -142,11 +142,14 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     /// @notice Reverts when the signed recipient is not one of the user's two safes.
     error InvalidRecipient();
 
-    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
-    ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
-    ///      `cashModule` is zero where there is no card spending (and therefore no lend gateway).
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance, and
+    ///      `tradingSafeFactory`) live in the IMPLEMENTATION's code — every upgrade impl must
+    ///      be constructed with the same dependencies. `cashModule` is zero where there is no
+    ///      card spending (and therefore no lend gateway).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _tradingSafeFactory) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+        if (_tradingSafeFactory == address(0)) revert InvalidInput();
+        tradingSafeFactory = ITradingSafeFactory(_tradingSafeFactory);
         _disableInitializers();
     }
 
@@ -173,15 +176,6 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         $.ensoRouter = _ensoRouter;
     }
 
-    /// @notice Sets the CREATE3 deployer used to derive and reverse-map each user's safe pair.
-    function setTradingSafeFactory(address _tradingSafeFactory) external {
-        _onlyAdmin();
-        if (_tradingSafeFactory == address(0)) revert InvalidInput();
-        EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
-        emit TradingSafeFactorySet($.tradingSafeFactory, _tradingSafeFactory);
-        $.tradingSafeFactory = _tradingSafeFactory;
-    }
-
     // ---- Views ----
 
     function getOrder(address safe) external view returns (Order memory) {
@@ -194,10 +188,6 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
     function getEnsoRouter() external view returns (address) {
         return _getEnsoSwapModuleStorage().ensoRouter;
-    }
-
-    function getTradingSafeFactory() external view returns (address) {
-        return _getEnsoSwapModuleStorage().tradingSafeFactory;
     }
 
     // ---- Lifecycle ----
@@ -248,8 +238,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
             revert InvalidInput();
         }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
-        if ($.ensoRouter == address(0) || $.tradingSafeFactory == address(0)) revert MissingConfig();
-        _validateRecipient(safe, order.recipient, $.tradingSafeFactory);
+        if ($.ensoRouter == address(0)) revert MissingConfig();
+        _validateRecipient(safe, order.recipient);
         if (address(cashModule) != address(0)) {
             (uint64 withdrawalDelay,,) = cashModule.getDelays();
             if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
@@ -432,15 +422,15 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
     // ---- Internals ----
 
-    function _validateRecipient(address safe, address recipient, address tradingSafeFactory) internal view {
+    function _validateRecipient(address safe, address recipient) internal view {
         if (recipient == safe) return;
 
         address pairedSafe;
-        if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
-            pairedSafe = ITradingSafeFactory(tradingSafeFactory).getTopUpAddress(safe);
+        if (etherFiDataProvider.getEtherFiSafeFactory() == address(tradingSafeFactory)) {
+            pairedSafe = tradingSafeFactory.getTopUpAddress(safe);
         } else {
             bytes32 salt = keccak256(abi.encode("TradingSafe", safe));
-            pairedSafe = CREATE3.predictDeterministicAddress(salt, tradingSafeFactory);
+            pairedSafe = CREATE3.predictDeterministicAddress(salt, address(tradingSafeFactory));
         }
         if (recipient != pairedSafe) revert InvalidRecipient();
     }

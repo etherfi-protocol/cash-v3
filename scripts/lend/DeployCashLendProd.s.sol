@@ -95,6 +95,7 @@ contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
         address liquifier;
         address enso;
         address across;
+        address tradingSafeFactory;
     }
 
     struct Deployed {
@@ -186,6 +187,7 @@ contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
         string memory trading = vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/10/trading-account.json"));
         c.enso = stdJson.readAddress(trading, ".EnsoSwapModule");
         c.across = stdJson.readAddress(trading, ".AcrossSwapModule");
+        c.tradingSafeFactory = stdJson.readAddress(trading, ".TradingSafeFactory");
     }
 
     function _addr(string memory json, string memory name) internal pure returns (address) {
@@ -245,8 +247,8 @@ contract DeployCashLendProd is Utils, GnosisHelpers, CashLendProdConfig {
         d.hook = _create3("EtherFiHookImpl", abi.encodePacked(type(EtherFiHook).creationCode, abi.encode(c.dataProvider)));
         d.topUpDest = _create3("TopUpDestImpl", abi.encodePacked(type(TopUpDest).creationCode, abi.encode(c.dataProvider, weth)));
         d.liquifierImpl = _create3("LiquifierImpl", abi.encodePacked(type(LiquidUSDLiquifierOPModule).creationCode, abi.encode(c.debtManager, c.dataProvider)));
-        d.ensoImpl = _create3("EnsoImpl", abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(c.dataProvider)));
-        d.acrossImpl = _create3("AcrossImpl", abi.encodePacked(type(AcrossSwapModule).creationCode, abi.encode(c.dataProvider)));
+        d.ensoImpl = _create3("EnsoImpl", abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(c.dataProvider, c.tradingSafeFactory)));
+        d.acrossImpl = _create3("AcrossImpl", abi.encodePacked(type(AcrossSwapModule).creationCode, abi.encode(c.dataProvider, c.tradingSafeFactory)));
         d.safeImpl = _create3("EtherFiSafeImpl", abi.encodePacked(type(EtherFiSafe).creationCode, abi.encode(c.dataProvider)));
 
         d.gatewayImpl = _create3("LendGatewayImpl", abi.encodePacked(type(LendGateway).creationCode, abi.encode(c.dataProvider, spoke)));

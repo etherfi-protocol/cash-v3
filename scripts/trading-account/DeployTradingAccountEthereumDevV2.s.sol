@@ -129,10 +129,10 @@ contract DeployTradingAccountEthereumDevV2 is Utils {
     ///      them as default modules additively. The pre-existing modules stay whitelisted and
     ///      default so a backend cutover can drain them before they are retired separately.
     function _deployModules() private {
-        address acrossImpl = _deploy("TradingAccount.DevRestore.AcrossSwapModuleImpl", type(AcrossSwapModule).creationCode, abi.encode(dataProviderProxy));
+        address acrossImpl = _deploy("TradingAccount.DevRestore.AcrossSwapModuleImpl", type(AcrossSwapModule).creationCode, abi.encode(dataProviderProxy, factoryProxy));
         acrossProxy = _deployProxy("TradingAccount.DevRestore.AcrossSwapModuleProxy", acrossImpl, abi.encodeWithSelector(AcrossSwapModule.initialize.selector, roleRegistryProxy, Prod.ETH_SPOKE_POOL, Prod.MULTICALL_HANDLER));
 
-        address ensoImpl = _deploy("TradingAccount.DevRestore.EnsoSwapModuleImpl", type(EnsoSwapModule).creationCode, abi.encode(dataProviderProxy));
+        address ensoImpl = _deploy("TradingAccount.DevRestore.EnsoSwapModuleImpl", type(EnsoSwapModule).creationCode, abi.encode(dataProviderProxy, factoryProxy));
         ensoProxy = _deployProxy("TradingAccount.DevRestore.EnsoSwapModuleProxy", ensoImpl, abi.encodeWithSelector(EnsoSwapModule.initialize.selector, roleRegistryProxy, Prod.ENSO_ROUTER));
     }
 
