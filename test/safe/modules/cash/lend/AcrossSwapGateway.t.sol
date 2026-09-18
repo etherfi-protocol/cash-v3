@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../../../../src/across/AcrossSwapModule.sol";
@@ -40,6 +41,8 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
     PullingSpokePoolStub internal spokePool;
     address internal multicallHandler = makeAddr("multicallHandler");
     address internal keeper = makeAddr("keeper");
+    address internal tradingSafeFactory = makeAddr("tradingSafeFactory");
+    address internal destinationRecipient;
 
     uint256 internal constant SRC_AMOUNT = 1_000e6;
     uint256 internal constant MIN_OUT = 990e6;
@@ -48,8 +51,9 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
     function setUp() public override {
         super.setUp();
 
+        destinationRecipient = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", address(safe))), tradingSafeFactory);
         spokePool = new PullingSpokePoolStub();
-        address impl = address(new AcrossSwapModule(address(dataProvider)));
+        address impl = address(new AcrossSwapModule(address(dataProvider), tradingSafeFactory));
         swapModule = AcrossSwapModule(address(new UUPSProxy(
             impl,
             abi.encodeWithSelector(AcrossSwapModule.initialize.selector, address(roleRegistry), address(spokePool), multicallHandler)
@@ -113,7 +117,7 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
             srcAmount: SRC_AMOUNT,
             dstChainId: 1,
             dstToken: makeAddr("dstToken"),
-            recipient: makeAddr("dstRecipient"),
+            recipient: destinationRecipient,
             minOut: MIN_OUT,
             deadline: block.timestamp + 3 days
         });

@@ -84,7 +84,10 @@ contract UpgradeEnsoNativeFee3CP is TradingAccountGnosisHelpers, Utils, TradingA
     function _requireImplDeployed(address newImpl, address dataProvider) private {
         if (newImpl.code.length == 0) {
             console.log("Implementation not deployed on chain; deploying in fork at the predicted address");
-            _deployCreate3(abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(dataProvider)), C.SALT_ENSO_IMPL_NATIVE_FEE);
+            _deployCreate3(
+                abi.encodePacked(type(EnsoSwapModule).creationCode, abi.encode(dataProvider, _predict(C.SALT_TRADING_SAFE_FACTORY_PROXY))),
+                C.SALT_ENSO_IMPL_NATIVE_FEE
+            );
         }
         require(address(EnsoSwapModule(newImpl).etherFiDataProvider()) == dataProvider, "implementation bound to wrong data provider");
     }
