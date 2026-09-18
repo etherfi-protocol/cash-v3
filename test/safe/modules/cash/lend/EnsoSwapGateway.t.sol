@@ -6,6 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { EnsoSwapModule } from "../../../../../src/enso/EnsoSwapModule.sol";
+import { ITradingSafeFactory } from "../../../../../src/interfaces/ITradingSafeFactory.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /// @dev Minimal Enso Router stand-in: pulls the input from the caller (the safe) and, for the
@@ -35,6 +36,7 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
     EnsoSwapModule internal swapModule;
     EnsoRouterStub internal router;
     address internal keeper = makeAddr("keeper");
+    address internal tradingSafeFactory = makeAddr("tradingSafeFactory");
 
     uint256 internal constant SRC_AMOUNT = 1_000e6;
     uint256 internal constant OUT_AMOUNT = 1 ether;
@@ -50,7 +52,10 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
         )));
         _enableModule(address(swapModule));
 
+        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(safe)), abi.encode(makeAddr("dstRecipient")));
         vm.startPrank(owner);
+        roleRegistry.grantRole(swapModule.ENSO_SWAP_MODULE_ADMIN_ROLE(), owner);
+        swapModule.setTradingSafeFactory(tradingSafeFactory);
         cashModule.configureModulesCanRequestWithdraw(_addr1(address(swapModule)), _bool1(true));
         // The sandwich drives gateway withdraw / supply on the safe's behalf, so it must be an authorized driver.
         gw.setDriver(address(swapModule), true);

@@ -8,6 +8,8 @@ import { Vm } from "forge-std/Vm.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
+import { IEtherFiDataProvider } from "../../src/interfaces/IEtherFiDataProvider.sol";
+import { ITradingSafeFactory } from "../../src/interfaces/ITradingSafeFactory.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
@@ -58,6 +60,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     address internal keeper = makeAddr("keeper");
     address internal moduleAdmin = makeAddr("moduleAdmin");
     address internal recipient = makeAddr("recipient");
+    address internal tradingSafeFactory = makeAddr("tradingSafeFactory");
 
     uint256 internal constant DST_CHAIN = 1;
     uint256 internal constant SRC_AMOUNT = 1000e6;
@@ -83,6 +86,10 @@ contract EnsoSwapModuleTest is SafeTestSetup {
 
         roleRegistry.grantRole(module.ENSO_SWAP_MODULE_ADMIN_ROLE(), moduleAdmin);
         vm.stopPrank();
+
+        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(safe)), abi.encode(recipient));
+        vm.prank(moduleAdmin);
+        module.setTradingSafeFactory(tradingSafeFactory);
 
         bytes[] memory setupData = new bytes[](1);
         _configureModules(mods, shouldWhitelist, setupData);
@@ -110,6 +117,24 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         vm.prank(moduleAdmin);
         module.setEnsoRouter(newAddr);
         assertEq(module.getEnsoRouter(), newAddr);
+    }
+
+    function test_setTradingSafeFactory_storesAndEmits() public {
+        address newFactory = makeAddr("newTradingSafeFactory");
+        vm.expectEmit(false, false, false, true, address(module));
+        emit EnsoSwapModule.TradingSafeFactorySet(tradingSafeFactory, newFactory);
+        vm.prank(moduleAdmin);
+        module.setTradingSafeFactory(newFactory);
+        assertEq(module.getTradingSafeFactory(), newFactory);
+    }
+
+    function test_setTradingSafeFactory_revertsForNonAdminOrZeroAddress() public {
+        vm.expectRevert(EnsoSwapModule.OnlyAdmin.selector);
+        module.setTradingSafeFactory(makeAddr("newTradingSafeFactory"));
+
+        vm.prank(moduleAdmin);
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        module.setTradingSafeFactory(address(0));
     }
 
     function test_initialize_revertsOnZeroConfig() public {
@@ -199,6 +224,39 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         module.requestSwap(address(safe), order, swapData, signers, sigs);
+    }
+
+    function test_requestSwap_revertsForRecipientOutsideUserSafePair() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.recipient = makeAddr("attacker");
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+    }
+
+    function test_requestSwap_allowsCashSafeItselfAsRecipient() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.recipient = address(safe);
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        assertEq(module.getOrder(address(safe)).recipient, address(safe));
+    }
+
+    function test_requestSwap_allowsCashSafePairedToTradingSafeSource() public {
+        vm.mockCall(address(dataProvider), abi.encodeWithSelector(IEtherFiDataProvider.getEtherFiSafeFactory.selector), abi.encode(tradingSafeFactory));
+        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getTopUpAddress.selector, address(safe)), abi.encode(recipient));
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        assertEq(module.getOrder(address(safe)).recipient, recipient);
     }
 
     function test_requestSwap_revertsForExpiredDeadline() public {
@@ -673,6 +731,8 @@ contract EnsoSwapModuleTest is SafeTestSetup {
 
         address immediateModuleImpl = address(new EnsoSwapModule(address(immediateDataProvider)));
         immediateModule = EnsoSwapModule(address(new UUPSProxy(immediateModuleImpl, abi.encodeCall(EnsoSwapModule.initialize, (address(roleRegistry), address(ensoRouter))))));
+        vm.prank(moduleAdmin);
+        immediateModule.setTradingSafeFactory(tradingSafeFactory);
 
         address[] memory modules = new address[](1);
         modules[0] = address(immediateModule);

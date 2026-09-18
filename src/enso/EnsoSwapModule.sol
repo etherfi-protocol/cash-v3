@@ -8,6 +8,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
+import { ITradingSafeFactory } from "../interfaces/ITradingSafeFactory.sol";
 import { ModuleBase } from "../modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../modules/ModuleCheckBalance.sol";
 import { ModuleLendGatewaySandwich } from "../modules/ModuleLendGatewaySandwich.sol";
@@ -26,9 +27,9 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         by the keeper at execution and forwarded through the safe to the Enso Router.
  * @dev The Enso calldata (`swapData`) is built off-chain by the BE via the Enso Route/Bundle
  *      API with the `router` routing strategy and stored at request time, then forwarded
- *      verbatim — there is no on-chain min-out / balance enforcement. Slippage protection
- *      lives entirely inside the Enso calldata; `order.minOut` is carried only for the
- *      signed intent and events. Off-chain monitoring catches BE bugs or mis-routing.
+ *      verbatim. The signed `order.recipient` is restricted to the user's Cash Safe /
+ *      Trading Safe pair, but the opaque route calldata is not decoded. Off-chain monitoring
+ *      remains responsible for route-payload consistency.
  *
  *      The module always executes via `EtherFiSafe.execTransactionFromModule`, which is a
  *      plain `call` (never `delegatecall`), so ONLY Enso's `router` strategy is usable here
@@ -86,6 +87,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         mapping(address safe => StoredSwap swap) swaps;
         /// @notice Pinned Enso Router address used on this chain; approved and called on every swap.
         address ensoRouter;
+        /// @notice Factory used to derive the user's Cash Safe / Trading Safe counterpart.
+        address tradingSafeFactory;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.EnsoSwapModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -107,6 +110,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     event SwapExecuted(address indexed safe, bytes32 indexed swapId, uint256 dstChainId, address indexed dstToken, uint256 minOut);
     event SwapCancelled(address indexed safe, bytes32 indexed swapId);
     event EnsoRouterSet(address oldEnsoRouter, address newEnsoRouter);
+    event TradingSafeFactorySet(address oldTradingSafeFactory, address newTradingSafeFactory);
 
     /// @notice Reverts when a non-admin tries to set the Enso Router.
     error OnlyAdmin();
@@ -134,6 +138,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     error InsufficientOutputAmount();
     /// @notice Reverts when the native fee supplied by the keeper differs from the signed fee.
     error InvalidNativeFee();
+    /// @notice Reverts when the signed recipient is not one of the user's two safes.
+    error InvalidRecipient();
 
     /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
     ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
@@ -166,6 +172,15 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         $.ensoRouter = _ensoRouter;
     }
 
+    /// @notice Sets the factory used to derive each user's paired Cash Safe / Trading Safe.
+    function setTradingSafeFactory(address _tradingSafeFactory) external {
+        _onlyAdmin();
+        if (_tradingSafeFactory == address(0)) revert InvalidInput();
+        EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
+        emit TradingSafeFactorySet($.tradingSafeFactory, _tradingSafeFactory);
+        $.tradingSafeFactory = _tradingSafeFactory;
+    }
+
     // ---- Views ----
 
     function getOrder(address safe) external view returns (Order memory) {
@@ -178,6 +193,10 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
     function getEnsoRouter() external view returns (address) {
         return _getEnsoSwapModuleStorage().ensoRouter;
+    }
+
+    function getTradingSafeFactory() external view returns (address) {
+        return _getEnsoSwapModuleStorage().tradingSafeFactory;
     }
 
     // ---- Lifecycle ----
@@ -228,7 +247,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
             revert InvalidInput();
         }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
-        if ($.ensoRouter == address(0)) revert MissingConfig();
+        if ($.ensoRouter == address(0) || $.tradingSafeFactory == address(0)) revert MissingConfig();
+        _validateRecipient(safe, order.recipient, $.tradingSafeFactory);
         if (address(cashModule) != address(0)) {
             (uint64 withdrawalDelay,,) = cashModule.getDelays();
             if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
@@ -410,6 +430,18 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     }
 
     // ---- Internals ----
+
+    function _validateRecipient(address safe, address recipient, address tradingSafeFactory) internal view {
+        if (recipient == safe) return;
+
+        address pairedSafe;
+        if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
+            pairedSafe = ITradingSafeFactory(tradingSafeFactory).getTopUpAddress(safe);
+        } else {
+            pairedSafe = ITradingSafeFactory(tradingSafeFactory).getDeterministicAddress(safe);
+        }
+        if (recipient != pairedSafe) revert InvalidRecipient();
+    }
 
     /// @dev Verifies the user's signature over the FULL request — the order AND the Enso
     ///      `swapData` — consuming a safe nonce so a signed request can't replay. Binding
