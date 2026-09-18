@@ -6,6 +6,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../../../../src/across/AcrossSwapModule.sol";
+import { ITradingSafeFactory } from "../../../../../src/interfaces/ITradingSafeFactory.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /// @dev SpokePool stand-in that PULLS the deposit's input like the real one, so post-execute
@@ -40,6 +41,7 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
     PullingSpokePoolStub internal spokePool;
     address internal multicallHandler = makeAddr("multicallHandler");
     address internal keeper = makeAddr("keeper");
+    address internal tradingSafeFactory = makeAddr("tradingSafeFactory");
 
     uint256 internal constant SRC_AMOUNT = 1_000e6;
     uint256 internal constant MIN_OUT = 990e6;
@@ -56,7 +58,10 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
         )));
         _enableModule(address(swapModule));
 
+        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getDeterministicAddress.selector, address(safe)), abi.encode(makeAddr("dstRecipient")));
         vm.startPrank(owner);
+        roleRegistry.grantRole(swapModule.ACROSS_SWAP_MODULE_ADMIN_ROLE(), owner);
+        swapModule.setTradingSafeFactory(tradingSafeFactory);
         cashModule.configureModulesCanRequestWithdraw(_addr1(address(swapModule)), _bool1(true));
         // The sandwich drives gateway withdraw / supply on the safe's behalf, so it must be an authorized driver.
         gw.setDriver(address(swapModule), true);
