@@ -23,6 +23,10 @@ import { TradingAccountGnosisHelpers } from "./TradingAccountGnosisHelpers.sol";
  *   source .env && forge script scripts/gnosis-txs/TradingSafeLiquidDepositEth3CP.s.sol --rpc-url $MAINNET_RPC
  */
 contract TradingSafeLiquidDepositEth3CP is TradingAccountGnosisHelpers, Utils, TradingAccountCreate3 {
+    address private constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
+    address private constant LIQUID_BTC = 0x5f46d540b6eD704C3c8789105F30E075AA900726;
+    address private constant LIQUID_BTC_TELLER = 0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353;
+
     function run() external {
         require(block.chainid == 1, "must run on Ethereum");
         require(isEqualString(getEnv(), "mainnet"), "prod script: ENV must be mainnet (or unset)");
@@ -72,7 +76,7 @@ contract TradingSafeLiquidDepositEth3CP is TradingAccountGnosisHelpers, Utils, T
         require(EtherFiDataProvider(dataProvider).isWhitelistedModule(module), "module not whitelisted");
         require(EtherFiDataProvider(dataProvider).isDefaultModule(module), "module not default");
         require(registry.hasRole(admin, C.OPERATING_SAFE), "OperatingSafe missing liquid deposit admin");
-        require(address(deployed.liquidAssetToTeller(C.LIQUID_BTC)) == C.LIQUID_BTC_TELLER, "Liquid BTC route mismatch");
+        require(address(deployed.liquidAssetToTeller(LIQUID_BTC)) == LIQUID_BTC_TELLER, "Liquid BTC route mismatch");
         _requirePauseSwitchLive(module);
 
         console.log("Simulation passed. TradingSafeLiquidDepositModule: %s", module);
@@ -81,9 +85,9 @@ contract TradingSafeLiquidDepositEth3CP is TradingAccountGnosisHelpers, Utils, T
     /// @dev The constructor only checks `teller.vault() == liquidAsset`. Refuse to enable the module
     ///      if the live teller would reject a WBTC deposit or lock the minted shares.
     function _requireTellerReady() private view {
-        ILayerZeroTeller teller = ILayerZeroTeller(C.LIQUID_BTC_TELLER);
-        require(address(teller.vault()) == C.LIQUID_BTC, "teller vault is not Liquid BTC");
-        require(teller.assetData(ERC20(C.WBTC)).allowDeposits, "teller does not accept WBTC");
+        ILayerZeroTeller teller = ILayerZeroTeller(LIQUID_BTC_TELLER);
+        require(address(teller.vault()) == LIQUID_BTC, "teller vault is not Liquid BTC");
+        require(teller.assetData(ERC20(WBTC)).allowDeposits, "teller does not accept WBTC");
         require(teller.shareLockPeriod() == 0, "teller share lock would trap the forward");
     }
 
@@ -123,14 +127,14 @@ contract TradingSafeLiquidDepositEth3CP is TradingAccountGnosisHelpers, Utils, T
         }
         TradingSafeLiquidDepositModule deployed = TradingSafeLiquidDepositModule(module);
         require(address(deployed.etherFiDataProvider()) == dataProvider, "module bound to wrong data provider");
-        require(address(deployed.liquidAssetToTeller(C.LIQUID_BTC)) == C.LIQUID_BTC_TELLER, "Liquid BTC route mismatch");
+        require(address(deployed.liquidAssetToTeller(LIQUID_BTC)) == LIQUID_BTC_TELLER, "Liquid BTC route mismatch");
     }
 
     function _creationCode(address dataProvider) private pure returns (bytes memory) {
         address[] memory liquidAssets = new address[](1);
-        liquidAssets[0] = C.LIQUID_BTC;
+        liquidAssets[0] = LIQUID_BTC;
         address[] memory tellers = new address[](1);
-        tellers[0] = C.LIQUID_BTC_TELLER;
+        tellers[0] = LIQUID_BTC_TELLER;
         return abi.encodePacked(type(TradingSafeLiquidDepositModule).creationCode, abi.encode(liquidAssets, tellers, dataProvider));
     }
 }

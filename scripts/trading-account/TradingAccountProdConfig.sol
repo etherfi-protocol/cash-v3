@@ -25,11 +25,6 @@ library TradingAccountProdConfig {
     address internal constant ACROSS_PERIPHERY = 0x10D8b8DaA26d307489803e10477De69C0492B610;
     address internal constant ENSO_ROUTER = 0xF75584eF6673aD213a685a1B58Cc0330B8eA22Cf;
 
-    /// @dev Initial route baked into `TradingSafeLiquidDepositModule`: mainnet WBTC into Liquid BTC.
-    address internal constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
-    address internal constant LIQUID_BTC = 0x5f46d540b6eD704C3c8789105F30E075AA900726;
-    address internal constant LIQUID_BTC_TELLER = 0x8Ea0B382D054dbEBeB1d0aE47ee4AC433C730353;
-
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
     bytes32 internal constant SALT_ROLE_REGISTRY_IMPL = keccak256("TradingAccount.Prod.v1.RoleRegistryImpl");
