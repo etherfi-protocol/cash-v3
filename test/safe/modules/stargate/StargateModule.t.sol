@@ -9,6 +9,7 @@ import { ChainConfig } from "../../../utils/Utils.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { SendParam } from "../../../../src/interfaces/IOFT.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
+import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
 
 contract StargateModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -65,7 +66,7 @@ contract StargateModuleTest is SafeTestSetup {
 
         _configureModules(modules, shouldWhitelist, setupData);
 
-        bytes32 role = stargateModule.STARGATE_MODULE_ADMIN_ROLE();
+        bytes32 role = keccak256("ADMIN_TIMELOCK_ROLE");
         vm.startPrank(owner);
         roleRegistry.grantRole(role, owner);
         vm.stopPrank();
@@ -421,7 +422,7 @@ contract StargateModuleTest is SafeTestSetup {
         });
 
         vm.prank(notOwner);
-        vm.expectRevert(StargateModule.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         stargateModule.setAssetConfig(assets, assetConfigs);
     }
 
@@ -530,8 +531,8 @@ contract StargateModuleTest is SafeTestSetup {
     }
 
     function test_setAssetConfig_invalidPool() public {
-        // Add STARGATE_MODULE_ADMIN_ROLE to owner
-        bytes32 role = stargateModule.STARGATE_MODULE_ADMIN_ROLE();
+        // Add ADMIN_TIMELOCK_ROLE to owner
+        bytes32 role = keccak256("ADMIN_TIMELOCK_ROLE");
         vm.startPrank(owner);
         roleRegistry.grantRole(role, owner);
         vm.stopPrank();

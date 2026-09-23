@@ -158,6 +158,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // }
 
     function test_verifyBytecode_RoleRegistry() public {
+        // The admin roles now live on the RoleRegistry (onlyAdmin/onlyAdminTimelock, STAKE-1889),
+        // so the bytecode no longer matches the deployed implementation. Re-enable after the
+        // timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new RoleRegistry(dataProviderProxy));
         _verify("RoleRegistry", roleRegistryImpl, local);
     }
@@ -184,11 +188,17 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Cash module ----
 
     function test_verifyBytecode_CashModuleCore() public {
+        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
+        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        vm.skip(true);
         address local = address(new CashModuleCore(dataProviderProxy));
         _verify("CashModuleCore", cashModuleCoreImpl, local);
     }
 
     function test_verifyBytecode_CashModuleSetters() public {
+        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
+        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        vm.skip(true);
         address local = address(new CashModuleSetters(dataProviderProxy));
         _verify("CashModuleSetters", cashModuleSettersImpl, local);
     }
@@ -204,6 +214,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashbackDispatcher() public {
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
+        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
+        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new CashbackDispatcher(dataProviderProxy));
         _verify("CashbackDispatcher", cashbackDispatcherImpl, local);
     }
@@ -211,11 +225,17 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Debt manager ----
 
     function test_verifyBytecode_DebtManagerCore() public {
+        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
+        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        vm.skip(true);
         address local = address(new DebtManagerCore(dataProviderProxy));
         _verify("DebtManagerCore", debtManagerCoreImpl, local);
     }
 
     function test_verifyBytecode_DebtManagerAdmin() public {
+        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
+        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        vm.skip(true);
         address local = address(new DebtManagerAdmin(dataProviderProxy));
         _verify("DebtManagerAdmin", debtManagerAdminImpl, local);
     }
@@ -223,6 +243,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Oracle ----
 
     function test_verifyBytecode_PriceProvider() public {
+        // The admin roles now live on the RoleRegistry (onlyAdmin/onlyAdminTimelock, STAKE-1889),
+        // so the bytecode no longer matches the deployed implementation. Re-enable after the
+        // timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new PriceProviderV2());
         _verify("PriceProvider", priceProviderImpl, local);
     }
@@ -230,21 +254,37 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Settlement dispatchers ----
 
     function test_verifyBytecode_SettlementDispatcherReap() public {
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
+        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
+        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.Reap, dataProviderProxy));
         _verify("SettlementDispatcherReap", settlementReapImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherRain() public {
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
+        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
+        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.Rain, dataProviderProxy));
         _verify("SettlementDispatcherRain", settlementRainImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherPix() public {
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
+        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
+        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.PIX, dataProviderProxy));
         _verify("SettlementDispatcherPix", settlementPixImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherCardOrder() public {
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
+        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
+        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.CardOrder, dataProviderProxy));
         _verify("SettlementDispatcherCardOrder", settlementCardOrderImpl, local);
     }
@@ -252,6 +292,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Top up ----
 
     function test_verifyBytecode_TopUpDest() public {
+        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
+        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        vm.skip(true);
         address local = address(new TopUpDest(dataProviderProxy, cc.weth));
         _verify("TopUpDest", topUpDestImpl, local);
     }
@@ -264,6 +307,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiLiquidModule() public {
+        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
+        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        vm.skip(true);
         address[] memory assets = new address[](4);
         assets[0] = cc.liquidEth;
         assets[1] = cc.liquidBtc;
@@ -281,6 +327,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiLiquidModuleWithReferrer() public {
+        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
+        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        vm.skip(true);
         address[] memory assets = new address[](1);
         assets[0] = cc.sethfi;
 
@@ -292,6 +341,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_StargateModule() public {
+        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
+        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
+        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
+        vm.skip(true);
         address[] memory assets = new address[](2);
         assets[0] = cc.usdc;
         assets[1] = cc.weETH;
@@ -315,6 +368,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_LiquidUSDLiquifierModule() public {
+        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
+        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        vm.skip(true);
         address liquifierImpl = _getImpl(liquidUsdLiquifierProxy);
         address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));
         _verify("LiquidUSDLiquifierModule", liquifierImpl, local);

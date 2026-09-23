@@ -51,7 +51,7 @@ contract ConfigureBeHYPEStakeModuleAndWithdraws is GnosisHelpers, Utils {
         bool[] memory whitelistModule = new bool[](1);
         whitelistModule[0] = true;
 
-        bytes32 adminRole = BeHYPEStakeModule(beHypeStakeModule).BEHYPE_STAKE_MODULE_ADMIN_ROLE();
+        bytes32 adminRole = keccak256("ADMIN_ROLE");
 
         string memory txs = _getGnosisHeader(chainId, addressToHex(cashControllerSafe));
 

@@ -136,8 +136,6 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /// @param shares Amount of `wrapper` the TopUp was credited.
     event WrapStock(address indexed topUp, address indexed wrapper, address indexed underlying, uint256 assets, uint256 shares);
 
-    /// @notice Error thrown when a non-admin tries to deploy a topUp contract
-    error OnlyAdmin();
     /// @notice Error thrown when trying to pull funds from an address not registered as deployedAddresses
     error InvalidTopUpAddress();
     /// @notice Error thrown when zero address is provided for a token
@@ -281,7 +279,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      *      Naming one here pulls it into this factory instead, where the redirect can no longer
      *      see it: the pending `redirectToTradingSafe` reverts on the drained balance, and because
      *      the batch variant is all-or-nothing one griefed entry fails the whole batch. What is
-     *      left is an `onlyRoleRegistryOwner` `recoverFunds` per incident to get the user made
+     *      left is a multisig-gated `recoverFunds` per incident to get the user made
      *      whole off-chain. The range variant walks every deployed TopUp, so one transaction could
      *      do this to every user holding a misrouted stock at once — cheap for the caller, who
      *      gains nothing by it, and expensive for us.
@@ -320,7 +318,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      *   - maxSlippageInBps exceeds MAX_ALLOWED_SLIPPAGE
      * @custom:emits TokenConfigSet when configs are updated
      */
-    function setTokenConfig(address[] calldata tokens, uint256[] calldata chainIds, TokenConfig[] calldata configs) external onlyRoleRegistryOwner {
+    function setTokenConfig(address[] calldata tokens, uint256[] calldata chainIds, TokenConfig[] calldata configs) external onlyAdminTimelock {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
         if (len != configs.length || len != chainIds.length) revert ArrayLengthMismatch();
@@ -343,7 +341,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /**
      * @notice Takes each `tokens[i]` off the topup lane for `chainIds[i]`: clears its bridge
      *         configuration for that destination and drops it from the supported set.
-     * @dev Admin-only, and the inverse of `setTokenConfig`, which is otherwise a one-way door —
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      *      it only ever adds to `supportedTokens`, and rejects a zeroed config, so before this
      *      there was no way to retire an asset from the lane at all.
      *
@@ -368,7 +366,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @custom:throws TokenConfigNotSet If any `(tokens[i], chainIds[i])` has no configured route.
      * @custom:emits TokenConfigRemoved
      */
-    function removeTokenConfig(address[] calldata tokens, uint256[] calldata chainIds) external onlyRoleRegistryOwner {
+    function removeTokenConfig(address[] calldata tokens, uint256[] calldata chainIds) external onlyAdminTimelock {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
         uint256 len = tokens.length;
         if (len != chainIds.length) revert ArrayLengthMismatch();
@@ -429,7 +427,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @custom:throws OnlyUnsupportedTokens if token is a supported bridge asset
      * @custom:throws RecoveryWalletNotSet if recovery wallet is not configured
      */
-    function recoverFunds(address token, uint256 amount) external nonReentrant onlyRoleRegistryOwner {
+    function recoverFunds(address token, uint256 amount) external nonReentrant onlyAdmin {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (token == address(0)) revert TokenCannotBeZeroAddress();
@@ -448,10 +446,10 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @notice Sets the recovery wallet address for emergency fund recovery
      * @dev Only callable by admin role
      * @param _recoveryWallet The new recovery wallet address
-     * @custom:throws OnlyAdmin if caller doesn't have admin role
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      * @custom:throws RecoveryWalletCannotBeZeroAddress if provided address is zero
      */
-    function setRecoveryWallet(address _recoveryWallet) external onlyRoleRegistryOwner {
+    function setRecoveryWallet(address _recoveryWallet) external onlyAdminTimelock {
         TopUpFactoryStorage storage $ = _getTopUpFactoryStorage();
 
         if (_recoveryWallet == address(0)) revert RecoveryWalletCannotBeZeroAddress();
@@ -462,7 +460,8 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /**
      * @notice Sets the destination-chain `TradingSafeFactory` address used by every TopUp
      *         instance when computing the redirect destination.
-     * @dev Admin-only. Read by `TopUp.redirectToTradingSafe` via the `tradingSafeFactory()`
+     * @dev Routes user-fund redirects, so it is gated like an upgrade: only the RoleRegistry
+     *      owner (the upgrade timelock) may call it. Read by `TopUp.redirectToTradingSafe` via the `tradingSafeFactory()`
      *      view below.
      * @param _tradingSafeFactory Address of the destination-chain TradingSafeFactory.
      * @custom:throws TradingSafeFactoryCannotBeZeroAddress If `_tradingSafeFactory == address(0)`.
@@ -484,7 +483,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
     /**
      * @notice Registers, for each `tokens[i]`, the ERC-4626 vault a redirect must deposit it
      *         into instead of transferring it — or clears that with the zero address.
-     * @dev Admin-only. This is the whole of the stock-wrapping feature's configuration: the
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
      *      tokenized equities a TradingSafe can hold are `WrappedBackedToken` vaults (wTSLAx),
      *      while what a user sends to a TopUp address is the raw Backed xStock underneath
      *      (TSLAx), which is trading-supported in no form of its own and would otherwise be
@@ -504,7 +503,7 @@ contract TopUpFactory is BeaconFactory, Constants, ITopUpFactory {
      * @custom:throws InvalidRedirectWrapper If any non-zero `wrappers[i]` is not an ERC-4626
      *                whose `asset()` is `tokens[i]`.
      */
-    function setRedirectWrappers(address[] calldata tokens, address[] calldata wrappers) external onlyRoleRegistryOwner {
+    function setRedirectWrappers(address[] calldata tokens, address[] calldata wrappers) external onlyAdminTimelock {
         uint256 len = tokens.length;
         if (len != wrappers.length) revert ArrayLengthMismatch();
 

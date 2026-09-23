@@ -96,7 +96,7 @@ contract GrantStockWithdrawAdminRoleOP3CP is StockWithdrawConfig, GnosisHelpers 
         dataProvider = EtherFiDataProvider(deployments.readAddress(".addresses.EtherFiDataProvider"));
         module = StockWithdrawModule(payable(deployments.readAddress(".addresses.StockWithdrawModule")));
         timelockController = EtherFiTimelock(payable(ETHERFI_TIMELOCK));
-        adminRole = module.STOCK_WITHDRAW_MODULE_ADMIN_ROLE();
+        adminRole = keccak256("ADMIN_ROLE");
     }
 
     // ── Preconditions ─────────────────────────────────────────────────────────────

@@ -80,8 +80,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Role identifier for EtherFi wallet access control
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
-    /// @notice Role identifier for Cash Moudle controller access control
-    bytes32 public constant CASH_MODULE_CONTROLLER_ROLE = keccak256("CASH_MODULE_CONTROLLER_ROLE");
     /// @notice Limit for maximum cashback percentage at 10%
     uint256 public constant MAX_CASHBACK_PERCENTAGE = 1000; // 10%
     /// @notice 100% in bps
@@ -113,9 +111,6 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
 
     /// @notice Error thrown when a recipient address is set to zero
     error RecipientCannotBeAddressZero();
-
-    /// @notice Error thrown when a function restricted to the Cash Module Controller is called by another address
-    error OnlyCashModuleController();
 
     /// @notice Error thrown when attempting to process a withdrawal before the delay period has elapsed
     error CannotWithdrawYet();

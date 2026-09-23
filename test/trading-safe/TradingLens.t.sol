@@ -80,7 +80,7 @@ contract TradingLensTest is Test {
             abi.encodeWithSelector(TradingLens.initialize.selector, address(roleRegistry))
         )));
 
-        bytes32 adminRole = lens.TRADING_LENS_ADMIN_ROLE();
+        bytes32 adminRole = keccak256("ADMIN_ROLE");
         vm.prank(owner);
         roleRegistry.grantRole(adminRole, admin);
 
@@ -102,7 +102,7 @@ contract TradingLensTest is Test {
     }
 
     function test_addSupportedToken_revertsWhen_notAdmin() public {
-        vm.expectRevert(TradingLens.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         vm.prank(stranger);
         lens.addSupportedToken(address(tokenA));
     }
@@ -135,7 +135,7 @@ contract TradingLensTest is Test {
         vm.prank(admin);
         lens.addSupportedToken(address(tokenA));
 
-        vm.expectRevert(TradingLens.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         vm.prank(stranger);
         lens.removeSupportedToken(address(tokenA));
     }

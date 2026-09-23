@@ -22,6 +22,30 @@ interface IRoleRegistry {
     function onlyUnpauser(address account) external view;
 
     /**
+     * @notice Verifies if an account has admin privileges
+     * @param account The address to check for the admin role
+     * @custom:throws Reverts if account does not have the ADMIN_ROLE
+     */
+    function onlyAdmin(address account) external view;
+
+    /**
+     * @notice Verifies if an account has admin-timelock privileges
+     * @param account The address to check for the admin-timelock role
+     * @custom:throws Reverts if account does not have the ADMIN_TIMELOCK_ROLE
+     */
+    function onlyAdminTimelock(address account) external view;
+
+    /**
+     * @notice Role identifier for the fast admin multisig
+     */
+    function ADMIN_ROLE() external pure returns (bytes32);
+
+    /**
+     * @notice Role identifier for the admin (operating) timelock
+     */
+    function ADMIN_TIMELOCK_ROLE() external pure returns (bytes32);
+
+    /**
      * @notice Checks if an account has any of the specified roles
      * @dev Reverts if the account doesn't have at least one of the roles
      * @param account The address to check roles for

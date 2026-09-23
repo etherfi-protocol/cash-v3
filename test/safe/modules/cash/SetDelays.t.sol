@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { CashEventEmitter, CashModuleTestSetup, ICashModule } from "./CashModuleTestSetup.t.sol";
+import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
 
 contract CashModuleSetDelaysTest is CashModuleTestSetup {
     function test_setDelays_succeeds_whenCalledByController() public {
@@ -80,7 +81,7 @@ contract CashModuleSetDelaysTest is CashModuleTestSetup {
         uint64 newModeDelay = 300;
 
         vm.prank(notOwner);
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         cashModule.setDelays(newWithdrawalDelay, newSpendLimitDelay, newModeDelay);
 
         // Verify the values were not updated

@@ -71,7 +71,9 @@ contract TradingSafeWithdrawModuleForkE2E is Test {
         address roleRegistryOwner = roleRegistry.owner();
         vm.startPrank(roleRegistryOwner);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), address(this));
-        roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), address(this));
+        // The deployed data provider pre-dates the role consolidation and still gates its
+        // config functions on DATA_PROVIDER_ADMIN_ROLE, so grant it by raw hash.
+        roleRegistry.grantRole(keccak256("DATA_PROVIDER_ADMIN_ROLE"), address(this));
         vm.stopPrank();
 
         address sourceSafe = makeAddr("sourceSafeForWithdrawForkTest");

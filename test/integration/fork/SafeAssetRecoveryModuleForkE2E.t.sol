@@ -106,7 +106,9 @@ contract SafeAssetRecoveryModuleForkE2E is Test {
     function _whitelistModule() internal {
         EtherFiDataProvider dp = EtherFiDataProvider(DATA_PROVIDER);
         IRoleRegistry rr = IRoleRegistry(ROLE_REGISTRY);
-        bytes32 role = dp.DATA_PROVIDER_ADMIN_ROLE();
+        // The deployed data provider pre-dates the role consolidation and still gates
+        // configureModules on DATA_PROVIDER_ADMIN_ROLE, so grant it by raw hash.
+        bytes32 role = keccak256("DATA_PROVIDER_ADMIN_ROLE");
         vm.prank(rr.owner());
         rr.grantRole(role, address(this));
 

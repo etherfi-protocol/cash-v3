@@ -34,7 +34,7 @@ contract DeployRecoveryDevOp is Utils {
         require(dataProvider != address(0), "EtherFiDataProvider missing");
         require(roleRegistry != address(0), "RoleRegistry missing");
 
-        bytes32 adminRole = EtherFiDataProvider(dataProvider).DATA_PROVIDER_ADMIN_ROLE();
+        bytes32 adminRole = keccak256("ADMIN_TIMELOCK_ROLE");
 
         vm.startBroadcast(deployerPk);
 

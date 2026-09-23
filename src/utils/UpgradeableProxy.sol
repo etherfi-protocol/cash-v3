@@ -116,4 +116,20 @@ contract UpgradeableProxy is UUPSUpgradeable, PausableUpgradeable, ReentrancyGua
         if (roleRegistry().owner() != msg.sender) revert OnlyRoleRegistryOwner();
         _;
     }
+
+    /**
+     * @dev Modifier to restrict access to holders of the registry's ADMIN_ROLE
+     */
+    modifier onlyAdmin() {
+        roleRegistry().onlyAdmin(msg.sender);
+        _;
+    }
+
+    /**
+     * @dev Modifier to restrict access to holders of the registry's ADMIN_TIMELOCK_ROLE
+     */
+    modifier onlyAdminTimelock() {
+        roleRegistry().onlyAdminTimelock(msg.sender);
+        _;
+    }
 }

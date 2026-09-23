@@ -14,6 +14,7 @@ import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../../../../src/interfaces/IEtherFiDataProvider.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { MockPriceProvider } from "../../../../../src/mocks/MockPriceProvider.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 
 contract DebtManagerBorrowTest is CashModuleTestSetup {
     using SafeERC20 for IERC20;
@@ -117,10 +118,10 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
         address newBorrowToken = address(new MockERC20("abc", "ABC", 12));
 
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         debtManager.supportBorrowToken(newBorrowToken, 1, 1);
 
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         debtManager.unsupportBorrowToken(address(weETH));
         vm.stopPrank();
     }
@@ -167,7 +168,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     /// Only the admin can set the borrow APY.
     function test_setBorrowApy_reverts_whenCallerNotAdmin() public {
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         debtManager.setBorrowApy(address(usdc), 1);
         vm.stopPrank();
     }
@@ -204,7 +205,7 @@ contract DebtManagerBorrowTest is CashModuleTestSetup {
     /// Only the admin can set the minimum borrow-token shares.
     function test_setMinBorrowTokenShares_reverts_whenCallerNotAdmin() public {
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         debtManager.setMinBorrowTokenShares(address(usdc), 1);
         vm.stopPrank();
     }
