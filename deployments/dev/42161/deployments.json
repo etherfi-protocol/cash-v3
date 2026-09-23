@@ -2,7 +2,7 @@
   "addresses": {
     "RoleRegistry": "0xf8D1e66850888b97A99c482862211F043E2eC530",
     "TopUpSourceFactory": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
-    "CCTPAdapter": "0xd7094C2fDd1440fC154bcc03eF4E78a16ca8c7F1"
+    "CCTPAdapter": "0xd7094C2fDd1440fC154bcc03eF4E78a16ca8c7F1",
+    "EtherFiOFTBridgeAdapter": "0x8E8B709339715A87dFE50EdF60E6290254cBdCD9"
   }
 }
-
