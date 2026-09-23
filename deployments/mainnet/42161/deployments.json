@@ -3,6 +3,7 @@
     "RoleRegistry": "0x55963de88267Aa3D1D995c359e8068D0Df34BEBb",
     "TopUpSourceFactory": "0xF4e147Db314947fC1275a8CbB6Cde48c510cd8CF",
     "CCTPAdapter": "0xc8e6e69E976fbD89cfe5F839c33D3c1d43130C5d",
-    "AssetRecoveryDispatcher": "0x418e0af7c750Ba5cbffC5C2a8398591755926A29"
+    "AssetRecoveryDispatcher": "0x418e0af7c750Ba5cbffC5C2a8398591755926A29",
+    "EtherFiOFTBridgeAdapter": "0x406593Aafa613ac16382667d06D54a2Fd16DF48c"
   }
 }
