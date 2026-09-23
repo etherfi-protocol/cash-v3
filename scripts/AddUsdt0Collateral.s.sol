@@ -26,17 +26,25 @@ interface IProxyRoleRegistry {
 ///         and whitelists it as a withdrawable Cash asset, the same three steps
 ///         AddOpCollateral(Dev) used to onboard OP as collateral.
 ///
-///         USDT0 is collateral only for this ticket: supportBorrowToken is never called, even
-///         though USDT itself is also a borrow token today. Direct "Debit" swipes and legacy
-///         "Credit" borrows both require `debtManager.isBorrowToken(token)` on the *spent*
-///         token (CashLendLib.sol:662,942) -- so USDT0 itself is not directly swipeable. What
-///         collateral registration buys is Credit-mode spend: `spendCredit` borrows an
-///         *already-supported* borrow token (e.g. USDC/USDT) sized against the safe's total
-///         collateral value, and `DebtManager.borrow()` (called from
-///         `CashLendLib._spendLegacyCredit`) checks that borrow's health across every supported
-///         collateral token -- which will include USDT0 once this script runs. That borrow-path
-///         health check is what "spendable" cashes out to for a collateral-only token; it needs
-///         nothing from CashModule/EtherFiDataProvider beyond the withdraw whitelist.
+///         USDT0 is also registered as a DebtManager *borrow token*, because that is what makes it
+///         directly debit-spendable on legacy (non-gateway) safes: `CashLendLib._sourceLegacyDebits`
+///         (CashLendLib.sol:942) reverts `UnsupportedToken` unless `debtManager.isBorrowToken(token)`.
+///         Collateral registration alone would only let USDT0 *back* a Credit-mode spend of some
+///         other token, not be swiped itself.
+///
+///         That does NOT make USDT0 meaningfully borrowable, and it is not the same thing as the
+///         Aave V4 reserve's `borrowable` flag (which stays false, COR-1762). USDT's live borrow
+///         config is `borrowApy = 1`, `minShares = type(uint128).max`; `DebtManagerCore.supply`
+///         reverts `SharesCannotBeLessThanMinShares` below that floor, so no borrow liquidity can
+///         ever be supplied and nothing can actually be borrowed. USDT has zero borrows outstanding
+///         today for exactly this reason. Mirroring those values reproduces the same
+///         spendable-but-not-borrowable shape rather than inventing risk parameters.
+///
+///         Lend-gateway safes use a different gate -- `gateway.isSpendAsset(token)`
+///         (CashLendLib.sol:986), set via `LendGateway.setSpendAsset`. That call requires the asset
+///         to be a registered gateway asset first (it currently reverts `AssetNotRegistered`), which
+///         happens with the Aave V4 reserve listing in COR-1762, so it is deliberately NOT part of
+///         this script and lands once USDT0 is live on the Aave market.
 ///
 ///         The deployed PriceProvider proxy runs the V2 implementation (generic `baseAsset`
 ///         field rather than V1's isBaseTokenEth/isBaseTokenBtc bools) -- confirmed by
@@ -105,6 +113,13 @@ contract AddUsdt0Collateral is Utils, GnosisHelpers, Test {
         require(debtManager.isCollateralToken(USDT), "USDT is not a DebtManager collateral token on this deployment");
         IDebtManager.CollateralTokenConfig memory usdtCollateralConfig = debtManager.collateralTokenConfig(USDT);
 
+        require(debtManager.isBorrowToken(USDT), "USDT is not a DebtManager borrow token on this deployment");
+        IDebtManager.BorrowTokenConfig memory usdtBorrowConfig = debtManager.borrowTokenConfig(USDT);
+        // Guard the premise this script relies on: USDT is registered for spend but pinned
+        // unborrowable by a max minShares floor. If that ever changes, mirroring it would grant
+        // USDT0 real borrow capacity, so fail loudly rather than propagate the new shape blindly.
+        require(usdtBorrowConfig.minShares == type(uint128).max, "USDT minShares is no longer type(uint128).max -- mirroring it would make USDT0 genuinely borrowable; re-review before proceeding");
+
         console.log("--- USDT live PriceProviderV2.Config ---");
         console.log("  oracle:              ", usdtOracleConfig.oracle);
         console.log("  isChainlinkType:     ", usdtOracleConfig.isChainlinkType);
@@ -117,26 +132,34 @@ contract AddUsdt0Collateral is Utils, GnosisHelpers, Test {
         console.log("  ltv:                 ", usdtCollateralConfig.ltv);
         console.log("  liquidationThreshold:", usdtCollateralConfig.liquidationThreshold);
         console.log("  liquidationBonus:    ", usdtCollateralConfig.liquidationBonus);
+        console.log("--- USDT live DebtManager.BorrowTokenConfig ---");
+        console.log("  borrowApy:           ", usdtBorrowConfig.borrowApy);
+        console.log("  minShares:           ", usdtBorrowConfig.minShares, "(type(uint128).max => supply blocked)");
 
         // USDT0's target config is an exact struct copy of USDT's -- copying rather than
         // re-typing the fields removes any chance of a transcription typo.
         PriceProviderV2.Config memory usdt0OracleConfig = usdtOracleConfig;
         IDebtManager.CollateralTokenConfig memory usdt0CollateralConfig = usdtCollateralConfig;
 
+        // Only the two admin-settable fields carry over; the rest of BorrowTokenConfig is runtime
+        // accounting that supportBorrowToken initialises itself.
+        uint64 usdt0BorrowApy = usdtBorrowConfig.borrowApy;
+        uint128 usdt0MinShares = usdtBorrowConfig.minShares;
+
         if (isEqualString(getEnv(), "dev")) {
-            _runDev(roleRegistry, usdt0OracleConfig, usdt0CollateralConfig);
+            _runDev(roleRegistry, usdt0OracleConfig, usdt0CollateralConfig, usdt0BorrowApy, usdt0MinShares);
         } else {
-            _runMainnet(roleRegistry, usdt0OracleConfig, usdt0CollateralConfig);
+            _runMainnet(roleRegistry, usdt0OracleConfig, usdt0CollateralConfig, usdt0BorrowApy, usdt0MinShares);
         }
 
-        _verify(usdt0OracleConfig, usdt0CollateralConfig);
+        _verify(usdt0OracleConfig, usdt0CollateralConfig, usdt0BorrowApy, usdt0MinShares);
     }
 
     // ---------------------------------------------------------------------------------------
     // Dev: direct EOA broadcast
     // ---------------------------------------------------------------------------------------
 
-    function _runDev(IRoleRegistry roleRegistry, PriceProviderV2.Config memory oracleConfig, IDebtManager.CollateralTokenConfig memory collateralConfig) internal {
+    function _runDev(IRoleRegistry roleRegistry, PriceProviderV2.Config memory oracleConfig, IDebtManager.CollateralTokenConfig memory collateralConfig, uint64 borrowApy, uint128 minShares) internal {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address broadcaster = vm.addr(deployerPrivateKey);
 
@@ -165,6 +188,14 @@ contract AddUsdt0Collateral is Utils, GnosisHelpers, Test {
             console.log("  [SET] USDT0 supported as DebtManager collateral");
         }
 
+        // Must come after collateral registration: supportBorrowToken reverts NotACollateralToken otherwise.
+        if (debtManager.isBorrowToken(USDT0)) {
+            console.log("  [SKIP] USDT0 already a DebtManager borrow token");
+        } else {
+            debtManager.supportBorrowToken(USDT0, borrowApy, minShares);
+            console.log("  [SET] USDT0 supported as DebtManager borrow token (debit-spendable, supply blocked)");
+        }
+
         if (_isWithdrawWhitelisted(USDT0)) {
             console.log("  [SKIP] USDT0 already whitelisted as a Cash withdraw asset");
         } else {
@@ -183,7 +214,7 @@ contract AddUsdt0Collateral is Utils, GnosisHelpers, Test {
     // Mainnet: Gnosis bundle for the Cash controller Safe
     // ---------------------------------------------------------------------------------------
 
-    function _runMainnet(IRoleRegistry roleRegistry, PriceProviderV2.Config memory oracleConfig, IDebtManager.CollateralTokenConfig memory collateralConfig) internal {
+    function _runMainnet(IRoleRegistry roleRegistry, PriceProviderV2.Config memory oracleConfig, IDebtManager.CollateralTokenConfig memory collateralConfig, uint64 borrowApy, uint128 minShares) internal {
         require(roleRegistry.hasRole(PRICE_PROVIDER_ADMIN_ROLE, cashControllerSafe), "cashControllerSafe lacks PRICE_PROVIDER_ADMIN_ROLE");
         require(roleRegistry.hasRole(DEBT_MANAGER_ADMIN_ROLE, cashControllerSafe), "cashControllerSafe lacks DEBT_MANAGER_ADMIN_ROLE");
         require(roleRegistry.hasRole(CASH_MODULE_CONTROLLER_ROLE, cashControllerSafe), "cashControllerSafe lacks CASH_MODULE_CONTROLLER_ROLE");
@@ -196,9 +227,11 @@ contract AddUsdt0Collateral is Utils, GnosisHelpers, Test {
         }
         bool needCollateral = !alreadyCollateral;
 
+        bool needBorrow = !debtManager.isBorrowToken(USDT0);
+
         bool needWithdraw = !_isWithdrawWhitelisted(USDT0);
 
-        uint256 stepsNeeded = (needOracle ? 1 : 0) + (needCollateral ? 1 : 0) + (needWithdraw ? 1 : 0);
+        uint256 stepsNeeded = (needOracle ? 1 : 0) + (needCollateral ? 1 : 0) + (needBorrow ? 1 : 0) + (needWithdraw ? 1 : 0);
         if (stepsNeeded == 0) {
             console.log("Already fully configured on-chain; nothing to bundle.");
             return;
@@ -220,6 +253,13 @@ contract AddUsdt0Collateral is Utils, GnosisHelpers, Test {
 
         if (needCollateral) {
             string memory data = iToHex(abi.encodeWithSelector(IDebtManager.supportCollateralToken.selector, USDT0, collateralConfig));
+            txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(debtManager)), data, "0", ++stepIndex == stepsNeeded)));
+        }
+
+        // Ordered after the collateral call in the same bundle: supportBorrowToken requires
+        // isCollateralToken(USDT0), which the preceding tx establishes.
+        if (needBorrow) {
+            string memory data = iToHex(abi.encodeWithSelector(IDebtManager.supportBorrowToken.selector, USDT0, borrowApy, minShares));
             txs = string(abi.encodePacked(txs, _getGnosisTransaction(addressToHex(address(debtManager)), data, "0", ++stepIndex == stepsNeeded)));
         }
 
@@ -278,7 +318,7 @@ contract AddUsdt0Collateral is Utils, GnosisHelpers, Test {
     // Post-condition verification -- read back on-chain state and assert it matches USDT's
     // ---------------------------------------------------------------------------------------
 
-    function _verify(PriceProviderV2.Config memory expectedOracleConfig, IDebtManager.CollateralTokenConfig memory expectedCollateralConfig) internal view {
+    function _verify(PriceProviderV2.Config memory expectedOracleConfig, IDebtManager.CollateralTokenConfig memory expectedCollateralConfig, uint64 expectedBorrowApy, uint128 expectedMinShares) internal view {
         require(_oracleConfigMatches(priceProvider.tokenConfig(USDT0), expectedOracleConfig), "USDT0 PriceProviderV2 config != USDT's after run");
         console.log("  [OK] USDT0 PriceProviderV2 config matches USDT's");
 
@@ -291,8 +331,15 @@ contract AddUsdt0Collateral is Utils, GnosisHelpers, Test {
         require(_collateralConfigMatches(debtManager.collateralTokenConfig(USDT0), expectedCollateralConfig), "USDT0 DebtManager collateral config != USDT's after run");
         console.log("  [OK] USDT0 DebtManager collateral config matches USDT's");
 
-        require(!debtManager.isBorrowToken(USDT0), "USDT0 unexpectedly registered as a borrow token -- out of scope for this ticket");
-        console.log("  [OK] USDT0 is NOT a borrow token (collateral-only, as scoped)");
+        require(debtManager.isBorrowToken(USDT0), "USDT0 is not a DebtManager borrow token after run -- it would not be debit-spendable");
+        IDebtManager.BorrowTokenConfig memory usdt0Borrow = debtManager.borrowTokenConfig(USDT0);
+        require(usdt0Borrow.borrowApy == expectedBorrowApy, "USDT0 borrowApy != USDT's after run");
+        require(usdt0Borrow.minShares == expectedMinShares, "USDT0 minShares != USDT's after run");
+        // The point of mirroring: a max minShares floor makes DebtManagerCore.supply unreachable, so
+        // no borrow liquidity can exist and USDT0 cannot actually be borrowed despite being registered.
+        require(usdt0Borrow.minShares == type(uint128).max, "USDT0 minShares is not type(uint128).max -- it would be genuinely borrowable");
+        require(usdt0Borrow.totalSharesOfBorrowTokens == 0, "USDT0 unexpectedly has borrow liquidity supplied");
+        console.log("  [OK] USDT0 is a borrow token (debit-spendable) with minShares pinned at type(uint128).max");
 
         require(_isWithdrawWhitelisted(USDT0), "USDT0 is not whitelisted as a Cash withdraw asset after run");
         console.log("  [OK] USDT0 whitelisted as a Cash withdraw asset");
