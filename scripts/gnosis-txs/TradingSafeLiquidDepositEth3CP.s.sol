@@ -58,10 +58,9 @@ contract TradingSafeLiquidDepositEth3CP is TradingAccountGnosisHelpers, Utils, T
         bool[] memory flags = new bool[](1);
         flags[0] = true;
 
-        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(C.OPERATING_SAFE));
-        txs = _appendRole(txs, address(registry), admin, C.OPERATING_SAFE);
-        bytes memory data = abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, modules, flags);
-        txs = string.concat(txs, _getGnosisTransaction(addressToHex(dataProvider), iToHex(data), "0", true));
+        bytes memory grantData = abi.encodeWithSelector(RoleRegistry.grantRole.selector, admin, C.OPERATING_SAFE);
+        bytes memory configureData = abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, modules, flags);
+        string memory txs = _bundleJson(address(registry), grantData, dataProvider, configureData);
 
         vm.createDir("./output", true);
         string memory path = "./output/TradingSafeLiquidDeposit3CP-eth-1.json";
@@ -80,6 +79,19 @@ contract TradingSafeLiquidDepositEth3CP is TradingAccountGnosisHelpers, Utils, T
         _requirePauseSwitchLive(module);
 
         console.log("Simulation passed. TradingSafeLiquidDepositModule: %s", module);
+    }
+
+    /// @dev Same schema as `output/3CP-644-RelaxLendStaleness-10.json`.
+    function _bundleJson(address grantTo, bytes memory grantData, address configureTo, bytes memory configureData) private view returns (string memory) {
+        return string.concat(_bundleHeader(), _txJson(grantTo, grantData, false), _txJson(configureTo, configureData, true), "  ]\n}\n");
+    }
+
+    function _bundleHeader() private view returns (string memory) {
+        return string.concat('{\n  "chainId": "', vm.toString(block.chainid), '",\n  "safeAddress": "', vm.toString(C.OPERATING_SAFE), '",\n  "meta": {\n    "txBuilderVersion": "1.16.5"\n  },\n  "transactions": [\n');
+    }
+
+    function _txJson(address to, bytes memory data, bool last) private pure returns (string memory) {
+        return string.concat('    {\n      "to": "', vm.toString(to), '",\n      "value": "0",\n      "data": "', vm.toString(data), '"\n    }', last ? "\n" : ",\n");
     }
 
     /// @dev The constructor only checks `teller.vault() == liquidAsset`. Refuse to enable the module
