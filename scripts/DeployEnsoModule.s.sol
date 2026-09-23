@@ -40,16 +40,12 @@ contract DeployEnsoModule is Utils {
         RoleRegistry roleRegistry = RoleRegistry(
             stdJson.readAddress(deployments, ".addresses.RoleRegistry")
         );
-        address tradingSafeFactory = stdJson.readAddress(
-            vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/1/trading-account.json")),
-            ".TradingSafeFactory"
-        );
 
         vm.startBroadcast(pk);
 
         // Impl constructor reads getCashModule() off the DataProvider; the resulting immutable
         // decides whether the hold path is active on this chain.
-        EnsoSwapModule module = new EnsoSwapModule(address(dataProvider), tradingSafeFactory);
+        EnsoSwapModule module = new EnsoSwapModule(address(dataProvider));
         EnsoSwapModule enso = EnsoSwapModule(address(new UUPSProxy(
             address(module),
             abi.encodeWithSelector(EnsoSwapModule.initialize.selector, address(roleRegistry), ENSO_ROUTER)
