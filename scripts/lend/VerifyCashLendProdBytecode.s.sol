@@ -81,8 +81,6 @@ contract VerifyCashLendProdBytecode is Utils, ContractCodeChecker, CashLendProdC
         address debtManager = _addr(json, "DebtManager");
         address spoke = stdJson.readAddress(vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/10/summer-lend.json")), ".spoke");
         address weth = _fixtureAsset("weth");
-        address tradingSafeFactory =
-            stdJson.readAddress(vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/10/trading-account.json")), ".TradingSafeFactory");
 
         // ── UUPS implementations: self-address (and library) bindings, see @dev ──
         _checkWithBindings("CashModuleCoreImpl", address(new CashModuleCore(dataProvider)));
@@ -94,8 +92,8 @@ contract VerifyCashLendProdBytecode is Utils, ContractCodeChecker, CashLendProdC
         _checkWithBindings("EtherFiHookImpl", address(new EtherFiHook(dataProvider)));
         _checkWithBindings("TopUpDestImpl", address(new TopUpDest(dataProvider, weth)));
         _checkWithBindings("LiquifierImpl", address(new LiquidUSDLiquifierOPModule(debtManager, dataProvider)));
-        _checkWithBindings("EnsoImpl", address(new EnsoSwapModule(dataProvider, tradingSafeFactory)));
-        _checkWithBindings("AcrossImpl", address(new AcrossSwapModule(dataProvider, tradingSafeFactory)));
+        _checkWithBindings("EnsoImpl", address(new EnsoSwapModule(dataProvider)));
+        _checkWithBindings("AcrossImpl", address(new AcrossSwapModule(dataProvider)));
         _checkWithBindings("LendGatewayImpl", address(new LendGateway(dataProvider, spoke)));
         _checkWithBindings("AaveV4LensImpl", address(new AaveV4Lens()));
 

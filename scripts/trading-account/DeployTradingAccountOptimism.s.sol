@@ -50,10 +50,6 @@ contract DeployTradingAccountOptimism is Utils {
         ICashModule cashModule = ICashModule(
             stdJson.readAddress(deployments, ".addresses.CashModule")
         );
-        address tradingSafeFactory = stdJson.readAddress(
-            vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/1/trading-account.json")),
-            ".TradingSafeFactory"
-        );
 
         require(DEPLOYER.isDeployer(deployer), "broadcaster not registered on EtherFiDeployer");
 
@@ -66,7 +62,7 @@ contract DeployTradingAccountOptimism is Utils {
         //    mainnet deploy ⇒ same address on both chains. The module is Buy-only
         //    (requestSwap stores the deposit args; executeSwap replays after the delay).
         address acrossImpl = _deploy(
-            "AcrossSwapModuleImplV2Dev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider), tradingSafeFactory)
+            "AcrossSwapModuleImplV2Dev", type(AcrossSwapModule).creationCode, abi.encode(address(dataProvider))
         );
         AcrossSwapModule acrossModule = AcrossSwapModule(_deploy(
             "AcrossSwapModuleV2Dev",
@@ -99,7 +95,7 @@ contract DeployTradingAccountOptimism is Utils {
         //     constructor reads getCashModule() from the OP data provider, so the CashModule
         //     hold path is live here (same as Across on OP).
         address ensoImpl = _deploy(
-            "EnsoSwapModuleImplDev", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider), tradingSafeFactory)
+            "EnsoSwapModuleImplDev", type(EnsoSwapModule).creationCode, abi.encode(address(dataProvider))
         );
         EnsoSwapModule ensoModule = EnsoSwapModule(_deploy(
             "EnsoSwapModuleDev",

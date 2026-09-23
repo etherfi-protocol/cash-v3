@@ -37,7 +37,6 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
         address dataProvider = _predict(C.SALT_DATA_PROVIDER_PROXY);
         address roleRegistry = _predict(C.SALT_ROLE_REGISTRY_PROXY);
         address priceProvider = _predict(C.SALT_PRICE_PROVIDER_PROXY);
-        address tradingFactory = _predict(C.SALT_TRADING_SAFE_FACTORY_PROXY);
 
         _verify(C.SALT_ROLE_REGISTRY_IMPL, address(new RoleRegistry(dataProvider)));
         _verify(C.SALT_PRICE_PROVIDER_IMPL, address(new PriceProviderV2()));
@@ -45,8 +44,8 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
         _verify(C.SALT_TRADING_SAFE_FACTORY_IMPL, address(new TradingSafeFactory()));
         _verify(C.SALT_TRADING_LENS_IMPL, address(new TradingLens(priceProvider)));
         _verify(C.SALT_DATA_PROVIDER_IMPL, address(new EtherFiDataProvider()));
-        _verify(C.SALT_ACROSS_IMPL, address(new AcrossSwapModule(dataProvider, tradingFactory)));
-        _verify(C.SALT_ENSO_IMPL_NATIVE_FEE, address(new EnsoSwapModule(dataProvider, tradingFactory)));
+        _verify(C.SALT_ACROSS_IMPL, address(new AcrossSwapModule(dataProvider)));
+        _verify(C.SALT_ENSO_IMPL_NATIVE_FEE, address(new EnsoSwapModule(dataProvider)));
         _verify(C.SALT_TOPUP_FACTORY_IMPL, address(new TopUpFactory()));
         _verify(C.SALT_TOPUP_IMPL, address(new TopUp(C.ETH_WETH)));
         _verify(C.SALT_TRADING_SAFE_WITHDRAW_MODULE, address(new TradingSafeWithdrawModule(dataProvider)));
@@ -59,6 +58,7 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
         _requireProxyImpl(C.SALT_ACROSS_PROXY, C.SALT_ACROSS_IMPL);
         _requireProxyImpl(C.SALT_ENSO_PROXY, C.SALT_ENSO_IMPL_NATIVE_FEE);
 
+        address tradingFactory = _predict(C.SALT_TRADING_SAFE_FACTORY_PROXY);
         address tradingSafeBeacon = TradingSafeFactory(tradingFactory).beacon();
         require(UpgradeableBeacon(tradingSafeBeacon).implementation() == _predict(C.SALT_TRADING_SAFE_IMPL), "TradingSafe implementation mismatch");
 
@@ -77,10 +77,9 @@ contract VerifyTradingAccountProdBytecode is Script, GnosisHelpers, Utils, Tradi
     function _verifyOptimism() private {
         string memory deployments = readDeploymentFile();
         address dataProvider = deployments.readAddress(".addresses.EtherFiDataProvider");
-        address tradingFactory = _predict(C.SALT_TRADING_SAFE_FACTORY_PROXY);
 
-        _verify(C.SALT_ACROSS_IMPL, address(new AcrossSwapModule(dataProvider, tradingFactory)));
-        _verify(C.SALT_ENSO_IMPL_NATIVE_FEE, address(new EnsoSwapModule(dataProvider, tradingFactory)));
+        _verify(C.SALT_ACROSS_IMPL, address(new AcrossSwapModule(dataProvider)));
+        _verify(C.SALT_ENSO_IMPL_NATIVE_FEE, address(new EnsoSwapModule(dataProvider)));
         _requireProxyImpl(C.SALT_ACROSS_PROXY, C.SALT_ACROSS_IMPL);
         _requireProxyImpl(C.SALT_ENSO_PROXY, C.SALT_ENSO_IMPL_NATIVE_FEE);
     }
