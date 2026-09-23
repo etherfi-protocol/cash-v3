@@ -9,7 +9,6 @@ import { CREATE3 } from "solady/utils/CREATE3.sol";
 import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
-import { ITradingSafeFactory } from "../interfaces/ITradingSafeFactory.sol";
 import { ModuleBase } from "../modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../modules/ModuleCheckBalance.sol";
 import { ModuleLendGatewaySandwich } from "../modules/ModuleLendGatewaySandwich.sol";
@@ -102,8 +101,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("EnsoSwapModule.cancelSwap");
     address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
-    /// @notice Permanent CREATE3 deployer used to derive and reverse-map each user's safe pair.
-    ITradingSafeFactory private immutable tradingSafeFactory;
+    /// @notice TradingSafeFactory address on the trading chain; the CREATE3 deployer of each user's Trading Safe.
+    address private immutable tradingSafeFactory;
 
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id.
@@ -149,7 +148,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _etherFiDataProvider, address _tradingSafeFactory) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         if (_tradingSafeFactory == address(0)) revert InvalidInput();
-        tradingSafeFactory = ITradingSafeFactory(_tradingSafeFactory);
+        tradingSafeFactory = _tradingSafeFactory;
         _disableInitializers();
     }
 
@@ -422,17 +421,18 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
     // ---- Internals ----
 
+    /// @dev Computed purely from CREATE3 so the factory need not be deployed on this chain.
+    ///      Accepts the safe itself or its pair in either direction: a Cash Safe caller may
+    ///      send to its Trading Safe, and a Trading Safe caller may send to its source Cash Safe.
     function _validateRecipient(address safe, address recipient) internal view {
         if (recipient == safe) return;
+        if (recipient == _predictTradingSafe(safe)) return;
+        if (safe == _predictTradingSafe(recipient)) return;
+        revert InvalidRecipient();
+    }
 
-        address pairedSafe;
-        if (etherFiDataProvider.getEtherFiSafeFactory() == address(tradingSafeFactory)) {
-            pairedSafe = tradingSafeFactory.getTopUpAddress(safe);
-        } else {
-            bytes32 salt = keccak256(abi.encode("TradingSafe", safe));
-            pairedSafe = CREATE3.predictDeterministicAddress(salt, address(tradingSafeFactory));
-        }
-        if (recipient != pairedSafe) revert InvalidRecipient();
+    function _predictTradingSafe(address cashSafe) internal view returns (address) {
+        return CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
     }
 
     /// @dev Verifies the user's signature over the FULL request — the order AND the Enso

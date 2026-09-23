@@ -7,8 +7,6 @@ import { Vm } from "forge-std/Vm.sol";
 import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
-import { IEtherFiDataProvider } from "../../src/interfaces/IEtherFiDataProvider.sol";
-import { ITradingSafeFactory } from "../../src/interfaces/ITradingSafeFactory.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -41,6 +39,14 @@ contract PeripheryStub {
         lastCaller = msg.sender;
         IERC20(token).transferFrom(msg.sender, address(this), amount);
         pulled = amount;
+    }
+}
+
+contract AcrossSwapModuleHarness is AcrossSwapModule {
+    constructor(address _etherFiDataProvider, address _tradingSafeFactory) AcrossSwapModule(_etherFiDataProvider, _tradingSafeFactory) { }
+
+    function exposed_validateRecipient(address safe, address recipient) external view {
+        _validateRecipient(safe, recipient);
     }
 }
 
@@ -192,15 +198,20 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         assertEq(module.getOrder(address(safe)).recipient, address(safe));
     }
 
-    function test_requestSwap_allowsCashSafePairedToTradingSafeSource() public {
-        vm.mockCall(address(dataProvider), abi.encodeWithSelector(IEtherFiDataProvider.getEtherFiSafeFactory.selector), abi.encode(tradingSafeFactory));
-        vm.mockCall(tradingSafeFactory, abi.encodeWithSelector(ITradingSafeFactory.getTopUpAddress.selector, address(safe)), abi.encode(recipient));
+    function test_validateRecipient_allowsTradingSafeSendingToSourceCashSafe() public {
+        AcrossSwapModuleHarness harness = new AcrossSwapModuleHarness(address(dataProvider), tradingSafeFactory);
+        address cashSafe = makeAddr("cashSafe");
+        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
 
-        AcrossSwapModule.Order memory order = _baseOrder();
-        (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
-        module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
+        harness.exposed_validateRecipient(tradingSafe, cashSafe);
+    }
 
-        assertEq(module.getOrder(address(safe)).recipient, recipient);
+    function test_validateRecipient_revertsForTradingSafeSendingToOtherCashSafe() public {
+        AcrossSwapModuleHarness harness = new AcrossSwapModuleHarness(address(dataProvider), tradingSafeFactory);
+        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", makeAddr("cashSafe"))), tradingSafeFactory);
+
+        vm.expectRevert(AcrossSwapModule.InvalidRecipient.selector);
+        harness.exposed_validateRecipient(tradingSafe, makeAddr("otherCashSafe"));
     }
 
     function test_requestSwap_revertsForExpiredDeadline() public {
