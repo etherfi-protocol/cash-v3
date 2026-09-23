@@ -28,13 +28,13 @@ import { Utils } from "./Utils.sol";
  *        - HyperEVM OFT  0x904861a24F30EC96ea7CFC3bE9EA4B476d237e98 (mainnet only, see below)
  *      Every pairwise `peers(eid)` between these four was read back live and matches.
  *
- * @dev HyperEVM's oftAdapter is NOT the same address in both environments. Mainnet uses the
- *      verified mesh member above; the pre-existing DEV fixture entry instead names the dev USDT
- *      token itself (`0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb`) as its own "oftAdapter" — and
- *      that address does NOT implement `token()`/`peers()` (calls revert on-chain). This predates
- *      COR-1759 and this change does not touch it (`keep the same oftAdapter` per spec), so
- *      `_assertOftWiring` is allowed to tolerate that one revert with a loud warning instead of
- *      failing the whole dev run.
+ * @dev HyperEVM's oftAdapter is the SAME in both environments, because dev and prod HyperEVM are
+ *      the same chain (999) and therefore the same USD₮0 deployment. An earlier revision branched
+ *      on ENV here and used the USD₮0 *token* (`0xB8CE59FC…625EBB`) as dev's "oftAdapter", copying
+ *      a bad value out of the dev fixture. That address implements neither `token()` nor
+ *      `peers()`, so the rail would have failed at send time — and the branch also forced
+ *      `_assertOftWiring` to swallow the very revert that would have caught it. Both the dev
+ *      fixture and this constant now name the real OFT, and the wiring check is unconditional.
  */
 abstract contract USDT0TopUpConfig is Utils {
     using stdJson for string;
@@ -69,19 +69,17 @@ abstract contract USDT0TopUpConfig is Utils {
     address internal constant ETH_USDT_OADAPTER = 0x6C96dE32CEa08842dcc4058c14d3aaAD7Fa41dee;
 
     address internal constant HYPE_USDT0 = 0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb;
-    /// @dev Mainnet-only verified OFT. Dev keeps its pre-existing (non-compliant) self-adapter —
-    ///      see the contract natspec.
-    address internal constant HYPE_USDT0_OFT_MAINNET = 0x904861a24F30EC96ea7CFC3bE9EA4B476d237e98;
+    /// @dev Same in dev and prod — HyperEVM is one chain (999) with one USD₮0 deployment.
+    ///      Verified live: `token()` returns HYPE_USDT0 and `peers(30111)` returns the OP OFT.
+    address internal constant HYPE_USDT0_OFT = 0x904861a24F30EC96ea7CFC3bE9EA4B476d237e98;
 
     /// @notice One rail: the token being configured, its human name (must match the fixture
-    ///         `name` field so `output/` bundles read the same as `top-up-fixtures.json`), the
-    ///         OFT/OAdapter that moves it, and whether that adapter tolerates a failed
-    ///         `token()`/`peers()` read (true only for dev HyperEVM, see natspec).
+    ///         `name` field so `output/` bundles read the same as `top-up-fixtures.json`), and
+    ///         the OFT/OAdapter that moves it.
     struct Rail {
         address token;
         string name;
         address oftAdapter;
-        bool tolerateWiringCheckRevert;
     }
 
     /// @dev Selects the rail for `block.chainid`, branching dev vs mainnet only where the
@@ -90,12 +88,11 @@ abstract contract USDT0TopUpConfig is Utils {
     ///      nothing.
     function _rail() internal view returns (Rail memory) {
         if (block.chainid == ARBITRUM_CHAIN_ID) {
-            return Rail({ token: ARB_USDT0, name: "usdt0", oftAdapter: ARB_USDT0_OFT, tolerateWiringCheckRevert: false });
+            return Rail({ token: ARB_USDT0, name: "usdt0", oftAdapter: ARB_USDT0_OFT });
         } else if (block.chainid == ETHEREUM_CHAIN_ID) {
-            return Rail({ token: ETH_USDT, name: "USDT", oftAdapter: ETH_USDT_OADAPTER, tolerateWiringCheckRevert: false });
+            return Rail({ token: ETH_USDT, name: "USDT", oftAdapter: ETH_USDT_OADAPTER });
         } else if (block.chainid == HYPEREVM_CHAIN_ID) {
-            address oftAdapter = _isDev() ? HYPE_USDT0 : HYPE_USDT0_OFT_MAINNET;
-            return Rail({ token: HYPE_USDT0, name: "usdt", oftAdapter: oftAdapter, tolerateWiringCheckRevert: _isDev() });
+            return Rail({ token: HYPE_USDT0, name: "usdt", oftAdapter: HYPE_USDT0_OFT });
         }
         revert("USDT0TopUpConfig: unsupported chain - must run on 42161 (Ethereum), 1 (Ethereum) or 999 (HyperEVM)");
     }
@@ -130,25 +127,16 @@ abstract contract USDT0TopUpConfig is Utils {
     /**
      * @dev Sanity check called before anything is broadcast or bundled: the OFT adapter
      *      actually locks/mints the token being configured, and it has a live LayerZero peer
-     *      for the destination eid. Catches almost any address typo. Tolerates a revert ONLY
-     *      for the one pre-existing exception documented on the contract (dev HyperEVM); every
-     *      other chain/env must pass or the run aborts before touching anything.
+     *      for the destination eid. Catches almost any address typo.
+     *
+     *      Unconditional on every chain and environment. It previously had a dev-HyperEVM escape
+     *      hatch, which is exactly what let a non-OFT address through; a check that can be opted
+     *      out of on the one rail known to be wrong is not a check.
      */
     function _assertOftWiring(Rail memory rail) internal view {
-        if (!rail.tolerateWiringCheckRevert) {
-            require(IOFT(rail.oftAdapter).token() == rail.token, string.concat(rail.name, ": OFT adapter does not front the configured token"));
-            bytes32 peer = IOAppPeers(rail.oftAdapter).peers(OP_EID);
-            require(peer != bytes32(0), string.concat(rail.name, ": OFT adapter has no LayerZero peer for the OP eid"));
-            return;
-        }
-
-        try IOFT(rail.oftAdapter).token() returns (address token) {
-            require(token == rail.token, string.concat(rail.name, ": OFT adapter does not front the configured token"));
-            bytes32 peer = IOAppPeers(rail.oftAdapter).peers(OP_EID);
-            require(peer != bytes32(0), string.concat(rail.name, ": OFT adapter has no LayerZero peer for the OP eid"));
-        } catch {
-            console.log("WARNING: %s oftAdapter's token()/peers() call reverted - pre-existing dev-only exception, NOT re-verified. See USDT0TopUpConfig natspec.", rail.name);
-        }
+        require(IOFT(rail.oftAdapter).token() == rail.token, string.concat(rail.name, ": OFT adapter does not front the configured token"));
+        bytes32 peer = IOAppPeers(rail.oftAdapter).peers(OP_EID);
+        require(peer != bytes32(0), string.concat(rail.name, ": OFT adapter has no LayerZero peer for the OP eid"));
     }
 
     // ---- single-element array helpers (setTokenConfig is batch-shaped) ----

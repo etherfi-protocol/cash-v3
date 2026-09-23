@@ -369,7 +369,7 @@
           "name": "usdt",
           "bridge": "oftBridgeAdapter",
           "maxSlippageInBps": "50",
-          "oftAdapter": "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb",
+          "oftAdapter": "0x904861a24F30EC96ea7CFC3bE9EA4B476d237e98",
           "destRecipient": "0xDe69649e21DDceeC86738211dCe6f7Bb4DEcd27B",
           "destEid": "30101"
         }
