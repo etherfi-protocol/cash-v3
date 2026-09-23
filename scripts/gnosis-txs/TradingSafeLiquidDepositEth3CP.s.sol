@@ -13,31 +13,11 @@ import { Utils } from "../utils/Utils.sol";
 import { TradingAccountGnosisHelpers } from "./TradingAccountGnosisHelpers.sol";
 
 /**
- * @notice Generates the Ethereum 3CP JSON that turns on the `TradingSafeLiquidDepositModule`.
- *         Two txs from the OperatingSafe, which owns the RoleRegistry and holds
- *         DATA_PROVIDER_ADMIN_ROLE:
- *
- *           1. RoleRegistry.grantRole(TRADING_SAFE_LIQUID_DEPOSIT_MODULE_ADMIN, OperatingSafe)
- *           2. EtherFiDataProvider.configureDefaultModules([TradingSafeLiquidDepositModule], [true])
- *
- *         `configureDefaultModules` whitelists AND marks the module default in one call, so it is
- *         enabled on every mainnet TradingSafe — existing safes included, since `isModuleEnabled`
- *         short-circuits on the data provider's default set rather than per-safe storage. That
- *         matches how the withdraw module, Enso, and Across are registered on this deployment.
- *
- *         The WBTC → Liquid BTC teller is set in the constructor, so this bundle does not call
- *         `addLiquidAssets`. The admin grant is what lets a later Safe tx add or remove routes.
- *         PAUSER and UNPAUSER are not granted here: the withdraw 3CP already put them on this
- *         registry (HyperNative and the Safe can pause; only the Safe can unpause). This script
- *         requires those holders and exercises the switch on the new module.
- *
- *         Ethereum only. Deposited Liquid BTC is forwarded to the factory-bound TopUp; the existing
- *         permissionless sweep bridges it to Optimism.
- *
- * @dev The module address is the CREATE3 prediction, so this bundle can be produced and reviewed
- *      before `DeployTradingSafeLiquidDepositModuleProd` broadcasts. Where the module is not on
- *      chain yet the fork simulation deploys it locally at that same deterministic address first,
- *      so the simulated end state is the one the real bundle produces.
+ * @notice Operating Safe bundle that enables `TradingSafeLiquidDepositModule` on Ethereum.
+ *         1. grant TRADING_SAFE_LIQUID_DEPOSIT_MODULE_ADMIN to the Operating Safe
+ *         2. configureDefaultModules, so every mainnet Trading Safe can use it
+ * @dev The address is the CREATE3 prediction. The fork deploys it locally if it is not on chain yet.
+ *      WBTC → Liquid BTC is set in the constructor. Pause roles already exist from the withdraw 3CP.
  *
  * Usage:
  *   source .env && forge script scripts/gnosis-txs/TradingSafeLiquidDepositEth3CP.s.sol --rpc-url $MAINNET_RPC
