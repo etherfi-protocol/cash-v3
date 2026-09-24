@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
@@ -26,9 +27,9 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         by the keeper at execution and forwarded through the safe to the Enso Router.
  * @dev The Enso calldata (`swapData`) is built off-chain by the BE via the Enso Route/Bundle
  *      API with the `router` routing strategy and stored at request time, then forwarded
- *      verbatim — there is no on-chain min-out / balance enforcement. Slippage protection
- *      lives entirely inside the Enso calldata; `order.minOut` is carried only for the
- *      signed intent and events. Off-chain monitoring catches BE bugs or mis-routing.
+ *      verbatim. The signed `order.recipient` is restricted to the user's Cash Safe /
+ *      Trading Safe pair, but the opaque route calldata is not decoded. Off-chain monitoring
+ *      remains responsible for route-payload consistency.
  *
  *      The module always executes via `EtherFiSafe.execTransactionFromModule`, which is a
  *      plain `call` (never `delegatecall`), so ONLY Enso's `router` strategy is usable here
@@ -100,6 +101,9 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("EnsoSwapModule.cancelSwap");
     address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
+    /// @notice TradingSafeFactory address on the trading chain; the CREATE3 deployer of each user's Trading Safe.
+    address private immutable tradingSafeFactory;
+
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id.
     event SwapRequested(address indexed safe, bytes32 indexed swapId, address srcToken, uint256 srcAmount, uint256 dstChainId, address dstToken, address recipient, uint256 minOut, uint256 deadline);
@@ -134,12 +138,17 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     error InsufficientOutputAmount();
     /// @notice Reverts when the native fee supplied by the keeper differs from the signed fee.
     error InvalidNativeFee();
+    /// @notice Reverts when the signed recipient is not one of the user's two safes.
+    error InvalidRecipient();
 
-    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
-    ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
-    ///      `cashModule` is zero where there is no card spending (and therefore no lend gateway).
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance, and
+    ///      `tradingSafeFactory`) live in the IMPLEMENTATION's code — every upgrade impl must
+    ///      be constructed with the same dependencies. `cashModule` is zero where there is no
+    ///      card spending (and therefore no lend gateway).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _tradingSafeFactory) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+        if (_tradingSafeFactory == address(0)) revert InvalidInput();
+        tradingSafeFactory = _tradingSafeFactory;
         _disableInitializers();
     }
 
@@ -229,6 +238,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
         if ($.ensoRouter == address(0)) revert MissingConfig();
+        _validateRecipient(safe, order.recipient);
         if (address(cashModule) != address(0)) {
             (uint64 withdrawalDelay,,) = cashModule.getDelays();
             if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
@@ -410,6 +420,23 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     }
 
     // ---- Internals ----
+
+    function _validateRecipient(address safe, address recipient) internal view {
+        // The recipient may be the calling Safe itself.
+        if (recipient == safe) return;
+
+        if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
+            // Trading Safe -> its source Cash Safe.
+            if (safe != _predictTradingSafe(recipient)) revert InvalidRecipient();
+        } else {
+            // Cash Safe -> its CREATE3-derived Trading Safe.
+            if (recipient != _predictTradingSafe(safe)) revert InvalidRecipient();
+        }
+    }
+
+    function _predictTradingSafe(address cashSafe) internal view returns (address) {
+        return CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
+    }
 
     /// @dev Verifies the user's signature over the FULL request — the order AND the Enso
     ///      `swapData` — consuming a safe nonce so a signed request can't replay. Binding
