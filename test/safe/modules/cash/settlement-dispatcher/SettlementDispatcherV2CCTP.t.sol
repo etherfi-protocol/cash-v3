@@ -39,6 +39,8 @@ contract MockCCTPTokenMessenger is ICCTPTokenMessenger {
         IERC20(burnToken).transferFrom(msg.sender, address(this), amount);
         emit DepositForBurnCalled(amount, destinationDomain, mintRecipient, burnToken, destinationCaller, maxFee, minFinalityThreshold);
     }
+
+    function localMinter() external pure override returns (address) { return address(0); }
 }
 
 contract SettlementDispatcherV2CCTPTest is Test, Constants {
