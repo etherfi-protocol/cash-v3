@@ -9,23 +9,27 @@ import { MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
 
 /**
  * @title ListStockWrappersSummerLend3CP
- * @notice LEND OWNER SAFE bundle: lists wSPYx, wQQQx and wTBLLx as collateral-only reserves on the prod
- *         Summer Lend instance, priced at 1 wei. Every risk parameter (collateral factor, liquidation
- *         bonus and fee, collateral risk, add cap) is copied from the mirror reserve it replaces, read
- *         live at generation time, so the two reserves differ only in underlying and price source.
+ * @notice TIMELOCK SAFE bundles: list wSPYx, wQQQx and wTBLLx as collateral-only reserves on the prod
+ *         Summer Lend instance, priced at 1 wei. The configurator roles sit with the 24h lend timelock, so
+ *         this writes two bundles: a scheduleBatch now and an executeBatch after the delay. Every risk
+ *         parameter (collateral factor, liquidation bonus and fee, collateral risk, add cap) is copied from
+ *         the mirror reserve it replaces, read live at generation time, so the two reserves differ only in
+ *         underlying and price source.
  *
  *         At 1 wei the reserves are open for supply but carry no borrowing power, which lets the lend
- *         sweep move every safe's wrapper in before the flip bundle switches the price sources.
+ *         sweep move every safe's wrapper in before the flip switches the price sources.
  *
- *         Nine calls, three per stock: HubConfigurator.addAsset, HubConfigurator.addSpoke,
- *         SpokeConfigurator.addReserve. Asset and reserve ids come from the live counters, so regenerate
- *         right before signing.
+ *         One batch of nine calls, three per stock: HubConfigurator.addAsset, HubConfigurator.addSpoke,
+ *         SpokeConfigurator.addReserve. The batch lists all three or none. Asset ids come from the live
+ *         counters, so nothing else may be listed on the instance between schedule and execute; if it is,
+ *         the Timelock Safe cancels and this is regenerated.
  *
  * Usage:
  *   forge script scripts/stock-migration/ListStockWrappersSummerLend3CP.s.sol --rpc-url $OPTIMISM_RPC -vvv
  */
 contract ListStockWrappersSummerLend3CP is StockMigration3CPBase {
-    string constant OUTPUT = "./output/ListStockWrappersSummerLend3CP-10.json";
+    string constant SCHEDULE = "./output/ListStockWrappersSummerLend3CP-schedule-10.json";
+    string constant EXECUTE = "./output/ListStockWrappersSummerLend3CP-execute-10.json";
 
     function run() public {
         _requireOptimismProd();
@@ -42,33 +46,24 @@ contract ListStockWrappersSummerLend3CP is StockMigration3CPBase {
         uint256 firstAssetId = hub.getAssetCount();
         uint256 firstReserveId = spoke.getReserveCount();
 
-        _writeBundle(stocks, feeds.oneWei8, firstAssetId);
-        console.log("Written: %s", OUTPUT);
+        // Collateral-only house style for the hub asset: flat 0% curve, no borrow use case.
+        address[] memory targets = new address[](stocks.length * 3);
+        bytes[] memory payloads = new bytes[](stocks.length * 3);
+        for (uint256 i = 0; i < stocks.length; ++i) {
+            targets[3 * i] = LendRails.HUB_CONFIGURATOR;
+            payloads[3 * i] = _addAssetCall(stocks[i].wrapper);
+            targets[3 * i + 1] = LendRails.HUB_CONFIGURATOR;
+            payloads[3 * i + 1] = _addSpokeCall(stocks[i], firstAssetId + i);
+            targets[3 * i + 2] = LendRails.SPOKE_CONFIGURATOR;
+            payloads[3 * i + 2] = _addReserveCall(stocks[i], firstAssetId + i, feeds.oneWei8);
+        }
+        _writeTimelockBundles(SCHEDULE, EXECUTE, StockMigration.LIST_SALT, targets, payloads);
 
-        executeGnosisTransactionBundle(OUTPUT);
         for (uint256 i = 0; i < stocks.length; ++i) {
             _assertListed(stocks[i], spoke, hub, feeds.oneWei8, firstAssetId + i, firstReserveId + i);
             console.log(string.concat("  ", stocks[i].symbol, " wrapper listed: assetId ", vm.toString(firstAssetId + i), ", reserveId ", vm.toString(firstReserveId + i)));
         }
         console.log("Simulation passed.");
-    }
-
-    function _writeBundle(MigratedStock[] memory stocks, address oneWei8, uint256 firstAssetId) internal {
-        string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(LendRails.LEND_OWNER_SAFE));
-        for (uint256 i = 0; i < stocks.length; ++i) {
-            txs = _appendStock(txs, stocks[i], oneWei8, firstAssetId + i, i == stocks.length - 1);
-        }
-        vm.createDir("./output", true);
-        vm.writeFile(OUTPUT, txs);
-    }
-
-    /// @dev Three calls for one stock, every parameter copied live from the mirror reserve. Collateral-only
-    ///      house style for the hub asset: flat 0% curve, no borrow use case.
-    function _appendStock(string memory txs, MigratedStock memory s, address oneWei8, uint256 assetId, bool last) internal view returns (string memory) {
-        txs = _append(txs, LendRails.HUB_CONFIGURATOR, _addAssetCall(s.wrapper), false);
-        txs = _append(txs, LendRails.HUB_CONFIGURATOR, _addSpokeCall(s, assetId), false);
-        txs = _append(txs, LendRails.SPOKE_CONFIGURATOR, _addReserveCall(s, assetId, oneWei8), last);
-        return txs;
     }
 
     function _addAssetCall(address wrapper) internal pure returns (bytes memory) {
@@ -127,5 +122,28 @@ contract ListStockWrappersSummerLend3CP is StockMigration3CPBase {
         assertEq(uint256(spokeConfig.drawCap), 0, "drawCap");
         assertTrue(spokeConfig.active, "active");
         assertFalse(spokeConfig.halted, "halted");
+    }
+}
+
+/// @dev The wrapper reserve ids, for the bundles that follow the listing. The listing is one atomic timelock
+///      batch, so either all three wrappers are live or none are; with none, the listing is rehearsed on the fork.
+abstract contract StockWrapperReserveIds is StockMigration3CPBase {
+    function _newReserveIds(MigratedStock[] memory stocks) internal returns (uint256[] memory) {
+        uint256[] memory ids = new uint256[](stocks.length);
+        uint256 listed;
+        for (uint256 i = 0; i < stocks.length; ++i) {
+            ids[i] = _reserveIdOf(stocks[i].wrapper);
+            if (ids[i] != type(uint256).max) ++listed;
+        }
+        if (listed == stocks.length) return ids;
+        require(listed == 0, "only some wrappers are listed; the listing batch should land all three at once");
+
+        console.log("Wrappers not yet listed live; rehearsing the listing on the fork");
+        new ListStockWrappersSummerLend3CP().run();
+        for (uint256 i = 0; i < stocks.length; ++i) {
+            ids[i] = _reserveIdOf(stocks[i].wrapper);
+            require(ids[i] != type(uint256).max, "listing did not list the wrapper");
+        }
+        return ids;
     }
 }

@@ -32,6 +32,12 @@ library StockMigration {
     /// @dev The Operating Safe exists at the same address on both chains; it is the OFT adapters' owner, the
     ///      PAUSER and UNPAUSER on both RoleRegistries, and the recipient of the bridged stock on Optimism.
     address internal constant OPERATING_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    /// @dev Summer Lend's 24h timelock, sole holder of the hub (200) and spoke (400) configurator roles, and the
+    ///      3-of-6 Timelock Safe that proposes, executes and cancels on it.
+    address internal constant LEND_TIMELOCK = 0xbaCa0cD6B69Eef3257e2D122b22ddEE8AeE5e283;
+    address internal constant TIMELOCK_SAFE = 0xd442635bc9bF83E21bBA8B65e224F5Db6a011166;
+    bytes32 internal constant LIST_SALT = keccak256("StockMigration.ListWrappers");
+    bytes32 internal constant FLIP_SALT = keccak256("StockMigration.FlipPriceSources");
 
     function all() internal pure returns (MigratedStock[] memory) {
         MigratedStock[] memory stocks = new MigratedStock[](3);
@@ -43,11 +49,23 @@ library StockMigration {
 }
 
 /// @dev The configurator calls this migration adds to the stock-listing mirrors (role gating: 400 for the
-///      price source, 401 for the pause flag, 402 for the freeze; all held by the Lend Owner Safe).
+///      price source, held by the lend timelock; 403 for the pause flag and 402 for the freeze, held by the
+///      Lend Owner Safe).
 interface ISpokeConfiguratorMigrationLike {
     function updateReservePriceSource(address spoke, uint256 reserveId, address priceSource) external;
     function updatePaused(address spoke, uint256 reserveId, bool paused) external;
     function freezeReserve(address spoke, uint256 reserveId) external;
+}
+
+/// @dev OpenZeppelin TimelockController, the batch surface the Timelock Safe drives.
+interface ILendTimelock {
+    function scheduleBatch(address[] calldata targets, uint256[] calldata values, bytes[] calldata payloads, bytes32 predecessor, bytes32 salt, uint256 delay) external;
+    function executeBatch(address[] calldata targets, uint256[] calldata values, bytes[] calldata payloads, bytes32 predecessor, bytes32 salt) external payable;
+    function hashOperationBatch(address[] calldata targets, uint256[] calldata values, bytes[] calldata payloads, bytes32 predecessor, bytes32 salt) external pure returns (bytes32);
+    function isOperation(bytes32 id) external view returns (bool);
+    function isOperationDone(bytes32 id) external view returns (bool);
+    function getTimestamp(bytes32 id) external view returns (uint256);
+    function getMinDelay() external view returns (uint256);
 }
 
 /// @dev The two OFT bridge contracts (Ethereum adapter, Optimism shadow) share this pause surface.

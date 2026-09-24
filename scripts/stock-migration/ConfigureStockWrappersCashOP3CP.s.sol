@@ -9,7 +9,7 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { ILendGatewayLike, LendRails } from "../stock-listing/StockLendConfig.sol";
-import { StockMigration3CPBase } from "./StockMigration3CPBase.sol";
+import { StockWrapperReserveIds } from "./ListStockWrappersSummerLend3CP.s.sol";
 import { MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
 
 /**
@@ -27,12 +27,11 @@ import { MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
  *
  *         Order is load-bearing inside the bundle: tx 2 reads the price tx 1 configures.
  *
- * Usage (after the listing bundle is generated; the fork replays it when the wrappers are not live):
+ * Usage (the fork rehearses the listing when the wrappers are not live yet):
  *   forge script scripts/stock-migration/ConfigureStockWrappersCashOP3CP.s.sol --rpc-url $OPTIMISM_RPC -vvv
  */
-contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
+contract ConfigureStockWrappersCashOP3CP is StockWrapperReserveIds {
     string constant OUTPUT = "./output/ConfigureStockWrappersCashOP3CP-10.json";
-    string constant LISTING_BUNDLE = "./output/ListStockWrappersSummerLend3CP-10.json";
 
     PriceProviderV2 internal pp;
     IDebtManager internal debtManager;
@@ -130,24 +129,5 @@ contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
             if (assets[i] == token) return true;
         }
         return false;
-    }
-
-    function _newReserveIds(MigratedStock[] memory stocks) internal returns (uint256[] memory) {
-        uint256[] memory ids = new uint256[](stocks.length);
-        bool listed = true;
-        for (uint256 i = 0; i < stocks.length; ++i) {
-            ids[i] = _reserveIdOf(stocks[i].wrapper);
-            listed = listed && ids[i] != type(uint256).max;
-        }
-        if (listed) return ids;
-
-        require(vm.exists(LISTING_BUNDLE), "wrappers not listed; generate the listing bundle first");
-        console.log("Wrappers not yet listed live; replaying the listing bundle on the fork");
-        executeGnosisTransactionBundle(LISTING_BUNDLE);
-        for (uint256 i = 0; i < stocks.length; ++i) {
-            ids[i] = _reserveIdOf(stocks[i].wrapper);
-            require(ids[i] != type(uint256).max, "listing bundle did not list the wrapper");
-        }
-        return ids;
     }
 }

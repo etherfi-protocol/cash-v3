@@ -9,6 +9,7 @@ import { IAaveV4PriceFeed } from "../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { LendRails } from "../stock-listing/StockLendConfig.sol";
+import { ConfigureStockWrappersCashOP3CP } from "./ConfigureStockWrappersCashOP3CP.s.sol";
 import { StockMigration3CPBase } from "./StockMigration3CPBase.sol";
 import { MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
 
@@ -23,13 +24,11 @@ import { MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
  *         The 6-decimal placeholder exists because PriceProviderV2 reports 6 decimals and would floor an
  *         8-decimal 1 wei to a price of 0, and callers dividing by the price would revert.
  *
- * Usage (after the Cash config bundle; the fork replays it when the wrappers are not yet priced):
+ * Usage (the fork rehearses the Cash config, and the listing before it, when they are not live yet):
  *   forge script scripts/stock-migration/FlipStockPricesCashOP3CP.s.sol --rpc-url $OPTIMISM_RPC -vvv
  */
 contract FlipStockPricesCashOP3CP is StockMigration3CPBase {
     string constant OUTPUT = "./output/FlipStockPricesCashOP3CP-10.json";
-    string constant CONFIG_BUNDLE = "./output/ConfigureStockWrappersCashOP3CP-10.json";
-    string constant LISTING_BUNDLE = "./output/ListStockWrappersSummerLend3CP-10.json";
 
     function run() public {
         _requireOptimismProd();
@@ -85,13 +84,7 @@ contract FlipStockPricesCashOP3CP is StockMigration3CPBase {
             configured = configured && pp.tokenConfig(stocks[i].wrapper).oracle != address(0);
         }
         if (configured) return;
-        require(vm.exists(CONFIG_BUNDLE), "wrappers not priced on the Cash side; generate the config bundle first");
-        if (_reserveIdOf(stocks[0].wrapper) == type(uint256).max) {
-            require(vm.exists(LISTING_BUNDLE), "wrappers not listed; generate the listing bundle first");
-            console.log("Wrappers not yet listed live; replaying the listing bundle on the fork");
-            executeGnosisTransactionBundle(LISTING_BUNDLE);
-        }
-        console.log("Wrappers not yet configured live; replaying the Cash config bundle on the fork");
-        executeGnosisTransactionBundle(CONFIG_BUNDLE);
+        console.log("Wrappers not yet priced on the Cash side; rehearsing the Cash config on the fork");
+        new ConfigureStockWrappersCashOP3CP().run();
     }
 }

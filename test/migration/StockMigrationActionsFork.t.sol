@@ -13,16 +13,14 @@ import { ListStockWrappersSummerLend3CP } from "../../scripts/stock-migration/Li
 import { PauseStockRailsOptimism3CP, UnpauseStockRailsOptimism3CP } from "../../scripts/stock-migration/PauseStockRails3CP.s.sol";
 import { PauseStockReservesSummerLend3CP } from "../../scripts/stock-migration/PauseStockReservesSummerLend3CP.s.sol";
 import { MigratedStock, StockMigration } from "../../scripts/stock-migration/StockMigrationConfig.sol";
+import { IAggregatorV3 } from "../../src/interfaces/IAggregatorV3.sol";
 import { BinSponsor, Cashback, ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { IRoleRegistry } from "../../src/interfaces/IRoleRegistry.sol";
 import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
+import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 
 interface ISpokeUserSupply {
     function getUserSuppliedAssets(uint256 reserveId, address user) external view returns (uint256);
-}
-
-interface IAccessManagerLike {
-    function grantRole(uint64 roleId, address account, uint32 executionDelay) external;
 }
 
 /**
@@ -42,13 +40,23 @@ contract StockMigrationActionsForkTest is Test {
     address constant CASH_MODULE = 0x7Ca0b75E67E33c0014325B739A8d019C4FE445F0;
     address constant LEND_GATEWAY = 0x01F8cDFb1694eA8fE4ED6c38a0fD78d1188E03F4;
     address constant ROLE_REGISTRY = 0x5C1E3D653fcbC54Ae25c2AD9d59548D2082C687B;
-    address constant AAVE_ACCESS_MANAGER = 0x188d7173772499FB6375F23FdFd130CE6107286b;
-    address constant LEND_TIMELOCK = 0xbaCa0cD6B69Eef3257e2D122b22ddEE8AeE5e283;
+    address constant PRICE_PROVIDER = 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB;
     /// @dev A Credit-mode gateway safe with iwSPYx supplied and USDC debt.
     address constant DEFAULT_SAFE = 0x4426B67eC6793dF4BCc337b11d2406749d235622;
     uint256 constant ACTION_USD = 10e6;
 
-    string[7] outputs = ["./output/ListStockWrappersSummerLend3CP-10.json", "./output/ConfigureStockWrappersCashOP3CP-10.json", "./output/PauseStockReservesSummerLend3CP-10.json", "./output/PauseStockRailsOptimism3CP-10.json", "./output/FlipStockReservesSummerLend3CP-10.json", "./output/FlipStockPricesCashOP3CP-10.json", "./output/UnpauseStockRailsOptimism3CP-10.json"];
+    string[10] outputs = [
+        "./output/ListStockWrappersSummerLend3CP-schedule-10.json",
+        "./output/ListStockWrappersSummerLend3CP-execute-10.json",
+        "./output/ConfigureStockWrappersCashOP3CP-10.json",
+        "./output/PauseStockReservesSummerLend3CP-10.json",
+        "./output/PauseStockRailsOptimism3CP-10.json",
+        "./output/FlipStockReservesSummerLend3CP-schedule-10.json",
+        "./output/FlipStockReservesSummerLend3CP-execute-10.json",
+        "./output/FreezeStockMirrorsSummerLend3CP-10.json",
+        "./output/FlipStockPricesCashOP3CP-10.json",
+        "./output/UnpauseStockRailsOptimism3CP-10.json"
+    ];
 
     struct Result {
         bool spend;
@@ -83,13 +91,6 @@ contract StockMigrationActionsForkTest is Test {
         IRoleRegistry rr = IRoleRegistry(ROLE_REGISTRY);
         vm.prank(rr.owner());
         rr.grantRole(keccak256("ETHER_FI_WALLET_ROLE"), wallet);
-
-        // Fork only: since 2026-09-19 the listing (200, 400) roles sit with the 24h lend timelock, not the
-        // Lend Owner Safe the bundles target. Hand them back here so the actions can be checked end to end.
-        vm.startPrank(LEND_TIMELOCK);
-        IAccessManagerLike(AAVE_ACCESS_MANAGER).grantRole(200, LendRails.LEND_OWNER_SAFE, 0);
-        IAccessManagerLike(AAVE_ACCESS_MANAGER).grantRole(400, LendRails.LEND_OWNER_SAFE, 0);
-        vm.stopPrank();
     }
 
     function test_fork_majorActionsAcrossMigration() public {
@@ -141,11 +142,31 @@ contract StockMigrationActionsForkTest is Test {
 
     /// @dev Tries each action from the same state and rolls it back, so every stage starts clean.
     function _checkStage(string memory name, address collateral) internal returns (Result memory r) {
+        _restampChainlink();
         console.log(string.concat("Stage ", name, ", health factor"), gw.healthFactor(safe));
         r.spend = _try(name, "spend", abi.encodeCall(this.actSpend, ()));
         r.borrow = _try(name, "borrow", abi.encodeCall(this.actBorrow, ()));
         r.repay = _try(name, "repay", abi.encodeCall(this.actRepay, ()));
         r.withdraw = _try(name, "withdraw", abi.encodeCall(this.actWithdraw, (collateral)));
+    }
+
+    /// @dev The timelock waits move the fork clock forward with no oracle updates. On chain the Chainlink feeds
+    ///      keep updating through the wait, so restamp the Cash-side ones to now at their current answer.
+    function _restampChainlink() internal {
+        MigratedStock[] memory stocks = StockMigration.all();
+        address[] memory tokens = new address[](1 + stocks.length * 3);
+        tokens[0] = USDC;
+        for (uint256 i = 0; i < stocks.length; ++i) {
+            tokens[1 + 3 * i] = stocks[i].stock;
+            tokens[2 + 3 * i] = stocks[i].wrapper;
+            tokens[3 + 3 * i] = stocks[i].iToken;
+        }
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            PriceProviderV2.Config memory config = PriceProviderV2(PRICE_PROVIDER).tokenConfig(tokens[i]);
+            if (!config.isChainlinkType) continue;
+            (uint80 roundId, int256 answer, uint256 startedAt,, uint80 answeredInRound) = IAggregatorV3(config.oracle).latestRoundData();
+            vm.mockCall(config.oracle, abi.encodeWithSelector(IAggregatorV3.latestRoundData.selector), abi.encode(roundId, answer, startedAt, block.timestamp, answeredInRound));
+        }
     }
 
     function _try(string memory stage, string memory action, bytes memory call) internal returns (bool) {

@@ -5,28 +5,33 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { console } from "forge-std/console.sol";
 
 import { IAaveOracleLike, ISpokeLike, LendRails } from "../stock-listing/StockLendConfig.sol";
-import { StockMigration3CPBase } from "./StockMigration3CPBase.sol";
+import { StockWrapperReserveIds } from "./ListStockWrappersSummerLend3CP.s.sol";
+import { PauseStockReservesSummerLend3CP } from "./PauseStockReservesSummerLend3CP.s.sol";
 import { ISpokeConfiguratorMigrationLike, MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
 
 /**
  * @title FlipStockReservesSummerLend3CP
- * @notice LEND OWNER SAFE bundle, the one-way step on the Aave side. In a single atomic batch, for each
- *         of the three stocks: the wrapper reserve moves from the 1 wei placeholder to its live
- *         wrapper-rate feed, the mirror reserve moves to the 1 wei placeholder, and the mirror reserve is
- *         frozen. At no instant do both reserves count, so no borrower's health factor moves provided
- *         every safe's wrapper is already supplied. That check, and the health-factor simulation, are the
- *         go/no-go for signing this.
+ * @notice The one-way step on the Aave side, in three bundles:
  *
+ *           1. TIMELOCK SAFE schedule: one scheduleBatch that, per stock, moves the wrapper reserve from the
+ *              1 wei placeholder to its live wrapper-rate feed and the mirror reserve to the 1 wei placeholder.
+ *           2. TIMELOCK SAFE execute: the matching executeBatch, at least 24h after the schedule. Every price
+ *              source moves in this one transaction, so at no instant do both reserves count, and no
+ *              borrower's health factor moves provided every safe's wrapper is already supplied. That check,
+ *              and the health-factor simulation, are the go/no-go for signing it.
+ *           3. LEND OWNER SAFE: freeze the three mirror reserves, right after the execute.
+ *
+ *         The price sources need the timelock's configurator role; the freeze stays with the Lend Owner Safe.
  *         The mirror reserves were paused on Friday and stay paused; frozen and 1 wei go on top so nothing
  *         about them ever counts or moves again.
  *
- * Usage (after the listing bundle; the fork replays it if the wrappers are not yet listed live):
+ * Usage (the fork rehearses the listing and the Friday pause when they are not live yet):
  *   forge script scripts/stock-migration/FlipStockReservesSummerLend3CP.s.sol --rpc-url $OPTIMISM_RPC -vvv
  */
-contract FlipStockReservesSummerLend3CP is StockMigration3CPBase {
-    string constant OUTPUT = "./output/FlipStockReservesSummerLend3CP-10.json";
-    string constant LISTING_BUNDLE = "./output/ListStockWrappersSummerLend3CP-10.json";
-    string constant PAUSE_BUNDLE = "./output/PauseStockReservesSummerLend3CP-10.json";
+contract FlipStockReservesSummerLend3CP is StockWrapperReserveIds {
+    string constant SCHEDULE = "./output/FlipStockReservesSummerLend3CP-schedule-10.json";
+    string constant EXECUTE = "./output/FlipStockReservesSummerLend3CP-execute-10.json";
+    string constant FREEZE = "./output/FreezeStockMirrorsSummerLend3CP-10.json";
 
     function run() public {
         _requireOptimismProd();
@@ -45,10 +50,17 @@ contract FlipStockReservesSummerLend3CP is StockMigration3CPBase {
             _logSupplied(s);
         }
 
-        _writeBundle(stocks, newIds, feeds);
-        console.log("Written: %s", OUTPUT);
+        address[] memory targets = new address[](stocks.length * 2);
+        bytes[] memory payloads = new bytes[](stocks.length * 2);
+        for (uint256 i = 0; i < stocks.length; ++i) {
+            targets[2 * i] = LendRails.SPOKE_CONFIGURATOR;
+            payloads[2 * i] = abi.encodeCall(ISpokeConfiguratorMigrationLike.updateReservePriceSource, (LendRails.CASH_SPOKE, newIds[i], feeds.wrapperUsd[i]));
+            targets[2 * i + 1] = LendRails.SPOKE_CONFIGURATOR;
+            payloads[2 * i + 1] = abi.encodeCall(ISpokeConfiguratorMigrationLike.updateReservePriceSource, (LendRails.CASH_SPOKE, stocks[i].oldReserveId, feeds.oneWei8));
+        }
+        _writeTimelockBundles(SCHEDULE, EXECUTE, StockMigration.FLIP_SALT, targets, payloads);
+        _writeFreezeBundle(stocks);
 
-        executeGnosisTransactionBundle(OUTPUT);
         ISpokeLike spoke = ISpokeLike(LendRails.CASH_SPOKE);
         for (uint256 i = 0; i < stocks.length; ++i) {
             MigratedStock memory s = stocks[i];
@@ -64,39 +76,17 @@ contract FlipStockReservesSummerLend3CP is StockMigration3CPBase {
         console.log("Simulation passed.");
     }
 
-    function _writeBundle(MigratedStock[] memory stocks, uint256[] memory newIds, MigrationFeeds memory feeds) internal {
+    function _writeFreezeBundle(MigratedStock[] memory stocks) internal {
         string memory txs = _getGnosisHeader(vm.toString(block.chainid), addressToHex(LendRails.LEND_OWNER_SAFE));
         for (uint256 i = 0; i < stocks.length; ++i) {
-            bool last = i == stocks.length - 1;
-            txs = _append(txs, LendRails.SPOKE_CONFIGURATOR, abi.encodeCall(ISpokeConfiguratorMigrationLike.updateReservePriceSource, (LendRails.CASH_SPOKE, newIds[i], feeds.wrapperUsd[i])), false);
-            txs = _append(txs, LendRails.SPOKE_CONFIGURATOR, abi.encodeCall(ISpokeConfiguratorMigrationLike.updateReservePriceSource, (LendRails.CASH_SPOKE, stocks[i].oldReserveId, feeds.oneWei8)), false);
-            txs = _append(txs, LendRails.SPOKE_CONFIGURATOR, abi.encodeCall(ISpokeConfiguratorMigrationLike.freezeReserve, (LendRails.CASH_SPOKE, stocks[i].oldReserveId)), last);
+            txs = _append(txs, LendRails.SPOKE_CONFIGURATOR, abi.encodeCall(ISpokeConfiguratorMigrationLike.freezeReserve, (LendRails.CASH_SPOKE, stocks[i].oldReserveId)), i == stocks.length - 1);
         }
-        vm.createDir("./output", true);
-        vm.writeFile(OUTPUT, txs);
+        vm.writeFile(FREEZE, txs);
+        console.log("Written: %s", FREEZE);
+        executeGnosisTransactionBundle(FREEZE);
     }
 
-    /// @dev The wrapper reserve ids; replays the listing bundle on the fork when they are not live yet.
-    function _newReserveIds(MigratedStock[] memory stocks) internal returns (uint256[] memory) {
-        uint256[] memory ids = new uint256[](stocks.length);
-        bool listed = true;
-        for (uint256 i = 0; i < stocks.length; ++i) {
-            ids[i] = _reserveIdOf(stocks[i].wrapper);
-            listed = listed && ids[i] != type(uint256).max;
-        }
-        if (listed) return ids;
-
-        require(vm.exists(LISTING_BUNDLE), "wrappers not listed; generate the listing bundle first");
-        console.log("Wrappers not yet listed live; replaying the listing bundle on the fork");
-        executeGnosisTransactionBundle(LISTING_BUNDLE);
-        for (uint256 i = 0; i < stocks.length; ++i) {
-            ids[i] = _reserveIdOf(stocks[i].wrapper);
-            require(ids[i] != type(uint256).max, "listing bundle did not list the wrapper");
-        }
-        return ids;
-    }
-
-    /// @dev The Friday pause bundle must have executed; replays it on the fork when generated in one sitting.
+    /// @dev The Friday pause bundle must have executed; rehearsed on the fork when it has not.
     function _ensureMirrorsPaused(MigratedStock[] memory stocks) internal {
         ISpokeLike spoke = ISpokeLike(LendRails.CASH_SPOKE);
         bool paused = true;
@@ -104,13 +94,12 @@ contract FlipStockReservesSummerLend3CP is StockMigration3CPBase {
             paused = paused && spoke.getReserveConfig(stocks[i].oldReserveId).paused;
         }
         if (paused) return;
-        require(vm.exists(PAUSE_BUNDLE), "mirror reserves not paused; generate the Friday pause bundle first");
-        console.log("Mirror reserves not yet paused live; replaying the pause bundle on the fork");
-        executeGnosisTransactionBundle(PAUSE_BUNDLE);
+        console.log("Mirror reserves not yet paused live; rehearsing the Friday pause on the fork");
+        new PauseStockReservesSummerLend3CP().run();
     }
 
     /// @dev Informational: the hub's holdings show whether the lend sweep has moved the collateral over.
-    ///      Left as a log, not a require, so the bundle can be generated for review ahead of the weekend.
+    ///      Left as a log, not a require, so the bundles can be generated for review ahead of the weekend.
     function _logSupplied(MigratedStock memory s) internal view {
         uint256 wrapperInHub = IERC20(s.wrapper).balanceOf(LendRails.CASH_HUB);
         uint256 mirrorInHub = IERC20(s.iToken).balanceOf(LendRails.CASH_HUB);
