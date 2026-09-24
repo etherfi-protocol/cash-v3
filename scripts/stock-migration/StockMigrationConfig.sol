@@ -38,6 +38,10 @@ library StockMigration {
     address internal constant TIMELOCK_SAFE = 0xd442635bc9bF83E21bBA8B65e224F5Db6a011166;
     bytes32 internal constant LIST_SALT = keccak256("StockMigration.ListWrappers");
     bytes32 internal constant FLIP_SALT = keccak256("StockMigration.FlipPriceSources");
+    /// @dev The 8h operating timelock, same address on both chains, sole holder of ADMIN_TIMELOCK_ROLE; the
+    ///      Operating Safe proposes and executes on it. TopUpFactory.removeTokenConfig is gated behind it.
+    address internal constant OPERATING_TIMELOCK = 0x9AEb8eaa982084219d1A938D8F7B5040a1d47849;
+    bytes32 internal constant TOP_UP_SALT = keccak256("StockMigration.RemoveTopUpConfigs");
 
     function all() internal pure returns (MigratedStock[] memory) {
         MigratedStock[] memory stocks = new MigratedStock[](3);
@@ -55,6 +59,17 @@ interface ISpokeConfiguratorMigrationLike {
     function updateReservePriceSource(address spoke, uint256 reserveId, address priceSource) external;
     function updatePaused(address spoke, uint256 reserveId, bool paused) external;
     function freezeReserve(address spoke, uint256 reserveId) external;
+}
+
+/// @dev OpenZeppelin TimelockController, the single-call surface the Operating Safe drives.
+interface IOperatingTimelock {
+    function schedule(address target, uint256 value, bytes calldata data, bytes32 predecessor, bytes32 salt, uint256 delay) external;
+    function execute(address target, uint256 value, bytes calldata payload, bytes32 predecessor, bytes32 salt) external payable;
+    function hashOperation(address target, uint256 value, bytes calldata data, bytes32 predecessor, bytes32 salt) external pure returns (bytes32);
+    function isOperation(bytes32 id) external view returns (bool);
+    function isOperationDone(bytes32 id) external view returns (bool);
+    function getTimestamp(bytes32 id) external view returns (uint256);
+    function getMinDelay() external view returns (uint256);
 }
 
 /// @dev OpenZeppelin TimelockController, the batch surface the Timelock Safe drives.

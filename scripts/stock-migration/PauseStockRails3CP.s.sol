@@ -7,7 +7,7 @@ import { console } from "forge-std/console.sol";
 
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
-import { IPausable, IPausableBridge, ITopUpFactoryLike, MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
+import { IOperatingTimelock, IPausable, IPausableBridge, ITopUpFactoryLike, MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
 
 /**
  * @notice Operating Safe bundles that stop every rail the three stocks ride before the migration weekend,
@@ -15,7 +15,9 @@ import { IPausable, IPausableBridge, ITopUpFactoryLike, MigratedStock, StockMigr
  *         both RoleRegistries are the Operating Safe, so one Safe per chain does all of it.
  *
  *         Ethereum: pause the three OFT adapters, remove the three wrappers' top-up configs (so a top-up
- *         cannot route new stock into a lockbox that is about to be emptied), pause the StockUnwrapper.
+ *         cannot route new stock into a lockbox that is about to be emptied), pause the StockUnwrapper. The
+ *         top-up removal is gated behind the 8h operating timelock, so it is scheduled at least 8h ahead in
+ *         its own bundle and executed from inside the weekend pause bundle.
  *         Optimism: pause the three mirror tokens, the StockWithdrawModule, and both asset recovery modules.
  *
  *         Deliberately not paused: TopUpDest, which credits every asset's top-ups on OP, and the PAXG
@@ -55,6 +57,7 @@ abstract contract StockRailsBundleBase is GnosisHelpers, Test, Utils {
 }
 
 contract PauseStockRailsEthereum3CP is StockRailsBundleBase {
+    string constant SCHEDULE = "./output/PauseStockRailsEthereum3CP-schedule-1.json";
     string constant OUTPUT = "./output/PauseStockRailsEthereum3CP-1.json";
 
     function run() public {
@@ -77,11 +80,14 @@ contract PauseStockRailsEthereum3CP is StockRailsBundleBase {
         require(!unwrapper.paused(), "StockUnwrapper already paused");
         address paxgAdapter = factory.getTokenConfig(PAXG, OP_CHAIN_ID).bridgeAdapter;
 
+        bytes memory removeCall = abi.encodeCall(ITopUpFactoryLike.removeTokenConfig, (wrappers, chainIds));
+        bytes memory executeCall = _scheduleTopUpRemoval(address(factory), removeCall);
+
         string memory txs = _header();
         for (uint256 i = 0; i < stocks.length; ++i) {
             txs = _append(txs, stocks[i].adapter, abi.encodeCall(IPausableBridge.pauseBridge, ()), false);
         }
-        txs = _append(txs, address(factory), abi.encodeCall(ITopUpFactoryLike.removeTokenConfig, (wrappers, chainIds)), false);
+        txs = _append(txs, StockMigration.OPERATING_TIMELOCK, executeCall, false);
         txs = _append(txs, address(unwrapper), abi.encodeCall(IPausable.pause, ()), true);
         _write(OUTPUT, txs);
 
@@ -93,6 +99,25 @@ contract PauseStockRailsEthereum3CP is StockRailsBundleBase {
         assertTrue(unwrapper.paused(), "unwrapper not paused");
         assertEq(factory.getTokenConfig(PAXG, OP_CHAIN_ID).bridgeAdapter, paxgAdapter, "PAXG top-up config changed");
         console.log("Simulation passed: 3 adapters paused, 3 top-up configs removed, StockUnwrapper paused. PAXG untouched.");
+    }
+
+    /// @dev Writes and rehearses the Safe's schedule bundle when the removal is not queued live yet, warps the
+    ///      fork past the delay, and returns the timelock execute call for the weekend bundle.
+    function _scheduleTopUpRemoval(address factory, bytes memory removeCall) internal returns (bytes memory) {
+        IOperatingTimelock timelock = IOperatingTimelock(StockMigration.OPERATING_TIMELOCK);
+        bytes32 id = timelock.hashOperation(factory, 0, removeCall, bytes32(0), StockMigration.TOP_UP_SALT);
+        require(!timelock.isOperationDone(id), "top-up removal already executed on the timelock");
+        if (!timelock.isOperation(id)) {
+            _write(SCHEDULE, _append(_header(), address(timelock), abi.encodeCall(IOperatingTimelock.schedule, (factory, 0, removeCall, bytes32(0), StockMigration.TOP_UP_SALT, timelock.getMinDelay())), true));
+            executeGnosisTransactionBundle(SCHEDULE);
+        } else {
+            console.log("Top-up removal already scheduled live; writing the weekend bundle only");
+        }
+        console.log("  top-up removal operation id:");
+        console.logBytes32(id);
+        console.log("  executable from (unix):", timelock.getTimestamp(id));
+        if (block.timestamp < timelock.getTimestamp(id)) vm.warp(timelock.getTimestamp(id));
+        return abi.encodeCall(IOperatingTimelock.execute, (factory, 0, removeCall, bytes32(0), StockMigration.TOP_UP_SALT));
     }
 }
 
@@ -132,7 +157,9 @@ contract PauseStockRailsOptimism3CP is StockRailsBundleBase {
     }
 }
 
-/// @notice After cutover: the mirrors stay paused for good; the withdraw and recovery modules come back.
+/// @notice After cutover: the recovery modules come back. The mirrors and the StockWithdrawModule stay paused for
+///         good: the module only withdraws mirrors over the retired OFT rail, so an order placed on it could never
+///         settle and would hold the safe's withdrawal slot.
 contract UnpauseStockRailsOptimism3CP is StockRailsBundleBase {
     string constant OUTPUT = "./output/UnpauseStockRailsOptimism3CP-10.json";
 
@@ -142,21 +169,21 @@ contract UnpauseStockRailsOptimism3CP is StockRailsBundleBase {
         IPausable withdrawModule = IPausable(stdJson.readAddress(deployments, ".addresses.StockWithdrawModule"));
         IPausable safeRecovery = IPausable(stdJson.readAddress(deployments, ".addresses.SafeAssetRecoveryModule"));
         IPausable recovery = IPausable(stdJson.readAddress(deployments, ".addresses.AssetRecoveryModule"));
-        require(withdrawModule.paused() && safeRecovery.paused() && recovery.paused(), "a module is not paused; nothing to unpause");
+        require(safeRecovery.paused() && recovery.paused(), "a recovery module is not paused; nothing to unpause");
 
         string memory txs = _header();
-        txs = _append(txs, address(withdrawModule), abi.encodeCall(IPausable.unpause, ()), false);
         txs = _append(txs, address(safeRecovery), abi.encodeCall(IPausable.unpause, ()), false);
         txs = _append(txs, address(recovery), abi.encodeCall(IPausable.unpause, ()), true);
         _write(OUTPUT, txs);
 
         executeGnosisTransactionBundle(OUTPUT);
-        assertFalse(withdrawModule.paused() || safeRecovery.paused() || recovery.paused(), "a module is still paused");
+        assertFalse(safeRecovery.paused() || recovery.paused(), "a recovery module is still paused");
+        assertTrue(withdrawModule.paused(), "StockWithdrawModule must stay paused");
         MigratedStock[] memory stocks = StockMigration.all();
         for (uint256 i = 0; i < stocks.length; ++i) {
             assertTrue(IPausableBridge(stocks[i].iToken).paused(), "mirror must stay paused");
         }
-        console.log("Simulation passed: modules unpaused, mirrors still paused.");
+        console.log("Simulation passed: recovery modules unpaused; mirrors and StockWithdrawModule still paused.");
     }
 }
 

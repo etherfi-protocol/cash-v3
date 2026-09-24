@@ -5,7 +5,7 @@ import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { console } from "forge-std/console.sol";
 
-import { StockRailsBundleBase } from "./PauseStockRails3CP.s.sol";
+import { PauseStockRailsEthereum3CP, StockRailsBundleBase } from "./PauseStockRails3CP.s.sol";
 import { IPausableBridge, MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
 
 /**
@@ -19,15 +19,14 @@ import { IPausableBridge, MigratedStock, StockMigration } from "./StockMigration
  *         adapter, then unpausing, restores today's state. The bridge send that follows is not.
  *
  *         Requires the adapter beacon upgrade (OFT listing repo) to have executed and the Ethereum pause
- *         bundle to have run. If the adapters are still unpaused on the fork, the pause bundle JSON is
- *         replayed first so both can be generated in one sitting.
+ *         bundle to have run. If the adapters are still unpaused on the fork, the Ethereum pause is rehearsed
+ *         first so both can be generated in one sitting.
  *
  * Usage:
  *   ENV=mainnet forge script scripts/stock-migration/SweepStockAdapters3CP.s.sol --rpc-url $MAINNET_RPC -vv
  */
 contract SweepStockAdapters3CP is StockRailsBundleBase {
     string constant OUTPUT = "./output/SweepStockAdapters3CP-1.json";
-    string constant PAUSE_BUNDLE = "./output/PauseStockRailsEthereum3CP-1.json";
 
     function run() public {
         _requireChain(1);
@@ -61,15 +60,16 @@ contract SweepStockAdapters3CP is StockRailsBundleBase {
         console.log("Simulation passed.");
     }
 
-    /// @dev Probes for the upgraded implementation on an unpaused adapter: the owner's sweep must revert with
-    ///      ExpectedPause. An empty revert means the selector does not exist, so the beacon upgrade has not run.
+    /// @dev Probes each adapter for the upgraded implementation, paused or not: the owner's sweep is tried and
+    ///      rolled back. Any revert data (ExpectedPause, NothingToSweep) or success means the function exists; an
+    ///      empty revert means the selector is missing, so the beacon upgrade has not run.
     function _requireSweepLive(MigratedStock[] memory stocks) internal {
         for (uint256 i = 0; i < stocks.length; ++i) {
-            if (IPausableBridge(stocks[i].adapter).paused()) continue;
+            uint256 snap = vm.snapshotState();
             vm.prank(StockMigration.OPERATING_SAFE);
             (bool ok, bytes memory err) = stocks[i].adapter.call(abi.encodeCall(IPausableBridge.sweepUnderlying, (StockMigration.OPERATING_SAFE)));
-            require(!ok, "sweep succeeded on an unpaused adapter");
-            require(err.length >= 4, string.concat(stocks[i].symbol, ": adapter has no sweep; execute the beacon upgrade bundle first"));
+            vm.revertToState(snap);
+            require(ok || err.length >= 4, string.concat(stocks[i].symbol, ": adapter has no sweep; execute the beacon upgrade first"));
         }
     }
 
@@ -79,8 +79,7 @@ contract SweepStockAdapters3CP is StockRailsBundleBase {
             allPaused = allPaused && IPausableBridge(stocks[i].adapter).paused();
         }
         if (allPaused) return;
-        require(vm.exists(PAUSE_BUNDLE), "adapters not paused; generate the Ethereum pause bundle first");
-        console.log("Adapters not yet paused live; replaying the pause bundle on the fork");
-        executeGnosisTransactionBundle(PAUSE_BUNDLE);
+        console.log("Adapters not yet paused live; rehearsing the Ethereum pause on the fork");
+        new PauseStockRailsEthereum3CP().run();
     }
 }

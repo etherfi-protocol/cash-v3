@@ -37,52 +37,70 @@ a DebtManager safe never counts both.
 
 ## Who signs what
 
-Since 2026-09-19 the Summer Lend configurator roles that list a reserve (200, 400) and set its price source
-(400) sit with the lend timelock `0xbaCa…e283`, which has a 24h delay. Its proposer and executor is the
-3-of-6 Timelock Safe `0xd442…1166`. So the listing and the price flip are each two Timelock Safe bundles:
-a `scheduleBatch`, then an `executeBatch` at least 24h later. The Lend Owner Safe keeps pause (403) and
-freeze (402). The Cash side stays with the Operating Safe.
+Since the September 2026 re-gating, three timelocks sit between the Safes and some of these calls:
+
+- **Lend timelock** `0xbaCa…e283`, 24h, on OP. Holds the Summer Lend configurator roles that list a reserve
+  (200, 400) and set its price source (400). Its proposer and executor is the 3-of-6 Timelock Safe
+  `0xd442…1166`. The listing and the price flip are each a `scheduleBatch` and an `executeBatch`.
+- **Operating timelock** `0x9AEb…7849`, 8h, same address on both chains. Gates
+  `TopUpFactory.removeTokenConfig` on Ethereum. The Operating Safe proposes and executes on it.
+- **Upgrade timelock** `0x9106…4434`, 2 days, owns the Ethereum RoleRegistry. Gates the OFT adapter beacon
+  upgrade that adds `sweepUnderlying` (OFT listing repo). The Operating Safe proposes and executes on it.
+
+The Lend Owner Safe keeps pause (403) and freeze (402). The rest of the Cash side stays with the Operating Safe.
 
 ## Order
 
-At least two days before the weekend (the stock feeds carry a 7 day staleness bound):
+At least three days before the weekend (the stock feeds carry a 7 day staleness bound):
 
-1. `DeployStockMigrationFeeds` as a registered EtherFiDeployer deployer. Records the five feeds in
+1. OFT listing repo: `DeployOFTAdapterSweepImpl` (EOA), then `UpgradeOFTAdapterBeaconForSweep`, Operating
+   Safe: sign `-schedule-1.json`. Two days later, regenerate and sign `-execute-1.json`. Must execute before
+   step 11; the sweep refuses to build until it has.
+2. `DeployStockMigrationFeeds` as a registered EtherFiDeployer deployer. Records the five feeds in
    `summer-lend-feeds.json`.
-2. `ListStockWrappersSummerLend3CP`, Timelock Safe: sign `-schedule-10.json`. Asset ids come from the live
-   counters, so nothing else may be listed on the instance until step 3 executes. If something is, the
+3. `ListStockWrappersSummerLend3CP`, Timelock Safe: sign `-schedule-10.json`. Asset ids come from the live
+   counters, so nothing else may be listed on the instance until step 4 executes. If something is, the
    Timelock Safe cancels and this is regenerated.
-3. 24h later, regenerate and sign `ListStockWrappersSummerLend3CP-execute-10.json`, Timelock Safe. All three
+4. 24h later, regenerate and sign `ListStockWrappersSummerLend3CP-execute-10.json`, Timelock Safe. All three
    wrappers list in one transaction.
-4. `ConfigureStockWrappersCashOP3CP`, Operating Safe, after step 3 executes (it reads the live reserve ids).
-5. `FlipStockReservesSummerLend3CP`, Timelock Safe: sign only `-schedule-10.json`, at least 24h before the
-   planned flip. Scheduling commits nothing: the flip only happens when step 11 executes it.
+5. `ConfigureStockWrappersCashOP3CP`, Operating Safe, after step 4 executes (it reads the live reserve ids).
+6. `FlipStockReservesSummerLend3CP`, Timelock Safe: sign only `-schedule-10.json`, at least 24h before the
+   planned flip. Scheduling commits nothing: the flip only happens when step 14 executes it.
+7. `PauseStockRailsEthereum3CP`, Operating Safe: sign only `-schedule-1.json` (the top-up config removal on
+   the operating timelock), at least 8h before step 10.
+8. Fund the Operating Safe on Ethereum with enough ETH for two bridge runs (about 0.002 ETH at today's CCIP
+   fees). The bridge generator refuses to build when the Safe is short.
 
 Friday night, before the snapshot:
 
-6. `PauseStockReservesSummerLend3CP`, Lend Owner Safe. Paused blocks withdraw and liquidation of the mirror
+9. `PauseStockReservesSummerLend3CP`, Lend Owner Safe. Paused blocks withdraw and liquidation of the mirror
    collateral; spending, borrowing and repaying still work. The snapshot block comes after this executes.
 
 Weekend, Friday after the US close, Operating Safe on both chains:
 
-7. `PauseStockRailsEthereum3CP` (adapters, wrapper top-up configs, StockUnwrapper) and
-   `PauseStockRailsOptimism3CP` (mirrors, StockWithdrawModule, both recovery modules). Let in-flight
-   LayerZero messages settle first. TopUpDest and the PAXG adapter stay live.
-8. `SweepStockAdapters3CP`, Ethereum: adapters to the Safe, wrappers redeemed to raw stock. Still reversible.
-9. `BridgeStocksToOptimism3CP`, Ethereum, twice: `CANARY=true` for 0.01 of each, confirm the payout on OP
-   after about 17 minutes, then the full balance. Point of no return. The Safe needs ETH for the CCIP fees.
-10. Distribute and run the lend sweep, so every safe's wrapper is supplied.
+10. `PauseStockRailsEthereum3CP-1.json` (adapters, StockUnwrapper, and the timelock execute that removes the
+    wrapper top-up configs) and `PauseStockRailsOptimism3CP` (mirrors, StockWithdrawModule, both recovery
+    modules). Let in-flight LayerZero messages settle first. TopUpDest and the PAXG adapter stay live.
+11. `SweepStockAdapters3CP`, Ethereum: adapters to the Safe, wrappers redeemed to raw stock. Still reversible.
+12. `BridgeStocksToOptimism3CP`, Ethereum, twice: `CANARY=true` for 0.01 of each, confirm the payout on OP
+    after about 17 minutes, then the full balance. Point of no return.
+13. Distribute and run the lend sweep, so every safe's wrapper is supplied.
 
 After the health-factor simulation is green, back to back:
 
-11. `FlipStockReservesSummerLend3CP-execute-10.json`, Timelock Safe. Every Aave price source moves in this one
+14. `FlipStockReservesSummerLend3CP-execute-10.json`, Timelock Safe. Every Aave price source moves in this one
     transaction. The Timelock Safe needs three signers available on the weekend.
-12. `FreezeStockMirrorsSummerLend3CP-10.json`, Lend Owner Safe, right after step 11.
-13. `FlipStockPricesCashOP3CP`, Operating Safe, right after step 11.
-14. `UnpauseStockRailsOptimism3CP` and `UnpauseStockRailsEthereum3CP`: modules and StockUnwrapper come
-    back. Adapters and mirrors stay paused for good.
+15. `FreezeStockMirrorsSummerLend3CP-10.json`, Lend Owner Safe, right after step 14.
+16. `FlipStockPricesCashOP3CP`, Operating Safe, right after step 14.
+17. `UnpauseStockRailsOptimism3CP` (both recovery modules) and `UnpauseStockRailsEthereum3CP`
+    (StockUnwrapper). The adapters, the mirrors and the StockWithdrawModule stay paused for good: the module
+    only withdraws mirrors over the retired rail.
 
-`test/migration/StockMigrationActionsFork.t.sol` runs steps 2 to 14 on the OP side against live state and
+**Deadline.** Mirror-backed positions cannot be liquidated from step 9 until step 14. Step 14 must execute
+before Monday's US open (9:30 ET). If it cannot, unpause the mirror reserves (Lend Owner Safe, the reverse of
+step 9) so liquidations work again, cancel the queued flip, and retry the next weekend.
+
+`test/migration/StockMigrationActionsFork.t.sol` runs steps 3 to 17 on the OP side against live state and
 checks that a real safe can spend, borrow, repay and withdraw at every stage.
 
 Every generator fork-simulates its own bundle and asserts the post-state before the JSON is trusted.
