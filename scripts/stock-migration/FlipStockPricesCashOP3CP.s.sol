@@ -21,7 +21,7 @@ import { MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
  *         stay listed as DebtManager collateral so existing positions keep resolving; they count for nothing.
  *
  *         The 6-decimal placeholder exists because PriceProviderV2 reports 6 decimals and would floor an
- *         8-decimal 1 wei to zero and revert.
+ *         8-decimal 1 wei to a price of 0, and callers dividing by the price would revert.
  *
  * Usage (after the Cash config bundle; the fork replays it when the wrappers are not yet priced):
  *   forge script scripts/stock-migration/FlipStockPricesCashOP3CP.s.sol --rpc-url $OPTIMISM_RPC -vvv

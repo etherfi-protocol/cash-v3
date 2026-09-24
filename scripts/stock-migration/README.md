@@ -28,10 +28,11 @@ else in the Spoke checks the resulting value. So the wrappers list at 1 wei: ope
 nothing for borrowing. The lend sweep moves every safe's wrapper in, verification runs, and one atomic
 bundle then swaps the price sources. At no instant do a mirror and its wrapper both count.
 
-PriceProviderV2 reports 6 decimals and would floor an 8-decimal 1 wei to zero and revert, hence the
-separate 1 unit / 6 dec placeholder for the Cash side. The Cash side follows the same shape: wrappers list
-at the placeholder, and one transaction later moves wrappers to the live rate and mirrors to the placeholder,
-so a DebtManager safe never counts both.
+PriceProviderV2 reports 6 decimals and would floor an 8-decimal 1 wei to a price of 0. Collateral value
+would read as 0 and any USD-to-token conversion would divide by zero and revert, hence the separate
+1 unit / 6 dec placeholder for the Cash side. The Cash side follows the same shape: wrappers list at the
+placeholder, and one transaction later moves wrappers to the live rate and mirrors to the placeholder, so
+a DebtManager safe never counts both.
 
 ## Order
 

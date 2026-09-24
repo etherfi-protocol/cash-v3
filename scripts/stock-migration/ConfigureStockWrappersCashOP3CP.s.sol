@@ -88,7 +88,7 @@ contract ConfigureStockWrappersCashOP3CP is StockMigration3CPBase {
     }
 
     /// @dev The 6-decimal placeholder: PriceProviderV2 reports 6 decimals and would floor an 8-decimal 1 wei
-    ///      to zero and revert, hence a constant 1 unit read through latestAnswer().
+    ///      to a price of 0, and callers dividing by the price would revert; a constant 1 unit keeps it non-zero.
     function _placeholderPriceCall(MigratedStock[] memory stocks, address oneUnit6) internal pure returns (bytes memory) {
         address[] memory tokens = new address[](stocks.length);
         PriceProviderV2.Config[] memory configs = new PriceProviderV2.Config[](stocks.length);

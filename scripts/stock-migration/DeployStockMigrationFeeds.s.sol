@@ -25,7 +25,7 @@ import { MigratedStock, StockMigration } from "./StockMigrationConfig.sol";
  *           - 1 wei at 8 decimals: the Aave placeholder. New reserves list on it so supplied wrapper
  *             counts for nothing until the flip; retired reserves point at it afterwards.
  *           - 1 unit at 6 decimals: the same idea for PriceProviderV2, whose 6-decimal output would
- *             floor an 8-decimal 1 wei to zero and revert.
+ *             floor an 8-decimal 1 wei to a price of 0, and callers dividing by the price would revert.
  */
 abstract contract StockMigrationFeedDeployer is StockFeedDeployer {
     struct MigrationFeeds {
