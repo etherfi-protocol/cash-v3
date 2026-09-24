@@ -10,12 +10,10 @@ import { Test, console } from "forge-std/Test.sol";
 import { ContractCodeChecker } from "../../scripts/utils/ContractCodeChecker.sol";
 import { ChainConfig, Utils } from "../utils/Utils.sol";
 
-import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
 import { DebtManagerCore } from "../../src/debt-manager/DebtManagerCore.sol";
 import { EtherFiHook } from "../../src/hook/EtherFiHook.sol";
-import { BinSponsor } from "../../src/interfaces/ICashModule.sol";
 import { CashEventEmitter } from "../../src/modules/cash/CashEventEmitter.sol";
 import { CashLens } from "../../src/modules/cash/CashLens.sol";
 import { CashModuleCore } from "../../src/modules/cash/CashModuleCore.sol";
@@ -23,16 +21,12 @@ import { CashModuleSetters } from "../../src/modules/cash/CashModuleSetters.sol"
 import { EtherFiLiquidModule } from "../../src/modules/etherfi/EtherFiLiquidModule.sol";
 import { EtherFiLiquidModuleWithReferrer } from "../../src/modules/etherfi/EtherFiLiquidModuleWithReferrer.sol";
 import { EtherFiStakeModule } from "../../src/modules/etherfi/EtherFiStakeModule.sol";
-import { LiquidUSDLiquifierOPModule } from "../../src/modules/etherfi/LiquidUSDLiquifierOP.sol";
 import { FraxModule } from "../../src/modules/frax/FraxModule.sol";
 import { OpenOceanSwapModule } from "../../src/modules/openocean-swap/OpenOceanSwapModule.sol";
 import { StargateModule } from "../../src/modules/stargate/StargateModule.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
-import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { EtherFiSafe } from "../../src/safe/EtherFiSafe.sol";
 import { EtherFiSafeFactory } from "../../src/safe/EtherFiSafeFactory.sol";
-import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
-import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 
 /// @title OP Mainnet Bytecode Verification
 /// @notice Verifies that every deployed contract on OP mainnet matches the bytecode from this repo.
@@ -45,45 +39,30 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
 
     // Deployed proxy addresses from deployments.json
     address dataProviderProxy;
-    address roleRegistryProxy;
     address cashModuleProxy;
     address cashLensProxy;
     address cashEventEmitterProxy;
-    address cashbackDispatcherProxy;
     address debtManagerProxy;
     address priceProviderProxy;
     address hookProxy;
     address safeFactoryProxy;
-    address settlementReapProxy;
-    address settlementRainProxy;
-    address settlementPixProxy;
-    address settlementCardOrderProxy;
-    address topUpDestProxy;
     address openOceanSwapModule;
     address etherFiLiquidModule;
     address etherFiLiquidModuleWithReferrer;
     address stargateModule;
     address fraxModule;
-    address liquidUsdLiquifierProxy;
     address etherFiStakeModule;
 
     // Resolved implementation addresses (read from EIP-1967 slot)
     address dataProviderImpl;
-    address roleRegistryImpl;
     address cashModuleCoreImpl;
     address cashLensImpl;
     address cashEventEmitterImpl;
-    address cashbackDispatcherImpl;
     address debtManagerCoreImpl;
     address priceProviderImpl;
     address hookImpl;
     address safeFactoryImpl;
     address safeImpl; // read from factory
-    address settlementReapImpl;
-    address settlementRainImpl;
-    address settlementPixImpl;
-    address settlementCardOrderImpl;
-    address topUpDestImpl;
 
     // CashModule setters impl (stored in CashModuleCore storage)
     address cashModuleSettersImpl;
@@ -101,44 +80,29 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
         string memory deployments = readDeploymentFile();
 
         dataProviderProxy = stdJson.readAddress(deployments, ".addresses.EtherFiDataProvider");
-        roleRegistryProxy = stdJson.readAddress(deployments, ".addresses.RoleRegistry");
         cashModuleProxy = stdJson.readAddress(deployments, ".addresses.CashModule");
         cashLensProxy = stdJson.readAddress(deployments, ".addresses.CashLens");
         cashEventEmitterProxy = stdJson.readAddress(deployments, ".addresses.CashEventEmitter");
-        cashbackDispatcherProxy = stdJson.readAddress(deployments, ".addresses.CashbackDispatcher");
         debtManagerProxy = stdJson.readAddress(deployments, ".addresses.DebtManager");
         priceProviderProxy = stdJson.readAddress(deployments, ".addresses.PriceProvider");
         hookProxy = stdJson.readAddress(deployments, ".addresses.EtherFiHook");
         safeFactoryProxy = stdJson.readAddress(deployments, ".addresses.EtherFiSafeFactory");
-        settlementReapProxy = stdJson.readAddress(deployments, ".addresses.SettlementDispatcherReap");
-        settlementRainProxy = stdJson.readAddress(deployments, ".addresses.SettlementDispatcherRain");
-        settlementPixProxy = stdJson.readAddress(deployments, ".addresses.SettlementDispatcherPix");
-        settlementCardOrderProxy = stdJson.readAddress(deployments, ".addresses.SettlementDispatcherCardOrder");
-        topUpDestProxy = stdJson.readAddress(deployments, ".addresses.TopUpDest");
         openOceanSwapModule = stdJson.readAddress(deployments, ".addresses.OpenOceanSwapModule");
         etherFiLiquidModule = stdJson.readAddress(deployments, ".addresses.EtherFiLiquidModule");
         etherFiLiquidModuleWithReferrer = stdJson.readAddress(deployments, ".addresses.EtherFiLiquidModuleWithReferrer");
         stargateModule = stdJson.readAddress(deployments, ".addresses.StargateModule");
         fraxModule = stdJson.readAddress(deployments, ".addresses.FraxModule");
-        liquidUsdLiquifierProxy = stdJson.readAddress(deployments, ".addresses.LiquidUSDLiquifierModule");
         etherFiStakeModule = stdJson.readAddress(deployments, ".addresses.EtherFiStakeModule");
 
         // Read implementation addresses from EIP-1967 slots
         dataProviderImpl = _getImpl(dataProviderProxy);
-        roleRegistryImpl = _getImpl(roleRegistryProxy);
         cashModuleCoreImpl = _getImpl(cashModuleProxy);
         cashLensImpl = _getImpl(cashLensProxy);
         cashEventEmitterImpl = _getImpl(cashEventEmitterProxy);
-        cashbackDispatcherImpl = _getImpl(cashbackDispatcherProxy);
         debtManagerCoreImpl = _getImpl(debtManagerProxy);
         priceProviderImpl = _getImpl(priceProviderProxy);
         hookImpl = _getImpl(hookProxy);
         safeFactoryImpl = _getImpl(safeFactoryProxy);
-        settlementReapImpl = _getImpl(settlementReapProxy);
-        settlementRainImpl = _getImpl(settlementRainProxy);
-        settlementPixImpl = _getImpl(settlementPixProxy);
-        settlementCardOrderImpl = _getImpl(settlementCardOrderProxy);
-        topUpDestImpl = _getImpl(topUpDestProxy);
 
         // Read safe impl from beacon
         safeImpl = UpgradeableBeacon(EtherFiSafeFactory(safeFactoryProxy).beacon()).implementation();
@@ -156,11 +120,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     //     address local = address(new EtherFiDataProvider());
     //     _verify("EtherFiDataProvider", dataProviderImpl, local);
     // }
-
-    function test_verifyBytecode_RoleRegistry() public {
-        address local = address(new RoleRegistry(dataProviderProxy));
-        _verify("RoleRegistry", roleRegistryImpl, local);
-    }
 
     function test_verifyBytecode_EtherFiSafe() public {
         address local = address(new EtherFiSafe(dataProviderProxy));
@@ -203,11 +162,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
         _verify("CashEventEmitter", cashEventEmitterImpl, local);
     }
 
-    function test_verifyBytecode_CashbackDispatcher() public {
-        address local = address(new CashbackDispatcher(dataProviderProxy));
-        _verify("CashbackDispatcher", cashbackDispatcherImpl, local);
-    }
-
     // ---- Debt manager ----
 
     function test_verifyBytecode_DebtManagerCore() public {
@@ -225,35 +179,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     function test_verifyBytecode_PriceProvider() public {
         address local = address(new PriceProviderV2());
         _verify("PriceProvider", priceProviderImpl, local);
-    }
-
-    // ---- Settlement dispatchers ----
-
-    function test_verifyBytecode_SettlementDispatcherReap() public {
-        address local = address(new SettlementDispatcherV2(BinSponsor.Reap, dataProviderProxy));
-        _verify("SettlementDispatcherReap", settlementReapImpl, local);
-    }
-
-    function test_verifyBytecode_SettlementDispatcherRain() public {
-        address local = address(new SettlementDispatcherV2(BinSponsor.Rain, dataProviderProxy));
-        _verify("SettlementDispatcherRain", settlementRainImpl, local);
-    }
-
-    function test_verifyBytecode_SettlementDispatcherPix() public {
-        address local = address(new SettlementDispatcherV2(BinSponsor.PIX, dataProviderProxy));
-        _verify("SettlementDispatcherPix", settlementPixImpl, local);
-    }
-
-    function test_verifyBytecode_SettlementDispatcherCardOrder() public {
-        address local = address(new SettlementDispatcherV2(BinSponsor.CardOrder, dataProviderProxy));
-        _verify("SettlementDispatcherCardOrder", settlementCardOrderImpl, local);
-    }
-
-    // ---- Top up ----
-
-    function test_verifyBytecode_TopUpDest() public {
-        address local = address(new TopUpDest(dataProviderProxy, cc.weth));
-        _verify("TopUpDest", topUpDestImpl, local);
     }
 
     // ---- Modules (non-proxy, deployed via CREATE3) ----
@@ -312,12 +237,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     function test_verifyBytecode_EtherFiStakeModule() public {
         address local = address(new EtherFiStakeModule(dataProviderProxy, cc.syncPool, cc.weth, cc.weETH));
         _verify("EtherFiStakeModule", etherFiStakeModule, local);
-    }
-
-    function test_verifyBytecode_LiquidUSDLiquifierModule() public {
-        address liquifierImpl = _getImpl(liquidUsdLiquifierProxy);
-        address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));
-        _verify("LiquidUSDLiquifierModule", liquifierImpl, local);
     }
 
     // ---- Helpers ----
