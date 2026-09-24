@@ -19,7 +19,6 @@ import {
     ReserveConfigLike,
     SpokeConfigLike
 } from "../wspyx-paxg/WspyxPaxgProdConfig.sol";
-import { ZchfUsdt0PaxgyProd as L } from "../zchf-usdt0-paxgy/ZchfUsdt0PaxgyProdConfig.sol";
 import { Usdt0SupportProd as C } from "./Usdt0SupportProdConfig.sol";
 
 interface IAdminTimelock {
@@ -269,35 +268,35 @@ contract ConfigureUsdt0Support3CP is GnosisHelpers, Utils, Test {
     /// @dev Fork-only: the USDT0 operation of 3CP-698, sent by the Lend EtherFiTimelock, with the same
     ///      parameters aave-v4 pins. Lets bundle 3 be generated and rehearsed before 698 has executed.
     function _rehearse698() internal {
-        uint256 assetId = IHubLike(L.CASH_HUB).getAssetCount();
+        uint256 assetId = IHubLike(C.CASH_HUB).getAssetCount();
         require(assetId == C.LEND_RESERVE_ID_USDT0, "hub asset count drifted off the pinned reserve id");
 
-        vm.startPrank(L.LEND_TIMELOCK);
-        IHubConfiguratorLike(L.HUB_CONFIGURATOR).addAsset(
-            L.CASH_HUB,
+        vm.startPrank(C.LEND_TIMELOCK);
+        IHubConfiguratorLike(C.HUB_CONFIGURATOR).addAsset(
+            C.CASH_HUB,
             C.USDT0,
-            L.TREASURY_SPOKE,
-            L.LEND_USDT0_LIQUIDITY_FEE,
-            L.IR_STRATEGY,
+            C.TREASURY_SPOKE,
+            C.LEND_USDT0_LIQUIDITY_FEE,
+            C.IR_STRATEGY,
             abi.encode(
                 InterestRateDataLike({
-                    optimalUsageRatio: L.LEND_USDT0_OPTIMAL_USAGE_RATIO,
-                    baseDrawnRate: L.LEND_USDT0_BASE_DRAWN_RATE,
-                    rateGrowthBeforeOptimal: L.LEND_USDT0_RATE_GROWTH_BEFORE_OPTIMAL,
-                    rateGrowthAfterOptimal: L.LEND_USDT0_RATE_GROWTH_AFTER_OPTIMAL
+                    optimalUsageRatio: C.LEND_USDT0_OPTIMAL_USAGE_RATIO,
+                    baseDrawnRate: C.LEND_USDT0_BASE_DRAWN_RATE,
+                    rateGrowthBeforeOptimal: C.LEND_USDT0_RATE_GROWTH_BEFORE_OPTIMAL,
+                    rateGrowthAfterOptimal: C.LEND_USDT0_RATE_GROWTH_AFTER_OPTIMAL
                 })
             )
         );
-        IHubConfiguratorLike(L.HUB_CONFIGURATOR).addSpoke(
-            L.CASH_HUB, L.CASH_SPOKE, assetId, SpokeConfigLike({ addCap: L.LEND_USDT0_ADD_CAP, drawCap: 0, riskPremiumThreshold: 0, active: true, halted: false })
+        IHubConfiguratorLike(C.HUB_CONFIGURATOR).addSpoke(
+            C.CASH_HUB, C.CASH_SPOKE, assetId, SpokeConfigLike({ addCap: C.LEND_USDT0_ADD_CAP, drawCap: 0, riskPremiumThreshold: 0, active: true, halted: false })
         );
-        ISpokeConfiguratorLike(L.SPOKE_CONFIGURATOR).addReserve(
-            L.CASH_SPOKE,
-            L.CASH_HUB,
+        ISpokeConfiguratorLike(C.SPOKE_CONFIGURATOR).addReserve(
+            C.CASH_SPOKE,
+            C.CASH_HUB,
             assetId,
-            L.LEND_USDT0_FEED,
+            C.LEND_USDT0_FEED,
             ReserveConfigLike({ collateralRisk: 0, paused: false, frozen: false, borrowable: true, receiveSharesEnabled: true }),
-            DynamicReserveConfigLike({ collateralFactor: L.LEND_USDT0_COLLATERAL_FACTOR, maxLiquidationBonus: L.LEND_USDT0_MAX_LIQUIDATION_BONUS, liquidationFee: L.LEND_LIQUIDATION_FEE })
+            DynamicReserveConfigLike({ collateralFactor: C.LEND_USDT0_COLLATERAL_FACTOR, maxLiquidationBonus: C.LEND_USDT0_MAX_LIQUIDATION_BONUS, liquidationFee: C.LEND_LIQUIDATION_FEE })
         );
         vm.stopPrank();
         console.log("  [REHEARSAL] USDT0 listed on Summer Lend as assetId %s", assetId);

@@ -93,9 +93,44 @@ Other facts worth having read: the OP OFT's `approvalRequired()` is `false` (it 
 so no allowance leg), `sharedDecimals()` is 6 = USDT0's decimals (so no OFT dust truncation on this
 asset), and it exposes no rate limiter.
 
+## Dev
+
+`ConfigureUsdt0SupportDev.s.sol` is the dev counterpart. It is **two calls and an EOA broadcast**, not
+three Safe transactions, because dev differs in two ways:
+
+1. **No timelock.** `ADMIN_ROLE` and `ADMIN_TIMELOCK_ROLE` have no holders on the dev RoleRegistry —
+   the cash-v3#289 re-gating that reached prod has not reached dev — so the dev dispatchers still
+   check `onlyRoleRegistryOwner`, and the owner is the deployer EOA `0x7D829d50…DC6E`. There is no dev
+   equivalent of the schedule/execute pair.
+2. **The lend-gateway leg is already live.** USD₮0 is already a registered dev gateway reserve and
+   already a spend asset, so the third prod transaction has nothing to do. The script asserts that
+   instead of repeating it, and prints the dev reserve id, which is **28**, not prod's 23 — dev listed
+   different assets in a different order, so the id is never assumed to match across environments.
+
+Also unlike prod, **every** dev dispatcher settles USDT, CardOrder included, so all four get a
+recipient (`0x7D829d50…DC6E` on each). The list is derived from each dispatcher's live
+`getSettlementRecipient(USDT)` rather than hardcoded, which is the same mirroring rule the prod
+generator uses — it is what makes the two scripts agree without sharing a recipient table, and it is
+why the same code yields four dispatchers on dev and three on prod.
+
+```sh
+# rehearse on a fork — no key needed, pranks the dev RoleRegistry owner
+ENV=dev forge script scripts/usdt0-support/ConfigureUsdt0SupportDev.s.sol:ConfigureUsdt0SupportDev   --sig 'rehearse()' --rpc-url $OPTIMISM_RPC
+
+# broadcast
+source .env && ENV=dev forge script scripts/usdt0-support/ConfigureUsdt0SupportDev.s.sol:ConfigureUsdt0SupportDev   --rpc-url $OPTIMISM_RPC --broadcast -vvvv
+
+# read-only re-check
+ENV=dev forge script scripts/usdt0-support/ConfigureUsdt0SupportDev.s.sol:ConfigureUsdt0SupportDev   --sig 'verify()' --rpc-url $OPTIMISM_RPC
+```
+
 ## Where things are pinned
 
 `scripts/usdt0-support/Usdt0SupportProdConfig.sol` — dispatchers, recipients, the OFT and its peers,
-the timelock salt, reserve id 23. The Summer Lend parameters the fork rehearsal replays are reused
-from `scripts/zchf-usdt0-paxgy/ZchfUsdt0PaxgyProdConfig.sol` rather than copied, so the rehearsal
-cannot silently drift from what 698 actually schedules.
+the timelock salt, reserve id 23, and the USDT0 Summer Lend parameters the fork rehearsal replays
+(aave-v4 `AaveV4EtherfiCash.sol` remains their source of truth; they are here only so the rehearsal
+can run before 698 has executed). The shared Summer Lend topology — hub, spoke, configurators,
+treasury spoke, IR strategy — comes from `scripts/wspyx-paxg/WspyxPaxgProdConfig.sol`.
+
+Deliberately no dependency on `scripts/zchf-usdt0-paxgy/`: that directory lives on an unmerged
+branch, so importing it would only compile for whoever has that branch checked out.

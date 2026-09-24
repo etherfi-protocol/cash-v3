@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { ZchfUsdt0PaxgyProd } from "../zchf-usdt0-paxgy/ZchfUsdt0PaxgyProdConfig.sol";
+import { WspyxPaxgProd } from "../wspyx-paxg/WspyxPaxgProdConfig.sol";
 
 /**
  * @title Usdt0SupportProdConfig
@@ -30,14 +30,15 @@ library Usdt0SupportProd {
     // ---------------------------------------------------------------- Safes / admins
     /// @dev Cash operating safe (OP). Holds LEND_GATEWAY_ADMIN_ROLE and STARGATE_MODULE_ADMIN_ROLE,
     ///      and PROPOSER / EXECUTOR / CANCELLER on the ADMIN_TIMELOCK (verified 2026-09-24)
-    address internal constant OPERATING_SAFE = ZchfUsdt0PaxgyProd.OPERATING_SAFE;
+    address internal constant OPERATING_SAFE = WspyxPaxgProd.OPERATING_SAFE;
     /// @dev The 8h operating timelock, sole holder of ADMIN_TIMELOCK_ROLE. The deployed
     ///      SettlementDispatchers gate setSettlementRecipients on it: a direct Safe call reverts
     ///      OnlyAdminTimelock() (0x7010de69), verified live against all three dispatchers.
     address internal constant ADMIN_TIMELOCK = 0x9AEb8eaa982084219d1A938D8F7B5040a1d47849;
 
     // ---------------------------------------------------------------- tokens (OP)
-    address internal constant USDT0 = ZchfUsdt0PaxgyProd.USDT0;
+    /// @dev Tether omnichain USDT (LayerZero OFT) on Optimism — NOT the legacy bridged USDT below
+    address internal constant USDT0 = 0x01bFF41798a0BcF287b996046Ca68b395DbC1071;
     /// @dev Legacy bridged USDT — the asset whose settlement and collateral treatment USDT0 mirrors
     address internal constant USDT = 0x94b008aA00579c1307B0EF2c499aD98a8ce58e58;
 
@@ -81,8 +82,32 @@ library Usdt0SupportProd {
     address internal constant USDT_ETHEREUM = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
 
     // ---------------------------------------------------------------- Summer Lend
-    address internal constant CASH_SPOKE = ZchfUsdt0PaxgyProd.CASH_SPOKE;
+    address internal constant CASH_HUB = WspyxPaxgProd.CASH_HUB;
+    address internal constant CASH_SPOKE = WspyxPaxgProd.CASH_SPOKE;
+    address internal constant HUB_CONFIGURATOR = WspyxPaxgProd.HUB_CONFIGURATOR;
+    address internal constant SPOKE_CONFIGURATOR = WspyxPaxgProd.SPOKE_CONFIGURATOR;
+    address internal constant TREASURY_SPOKE = WspyxPaxgProd.TREASURY_SPOKE;
+    address internal constant IR_STRATEGY = WspyxPaxgProd.IR_STRATEGY;
+    uint16 internal constant LEND_LIQUIDATION_FEE = WspyxPaxgProd.LEND_LIQUIDATION_FEE;
+
     /// @dev The reserve id 3CP-698 lists USDT0 at. Pinned rather than discovered so a drifted listing
     ///      (another asset landing on 23 first) fails the generator instead of registering the wrong id.
     uint256 internal constant LEND_RESERVE_ID_USDT0 = 23;
+
+    /// @dev EtherFiTimelock of the Summer Lend instance — the only holder of the configurator
+    ///      domain-admin roles since the migration. Pranked on forks to rehearse 698 before it runs.
+    address internal constant LEND_TIMELOCK = 0xbaCa0cD6B69Eef3257e2D122b22ddEE8AeE5e283;
+
+    /// @dev The USDT0 listing parameters 3CP-698 schedules, mirrored here for the fork rehearsal ONLY
+    ///      — aave-v4 `AaveV4EtherfiCash.sol` is their source of truth. The price source is the live
+    ///      "Capped USDT / USD" CAPO adapter the USDT reserve already reads, so there is no new feed.
+    address internal constant LEND_USDT0_FEED = 0x7579977643ee68946DB95d9Cb5fF582674619025;
+    uint40 internal constant LEND_USDT0_ADD_CAP = 5_000_000;
+    uint256 internal constant LEND_USDT0_LIQUIDITY_FEE = 30_00;
+    uint16 internal constant LEND_USDT0_OPTIMAL_USAGE_RATIO = 85_00;
+    uint32 internal constant LEND_USDT0_BASE_DRAWN_RATE = 3_00;
+    uint32 internal constant LEND_USDT0_RATE_GROWTH_BEFORE_OPTIMAL = 1_25;
+    uint32 internal constant LEND_USDT0_RATE_GROWTH_AFTER_OPTIMAL = 10_00;
+    uint16 internal constant LEND_USDT0_COLLATERAL_FACTOR = 90_00;
+    uint32 internal constant LEND_USDT0_MAX_LIQUIDATION_BONUS = 105_00;
 }
