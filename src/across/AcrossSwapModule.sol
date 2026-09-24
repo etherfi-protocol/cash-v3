@@ -534,14 +534,17 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
 
     // ---- Internals ----
 
-    /// @dev Computed purely from CREATE3 so the factory need not be deployed on this chain.
-    ///      Accepts the safe itself or its pair in either direction: a Cash Safe caller may
-    ///      send to its Trading Safe, and a Trading Safe caller may send to its source Cash Safe.
     function _validateRecipient(address safe, address recipient) internal view {
+        // The recipient may be the calling Safe itself.
         if (recipient == safe) return;
-        if (recipient == _predictTradingSafe(safe)) return;
-        if (safe == _predictTradingSafe(recipient)) return;
-        revert InvalidRecipient();
+
+        if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
+            // Trading Safe -> its source Cash Safe.
+            if (safe != _predictTradingSafe(recipient)) revert InvalidRecipient();
+        } else {
+            // Cash Safe -> its CREATE3-derived Trading Safe.
+            if (recipient != _predictTradingSafe(safe)) revert InvalidRecipient();
+        }
     }
 
     function _predictTradingSafe(address cashSafe) internal view returns (address) {

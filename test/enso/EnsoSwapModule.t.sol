@@ -250,6 +250,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     }
 
     function test_validateRecipient_allowsTradingSafeSendingToSourceCashSafe() public {
+        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
         EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
         address cashSafe = makeAddr("cashSafe");
         address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
@@ -258,11 +259,23 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     }
 
     function test_validateRecipient_revertsForTradingSafeSendingToOtherCashSafe() public {
+        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
         EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
         address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", makeAddr("cashSafe"))), tradingSafeFactory);
 
         vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
         harness.exposed_validateRecipient(tradingSafe, makeAddr("otherCashSafe"));
+    }
+
+    function test_validateRecipient_revertsForTradingSafeSendingToNestedDerivedAddress() public {
+        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
+        EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
+        address cashSafe = makeAddr("cashSafe");
+        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
+        address nestedTradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", tradingSafe)), tradingSafeFactory);
+
+        vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
+        harness.exposed_validateRecipient(tradingSafe, nestedTradingSafe);
     }
 
     function test_requestSwap_revertsForExpiredDeadline() public {
