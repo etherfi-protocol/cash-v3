@@ -176,6 +176,17 @@ contract StockMigrationDistributorTest is MerkleFixture {
         assertEq(tokenA.balanceOf(owner), 100e18);
         assertEq(tokenA.balanceOf(address(distributor)), 0);
     }
+
+    function test_renounceOwnership_disabled() public {
+        vm.prank(stranger);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        distributor.renounceOwnership();
+
+        vm.prank(owner);
+        vm.expectRevert(StockMigrationDistributor.RenounceDisabled.selector);
+        distributor.renounceOwnership();
+        assertEq(distributor.owner(), owner);
+    }
 }
 
 /// @notice Against live Optimism: the real wSPYx wrapper moves through the distributor to live safes.

@@ -42,6 +42,7 @@ contract StockMigrationDistributor is Ownable2Step, Pausable {
     error AlreadyPaid();
     error InvalidAddress();
     error LengthMismatch();
+    error RenounceDisabled();
 
     constructor(address _owner) Ownable(_owner) { }
 
@@ -80,6 +81,11 @@ contract StockMigrationDistributor is Ownable2Step, Pausable {
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    /// @notice Disabled: without an owner the root could never be set and funds could never be swept
+    function renounceOwnership() public view override onlyOwner {
+        revert RenounceDisabled();
     }
 
     /// @notice Returns the contract's whole balance of `token` to `to`. Owner only, any time.
