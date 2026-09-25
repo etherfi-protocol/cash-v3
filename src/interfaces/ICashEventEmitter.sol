@@ -16,6 +16,14 @@ interface ICashEventEmitter {
      * @param shouldWhitelist Array of boolean values indicating if the module should be whitelisted for withdrawal
      */
     function emitModulesCanRequestWithdrawConfigured(address[] calldata modules, bool[] calldata shouldWhitelist) external;
+
+    /**
+     * @notice Emits a module withdrawal-delay configuration change
+     * @param module Module whose delay override changed
+     * @param delay Configured delay in seconds
+     * @param enabled Whether the override is enabled
+     */
+    function emitModuleWithdrawalDelayConfigured(address module, uint64 delay, bool enabled) external;
     
     /**
      * @notice Emits the SettlementDispatcheUpdated event

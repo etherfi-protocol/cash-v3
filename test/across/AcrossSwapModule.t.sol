@@ -6,6 +6,9 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Vm } from "forge-std/Vm.sol";
 
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
+import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
+import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
+import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -151,6 +154,55 @@ contract AcrossSwapModuleTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
+    }
+
+    function test_requestSwap_usesConfiguredModuleWithdrawalDelay() public {
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(address(module), 3, true);
+
+        _request(_baseOrder());
+
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + 3);
+    }
+
+    function test_requestSwap_executesNonCollateralInputImmediately() public {
+        MockERC20 nonCollateral = new MockERC20("Non-collateral", "NC", 18);
+        nonCollateral.mint(address(safe), SRC_AMOUNT);
+
+        AcrossSwapModule.Order memory order = _baseOrder();
+        order.srcToken = address(nonCollateral);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
+
+        module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
+
+        assertEq(spokePool.callCount(), 1);
+        assertEq(module.getOrder(address(safe)).srcToken, address(0));
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
+    }
+
+    function test_requestSwap_holdsSpendAssetWithZeroLtv() public {
+        MockERC20 spendAsset = new MockERC20("Spend", "SP", 6);
+        spendAsset.mint(address(safe), SRC_AMOUNT);
+        vm.mockCall(address(debtManager), abi.encodeCall(IDebtManager.isCollateralToken, (address(spendAsset))), abi.encode(false));
+        vm.mockCall(address(debtManager), abi.encodeCall(IDebtManager.isBorrowToken, (address(spendAsset))), abi.encode(true));
+        vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.ltv, (address(spendAsset))), abi.encode(uint256(0)));
+        vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.isSpendAsset, (address(spendAsset))), abi.encode(true));
+        address[] memory assets = new address[](1);
+        assets[0] = address(spendAsset);
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+        vm.prank(owner);
+        cashModule.configureWithdrawAssets(assets, whitelist);
+
+        AcrossSwapModule.Order memory order = _baseOrder();
+        order.srcToken = address(spendAsset);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order);
+
+        module.requestSwap(address(safe), order, _baseDepositArgs(MIN_OUT), FAKE_MESSAGE, "", signers, sigs);
+
+        assertEq(spokePool.callCount(), 0);
+        assertTrue(module.getSwap(address(safe)).hasWithdrawalHold);
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(module));
     }
 
     function test_requestSwap_revertsForExpiredDeadline() public {
