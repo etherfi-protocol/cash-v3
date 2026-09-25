@@ -65,6 +65,7 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
     error FeeTooHigh();
     error AmountZero();
     error PaymentAmountZero();
+    error MaxPaymentExceeded();
     error InsufficientFloat();
     error InvalidConversion();
     error CannotWithdrawZeroAmount();
@@ -109,8 +110,10 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
      * @param user Address of the EtherFi Safe
      * @param paymentToken Midas vault token to take from the safe
      * @param debtAmount Amount of debt token to repay; capped at the outstanding debt
+     * @param maxPaymentAmount Most payment token, fee included, the safe may be charged; binds the quote
+     *        the caller priced against, so a price or fee change between quoting and mining reverts
      */
-    function repay(address user, address paymentToken, uint256 debtAmount) external nonReentrant whenNotPaused onlyEtherFiSafe(user) onlyEtherFiWallet {
+    function repay(address user, address paymentToken, uint256 debtAmount, uint256 maxPaymentAmount) external nonReentrant whenNotPaused onlyEtherFiSafe(user) onlyEtherFiWallet {
         if (debtAmount == 0) revert AmountZero();
         Pair memory pair = _getPair(paymentToken);
         uint256 healthFactorBefore = _gatewayHealthFactor(user);
@@ -124,13 +127,15 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
         uint256 feeAmount = (paymentAmount * pair.feeBps) / BPS_DENOMINATOR + (pair.flatFee * scaleNum) / scaleDen;
 
         // Take payment plus fee out of the safe
-        _reclaim(user, paymentToken, paymentAmount + feeAmount);
-        // Fees can worsen health. Check after collection because the Safe's hook runs before transferFrom.
-        // Zero-fee repayments retain their existing de-risking behavior.
-        if (feeAmount > 0) {
-            if (cashModule.usesLendGateway(user)) _ensureGatewayFloor(user, healthFactorBefore);
-            else debtManager.ensureHealth(user);
-        }
+        uint256 totalPayment = paymentAmount + feeAmount;
+        if (totalPayment > maxPaymentAmount) revert MaxPaymentExceeded();
+        _reclaim(user, paymentToken, totalPayment);
+        // Health is checked after collection because the Safe's hook runs before transferFrom. A gateway safe
+        // always takes the not-worsened floor: fees can worsen health, and so can a gap between the
+        // PriceProvider rate charged here and Aave's own valuation, while a genuine de-risk still passes.
+        // A legacy safe prices both sides on the PriceProvider, so only a fee can worsen it.
+        if (cashModule.usesLendGateway(user)) _ensureGatewayFloor(user, healthFactorBefore);
+        else if (feeAmount > 0) debtManager.ensureHealth(user);
 
         emit Repaid(user, paymentToken, pair.debtToken, debtRepaid, paymentAmount, feeAmount);
     }
@@ -145,8 +150,10 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
             if (debtToken.balanceOf(address(this)) < debtAmount) revert InsufficientFloat();
 
             // The gateway pulls repayment from the safe, so the float hops through it within this transaction.
+            // Charge for what left the float: anything Aave did not consume is refunded loose to the safe.
             debtToken.safeTransfer(user, debtAmount);
-            return gateway().repay(user, address(debtToken), debtAmount);
+            gateway().repay(user, address(debtToken), debtAmount);
+            return debtAmount;
         }
 
         // Legacy safe: the DebtManager caps a request above the debt itself, so the request goes through unchanged
