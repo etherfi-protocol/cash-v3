@@ -13,8 +13,9 @@ import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
  *      risk-increasing consumer flows end with _ensureGatewayFloor: whatever the resupply put back, the
  *      end state must sit at or above the gateway's configured health-factor floor (a failed or
  *      unregistered resupply otherwise leaves the health factor between Aave's 1.0 limit and the floor).
- *      Repayment flows (the LiquidUSD liquifier) are deliberately exempt: de-risking must never be
- *      blocked. Gating: the WITHDRAW bookend and the FLOOR check run for any gateway-engine safe —
+ *      The LiquidUSD liquifier's repayment flow is deliberately exempt: de-risking must never be
+ *      blocked. The Midas liquifier instead takes the not-worsened form of the check, which still
+ *      passes a genuine de-risk. Gating: the WITHDRAW bookend and the FLOOR check run for any gateway-engine safe —
  *      an opted-out safe (including a matured opt-out whose unwind open borrows still block) can hold
  *      funds supplied on Aave, and pulling them loose is an exit op the repayment/exit paths depend on
  *      (repayUsingLiquidUSD sourcing supplied LiquidUSD); the floor must bind those pulls exactly
@@ -137,8 +138,8 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
      * @dev Called at the very end of an operation that may have pulled collateral out of Aave: the
      *      module's signed amount is not bound to the lens quote, and a failed or unregistered resupply
      *      can leave the health factor between Aave's 1.0 limit and the configured floor — this makes the
-     *      end state take the floor. Repayment flows are deliberately exempt (de-risking must never be
-     *      blocked). Engine-gated like the withdraw bookend, NOT _lendActive: an opted-out safe can still
+     *      end state take the floor. The LiquidUSD repayment flow is deliberately exempt (de-risking must
+     *      never be blocked). Engine-gated like the withdraw bookend, NOT _lendActive: an opted-out safe can still
      *      hold a live Aave position (a matured opt-out whose unwind open borrows block), and the floor
      *      must bind its extractions too — otherwise the withdraw bookend could park that position at
      *      Aave's raw 1.0 boundary with no check. A cleanly opted-out safe has no debt, so

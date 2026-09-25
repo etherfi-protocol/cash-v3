@@ -94,7 +94,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         uint256 expected = _paymentWithFee(debtAmount);
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), debtAmount);
+        liquifier.repay(address(safe), address(mToken), debtAmount, type(uint256).max);
 
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), debtBefore - debtAmount, 1, "Aave debt not reduced");
         assertApproxEqAbs(floatBefore - usdc.balanceOf(address(liquifier)), debtAmount, 1, "float not spent by the repaid amount");
@@ -114,7 +114,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertGt(expected, loose, "fixture: reclaim must exceed the loose balance");
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 200e6);
+        liquifier.repay(address(safe), address(mToken), 200e6, type(uint256).max);
 
         assertEq(mToken.balanceOf(address(safe)), 0, "loose payment not consumed first");
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(mToken)), 1000e18 - (expected - loose), 1e12, "only the shortfall should leave Aave");
@@ -127,7 +127,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         uint256 debtBefore = gw.debtOf(address(safe), address(usdc));
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 200e6);
+        liquifier.repay(address(safe), address(mToken), 200e6, type(uint256).max);
 
         assertApproxEqAbs(usdc.balanceOf(address(safe)), 300e6, 1, "safe's own loose USDC was consumed");
         assertApproxEqAbs(gw.debtOf(address(safe), address(usdc)), debtBefore - 200e6, 1, "debt not reduced by the repaid amount");
@@ -141,7 +141,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
-        liquifier.repay(address(safe), address(mToken), 100e6);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
     }
 
     /// @notice Verifies an oversized repayment clears only outstanding debt without leaving float in the Safe.
@@ -151,7 +151,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         uint256 floatBefore = usdc.balanceOf(address(liquifier));
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 400e6);
+        liquifier.repay(address(safe), address(mToken), 400e6, type(uint256).max);
 
         assertEq(gw.debtOf(address(safe), address(usdc)), 0, "Aave debt not cleared");
         assertEq(usdc.balanceOf(address(safe)), 0, "float stranded in safe");
@@ -164,7 +164,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.AmountZero.selector);
-        liquifier.repay(address(safe), address(mToken), 100e6);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
     }
 
     /// @notice Verifies repayment reverts when the module has insufficient USDC float.
@@ -174,14 +174,14 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.InsufficientFloat.selector);
-        liquifier.repay(address(safe), address(mToken), 100e6);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
     }
 
     /// @notice Verifies redemption transfers collected payment tokens from the module to the Midas vault.
     function test_redeemMidas_sendsAccumulatedPaymentToVault() public {
         _buildDebtAndSuppliedMToken(500e6, 1000e18);
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 200e6);
+        liquifier.repay(address(safe), address(mToken), 200e6, type(uint256).max);
         uint256 held = mToken.balanceOf(address(liquifier));
         assertGt(held, 0);
 
@@ -204,7 +204,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         vm.prank(etherFiWallet);
         vm.expectEmit(true, true, true, false);
         emit MidasLiquifierModule.Repaid(address(safe), address(mToken), address(usdc), debtAmount, payment, fee);
-        liquifier.repay(address(safe), address(mToken), debtAmount);
+        liquifier.repay(address(safe), address(mToken), debtAmount, type(uint256).max);
     }
 
     /// @notice Verifies zero-fee repayment collects only the converted payment amount.
@@ -215,7 +215,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         uint256 payment = liquifier.convertDebtToPayment(address(mToken), 200e6);
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 200e6);
+        liquifier.repay(address(safe), address(mToken), 200e6, type(uint256).max);
 
         assertApproxEqAbs(mToken.balanceOf(address(liquifier)), payment, 1e12, "fee charged at 0 bps");
     }
@@ -231,7 +231,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         uint256 expected = payment + payment * FEE_BPS / 10_000 + liquifier.convertDebtToPayment(address(mToken), flatFee);
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 200e6);
+        liquifier.repay(address(safe), address(mToken), 200e6, type(uint256).max);
 
         assertApproxEqAbs(mToken.balanceOf(address(liquifier)), expected, 1e12, "flat fee not charged");
     }
@@ -254,19 +254,21 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 100e6);
         vm.prank(etherFiWallet);
         vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
-        liquifier.repay(address(safe), address(mToken), 100e6);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
 
         // 100 of debt cleared for 110 of collateral out: health still improves, so the floor does not apply
         vm.prank(owner);
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 10e6);
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 100e6);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
         assertGt(gw.healthFactor(address(safe)), hfBefore, "health improved");
     }
 
-    // Zero fee is the de-risking path and is never blocked by the floor, even from under it.
-    /// @notice Verifies zero-fee repayment remains available below the gateway health floor.
-    function test_repay_zeroFeeIgnoresGatewayHealthFactorFloor() public {
+    // Zero fee at matching valuations is a pure de-risk, so the not-worsened floor lets it through from under
+    // the floor. If the PriceProvider values the payment token below Aave, the same repay pulls more collateral
+    // than debt it clears in Aave's eyes, health drops, and the floor rejects it.
+    /// @notice Verifies zero-fee repayment below the floor passes when health improves and reverts when a price gap worsens it.
+    function test_repay_zeroFeeTakesGatewayHealthFactorFloorOnlyWhenWorsened() public {
         _supplyToGateway(address(safe), address(mToken), 10_000e18);
         _borrowOnGateway(address(safe), address(usdc), 6800e6, recipient);
         deal(address(usdc), address(liquifier), 1000e6);
@@ -274,38 +276,63 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         gw.setMinHealthFactor(1.05e18);
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 0);
         vm.stopPrank();
+        uint256 hfBefore = gw.healthFactor(address(safe));
+        assertLt(hfBefore, 1.05e18, "safe starts below the floor");
+
+        // PriceProvider at half of Aave's valuation: 100 of debt cleared for 200 of collateral out
+        uint256 price = priceProvider.price(address(mToken));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(priceProvider.price.selector, address(mToken)), abi.encode(price / 2));
+        vm.prank(etherFiWallet);
+        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
+        vm.clearMockedCalls();
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 100e6);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
         assertEq(gw.debtOf(address(safe), address(usdc)), 6700e6, "debt not reduced");
+        assertGt(gw.healthFactor(address(safe)), hfBefore, "health improved");
+    }
+
+    /// @notice Verifies repayment reverts when payment plus fee exceeds the caller's maximum and passes at exactly it.
+    function test_repay_revertsWhenPaymentExceedsMax() public {
+        _buildDebtAndSuppliedMToken(500e6, 1000e18);
+        uint256 expected = _paymentWithFee(200e6);
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(MidasLiquifierModule.MaxPaymentExceeded.selector);
+        liquifier.repay(address(safe), address(mToken), 200e6, expected - 1);
+
+        vm.prank(etherFiWallet);
+        liquifier.repay(address(safe), address(mToken), 200e6, expected);
+        assertApproxEqAbs(mToken.balanceOf(address(liquifier)), expected, 1, "payment not reclaimed");
     }
 
     /// @notice Verifies repayment rejects a payment token without a configured pair.
     function test_repay_revertsWhenPairNotSet() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.PairNotSet.selector);
-        liquifier.repay(address(safe), address(usdc), 10e6);
+        liquifier.repay(address(safe), address(usdc), 10e6, type(uint256).max);
     }
 
     /// @notice Verifies repayment rejects a zero debt amount.
     function test_repay_revertsOnZeroAmount() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.AmountZero.selector);
-        liquifier.repay(address(safe), address(mToken), 0);
+        liquifier.repay(address(safe), address(mToken), 0, type(uint256).max);
     }
 
     /// @notice Verifies repayment rejects callers without the EtherFi Wallet role.
     function test_repay_onlyEtherFiWallet() public {
         vm.prank(makeAddr("notEtherFiWallet"));
         vm.expectRevert(MidasLiquifierModule.OnlyEtherFiWallet.selector);
-        liquifier.repay(address(safe), address(mToken), 10e6);
+        liquifier.repay(address(safe), address(mToken), 10e6, type(uint256).max);
     }
 
     /// @notice Verifies repayment rejects an account that is not an EtherFi Safe.
     function test_repay_onlyEtherFiSafe() public {
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.OnlyEtherFiSafe.selector);
-        liquifier.repay(makeAddr("notASafe"), address(mToken), 10e6);
+        liquifier.repay(makeAddr("notASafe"), address(mToken), 10e6, type(uint256).max);
     }
 
     // ----------------------------------------------------------------- conversions
@@ -372,7 +399,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.PairNotSet.selector);
-        liquifier.repay(address(safe), address(mToken), 10e6);
+        liquifier.repay(address(safe), address(mToken), 10e6, type(uint256).max);
     }
 
     // ----------------------------------------------------------------- redeemMidas
@@ -413,7 +440,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
-        liquifier.repay(address(safe), address(mToken), 100e6);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
         vm.prank(owner);
         vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
         liquifier.redeemMidas(address(mToken), 1e18);
@@ -421,7 +448,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         vm.prank(unpauser);
         liquifier.unpause();
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), 100e6);
+        liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
     }
 
     // ----------------------------------------------------------------- withdrawFunds

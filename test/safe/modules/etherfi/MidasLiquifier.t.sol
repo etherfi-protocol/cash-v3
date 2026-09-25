@@ -105,7 +105,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         uint256 floatBefore = USDC.balanceOf(address(liquifier));
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), debtAmount);
+        liquifier.repay(address(safe), address(mToken), debtAmount, type(uint256).max);
 
         // The DebtManager settles through its normalized-debt index, so the repaid figure can land 1 unit off.
         assertApproxEqAbs(debtBefore - debtManager.borrowingOf(address(safe), address(USDC)), debtAmount, 1, "debt not reduced");
@@ -130,7 +130,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(IDebtManager.AccountUnhealthy.selector);
-        liquifier.repay(address(safe), address(mToken), 10e6);
+        liquifier.repay(address(safe), address(mToken), 10e6, type(uint256).max);
 
         assertEq(debtManager.borrowingOf(address(safe), address(USDC)), debtBefore, "debt change not reverted");
         assertEq(USDC.balanceOf(address(liquifier)), initialFloat, "float change not reverted");
@@ -144,7 +144,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         uint256 safeMTokenBefore = mToken.balanceOf(address(safe));
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), requested);
+        liquifier.repay(address(safe), address(mToken), requested, type(uint256).max);
 
         // The DebtManager floors the normalized amount it clears, so a full repayment can leave one unit of USD dust
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1, "debt not cleared");
@@ -157,7 +157,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         deal(address(USDC), address(liquifier), debt);
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), debt + 10e6);
+        liquifier.repay(address(safe), address(mToken), debt + 10e6, type(uint256).max);
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1, "debt not cleared");
     }
 
@@ -176,7 +176,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         // 10 USDC of debt needs about 10.05 payment tokens, but only 1 is left unreserved
         vm.prank(etherFiWallet);
         vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
-        liquifier.repay(address(safe), address(mToken), 10e6);
+        liquifier.repay(address(safe), address(mToken), 10e6, type(uint256).max);
     }
 
     /// @notice Verifies a pair whose debt token the Safe has never borrowed reverts before any conversion.
@@ -187,7 +187,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.AmountZero.selector);
-        liquifier.repay(address(safe), address(mToken), 10e6);
+        liquifier.repay(address(safe), address(mToken), 10e6, type(uint256).max);
     }
 
     /// @notice Verifies full repayment can clear an unhealthy legacy Safe's debt.
@@ -199,7 +199,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
         debtManager.ensureHealth(address(safe));
 
         vm.prank(etherFiWallet);
-        liquifier.repay(address(safe), address(mToken), initialDebtAmount);
+        liquifier.repay(address(safe), address(mToken), initialDebtAmount, type(uint256).max);
         assertApproxEqAbs(debtManager.borrowingOf(address(safe), address(USDC)), 0, 1, "debt not cleared");
     }
 
@@ -209,7 +209,7 @@ contract MidasLiquifierTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(MidasLiquifierModule.InsufficientFloat.selector);
-        liquifier.repay(address(safe), address(mToken), 10e6);
+        liquifier.repay(address(safe), address(mToken), 10e6, type(uint256).max);
     }
 
     /// @notice Verifies legacy repayment reverts when the Safe has no payment tokens.
@@ -218,6 +218,6 @@ contract MidasLiquifierTest is CashModuleTestSetup {
 
         vm.prank(etherFiWallet);
         vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
-        liquifier.repay(address(safe), address(mToken), 10e6);
+        liquifier.repay(address(safe), address(mToken), 10e6, type(uint256).max);
     }
 }
