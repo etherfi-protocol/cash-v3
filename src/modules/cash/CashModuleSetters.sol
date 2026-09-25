@@ -250,15 +250,16 @@ contract CashModuleSetters is CashModuleStorageContract {
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
 
-        if (_getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(msg.sender) || _getCashModuleStorage().whitelistedModulesCanRequestWithdraw.contains(recipient)) {
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        if ($.whitelistedModulesCanRequestWithdraw.contains(msg.sender) || $.whitelistedModulesCanRequestWithdraw.contains(recipient)) {
             revert InvalidWithdrawRequest();
         }
 
         // A matured opt-out returns all Aave collateral to the safe first, so the withdrawal sources
         // from loose balances instead of pulling from the lend market
-        CashLendLib.processLendOptOutIfReady(_getCashModuleStorage(), safe);
+        CashLendLib.processLendOptOutIfReady($, safe);
 
-        _requestWithdrawal(safe, tokens, amounts, recipient);
+        _requestWithdrawal(safe, tokens, amounts, recipient, $.withdrawalDelay);
     }
 
     /**
@@ -285,7 +286,7 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         address recipient = msg.sender; // The module itself is the recipient
 
-        _requestWithdrawal(safe, tokens, amounts, recipient);
+        _requestWithdrawal(safe, tokens, amounts, recipient, _withdrawalDelayForModule($, msg.sender));
     }
 
     /**
@@ -311,6 +312,19 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         EnumerableAddressWhitelistLib.configure($.whitelistedModulesCanRequestWithdraw, modules, shouldWhitelist);
         $.cashEventEmitter.emitModulesCanRequestWithdrawConfigured(modules, shouldWhitelist);
+    }
+
+    /**
+     * @notice Configures or clears a module-specific withdrawal delay
+     * @dev Unconfigured modules continue to use the global withdrawal delay.
+     */
+    function configureModuleWithdrawalDelay(address module, uint64 delay, bool enabled) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        if (module == address(0)) revert InvalidInput();
+
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        $.moduleWithdrawalDelayConfig[module] = ModuleWithdrawalDelayConfig({ delay: delay, configured: enabled });
+        $.cashEventEmitter.emitModuleWithdrawalDelayConfigured(module, delay, enabled);
     }
 
     /**
@@ -407,11 +421,12 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param tokens Array of token addresses to withdraw
      * @param amounts Array of token amounts to withdraw
      * @param recipient Address to receive the withdrawn tokens
+     * @param withdrawalDelay Delay to apply to this request
      * @custom:throws RecipientCannotBeAddressZero if recipient is the zero address
      * @custom:throws InvalidInput if tokens is empty
      * @custom:throws AmountZero if every amount is zero
      */
-    function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient) internal {
+    function _requestWithdrawal(address safe, address[] memory tokens, uint256[] memory amounts, address recipient, uint64 withdrawalDelay) internal {
         CashModuleStorage storage $ = _getCashModuleStorage();
         SafeCashConfig storage $$ = $.safeCashConfig[safe];
 
@@ -427,7 +442,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         _areAssetsWithdrawable($, tokens);
         _cancelOldWithdrawal(safe);
 
-        uint96 finalTime = uint96(block.timestamp) + $.withdrawalDelay;
+        uint96 finalTime = uint96(block.timestamp) + withdrawalDelay;
 
         CashLendLib.sourceWithdrawal($, safe, tokens, amounts);
         _checkBalance(safe, tokens, amounts);
@@ -441,7 +456,7 @@ contract CashModuleSetters is CashModuleStorageContract {
         // does not list as collateral (the two registries diverge by design as DebtManager is retired).
         if (!_usesLendGateway(safe)) _getDebtManager().ensureHealth(safe);
 
-        if ($.withdrawalDelay == 0) _processWithdrawal(safe);
+        if (withdrawalDelay == 0) _processWithdrawal(safe);
     }
 
     /// @dev Whether the request moves anything at all (see _requestWithdrawal's zero-amount rule)

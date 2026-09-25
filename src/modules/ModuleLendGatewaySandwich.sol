@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
 
@@ -60,6 +61,25 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
      */
     function _onGatewayEngine(address safe) internal view virtual returns (bool) {
         return cashModule.usesLendGateway(safe);
+    }
+
+    /**
+     * @notice Whether moving `asset` out of the safe can race card spending or reduce borrowing capacity
+     * @dev Gateway safes: the reserve's live LTV marks collateral and `isSpendAsset` marks debit-spendable
+     *      assets. Legacy safes: DebtManager's collateral and borrow registries. Chains without CashModule
+     *      card spending never need a hold.
+     * @param safe The safe moving the asset
+     * @param asset The asset being moved
+     * @return True if the move must sit behind a CashModule withdrawal hold
+     */
+    function _requiresSolvencyHold(address safe, address asset) internal view returns (bool) {
+        if (address(cashModule) == address(0)) return false;
+        if (_onGatewayEngine(safe)) {
+            ILendGateway lendGateway = gateway();
+            return address(lendGateway) != address(0) && (lendGateway.ltv(asset) != 0 || lendGateway.isSpendAsset(asset));
+        }
+        IDebtManager debtManager = cashModule.getDebtManager();
+        return debtManager.isCollateralToken(asset) || debtManager.isBorrowToken(asset);
     }
 
     /**
