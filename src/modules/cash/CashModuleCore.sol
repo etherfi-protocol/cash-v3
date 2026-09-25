@@ -144,6 +144,14 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Returns the effective withdrawal delay for `module`
+     * @dev Uses the module override when configured, otherwise the global withdrawal delay.
+     */
+    function getWithdrawalDelayForModule(address module) external view returns (uint64) {
+        return _withdrawalDelayForModule(_getCashModuleStorage(), module);
+    }
+
+    /**
      * @notice Gets the pending cashback amount for an account in USD
      * @dev Returns the amount of cashback waiting to be claimed
      * @param account Address of the account (safe or spender)
