@@ -130,12 +130,10 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
         uint256 totalPayment = paymentAmount + feeAmount;
         if (totalPayment > maxPaymentAmount) revert MaxPaymentExceeded();
         _reclaim(user, paymentToken, totalPayment);
-        // Health is checked after collection because the Safe's hook runs before transferFrom. A gateway safe
-        // always takes the not-worsened floor: fees can worsen health, and so can a gap between the
-        // PriceProvider rate charged here and Aave's own valuation, while a genuine de-risk still passes.
-        // A legacy safe prices both sides on the PriceProvider, so only a fee can worsen it.
-        if (cashModule.usesLendGateway(user)) _ensureGatewayFloor(user, healthFactorBefore);
-        else if (feeAmount > 0) debtManager.ensureHealth(user);
+        // Checked after collection: the Safe's hook runs before transferFrom. A repay may never lower health;
+        // a fee or a PriceProvider-vs-Aave price gap could. Legacy prices both sides the same, so only a fee can.
+        _ensureGatewayHealthNotWorsened(user, healthFactorBefore);
+        if (feeAmount > 0 && !cashModule.usesLendGateway(user)) debtManager.ensureHealth(user);
 
         emit Repaid(user, paymentToken, pair.debtToken, debtRepaid, paymentAmount, feeAmount);
     }

@@ -12,8 +12,8 @@ import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
 import { IMidasVault } from "../../../../../src/interfaces/IMidasVault.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { ModuleCheckBalance } from "../../../../../src/modules/ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../../../../../src/modules/ModuleLendGatewaySandwich.sol";
 import { MidasLiquifierModule } from "../../../../../src/modules/etherfi/MidasLiquifierModule.sol";
-import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
@@ -237,26 +237,26 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
     }
 
     // A fee takes more collateral than the debt it clears, so it is the one part of a repayment that can
-    // worsen health. From under the floor, a fee-heavy repay that lowers health is rejected, while a small
-    // fee that still leaves health better than before goes through.
-    /// @notice Verifies repayment below the gateway floor rejects fees that worsen health but allows fees that improve health.
-    function test_repay_feeTakesGatewayHealthFactorFloor() public {
+    // worsen health. A repay may never lower health, even when the safe would still sit above the floor:
+    // a fee-heavy repay that lowers health is rejected, a small fee that still improves it goes through.
+    /// @notice Verifies a repay whose fee lowers health reverts even above the floor, while a fee that still improves health passes.
+    function test_repay_revertsWhenFeeWorsensHealthEvenAboveFloor() public {
         _supplyToGateway(address(safe), address(mToken), 10_000e18);
-        _borrowOnGateway(address(safe), address(usdc), 6800e6, recipient);
+        _borrowOnGateway(address(safe), address(usdc), 6000e6, recipient);
         deal(address(usdc), address(liquifier), 1000e6);
         vm.prank(owner);
         gw.setMinHealthFactor(1.05e18);
         uint256 hfBefore = gw.healthFactor(address(safe));
-        assertLt(hfBefore, 1.05e18, "safe starts below the floor");
+        assertGt(hfBefore, 1.05e18, "safe starts above the floor");
 
-        // 100 of debt cleared for 200 of collateral out: health drops, and it is under the floor
+        // 100 of debt cleared for 200 of collateral out: health drops, though it stays above the floor
         vm.prank(owner);
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 100e6);
         vm.prank(etherFiWallet);
-        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        vm.expectRevert(ModuleLendGatewaySandwich.HealthFactorWorsened.selector);
         liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
 
-        // 100 of debt cleared for 110 of collateral out: health still improves, so the floor does not apply
+        // 100 of debt cleared for 110 of collateral out: health still improves
         vm.prank(owner);
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 10e6);
         vm.prank(etherFiWallet);
@@ -264,11 +264,11 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         assertGt(gw.healthFactor(address(safe)), hfBefore, "health improved");
     }
 
-    // Zero fee at matching valuations is a pure de-risk, so the not-worsened floor lets it through from under
-    // the floor. If the PriceProvider values the payment token below Aave, the same repay pulls more collateral
-    // than debt it clears in Aave's eyes, health drops, and the floor rejects it.
-    /// @notice Verifies zero-fee repayment below the floor passes when health improves and reverts when a price gap worsens it.
-    function test_repay_zeroFeeTakesGatewayHealthFactorFloorOnlyWhenWorsened() public {
+    // Zero fee at matching valuations is a pure de-risk and passes even from under the floor. If the
+    // PriceProvider values the payment token below Aave, the same repay pulls more collateral than the debt
+    // it clears in Aave's eyes, health drops, and the repay is rejected.
+    /// @notice Verifies a zero-fee repay below the floor passes when health improves and reverts when a price gap worsens it.
+    function test_repay_zeroFeeRevertsOnlyWhenPriceGapWorsensHealth() public {
         _supplyToGateway(address(safe), address(mToken), 10_000e18);
         _borrowOnGateway(address(safe), address(usdc), 6800e6, recipient);
         deal(address(usdc), address(liquifier), 1000e6);
@@ -283,7 +283,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         uint256 price = priceProvider.price(address(mToken));
         vm.mockCall(address(priceProvider), abi.encodeWithSelector(priceProvider.price.selector, address(mToken)), abi.encode(price / 2));
         vm.prank(etherFiWallet);
-        vm.expectRevert(LendGateway.HealthFactorBelowMinimum.selector);
+        vm.expectRevert(ModuleLendGatewaySandwich.HealthFactorWorsened.selector);
         liquifier.repay(address(safe), address(mToken), 100e6, type(uint256).max);
         vm.clearMockedCalls();
 
