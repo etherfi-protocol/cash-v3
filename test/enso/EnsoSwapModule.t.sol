@@ -295,7 +295,11 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     }
 
     function test_requestSwap_gatewayCollateral_pendingDebitSwitchIsHeld() public {
-        assertTrue(_requestGatewayCollateralSwap(Mode.Credit, false, Mode.Debit, block.timestamp - 1));
+        assertTrue(_requestGatewayCollateralSwap(Mode.Credit, false, Mode.Debit, block.timestamp + 60));
+    }
+
+    function test_requestSwap_gatewayCollateral_maturedDebitSwitchExecutesImmediately() public {
+        assertFalse(_requestGatewayCollateralSwap(Mode.Credit, false, Mode.Debit, block.timestamp - 1));
     }
 
     function test_requestSwap_nonCollateralTradeKeepsPendingUserWithdrawal() public {
@@ -836,6 +840,8 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         data.incomingModeStartTime = incomingModeStartTime;
         vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.usesLendGateway, (address(safe))), abi.encode(true));
         vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.getData, (address(safe))), abi.encode(data));
+        Mode effectiveMode = incomingModeStartTime != 0 && block.timestamp > incomingModeStartTime ? incomingMode : mode;
+        vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.getMode, (address(safe))), abi.encode(effectiveMode));
         vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.ltv, (address(collateral))), abi.encode(uint256(80e18)));
         vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.hasDebt, (address(safe))), abi.encode(hasDebt));
 

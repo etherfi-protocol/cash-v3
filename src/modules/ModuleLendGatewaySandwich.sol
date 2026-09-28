@@ -67,8 +67,8 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     /**
      * @notice Whether moving `asset` out of the safe can race card spending or reduce borrowing capacity
      * @dev Gateway safes: a spend asset is always held. A collateral asset (live LTV != 0) is held
-     *      unless the safe is in Debit mode with no debt and no pending mode switch — then the collateral
-     *      backs nothing. Legacy safes: DebtManager's collateral and borrow registries, held regardless of
+     *      unless the safe is in Debit mode with no debt and no mode switch inside its delay — then the
+     *      collateral backs nothing. Legacy safes: DebtManager's collateral and borrow registries, held regardless of
      *      mode because the no-hold path runs no DebtManager health check. Chains without CashModule card
      *      spending never need a hold.
      * @param safe The safe moving the asset
@@ -85,10 +85,12 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
             if (lendGateway.hasDebt(safe)) return true; // collateral asset, safe has debt
             SafeData memory data = cashModule.getData(safe);
             // Collateral asset, no debt:
+            //   - mode switch still inside its delay -> held (CashLens already authorizes in the incoming mode)
             //   - Credit mode                        -> held (card spends borrow against it)
-            //   - any pending mode switch            -> held (avoid race conditions with switching to credit mode)
-            //   - Debit mode, no pending mode switch -> not held (no need to hold collateral assets for debt users without debt)
-            return data.mode != Mode.Debit || data.incomingModeStartTime != 0;
+            //   - Debit mode                         -> not held (no need to hold collateral for Debit users without debt)
+            // getMode applies a matured switch that storage has not recorded yet (stored mode is updated lazily)
+            bool modeSwitchPending = data.incomingModeStartTime != 0 && block.timestamp <= data.incomingModeStartTime;
+            return modeSwitchPending || cashModule.getMode(safe) == Mode.Credit;
         }
         IDebtManager debtManager = cashModule.getDebtManager();
         return debtManager.isCollateralToken(asset) || debtManager.isBorrowToken(asset); // legacy safe: collateral or borrow (spend) asset
