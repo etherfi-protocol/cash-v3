@@ -294,8 +294,8 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         assertTrue(_requestGatewayCollateralSwap(Mode.Debit, false, Mode.Credit, block.timestamp + 60));
     }
 
-    function test_requestSwap_gatewayCollateral_maturedDebitSwitchExecutesImmediately() public {
-        assertFalse(_requestGatewayCollateralSwap(Mode.Credit, false, Mode.Debit, block.timestamp - 1));
+    function test_requestSwap_gatewayCollateral_pendingDebitSwitchIsHeld() public {
+        assertTrue(_requestGatewayCollateralSwap(Mode.Credit, false, Mode.Debit, block.timestamp - 1));
     }
 
     function test_requestSwap_nonCollateralTradeKeepsPendingUserWithdrawal() public {

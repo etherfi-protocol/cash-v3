@@ -66,9 +66,9 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
 
     /**
      * @notice Whether moving `asset` out of the safe can race card spending or reduce borrowing capacity
-     * @dev Gateway safes: a spend asset is always held. A collateral asset (live LTV != 0) is held while the
-     *      safe is in Credit mode, has a pending switch to Credit, or carries any debt — a Debit-mode safe
-     *      with no debt and no incoming Credit has nothing the collateral backs. Legacy safes: DebtManager's collateral and borrow registries, held regardless of
+     * @dev Gateway safes: a spend asset is always held. A collateral asset (live LTV != 0) is held
+     *      unless the safe is in Debit mode with no debt and no pending mode switch — then the collateral
+     *      backs nothing. Legacy safes: DebtManager's collateral and borrow registries, held regardless of
      *      mode because the no-hold path runs no DebtManager health check. Chains without CashModule card
      *      spending never need a hold.
      * @param safe The safe moving the asset
@@ -84,10 +84,8 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
             if (lendGateway.ltv(asset) == 0) return false;
             if (lendGateway.hasDebt(safe)) return true;
             SafeData memory data = cashModule.getData(safe);
-            if (data.incomingModeStartTime == 0) return data.mode == Mode.Credit;
-            // CashLens authorizes card spends in the incoming mode before it matures, so a pending
-            // switch to Credit already counts as Credit here
-            return data.incomingMode == Mode.Credit || (block.timestamp <= data.incomingModeStartTime && data.mode == Mode.Credit);
+            // Any pending mode switch holds: CashLens authorizes card spends in the incoming mode before it matures
+            return data.mode != Mode.Debit || data.incomingModeStartTime != 0;
         }
         IDebtManager debtManager = cashModule.getDebtManager();
         return debtManager.isCollateralToken(asset) || debtManager.isBorrowToken(asset);
