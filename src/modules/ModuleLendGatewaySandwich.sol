@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { Mode } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
@@ -65,9 +66,11 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
 
     /**
      * @notice Whether moving `asset` out of the safe can race card spending or reduce borrowing capacity
-     * @dev Gateway safes: the reserve's live LTV marks collateral and `isSpendAsset` marks debit-spendable
-     *      assets. Legacy safes: DebtManager's collateral and borrow registries. Chains without CashModule
-     *      card spending never need a hold.
+     * @dev Gateway safes: a spend asset is always held. A collateral asset (live LTV != 0) is held while the
+     *      safe is in Credit mode or carries any debt — a Debit-mode safe with no debt has nothing the
+     *      collateral backs. Legacy safes: DebtManager's collateral and borrow registries, held regardless of
+     *      mode because the no-hold path runs no DebtManager health check. Chains without CashModule card
+     *      spending never need a hold.
      * @param safe The safe moving the asset
      * @param asset The asset being moved
      * @return True if the move must sit behind a CashModule withdrawal hold
@@ -76,7 +79,10 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
         if (address(cashModule) == address(0)) return false;
         if (_onGatewayEngine(safe)) {
             ILendGateway lendGateway = gateway();
-            return address(lendGateway) != address(0) && (lendGateway.ltv(asset) != 0 || lendGateway.isSpendAsset(asset));
+            if (address(lendGateway) == address(0)) return false;
+            if (lendGateway.isSpendAsset(asset)) return true;
+            if (lendGateway.ltv(asset) == 0) return false;
+            return cashModule.getMode(safe) == Mode.Credit || lendGateway.hasDebt(safe);
         }
         IDebtManager debtManager = cashModule.getDebtManager();
         return debtManager.isCollateralToken(asset) || debtManager.isBorrowToken(asset);
