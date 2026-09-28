@@ -84,8 +84,10 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
             if (lendGateway.ltv(asset) == 0) return false; // non-collateral, non-spend asset
             if (lendGateway.hasDebt(safe)) return true; // collateral asset, safe has debt
             SafeData memory data = cashModule.getData(safe);
-            // Collateral asset, no debt: held unless in Debit mode with no pending mode switch (CashLens
-            // authorizes card spends in the incoming mode before it matures)
+            // Collateral asset, no debt:
+            //   - Credit mode                        -> held (card spends borrow against it)
+            //   - any pending mode switch            -> held (avoid race conditions with switching to credit mode)
+            //   - Debit mode, no pending mode switch -> not held (no need to hold collateral assets for debt users without debt)
             return data.mode != Mode.Debit || data.incomingModeStartTime != 0;
         }
         IDebtManager debtManager = cashModule.getDebtManager();
