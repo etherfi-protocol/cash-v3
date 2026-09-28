@@ -76,19 +76,20 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
      * @return True if the move must sit behind a CashModule withdrawal hold
      */
     function _requiresSolvencyHold(address safe, address asset) internal view returns (bool) {
-        if (address(cashModule) == address(0)) return false;
+        if (address(cashModule) == address(0)) return false; // any asset: chain with no card spending (mainnet safes)
         if (_onGatewayEngine(safe)) {
             ILendGateway lendGateway = gateway();
-            if (address(lendGateway) == address(0)) return false;
-            if (lendGateway.isSpendAsset(asset)) return true;
-            if (lendGateway.ltv(asset) == 0) return false;
-            if (lendGateway.hasDebt(safe)) return true;
+            if (address(lendGateway) == address(0)) return false; // any asset: chain with no aave lending engine
+            if (lendGateway.isSpendAsset(asset)) return true; // spend asset
+            if (lendGateway.ltv(asset) == 0) return false; // non-collateral, non-spend asset
+            if (lendGateway.hasDebt(safe)) return true; // collateral asset, safe has debt
             SafeData memory data = cashModule.getData(safe);
-            // Any pending mode switch holds: CashLens authorizes card spends in the incoming mode before it matures
+            // Collateral asset, no debt: held unless in Debit mode with no pending mode switch (CashLens
+            // authorizes card spends in the incoming mode before it matures)
             return data.mode != Mode.Debit || data.incomingModeStartTime != 0;
         }
         IDebtManager debtManager = cashModule.getDebtManager();
-        return debtManager.isCollateralToken(asset) || debtManager.isBorrowToken(asset);
+        return debtManager.isCollateralToken(asset) || debtManager.isBorrowToken(asset); // legacy safe: collateral or borrow (spend) asset
     }
 
     /**
