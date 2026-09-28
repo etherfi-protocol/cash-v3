@@ -8,7 +8,7 @@ import { Vm } from "forge-std/Vm.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
-import { ICashModule, Mode } from "../../src/interfaces/ICashModule.sol";
+import { ICashModule, Mode, SafeData } from "../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
 import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
@@ -288,6 +288,14 @@ contract EnsoSwapModuleTest is SafeTestSetup {
 
     function test_requestSwap_gatewayCollateral_creditIsHeld() public {
         assertTrue(_requestGatewayCollateralSwap(Mode.Credit, false));
+    }
+
+    function test_requestSwap_gatewayCollateral_pendingCreditIsHeld() public {
+        assertTrue(_requestGatewayCollateralSwap(Mode.Debit, false, Mode.Credit, block.timestamp + 60));
+    }
+
+    function test_requestSwap_gatewayCollateral_maturedDebitSwitchExecutesImmediately() public {
+        assertFalse(_requestGatewayCollateralSwap(Mode.Credit, false, Mode.Debit, block.timestamp - 1));
     }
 
     function test_requestSwap_nonCollateralTradeKeepsPendingUserWithdrawal() public {
@@ -816,10 +824,18 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     /// @dev Requests a swap of a fresh gateway collateral asset (LTV != 0, not a spend asset) under the given
     ///      mode / debt state and returns whether it was placed behind a CashModule hold.
     function _requestGatewayCollateralSwap(Mode mode, bool hasDebt) internal returns (bool held) {
+        return _requestGatewayCollateralSwap(mode, hasDebt, Mode.Debit, 0);
+    }
+
+    function _requestGatewayCollateralSwap(Mode mode, bool hasDebt, Mode incomingMode, uint256 incomingModeStartTime) internal returns (bool held) {
         MockERC20 collateral = new MockERC20("Collateral", "COL", 18);
         collateral.mint(address(safe), SRC_AMOUNT);
+        SafeData memory data = cashModule.getData(address(safe));
+        data.mode = mode;
+        data.incomingMode = incomingMode;
+        data.incomingModeStartTime = incomingModeStartTime;
         vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.usesLendGateway, (address(safe))), abi.encode(true));
-        vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.getMode, (address(safe))), abi.encode(mode));
+        vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.getData, (address(safe))), abi.encode(data));
         vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.ltv, (address(collateral))), abi.encode(uint256(80e18)));
         vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.hasDebt, (address(safe))), abi.encode(hasDebt));
 
@@ -836,6 +852,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
         module.requestSwap(address(safe), order, swapData, signers, sigs);
 
+        vm.clearMockedCalls();
         held = cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient == address(module);
     }
 

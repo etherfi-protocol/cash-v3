@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { Mode } from "../interfaces/ICashModule.sol";
+import { Mode, SafeData } from "../interfaces/ICashModule.sol";
 import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
@@ -67,8 +67,8 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     /**
      * @notice Whether moving `asset` out of the safe can race card spending or reduce borrowing capacity
      * @dev Gateway safes: a spend asset is always held. A collateral asset (live LTV != 0) is held while the
-     *      safe is in Credit mode or carries any debt — a Debit-mode safe with no debt has nothing the
-     *      collateral backs. Legacy safes: DebtManager's collateral and borrow registries, held regardless of
+     *      safe is in Credit mode, has a pending switch to Credit, or carries any debt — a Debit-mode safe
+     *      with no debt and no incoming Credit has nothing the collateral backs. Legacy safes: DebtManager's collateral and borrow registries, held regardless of
      *      mode because the no-hold path runs no DebtManager health check. Chains without CashModule card
      *      spending never need a hold.
      * @param safe The safe moving the asset
@@ -82,7 +82,12 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
             if (address(lendGateway) == address(0)) return false;
             if (lendGateway.isSpendAsset(asset)) return true;
             if (lendGateway.ltv(asset) == 0) return false;
-            return cashModule.getMode(safe) == Mode.Credit || lendGateway.hasDebt(safe);
+            if (lendGateway.hasDebt(safe)) return true;
+            SafeData memory data = cashModule.getData(safe);
+            if (data.incomingModeStartTime == 0) return data.mode == Mode.Credit;
+            // CashLens authorizes card spends in the incoming mode before it matures, so a pending
+            // switch to Credit already counts as Credit here
+            return data.incomingMode == Mode.Credit || (block.timestamp <= data.incomingModeStartTime && data.mode == Mode.Credit);
         }
         IDebtManager debtManager = cashModule.getDebtManager();
         return debtManager.isCollateralToken(asset) || debtManager.isBorrowToken(asset);
