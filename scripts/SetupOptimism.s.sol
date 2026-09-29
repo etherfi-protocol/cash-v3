@@ -469,7 +469,8 @@ contract SetupOptimism is Utils {
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), deployer);
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), deployer);
         roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), deployer);
-        roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), deployer);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), deployer);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), deployer);
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
         roleRegistry.grantRole(settlementDispatcherReap.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), deployer);
         roleRegistry.grantRole(settlementDispatcherRain.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), deployer);

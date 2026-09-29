@@ -335,7 +335,8 @@ contract SafeTestSetup is Utils {
 
         deal(chainConfig.weth, address(cashbackDispatcher), 100000 ether);
 
-        roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), owner);
     }
 
     function _setupSettlementDispatcher() internal {
