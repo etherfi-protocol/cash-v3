@@ -21,15 +21,13 @@ import { Utils } from "../utils/Utils.sol";
  *         timelocks with different delays, so the launch lands in three steps:
  *
  *           Step 1 (day 0): schedule both timelock batches.
- *             admin timelock (8h):    setMidasRedemptionVault(liquidRWA, vault) on the 4 dispatchers,
- *                                     MidasLiquifier.setPair(liquidRWA -> USDC)
- *             upgrade timelock (2d):  LiquidUSD upgradeToAndCall
+ *             admin timelock (8h):    setMidasRedemptionVault(liquidRWA, vault) on the 4 dispatchers
+ *             upgrade timelock (2d):  MidasLiquifier.setPair(liquidRWA -> USDC), LiquidUSD upgradeToAndCall
  *           Step 2 (>= 8h after step 1 EXECUTES): execute the admin batch, then LendGateway.setSpendAsset.
  *             Spend flips only once every dispatcher can redeem the token it will receive.
  *           Step 3 (>= 2d after step 1 EXECUTES): execute the upgrade batch, then register the Midas
- *             module as a default module and gateway driver. The pair is set at step 2, but until this step
- *             the module is not a default module or driver, and repay / redeemMidas stay behind the
- *             ETHER_FI_WALLET_ROLE / SETTLEMENT_DISPATCHER_BRIDGER_ROLE holders.
+ *             module as a default module and gateway driver. The module is inert until this step: with no
+ *             pair set, repay and redeem revert, and it is not yet a module or driver.
  *
  * @dev Both timelock salts are non-zero and specific to this launch so the operation ids are unique;
  *      TimelockController keeps an id `isOperation` forever, so a reused salt could never be re-scheduled.
@@ -145,8 +143,8 @@ contract LiquidRwaLaunchOP3CP is Utils, GnosisHelpers {
             adminTargets.push(dispatchers[i]);
             adminPayloads.push(abi.encodeCall(SettlementDispatcherV2.setMidasRedemptionVault, (LIQUID_RWA, LIQUID_RWA_REDEMPTION_VAULT)));
         }
-        adminTargets.push(address(midas));
-        adminPayloads.push(abi.encodeCall(MidasLiquifierModule.setPair, (LIQUID_RWA, USDC, LIQUID_RWA_REDEMPTION_VAULT, 0, 0)));
+        upgradeTargets.push(address(midas));
+        upgradePayloads.push(abi.encodeCall(MidasLiquifierModule.setPair, (LIQUID_RWA, USDC, LIQUID_RWA_REDEMPTION_VAULT, 0, 0)));
         upgradeTargets.push(liquidUsdProxy);
         upgradePayloads.push(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", liquidUsdImpl, ""));
 
@@ -220,20 +218,20 @@ contract LiquidRwaLaunchOP3CP is Utils, GnosisHelpers {
         require(_isOperation(UPGRADE_TIMELOCK, upgradeTargets, upgradePayloads, SALT_UPGRADE), "upgrade batch not scheduled");
         require(!gateway.isSpendAsset(LIQUID_RWA), "spend must stay off after step 1");
 
-        console.log("=== Warp 8h, step 2: dispatcher vaults + Midas pair + spend on ===");
+        console.log("=== Warp 8h, step 2: dispatcher vaults + spend on ===");
         vm.warp(block.timestamp + ADMIN_DELAY + 1);
         executeGnosisTransactionBundle(step2);
         for (uint256 i = 0; i < 4; i++) {
             require(SettlementDispatcherV2(payable(dispatchers[i])).getMidasRedemptionVault(LIQUID_RWA) == LIQUID_RWA_REDEMPTION_VAULT, "dispatcher vault not set");
         }
-        MidasLiquifierModule.Pair memory pair = midas.pairs(LIQUID_RWA);
-        require(pair.debtToken == USDC && pair.redemptionVault == LIQUID_RWA_REDEMPTION_VAULT && pair.feeBps == 0 && pair.flatFee == 0, "pair mismatch");
         require(gateway.isSpendAsset(LIQUID_RWA), "spend not enabled");
-        require(!dataProvider.isDefaultModule(address(midas)) && !gateway.isDriver(address(midas)), "Midas must not be a module or driver before step 3");
+        require(midas.pairs(LIQUID_RWA).debtToken == address(0), "pair must not be set before step 3");
 
-        console.log("=== Warp 2d, step 3: LiquidUSD upgrade, module + driver ===");
+        console.log("=== Warp 2d, step 3: pair, LiquidUSD upgrade, module + driver ===");
         vm.warp(block.timestamp + UPGRADE_DELAY + 1);
         executeGnosisTransactionBundle(step3);
+        MidasLiquifierModule.Pair memory pair = midas.pairs(LIQUID_RWA);
+        require(pair.debtToken == USDC && pair.redemptionVault == LIQUID_RWA_REDEMPTION_VAULT && pair.feeBps == 0 && pair.flatFee == 0, "pair mismatch");
         require(_implOf(liquidUsdProxy) == liquidUsdImpl, "LiquidUSD impl slot != new impl");
         require(dataProvider.isDefaultModule(address(midas)), "Midas not a default module");
         require(gateway.isDriver(address(midas)), "Midas not a driver");
