@@ -12,6 +12,7 @@ interface ILayerZeroTeller {
 
     function vault() external view returns (BoringVault);
     function assetData(ERC20 asset) external view returns (Asset memory);
+    function shareLockPeriod() external view returns (uint64);
     function deposit(ERC20 depositAsset, uint256 depositAmount, uint256 minimumMint) external payable returns (uint256 shares);
     function bridge(uint96 shareAmount, address to, bytes calldata bridgeWildCard, ERC20 feeToken, uint256 maxFee) external payable;
     function previewFee(uint96 shareAmount, address to, bytes calldata bridgeWildCard, ERC20 feeToken) external view returns (uint256 fee);
