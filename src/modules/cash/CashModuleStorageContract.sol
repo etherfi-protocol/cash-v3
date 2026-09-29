@@ -75,6 +75,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         ILendGateway gateway;
         /// @notice Optional withdrawal-delay override for each module. Unconfigured modules use `withdrawalDelay`.
         mapping(address module => ModuleWithdrawalDelayConfig config) moduleWithdrawalDelayConfig;
+        /// @notice Supported assets that back no borrowing and are not card-spendable. They skip the withdrawal delay.
+        EnumerableSetLib.AddressSet nonCollateralAssets;
     }
 
     struct ModuleWithdrawalDelayConfig {
@@ -152,6 +154,10 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
     /// @notice Error thrown when trying to withdraw an non whitelisted asset
     /// @param asset The address of the invalid asset
     error InvalidWithdrawAsset(address asset);
+
+    /// @notice Error thrown when registering a non-collateral asset that is a lending or spend asset
+    /// @param asset The address of the invalid asset
+    error InvalidNonCollateralAsset(address asset);
 
     /// @notice Error thrown when a withdrawal request is made by a module that is not whitelisted
     error OnlyWhitelistedModuleCanRequestWithdraw();

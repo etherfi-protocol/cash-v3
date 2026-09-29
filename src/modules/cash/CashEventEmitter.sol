@@ -245,6 +245,13 @@ contract CashEventEmitter is UpgradeableProxy {
     event WithdrawTokensConfigured(address[] tokens, bool[] shouldWhitelist);
 
     /**
+     * @notice Emitted when the non-collateral asset registry is updated
+     * @param assets Address of the assets
+     * @param shouldRegister Boolean value suggesting if the asset is registered as non-collateral
+     */
+    event NonCollateralAssetsConfigured(address[] assets, bool[] shouldRegister);
+
+    /**
      * @notice Emitted when modules are configured to request withdrawals
      * @param modules Array of module addresses that can request withdrawals
      * @param shouldWhitelist Array of boolean values suggesting whether to whitelist the modules
@@ -287,6 +294,15 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitWithdrawTokensConfigured(address[] calldata tokens, bool[] calldata shouldWhitelist) external onlyCashModule {
         emit WithdrawTokensConfigured(tokens, shouldWhitelist);
+    }
+
+    /**
+     * @notice Emits the NonCollateralAssetsConfigured event
+     * @param assets Address of the assets
+     * @param shouldRegister Boolean value suggesting if the asset is registered as non-collateral
+     */
+    function emitNonCollateralAssetsConfigured(address[] calldata assets, bool[] calldata shouldRegister) external onlyCashModule {
+        emit NonCollateralAssetsConfigured(assets, shouldRegister);
     }
 
     /**

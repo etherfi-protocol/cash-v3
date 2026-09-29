@@ -123,6 +123,23 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
+     * @notice Returns all the registered non-collateral assets
+     * @return Array of non-collateral assets
+     */
+    function getNonCollateralAssets() external view returns (address[] memory) {
+        return _getCashModuleStorage().nonCollateralAssets.values();
+    }
+
+    /**
+     * @notice Whether `asset` is a registered non-collateral asset
+     * @param asset Asset address to check
+     * @return True if the asset is registered as non-collateral
+     */
+    function isNonCollateralAsset(address asset) external view returns (bool) {
+        return _getCashModuleStorage().nonCollateralAssets.contains(asset);
+    }
+
+    /**
      * @notice Fetches the safe tier
      * @param safe Address of the safe
      * @return SafeTiers Tier of the safe

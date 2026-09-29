@@ -281,6 +281,10 @@ interface ICashModule {
     /// @param asset The address of the invalid asset
     error InvalidWithdrawAsset(address asset);
 
+    /// @notice Error thrown when registering a non-collateral asset that is a lending or spend asset
+    /// @param asset The address of the invalid asset
+    error InvalidNonCollateralAsset(address asset);
+
     /// @notice Error thrown when a withdrawal request is made by a module that is not whitelisted
     error OnlyWhitelistedModuleCanRequestWithdraw();
 
@@ -331,6 +335,19 @@ interface ICashModule {
      * @return Array of whitelisted withdraw assets
      */
     function getWhitelistedWithdrawAssets() external view returns (address[] memory);
+
+    /**
+     * @notice Returns all the registered non-collateral assets
+     * @return Array of non-collateral assets
+     */
+    function getNonCollateralAssets() external view returns (address[] memory);
+
+    /**
+     * @notice Whether `asset` is a registered non-collateral asset
+     * @param asset Asset address to check
+     * @return True if the asset is registered as non-collateral
+     */
+    function isNonCollateralAsset(address asset) external view returns (bool);
 
     /**
      * @notice Retrieves cash configuration data for a Safe
@@ -565,6 +582,18 @@ interface ICashModule {
      * @custom:throws DuplicateElementFound If any address appears more than once in the addrs array
      */
     function configureWithdrawAssets(address[] calldata assets, bool[] calldata shouldWhitelist) external;
+
+    /**
+     * @notice Configures the registry of non-collateral assets
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE. A registered asset must also be a
+     *      whitelisted withdraw asset to be withdrawn; withdrawals made up only of registered assets skip
+     *      the withdrawal delay.
+     * @param assets Array of asset addresses to configure
+     * @param shouldRegister Array of booleans suggesting whether to register the assets
+     * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
+     * @custom:throws InvalidNonCollateralAsset if a registered asset is a lending, collateral or borrow asset
+     */
+    function configureNonCollateralAssets(address[] calldata assets, bool[] calldata shouldRegister) external;
 
     /**
      * @notice Sets the settlement dispatcher address for a bin sponsor

@@ -234,4 +234,11 @@ interface ICashEventEmitter {
      * @param shouldWhitelist Boolean value suggesting if the token should be whitelisted for withdrawal
      */
     function emitWithdrawTokensConfigured(address[] calldata tokens, bool[] calldata shouldWhitelist) external;
+
+    /**
+     * @notice Emits the NonCollateralAssetsConfigured event
+     * @param assets Address of the assets
+     * @param shouldRegister Boolean value suggesting if the asset is registered as non-collateral
+     */
+    function emitNonCollateralAssetsConfigured(address[] calldata assets, bool[] calldata shouldRegister) external;
 }

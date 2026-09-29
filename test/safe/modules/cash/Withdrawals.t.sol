@@ -13,6 +13,7 @@ import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../../../src/interfaces/IBridgeModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { MockERC20 } from "../../../../src/mocks/MockERC20.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -721,6 +722,145 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.prank(owner);
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         cashModule.configureModuleWithdrawalDelay(address(0), 3, true);
+    }
+
+    function test_configureNonCollateralAssets_registersAndRemovesAssets() public {
+        MockERC20 nonCollateral = new MockERC20("Non-collateral", "NC", 18);
+        address[] memory assets = new address[](1);
+        assets[0] = address(nonCollateral);
+        bool[] memory shouldRegister = new bool[](1);
+        shouldRegister[0] = true;
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit CashEventEmitter.NonCollateralAssetsConfigured(assets, shouldRegister);
+        cashModule.configureNonCollateralAssets(assets, shouldRegister);
+
+        assertTrue(cashModule.isNonCollateralAsset(address(nonCollateral)));
+        assertEq(cashModule.getNonCollateralAssets().length, 1);
+        assertEq(cashModule.getNonCollateralAssets()[0], address(nonCollateral));
+
+        shouldRegister[0] = false;
+        vm.prank(owner);
+        cashModule.configureNonCollateralAssets(assets, shouldRegister);
+
+        assertFalse(cashModule.isNonCollateralAsset(address(nonCollateral)));
+        assertEq(cashModule.getNonCollateralAssets().length, 0);
+    }
+
+    function test_configureNonCollateralAssets_revertsForNonController() public {
+        address[] memory assets = new address[](1);
+        assets[0] = makeAddr("asset");
+        bool[] memory shouldRegister = new bool[](1);
+        shouldRegister[0] = true;
+
+        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        cashModule.configureNonCollateralAssets(assets, shouldRegister);
+    }
+
+    function test_configureNonCollateralAssets_revertsForGatewayRegisteredAsset() public {
+        address[] memory assets = new address[](1);
+        assets[0] = address(usdc);
+        bool[] memory shouldRegister = new bool[](1);
+        shouldRegister[0] = true;
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(ICashModule.InvalidNonCollateralAsset.selector, address(usdc)));
+        cashModule.configureNonCollateralAssets(assets, shouldRegister);
+    }
+
+    function test_configureNonCollateralAssets_revertsForDebtManagerCollateral() public {
+        MockERC20 legacyCollateral = new MockERC20("Legacy collateral", "LC", 18);
+        vm.mockCall(address(debtManager), abi.encodeCall(IDebtManager.isCollateralToken, (address(legacyCollateral))), abi.encode(true));
+        address[] memory assets = new address[](1);
+        assets[0] = address(legacyCollateral);
+        bool[] memory shouldRegister = new bool[](1);
+        shouldRegister[0] = true;
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(ICashModule.InvalidNonCollateralAsset.selector, address(legacyCollateral)));
+        cashModule.configureNonCollateralAssets(assets, shouldRegister);
+    }
+
+    function test_requestWithdrawal_nonCollateralAssetIsProcessedImmediately() public {
+        MockERC20 nonCollateral = _supportNonCollateralAsset();
+        uint256 amount = 10e18;
+        nonCollateral.mint(address(safe), amount);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(nonCollateral);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amount;
+        (address[] memory signers, bytes[] memory signatures) = _signWithdrawal(tokens, amounts, withdrawRecipient);
+        cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, signers, signatures);
+
+        assertEq(nonCollateral.balanceOf(withdrawRecipient), amount);
+        assertEq(nonCollateral.balanceOf(address(safe)), 0);
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
+    }
+
+    function test_requestWithdrawal_mixedRequestKeepsGlobalDelay() public {
+        MockERC20 nonCollateral = _supportNonCollateralAsset();
+        nonCollateral.mint(address(safe), 10e18);
+        deal(address(usdc), address(safe), 50e6);
+
+        address[] memory tokens = new address[](2);
+        tokens[0] = address(nonCollateral);
+        tokens[1] = address(usdc);
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 10e18;
+        amounts[1] = 50e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        (uint64 globalDelay,,) = cashModule.getDelays();
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + globalDelay);
+        assertEq(nonCollateral.balanceOf(withdrawRecipient), 0);
+    }
+
+    function test_requestWithdrawal_nonCollateralAssetListedForLendingLaterKeepsGlobalDelay() public {
+        MockERC20 nonCollateral = _supportNonCollateralAsset();
+        nonCollateral.mint(address(safe), 10e18);
+        gateway.setRegistered(address(nonCollateral), true);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(nonCollateral);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 10e18;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        (uint64 globalDelay,,) = cashModule.getDelays();
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + globalDelay);
+    }
+
+    function test_requestWithdrawal_nonCollateralAssetStillNeedsWithdrawWhitelist() public {
+        MockERC20 nonCollateral = new MockERC20("Non-collateral", "NC", 18);
+        nonCollateral.mint(address(safe), 10e18);
+        address[] memory assets = new address[](1);
+        assets[0] = address(nonCollateral);
+        bool[] memory shouldRegister = new bool[](1);
+        shouldRegister[0] = true;
+        vm.prank(owner);
+        cashModule.configureNonCollateralAssets(assets, shouldRegister);
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 10e18;
+        (address[] memory signers, bytes[] memory signatures) = _signWithdrawal(assets, amounts, withdrawRecipient);
+        vm.expectRevert(abi.encodeWithSelector(ICashModule.InvalidWithdrawAsset.selector, address(nonCollateral)));
+        cashModule.requestWithdrawal(address(safe), assets, amounts, withdrawRecipient, signers, signatures);
+    }
+
+    /// @dev Deploys a token and supports it the way prod will: registered as non-collateral and whitelisted for withdrawal.
+    function _supportNonCollateralAsset() internal returns (MockERC20 nonCollateral) {
+        nonCollateral = new MockERC20("Non-collateral", "NC", 18);
+        address[] memory assets = new address[](1);
+        assets[0] = address(nonCollateral);
+        bool[] memory flags = new bool[](1);
+        flags[0] = true;
+
+        vm.startPrank(owner);
+        cashModule.configureNonCollateralAssets(assets, flags);
+        cashModule.configureWithdrawAssets(assets, flags);
+        vm.stopPrank();
     }
 
     function test_cancelWithdrawalByModule_works() public {

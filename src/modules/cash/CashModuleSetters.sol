@@ -20,6 +20,7 @@ import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { CashLendLib } from "./CashLendLib.sol";
 import { CashModuleStorageContract } from "./CashModuleStorageContract.sol";
+import { CashNonCollateralLib } from "./CashNonCollateralLib.sol";
 
 /**
  * @title CashModule
@@ -115,6 +116,21 @@ contract CashModuleSetters is CashModuleStorageContract {
 
         EnumerableAddressWhitelistLib.configure($.whitelistedWithdrawAssets, assets, shouldWhitelist);
         $.cashEventEmitter.emitWithdrawTokensConfigured(assets, shouldWhitelist);
+    }
+
+    /**
+     * @notice Configures the registry of non-collateral assets
+     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE. A registered asset still needs to be a
+     *      whitelisted withdraw asset to be withdrawn.
+     * @param assets Array of asset addresses to configure
+     * @param shouldRegister Array of booleans suggesting whether to register the assets
+     * @custom:throws OnlyCashModuleController if the caller does not have CASH_MODULE_CONTROLLER_ROLE role
+     * @custom:throws InvalidNonCollateralAsset if a registered asset is a lending, collateral or borrow asset
+     */
+    function configureNonCollateralAssets(address[] calldata assets, bool[] calldata shouldRegister) external {
+        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+
+        CashNonCollateralLib.configure(_getCashModuleStorage(), assets, shouldRegister);
     }
 
     /**
@@ -250,16 +266,19 @@ contract CashModuleSetters is CashModuleStorageContract {
     function requestWithdrawal(address safe, address[] calldata tokens, uint256[] calldata amounts, address recipient, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         CashVerificationLib.verifyRequestWithdrawalSig(safe, IEtherFiSafe(safe).useNonce(), tokens, amounts, recipient, signers, signatures);
 
-        CashModuleStorage storage $ = _getCashModuleStorage();
-        if ($.whitelistedModulesCanRequestWithdraw.contains(msg.sender) || $.whitelistedModulesCanRequestWithdraw.contains(recipient)) {
-            revert InvalidWithdrawRequest();
+        {
+            CashModuleStorage storage $ = _getCashModuleStorage();
+            if ($.whitelistedModulesCanRequestWithdraw.contains(msg.sender) || $.whitelistedModulesCanRequestWithdraw.contains(recipient)) {
+                revert InvalidWithdrawRequest();
+            }
+
+            // A matured opt-out returns all Aave collateral to the safe first, so the withdrawal sources
+            // from loose balances instead of pulling from the lend market
+            CashLendLib.processLendOptOutIfReady($, safe);
         }
 
-        // A matured opt-out returns all Aave collateral to the safe first, so the withdrawal sources
-        // from loose balances instead of pulling from the lend market
-        CashLendLib.processLendOptOutIfReady($, safe);
-
-        _requestWithdrawal(safe, tokens, amounts, recipient, $.withdrawalDelay);
+        uint64 withdrawalDelay = CashNonCollateralLib.userWithdrawalDelay(_getCashModuleStorage(), tokens);
+        _requestWithdrawal(safe, tokens, amounts, recipient, withdrawalDelay);
     }
 
     /**
