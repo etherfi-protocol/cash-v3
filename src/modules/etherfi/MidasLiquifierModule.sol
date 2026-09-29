@@ -89,14 +89,14 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
      * @param feeBps Proportional fee in basis points of the payment amount, kept by this contract
      * @param flatFee Flat fee per repayment in debt token units, charged in payment token at the same price
      */
-    function setPair(address paymentToken, address debtToken, address redemptionVault, uint16 feeBps, uint128 flatFee) external onlyAdminTimelock {
+    function setPair(address paymentToken, address debtToken, address redemptionVault, uint16 feeBps, uint128 flatFee) external onlyRoleRegistryOwner {
         if (paymentToken == address(0) || debtToken == address(0) || redemptionVault == address(0)) revert InvalidValue();
         if (feeBps > MAX_FEE_BPS) revert FeeTooHigh();
         _getMidasLiquifierStorage().pairs[paymentToken] = Pair(debtToken, redemptionVault, feeBps, flatFee);
         emit PairSet(paymentToken, debtToken, redemptionVault, feeBps, flatFee);
     }
 
-    function removePair(address paymentToken) external onlyAdmin {
+    function removePair(address paymentToken) external onlyRoleRegistryOwner {
         delete _getMidasLiquifierStorage().pairs[paymentToken];
         emit PairRemoved(paymentToken);
     }
@@ -215,7 +215,7 @@ contract MidasLiquifierModule is Constants, UpgradeableProxy, ModuleCheckBalance
      * @notice Withdraws tokens or ETH from the contract
      * @param amount Amount to withdraw, 0 for the full balance
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external onlyAdminTimelock {
+    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRoleRegistryOwner {
         if (recipient == address(0)) revert InvalidValue();
         if (token == ETH) {
             if (amount == 0) amount = address(this).balance;
