@@ -127,6 +127,11 @@ abstract contract RoleGatingBatch3Config is Utils {
         return ["liquidModule", "liquidReferrerModule", "stargateModule", "beHypeStakeModule", "midasModule"];
     }
 
+    /// @dev Record key for the module a new module replaced, e.g. `old_liquidModule`
+    function _oldModuleRecordKey(uint256 i) internal pure returns (string memory) {
+        return string.concat("old_", _moduleKeys()[i]);
+    }
+
     /// @dev Whether the module runs the Aave-gateway sandwich and so must be a LendGateway driver
     function _isGatewayDriver(uint256 i) internal pure returns (bool) {
         return i != 2; // everything but StargateModule

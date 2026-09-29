@@ -158,7 +158,7 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
 
         EtherFiDataProvider dp = EtherFiDataProvider(l.dataProvider);
         for (uint256 k = 0; k < N_MODULES; ++k) {
-            require(l.oldModules[k] != i.modules[k], "new module == old module");
+            require(l.oldModules[k] == i.oldModules[k], "deployments.json module != module recorded at deploy");
             // The swap below demotes every old module; it assumes all five are live defaults today
             require(dp.isDefaultModule(l.oldModules[k]) && dp.isWhitelistedModule(l.oldModules[k]), "old module is not a live default module");
             require(!dp.isWhitelistedModule(i.modules[k]), "new module already whitelisted");

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { stdJson } from "forge-std/StdJson.sol";
 import { console } from "forge-std/console.sol";
 
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
@@ -32,6 +33,8 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         address lendGateway;
         address stockWithdrawModule;
         address[5] modules;
+        /// @dev The modules the new ones replaced, as recorded at deploy time
+        address[5] oldModules;
         address tradingRoleRegistry;
     }
 
@@ -61,6 +64,8 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         string[5] memory salts = _moduleSaltNames();
         for (uint256 k = 0; k < N_MODULES; ++k) {
             i.modules[k] = _recorded(r, keys[k], salts[k]);
+            i.oldModules[k] = stdJson.readAddress(r, string.concat(".", _oldModuleRecordKey(k)));
+            require(i.oldModules[k].code.length > 0 && i.oldModules[k] != i.modules[k], "record: bad old module");
         }
         i.tradingRoleRegistry = _recorded(r, "tradingRoleRegistryImpl", "TradingRoleRegistryImpl");
     }
@@ -97,7 +102,7 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         address[] memory requesters = ICashModule(l.cashModule).getWhitelistedModulesCanRequestWithdraw();
         LendGateway gw = LendGateway(l.lendGateway);
         for (uint256 k = 0; k < N_MODULES; ++k) {
-            address oldM = l.oldModules[k];
+            address oldM = i.oldModules[k];
             address newM = i.modules[k];
             require(dp.isDefaultModule(newM) && dp.isWhitelistedModule(newM), "new module not default");
             require(!dp.isDefaultModule(oldM), "old module still default");
@@ -109,7 +114,7 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         // Withdraw queues are post-constructor state on the liquid modules
         address[9] memory assets = _liquidAssetCandidates();
         for (uint256 k = 0; k < 2; ++k) {
-            EtherFiLiquidModule oldM = EtherFiLiquidModule(payable(l.oldModules[k]));
+            EtherFiLiquidModule oldM = EtherFiLiquidModule(payable(i.oldModules[k]));
             EtherFiLiquidModule newM = EtherFiLiquidModule(payable(i.modules[k]));
             for (uint256 a = 0; a < assets.length; ++a) {
                 require(newM.liquidWithdrawQueue(assets[a]) == oldM.liquidWithdrawQueue(assets[a]), "liquid withdraw queue not copied");

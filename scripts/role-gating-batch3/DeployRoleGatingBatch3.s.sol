@@ -110,6 +110,12 @@ contract DeployRoleGatingBatch3 is RoleGatingBatch3Config {
         string[5] memory salts = _moduleSaltNames();
         address dp = l.dataProvider;
 
+        // The replaced modules go in the record too: deployments.json gets repointed at the new
+        // ones after the swap, but the verifier still needs the old addresses
+        for (uint256 i = 0; i < N_MODULES; ++i) {
+            vm.serializeAddress(OUT, _oldModuleRecordKey(i), l.oldModules[i]);
+        }
+
         // Liquid + Liquid-with-referrer: tellers from the live module, weth passthrough
         for (uint256 i = 0; i < 2; ++i) {
             EtherFiLiquidModule old = EtherFiLiquidModule(payable(l.oldModules[i]));
