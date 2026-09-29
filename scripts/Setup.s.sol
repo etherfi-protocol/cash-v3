@@ -217,7 +217,8 @@ contract Setup is Utils {
         roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), owner);
         roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
         roleRegistry.grantRole(priceProvider.PRICE_PROVIDER_ADMIN_ROLE(), owner);
-        roleRegistry.grantRole(cashbackDispatcher.CASHBACK_DISPATCHER_ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), owner);
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, owner);
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, deployer);
         roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);
