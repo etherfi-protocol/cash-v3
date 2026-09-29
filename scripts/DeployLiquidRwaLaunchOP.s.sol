@@ -23,9 +23,9 @@ import { EtherFiDeployerHelper } from "./utils/EtherFiDeployerHelper.sol";
 contract DeployLiquidRwaLaunchOP is EtherFiDeployerHelper {
     using stdJson for string;
 
-    string constant MIDAS_IMPL = "MidasLiquifierModuleImplV1";
-    string constant MIDAS_PROXY = "MidasLiquifierModuleProxy";
-    string constant LIQUID_USD_IMPL = "LiquidUSDLiquifierOPModuleImplV2";
+    string constant MIDAS_IMPL = "MidasLiquifierModuleImplV2";
+    string constant MIDAS_PROXY = "MidasLiquifierModuleProxyV2";
+    string constant LIQUID_USD_IMPL = "LiquidUSDLiquifierOPModuleImplV3";
 
     function run() public {
         require(block.chainid == 10, "Optimism only");
