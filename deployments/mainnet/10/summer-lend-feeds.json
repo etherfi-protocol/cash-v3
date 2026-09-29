@@ -18,6 +18,9 @@
     "PAXG": {
       "oracle": "0xaC28d7fe39d16aa0d35CDCc8cE939125cB3f091b"
     },
+    "PAXGy": {
+      "oracle": "0x9B92A2D4468ff3Df8A6Be50Ad043E8a5165459c2"
+    },
     "QQQ": {
       "oracle": "0x2cD17B00f5E2C0613323C2fdB9709d54d958AFEb"
     },
@@ -32,6 +35,12 @@
     },
     "USDT": {
       "oracle": "0x7579977643ee68946DB95d9Cb5fF582674619025"
+    },
+    "XAU": {
+      "oracle": "0xf66C01179bA7326C95a5d3324Bc364f34CA7c7Af"
+    },
+    "ZCHF": {
+      "oracle": "0x7445E49137F073B836eB93Fd2929820d730b948C"
     },
     "beHYPE": {
       "oracle": "0x0547C7F5E4923895C5516D57aaE108fDb943933F"
