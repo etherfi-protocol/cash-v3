@@ -15,7 +15,7 @@ import { ModuleCheckBalance } from "../../../../../src/modules/ModuleCheckBalanc
 import { ModuleLendGatewaySandwich } from "../../../../../src/modules/ModuleLendGatewaySandwich.sol";
 import { MidasLiquifierModule } from "../../../../../src/modules/etherfi/MidasLiquifierModule.sol";
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
-import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 contract MockMidasRedemptionVault is IMidasVault {
@@ -381,11 +381,53 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), tooHigh, 0);
     }
 
-    /// @notice Verifies only the role registry owner can configure a pair.
-    function test_setPair_onlyRoleRegistryOwner() public {
-        vm.prank(makeAddr("notOwner"));
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+    /// @notice Verifies the gates: setPair and withdrawFunds need ADMIN_TIMELOCK_ROLE, removePair needs ADMIN_ROLE, and
+    ///         neither role opens the other's functions. The role registry owner holds neither role by itself.
+    function test_adminGates() public {
+        address timelock = makeAddr("adminTimelock");
+        address admin = makeAddr("admin");
+        address stranger = makeAddr("stranger");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), timelock);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), admin);
+        roleRegistry.revokeRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), owner);
+        roleRegistry.revokeRole(roleRegistry.ADMIN_ROLE(), owner);
+        vm.stopPrank();
+        deal(address(usdc), address(liquifier), 1e6);
+
+        vm.startPrank(stranger);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 0);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        liquifier.withdrawFunds(address(usdc), owner, 1);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        liquifier.removePair(address(mToken));
+        vm.stopPrank();
+
+        // The owner alone is only the upgrader now
+        vm.startPrank(owner);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 0);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        liquifier.removePair(address(mToken));
+        vm.stopPrank();
+
+        vm.startPrank(admin);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 0);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        liquifier.withdrawFunds(address(usdc), owner, 1);
+        liquifier.removePair(address(mToken));
+        vm.stopPrank();
+        assertEq(liquifier.pairs(address(mToken)).debtToken, address(0));
+
+        vm.startPrank(timelock);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        liquifier.removePair(address(mToken));
+        liquifier.setPair(address(mToken), address(usdc), address(redemptionVault), 0, 0);
+        liquifier.withdrawFunds(address(usdc), owner, 1);
+        vm.stopPrank();
+        assertEq(liquifier.pairs(address(mToken)).debtToken, address(usdc));
     }
 
     /// @notice Verifies pair removal clears its configuration, emits PairRemoved, and blocks subsequent repayment.
@@ -483,7 +525,7 @@ contract MidasLiquifierGatewayTest is CashGatewayTestSetup {
         vm.stopPrank();
 
         vm.prank(makeAddr("notOwner"));
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         liquifier.withdrawFunds(address(usdc), owner, 1);
     }
 }
