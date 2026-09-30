@@ -24,7 +24,15 @@ abstract contract RoleGatingBatch3BytecodeBase is Test {
         // envOr alone is not enough: CI sets unset secrets to "", which must also fall back
         string memory rpc = vm.envOr(rpcEnv, string(""));
         vm.createSelectFork(bytes(rpc).length > 0 ? rpc : fallbackRpc);
-        verifier = new VerifyRoleGatingBatch3();
+        // The verifier embeds the creation code of every contract it rebuilds (~313 KB), far past the
+        // EIP-170 / EIP-3860 limits that forge >= 1.8 enforces on `new` inside tests. Etch its runtime
+        // code instead. That skips its constructor, which only initialises forge-std / Utils state
+        // (IS_SCRIPT, chain-id strings) the checkBytecode* path never reads. Each contract it rebuilds
+        // is still deployed normally, and is itself under the limit.
+        verifier = VerifyRoleGatingBatch3(makeAddr("VerifyRoleGatingBatch3"));
+        vm.etch(address(verifier), vm.getDeployedCode("VerifyRoleGatingBatch3.s.sol:VerifyRoleGatingBatch3"));
+        // `new` grants cheatcode access automatically; etched code needs it explicitly (vm.readFile / vm.load)
+        vm.allowCheatcodes(address(verifier));
         string memory dir = string.concat(vm.projectRoot(), "/deployments/mainnet/", vm.toString(block.chainid));
         cash = vm.readFile(string.concat(dir, "/deployments.json"));
         trading = vm.readFile(string.concat(dir, "/trading-account.json"));
