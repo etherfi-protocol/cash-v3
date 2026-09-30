@@ -27,7 +27,7 @@ import { Utils } from "../utils/Utils.sol";
  *                    StockWithdrawModule
  *           modules  EtherFiLiquidModule, EtherFiLiquidModuleWithReferrer, StargateModule,
  *                    BeHYPEStakeModule, MidasModule — immutable, so redeployed with the live
- *                    config and swapped in as default modules
+ *                    config and added as default modules alongside the old ones
  *         Optimism, trading stack (own RoleRegistry, owner = governance Safe):
  *           RoleRegistry, EtherFiDataProvider
  *         Ethereum, cash stack (RoleRegistry owner = 2-day upgrade timelock):
@@ -38,8 +38,9 @@ import { Utils } from "../utils/Utils.sol";
  *
  *         Deliberately NOT in batch 3: TradingSafeFactory (PR only changes doc comments),
  *         TradingSafe / TopUp beacon impls and TradingSafeWithdrawModule (untouched by the PR),
- *         and retiring the OLD modules (they stay whitelisted + withdraw-requesters so in-flight
- *         bridges can drain; retire them later after scripts/lend/check-pending-withdrawals.sh).
+ *         and demoting/retiring the OLD modules (they stay default, whitelisted and
+ *         withdraw-requesters so every integration keeps working; retire them in a later 3CP once
+ *         the backend has moved and scripts/lend/check-pending-withdrawals.sh is clean).
  */
 abstract contract RoleGatingBatch3Config is Utils {
     // ─────────────────────────────── governance ───────────────────────────────

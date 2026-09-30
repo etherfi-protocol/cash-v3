@@ -96,8 +96,8 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         _requireImpl(l.lendGateway, i.lendGateway, "LendGateway");
         _requireImpl(l.stockWithdrawModule, i.stockWithdrawModule, "StockWithdrawModule");
 
-        // Module swap: new modules default + mirrored requester/driver status; old ones demoted
-        // but still whitelisted (and still requesters) so in-flight bridges can drain
+        // New modules default + mirrored requester/driver status; old ones untouched (still default,
+        // whitelisted, requesters) so integrations keep working until a later retirement 3CP
         EtherFiDataProvider dp = EtherFiDataProvider(l.dataProvider);
         address[] memory requesters = ICashModule(l.cashModule).getWhitelistedModulesCanRequestWithdraw();
         LendGateway gw = LendGateway(l.lendGateway);
@@ -105,10 +105,9 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
             address oldM = i.oldModules[k];
             address newM = i.modules[k];
             require(dp.isDefaultModule(newM) && dp.isWhitelistedModule(newM), "new module not default");
-            require(!dp.isDefaultModule(oldM), "old module still default");
-            require(dp.isWhitelistedModule(oldM), "old module must stay whitelisted until drained");
+            require(dp.isDefaultModule(oldM) && dp.isWhitelistedModule(oldM), "old module must stay default until retired");
             require(_contains(requesters, newM) == _contains(requesters, oldM), "new module requester status != old");
-            if (_isGatewayDriver(k)) require(gw.isDriver(newM), "new sandwich module is not a LendGateway driver");
+            if (_isGatewayDriver(k)) require(gw.isDriver(newM) && gw.isDriver(oldM), "sandwich module (new or old) is not a LendGateway driver");
         }
 
         // Withdraw queues are post-constructor state on the liquid modules

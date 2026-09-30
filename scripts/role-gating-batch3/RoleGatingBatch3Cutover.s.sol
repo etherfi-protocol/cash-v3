@@ -48,9 +48,11 @@ import { RoleGatingBatch3Checks } from "./RoleGatingBatch3Checks.sol";
 ///         The module swap only works once the cash batch has executed, which is why it sits after
 ///         it in multisend 2 — both executes land atomically in one Safe tx.
 ///
-///         Old modules are demoted from default but stay whitelisted and stay withdraw-requesters,
-///         so any in-flight Liquid/Stargate bridge can still drain through them. Retiring them is a
-///         later, separate 3CP (after scripts/lend/check-pending-withdrawals.sh is clean).
+///         The new modules are ADDED as defaults; the old ones are left untouched (still default,
+///         whitelisted, withdraw-requesters and drivers), so every integration keeps working and can
+///         move to the new addresses at its own pace. Demoting and retiring the old modules is a
+///         later, separate 3CP (after the backend has switched and
+///         scripts/lend/check-pending-withdrawals.sh is clean).
 ///
 /// Usage (no broadcast — writes ./output/*.json and simulates):
 ///   ENV=mainnet forge script scripts/role-gating-batch3/RoleGatingBatch3Cutover.s.sol --rpc-url $OPTIMISM_RPC
@@ -159,7 +161,7 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
         EtherFiDataProvider dp = EtherFiDataProvider(l.dataProvider);
         for (uint256 k = 0; k < N_MODULES; ++k) {
             require(l.oldModules[k] == i.oldModules[k], "deployments.json module != module recorded at deploy");
-            // The swap below demotes every old module; it assumes all five are live defaults today
+            // The new modules sit alongside the old ones; the verifier requires the old ones stay live defaults
             require(dp.isDefaultModule(l.oldModules[k]) && dp.isWhitelistedModule(l.oldModules[k]), "old module is not a live default module");
             require(!dp.isWhitelistedModule(i.modules[k]), "new module already whitelisted");
         }
@@ -192,15 +194,15 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
         for (uint256 k = 0; k < N_MODULES; ++k) {
             if (_isGatewayDriver(k)) _module(l.lendGateway, abi.encodeWithSelector(LendGateway.setDriver.selector, i.modules[k], true));
         }
-        address[] memory swap = new address[](2 * N_MODULES);
-        bool[] memory flags = new bool[](2 * N_MODULES);
+        // Add only: the old modules stay default so integrations keep working until they move
+        // over; demoting and retiring them is a later 3CP
+        address[] memory added = new address[](N_MODULES);
+        bool[] memory addFlags = new bool[](N_MODULES);
         for (uint256 k = 0; k < N_MODULES; ++k) {
-            swap[k] = i.modules[k];
-            flags[k] = true;
-            swap[N_MODULES + k] = l.oldModules[k];
-            flags[N_MODULES + k] = false; // demote only: stays whitelisted
+            added[k] = i.modules[k];
+            addFlags[k] = true;
         }
-        _module(l.dataProvider, abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, swap, flags));
+        _module(l.dataProvider, abi.encodeWithSelector(EtherFiDataProvider.configureDefaultModules.selector, added, addFlags));
 
         // New module inherits the old one's withdraw-requester status; the old one keeps it to drain
         address[] memory requesters = ICashModule(l.cashModule).getWhitelistedModulesCanRequestWithdraw();
