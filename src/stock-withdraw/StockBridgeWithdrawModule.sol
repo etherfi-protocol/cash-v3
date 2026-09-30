@@ -92,6 +92,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         _disableInitializers();
     }
 
+    /// @notice Sets up the proxy with the role registry, the bridge and the destination chain selector
     function initialize(address _roleRegistry, address _bridge, uint64 _destinationSelector) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
         _setBridge(_bridge, _destinationSelector);
@@ -139,22 +140,27 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
 
     // ---- Views ----
 
+    /// @notice The safe's open order, empty if it has none
     function getOrder(address safe) external view returns (Order memory) {
         return _getStorage().withdrawals[safe].order;
     }
 
+    /// @notice The safe's open order with the CashModule withdrawal id it is bound to
     function getWithdrawal(address safe) external view returns (StoredWithdrawal memory) {
         return _getStorage().withdrawals[safe];
     }
 
+    /// @notice Whether orders may be placed for this wrapper
     function isWrapperSupported(address wrapper) external view returns (bool) {
         return _getStorage().supportedWrappers.contains(wrapper);
     }
 
+    /// @notice Every wrapper orders may be placed for
     function getSupportedWrappers() external view returns (address[] memory) {
         return _getStorage().supportedWrappers.values();
     }
 
+    /// @notice The bridge and destination chain selector every order is sent with
     function getBridge() external view returns (address, uint64) {
         StockBridgeWithdrawModuleStorage storage $ = _getStorage();
         return (address($.bridge), $.destinationSelector);
@@ -279,6 +285,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
 
     // ---- Internals ----
 
+    /// @dev Reverts unless the order is complete, the wrapper supported, the safe has no open order and the deadline outlasts the withdrawal delay
     function _validateRequest(address safe, Order calldata order) internal view {
         StockBridgeWithdrawModuleStorage storage $ = _getStorage();
         if (order.amount == 0 || order.recipient == address(0)) revert InvalidInput();
@@ -291,6 +298,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
     }
 
+    /// @dev The message the safe owners sign for a request, bound to this chain, this module, the nonce and the safe
     function _requestDigest(address safe, Order calldata order, uint256 nonce) internal view returns (bytes32) {
         return keccak256(abi.encodePacked(REQUEST_WITHDRAWAL_SIG, block.chainid, address(this), nonce, safe, abi.encode(order))).toEthSignedMessageHash();
     }
@@ -300,6 +308,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         emit WithdrawalRequested(safe, withdrawalId, order.wrapper, order.amount, order.recipient, order.deadline);
     }
 
+    /// @dev Stores the bridge and destination chain selector, both required
     function _setBridge(address _bridge, uint64 _destinationSelector) internal {
         if (_bridge == address(0) || _destinationSelector == 0) revert InvalidInput();
         StockBridgeWithdrawModuleStorage storage $ = _getStorage();
@@ -308,10 +317,12 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         emit BridgeSet(_bridge, _destinationSelector);
     }
 
+    /// @dev The recipient in the bytes32 form the bridge takes
     function _receiver(address recipient) internal pure returns (bytes32) {
         return bytes32(uint256(uint160(recipient)));
     }
 
+    /// @dev The module's ERC-7201 storage
     function _getStorage() private pure returns (StockBridgeWithdrawModuleStorage storage $) {
         assembly {
             $.slot := StockBridgeWithdrawModuleStorageLocation

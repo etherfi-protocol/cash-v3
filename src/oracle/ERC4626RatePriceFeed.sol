@@ -27,6 +27,7 @@ contract ERC4626RatePriceFeed is BaseAaveV4PriceFeed {
     /// @notice Thrown when no underlying USD feed is given; a vault rate is never USD-quoted on its own
     error MissingUnderlyingFeed();
 
+    /// @notice Binds the feed to one vault and the USD feed of its underlying asset
     constructor(IERC4626 _vault, IAaveV4PriceFeed _underlyingUsdFeed, uint8 _feedDecimals, string memory feedDescription) BaseAaveV4PriceFeed(_underlyingUsdFeed, _feedDecimals, IERC20Metadata(_vault.asset()).decimals(), false, feedDescription) {
         require(address(_underlyingUsdFeed) != address(0), MissingUnderlyingFeed());
         vault = _vault;

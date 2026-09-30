@@ -20,5 +20,6 @@ interface IBackedCCIPBridge {
     /// @notice The receiver contract on a destination chain, zero if the lane is not registered
     function allowlistedDestinationChains(uint64 selector) external view returns (bytes32);
 
+    /// @notice Whether the bridge is paused and rejecting sends
     function paused() external view returns (bool);
 }

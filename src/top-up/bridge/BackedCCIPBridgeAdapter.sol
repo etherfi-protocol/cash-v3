@@ -61,6 +61,7 @@ contract BackedCCIPBridgeAdapter is BridgeAdapterBase {
         return (ETH, ccipBridge.getDeliveryFeeCost(selector, bytes32(uint256(uint160(destRecipient))), token, amount, ""));
     }
 
+    /// @dev Unpacks the token config's (bridge, destination chain selector)
     function _decode(bytes calldata additionalData) internal pure returns (IBackedCCIPBridge, uint64) {
         (address ccipBridge, uint64 selector) = abi.decode(additionalData, (address, uint64));
         return (IBackedCCIPBridge(ccipBridge), selector);

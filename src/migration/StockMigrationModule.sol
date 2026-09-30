@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
@@ -16,11 +15,11 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  * @notice Moves a safe's stock from a stand-in token to Backed's ERC-4626 wrapper on this chain, one safe at a
  *         time and 1:1, out of a pot of wrapper seeded here. Stock the safe has supplied to Aave is swapped in
  *         place: the wrapper is supplied first and the stand-in withdrawn second, so collateral never dips.
- *         Stand-in held loose in the safe is replaced directly. The same module wraps raw stock sitting in a
- *         safe into its wrapper. Both jobs are keeper driven; nothing here needs a user signature.
+ *         Stand-in held loose in the safe is replaced directly. Keeper driven; nothing here needs a user
+ *         signature.
  * @dev A default module (it drives `execTransactionFromModule` on any safe) and a lend gateway driver (it moves
- *      the safe's Aave position). Every call leaves the safe holding wrapper for exactly the stand-in or raw
- *      stock it gave up, and the gateway's not-worsened health check closes the Aave leg. A safe with a pending
+ *      the safe's Aave position). Every call leaves the safe holding wrapper for exactly the stand-in it gave
+ *      up, and the gateway's not-worsened health check closes the Aave leg. A safe with a pending
  *      withdrawal of the stand-in, or opted out of lend with a supplied position, is refused so the keeper can
  *      handle it by hand. Collected stand-ins and unused seed leave only through the admin sweep.
  * @author ether.fi
@@ -32,8 +31,6 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
     struct StockMigrationModuleStorage {
         /// @notice Wrapper paid out for each stand-in token
         mapping(address standIn => address wrapper) swapPairs;
-        /// @notice Wrapper each raw stock is deposited into
-        mapping(address raw => address wrapper) wrapPairs;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockMigrationModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -41,31 +38,27 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
 
     /// @notice Role that sets pairs and sweeps this contract's balances
     bytes32 public constant STOCK_MIGRATION_MODULE_ADMIN_ROLE = keccak256("STOCK_MIGRATION_MODULE_ADMIN_ROLE");
-    /// @notice Role that runs the swaps and wraps
+    /// @notice Role that runs the swaps
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
 
     event SwapPairSet(address indexed standIn, address indexed wrapper);
-    event WrapPairSet(address indexed raw, address indexed wrapper);
     event Migrated(address indexed safe, address indexed standIn, address indexed wrapper, uint256 supplied, uint256 loose);
     event MigrateSkipped(address indexed safe, address indexed standIn, bytes reason);
-    event Wrapped(address indexed safe, address indexed raw, address indexed wrapper, uint256 amount, uint256 shares);
-    event WrapSkipped(address indexed safe, address indexed raw, bytes reason);
     event Swept(address indexed token, address indexed to, uint256 amount);
 
     error OnlySelf();
     error PairNotSet();
-    error InvalidWrapperAsset();
     error PendingWithdrawal();
     error LendOptedOut();
     error NothingToMigrate();
     error InsufficientSeed();
-    error WrapMintedNothing();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
         _disableInitializers();
     }
 
+    /// @notice Sets up the proxy with the role registry that gates admin, keeper and pause calls
     function initialize(address _roleRegistry) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
     }
@@ -86,24 +79,6 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
             if (standIns[i] == address(0)) revert InvalidInput();
             $.swapPairs[standIns[i]] = wrappers[i];
             emit SwapPairSet(standIns[i], wrappers[i]);
-        }
-    }
-
-    /**
-     * @notice Sets the wrapper each raw stock is deposited into; a zero wrapper removes the pair
-     * @param raws Raw stock tokens
-     * @param wrappers Wrapper per raw stock; must report the raw stock as its asset
-     */
-    function setWrapPairs(address[] calldata raws, address[] calldata wrappers) external onlyRole(STOCK_MIGRATION_MODULE_ADMIN_ROLE) {
-        uint256 len = raws.length;
-        if (len != wrappers.length) revert ArrayLengthMismatch();
-        StockMigrationModuleStorage storage $ = _getStockMigrationModuleStorage();
-
-        for (uint256 i = 0; i < len; ++i) {
-            if (raws[i] == address(0)) revert InvalidInput();
-            if (wrappers[i] != address(0) && IERC4626(wrappers[i]).asset() != raws[i]) revert InvalidWrapperAsset();
-            $.wrapPairs[raws[i]] = wrappers[i];
-            emit WrapPairSet(raws[i], wrappers[i]);
         }
     }
 
@@ -157,52 +132,16 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
         return _migrate(safe, standIn);
     }
 
-    /**
-     * @notice Wraps the raw stock a safe holds loose into its wrapper, credited to the safe, then supplies it to Aave
-     * @param safe The safe holding raw stock
-     * @param raw The raw stock token
-     * @return shares Wrapper shares the safe received
-     */
-    function wrap(address safe, address raw) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) onlyEtherFiSafe(safe) returns (uint256 shares) {
-        return _wrap(safe, raw);
-    }
-
-    /**
-     * @notice Wraps raw stock in many safes; a safe that fails is skipped with its reason
-     * @param safes The safes holding raw stock
-     * @param raw The raw stock token
-     * @return wrapped How many safes were wrapped in this call
-     */
-    function wrapMany(address[] calldata safes, address raw) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) returns (uint256 wrapped) {
-        uint256 len = safes.length;
-        for (uint256 i = 0; i < len; ++i) {
-            try this.wrapSelf(safes[i], raw) {
-                ++wrapped;
-            } catch (bytes memory reason) {
-                emit WrapSkipped(safes[i], raw, reason);
-            }
-        }
-        return wrapped;
-    }
-
-    /// @dev Self-call target for wrapMany's try/catch; nothing else may call it
-    function wrapSelf(address safe, address raw) external onlyEtherFiSafe(safe) returns (uint256) {
-        if (msg.sender != address(this)) revert OnlySelf();
-        return _wrap(safe, raw);
-    }
-
     // ---- Views ----
 
+    /// @notice The wrapper paid out for a stand-in token, zero if none is set
     function swapPairFor(address standIn) external view returns (address) {
         return _getStockMigrationModuleStorage().swapPairs[standIn];
     }
 
-    function wrapPairFor(address raw) external view returns (address) {
-        return _getStockMigrationModuleStorage().wrapPairs[raw];
-    }
-
     // ---- Internals ----
 
+    /// @dev Swaps the safe's supplied and loose stand-in for wrapper 1:1 and returns the two amounts swapped
     function _migrate(address safe, address standIn) internal returns (uint256, uint256) {
         address wrapper = _getStockMigrationModuleStorage().swapPairs[standIn];
         if (wrapper == address(0)) revert PairNotSet();
@@ -241,33 +180,6 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
         return (supplied, loose);
     }
 
-    function _wrap(address safe, address raw) internal returns (uint256) {
-        address wrapper = _getStockMigrationModuleStorage().wrapPairs[raw];
-        if (wrapper == address(0)) revert PairNotSet();
-
-        uint256 amount = _getAvailableAmount(safe, raw);
-        if (amount == 0) revert NothingToMigrate();
-
-        // The safe approves the wrapper and deposits with itself as receiver, in one module batch
-        address[] memory to = new address[](2);
-        uint256[] memory values = new uint256[](2);
-        bytes[] memory data = new bytes[](2);
-        to[0] = raw;
-        data[0] = abi.encodeCall(IERC20.approve, (wrapper, amount));
-        to[1] = wrapper;
-        data[1] = abi.encodeCall(IERC4626.deposit, (amount, safe));
-
-        uint256 before = IERC20(wrapper).balanceOf(safe);
-        IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
-        uint256 shares = IERC20(wrapper).balanceOf(safe) - before;
-        if (shares == 0) revert WrapMintedNothing();
-
-        _resupplyToGateway(safe, wrapper, shares);
-
-        emit Wrapped(safe, raw, wrapper, amount, shares);
-        return shares;
-    }
-
     /// @dev Has the safe send `amount` of `token` here
     function _safeTransferOut(address safe, address token, uint256 amount) internal {
         address[] memory to = new address[](1);
@@ -278,6 +190,7 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
     }
 
+    /// @dev The module's ERC-7201 storage
     function _getStockMigrationModuleStorage() private pure returns (StockMigrationModuleStorage storage $) {
         assembly {
             $.slot := StockMigrationModuleStorageLocation

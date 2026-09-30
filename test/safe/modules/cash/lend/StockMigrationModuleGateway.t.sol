@@ -31,7 +31,7 @@ contract FixedStockFeed is IAaveV4PriceFeed {
  * @title StockMigrationModuleGatewayTest
  * @notice Swaps a safe's stand-in stock for its wrapper against the real LendGateway and a real Aave v4
  *         instance: supplied positions move reserve without the health factor changing, loose balances are
- *         replaced and resupplied, and raw stock in a safe is wrapped and supplied.
+ *         replaced and resupplied.
  */
 contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
     StockMigrationModule internal module;
@@ -71,10 +71,8 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         roleRegistry.grantRole(roleRegistry.PAUSER(), owner);
         vm.stopPrank();
 
-        vm.startPrank(admin);
+        vm.prank(admin);
         module.setSwapPairs(_addr1(address(standIn)), _addr1(address(wrapper)));
-        module.setWrapPairs(_addr1(address(raw)), _addr1(address(wrapper)));
-        vm.stopPrank();
 
         // Seed the module with real wrapper shares backed by raw stock, as treasury would
         raw.mint(address(module), SEED);
@@ -202,43 +200,6 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
 
         assertEq(migrated, 1);
         assertEq(standIn.balanceOf(address(module)), LOOSE);
-    }
-
-    function test_wrap_depositsRawAndResupplies() public {
-        raw.mint(address(safe), LOOSE);
-
-        vm.prank(keeper);
-        vm.expectEmit(true, true, true, true);
-        emit StockMigrationModule.Wrapped(address(safe), address(raw), address(wrapper), LOOSE, LOOSE);
-        uint256 shares = module.wrap(address(safe), address(raw));
-
-        assertEq(shares, LOOSE);
-        assertEq(raw.balanceOf(address(safe)), 0);
-        assertApproxEqAbs(gw.suppliedOf(address(safe), address(wrapper)), LOOSE, 1, "shares not supplied");
-        assertEq(raw.allowance(address(safe), address(wrapper)), 0);
-    }
-
-    function test_wrap_reverts_whenNothingToWrap() public {
-        vm.prank(keeper);
-        vm.expectRevert(StockMigrationModule.NothingToMigrate.selector);
-        module.wrap(address(safe), address(raw));
-    }
-
-    function test_wrapMany_skipsFailures() public {
-        raw.mint(address(safe), LOOSE);
-        address[] memory safes = new address[](2);
-        safes[0] = address(safe);
-        safes[1] = address(safe);
-
-        vm.prank(keeper);
-        uint256 wrapped = module.wrapMany(safes, address(raw));
-        assertEq(wrapped, 1);
-    }
-
-    function test_setWrapPairs_reverts_whenAssetMismatch() public {
-        vm.prank(admin);
-        vm.expectRevert(StockMigrationModule.InvalidWrapperAsset.selector);
-        module.setWrapPairs(_addr1(address(standIn)), _addr1(address(wrapper)));
     }
 
     function test_setSwapPairs_reverts_whenNotAdmin() public {
