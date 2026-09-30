@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { ERC4626Mock } from "@openzeppelin/contracts/mocks/token/ERC4626Mock.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 
@@ -488,5 +489,98 @@ contract TopUpDestTest is Utils, Constants {
 
         uint256 balanceAfter = IERC20(weth).balanceOf(address(topUpDest));
         assertEq(balanceAfter - balanceBefore, amount);
+    }
+
+    function _stockPair() internal returns (MockERC20 raw, ERC4626Mock wrapper) {
+        raw = new MockERC20("SPYx", "SPYx", 18);
+        wrapper = new ERC4626Mock(address(raw));
+        vm.prank(depositor);
+        topUpDest.setStockWrappers(_one(address(raw)), _one(address(wrapper)));
+    }
+
+    function _one(address a) internal pure returns (address[] memory arr) {
+        arr = new address[](1);
+        arr[0] = a;
+    }
+
+    function test_setStockWrappers_setsAndRemoves() public {
+        (MockERC20 raw, ERC4626Mock wrapper) = _stockPair();
+        assertEq(topUpDest.stockWrapperFor(address(raw)), address(wrapper));
+
+        vm.prank(depositor);
+        vm.expectEmit(true, true, true, true);
+        emit TopUpDest.StockWrapperSet(address(raw), address(0));
+        topUpDest.setStockWrappers(_one(address(raw)), _one(address(0)));
+        assertEq(topUpDest.stockWrapperFor(address(raw)), address(0));
+    }
+
+    function test_setStockWrappers_fails_whenWrapperAssetMismatch() public {
+        ERC4626Mock wrapper = new ERC4626Mock(address(token1));
+        vm.prank(depositor);
+        vm.expectRevert(TopUpDest.InvalidWrapperAsset.selector);
+        topUpDest.setStockWrappers(_one(address(token2)), _one(address(wrapper)));
+    }
+
+    function test_setStockWrappers_fails_whenArrayLengthsMismatch() public {
+        vm.prank(depositor);
+        vm.expectRevert(TopUpDest.ArrayLengthMismatch.selector);
+        topUpDest.setStockWrappers(_one(address(token1)), new address[](2));
+    }
+
+    function test_setStockWrappers_fails_whenCallerNotDepositor() public {
+        ERC4626Mock wrapper = new ERC4626Mock(address(token1));
+        vm.prank(topUpRole);
+        vm.expectRevert();
+        topUpDest.setStockWrappers(_one(address(token1)), _one(address(wrapper)));
+    }
+
+    function test_wrapStock_wrapsBalanceAndCreditsDeposit() public {
+        (MockERC20 raw, ERC4626Mock wrapper) = _stockPair();
+        raw.mint(address(topUpDest), TOP_UP_AMOUNT);
+
+        vm.prank(topUpRole);
+        vm.expectEmit(true, true, true, true);
+        emit TopUpDest.StockWrapped(address(raw), address(wrapper), TOP_UP_AMOUNT, TOP_UP_AMOUNT);
+        topUpDest.wrapStock(address(raw));
+
+        assertEq(raw.balanceOf(address(topUpDest)), 0);
+        assertEq(wrapper.balanceOf(address(topUpDest)), TOP_UP_AMOUNT);
+        assertEq(topUpDest.getDeposit(address(wrapper)), TOP_UP_AMOUNT);
+
+        // The wrapped shares are ordinary top-up float from here on
+        vm.prank(topUpRole);
+        topUpDest.topUpUserSafe(keccak256("bridge-tx"), user1, 1, address(wrapper), TOP_UP_AMOUNT);
+        assertEq(wrapper.balanceOf(user1), TOP_UP_AMOUNT);
+    }
+
+    function test_wrapStock_fails_whenWrapperNotSet() public {
+        vm.prank(topUpRole);
+        vm.expectRevert(TopUpDest.StockWrapperNotSet.selector);
+        topUpDest.wrapStock(address(token1));
+    }
+
+    function test_wrapStock_fails_whenNothingToWrap() public {
+        (MockERC20 raw,) = _stockPair();
+        vm.prank(topUpRole);
+        vm.expectRevert(TopUpDest.AmountCannotBeZero.selector);
+        topUpDest.wrapStock(address(raw));
+    }
+
+    function test_wrapStock_fails_whenCallerNotTopUpRole() public {
+        (MockERC20 raw,) = _stockPair();
+        raw.mint(address(topUpDest), TOP_UP_AMOUNT);
+        vm.prank(depositor);
+        vm.expectRevert();
+        topUpDest.wrapStock(address(raw));
+    }
+
+    function test_wrapStock_fails_whenPaused() public {
+        (MockERC20 raw,) = _stockPair();
+        raw.mint(address(topUpDest), TOP_UP_AMOUNT);
+        vm.prank(pauser);
+        topUpDest.pause();
+        vm.prank(topUpRole);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        topUpDest.wrapStock(address(raw));
     }
 }
