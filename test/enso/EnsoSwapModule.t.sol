@@ -9,6 +9,10 @@ import { CREATE3 } from "solady/utils/CREATE3.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
+import { ICashModule, Mode, SafeData } from "../../src/interfaces/ICashModule.sol";
+import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
+import { ILendGateway } from "../../src/interfaces/ILendGateway.sol";
+import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
@@ -215,6 +219,126 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         module.requestSwap(address(safe), order, swapData, signers, sigs);
+    }
+
+    function test_requestSwap_usesConfiguredModuleWithdrawalDelay() public {
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(address(module), 3, true);
+
+        _request(_baseOrder());
+
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + 3);
+    }
+
+    function test_requestSwap_executesNonCollateralInputImmediately() public {
+        MockERC20 nonCollateral = new MockERC20("Non-collateral", "NC", 18);
+        nonCollateral.mint(address(safe), SRC_AMOUNT);
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.srcToken = address(nonCollateral);
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swap, (address(nonCollateral), SRC_AMOUNT));
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        assertEq(ensoRouter.pulled(), SRC_AMOUNT);
+        assertEq(module.getOrder(address(safe)).srcToken, address(0));
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
+    }
+
+    function test_requestSwapWithNativeFee_executesNonCollateralInputImmediatelyWithRequestFee() public {
+        MockERC20 nonCollateral = new MockERC20("Non-collateral", "NC", 18);
+        nonCollateral.mint(address(safe), SRC_AMOUNT);
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.srcToken = address(nonCollateral);
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swap, (address(nonCollateral), SRC_AMOUNT));
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, NATIVE_FEE);
+        deal(address(this), NATIVE_FEE);
+
+        module.requestSwapWithNativeFee{ value: NATIVE_FEE }(address(safe), order, swapData, NATIVE_FEE, signers, sigs);
+
+        assertEq(ensoRouter.lastValue(), NATIVE_FEE);
+        assertEq(module.getOrder(address(safe)).srcToken, address(0));
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
+    }
+
+    function test_requestSwapWithNativeFee_revertsWhenImmediateFeeIsMissing() public {
+        MockERC20 nonCollateral = new MockERC20("Non-collateral", "NC", 18);
+        nonCollateral.mint(address(safe), SRC_AMOUNT);
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.srcToken = address(nonCollateral);
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swap, (address(nonCollateral), SRC_AMOUNT));
+        (address[] memory signers, bytes[] memory sigs) = _signNativeFeeRequest(module, order, swapData, NATIVE_FEE);
+
+        vm.expectRevert(EnsoSwapModule.InvalidNativeFee.selector);
+        module.requestSwapWithNativeFee(address(safe), order, swapData, NATIVE_FEE, signers, sigs);
+    }
+
+    function test_requestSwap_holdsSpendAssetWithZeroLtv() public {
+        MockERC20 spendAsset = new MockERC20("Spend", "SP", 6);
+        spendAsset.mint(address(safe), SRC_AMOUNT);
+        _markSpendOnlyAsset(address(spendAsset));
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.srcToken = address(spendAsset);
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swap, (address(spendAsset), SRC_AMOUNT));
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        assertEq(ensoRouter.callCount(), 0);
+        assertTrue(module.getSwap(address(safe)).hasWithdrawalHold);
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(module));
+    }
+
+    function test_requestSwap_gatewayCollateral_debitWithoutDebtExecutesImmediately() public {
+        assertFalse(_requestGatewayCollateralSwap(Mode.Debit, false));
+        assertEq(ensoRouter.pulled(), SRC_AMOUNT);
+    }
+
+    function test_requestSwap_gatewayCollateral_debitWithDebtIsHeld() public {
+        assertTrue(_requestGatewayCollateralSwap(Mode.Debit, true));
+    }
+
+    function test_requestSwap_gatewayCollateral_creditIsHeld() public {
+        assertTrue(_requestGatewayCollateralSwap(Mode.Credit, false));
+    }
+
+    function test_requestSwap_gatewayCollateral_pendingCreditIsHeld() public {
+        assertTrue(_requestGatewayCollateralSwap(Mode.Debit, false, Mode.Credit, block.timestamp + 60));
+    }
+
+    function test_requestSwap_gatewayCollateral_pendingDebitSwitchIsHeld() public {
+        assertTrue(_requestGatewayCollateralSwap(Mode.Credit, false, Mode.Debit, block.timestamp + 60));
+    }
+
+    function test_requestSwap_gatewayCollateral_maturedDebitSwitchExecutesImmediately() public {
+        assertFalse(_requestGatewayCollateralSwap(Mode.Credit, false, Mode.Debit, block.timestamp - 1));
+    }
+
+    function test_requestSwap_nonCollateralTradeKeepsPendingUserWithdrawal() public {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = SRC_AMOUNT;
+        address withdrawRecipient = makeAddr("withdrawRecipient");
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
+        (address[] memory wSigners, bytes[] memory wSigs) = _twoSig(digest);
+        cashModule.requestWithdrawal(address(safe), tokens, amounts, withdrawRecipient, wSigners, wSigs);
+
+        MockERC20 nonCollateral = new MockERC20("Non-collateral", "NC", 18);
+        nonCollateral.mint(address(safe), SRC_AMOUNT);
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.srcToken = address(nonCollateral);
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swap, (address(nonCollateral), SRC_AMOUNT));
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        assertEq(ensoRouter.pulled(), SRC_AMOUNT);
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, withdrawRecipient);
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.amounts[0], SRC_AMOUNT);
     }
 
     function test_requestSwap_revertsForRecipientOutsideUserSafePair() public {
@@ -760,6 +884,59 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         vm.prank(owner);
         dataProvider.configureModules(modules, shouldWhitelist);
         _configureModules(modules, shouldWhitelist, setupData);
+    }
+
+    /// @dev Marks `asset` as a card spend asset that is NOT collateral on both engines, and whitelists it
+    ///      as a CashModule withdraw asset so the hold can be placed.
+    function _markSpendOnlyAsset(address asset) internal {
+        vm.mockCall(address(debtManager), abi.encodeCall(IDebtManager.isCollateralToken, (asset)), abi.encode(false));
+        vm.mockCall(address(debtManager), abi.encodeCall(IDebtManager.isBorrowToken, (asset)), abi.encode(true));
+        vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.ltv, (asset)), abi.encode(uint256(0)));
+        vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.isSpendAsset, (asset)), abi.encode(true));
+
+        address[] memory assets = new address[](1);
+        assets[0] = asset;
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+        vm.prank(owner);
+        cashModule.configureWithdrawAssets(assets, whitelist);
+    }
+
+    /// @dev Requests a swap of a fresh gateway collateral asset (LTV != 0, not a spend asset) under the given
+    ///      mode / debt state and returns whether it was placed behind a CashModule hold.
+    function _requestGatewayCollateralSwap(Mode mode, bool hasDebt) internal returns (bool held) {
+        return _requestGatewayCollateralSwap(mode, hasDebt, Mode.Debit, 0);
+    }
+
+    function _requestGatewayCollateralSwap(Mode mode, bool hasDebt, Mode incomingMode, uint256 incomingModeStartTime) internal returns (bool held) {
+        MockERC20 collateral = new MockERC20("Collateral", "COL", 18);
+        collateral.mint(address(safe), SRC_AMOUNT);
+        SafeData memory data = cashModule.getData(address(safe));
+        data.mode = mode;
+        data.incomingMode = incomingMode;
+        data.incomingModeStartTime = incomingModeStartTime;
+        vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.usesLendGateway, (address(safe))), abi.encode(true));
+        vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.getData, (address(safe))), abi.encode(data));
+        Mode effectiveMode = incomingModeStartTime != 0 && block.timestamp > incomingModeStartTime ? incomingMode : mode;
+        vm.mockCall(address(cashModule), abi.encodeCall(ICashModule.getMode, (address(safe))), abi.encode(effectiveMode));
+        vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.ltv, (address(collateral))), abi.encode(uint256(80e18)));
+        vm.mockCall(address(gateway), abi.encodeCall(ILendGateway.hasDebt, (address(safe))), abi.encode(hasDebt));
+
+        address[] memory assets = new address[](1);
+        assets[0] = address(collateral);
+        bool[] memory whitelist = new bool[](1);
+        whitelist[0] = true;
+        vm.prank(owner);
+        cashModule.configureWithdrawAssets(assets, whitelist);
+
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.srcToken = address(collateral);
+        bytes memory swapData = abi.encodeCall(EnsoRouterStub.swap, (address(collateral), SRC_AMOUNT));
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        vm.clearMockedCalls();
+        held = cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient == address(module);
     }
 
     function _warpPastDelay() internal {
