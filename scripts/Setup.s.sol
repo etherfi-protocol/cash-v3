@@ -214,10 +214,8 @@ contract Setup is Utils {
     function _grantRoles() internal {
         roleRegistry.grantRole(roleRegistry.PAUSER(), owner);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), owner);
-        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
-        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
-        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
-        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), owner);
         roleRegistry.grantRole(DEBT_MANAGER_ADMIN_ROLE, owner);
         roleRegistry.grantRole(keccak256("ADMIN_ROLE"), deployer);
         roleRegistry.grantRole(settlementDispatcher.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), owner);

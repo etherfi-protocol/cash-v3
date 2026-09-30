@@ -466,10 +466,8 @@ contract SetupOptimism is Utils {
     function _grantRoles() internal {
         roleRegistry.grantRole(roleRegistry.PAUSER(), deployer);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), deployer);
-        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployer);
-        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployer);
-        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployer);
-        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), deployer);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), deployer);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), deployer);
         roleRegistry.grantRole(settlementDispatcherReap.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), deployer);
         roleRegistry.grantRole(settlementDispatcherRain.SETTLEMENT_DISPATCHER_BRIDGER_ROLE(), deployer);
         roleRegistry.grantRole(topUpDest.TOP_UP_DEPOSITOR_ROLE(), deployer);

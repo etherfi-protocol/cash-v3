@@ -12,5 +12,6 @@
   "TradingSafeFactory": "0xE40E4fb2A4686299fb655D9c264746079A648119",
   "TradingSafeFactoryImpl": "0xF3208Bea08c5F4D047D6B8Fb5C2AA1eb046475b2",
   "TradingSafeImpl": "0xb78E5eF8384AB8dA2C4c408E6F0EF1374C6885a6",
+  "TradingSafeLiquidDepositModule": "0x2c6aF8712c7883fD87C7F0Ae80c64e1A65838e6b",
   "TradingSafeWithdrawModule": "0xa8f4e67EAEf79B41c3e5aEc6111660d8b41A0Ef8"
 }
