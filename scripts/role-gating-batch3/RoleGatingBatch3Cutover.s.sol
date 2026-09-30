@@ -32,14 +32,22 @@ import { RoleGatingBatch3Checks } from "./RoleGatingBatch3Checks.sol";
 ///         Three bundles per chain, all signed by the governance Safe (0xA6cf…AAC4):
 ///
 ///         multisend 1 (day 0) — schedule:
-///           2-day upgrade timelock.scheduleBatch(cash upgrades)
-///           8h operating timelock.scheduleBatch(module swap)            [OP only]
+///           2-day upgrade timelock.scheduleBatch(cash upgrades, then trading
+///             RoleRegistry.requestOwnershipHandover() LAST)
+///           8h operating timelock.scheduleBatch(module add)             [OP only]
+///         trading (before multisend 2; nonce order guarantees it) — direct calls from the Safe,
+///           which still owns the trading RoleRegistry: upgrade the registry, grant ADMIN_ROLE (Safe)
+///           + ADMIN_TIMELOCK_ROLE (operating timelock), then upgrade every trading consumer
 ///         multisend 2 (day 2+) — execute, in this order:
-///           2-day upgrade timelock.executeBatch(cash upgrades)
-///           8h operating timelock.executeBatch(module swap)             [OP only]
-///         trading (any time, independent) — direct calls from the Safe, which owns the trading
-///           RoleRegistry: upgrade the registry, grant ADMIN_ROLE (Safe) + ADMIN_TIMELOCK_ROLE
-///           (operating timelock), then upgrade every trading consumer
+///           2-day upgrade timelock.executeBatch(cash upgrades + handover request)
+///           8h operating timelock.executeBatch(module add)              [OP only]
+///           trading RoleRegistry.completeOwnershipHandover(2-day timelock)  LAST, from the Safe
+///
+///         The trading RoleRegistry moves to the 2-day upgrade timelock with solady's two-step
+///         handover, as batch 2 did for the cash registries: the timelock itself requests it (proving
+///         it can execute calls) and the Safe completes it. Request and completion land in the same
+///         transaction, so the 48h request expiry never bites, and completion is last so the Safe is
+///         owner for every earlier call.
 ///
 ///         Why two timelocks on OP: upgrades, setCashModuleSettersAddress, setAdminImpl and the
 ///         liquid setLiquidAssetWithdrawQueue are RoleRegistry-OWNER calls (2-day timelock); the
@@ -77,6 +85,8 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
     bytes[] modulePayloads;
     TxItem[] tradingTxs;
     Probe[] probes;
+    /// @dev Trading RoleRegistry whose ownership moves to the 2-day timelock (set in preflight)
+    address tradingRoleRegistry;
 
     function run() public {
         require(block.chainid == 10 || block.chainid == 1, "RoleGatingBatch3Cutover: Optimism or Ethereum only");
@@ -144,7 +154,7 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
         require(tl.hasRole(tl.DEFAULT_ADMIN_ROLE(), timelock) && !tl.hasRole(tl.DEFAULT_ADMIN_ROLE(), SAFE), "timelock admin misconfigured");
     }
 
-    function _preflightCommon(address cashRegistry, address tradingRegistry) internal view {
+    function _preflightCommon(address cashRegistry, address tradingRegistry) internal {
         require(RoleRegistry(cashRegistry).owner() == UPGRADE_TIMELOCK, "cash RoleRegistry owner != 2-day timelock (batch 1/2 missing?)");
         require(_registryIsRegated(cashRegistry), "cash RoleRegistry not on re-gated code");
         RoleRegistry(cashRegistry).onlyAdmin(SAFE);
@@ -152,9 +162,11 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
 
         require(RoleRegistry(tradingRegistry).owner() == SAFE, "trading RoleRegistry owner != Safe");
         require(!_registryIsRegated(tradingRegistry), "trading RoleRegistry already re-gated (batch 3 already ran?)");
+        require(RoleRegistry(tradingRegistry).ownershipHandoverExpiresAt(UPGRADE_TIMELOCK) == 0, "trading RoleRegistry: handover already requested");
+        tradingRoleRegistry = tradingRegistry;
     }
 
-    function _preflightOp(OpLive memory l, OpImpls memory i) internal view {
+    function _preflightOp(OpLive memory l, OpImpls memory i) internal {
         _preflightCommon(l.roleRegistry, l.tradingRoleRegistry);
         require(_implOf(l.cashModule) != i.cashModuleCore, "CashModule already on batch-3 impl");
 
@@ -167,7 +179,7 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
         }
     }
 
-    function _preflightEth(EthLive memory l, EthImpls memory i) internal view {
+    function _preflightEth(EthLive memory l, EthImpls memory i) internal {
         _preflightCommon(l.roleRegistry, l.tradingRoleRegistry);
         require(_implOf(l.stockUnwrapper) != i.stockUnwrapper, "StockUnwrapper already on batch-3 impl");
     }
@@ -189,6 +201,8 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
         // Withdraw queues are post-constructor state; the new code gates the setter on the registry owner
         _pushQueueCopies(EtherFiLiquidModule(payable(l.oldModules[0])), i.modules[0]);
         _pushQueueCopies(EtherFiLiquidModule(payable(l.oldModules[1])), i.modules[1]);
+        // LAST: the timelock requests the trading registry handover (completed by the Safe in multisend 2)
+        _cash(l.tradingRoleRegistry, abi.encodeWithSignature("requestOwnershipHandover()"));
 
         // ── 8h timelock: module swap (ADMIN_TIMELOCK_ROLE calls on the NEW code) ──
         for (uint256 k = 0; k < N_MODULES; ++k) {
@@ -242,6 +256,8 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
 
     function _buildEth(EthLive memory l, EthImpls memory i) internal {
         _cash(l.stockUnwrapper, _upgrade(i.stockUnwrapper));
+        // LAST: the timelock requests the trading registry handover (completed by the Safe in multisend 2)
+        _cash(l.tradingRoleRegistry, abi.encodeWithSignature("requestOwnershipHandover()"));
 
         _tradingRegistry(l.tradingRoleRegistry, i.tradingRoleRegistry);
         _trading(l.tradingDataProvider, _upgrade(i.dataProvider));
@@ -270,11 +286,15 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
             ms1 = string.concat(ms1, _getGnosisTransaction(addressToHex(OPERATING_TIMELOCK), iToHex(_scheduleData(moduleTargets, modulePayloads, TL_SALT_MODULES, OPERATING_DELAY)), "0", true));
         }
 
+        // Execute order: 2-day batch (upgrades + the handover request), 8h batch (OP only), then the
+        // Safe completes the trading registry handover LAST, so it is owner for every earlier call.
+        // Request and completion land in one transaction, so solady's 48h request expiry never bites.
         string memory ms2 = _getGnosisHeader(chain, addressToHex(SAFE));
-        ms2 = string.concat(ms2, _getGnosisTransaction(addressToHex(UPGRADE_TIMELOCK), iToHex(_executeData(cashTargets, cashPayloads, TL_SALT_CASH)), "0", !hasModules));
+        ms2 = string.concat(ms2, _getGnosisTransaction(addressToHex(UPGRADE_TIMELOCK), iToHex(_executeData(cashTargets, cashPayloads, TL_SALT_CASH)), "0", false));
         if (hasModules) {
-            ms2 = string.concat(ms2, _getGnosisTransaction(addressToHex(OPERATING_TIMELOCK), iToHex(_executeData(moduleTargets, modulePayloads, TL_SALT_MODULES)), "0", true));
+            ms2 = string.concat(ms2, _getGnosisTransaction(addressToHex(OPERATING_TIMELOCK), iToHex(_executeData(moduleTargets, modulePayloads, TL_SALT_MODULES)), "0", false));
         }
+        ms2 = string.concat(ms2, _getGnosisTransaction(addressToHex(tradingRoleRegistry), iToHex(abi.encodeWithSignature("completeOwnershipHandover(address)", UPGRADE_TIMELOCK)), "0", true));
 
         string memory tr = _getGnosisHeader(chain, addressToHex(SAFE));
         for (uint256 k = 0; k < tradingTxs.length; ++k) {
@@ -472,5 +492,14 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
         (bool ok,) = tradingDp.call(abi.encodeWithSelector(EtherFiDataProvider.configureModules.selector, one, yes));
         require(!ok, "Safe can still configureModules directly on trading DP");
         console.log("  [OK] re-gated trading DP rejects the Safe for trust changes");
+
+        // Ownership moved: the Safe can no longer grant roles or upgrade the trading registry
+        vm.prank(SAFE);
+        (ok,) = tradingRoleRegistry.call(abi.encodeWithSignature("grantRole(bytes32,address)", keccak256("PROBE"), SAFE));
+        require(!ok, "Safe can still grant roles on the trading registry");
+        vm.prank(SAFE);
+        (ok,) = tradingRoleRegistry.call(abi.encodeCall(UUPSUpgradeable.upgradeToAndCall, (makeAddr("probeImpl"), bytes(""))));
+        require(!ok, "Safe can still upgrade the trading registry");
+        console.log("  [OK] trading RoleRegistry owned by the 2-day timelock; Safe locked out of owner paths");
     }
 }

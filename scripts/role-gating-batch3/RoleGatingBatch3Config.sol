@@ -28,11 +28,11 @@ import { Utils } from "../utils/Utils.sol";
  *           modules  EtherFiLiquidModule, EtherFiLiquidModuleWithReferrer, StargateModule,
  *                    BeHYPEStakeModule, MidasModule — immutable, so redeployed with the live
  *                    config and added as default modules alongside the old ones
- *         Optimism, trading stack (own RoleRegistry, owner = governance Safe):
+ *         Optimism, trading stack (own RoleRegistry, owner = governance Safe -> 2-day timelock):
  *           RoleRegistry, EtherFiDataProvider
  *         Ethereum, cash stack (RoleRegistry owner = 2-day upgrade timelock):
  *           StockUnwrapper
- *         Ethereum, trading stack (own RoleRegistry, owner = governance Safe):
+ *         Ethereum, trading stack (own RoleRegistry, owner = governance Safe -> 2-day timelock):
  *           RoleRegistry, EtherFiDataProvider, PriceProvider (PriceProviderV2), AcrossSwapModule,
  *           EnsoSwapModule, TradingLens
  *

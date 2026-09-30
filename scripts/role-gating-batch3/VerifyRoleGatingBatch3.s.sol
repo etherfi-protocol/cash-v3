@@ -32,7 +32,8 @@ import { RoleGatingBatch3Checks } from "./RoleGatingBatch3Checks.sol";
 ///           - CashModule setters / DebtManager admin point at the new delegated impls
 ///           - new modules are default, mirror the old requester status, are LendGateway drivers,
 ///             carry the liquid withdraw queues; old modules untouched (still default + whitelisted)
-///           - registry owners and timelock delays unchanged; ADMIN_ROLE / ADMIN_TIMELOCK_ROLE in place
+///           - cash registry owner and timelock delays unchanged; trading registry now owned by the
+///             2-day timelock; ADMIN_ROLE / ADMIN_TIMELOCK_ROLE in place
 ///           - BYTECODE: every live impl / new module byte-matches a local build of this branch
 ///             with the same constructor args (address embeds such as UUPS `__self` reconciled)
 ///

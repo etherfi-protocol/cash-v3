@@ -152,7 +152,9 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         RoleRegistry trading = RoleRegistry(tradingRegistry);
 
         require(cash.owner() == UPGRADE_TIMELOCK, "CRITICAL: cash RoleRegistry owner changed");
-        require(trading.owner() == SAFE, "CRITICAL: trading RoleRegistry owner changed");
+        // Batch 3 hands the trading registry to the 2-day timelock (two-step, completed in multisend 2)
+        require(trading.owner() == UPGRADE_TIMELOCK, "CRITICAL: trading RoleRegistry owner != 2-day timelock");
+        require(trading.ownershipHandoverExpiresAt(UPGRADE_TIMELOCK) == 0, "trading RoleRegistry: handover request left open");
         require(EtherFiTimelock(payable(UPGRADE_TIMELOCK)).getMinDelay() == UPGRADE_DELAY, "upgrade timelock delay changed");
         require(EtherFiTimelock(payable(OPERATING_TIMELOCK)).getMinDelay() == OPERATING_DELAY, "operating timelock delay changed");
 
