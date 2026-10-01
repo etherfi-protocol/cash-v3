@@ -315,6 +315,9 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_LiquidUSDLiquifierModule() public {
+        // The Item 21 repay fixes are not live yet: the proxy runs the 3CP-674 impl until 3CP-707 step 3 executes
+        // upgradeToAndCall. Re-enable once it does.
+        vm.skip(true);
         address liquifierImpl = _getImpl(liquidUsdLiquifierProxy);
         address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));
         _verify("LiquidUSDLiquifierModule", liquifierImpl, local);
