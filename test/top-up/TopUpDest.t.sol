@@ -553,6 +553,22 @@ contract TopUpDestTest is Utils, Constants {
         assertEq(wrapper.balanceOf(user1), TOP_UP_AMOUNT);
     }
 
+    function test_wrapStock_lowersRawLedgerOnlyByWhatWasBooked() public {
+        (MockERC20 raw, ERC4626Mock wrapper) = _stockPair();
+        raw.mint(depositor, TOP_UP_AMOUNT);
+        vm.startPrank(depositor);
+        raw.approve(address(topUpDest), TOP_UP_AMOUNT);
+        topUpDest.deposit(address(raw), TOP_UP_AMOUNT);
+        vm.stopPrank();
+        raw.mint(address(topUpDest), TOP_UP_AMOUNT); // a bridge payout, never booked
+
+        vm.prank(topUpRole);
+        topUpDest.wrapStock(address(raw));
+
+        assertEq(topUpDest.getDeposit(address(raw)), 0, "booked raw should be released");
+        assertEq(topUpDest.getDeposit(address(wrapper)), 2 * TOP_UP_AMOUNT);
+    }
+
     function test_wrapStock_fails_whenWrapperNotSet() public {
         vm.prank(topUpRole);
         vm.expectRevert(TopUpDest.StockWrapperNotSet.selector);

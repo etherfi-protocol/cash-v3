@@ -299,6 +299,9 @@ contract TopUpDest is UpgradeableProxy {
 
         IERC20(raw).forceApprove(wrapper, amount);
         uint256 shares = IERC4626(wrapper).deposit(amount, address(this));
+        // Raw booked through deposit() has left as wrapper; raw from the bridge was never booked
+        uint256 booked = $.deposits[raw];
+        $.deposits[raw] -= amount > booked ? booked : amount;
         $.deposits[wrapper] += shares;
 
         emit StockWrapped(raw, wrapper, amount, shares);

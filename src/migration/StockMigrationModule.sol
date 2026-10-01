@@ -12,7 +12,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
  * @title StockMigrationModule
- * @notice Moves a safe's stock from a stand-in token to Backed's ERC-4626 wrapper on this chain, one safe at a
+ * @notice Moves a safe's stock from a stand-in token to the stock's ERC-4626 wrapper on this chain, one safe at a
  *         time and 1:1, out of a pot of wrapper seeded here. Stock the safe has supplied to Aave is swapped in
  *         place: the wrapper is supplied first and the stand-in withdrawn second, so collateral never dips.
  *         Stand-in held loose in the safe is replaced directly. Keeper driven; nothing here needs a user
@@ -99,10 +99,10 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
      * @notice Swaps one safe's stand-in token for its wrapper, 1:1, supplied position first and loose balance second
      * @param safe The safe to migrate
      * @param standIn The stand-in token to replace
-     * @return supplied Amount swapped inside the safe's Aave position
-     * @return loose Amount swapped in the safe's wallet
+     * @return Amount swapped inside the safe's Aave position
+     * @return Amount swapped in the safe's wallet
      */
-    function migrate(address safe, address standIn) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) onlyEtherFiSafe(safe) returns (uint256 supplied, uint256 loose) {
+    function migrate(address safe, address standIn) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) onlyEtherFiSafe(safe) returns (uint256, uint256) {
         return _migrate(safe, standIn);
     }
 
@@ -110,9 +110,10 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
      * @notice Swaps many safes; a safe that fails is skipped with its reason so the batch finishes
      * @param safes The safes to migrate
      * @param standIn The stand-in token to replace
-     * @return migrated How many safes were swapped in this call
+     * @return How many safes were swapped in this call
      */
-    function migrateMany(address[] calldata safes, address standIn) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) returns (uint256 migrated) {
+    function migrateMany(address[] calldata safes, address standIn) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) returns (uint256) {
+        uint256 migrated;
         uint256 len = safes.length;
         for (uint256 i = 0; i < len; ++i) {
             try this.migrateSelf(safes[i], standIn) {

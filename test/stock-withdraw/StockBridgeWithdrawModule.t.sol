@@ -49,14 +49,6 @@ contract BridgeMock is IBackedCCIPBridge {
     function getDeliveryFeeCost(uint64, bytes32, address, uint256, bytes calldata) external view returns (uint256) {
         return fee;
     }
-
-    function allowlistedDestinationChains(uint64) external view returns (bytes32) {
-        return bytes32(uint256(uint160(address(this))));
-    }
-
-    function paused() external pure returns (bool) {
-        return false;
-    }
 }
 
 contract StockBridgeWithdrawModuleTest is SafeTestSetup {
@@ -73,7 +65,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     uint64 internal constant ETH_SELECTOR = 5_009_297_550_715_157_269;
     uint256 internal constant AMOUNT = 100e18;
-    uint256 internal constant FLOAT = 1 ether;
+    uint256 internal constant KEEPER_ETH = 1 ether;
 
     address internal constant BACKED_BRIDGE = 0x9eC0e4A4c411493773E01e2ABF4D42395788846b;
     address internal constant BACKED_CUSTODY = 0x5F7A4c11bde4f218f0025Ef444c369d838ffa2aD;
@@ -90,7 +82,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         bridge.register(SPYX, 2);
 
         address impl = address(new StockBridgeWithdrawModule(address(dataProvider)));
-        module = StockBridgeWithdrawModule(payable(address(new UUPSProxy(impl, abi.encodeCall(StockBridgeWithdrawModule.initialize, (address(roleRegistry), address(bridge), ETH_SELECTOR))))));
+        module = StockBridgeWithdrawModule(address(new UUPSProxy(impl, abi.encodeCall(StockBridgeWithdrawModule.initialize, (address(roleRegistry), address(bridge), ETH_SELECTOR)))));
 
         address[] memory mods = new address[](1);
         mods[0] = address(module);
@@ -121,8 +113,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         raw.approve(address(wrapper), AMOUNT);
         wrapper.deposit(AMOUNT, address(safe));
 
-        vm.deal(address(module), FLOAT);
-        vm.deal(keeper, 1 ether);
+        vm.deal(keeper, KEEPER_ETH);
     }
 
     // ---- helpers ----
@@ -244,10 +235,11 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         _request(_order());
         _warpPastDelay();
 
+        uint256 fee = bridge.fee();
         vm.expectEmit(true, false, false, false, address(module));
-        emit StockBridgeWithdrawModule.WithdrawalExecuted(address(safe), bytes32(0), address(wrapper), AMOUNT, AMOUNT, recipient, bytes32(0));
+        emit StockBridgeWithdrawModule.BridgeWithdrawalExecuted(address(safe), bytes32(0), address(wrapper), AMOUNT, AMOUNT, recipient, bytes32(0));
         vm.prank(keeper);
-        module.executeWithdrawal(address(safe));
+        module.executeWithdrawal{ value: fee }(address(safe));
 
         assertEq(bridge.sends(), 1);
         assertEq(bridge.lastSelector(), ETH_SELECTOR);
@@ -259,30 +251,32 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(wrapper.balanceOf(address(module)), 0);
         assertEq(raw.balanceOf(address(module)), 0);
         assertEq(raw.allowance(address(module), address(bridge)), 0);
-        assertEq(address(module).balance, FLOAT - bridge.fee(), "fee not paid from the float");
+        assertEq(keeper.balance, KEEPER_ETH - fee, "caller did not pay the fee");
+        assertEq(address(module).balance, 0, "module kept native balance");
         assertEq(module.getOrder(address(safe)).wrapper, address(0));
         assertEq(_pendingRecipient(), address(0));
     }
 
-    function test_executeWithdrawal_msgValueTopsUpFloat() public {
-        vm.deal(address(module), 0);
+    function test_executeWithdrawal_refundsExcessFee() public {
         _request(_order());
         _warpPastDelay();
 
+        uint256 fee = bridge.fee();
         vm.prank(keeper);
-        module.executeWithdrawal{ value: bridge.fee() }(address(safe));
+        module.executeWithdrawal{ value: fee * 3 }(address(safe));
         assertEq(bridge.sends(), 1);
+        assertEq(keeper.balance, KEEPER_ETH - fee, "excess not refunded");
         assertEq(address(module).balance, 0);
     }
 
-    function test_executeWithdrawal_reverts_whenFloatShort() public {
-        vm.deal(address(module), bridge.fee() - 1);
+    function test_executeWithdrawal_reverts_whenFeeShort() public {
         _request(_order());
         _warpPastDelay();
 
+        uint256 fee = bridge.fee();
         vm.prank(keeper);
         vm.expectRevert(StockBridgeWithdrawModule.InsufficientNativeFee.selector);
-        module.executeWithdrawal(address(safe));
+        module.executeWithdrawal{ value: fee - 1 }(address(safe));
     }
 
     function test_executeWithdrawal_reverts_whenNoOrder() public {
@@ -302,7 +296,9 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         StockBridgeWithdrawModule.Order memory order = _order();
         _request(order);
         vm.warp(order.deadline);
-        module.executeWithdrawal(address(safe));
+        uint256 fee = bridge.fee();
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: fee }(address(safe));
         assertEq(bridge.sends(), 1);
     }
 
@@ -357,7 +353,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         _request(_order());
         (address[] memory signers, bytes[] memory sigs) = _signCancel();
         vm.expectEmit(true, false, false, false, address(module));
-        emit StockBridgeWithdrawModule.WithdrawalCancelled(address(safe), bytes32(0));
+        emit StockBridgeWithdrawModule.BridgeWithdrawalCancelled(address(safe), bytes32(0));
         module.cancelWithdrawal(address(safe), signers, sigs);
         assertEq(module.getOrder(address(safe)).wrapper, address(0));
         assertEq(_pendingRecipient(), address(0));
@@ -433,19 +429,6 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(selector, 7);
     }
 
-    function test_withdrawNative_adminOnly() public {
-        address treasury = makeAddr("treasury");
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
-        module.withdrawNative(treasury, 0);
-
-        vm.startPrank(moduleAdmin);
-        module.withdrawNative(treasury, 0.25 ether);
-        module.withdrawNative(treasury, 0);
-        vm.stopPrank();
-        assertEq(treasury.balance, FLOAT);
-        assertEq(address(module).balance, 0);
-    }
-
     // ---- fork: the real wrapper and bridge on OP ----
 
     function test_fork_executeWithdrawal_overBackedBridge() public {
@@ -473,12 +456,12 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         uint256 expectedRaw = IERC4626(WSPYX).previewRedeem(shares);
 
         vm.prank(keeper);
-        module.executeWithdrawal(address(safe));
+        module.executeWithdrawal{ value: fee }(address(safe));
 
         assertGe(IERC20(SPYX).balanceOf(BACKED_CUSTODY) - custodyBefore, expectedRaw - 2, "custody did not receive the stock");
         assertLe(IERC20(SPYX).balanceOf(address(module)), 2, "raw stock left behind");
         assertEq(IERC20(WSPYX).balanceOf(address(safe)), 0);
-        assertEq(address(module).balance, FLOAT - fee, "fee not paid from the float");
+        assertEq(keeper.balance, KEEPER_ETH - fee, "caller did not pay the fee");
         assertEq(_pendingRecipient(), address(0));
     }
 }

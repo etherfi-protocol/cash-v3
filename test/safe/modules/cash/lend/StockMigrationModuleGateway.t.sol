@@ -5,10 +5,13 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC4626Mock } from "@openzeppelin/contracts/mocks/token/ERC4626Mock.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
-import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
+import { DebtManagerStorageContract } from "../../../../../src/debt-manager/DebtManagerStorageContract.sol";
+import { BinSponsor, ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
+import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { StockMigrationModule } from "../../../../../src/migration/StockMigrationModule.sol";
 import { IAaveV4PriceFeed } from "../../../../../src/interfaces/IAaveV4PriceFeed.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
+import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
 import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 import { UpgradeableProxy, PausableUpgradeable } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
@@ -39,6 +42,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
     MockERC20 internal standIn;
     MockERC20 internal raw;
     ERC4626Mock internal wrapper;
+    address internal stockFeed;
 
     address internal keeper = makeAddr("keeper");
     address internal admin = makeAddr("migrationAdmin");
@@ -55,9 +59,9 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         standIn = new MockERC20("iwSPYx", "iwSPYx", 18);
         raw = new MockERC20("SPYx", "SPYx", 18);
         wrapper = new ERC4626Mock(address(raw));
-        address feed = address(new FixedStockFeed());
-        uint256 standInId = _addAaveReserve(address(standIn), feed, 7300, false);
-        uint256 wrapperId = _addAaveReserve(address(wrapper), feed, 7300, false);
+        stockFeed = address(new FixedStockFeed());
+        uint256 standInId = _addAaveReserve(address(standIn), stockFeed, 7300, false);
+        uint256 wrapperId = _addAaveReserve(address(wrapper), stockFeed, 7300, false);
 
         address impl = address(new StockMigrationModule(address(dataProvider)));
         module = StockMigrationModule(address(new UUPSProxy(impl, abi.encodeWithSelector(StockMigrationModule.initialize.selector, address(roleRegistry)))));
@@ -135,6 +139,61 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
 
         assertEq(wrapper.balanceOf(address(safe)), LOOSE, "wrapper must stay loose for a legacy safe");
         assertEq(standIn.balanceOf(address(module)), LOOSE);
+    }
+
+    function test_migrate_legacySafeWithDebt_passesWhenWrapperIsLegacyCollateral() public {
+        _forceLegacyEngine(address(safe));
+        _listLegacyCollateral(address(standIn));
+        _listLegacyCollateral(address(wrapper));
+        uint256 debt = _borrowLegacyAgainst(LOOSE);
+
+        vm.prank(keeper);
+        module.migrate(address(safe), address(standIn));
+
+        assertEq(wrapper.balanceOf(address(safe)), LOOSE, "wrapper must stay loose for a legacy safe");
+        assertEq(debtManager.borrowingOf(address(safe), address(usdc)), debt, "debt must be untouched");
+    }
+
+    function test_migrate_legacySafeWithDebt_reverts_whenWrapperNotLegacyCollateral() public {
+        _forceLegacyEngine(address(safe));
+        _listLegacyCollateral(address(standIn));
+        _borrowLegacyAgainst(LOOSE);
+
+        vm.prank(keeper);
+        vm.expectRevert(DebtManagerStorageContract.AccountUnhealthy.selector);
+        module.migrate(address(safe), address(standIn));
+    }
+
+    /// @dev Lists `token` on the legacy DebtManager at the stock feed's fixed price
+    function _listLegacyCollateral(address token) internal {
+        address[] memory tokens = new address[](1);
+        tokens[0] = token;
+        PriceProvider.Config[] memory configs = new PriceProvider.Config[](1);
+        configs[0] = PriceProvider.Config({
+            oracle: stockFeed,
+            priceFunctionCalldata: abi.encodeWithSignature("latestAnswer()"),
+            isChainlinkType: false,
+            oraclePriceDecimals: 8,
+            maxStaleness: type(uint24).max,
+            dataType: PriceProvider.ReturnType.Int256,
+            isBaseTokenEth: false,
+            isStableToken: false,
+            isBaseTokenBtc: false
+        });
+
+        vm.startPrank(owner);
+        priceProvider.setTokenConfig(tokens, configs);
+        debtManager.supportCollateralToken(token, IDebtManager.CollateralTokenConfig({ ltv: ltv, liquidationThreshold: liquidationThreshold, liquidationBonus: liquidationBonus }));
+        vm.stopPrank();
+    }
+
+    /// @dev Gives the legacy safe `amount` of stand-in as its only collateral and borrows up to the limit against it
+    function _borrowLegacyAgainst(uint256 amount) internal returns (uint256) {
+        deal(address(standIn), address(safe), amount);
+        uint256 debt = debtManager.getMaxBorrowAmount(address(safe), true);
+        vm.prank(address(safe));
+        debtManager.borrow(BinSponsor.Reap, address(usdc), debt);
+        return debt;
     }
 
     function test_migrate_reverts_whenPendingWithdrawal() public {

@@ -17,12 +17,13 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 
 /**
  * @title StockBridgeWithdrawModule
- * @notice Withdraws a safe's wrapped stock to an address on another chain over Backed's bridge. The user signs one
- *         intent `(wrapper, amount, recipient, deadline)`, which places a CashModule withdrawal hold with this module
- *         as recipient. Once the delay matures anyone can execute it: the wrapper lands here, is redeemed to the raw
- *         stock and sent over the bridge, which pays the raw stock to the recipient on the destination from custody.
- *         The bridge fee is paid from this module's native balance. An order past its deadline is released back to
- *         the safe by anyone; nothing ever leaves the safe for an expired order.
+ * @notice Withdraws a safe's wrapped stock to an address on another chain over the stock issuer's bridge. The user
+ *         signs one intent `(wrapper, amount, recipient, deadline)`, which places a CashModule withdrawal hold with
+ *         this module as recipient. Once the delay matures anyone can execute it: the wrapper lands here, is redeemed
+ *         to the raw stock and sent over the bridge, which pays the raw stock to the recipient on the destination
+ *         from custody. The executing caller pays the bridge fee as `msg.value`; this module holds no native balance.
+ *         An order past its deadline is released back to the safe by anyone; nothing ever leaves the safe for an
+ *         expired order.
  * @author ether.fi
  */
 contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModule {
@@ -63,12 +64,11 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
     bytes32 private constant REQUEST_WITHDRAWAL_SIG = keccak256("StockBridgeWithdrawModule.requestWithdrawal");
     bytes32 private constant CANCEL_WITHDRAWAL_SIG = keccak256("StockBridgeWithdrawModule.cancelWithdrawal");
 
-    event WithdrawalRequested(address indexed safe, bytes32 indexed withdrawalId, address wrapper, uint256 amount, address recipient, uint256 deadline);
-    event WithdrawalExecuted(address indexed safe, bytes32 indexed withdrawalId, address wrapper, uint256 amount, uint256 rawAmount, address recipient, bytes32 messageId);
-    event WithdrawalCancelled(address indexed safe, bytes32 indexed withdrawalId);
+    event BridgeWithdrawalRequested(address indexed safe, bytes32 indexed withdrawalId, address wrapper, uint256 amount, address recipient, uint256 deadline);
+    event BridgeWithdrawalExecuted(address indexed safe, bytes32 indexed withdrawalId, address wrapper, uint256 amount, uint256 rawAmount, address recipient, bytes32 messageId);
+    event BridgeWithdrawalCancelled(address indexed safe, bytes32 indexed withdrawalId);
     event WrappersConfigured(address[] wrappers, bool[] supported);
     event BridgeSet(address bridge, uint64 destinationSelector);
-    event NativeWithdrawn(address indexed to, uint256 amount);
 
     error TokenNotSupported();
     error TokenNotOnBridge();
@@ -116,24 +116,11 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
 
     /**
      * @notice Sets the bridge and the destination chain selector used for every order
-     * @param _bridge Backed's bridge on this chain
+     * @param _bridge The stock bridge on this chain
      * @param _destinationSelector Selector of the chain the raw stock is delivered on
      */
     function setBridge(address _bridge, uint64 _destinationSelector) external onlyAdminTimelock {
         _setBridge(_bridge, _destinationSelector);
-    }
-
-    /**
-     * @notice Withdraws native balance from the fee float
-     * @param to Recipient
-     * @param amount Amount, 0 for the whole balance
-     */
-    function withdrawNative(address to, uint256 amount) external onlyAdminTimelock {
-        if (to == address(0)) revert InvalidInput();
-        if (amount == 0) amount = address(this).balance;
-        (bool success,) = payable(to).call{ value: amount }("");
-        if (!success) revert NativeTransferFailed();
-        emit NativeWithdrawn(to, amount);
     }
 
     // ---- Views ----
@@ -167,10 +154,10 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
     /**
      * @notice Quotes the native bridge fee for the stored withdrawal, priced on the raw stock the redeem would return
      * @param safe The safe whose stored withdrawal to quote
-     * @return feeToken Always `ETH`
-     * @return amount The native fee `executeWithdrawal` will spend from this module's balance
+     * @return Always `ETH`
+     * @return The native fee the `executeWithdrawal` caller must send as `msg.value`
      */
-    function getWithdrawalFee(address safe) external view returns (address feeToken, uint256 amount) {
+    function getWithdrawalFee(address safe) external view returns (address, uint256) {
         StockBridgeWithdrawModuleStorage storage $ = _getStorage();
         Order memory order = $.withdrawals[safe].order;
         if (order.wrapper == address(0)) revert NoActiveOrder();
@@ -204,8 +191,8 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
 
     /**
      * @notice Executes the stored withdrawal for `safe`: processes the matured CashModule withdrawal, redeems the
-     *         wrapper to raw stock and sends it over the bridge to the recipient. Anyone may call; the bridge fee
-     *         comes from this module's native balance, which `msg.value` tops up.
+     *         wrapper to raw stock and sends it over the bridge to the recipient. Anyone may call and pays the bridge
+     *         fee (`getWithdrawalFee`) as `msg.value`; the excess is refunded to the caller.
      * @param safe The safe whose stored withdrawal to execute
      */
     function executeWithdrawal(address safe) external payable nonReentrant whenNotPaused onlyEtherFiSafe(safe) {
@@ -233,11 +220,17 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
 
         bytes32 receiver = _receiver(order.recipient);
         uint256 fee = $.bridge.getDeliveryFeeCost($.destinationSelector, receiver, raw, rawAmount, "");
-        if (address(this).balance < fee) revert InsufficientNativeFee();
+        if (msg.value < fee) revert InsufficientNativeFee();
         IERC20(raw).forceApprove(address($.bridge), rawAmount);
         bytes32 messageId = $.bridge.send{ value: fee }($.destinationSelector, receiver, raw, rawAmount, "");
 
-        emit WithdrawalExecuted(safe, withdrawal.withdrawalId, order.wrapper, order.amount, rawAmount, order.recipient, messageId);
+        uint256 excess = msg.value - fee;
+        if (excess != 0) {
+            (bool success,) = payable(msg.sender).call{ value: excess }("");
+            if (!success) revert NativeTransferFailed();
+        }
+
+        emit BridgeWithdrawalExecuted(safe, withdrawal.withdrawalId, order.wrapper, order.amount, rawAmount, order.recipient, messageId);
     }
 
     /**
@@ -275,11 +268,8 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         if ($.withdrawals[safe].order.wrapper == address(0)) return;
         bytes32 withdrawalId = $.withdrawals[safe].withdrawalId;
         delete $.withdrawals[safe];
-        emit WithdrawalCancelled(safe, withdrawalId);
+        emit BridgeWithdrawalCancelled(safe, withdrawalId);
     }
-
-    /// @notice Accepts native funding for the bridge fee float
-    receive() external payable { }
 
     // ---- Internals ----
 
@@ -303,7 +293,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
 
     /// @dev Split out of `requestWithdrawal` to stay under the stack limit
     function _emitRequested(address safe, bytes32 withdrawalId, Order calldata order) internal {
-        emit WithdrawalRequested(safe, withdrawalId, order.wrapper, order.amount, order.recipient, order.deadline);
+        emit BridgeWithdrawalRequested(safe, withdrawalId, order.wrapper, order.amount, order.recipient, order.deadline);
     }
 
     /// @dev Stores the bridge and destination chain selector, both required
