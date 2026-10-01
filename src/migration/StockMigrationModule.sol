@@ -36,8 +36,6 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockMigrationModule")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant StockMigrationModuleStorageLocation = 0x8e53134b5f30830a21a79ee07e1b8fd9da4539c386018f3a5fde30e4e19be400;
 
-    /// @notice Role that sets pairs and sweeps this contract's balances
-    bytes32 public constant STOCK_MIGRATION_MODULE_ADMIN_ROLE = keccak256("STOCK_MIGRATION_MODULE_ADMIN_ROLE");
     /// @notice Role that runs the swaps
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
 
@@ -70,7 +68,7 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
      * @param standIns Stand-in tokens
      * @param wrappers Wrapper per stand-in
      */
-    function setSwapPairs(address[] calldata standIns, address[] calldata wrappers) external onlyRole(STOCK_MIGRATION_MODULE_ADMIN_ROLE) {
+    function setSwapPairs(address[] calldata standIns, address[] calldata wrappers) external onlyAdminTimelock {
         uint256 len = standIns.length;
         if (len != wrappers.length) revert ArrayLengthMismatch();
         StockMigrationModuleStorage storage $ = _getStockMigrationModuleStorage();
@@ -88,7 +86,7 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
      * @param to Recipient
      * @param amount Amount, 0 for the whole balance
      */
-    function sweep(address token, address to, uint256 amount) external onlyRole(STOCK_MIGRATION_MODULE_ADMIN_ROLE) {
+    function sweep(address token, address to, uint256 amount) external onlyAdminTimelock {
         if (to == address(0)) revert InvalidInput();
         if (amount == 0) amount = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransfer(to, amount);

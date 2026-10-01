@@ -494,7 +494,7 @@ contract TopUpDestTest is Utils, Constants {
     function _stockPair() internal returns (MockERC20 raw, ERC4626Mock wrapper) {
         raw = new MockERC20("SPYx", "SPYx", 18);
         wrapper = new ERC4626Mock(address(raw));
-        vm.prank(depositor);
+        vm.prank(owner);
         topUpDest.setStockWrappers(_one(address(raw)), _one(address(wrapper)));
     }
 
@@ -507,7 +507,7 @@ contract TopUpDestTest is Utils, Constants {
         (MockERC20 raw, ERC4626Mock wrapper) = _stockPair();
         assertEq(topUpDest.stockWrapperFor(address(raw)), address(wrapper));
 
-        vm.prank(depositor);
+        vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit TopUpDest.StockWrapperSet(address(raw), address(0));
         topUpDest.setStockWrappers(_one(address(raw)), _one(address(0)));
@@ -516,21 +516,21 @@ contract TopUpDestTest is Utils, Constants {
 
     function test_setStockWrappers_fails_whenWrapperAssetMismatch() public {
         ERC4626Mock wrapper = new ERC4626Mock(address(token1));
-        vm.prank(depositor);
+        vm.prank(owner);
         vm.expectRevert(TopUpDest.InvalidWrapperAsset.selector);
         topUpDest.setStockWrappers(_one(address(token2)), _one(address(wrapper)));
     }
 
     function test_setStockWrappers_fails_whenArrayLengthsMismatch() public {
-        vm.prank(depositor);
+        vm.prank(owner);
         vm.expectRevert(TopUpDest.ArrayLengthMismatch.selector);
         topUpDest.setStockWrappers(_one(address(token1)), new address[](2));
     }
 
-    function test_setStockWrappers_fails_whenCallerNotDepositor() public {
+    function test_setStockWrappers_fails_whenCallerNotAdminTimelock() public {
         ERC4626Mock wrapper = new ERC4626Mock(address(token1));
-        vm.prank(topUpRole);
-        vm.expectRevert();
+        vm.prank(depositor);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         topUpDest.setStockWrappers(_one(address(token1)), _one(address(wrapper)));
     }
 

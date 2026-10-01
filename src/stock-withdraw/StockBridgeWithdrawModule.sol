@@ -59,8 +59,6 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
 
     ICashModule public immutable cashModule;
 
-    /// @notice Role that configures wrappers and the bridge and withdraws the native fee float
-    bytes32 public constant STOCK_BRIDGE_WITHDRAW_MODULE_ADMIN_ROLE = keccak256("STOCK_BRIDGE_WITHDRAW_MODULE_ADMIN_ROLE");
 
     bytes32 private constant REQUEST_WITHDRAWAL_SIG = keccak256("StockBridgeWithdrawModule.requestWithdrawal");
     bytes32 private constant CANCEL_WITHDRAWAL_SIG = keccak256("StockBridgeWithdrawModule.cancelWithdrawal");
@@ -105,7 +103,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
      * @param wrappers Wrapper tokens
      * @param supported Support flag per wrapper
      */
-    function configureWrappers(address[] calldata wrappers, bool[] calldata supported) external onlyRole(STOCK_BRIDGE_WITHDRAW_MODULE_ADMIN_ROLE) {
+    function configureWrappers(address[] calldata wrappers, bool[] calldata supported) external onlyAdmin {
         StockBridgeWithdrawModuleStorage storage $ = _getStorage();
         uint256 len = wrappers.length;
         if (len != supported.length) revert ArrayLengthMismatch();
@@ -121,7 +119,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
      * @param _bridge Backed's bridge on this chain
      * @param _destinationSelector Selector of the chain the raw stock is delivered on
      */
-    function setBridge(address _bridge, uint64 _destinationSelector) external onlyRole(STOCK_BRIDGE_WITHDRAW_MODULE_ADMIN_ROLE) {
+    function setBridge(address _bridge, uint64 _destinationSelector) external onlyAdminTimelock {
         _setBridge(_bridge, _destinationSelector);
     }
 
@@ -130,7 +128,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
      * @param to Recipient
      * @param amount Amount, 0 for the whole balance
      */
-    function withdrawNative(address to, uint256 amount) external onlyRole(STOCK_BRIDGE_WITHDRAW_MODULE_ADMIN_ROLE) {
+    function withdrawNative(address to, uint256 amount) external onlyAdminTimelock {
         if (to == address(0)) revert InvalidInput();
         if (amount == 0) amount = address(this).balance;
         (bool success,) = payable(to).call{ value: amount }("");

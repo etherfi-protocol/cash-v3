@@ -7,6 +7,7 @@ import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { StockWrapModule } from "../../../../../src/modules/stock-wrap/StockWrapModule.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 import { UpgradeableProxy, PausableUpgradeable } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -37,7 +38,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
 
         vm.startPrank(owner);
         roleRegistry.grantRole(module.ETHER_FI_WALLET_ROLE(), keeper);
-        roleRegistry.grantRole(module.STOCK_WRAP_MODULE_ADMIN_ROLE(), admin);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), admin);
         vm.stopPrank();
 
         vm.prank(admin);
@@ -136,7 +137,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module.setWrapPairs(_addr1(address(other)), _addr1(address(wrapper)));
 
         vm.prank(keeper);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setWrapPairs(_addr1(address(raw)), _addr1(address(0)));
 
         vm.prank(admin);

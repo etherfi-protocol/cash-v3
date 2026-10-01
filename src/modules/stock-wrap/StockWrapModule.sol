@@ -28,8 +28,6 @@ contract StockWrapModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy {
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockWrapModule")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant StockWrapModuleStorageLocation = 0x6b563e72367a90aa1f226d57839ae0b7fea2bc078b9e3d85a77763d4baef7200;
 
-    /// @notice Role that sets the wrap pairs
-    bytes32 public constant STOCK_WRAP_MODULE_ADMIN_ROLE = keccak256("STOCK_WRAP_MODULE_ADMIN_ROLE");
     /// @notice Role that runs the wraps
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
 
@@ -58,7 +56,7 @@ contract StockWrapModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy {
      * @param raws Raw stock tokens
      * @param wrappers Wrapper per raw stock; must report the raw stock as its asset
      */
-    function setWrapPairs(address[] calldata raws, address[] calldata wrappers) external onlyRole(STOCK_WRAP_MODULE_ADMIN_ROLE) {
+    function setWrapPairs(address[] calldata raws, address[] calldata wrappers) external onlyAdminTimelock {
         uint256 len = raws.length;
         if (len != wrappers.length) revert ArrayLengthMismatch();
         StockWrapModuleStorage storage $ = _getStockWrapModuleStorage();

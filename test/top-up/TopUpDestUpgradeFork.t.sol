@@ -13,7 +13,7 @@ contract TopUpDestUpgradeForkTest is Test {
     address internal constant DATA_PROVIDER = 0xDC515Cb479a64552c5A11a57109C314E40A1A778;
     address internal constant OP_WETH = 0x4200000000000000000000000000000000000006;
     address internal constant UPGRADE_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
-    address internal constant OPERATING_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address internal constant OPERATING_TIMELOCK = 0x9AEb8eaa982084219d1A938D8F7B5040a1d47849;
     address internal constant TOP_UP_WALLET = 0xf96f8E03615f7b71e0401238D28bb08CceECBae7;
     address internal constant BACKED_CUSTODY = 0x5F7A4c11bde4f218f0025Ef444c369d838ffa2aD;
 
@@ -53,7 +53,7 @@ contract TopUpDestUpgradeForkTest is Test {
         address[] memory wrappers = new address[](1);
         raws[0] = SPYX;
         wrappers[0] = WSPYX;
-        vm.prank(OPERATING_SAFE);
+        vm.prank(OPERATING_TIMELOCK);
         topUpDest.setStockWrappers(raws, wrappers);
 
         // A bridge payout is a plain transfer from Backed's custody

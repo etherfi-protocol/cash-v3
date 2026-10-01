@@ -11,6 +11,7 @@ import { IBackedCCIPBridge } from "../../src/interfaces/IBackedCCIPBridge.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { StockBridgeWithdrawModule } from "../../src/stock-withdraw/StockBridgeWithdrawModule.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
 
@@ -99,7 +100,8 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         vm.startPrank(owner);
         dataProvider.configureModules(mods, yes);
         cashModule.configureModulesCanRequestWithdraw(mods, yes);
-        roleRegistry.grantRole(module.STOCK_BRIDGE_WITHDRAW_MODULE_ADMIN_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), moduleAdmin);
         address[] memory assets = new address[](2);
         assets[0] = address(wrapper);
         assets[1] = WSPYX;
@@ -401,7 +403,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         yes[0] = true;
         ERC4626Mock other = new ERC4626Mock(address(new MockERC20("X", "X", 18)));
 
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         module.configureWrappers(_addr1(address(other)), yes);
 
         vm.prank(moduleAdmin);
@@ -416,7 +418,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
     }
 
     function test_setBridge_adminOnlyAndValidates() public {
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setBridge(address(bridge), 1);
 
         vm.startPrank(moduleAdmin);
@@ -433,7 +435,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     function test_withdrawNative_adminOnly() public {
         address treasury = makeAddr("treasury");
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.withdrawNative(treasury, 0);
 
         vm.startPrank(moduleAdmin);

@@ -263,13 +263,13 @@ contract TopUpDest is UpgradeableProxy {
 
     /**
      * @notice Sets the ERC-4626 wrapper for each raw stock; a zero wrapper removes the pair
-     * @dev Only callable by accounts with TOP_UP_DEPOSITOR_ROLE. The wrapper must report the raw stock as its asset.
+     * @dev Only callable by the admin timelock. The wrapper must report the raw stock as its asset.
      * @param raws Raw stock tokens
      * @param wrappers Wrapper per raw stock
      * @custom:throws ArrayLengthMismatch if arrays have different lengths
      * @custom:throws InvalidWrapperAsset if a wrapper's asset is not the raw stock
      */
-    function setStockWrappers(address[] calldata raws, address[] calldata wrappers) external onlyRole(TOP_UP_DEPOSITOR_ROLE) {
+    function setStockWrappers(address[] calldata raws, address[] calldata wrappers) external onlyAdminTimelock {
         uint256 len = raws.length;
         if (len != wrappers.length) revert ArrayLengthMismatch();
         TopUpDestStorage storage $ = _getTopUpDestStorage();

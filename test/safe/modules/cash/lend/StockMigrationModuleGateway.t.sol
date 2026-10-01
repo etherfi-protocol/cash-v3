@@ -9,6 +9,7 @@ import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
 import { StockMigrationModule } from "../../../../../src/migration/StockMigrationModule.sol";
 import { IAaveV4PriceFeed } from "../../../../../src/interfaces/IAaveV4PriceFeed.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 import { UpgradeableProxy, PausableUpgradeable } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
@@ -67,7 +68,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         gw.setReserveId(address(wrapper), wrapperId);
         gw.setDriver(address(module), true);
         roleRegistry.grantRole(module.ETHER_FI_WALLET_ROLE(), keeper);
-        roleRegistry.grantRole(module.STOCK_MIGRATION_MODULE_ADMIN_ROLE(), admin);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), admin);
         roleRegistry.grantRole(roleRegistry.PAUSER(), owner);
         vm.stopPrank();
 
@@ -204,7 +205,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
 
     function test_setSwapPairs_reverts_whenNotAdmin() public {
         vm.prank(keeper);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setSwapPairs(_addr1(address(standIn)), _addr1(address(wrapper)));
     }
 
@@ -214,7 +215,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         module.migrate(address(safe), address(standIn));
 
         vm.prank(keeper);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.sweep(address(standIn), treasury, 0);
 
         vm.startPrank(admin);
