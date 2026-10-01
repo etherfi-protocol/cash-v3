@@ -73,6 +73,13 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         address settlementDispatcherCardOrder;
         /// @notice The Aave gateway that runs position operations (borrow/withdraw/repay) on a safe's behalf
         ILendGateway gateway;
+        /// @notice Optional withdrawal-delay override for each module. Unconfigured modules use `withdrawalDelay`.
+        mapping(address module => ModuleWithdrawalDelayConfig config) moduleWithdrawalDelayConfig;
+    }
+
+    struct ModuleWithdrawalDelayConfig {
+        uint64 delay;
+        bool configured;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
@@ -193,6 +200,12 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         assembly {
             $.slot := CashModuleStorageLocation
         }
+    }
+
+    /// @dev Returns a module's configured withdrawal delay, falling back to the global delay.
+    function _withdrawalDelayForModule(CashModuleStorage storage $, address module) internal view returns (uint64) {
+        ModuleWithdrawalDelayConfig storage config = $.moduleWithdrawalDelayConfig[module];
+        return config.configured ? config.delay : $.withdrawalDelay;
     }
 
     /**
