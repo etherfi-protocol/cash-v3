@@ -475,6 +475,11 @@ contract TopUpDestTest is Utils, Constants {
         assertEq(address(topUpDest.etherFiDataProvider()), address(dataProvider));
     }
 
+    function test_supplyTopUpToLend_failsWhenCalledExternally() public {
+        vm.expectRevert(TopUpDest.OnlySelf.selector);
+        topUpDest.supplyTopUpToLend(user1, address(token1), TOP_UP_AMOUNT);
+    }
+
     function test_receive_depositsEthAsWeth() public {
         uint256 amount = 1 ether;
         deal(address(owner), amount);
