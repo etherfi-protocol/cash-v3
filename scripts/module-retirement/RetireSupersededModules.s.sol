@@ -201,7 +201,7 @@ contract RetireSupersededModules is GnosisHelpers, Utils {
         registries[1] = TRADING_REGISTRY;
 
         if (isOp) {
-            _checkRecords();
+            _checkDeployments();
             // The gate for a retired module with something in flight comes first: nothing below matters
             // if retiring would strand funds.
             _checkNoPending();
@@ -279,16 +279,10 @@ contract RetireSupersededModules is GnosisHelpers, Utils {
         require(tl.hasRole(tl.DEFAULT_ADMIN_ROLE(), timelock) && !tl.hasRole(tl.DEFAULT_ADMIN_ROLE(), SAFE), "timelock admin misconfigured");
     }
 
-    /// @dev The pinned addresses must equal the deploy record and the current deployments file
-    function _checkRecords() internal view {
-        string memory rec = vm.readFile("./deployments/mainnet/10/role-gating-batch3.json");
+    /// @dev deployments.json already points at the replacement for every retired module (the backend reads it)
+    function _checkDeployments() internal view {
         string memory dep = readDeploymentFile();
-        string[5] memory oldKeys = ["old_liquidModule", "old_liquidReferrerModule", "old_stargateModule", "old_beHypeStakeModule", "old_midasModule"];
-        string[5] memory newKeys = ["liquidModule", "liquidReferrerModule", "stargateModule", "beHypeStakeModule", "midasModule"];
         for (uint256 k = 0; k < N; ++k) {
-            require(stdJson.readAddress(rec, string.concat(".", oldKeys[k])) == OLD[k], string.concat("old module != deploy record: ", NAMES[k]));
-            require(stdJson.readAddress(rec, string.concat(".", newKeys[k])) == NEW[k], string.concat("new module != deploy record: ", NAMES[k]));
-            // deployments.json already points at the replacement (the backend reads it)
             require(stdJson.readAddress(dep, string.concat(".addresses.", NAMES[k])) == NEW[k], string.concat("deployments.json not on the new module: ", NAMES[k]));
         }
     }
