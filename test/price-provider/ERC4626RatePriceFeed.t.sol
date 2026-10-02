@@ -117,24 +117,28 @@ contract ERC4626RatePriceFeedTest is Test {
         assertEq(f6.latestAnswer(), 1140e8);
     }
 
+    /// @notice A stale underlying USD leg fails closed.
     function test_reverts_whenUnderlyingStale() public {
         usd.set(760e8, true);
         vm.expectRevert(BaseAaveV4PriceFeed.StalePrice.selector);
         feed.latestAnswer();
     }
 
+    /// @notice A zero or negative underlying price fails closed.
     function test_reverts_whenUnderlyingNotPositive() public {
         usd.set(0, false);
         vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
 
+    /// @notice A zero vault rate fails closed.
     function test_reverts_whenRateZero() public {
         vault.setRate(0);
         vm.expectRevert(BaseAaveV4PriceFeed.InvalidPrice.selector);
         feed.latestAnswer();
     }
 
+    /// @notice The feed cannot be deployed without an underlying USD leg.
     function test_constructor_requiresUnderlyingFeed() public {
         vm.expectRevert(ERC4626RatePriceFeed.MissingUnderlyingFeed.selector);
         new ERC4626RatePriceFeed(IERC4626(address(vault)), IAaveV4PriceFeed(address(0)), FEED_DECIMALS, "wSPYx / USD");
@@ -158,6 +162,7 @@ contract ERC4626RatePriceFeedForkTest is Test {
         feed = new ERC4626RatePriceFeed(IERC4626(WSPYX), IAaveV4PriceFeed(SPY_USD_LEG), 8, "wSPYx / USD");
     }
 
+    /// @notice OP fork: the answer equals the live wSPYx rate times the SPY/USD leg, with 18 rate decimals.
     function test_fork_matchesManualCompose() public view {
         uint256 rate = IERC4626(WSPYX).convertToAssets(1e18);
         uint256 spy = IAaveV4PriceFeed(SPY_USD_LEG).latestAnswer().toUint256();

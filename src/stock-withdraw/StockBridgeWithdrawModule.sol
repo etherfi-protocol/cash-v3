@@ -83,6 +83,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
     error MissingConfig();
     error ZeroWithdrawalDelay();
     error DeadlineBeforeWithdrawalDelay();
+    error RedeemedNothing();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) {
@@ -103,7 +104,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
      * @param wrappers Wrapper tokens
      * @param supported Support flag per wrapper
      */
-    function configureWrappers(address[] calldata wrappers, bool[] calldata supported) external onlyAdmin {
+    function configureWrappers(address[] calldata wrappers, bool[] calldata supported) external onlyAdminTimelock {
         StockBridgeWithdrawModuleStorage storage $ = _getStorage();
         uint256 len = wrappers.length;
         if (len != supported.length) revert ArrayLengthMismatch();
@@ -217,6 +218,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         uint256 rawBefore = IERC20(raw).balanceOf(address(this));
         IERC4626(order.wrapper).redeem(order.amount, address(this), address(this));
         uint256 rawAmount = IERC20(raw).balanceOf(address(this)) - rawBefore;
+        if (rawAmount == 0) revert RedeemedNothing();
 
         bytes32 receiver = _receiver(order.recipient);
         uint256 fee = $.bridge.getDeliveryFeeCost($.destinationSelector, receiver, raw, rawAmount, "");

@@ -45,6 +45,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module.setWrapPairs(_addr1(address(raw)), _addr1(address(wrapper)));
     }
 
+    /// Wrap deposits the safe's raw into the wrapper, credits the shares to the safe, and leaves the lend position alone.
     function test_wrap_creditsSafeAndLeavesLendPositionAlone() public {
         raw.mint(address(safe), AMOUNT);
 
@@ -60,6 +61,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(wrapper)), 0, "wrap must not touch the lend position");
     }
 
+    /// Raw under a pending withdrawal hold is excluded from the wrap.
     function test_wrap_leavesPendingWithdrawalUntouched() public {
         uint256 held = 1e18;
         raw.mint(address(safe), AMOUNT);
@@ -72,12 +74,14 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         assertEq(raw.balanceOf(address(safe)), held, "held raw was wrapped");
     }
 
+    /// A safe holding no raw is refused.
     function test_wrap_reverts_whenNothingToWrap() public {
         vm.prank(keeper);
         vm.expectRevert(StockWrapModule.NothingToWrap.selector);
         module.wrap(address(safe), address(raw));
     }
 
+    /// A raw stock without a wrap pair is refused.
     function test_wrap_reverts_whenPairNotSet() public {
         MockERC20 other = new MockERC20("QQQx", "QQQx", 18);
         other.mint(address(safe), AMOUNT);
@@ -87,6 +91,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module.wrap(address(safe), address(other));
     }
 
+    /// Only the keeper role wraps.
     function test_wrap_reverts_whenNotKeeper() public {
         raw.mint(address(safe), AMOUNT);
 
@@ -95,6 +100,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module.wrap(address(safe), address(raw));
     }
 
+    /// Pause blocks wraps.
     function test_wrap_reverts_whenPaused() public {
         raw.mint(address(safe), AMOUNT);
         vm.prank(pauser);
@@ -105,6 +111,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module.wrap(address(safe), address(raw));
     }
 
+    /// The try/catch target is callable only by the module itself.
     function test_wrapSelf_reverts_whenNotSelf() public {
         raw.mint(address(safe), AMOUNT);
 
@@ -113,6 +120,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module.wrapSelf(address(safe), address(raw));
     }
 
+    /// A batch logs each failing safe and keeps going; the return value counts the successes.
     function test_wrapMany_skipsFailuresAndContinues() public {
         raw.mint(address(safe), AMOUNT);
         address[] memory safes = new address[](3);
@@ -129,6 +137,7 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         assertEq(wrapper.balanceOf(address(safe)), AMOUNT);
     }
 
+    /// Wrap pairs are timelocked, the wrapper must report the raw as its asset, and a zero wrapper removes the pair.
     function test_setWrapPairs_checksAssetAndRole() public {
         MockERC20 other = new MockERC20("QQQx", "QQQx", 18);
 

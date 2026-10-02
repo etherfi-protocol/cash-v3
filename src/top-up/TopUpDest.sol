@@ -108,6 +108,9 @@ contract TopUpDest is UpgradeableProxy {
     /// @notice Error thrown when a raw stock has no wrapper set
     error StockWrapperNotSet();
 
+    /// @notice Thrown when wrapping raw stock minted no wrapper shares
+    error WrapMintedNothing();
+
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
      */
@@ -288,6 +291,7 @@ contract TopUpDest is UpgradeableProxy {
      * @param raw Raw stock token to wrap
      * @custom:throws StockWrapperNotSet if the raw stock has no wrapper
      * @custom:throws AmountCannotBeZero if this contract holds none of the raw stock
+     * @custom:throws WrapMintedNothing if the wrapper minted no shares for the deposit
      */
     function wrapStock(address raw) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
@@ -299,6 +303,7 @@ contract TopUpDest is UpgradeableProxy {
 
         IERC20(raw).forceApprove(wrapper, amount);
         uint256 shares = IERC4626(wrapper).deposit(amount, address(this));
+        if (shares == 0) revert WrapMintedNothing();
         // Raw booked through deposit() has left as wrapper; raw from the bridge was never booked
         uint256 booked = $.deposits[raw];
         $.deposits[raw] -= amount > booked ? booked : amount;

@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { ERC4626Mock } from "@openzeppelin/contracts/mocks/token/ERC4626Mock.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { DebtManagerStorageContract } from "../../../../../src/debt-manager/DebtManagerStorageContract.sol";
@@ -10,6 +11,7 @@ import { BinSponsor, ICashModule } from "../../../../../src/interfaces/ICashModu
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { StockMigrationModule } from "../../../../../src/migration/StockMigrationModule.sol";
 import { IAaveV4PriceFeed } from "../../../../../src/interfaces/IAaveV4PriceFeed.sol";
+import { CashVerificationLib } from "../../../../../src/libraries/CashVerificationLib.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
 import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
@@ -38,6 +40,8 @@ contract FixedStockFeed is IAaveV4PriceFeed {
  *         replaced and resupplied.
  */
 contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
+    using MessageHashUtils for bytes32;
+
     StockMigrationModule internal module;
     MockERC20 internal standIn;
     MockERC20 internal raw;
@@ -87,6 +91,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         vm.stopPrank();
     }
 
+    /// A supplied stand-in becomes supplied wrapper with the health factor unchanged and nothing left loose.
     function test_migrate_suppliedPosition_keepsHealthFactor() public {
         _buildGatewayPosition(address(safe), address(standIn), SUPPLIED, address(usdc), DEBT);
         uint256 healthBefore = gw.healthFactor(address(safe));
@@ -105,6 +110,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         assertEq(gw.healthFactor(address(safe)), healthBefore, "health factor moved");
     }
 
+    /// Loose stand-in is swapped and the wrapper is supplied to the gateway.
     function test_migrate_looseBalance_resuppliesWrapper() public {
         deal(address(standIn), address(safe), LOOSE);
 
@@ -117,6 +123,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         assertEq(wrapper.balanceOf(address(module)), SEED - LOOSE);
     }
 
+    /// Supplied and loose stand-in are swapped in one call.
     function test_migrate_bothLegs() public {
         _supplyToGateway(address(safe), address(standIn), SUPPLIED);
         deal(address(standIn), address(safe), LOOSE);
@@ -130,6 +137,29 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         assertEq(standIn.balanceOf(address(module)), SUPPLIED + LOOSE);
     }
 
+    /// A matured lend opt-out is executed first, so the whole position is swapped loose and nothing is re-supplied.
+    function test_migrate_optedOutSafe_unwindsThenSwapsLoose() public {
+        _supplyToGateway(address(safe), address(standIn), SUPPLIED);
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.TOGGLE_LEND_METHOD, block.chainid, address(safe), nonce, abi.encode(false))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
+        cashModule.toggleLend(address(safe), false, owner1, abi.encodePacked(r, s, v));
+        (,, uint64 modeDelay) = cashModule.getDelays();
+        vm.warp(block.timestamp + modeDelay + 1);
+        assertTrue(cashModule.isLendOptedOut(address(safe)));
+
+        vm.prank(keeper);
+        (uint256 supplied, uint256 loose) = module.migrate(address(safe), address(standIn));
+
+        assertEq(supplied, 0);
+        assertApproxEqAbs(loose, SUPPLIED, 1);
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(standIn)), 0, 1, "stand-in still supplied");
+        assertEq(gw.suppliedOf(address(safe), address(wrapper)), 0, "wrapper supplied for an opted-out safe");
+        assertApproxEqAbs(wrapper.balanceOf(address(safe)), SUPPLIED, 1, "wrapper not loose in the safe");
+        assertEq(standIn.balanceOf(address(safe)), 0);
+    }
+
+    /// A legacy safe has no gateway position, so the wrapper stays loose.
     function test_migrate_legacySafe_wrapperStaysLoose() public {
         _forceLegacyEngine(address(safe));
         deal(address(standIn), address(safe), LOOSE);
@@ -141,6 +171,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         assertEq(standIn.balanceOf(address(module)), LOOSE);
     }
 
+    /// A legacy safe with stand-in-backed debt migrates once the wrapper is DebtManager collateral; the debt is untouched.
     function test_migrate_legacySafeWithDebt_passesWhenWrapperIsLegacyCollateral() public {
         _forceLegacyEngine(address(safe));
         _listLegacyCollateral(address(standIn));
@@ -154,6 +185,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         assertEq(debtManager.borrowingOf(address(safe), address(usdc)), debt, "debt must be untouched");
     }
 
+    /// Without the wrapper listed as legacy collateral the swap would strand the debt, so the hook's health check reverts.
     function test_migrate_legacySafeWithDebt_reverts_whenWrapperNotLegacyCollateral() public {
         _forceLegacyEngine(address(safe));
         _listLegacyCollateral(address(standIn));
@@ -196,6 +228,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         return debt;
     }
 
+    /// Stand-in under a pending withdrawal is left for the keeper to handle by hand.
     function test_migrate_reverts_whenPendingWithdrawal() public {
         deal(address(standIn), address(safe), LOOSE);
         vm.mockCall(address(cashModule), abi.encodeWithSelector(ICashModule.getPendingWithdrawalAmount.selector, address(safe), address(standIn)), abi.encode(uint256(1)));
@@ -205,12 +238,14 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         module.migrate(address(safe), address(standIn));
     }
 
+    /// A safe holding no stand-in is refused.
     function test_migrate_reverts_whenNothingToMigrate() public {
         vm.prank(keeper);
         vm.expectRevert(StockMigrationModule.NothingToMigrate.selector);
         module.migrate(address(safe), address(standIn));
     }
 
+    /// The module must hold enough wrapper seed to pay the full swap.
     function test_migrate_reverts_whenSeedShort() public {
         deal(address(standIn), address(safe), SEED + 1);
         vm.prank(keeper);
@@ -218,12 +253,14 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         module.migrate(address(safe), address(standIn));
     }
 
+    /// A token without a swap pair is refused.
     function test_migrate_reverts_whenPairNotSet() public {
         vm.prank(keeper);
         vm.expectRevert(StockMigrationModule.PairNotSet.selector);
         module.migrate(address(safe), address(raw));
     }
 
+    /// Only the keeper role runs swaps.
     function test_migrate_reverts_whenNotKeeper() public {
         deal(address(standIn), address(safe), LOOSE);
         vm.prank(admin);
@@ -231,6 +268,7 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         module.migrate(address(safe), address(standIn));
     }
 
+    /// Pause blocks swaps.
     function test_migrate_reverts_whenPaused() public {
         deal(address(standIn), address(safe), LOOSE);
         vm.prank(owner);
@@ -240,12 +278,14 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         module.migrate(address(safe), address(standIn));
     }
 
+    /// The try/catch target is callable only by the module itself.
     function test_migrateSelf_reverts_whenNotSelf() public {
         vm.prank(keeper);
         vm.expectRevert(StockMigrationModule.OnlySelf.selector);
         module.migrateSelf(address(safe), address(standIn));
     }
 
+    /// A batch logs each failing safe and keeps going; the return value counts the successes.
     function test_migrateMany_skipsFailuresAndContinues() public {
         deal(address(standIn), address(safe), LOOSE);
         address[] memory safes = new address[](3);
@@ -262,12 +302,14 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         assertEq(standIn.balanceOf(address(module)), LOOSE);
     }
 
+    /// Swap pairs are timelocked.
     function test_setSwapPairs_reverts_whenNotAdmin() public {
         vm.prank(keeper);
         vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setSwapPairs(_addr1(address(standIn)), _addr1(address(wrapper)));
     }
 
+    /// The timelocked sweep moves collected stand-in (whole balance on zero) and unused seed to the treasury.
     function test_sweep_adminOnly_movesCollectedAndSeed() public {
         deal(address(standIn), address(safe), LOOSE);
         vm.prank(keeper);

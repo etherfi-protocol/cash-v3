@@ -171,6 +171,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     // ---- initialize ----
 
+    /// Initialize stores the bridge and destination selector; the wrapper configured in setUp is supported.
     function test_initialize_setsBridge() public view {
         (address b, uint64 selector) = module.getBridge();
         assertEq(b, address(bridge));
@@ -181,6 +182,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     // ---- requestWithdrawal ----
 
+    /// A signed request stores the order and places a CashModule hold on the wrapper with this module as recipient.
     function test_requestWithdrawal_storesOrderAndPlacesHold() public {
         _request(_order());
         StockBridgeWithdrawModule.Order memory stored = module.getOrder(address(safe));
@@ -191,6 +193,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens[0], address(wrapper));
     }
 
+    /// An unsupported wrapper, a zero amount or recipient, or a deadline inside the withdrawal delay is rejected.
     function test_requestWithdrawal_reverts_onBadOrders() public {
         StockBridgeWithdrawModule.Order memory order = _order();
         order.wrapper = address(raw);
@@ -210,17 +213,20 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         _expectRequestRevert(order, StockBridgeWithdrawModule.DeadlineBeforeWithdrawalDelay.selector);
     }
 
+    /// A zero CashModule withdrawal delay would skip the hold, so requests are refused.
     function test_requestWithdrawal_reverts_whenDelayZero() public {
         vm.prank(owner);
         cashModule.setDelays(0, 0, 0);
         _expectRequestRevert(_order(), StockBridgeWithdrawModule.ZeroWithdrawalDelay.selector);
     }
 
+    /// One open order per safe: a second request is rejected until the first is executed or cancelled.
     function test_requestWithdrawal_reverts_whenOrderActive() public {
         _request(_order());
         _expectRequestRevert(_order(), StockBridgeWithdrawModule.OrderAlreadyActive.selector);
     }
 
+    /// A signature over a different order does not authorize this one.
     function test_requestWithdrawal_reverts_onBadSignature() public {
         StockBridgeWithdrawModule.Order memory tampered = _order();
         tampered.amount = AMOUNT - 1;
@@ -231,6 +237,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     // ---- executeWithdrawal ----
 
+    /// Execute processes the hold, redeems the wrapper, hands exactly the raw received to the bridge, and the caller pays the fee.
     function test_executeWithdrawal_redeemsAndBridgesRaw() public {
         _request(_order());
         _warpPastDelay();
@@ -257,6 +264,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(_pendingRecipient(), address(0));
     }
 
+    /// Native value above the quoted fee goes back to the caller; the module keeps no balance.
     function test_executeWithdrawal_refundsExcessFee() public {
         _request(_order());
         _warpPastDelay();
@@ -269,6 +277,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(address(module).balance, 0);
     }
 
+    /// Execute reverts when the caller sends less than the bridge's quote.
     function test_executeWithdrawal_reverts_whenFeeShort() public {
         _request(_order());
         _warpPastDelay();
@@ -279,11 +288,25 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         module.executeWithdrawal{ value: fee - 1 }(address(safe));
     }
 
+    /// A redeem that yields no raw reverts instead of sending zero over the bridge.
+    function test_executeWithdrawal_reverts_whenRedeemReturnsNothing() public {
+        _request(_order());
+        _warpPastDelay();
+        deal(address(raw), address(wrapper), 0); // an empty vault redeems shares for nothing
+
+        uint256 fee = bridge.fee();
+        vm.prank(keeper);
+        vm.expectRevert(StockBridgeWithdrawModule.RedeemedNothing.selector);
+        module.executeWithdrawal{ value: fee }(address(safe));
+    }
+
+    /// Execute needs a stored order.
     function test_executeWithdrawal_reverts_whenNoOrder() public {
         vm.expectRevert(StockBridgeWithdrawModule.NoActiveOrder.selector);
         module.executeWithdrawal(address(safe));
     }
 
+    /// An order past its deadline cannot be executed.
     function test_executeWithdrawal_reverts_afterDeadline() public {
         StockBridgeWithdrawModule.Order memory order = _order();
         _request(order);
@@ -292,6 +315,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         module.executeWithdrawal(address(safe));
     }
 
+    /// The deadline second itself is still inside the window.
     function test_executeWithdrawal_worksAtDeadline() public {
         StockBridgeWithdrawModule.Order memory order = _order();
         _request(order);
@@ -302,12 +326,14 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(bridge.sends(), 1);
     }
 
+    /// Execute fails while the CashModule hold has not matured.
     function test_executeWithdrawal_reverts_beforeDelayMatures() public {
         _request(_order());
         vm.expectRevert();
         module.executeWithdrawal(address(safe));
     }
 
+    /// Removing a wrapper halts its in-flight orders, but the owners can still cancel and keep the wrapper.
     function test_executeWithdrawal_reverts_whenWrapperRemoved() public {
         _request(_order());
         _warpPastDelay();
@@ -326,6 +352,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(wrapper.balanceOf(address(safe)), AMOUNT);
     }
 
+    /// Pause blocks execution.
     function test_executeWithdrawal_reverts_whenPaused() public {
         _request(_order());
         _warpPastDelay();
@@ -337,6 +364,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     // ---- fee view ----
 
+    /// The fee view quotes the bridge in native ETH for the stored order and reverts without one.
     function test_getWithdrawalFee_quotesBridge() public {
         vm.expectRevert(StockBridgeWithdrawModule.NoActiveOrder.selector);
         module.getWithdrawalFee(address(safe));
@@ -349,6 +377,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     // ---- cancels ----
 
+    /// An owner-signed cancel releases the hold and clears the order through the CashModule callback.
     function test_cancelWithdrawal_clearsOrderAndHold() public {
         _request(_order());
         (address[] memory signers, bytes[] memory sigs) = _signCancel();
@@ -359,6 +388,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(_pendingRecipient(), address(0));
     }
 
+    /// Cancel needs the owners' signature over the cancel digest.
     function test_cancelWithdrawal_reverts_onBadSignature() public {
         _request(_order());
         (address[] memory signers, bytes[] memory sigs) = _twoSig(keccak256("wrong").toEthSignedMessageHash());
@@ -366,6 +396,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         module.cancelWithdrawal(address(safe), signers, sigs);
     }
 
+    /// Anyone can cancel an order once it has expired; the wrapper never left the safe.
     function test_cancelExpiredWithdrawal_complementsExecute() public {
         StockBridgeWithdrawModule.Order memory order = _order();
         _request(order);
@@ -382,6 +413,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(wrapper.balanceOf(address(safe)), AMOUNT, "wrapper never left the safe");
     }
 
+    /// When the hold was released without the callback, cancel clears the stranded order locally.
     function test_cancelWithdrawal_clearsOrderAfterHoldReleasedWhileDelisted() public {
         _strandOrder();
         (address[] memory signers, bytes[] memory sigs) = _signCancel();
@@ -391,6 +423,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(module.getOrder(address(safe)).wrapper, address(0));
     }
 
+    /// The expired-order path clears a stranded order the same way.
     function test_cancelExpiredWithdrawal_clearsOrderAfterHoldReleasedWhileDelisted() public {
         StockBridgeWithdrawModule.Order memory order = _strandOrder();
         vm.warp(order.deadline + 1);
@@ -418,6 +451,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         return order;
     }
 
+    /// Only the CashModule may call the cancel callback.
     function test_cancelBridgeByCashModule_onlyCashModule() public {
         _request(_order());
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
@@ -430,12 +464,13 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     // ---- admin ----
 
+    /// Wrapper listing is timelocked and the raw stock must be known to the bridge; removal clears support.
     function test_configureWrappers_adminOnlyAndChecksBridge() public {
         bool[] memory yes = new bool[](1);
         yes[0] = true;
         ERC4626Mock other = new ERC4626Mock(address(new MockERC20("X", "X", 18)));
 
-        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.configureWrappers(_addr1(address(other)), yes);
 
         vm.prank(moduleAdmin);
@@ -449,6 +484,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(module.getSupportedWrappers().length, 0);
     }
 
+    /// setBridge is timelocked and rejects a zero bridge or selector.
     function test_setBridge_adminOnlyAndValidates() public {
         vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setBridge(address(bridge), 1);
@@ -467,6 +503,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
 
     // ---- fork: the real wrapper and bridge on OP ----
 
+    /// OP fork: a real wSPYx order redeems and sends SPYx to Backed's custody over the live bridge, with the caller paying the quoted fee.
     function test_fork_executeWithdrawal_overBackedBridge() public {
         vm.skip(block.chainid != 10);
 

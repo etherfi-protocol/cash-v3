@@ -31,6 +31,7 @@ contract TopUpDestUpgradeForkTest is Test {
         vm.createSelectFork(rpc);
     }
 
+    /// OP fork: upgrading the live TopUpDest keeps its deposits and pause state, then a custody payout of SPYx wraps into wSPYx float.
     function test_upgrade_keepsDepositsAndWrapsRawStock() public {
         uint256 spyDeposit = topUpDest.getDeposit(IWSPYX);
         uint256 qqqDeposit = topUpDest.getDeposit(IWQQQX);

@@ -66,6 +66,7 @@ contract BackedCCIPBridgeAdapterTest is Test, Constants {
         return IERC20(SPYX).balanceOf(address(factory));
     }
 
+    /// The factory's fee quote is Backed's own delivery fee in ETH for the TopUpDest recipient.
     function test_getBridgeFee_matchesBridgeQuote() public view {
         (address feeToken, uint256 fee) = factory.getBridgeFee(SPYX, 1e18, OP_CHAIN_ID);
         assertEq(feeToken, ETH, "fee token should be ETH");
@@ -73,6 +74,7 @@ contract BackedCCIPBridgeAdapterTest is Test, Constants {
         assertGt(fee, 0);
     }
 
+    /// Bridging moves the stock from the factory into Backed's custody, spends the fee, and leaves no allowance.
     function test_bridge_sendsExactAmountToCustody() public {
         uint256 amount = _fundFactoryWithStock(1e18);
         (, uint256 fee) = factory.getBridgeFee(SPYX, amount, OP_CHAIN_ID);
@@ -88,6 +90,7 @@ contract BackedCCIPBridgeAdapterTest is Test, Constants {
         assertEq(address(factory).balance, 0, "fee not spent");
     }
 
+    /// The factory rejects a bridge call that underpays the quoted fee.
     function test_bridge_reverts_whenFeeShort() public {
         uint256 amount = _fundFactoryWithStock(1e18);
         (, uint256 fee) = factory.getBridgeFee(SPYX, amount, OP_CHAIN_ID);
@@ -96,6 +99,7 @@ contract BackedCCIPBridgeAdapterTest is Test, Constants {
         factory.bridge{ value: fee - 1 }(SPYX, amount, OP_CHAIN_ID);
     }
 
+    /// A token the bridge does not list cannot be quoted through the adapter.
     function test_bridge_reverts_whenTokenNotOnBridge() public {
         vm.startPrank(owner);
         address[] memory tokens = new address[](1);

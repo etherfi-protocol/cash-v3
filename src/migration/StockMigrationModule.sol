@@ -19,9 +19,10 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         signature.
  * @dev A default module (it drives `execTransactionFromModule` on any safe) and a lend gateway driver (it moves
  *      the safe's Aave position). Every call leaves the safe holding wrapper for exactly the stand-in it gave
- *      up, and the gateway's not-worsened health check closes the Aave leg. A safe with a pending
- *      withdrawal of the stand-in, or opted out of lend with a supplied position, is refused so the keeper can
- *      handle it by hand. Collected stand-ins and unused seed leave only through the admin sweep.
+ *      up, and the gateway's not-worsened health check closes the Aave leg. A safe whose lend opt-out has
+ *      matured but still holds a supplied position is unwound first, so its stand-in is swapped loose. A safe
+ *      with a pending withdrawal of the stand-in is refused so the keeper can handle it by hand. Collected
+ *      stand-ins and unused seed leave only through the admin sweep.
  * @author ether.fi
  */
 contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySandwich, UpgradeableProxy {
@@ -47,7 +48,6 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
     error OnlySelf();
     error PairNotSet();
     error PendingWithdrawal();
-    error LendOptedOut();
     error NothingToMigrate();
     error InsufficientSeed();
 
@@ -150,7 +150,11 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
         uint256 healthFactorBefore;
         if (_onGatewayEngine(safe)) {
             supplied = gateway().suppliedOf(safe, standIn);
-            if (supplied != 0 && cashModule.isLendOptedOut(safe)) revert LendOptedOut();
+            if (supplied != 0 && cashModule.isLendOptedOut(safe)) {
+                // A matured opt-out returns the whole position to the safe, so everything is swapped loose
+                cashModule.processLendOptOut(safe);
+                supplied = 0;
+            }
             healthFactorBefore = _gatewayHealthFactor(safe);
         }
         uint256 loose = IERC20(standIn).balanceOf(safe);
