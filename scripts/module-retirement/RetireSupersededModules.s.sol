@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { stdJson } from "forge-std/StdJson.sol";
+import { Vm } from "forge-std/Vm.sol";
 import { console } from "forge-std/console.sol";
 
 import { TimelockController } from "@openzeppelin/contracts/governance/TimelockController.sol";
@@ -53,24 +54,23 @@ import { Utils } from "../utils/Utils.sol";
 ///         Hard precondition for 1: no pending withdrawal or bridge on any retired module. A Cash withdrawal
 ///         requested by a module pays out to the module, and once the module stops being a requester
 ///         processWithdrawal is open to anyone while the module has no sweep. The Safe set is too large
-///         to scan on-chain (about 540k Safes), so the preflight runs
-///         scripts/module-retirement/check-pending-retired-modules.sh through ffi, which scans the
-///         withdrawal events and confirms every suspect against live state. A non-zero count reverts
+///         to scan one by one (about 540k Safes), and only the Liquid, Liquid with referrer and Stargate
+///         modules ever request a withdrawal, so the preflight reads each one's own bridge-request events
+///         and confirms every Safe in them against live state. A non-zero count reverts
 ///         the script unless ALLOW_PENDING_COUNT acknowledges it, which exists only so a bundle can be
-///         simulated while a known pending item is still being resolved. Re-run the preflight right
+///         simulated while a known pending item is still being resolved. Re-run the script right
 ///         before executing the batch: a withdrawal requested between schedule and execute is not
 ///         covered by the one at generation time.
 ///
 ///         The re-gating rollout has to be live for the batches to execute. If the fork predates it (the
-///         trading RoleRegistry is not yet owned by the 2-day timelock), the queued rollout transaction is
-///         fetched from the Safe transaction service (the pending re-gating execute on each chain) and replayed
-///         first as the Safe, after warping past its 2 day delay. Pass ROLLOUT_JSON=<path> to replay a
-///         file instead of fetching, or ROLLOUT_NONCE to replay another nonce.
+///         trading RoleRegistry is not yet owned by the 2-day timelock), pass the queued re-gating execute
+///         as ROLLOUT_JSON=<path to its Safe transaction file>; it is replayed first as the Safe, after
+///         warping past its 2 day delay.
 ///
 /// Usage (no broadcast; writes ./output/*.json and simulates):
 ///   ENV=mainnet forge script scripts/module-retirement/RetireSupersededModules.s.sol --rpc-url $OPTIMISM_RPC
 ///   ENV=mainnet forge script scripts/module-retirement/RetireSupersededModules.s.sol --rpc-url $MAINNET_RPC
-///   Optional: ROLLOUT_NONCE, ROLLOUT_JSON, ALLOW_PENDING_COUNT, LOGS_RPC
+///   Optional: ROLLOUT_JSON, ALLOW_PENDING_COUNT
 contract RetireSupersededModules is GnosisHelpers, Utils {
     // ─────────────────────────────── governance and live addresses ───────────────────────────────
 
@@ -95,9 +95,18 @@ contract RetireSupersededModules is GnosisHelpers, Utils {
     bytes32 internal constant TL_SALT_ROLES = keccak256("RetireSupersededModules.Roles.v1");
 
     uint256 internal constant N = 5;
-    string internal constant PENDING_CHECK = "scripts/module-retirement/check-pending-retired-modules.sh";
-    string internal constant PUBLIC_STATE_RPC = "https://optimism-rpc.publicnode.com";
-    string internal constant PUBLIC_LOGS_RPC = "https://optimism.gateway.tenderly.co";
+    // Pending-withdrawal scan: from before the first module-recipient withdrawal ever requested (~149.8M)
+    uint256 internal constant SCAN_FROM_BLOCK = 149_000_000;
+    uint256 internal constant SCAN_CHUNK = 2_000_000;
+    bytes32 internal constant LIQUID_BRIDGE_REQUESTED = keccak256("LiquidBridgeRequested(address,address,uint32,address,uint256)");
+    bytes32 internal constant STARGATE_BRIDGE_REQUESTED = keccak256("RequestBridgeWithStargate(address,uint32,address,uint256,address,uint256)");
+    bytes32 internal constant LIQUID_BRIDGE_EXECUTED = keccak256("LiquidBridgeExecuted(address,address,address,uint32,uint256,uint256)");
+    bytes32 internal constant LIQUID_BRIDGE_CANCELLED = keccak256("LiquidBridgeCancelled(address,address,uint32,address,uint256)");
+    bytes32 internal constant STARGATE_BRIDGE_EXECUTED = keccak256("BridgeWithStargate(address,uint32,address,uint256,address,uint256)");
+    bytes32 internal constant STARGATE_BRIDGE_CANCELLED = keccak256("BridgeCancelled(address,uint32,address,uint256,address)");
+    // Pending-scan bookkeeping: module => safe => latest event key, and the Safes seen per module
+    mapping(address => mapping(address => uint256)) internal lastEvent;
+    mapping(address => address[]) internal scannedSafes;
 
     // Index-aligned: Liquid, Liquid with referrer, Stargate, BeHYPE stake, Midas
     address[5] internal OLD = [
@@ -287,43 +296,107 @@ contract RetireSupersededModules is GnosisHelpers, Utils {
         }
     }
 
-    /// @dev Zero pending withdrawals/bridges on every retired module, or revert
+    /// @dev Zero pending withdrawals/bridges on every retired module, or revert. Only the Liquid, Liquid
+    ///      with referrer and Stargate modules request a Cash withdrawal (paid out to the module), and each
+    ///      emits its own request, execute and cancel events. A Safe whose latest event on a module is a
+    ///      request is a suspect, and every suspect is confirmed against live state: the module's pending
+    ///      bridge, and whether the Safe's pending Cash withdrawal pays out to the module.
+    ///      The pre-taxi Stargate module is already unlisted and this proposal does not change it.
     function _checkNoPending() internal {
-        string memory stateRpc = vm.envOr("OPTIMISM_RPC", PUBLIC_STATE_RPC);
-        string memory logsRpc = vm.envOr("LOGS_RPC", PUBLIC_LOGS_RPC);
-        string[] memory cmd = new string[](5);
-        cmd[0] = "bash";
-        cmd[1] = "-c";
-        // Prints only the count; a script failure leaves it empty, which fails the parse below
-        cmd[2] = string.concat("'", PENDING_CHECK, "' \"$0\" \"$1\" 2>/dev/null | grep -E '^PENDING_COUNT=' | cut -d= -f2");
-        cmd[3] = stateRpc;
-        cmd[4] = logsRpc;
-        bytes memory out = vm.ffi(cmd);
-        require(out.length > 0, "pending-withdrawal preflight failed to run (see check-pending-retired-modules.sh)");
-        uint256 pending = vm.parseUint(string(out));
+        // Read-only bookkeeping over thousands of events; it would otherwise exceed the script gas limit
+        vm.pauseGasMetering();
+        uint256 pending;
+        pending += _pendingOn(OLD[0], LIQUID_BRIDGE_REQUESTED, LIQUID_BRIDGE_EXECUTED, LIQUID_BRIDGE_CANCELLED, NAMES[0]);
+        pending += _pendingOn(OLD[1], LIQUID_BRIDGE_REQUESTED, LIQUID_BRIDGE_EXECUTED, LIQUID_BRIDGE_CANCELLED, NAMES[1]);
+        pending += _pendingOn(OLD[2], STARGATE_BRIDGE_REQUESTED, STARGATE_BRIDGE_EXECUTED, STARGATE_BRIDGE_CANCELLED, NAMES[2]);
+        vm.resumeGasMetering();
         uint256 allowed = vm.envOr("ALLOW_PENDING_COUNT", uint256(0));
         console.log("Pending withdrawals/bridges on retired modules:", pending);
         if (pending > 0) {
-            require(pending <= allowed, "pending withdrawals on retired modules: resolve them before generating (see the preflight output)");
-            console.log("  WARNING: simulating with an acknowledged pending item. Do NOT queue this bundle until the preflight shows 0.");
+            require(pending <= allowed, "pending withdrawals on retired modules: resolve them before generating");
+            console.log("  WARNING: simulating with an acknowledged pending item. Do NOT queue this bundle until this shows 0.");
         }
+    }
+
+    /// @dev Pending items on `module`, from its own bridge events, confirmed against live state
+    function _pendingOn(address module, bytes32 requested, bytes32 executed, bytes32 cancelled, string memory name) internal returns (uint256 count) {
+        uint256 events;
+        events += _scan(module, requested, true);
+        events += _scan(module, executed, false);
+        events += _scan(module, cancelled, false);
+        address[] storage safes = scannedSafes[module];
+        uint256 suspects;
+        for (uint256 i = 0; i < safes.length; ++i) {
+            // Latest event on this module is a request (lowest bit set)
+            if (lastEvent[module][safes[i]] & 1 == 0) continue;
+            ++suspects;
+            string memory why = _pendingReason(module, safes[i]);
+            if (bytes(why).length > 0) {
+                ++count;
+                console.log(string.concat("  PENDING on ", name, ": ", why), safes[i]);
+            }
+        }
+        console.log(string.concat("  ", name, ": events / Safes / suspects / pending"), events, safes.length);
+        console.log("    ", suspects, count);
+    }
+
+    /// @dev Records, per Safe, the position of its latest `topic` event on `module` (bit 0 set for a request)
+    function _scan(address module, bytes32 topic, bool isRequest) internal returns (uint256 events) {
+        bytes32[] memory topics = new bytes32[](1);
+        topics[0] = topic;
+        for (uint256 from = SCAN_FROM_BLOCK; from <= block.number; from += SCAN_CHUNK) {
+            uint256 to = from + SCAN_CHUNK - 1;
+            if (to > block.number) to = block.number;
+            events += _scanRange(module, topics, isRequest, from, to);
+        }
+    }
+
+    /// @dev One eth_getLogs over [from, to], halving the range whenever the RPC rejects it (too many results)
+    function _scanRange(address module, bytes32[] memory topics, bool isRequest, uint256 from, uint256 to) internal returns (uint256 events) {
+        try vm.eth_getLogs(from, to, module, topics) returns (Vm.EthGetLogs[] memory logs) {
+            for (uint256 i = 0; i < logs.length; ++i) {
+                address safe = address(uint160(uint256(logs[i].topics[1])));
+                uint256 key = ((uint256(logs[i].blockNumber) << 64 | logs[i].logIndex) << 1) | (isRequest ? 1 : 0);
+                uint256 prev = lastEvent[module][safe];
+                if (prev == 0) scannedSafes[module].push(safe);
+                if (key > prev) lastEvent[module][safe] = key;
+            }
+            return logs.length;
+        } catch {
+            require(to > from, "eth_getLogs failed on a single block");
+            uint256 mid = (from + to) / 2;
+            return _scanRange(module, topics, isRequest, from, mid) + _scanRange(module, topics, isRequest, mid + 1, to);
+        }
+    }
+
+    /// @dev Why `safe` has something pending on `module`, or "" if nothing is
+    function _pendingReason(address module, address safe) internal view returns (string memory) {
+        // Both bridge structs keep the amount in the third word
+        (bool ok, bytes memory ret) = module.staticcall(abi.encodeWithSignature("getPendingBridge(address)", safe));
+        require(ok && ret.length >= 96, "getPendingBridge failed");
+        uint256 amount;
+        assembly ("memory-safe") {
+            amount := mload(add(ret, 96))
+        }
+        if (amount != 0) return "pending bridge";
+        (ok, ret) = CASH_MODULE.staticcall(abi.encodeWithSignature("getData(address)", safe));
+        require(ok, "CashModule.getData failed");
+        uint256 target = uint256(uint160(module));
+        for (uint256 off = 32; off + 32 <= ret.length + 32; off += 32) {
+            uint256 word;
+            assembly ("memory-safe") {
+                word := mload(add(ret, off))
+            }
+            if (word == target) return "Cash withdrawal pays out to the module";
+        }
+        return "";
     }
 
     /// @dev Replays the queued rollout (Safe-signed, executes the 2-day batch and the handover) as the Safe
     function _replayQueuedRollout() internal {
         console.log("Rollout not executed on this fork yet: replaying the queued rollout first");
         string memory path = vm.envOr("ROLLOUT_JSON", string(""));
-        if (bytes(path).length == 0) {
-            path = string.concat("./output/queued-rollout-", vm.toString(block.chainid), ".json");
-            string[] memory cmd = new string[](5);
-            cmd[0] = "bash";
-            cmd[1] = "scripts/module-retirement/queued-safe-tx-to-json.sh";
-            cmd[2] = vm.toString(block.chainid);
-            cmd[3] = vm.toString(vm.envOr("ROLLOUT_NONCE", block.chainid == 10 ? uint256(127) : uint256(64)));
-            cmd[4] = path;
-            vm.createDir("./output", true);
-            vm.ffi(cmd);
-        }
+        require(bytes(path).length > 0, "rollout not executed on this fork: set ROLLOUT_JSON to its Safe transaction file");
         require(vm.parseJsonAddress(vm.readFile(path), ".safeAddress") == SAFE, "rollout file is for another Safe");
         vm.warp(block.timestamp + UPGRADE_DELAY + 1);
         executeGnosisTransactionBundle(path);
