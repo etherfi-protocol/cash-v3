@@ -13,7 +13,7 @@ import { VerifyRoleGatingBatch3 } from "../../scripts/role-gating-batch3/VerifyR
 ///      Each test SKIPS until its contract is on the re-gated code, detected independently of the
 ///      deployment record: the old code still answers its per-contract role getter
 ///      (e.g. DATA_PROVIDER_ADMIN_ROLE()), the re-gated code does not. So the suite is green before
-///      the rollout and starts enforcing on its own once the upgrade executes. Module checks skip
+///      the upgrade and starts enforcing on its own once it executes. Module checks skip
 ///      until deployments/mainnet/10/role-gating-batch3.json exists.
 abstract contract RoleGatingBatch3BytecodeBase is Test {
     VerifyRoleGatingBatch3 verifier;
