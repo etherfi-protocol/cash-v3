@@ -8,7 +8,7 @@ import { ICashModule } from "../../../../../src/interfaces/ICashModule.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { StockWrapModule } from "../../../../../src/modules/stock-wrap/StockWrapModule.sol";
 import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
-import { UpgradeableProxy, PausableUpgradeable } from "../../../../../src/utils/UpgradeableProxy.sol";
+import { PausableUpgradeable } from "../../../../../src/utils/UpgradeableProxy.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /**
@@ -36,10 +36,8 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module = StockWrapModule(address(new UUPSProxy(impl, abi.encodeWithSelector(StockWrapModule.initialize.selector, address(roleRegistry)))));
         _enableModule(address(module));
 
-        vm.startPrank(owner);
-        roleRegistry.grantRole(module.ETHER_FI_WALLET_ROLE(), keeper);
+        vm.prank(owner);
         roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), admin);
-        vm.stopPrank();
 
         vm.prank(admin);
         module.setWrapPairs(_addr1(address(raw)), _addr1(address(wrapper)));
@@ -91,13 +89,13 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module.wrap(address(safe), address(other));
     }
 
-    /// Only the keeper role wraps.
-    function test_wrap_reverts_whenNotKeeper() public {
+    /// Wrapping needs no role, since the value stays in the safe.
+    function test_wrap_openToAnyCaller() public {
         raw.mint(address(safe), AMOUNT);
 
-        vm.prank(admin);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.prank(makeAddr("stranger"));
         module.wrap(address(safe), address(raw));
+        assertEq(wrapper.balanceOf(address(safe)), AMOUNT);
     }
 
     /// Pause blocks wraps.

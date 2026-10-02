@@ -11,8 +11,8 @@ import { ModuleCheckBalance } from "../ModuleCheckBalance.sol";
 
 /**
  * @title StockWrapModule
- * @notice Wraps raw stock sitting in a safe into its ERC-4626 wrapper, credited to the same safe. Keeper driven;
- *         nothing here needs a user signature.
+ * @notice Wraps raw stock sitting in a safe into its ERC-4626 wrapper, credited to the same safe. Anyone may call
+ *         it, since the value stays in the safe; nothing here needs a user signature.
  * @dev A default module (it drives `execTransactionFromModule` on any safe) and nothing more: it never holds
  *      tokens and never touches the safe's lend position. The wrapper stays loose in the safe for the lend
  *      sweep to supply. Only the balance net of pending withdrawals is wrapped.
@@ -27,9 +27,6 @@ contract StockWrapModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy {
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.StockWrapModule")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant StockWrapModuleStorageLocation = 0x6b563e72367a90aa1f226d57839ae0b7fea2bc078b9e3d85a77763d4baef7200;
-
-    /// @notice Role that runs the wraps
-    bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
 
     event WrapPairSet(address indexed raw, address indexed wrapper);
     event Wrapped(address indexed safe, address indexed raw, address indexed wrapper, uint256 amount, uint256 shares);
@@ -46,7 +43,7 @@ contract StockWrapModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy {
         _disableInitializers();
     }
 
-    /// @notice Sets up the proxy with the role registry that gates admin, keeper and pause calls
+    /// @notice Sets up the proxy with the role registry that gates admin and pause calls
     function initialize(address _roleRegistry) external initializer {
         __UpgradeableProxy_init(_roleRegistry);
     }
@@ -75,7 +72,7 @@ contract StockWrapModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy {
      * @param raw The raw stock token
      * @return Wrapper shares the safe received
      */
-    function wrap(address safe, address raw) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) onlyEtherFiSafe(safe) returns (uint256) {
+    function wrap(address safe, address raw) external whenNotPaused nonReentrant onlyEtherFiSafe(safe) returns (uint256) {
         return _wrap(safe, raw);
     }
 
@@ -85,7 +82,7 @@ contract StockWrapModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy {
      * @param raw The raw stock token
      * @return How many safes were wrapped in this call
      */
-    function wrapMany(address[] calldata safes, address raw) external whenNotPaused nonReentrant onlyRole(ETHER_FI_WALLET_ROLE) returns (uint256) {
+    function wrapMany(address[] calldata safes, address raw) external whenNotPaused nonReentrant returns (uint256) {
         uint256 wrapped;
         uint256 len = safes.length;
         for (uint256 i = 0; i < len; ++i) {
