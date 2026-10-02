@@ -50,6 +50,10 @@ import { Utils } from "../utils/Utils.sol";
 ///            ADMIN_TIMELOCK_ROLE, PAUSER, UNPAUSER and every operational role) are never touched, and the
 ///            simulation asserts their holders are identical afterwards.
 ///
+///         3. Grant (Ethereum only, in the same 2-day batch, after the revocations): TRADING_LENS_ADMIN_ROLE to
+///            0x3A38ad2cb838e99Dd557f888d78f4769c64b21d0 on the trading RoleRegistry. The re-gated TradingLens
+///            checks ADMIN_ROLE, so this role grants no permission until code checks it again.
+///
 ///         Hard precondition for 1: no pending withdrawal or bridge on any retired module. A Cash withdrawal
 ///         requested by a module pays out to the module, and once the module stops being a requester
 ///         processWithdrawal is open to anyone while the module has no sweep. The Safe set is too large
@@ -89,6 +93,9 @@ contract RetireSupersededModules is GnosisHelpers, Utils {
     address internal constant CASH_REGISTRY_ETH = 0x55963de88267Aa3D1D995c359e8068D0Df34BEBb;
     // Trading RoleRegistry (same address on both chains)
     address internal constant TRADING_REGISTRY = 0xBdAe3A2EfDFf4f27Dc1D89E0BEdb88F3e9A62Bd0;
+    // Granted TRADING_LENS_ADMIN_ROLE on the Ethereum trading RoleRegistry
+    address internal constant TRADING_LENS_ADMIN = 0x3A38ad2cb838e99Dd557f888d78f4769c64b21d0;
+    string internal constant GRANTED_ROLE = "TRADING_LENS_ADMIN_ROLE";
 
     bytes32 internal constant TL_PREDECESSOR = bytes32(0);
     bytes32 internal constant TL_SALT_MODULES = keccak256("RetireSupersededModules.OP.v1");
@@ -216,6 +223,7 @@ contract RetireSupersededModules is GnosisHelpers, Utils {
 
         if (isOp) _buildModuleBatch();
         _buildRevocations(registries);
+        if (!isOp) _buildGrant();
         require(revTargets.length > 0, "no retired role has a holder: nothing to revoke");
         (string memory schedulePath, string memory executePath) = _writeBundles(isOp);
 
@@ -400,6 +408,14 @@ contract RetireSupersededModules is GnosisHelpers, Utils {
         console.log("  role revocations:", revTargets.length);
     }
 
+    /// @dev Appended after the revocations, so the role ends up held by TRADING_LENS_ADMIN only
+    function _buildGrant() internal {
+        revTargets.push(TRADING_REGISTRY);
+        revPayloads.push(abi.encodeWithSelector(RoleRegistry.grantRole.selector, keccak256(bytes(GRANTED_ROLE)), TRADING_LENS_ADMIN));
+        console.log(string.concat("  grant ", GRANTED_ROLE, " to"), TRADING_LENS_ADMIN);
+        console.log("    on registry", TRADING_REGISTRY);
+    }
+
     function _add(address to, bytes memory data) internal {
         targets.push(to);
         payloads.push(data);
@@ -505,15 +521,24 @@ contract RetireSupersededModules is GnosisHelpers, Utils {
     function _assertEndState(Snapshot memory before, address[] memory registries, bool isOp) internal view {
         if (isOp) _assertModules(before);
 
-        // Removed roles: no holder left on either registry, and exactly the recorded revocations happened
+        // Removed roles: no holder left on either registry (except the Ethereum grant), and exactly the
+        // recorded revocations happened
+        bytes32 granted = keccak256(bytes(GRANTED_ROLE));
         for (uint256 i = 0; i < registries.length; ++i) {
             for (uint256 r = 0; r < REMOVED_ROLES.length; ++r) {
-                require(RoleRegistry(registries[i]).roleHolders(keccak256(bytes(REMOVED_ROLES[r]))).length == 0, string.concat("removed role still has a holder: ", REMOVED_ROLES[r]));
+                bytes32 role = keccak256(bytes(REMOVED_ROLES[r]));
+                address[] memory holders = RoleRegistry(registries[i]).roleHolders(role);
+                if (!isOp && registries[i] == TRADING_REGISTRY && role == granted) {
+                    require(holders.length == 1 && holders[0] == TRADING_LENS_ADMIN, "granted role not held by exactly the new holder");
+                } else {
+                    require(holders.length == 0, string.concat("removed role still has a holder: ", REMOVED_ROLES[r]));
+                }
             }
         }
         for (uint256 k = 0; k < revocations.length; ++k) {
             require(!RoleRegistry(revocations[k].registry).hasRole(revocations[k].role, revocations[k].holder), "revoked holder still has the role");
         }
+        if (!isOp) require(!RoleRegistry(TRADING_REGISTRY).hasRole(granted, SAFE), "Safe still holds the granted role");
 
         // Kept roles untouched: ADMIN_ROLE (Safe), ADMIN_TIMELOCK_ROLE (8h timelock), PAUSER/UNPAUSER and every operational role
         bytes32[] memory afterDigests = _keptRoleDigests(registries);
