@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import { ICashModule } from "../interfaces/ICashModule.sol";
@@ -38,6 +39,9 @@ contract TopUpDest is UpgradeableProxy {
 
         /// @notice Tracks whether a transaction has been processed
         mapping(bytes32 txId => bool completed) transactionCompleted;
+
+        /// @notice ERC-4626 wrapper that raw stock arriving here is wrapped into
+        mapping(address raw => address wrapper) stockWrappers;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpDest")) - 1)) & ~bytes32(uint256(0xff))
@@ -71,6 +75,12 @@ contract TopUpDest is UpgradeableProxy {
     /// @notice Emitted when a best-effort top-up supply to the lend gateway fails
     event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
 
+    /// @notice Emitted when a raw stock's wrapper is set; a zero wrapper removes the pair
+    event StockWrapperSet(address indexed raw, address indexed wrapper);
+
+    /// @notice Emitted when raw stock held here is wrapped and the shares added to the wrapper's deposit
+    event StockWrapped(address indexed raw, address indexed wrapper, uint256 amount, uint256 shares);
+
     /// @notice Error thrown when the contract has insufficient token balance
     error BalanceTooLow();
 
@@ -91,6 +101,15 @@ contract TopUpDest is UpgradeableProxy {
 
     /// @notice Error thrown when a self-call-only function is called externally
     error OnlySelf();
+
+    /// @notice Error thrown when a wrapper's underlying asset is not the raw stock it is paired with
+    error InvalidWrapperAsset();
+
+    /// @notice Error thrown when a raw stock has no wrapper set
+    error StockWrapperNotSet();
+
+    /// @notice Thrown when wrapping raw stock minted no wrapper shares
+    error WrapMintedNothing();
 
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
@@ -243,6 +262,63 @@ contract TopUpDest is UpgradeableProxy {
         if (!lendGateway.isRegistered(token)) return;
 
         lendGateway.supply(safe, token, amount);
+    }
+
+    /**
+     * @notice Sets the ERC-4626 wrapper for each raw stock; a zero wrapper removes the pair
+     * @dev Only callable by the admin timelock. The wrapper must report the raw stock as its asset.
+     * @param raws Raw stock tokens
+     * @param wrappers Wrapper per raw stock
+     * @custom:throws ArrayLengthMismatch if arrays have different lengths
+     * @custom:throws InvalidWrapperAsset if a wrapper's asset is not the raw stock
+     */
+    function setStockWrappers(address[] calldata raws, address[] calldata wrappers) external onlyAdminTimelock {
+        uint256 len = raws.length;
+        if (len != wrappers.length) revert ArrayLengthMismatch();
+        TopUpDestStorage storage $ = _getTopUpDestStorage();
+
+        for (uint256 i = 0; i < len; ++i) {
+            if (wrappers[i] != address(0) && IERC4626(wrappers[i]).asset() != raws[i]) revert InvalidWrapperAsset();
+            $.stockWrappers[raws[i]] = wrappers[i];
+            emit StockWrapperSet(raws[i], wrappers[i]);
+        }
+    }
+
+    /**
+     * @notice Wraps this contract's whole balance of a raw stock into its wrapper and adds the shares to the
+     *         wrapper's deposit, so a bridge payout of raw stock becomes wrapper available for top-ups
+     * @dev Only callable by accounts with TOP_UP_ROLE when contract is not paused
+     * @param raw Raw stock token to wrap
+     * @custom:throws StockWrapperNotSet if the raw stock has no wrapper
+     * @custom:throws AmountCannotBeZero if this contract holds none of the raw stock
+     * @custom:throws WrapMintedNothing if the wrapper minted no shares for the deposit
+     */
+    function wrapStock(address raw) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+        TopUpDestStorage storage $ = _getTopUpDestStorage();
+        address wrapper = $.stockWrappers[raw];
+        if (wrapper == address(0)) revert StockWrapperNotSet();
+
+        uint256 amount = IERC20(raw).balanceOf(address(this));
+        if (amount == 0) revert AmountCannotBeZero();
+
+        IERC20(raw).forceApprove(wrapper, amount);
+        uint256 shares = IERC4626(wrapper).deposit(amount, address(this));
+        if (shares == 0) revert WrapMintedNothing();
+        // Raw booked through deposit() has left as wrapper; raw from the bridge was never booked
+        uint256 booked = $.deposits[raw];
+        $.deposits[raw] -= amount > booked ? booked : amount;
+        $.deposits[wrapper] += shares;
+
+        emit StockWrapped(raw, wrapper, amount, shares);
+    }
+
+    /**
+     * @notice Gets the wrapper set for a raw stock, zero if none
+     * @param raw Raw stock token
+     * @return Wrapper address
+     */
+    function stockWrapperFor(address raw) external view returns (address) {
+        return _getTopUpDestStorage().stockWrappers[raw];
     }
 
     /**
