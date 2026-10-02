@@ -74,6 +74,7 @@ contract TradingSafeWithdrawModuleForkE2E is Test {
         // The deployed data provider pre-dates the role consolidation and still gates its
         // config functions on DATA_PROVIDER_ADMIN_ROLE, so grant it by raw hash.
         roleRegistry.grantRole(keccak256("DATA_PROVIDER_ADMIN_ROLE"), address(this));
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), address(this));
         vm.stopPrank();
 
         address sourceSafe = makeAddr("sourceSafeForWithdrawForkTest");

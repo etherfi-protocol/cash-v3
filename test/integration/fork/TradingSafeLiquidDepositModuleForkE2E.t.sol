@@ -88,9 +88,6 @@ contract TradingSafeLiquidDepositModuleForkE2E is Test {
         address roleRegistryOwner = roleRegistry.owner();
         vm.startPrank(roleRegistryOwner);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), address(this));
-        // configureModules is gated on DATA_PROVIDER_ADMIN_ROLE by the pre-#289 DataProvider live today and
-        // on ADMIN_TIMELOCK_ROLE once the re-gated impl is installed (3CP-710); grant both so the fork test
-        // holds on either side of the rollout
         roleRegistry.grantRole(keccak256("DATA_PROVIDER_ADMIN_ROLE"), address(this));
         roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), address(this));
         vm.stopPrank();

@@ -97,7 +97,7 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         _requireImpl(l.stockWithdrawModule, i.stockWithdrawModule, "StockWithdrawModule");
 
         // New modules default + mirrored requester/driver status; old ones untouched (still default,
-        // whitelisted, requesters) so integrations keep working until a later retirement 3CP
+        // whitelisted, requesters) so integrations keep working until they are retired later
         EtherFiDataProvider dp = EtherFiDataProvider(l.dataProvider);
         address[] memory requesters = ICashModule(l.cashModule).getWhitelistedModulesCanRequestWithdraw();
         LendGateway gw = LendGateway(l.lendGateway);

@@ -368,8 +368,8 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_LiquidUSDLiquifierModule() public {
-        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
-        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
+        // The Item 21 repay fixes are not live yet: the proxy runs the 3CP-674 impl until 3CP-707 step 3 executes
+        // upgradeToAndCall. Re-enable once it does.
         vm.skip(true);
         address liquifierImpl = _getImpl(liquidUsdLiquifierProxy);
         address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));

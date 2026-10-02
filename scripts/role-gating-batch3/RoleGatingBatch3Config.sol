@@ -39,7 +39,7 @@ import { Utils } from "../utils/Utils.sol";
  *         Deliberately NOT in batch 3: TradingSafeFactory (PR only changes doc comments),
  *         TradingSafe / TopUp beacon impls and TradingSafeWithdrawModule (untouched by the PR),
  *         and demoting/retiring the OLD modules (they stay default, whitelisted and
- *         withdraw-requesters so every integration keeps working; retire them in a later 3CP once
+ *         withdraw-requesters so every integration keeps working; retire them later, once
  *         the backend has moved and scripts/lend/check-pending-withdrawals.sh is clean).
  */
 abstract contract RoleGatingBatch3Config is Utils {

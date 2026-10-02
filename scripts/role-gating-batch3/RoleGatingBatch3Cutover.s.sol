@@ -59,7 +59,7 @@ import { RoleGatingBatch3Checks } from "./RoleGatingBatch3Checks.sol";
 ///         The new modules are ADDED as defaults; the old ones are left untouched (still default,
 ///         whitelisted, withdraw-requesters and drivers), so every integration keeps working and can
 ///         move to the new addresses at its own pace. Demoting and retiring the old modules is a
-///         later, separate 3CP (after the backend has switched and
+///         later, separate step (after the backend has switched and
 ///         scripts/lend/check-pending-withdrawals.sh is clean).
 ///
 /// Usage (no broadcast — writes ./output/*.json and simulates):
@@ -209,7 +209,7 @@ contract RoleGatingBatch3Cutover is RoleGatingBatch3Checks, GnosisHelpers {
             if (_isGatewayDriver(k)) _module(l.lendGateway, abi.encodeWithSelector(LendGateway.setDriver.selector, i.modules[k], true));
         }
         // Add only: the old modules stay default so integrations keep working until they move
-        // over; demoting and retiring them is a later 3CP
+        // over; demoting and retiring them comes later
         address[] memory added = new address[](N_MODULES);
         bool[] memory addFlags = new bool[](N_MODULES);
         for (uint256 k = 0; k < N_MODULES; ++k) {
