@@ -245,7 +245,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         bytes32 digest = keccak256(abi.encodePacked(CANCEL_WITHDRAWAL_SIG, block.chainid, address(this), IEtherFiSafe(safe).useNonce(), safe)).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
 
-        cashModule.cancelWithdrawalByModule(safe);
+        _cancel(safe);
     }
 
     /**
@@ -258,20 +258,31 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         if (order.wrapper == address(0)) revert NoActiveOrder();
         if (block.timestamp <= order.deadline) revert OrderNotExpired();
 
-        cashModule.cancelWithdrawalByModule(safe);
+        _cancel(safe);
     }
 
     /// @inheritdoc IBridgeModule
     function cancelBridgeByCashModule(address safe) external {
         if (msg.sender != address(cashModule)) revert Unauthorized();
+        _clearOrder(safe);
+    }
+
+    // ---- Internals ----
+
+    /// @dev Releases the hold through the CashModule while it still names this module, which calls back into
+    ///      `_clearOrder`; otherwise the hold is already gone and the order is cleared here
+    function _cancel(address safe) internal {
+        if (cashModule.getData(safe).pendingWithdrawalRequest.recipient == address(this)) cashModule.cancelWithdrawalByModule(safe);
+        else _clearOrder(safe);
+    }
+
+    function _clearOrder(address safe) internal {
         StockBridgeWithdrawModuleStorage storage $ = _getStorage();
         if ($.withdrawals[safe].order.wrapper == address(0)) return;
         bytes32 withdrawalId = $.withdrawals[safe].withdrawalId;
         delete $.withdrawals[safe];
         emit BridgeWithdrawalCancelled(safe, withdrawalId);
     }
-
-    // ---- Internals ----
 
     /// @dev Reverts unless the order is complete, the wrapper supported, the safe has no open order and the deadline outlasts the withdrawal delay
     function _validateRequest(address safe, Order calldata order) internal view {

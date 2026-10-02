@@ -382,6 +382,42 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(wrapper.balanceOf(address(safe)), AMOUNT, "wrapper never left the safe");
     }
 
+    function test_cancelWithdrawal_clearsOrderAfterHoldReleasedWhileDelisted() public {
+        _strandOrder();
+        (address[] memory signers, bytes[] memory sigs) = _signCancel();
+        vm.expectEmit(true, false, false, false, address(module));
+        emit StockBridgeWithdrawModule.BridgeWithdrawalCancelled(address(safe), bytes32(0));
+        module.cancelWithdrawal(address(safe), signers, sigs);
+        assertEq(module.getOrder(address(safe)).wrapper, address(0));
+    }
+
+    function test_cancelExpiredWithdrawal_clearsOrderAfterHoldReleasedWhileDelisted() public {
+        StockBridgeWithdrawModule.Order memory order = _strandOrder();
+        vm.warp(order.deadline + 1);
+        module.cancelExpiredWithdrawal(address(safe));
+        assertEq(module.getOrder(address(safe)).wrapper, address(0));
+        assertEq(wrapper.balanceOf(address(safe)), AMOUNT);
+    }
+
+    /// @dev De-lists the module, then the owners release the hold through the CashModule directly, which skips the
+    ///      callback and leaves the stored order behind
+    function _strandOrder() internal returns (StockBridgeWithdrawModule.Order memory) {
+        StockBridgeWithdrawModule.Order memory order = _order();
+        _request(order);
+
+        address[] memory mods = new address[](1);
+        mods[0] = address(module);
+        bool[] memory no = new bool[](1);
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(mods, no);
+
+        (address[] memory signers, bytes[] memory sigs) = _twoSig(keccak256(abi.encodePacked(keccak256("cancelWithdrawal"), block.chainid, address(safe), safe.nonce())).toEthSignedMessageHash());
+        cashModule.cancelWithdrawal(address(safe), signers, sigs);
+        assertEq(_pendingRecipient(), address(0), "hold released");
+        assertEq(module.getOrder(address(safe)).wrapper, address(wrapper), "order stranded");
+        return order;
+    }
+
     function test_cancelBridgeByCashModule_onlyCashModule() public {
         _request(_order());
         vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
