@@ -12,6 +12,7 @@ import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 
 /// @dev Mock Enso Router for the forward-calldata path: when called with the encoded
 ///      `swap(token, amount)`, it pulls `amount` of `token` from the caller (the safe),
@@ -81,7 +82,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         dataProvider.configureModules(mods, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(mods, shouldWhitelist);
 
-        roleRegistry.grantRole(module.ENSO_SWAP_MODULE_ADMIN_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), moduleAdmin);
         vm.stopPrank();
 
         bytes[] memory setupData = new bytes[](1);
@@ -93,7 +94,7 @@ contract EnsoSwapModuleTest is SafeTestSetup {
     // ---- Admin setter ----
 
     function test_setEnsoRouter_revertsForNonAdmin() public {
-        vm.expectRevert(EnsoSwapModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setEnsoRouter(address(ensoRouter));
     }
 

@@ -146,7 +146,7 @@ contract DeployStockWithdrawModule is StockWithdrawConfig {
         targets[1] = address(cashModule);
         payloads[1] = abi.encodeWithSelector(ICashModule.configureModulesCanRequestWithdraw.selector, modules, enable);
         targets[2] = address(roleRegistry);
-        payloads[2] = abi.encodeWithSignature("grantRole(bytes32,address)", StockWithdrawModule(payable(proxy)).STOCK_WITHDRAW_MODULE_ADMIN_ROLE(), moduleAdmin);
+        payloads[2] = abi.encodeWithSignature("grantRole(bytes32,address)", keccak256("ADMIN_ROLE"), moduleAdmin);
     }
 
     /// @dev Dev: the broadcaster holds the roles — execute the wiring in-broadcast.
