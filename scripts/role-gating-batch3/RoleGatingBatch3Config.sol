@@ -11,36 +11,29 @@ import { Utils } from "../utils/Utils.sol";
 
 /**
  * @title RoleGatingBatch3Config
- * @notice Single source of truth shared by DeployRoleGatingBatch3, RoleGatingBatch3Cutover and
- *         VerifyRoleGatingBatch3: governance addresses, salts, live-address resolution and the
- *         candidate lists used to copy immutable module config. All three inherit this so the
- *         verifier's "impl slot == predicted CREATE3 address" check can never drift from what the
- *         deploy script actually deployed.
+ * @notice Shared by RoleGatingBatch3Checks and VerifyRoleGatingBatch3: governance addresses,
+ *         salts, live-address resolution and the candidate lists used to rebuild the immutable
+ *         module config. The verifier's "impl slot == predicted CREATE3 address" check is derived
+ *         from the same salts the implementations were deployed with.
  *
- *         Batch 3 finishes the PR #289 role re-gating rollout. Batches 1 (OP) and 2 (top-up chains)
- *         already upgraded the RoleRegistry, settlement dispatchers, TopUpDest, CashbackDispatcher,
- *         liquifier and TopUpFactory. Batch 3 covers everything that is still on pre-PR code:
+ *         It describes the role re-gated deployment that moved these onto the new code:
  *
  *         Optimism, cash stack (RoleRegistry owner = 2-day upgrade timelock):
  *           proxies  CashModule (core + setters), DebtManager (core + admin), EtherFiDataProvider,
  *                    PriceProvider (PriceProviderV2), AcrossSwapModule, EnsoSwapModule, LendGateway,
  *                    StockWithdrawModule
  *           modules  EtherFiLiquidModule, EtherFiLiquidModuleWithReferrer, StargateModule,
- *                    BeHYPEStakeModule, MidasModule — immutable, so redeployed with the live
+ *                    BeHYPEStakeModule, MidasModule: immutable, so redeployed with the live
  *                    config and added as default modules alongside the old ones
- *         Optimism, trading stack (own RoleRegistry, owner = governance Safe -> 2-day timelock):
+ *         Optimism, trading stack (own RoleRegistry, owner = 2-day timelock):
  *           RoleRegistry, EtherFiDataProvider
  *         Ethereum, cash stack (RoleRegistry owner = 2-day upgrade timelock):
  *           StockUnwrapper
- *         Ethereum, trading stack (own RoleRegistry, owner = governance Safe -> 2-day timelock):
+ *         Ethereum, trading stack (own RoleRegistry, owner = 2-day timelock):
  *           RoleRegistry, EtherFiDataProvider, PriceProvider (PriceProviderV2), AcrossSwapModule,
  *           EnsoSwapModule, TradingLens
  *
- *         Deliberately NOT in batch 3: TradingSafeFactory (PR only changes doc comments),
- *         TradingSafe / TopUp beacon impls and TradingSafeWithdrawModule (untouched by the PR),
- *         and demoting/retiring the OLD modules (they stay default, whitelisted and
- *         withdraw-requesters so every integration keeps working; retire them later, once
- *         the backend has moved and scripts/lend/check-pending-withdrawals.sh is clean).
+ *         The old modules stay default, whitelisted and withdraw-requesters until they are retired.
  */
 abstract contract RoleGatingBatch3Config is Utils {
     // ─────────────────────────────── governance ───────────────────────────────
@@ -48,26 +41,20 @@ abstract contract RoleGatingBatch3Config is Utils {
     /// @dev Cash governance multisig (3/6): proposer/executor on both timelocks, owner of the
     ///      trading RoleRegistry, and ADMIN_ROLE holder
     address internal constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-    /// @dev 2-day upgrade timelock — owner of the cash RoleRegistry on OP and ETH since batches 1/2
+    /// @dev 2-day upgrade timelock — owner of the cash RoleRegistry on OP and ETH
     address internal constant UPGRADE_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
-    /// @dev 8h operating timelock — holds ADMIN_TIMELOCK_ROLE on the cash RoleRegistry (and, after
-    ///      this batch, on the trading RoleRegistry)
+    /// @dev 8h operating timelock — holds ADMIN_TIMELOCK_ROLE on the cash RoleRegistry (and on the trading RoleRegistry)
     address internal constant OPERATING_TIMELOCK = 0x9AEb8eaa982084219d1A938D8F7B5040a1d47849;
 
     uint256 internal constant UPGRADE_DELAY = 2 days;
     uint256 internal constant OPERATING_DELAY = 8 hours;
 
-    bytes32 internal constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 internal constant ADMIN_TIMELOCK_ROLE = keccak256("ADMIN_TIMELOCK_ROLE");
-
-    bytes32 internal constant TL_PREDECESSOR = bytes32(0);
-    bytes32 internal constant TL_SALT_CASH = keccak256("RoleGatingBatch3Cutover.CashUpgrades");
-    bytes32 internal constant TL_SALT_MODULES = keccak256("RoleGatingBatch3Cutover.ModuleSwap");
 
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
     /// @dev Permissioned CREATE3 deployer (never a public factory: our salts are public, so a
-    ///      public factory would let anyone squat the addresses — see scripts/lend/CashLendProdConfig.sol)
+    ///      public factory would let anyone squat the addresses)
     EtherFiDeployer internal constant DEPLOYER = EtherFiDeployer(0xFCD957b5913d607BF2222280093421B1e2Af6f30);
 
     string internal constant SALT_PREFIX = "RoleGatingBatch3.";
@@ -75,9 +62,7 @@ abstract contract RoleGatingBatch3Config is Utils {
     // ─────────────────────────────── module config candidates (Optimism) ───────────────────────────────
 
     // Immutable modules take their config in the constructor and the mappings are not enumerable,
-    // so the live values are copied for every candidate the old module has configured. An asset
-    // listed on prod after this file was written MUST be appended here before deploying — the
-    // deploy script cannot see it otherwise.
+    // so the config is rebuilt from every candidate the old module has configured.
     address internal constant LIQUID_ETH = 0xf0bb20865277aBd641a307eCe5Ee04E79073416C;
     address internal constant LIQUID_USD = 0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C;
     address internal constant LIQUID_BTC = 0x5f46d540b6eD704C3c8789105F30E075AA900726;
@@ -94,7 +79,7 @@ abstract contract RoleGatingBatch3Config is Utils {
     address internal constant WHYPE = 0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E;
     address internal constant BEHYPE = 0xA519AfBc91986c0e7501d7e34968FEE51CD901aC;
     address internal constant EURC = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
-    /// @dev Added to the live StargateModule after deploy (AssetConfigSet at OP blocks 156470048 / 157379291)
+    /// @dev Added to the live StargateModule after deploy (AssetConfigSet)
     address internal constant IPAXG = 0x41a7f2bb9789199654c206f09392674c1Af6676c;
     address internal constant USDT0 = 0x01bFF41798a0BcF287b996046Ca68b395DbC1071;
 
@@ -220,7 +205,7 @@ abstract contract RoleGatingBatch3Config is Utils {
 
     function _readRecord() internal view returns (string memory) {
         string memory path = _recordPath();
-        require(vm.exists(path), "role-gating-batch3.json missing: run DeployRoleGatingBatch3 first");
+        require(vm.exists(path), "role-gating-batch3.json missing");
         return vm.readFile(path);
     }
 
@@ -321,11 +306,5 @@ abstract contract RoleGatingBatch3Config is Utils {
             if (list[i] == needle) return true;
         }
         return false;
-    }
-
-    /// @dev True when `registry` already runs the re-gated RoleRegistry code (has the ADMIN_ROLE getter)
-    function _registryIsRegated(address registry) internal view returns (bool) {
-        (bool ok, bytes memory ret) = registry.staticcall(abi.encodeWithSignature("ADMIN_ROLE()"));
-        return ok && ret.length == 32 && abi.decode(ret, (bytes32)) == ADMIN_ROLE;
     }
 }

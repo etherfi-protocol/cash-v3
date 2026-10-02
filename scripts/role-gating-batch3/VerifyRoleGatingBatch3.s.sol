@@ -25,9 +25,9 @@ import { ContractCodeChecker } from "../utils/ContractCodeChecker.sol";
 import { RoleGatingBatch3Checks } from "./RoleGatingBatch3Checks.sol";
 
 /// @title VerifyRoleGatingBatch3
-/// @notice Post-execution verifier for batch 3, run against the LIVE chain after the Safe has
-///         executed multisend 2 and the trading bundle. Reverts on the first failure:
-///           - every batch-3 proxy's EIP-1967 slot holds the exact CREATE3-predicted impl
+/// @notice Verifier for the role re-gated deployment, run against the LIVE chain.
+///         Reverts on the first failure:
+///           - every proxy's EIP-1967 slot holds the exact CREATE3-predicted impl
 ///             (record cross-checked against the prediction, so a swapped impl is caught)
 ///           - CashModule setters / DebtManager admin point at the new delegated impls
 ///           - new modules are default, mirror the old requester status, are LendGateway drivers,
@@ -72,7 +72,7 @@ contract VerifyRoleGatingBatch3 is RoleGatingBatch3Checks, ContractCodeChecker {
         } else {
             revert("VerifyRoleGatingBatch3: Optimism or Ethereum only");
         }
-        console.log("=== Batch-3 verification passed (end state + bytecode) ===");
+        console.log("=== Verification passed (end state + bytecode) ===");
     }
 
     // ─────────────────────────────── Optimism cash ───────────────────────────────
@@ -144,7 +144,7 @@ contract VerifyRoleGatingBatch3 is RoleGatingBatch3Checks, ContractCodeChecker {
 
     /// @dev OP: the cash DataProvider (the trading one is checked separately)
     function checkBytecodeDataProvider() public {
-        require(block.chainid == 10, "cash DataProvider is OP-only in batch 3");
+        require(block.chainid == 10, "cash DataProvider is OP-only");
         _match("EtherFiDataProvider", _implOf(_readOpLive().dataProvider), address(new EtherFiDataProvider()));
     }
 

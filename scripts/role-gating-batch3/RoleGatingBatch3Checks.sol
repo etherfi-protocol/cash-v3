@@ -16,8 +16,8 @@ import { RoleGatingBatch3Config } from "./RoleGatingBatch3Config.sol";
 
 /**
  * @title RoleGatingBatch3Checks
- * @notice Deployment-record readers and the end-state assertions shared by the cutover (after its
- *         fork simulation) and the verifier (against the live chain after the Safe executes).
+ * @notice Deployment-record readers and the end-state assertions used by the verifier against
+ *         the live chain.
  *         Every check is a require — a failure reverts, never just logs.
  */
 abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
@@ -125,7 +125,7 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         _requireImpl(l.tradingDataProvider, i.dataProvider, "trading EtherFiDataProvider");
 
         _assertGovernance(l.roleRegistry, l.tradingRoleRegistry);
-        console.log("  [OK] Optimism batch-3 end state");
+        console.log("  [OK] Optimism end state");
     }
 
     // ─────────────────────────────── end state: Ethereum ───────────────────────────────
@@ -140,19 +140,18 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
         _requireImpl(l.tradingLens, i.tradingLens, "TradingLens");
 
         _assertGovernance(l.roleRegistry, l.tradingRoleRegistry);
-        console.log("  [OK] Ethereum batch-3 end state");
+        console.log("  [OK] Ethereum end state");
     }
 
     // ─────────────────────────────── governance (post-op ownership hook) ───────────────────────────────
 
-    /// @dev Last check on every run: registry owners and timelock delays unchanged, roles in place.
-    ///      Catches anything injected into a batch that moved ownership mid-execution.
+    /// @dev Registry owners, timelock delays and admin roles are in place.
     function _assertGovernance(address cashRegistry, address tradingRegistry) internal view {
         RoleRegistry cash = RoleRegistry(cashRegistry);
         RoleRegistry trading = RoleRegistry(tradingRegistry);
 
         require(cash.owner() == UPGRADE_TIMELOCK, "CRITICAL: cash RoleRegistry owner changed");
-        // Batch 3 hands the trading registry to the 2-day timelock (two-step, completed in multisend 2)
+        // The trading registry is owned by the 2-day timelock (two-step handover, must be completed)
         require(trading.owner() == UPGRADE_TIMELOCK, "CRITICAL: trading RoleRegistry owner != 2-day timelock");
         require(trading.ownershipHandoverExpiresAt(UPGRADE_TIMELOCK) == 0, "trading RoleRegistry: handover request left open");
         require(EtherFiTimelock(payable(UPGRADE_TIMELOCK)).getMinDelay() == UPGRADE_DELAY, "upgrade timelock delay changed");
@@ -167,6 +166,6 @@ abstract contract RoleGatingBatch3Checks is RoleGatingBatch3Config {
     }
 
     function _requireImpl(address proxy, address expected, string memory name) internal view {
-        require(_implOf(proxy) == expected, string.concat(name, ": impl slot != batch-3 impl"));
+        require(_implOf(proxy) == expected, string.concat(name, ": impl slot != expected impl"));
     }
 }

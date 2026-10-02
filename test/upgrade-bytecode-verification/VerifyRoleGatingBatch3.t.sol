@@ -10,10 +10,10 @@ import { VerifyRoleGatingBatch3 } from "../../scripts/role-gating-batch3/VerifyR
 ///      Every check reverts on mismatch (ContractCodeChecker.requireCodeMatchAllowingAddressEmbeds),
 ///      unlike the log-only verifyContractByteCodeMatch.
 ///
-///      Each test SKIPS until its contract is on batch-3 code, detected independently of the
-///      deployment record: the pre-PR code still answers its per-contract role getter
+///      Each test SKIPS until its contract is on the re-gated code, detected independently of the
+///      deployment record: the old code still answers its per-contract role getter
 ///      (e.g. DATA_PROVIDER_ADMIN_ROLE()), the re-gated code does not. So the suite is green before
-///      the rollout and starts enforcing on its own once the Safe executes it. Module checks skip
+///      the rollout and starts enforcing on its own once the upgrade executes. Module checks skip
 ///      until deployments/mainnet/10/role-gating-batch3.json exists.
 abstract contract RoleGatingBatch3BytecodeBase is Test {
     VerifyRoleGatingBatch3 verifier;
@@ -59,7 +59,7 @@ abstract contract RoleGatingBatch3BytecodeBase is Test {
     }
 }
 
-/// @title Batch-3 bytecode verification — Optimism
+/// @title Role re-gated bytecode verification — Optimism
 /// Usage: forge test --match-contract VerifyRoleGatingBatch3OPBytecode -vv
 contract VerifyRoleGatingBatch3OPBytecode is RoleGatingBatch3BytecodeBase {
     function setUp() public {
@@ -123,7 +123,7 @@ contract VerifyRoleGatingBatch3OPBytecode is RoleGatingBatch3BytecodeBase {
     }
 }
 
-/// @title Batch-3 bytecode verification — Ethereum
+/// @title Role re-gated bytecode verification — Ethereum
 /// Usage: forge test --match-contract VerifyRoleGatingBatch3ETHBytecode -vv
 contract VerifyRoleGatingBatch3ETHBytecode is RoleGatingBatch3BytecodeBase {
     function setUp() public {
