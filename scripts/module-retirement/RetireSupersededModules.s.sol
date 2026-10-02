@@ -63,7 +63,7 @@ import { Utils } from "../utils/Utils.sol";
 ///
 ///         The re-gating rollout has to be live for the batches to execute. If the fork predates it (the
 ///         trading RoleRegistry is not yet owned by the 2-day timelock), the queued rollout transaction is
-///         fetched from the Safe transaction service (Optimism nonce 127, Ethereum nonce 64) and replayed
+///         fetched from the Safe transaction service (the pending re-gating execute on each chain) and replayed
 ///         first as the Safe, after warping past its 2 day delay. Pass ROLLOUT_JSON=<path> to replay a
 ///         file instead of fetching, or ROLLOUT_NONCE to replay another nonce.
 ///
