@@ -16,8 +16,8 @@ import { Utils } from "../../utils/Utils.sol";
 
 /**
  * @notice Re-gates the Ethereum dev trading stack - its own RoleRegistry, EtherFiDataProvider,
- *         PriceProvider (V2), AcrossSwapModule, EnsoSwapModule and TradingLens - mirroring what
- *         prod's role-gating batch 3 did to the trading stacks on ETH and OP.
+ *         PriceProvider (V2), AcrossSwapModule, EnsoSwapModule and TradingLens, matching the
+ *         prod trading stacks.
  *
  *         The trading RoleRegistry is a separate registry from the cash one (its
  *         `etherFiDataProvider` immutable points at the trading data provider, which has no

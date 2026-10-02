@@ -32,8 +32,7 @@ import { EtherFiDeployer } from "../../../src/utils/EtherFiDeployer.sol";
 import { Utils } from "../../utils/Utils.sol";
 
 /**
- * @notice Brings OP dev's cash stack onto re-gated code, mirroring what prod's role-gating batch 3
- *         did on Optimism: upgrades the proxies whose access control was re-gated onto the
+ * @notice Brings OP dev's cash stack onto re-gated code, matching prod on Optimism: upgrades the proxies whose access control was re-gated onto the
  *         RoleRegistry's ADMIN_ROLE / ADMIN_TIMELOCK_ROLE, and redeploys the five immutable
  *         modules (EtherFiLiquidModule, EtherFiLiquidModuleWithReferrer, StargateModule,
  *         BeHYPEStakeModule, MidasModule) alongside the old ones with their live config copied

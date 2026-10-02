@@ -14,8 +14,8 @@ import { Utils } from "../../utils/Utils.sol";
 /**
  * @notice Re-gates the dev RoleRegistry and upgrades the dev TopUpSourceFactory (the deployed
  *         name for `TopUpFactory`) on each of the top-up source chains - Ethereum, Arbitrum,
- *         Base and HyperEVM - mirroring prod's role-gating batch 2. Ethereum additionally
- *         upgrades `StockUnwrapper`, which batch 2/3 covered there too.
+ *         Base and HyperEVM, matching prod. Ethereum additionally
+ *         upgrades `StockUnwrapper`.
  *
  *         Unlike OP, none of these RoleRegistries are re-gated yet: this script deploys the new
  *         impl, upgrades the proxy, and grants DEV_ADMIN (who already owns every one of these
