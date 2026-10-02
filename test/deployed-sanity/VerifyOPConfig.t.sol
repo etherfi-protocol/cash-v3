@@ -323,8 +323,8 @@ contract VerifyOPConfig is Utils {
 
     function test_config_liquidModule_boringQueues() public {
         EtherFiLiquidModule lm = EtherFiLiquidModule(stdJson.readAddress(deployments, ".addresses.EtherFiLiquidModule"));
-        // The withdraw queues are set once the module is made default
-        vm.skip(lm.liquidWithdrawQueue(cc.liquidEth) == address(0));
+        // The queues are copied in the same execution that makes the module default
+        vm.skip(!dataProvider.isDefaultModule(address(lm)));
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidEth), address(0), "liquidEth boring queue not set");
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidBtc), address(0), "liquidBtc boring queue not set");
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidUsd), address(0), "liquidUsd boring queue not set");
@@ -333,8 +333,8 @@ contract VerifyOPConfig is Utils {
 
     function test_config_liquidModuleWithReferrer_boringQueue() public {
         EtherFiLiquidModuleWithReferrer lmr = EtherFiLiquidModuleWithReferrer(stdJson.readAddress(deployments, ".addresses.EtherFiLiquidModuleWithReferrer"));
-        // The withdraw queues are set once the module is made default
-        vm.skip(lmr.liquidWithdrawQueue(cc.sethfi) == address(0));
+        // The queues are copied in the same execution that makes the module default
+        vm.skip(!dataProvider.isDefaultModule(address(lmr)));
         assertNotEq(lmr.liquidWithdrawQueue(cc.sethfi), address(0), "sETHFI boring queue not set");
     }
 
