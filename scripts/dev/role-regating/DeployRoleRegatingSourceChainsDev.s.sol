@@ -66,12 +66,9 @@ contract DeployRoleRegatingSourceChainsDev is Utils {
 
         _startBroadcast();
 
-        address newRegistryImpl = _regateRoleRegistry(registry);
-        address newTopUpFactoryImpl = _upgradeTopUpSourceFactory(topUpSourceFactory);
-        address newStockUnwrapperImpl;
-        if (chainId == 1) {
-            newStockUnwrapperImpl = _upgradeStockUnwrapper();
-        }
+        _regateRoleRegistry(registry);
+        _upgradeTopUpSourceFactory(topUpSourceFactory);
+        if (chainId == 1) _upgradeStockUnwrapper();
 
         vm.stopBroadcast();
 
@@ -79,8 +76,6 @@ contract DeployRoleRegatingSourceChainsDev is Utils {
         require(registry.hasRole(registry.ADMIN_ROLE(), DEV_ADMIN), "CRITICAL: DEV_ADMIN lost ADMIN_ROLE!");
         require(registry.hasRole(registry.ADMIN_TIMELOCK_ROLE(), DEV_ADMIN), "CRITICAL: DEV_ADMIN lost ADMIN_TIMELOCK_ROLE!");
         console2.log("  [OK] governance unchanged");
-
-        _writeManifest(chainId, newRegistryImpl, newTopUpFactoryImpl, newStockUnwrapperImpl);
     }
 
     function _roleRegistryFor(uint256 chainId) internal pure returns (address) {
@@ -165,19 +160,6 @@ contract DeployRoleRegatingSourceChainsDev is Utils {
         return address(uint160(uint256(vm.load(proxy, slot))));
     }
 
-    function _writeManifest(uint256 chainId, address registryImpl, address topUpFactoryImpl, address stockUnwrapperImpl) internal {
-        string memory path = string.concat(vm.projectRoot(), "/deployments/dev/", vm.toString(chainId), "/role-regating.json");
-        string memory obj = "role-regating-source-dev";
-
-        string memory json = vm.serializeAddress(obj, "RoleRegistryImpl", registryImpl);
-        json = vm.serializeAddress(obj, "TopUpFactoryImpl", topUpFactoryImpl);
-        if (chainId == 1) {
-            json = vm.serializeAddress(obj, "StockUnwrapperImpl", stockUnwrapperImpl);
-        }
-
-        vm.writeJson(json, path);
-        console2.log("Wrote", path);
-    }
 
     function _startBroadcast() private {
         uint256 privateKey = vm.envOr("PRIVATE_KEY", uint256(0));

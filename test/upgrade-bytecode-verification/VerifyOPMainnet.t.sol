@@ -106,7 +106,6 @@ contract VerifyOPMainnetBytecode is TradingStackBytecode {
     ChainConfig cc;
     string deployments;
     string fixtures;
-    string record;
 
     function setUp() public {
         string memory rpc = _tryEnv("OPTIMISM_RPC", "https://mainnet.optimism.io");
@@ -120,7 +119,6 @@ contract VerifyOPMainnetBytecode is TradingStackBytecode {
 
         deployments = readDeploymentFile();
         fixtures = vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/fixtures/fixtures.json"));
-        record = vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/10/role-gating-batch3.json"));
 
         dataProviderProxy = stdJson.readAddress(deployments, ".addresses.EtherFiDataProvider");
         roleRegistryProxy = stdJson.readAddress(deployments, ".addresses.RoleRegistry");
@@ -365,30 +363,30 @@ contract VerifyOPMainnetBytecode is TradingStackBytecode {
         _verify("StockWithdrawModule", _getImpl(_cash("StockWithdrawModule")), local);
     }
 
-    // ---- Immutable modules rebuilt from the config of the module each one replaced ----
+    // ---- Immutable modules, rebuilt from the constructor config they report ----
 
     function test_verifyBytecode_BeHYPEStakeModule() public {
-        BeHYPEStakeModule old = BeHYPEStakeModule(stdJson.readAddress(record, ".old_beHypeStakeModule"));
-        address local = address(new BeHYPEStakeModule(dataProviderProxy, address(old.staker()), old.whype(), old.beHYPE(), old.getRefundGasLimit()));
+        BeHYPEStakeModule live = BeHYPEStakeModule(_cash("BeHYPEStakeModule"));
+        address local = address(new BeHYPEStakeModule(dataProviderProxy, address(live.staker()), live.whype(), live.beHYPE(), live.getRefundGasLimit()));
         _verify("BeHYPEStakeModule", _cash("BeHYPEStakeModule"), local);
     }
 
     function test_verifyBytecode_MidasModule() public {
-        MidasModule old = MidasModule(stdJson.readAddress(record, ".old_midasModule"));
+        MidasModule live = MidasModule(_cash("MidasModule"));
         string[3] memory names = ["liquidReserve", "liquidEUR", "liquidRWA"];
         uint256 count;
         for (uint256 i = 0; i < names.length; ++i) {
-            (address deposit,) = old.vaults(_fixture(names[i]));
+            (address deposit,) = live.vaults(_fixture(names[i]));
             if (deposit != address(0)) ++count;
         }
-        require(count > 0, "old Midas module has no configured vaults");
+        require(count > 0, "Midas module has no configured vaults");
         address[] memory tokens = new address[](count);
         address[] memory deposits = new address[](count);
         address[] memory redemptions = new address[](count);
         uint256 j;
         for (uint256 i = 0; i < names.length; ++i) {
             address token = _fixture(names[i]);
-            (address deposit, address redemption) = old.vaults(token);
+            (address deposit, address redemption) = live.vaults(token);
             if (deposit == address(0)) continue;
             tokens[j] = token;
             deposits[j] = deposit;

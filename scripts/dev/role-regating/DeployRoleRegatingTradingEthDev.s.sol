@@ -63,7 +63,7 @@ contract DeployRoleRegatingTradingEthDev is Utils {
         _startBroadcast();
 
         _regateRoleRegistry(registry);
-        (address dataProviderImpl, address priceProviderImpl, address acrossImpl, address ensoImpl, address tradingLensImpl) = _upgradeConsumers();
+        _upgradeConsumers();
 
         vm.stopBroadcast();
 
@@ -71,8 +71,6 @@ contract DeployRoleRegatingTradingEthDev is Utils {
         require(registry.hasRole(registry.ADMIN_ROLE(), DEV_ADMIN), "CRITICAL: DEV_ADMIN lost ADMIN_ROLE!");
         require(registry.hasRole(registry.ADMIN_TIMELOCK_ROLE(), DEV_ADMIN), "CRITICAL: DEV_ADMIN lost ADMIN_TIMELOCK_ROLE!");
         console2.log("  [OK] trading governance unchanged");
-
-        _writeManifest(_currentImpl(ROLE_REGISTRY), dataProviderImpl, priceProviderImpl, acrossImpl, ensoImpl, tradingLensImpl);
     }
 
     function _regateRoleRegistry(RoleRegistry registry) internal {
@@ -122,20 +120,6 @@ contract DeployRoleRegatingTradingEthDev is Utils {
         _upgrade("TradingLens", TRADING_LENS, tradingLensImpl);
     }
 
-    function _writeManifest(address registryImpl, address dataProviderImpl, address priceProviderImpl, address acrossImpl, address ensoImpl, address tradingLensImpl) internal {
-        string memory path = string.concat(vm.projectRoot(), "/deployments/dev/1/role-regating-trading.json");
-        string memory obj = "role-regating-trading-eth-dev";
-
-        string memory json = vm.serializeAddress(obj, "RoleRegistryImpl", registryImpl);
-        json = vm.serializeAddress(obj, "EtherFiDataProviderImpl", dataProviderImpl);
-        json = vm.serializeAddress(obj, "PriceProviderV2Impl", priceProviderImpl);
-        json = vm.serializeAddress(obj, "AcrossSwapModuleImpl", acrossImpl);
-        json = vm.serializeAddress(obj, "EnsoSwapModuleImpl", ensoImpl);
-        json = vm.serializeAddress(obj, "TradingLensImpl", tradingLensImpl);
-
-        vm.writeJson(json, path);
-        console2.log("Wrote", path);
-    }
 
     function _upgrade(string memory label, address proxy, address newImpl) internal {
         if (_currentImpl(proxy) == newImpl) {

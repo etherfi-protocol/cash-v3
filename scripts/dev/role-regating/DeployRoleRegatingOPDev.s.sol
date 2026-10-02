@@ -104,7 +104,6 @@ contract DeployRoleRegatingOPDev is Utils {
     address private constant MIDAS_TOKEN = 0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898;
 
     string private constant SALT_PREFIX = "RoleRegating.Dev.v1.OP.";
-    string private constant MANIFEST_PATH = "/deployments/dev/10/role-regating.json";
 
     function run() external {
         require(block.chainid == 10, "must run on Optimism");
@@ -121,21 +120,20 @@ contract DeployRoleRegatingOPDev is Utils {
 
         _startBroadcast();
 
-        address[] memory newImpls = _deployAndUpgradeProxies();
+        _deployAndUpgradeProxies();
         address[] memory newModules = _redeployImmutableModules();
         _wireNewModules(newModules);
 
         vm.stopBroadcast();
 
         _verifyGovernanceUnchanged(registry);
-        _writeManifest(newImpls, newModules);
     }
 
     // ------------------------------------------------------------------
     // 1. Deploy new impls, upgrade the proxies that were re-gated
     // ------------------------------------------------------------------
 
-    // Index map for the newImpls array threaded through deploy -> upgrade -> manifest.
+    // Index map for the newImpls array threaded through deploy -> upgrade.
     uint256 private constant I_DATA_PROVIDER = 0;
     uint256 private constant I_CASH_MODULE_CORE = 1;
     uint256 private constant I_CASH_MODULE_SETTERS = 2;
@@ -473,42 +471,6 @@ contract DeployRoleRegatingOPDev is Utils {
         console2.log("  [OK] OP RoleRegistry governance unchanged");
     }
 
-    function _writeManifest(address[] memory newImpls, address[] memory newModules) internal {
-        string memory path = string.concat(vm.projectRoot(), MANIFEST_PATH);
-        string memory obj = "role-regating-op-dev";
-
-        string memory json = vm.serializeAddress(obj, "RoleRegistryImpl", _currentImpl(ROLE_REGISTRY));
-        json = vm.serializeAddress(obj, "EtherFiDataProviderImpl", newImpls[I_DATA_PROVIDER]);
-        json = vm.serializeAddress(obj, "CashModuleCoreImpl", newImpls[I_CASH_MODULE_CORE]);
-        json = vm.serializeAddress(obj, "CashModuleSettersImpl", newImpls[I_CASH_MODULE_SETTERS]);
-        json = vm.serializeAddress(obj, "DebtManagerCoreImpl", newImpls[I_DEBT_MANAGER_CORE]);
-        json = vm.serializeAddress(obj, "DebtManagerAdminImpl", newImpls[I_DEBT_MANAGER_ADMIN]);
-        json = vm.serializeAddress(obj, "PriceProviderV2Impl", newImpls[I_PRICE_PROVIDER]);
-        json = vm.serializeAddress(obj, "AcrossSwapModuleImpl", newImpls[I_ACROSS]);
-        json = vm.serializeAddress(obj, "EnsoSwapModuleImpl", newImpls[I_ENSO]);
-        json = vm.serializeAddress(obj, "StockWithdrawModuleImpl", newImpls[I_STOCK_WITHDRAW]);
-        json = vm.serializeAddress(obj, "LendGatewayImpl", newImpls[I_LEND_GATEWAY]);
-        json = vm.serializeAddress(obj, "TopUpDestImpl", newImpls[I_TOP_UP_DEST]);
-        json = vm.serializeAddress(obj, "SettlementDispatcherRainImpl", newImpls[I_SETTLEMENT_RAIN]);
-        json = vm.serializeAddress(obj, "SettlementDispatcherReapImpl", newImpls[I_SETTLEMENT_REAP]);
-        json = vm.serializeAddress(obj, "SettlementDispatcherPixImpl", newImpls[I_SETTLEMENT_PIX]);
-        json = vm.serializeAddress(obj, "SettlementDispatcherCardOrderImpl", newImpls[I_SETTLEMENT_CARD_ORDER]);
-        json = vm.serializeAddress(obj, "CashbackDispatcherImpl", newImpls[I_CASHBACK_DISPATCHER]);
-
-        json = vm.serializeAddress(obj, "EtherFiLiquidModule", newModules[0]);
-        json = vm.serializeAddress(obj, "old_EtherFiLiquidModule", OLD_LIQUID_MODULE);
-        json = vm.serializeAddress(obj, "EtherFiLiquidModuleWithReferrer", newModules[1]);
-        json = vm.serializeAddress(obj, "old_EtherFiLiquidModuleWithReferrer", OLD_LIQUID_MODULE_REFERRER);
-        json = vm.serializeAddress(obj, "StargateModule", newModules[2]);
-        json = vm.serializeAddress(obj, "old_StargateModule", OLD_STARGATE_MODULE);
-        json = vm.serializeAddress(obj, "BeHYPEStakeModule", newModules[3]);
-        json = vm.serializeAddress(obj, "old_BeHYPEStakeModule", OLD_BEHYPE_STAKE_MODULE);
-        json = vm.serializeAddress(obj, "MidasModule", newModules[4]);
-        json = vm.serializeAddress(obj, "old_MidasModule", OLD_MIDAS_MODULE);
-
-        vm.writeJson(json, path);
-        console2.log("Wrote", path);
-    }
 
     function _startBroadcast() private {
         uint256 privateKey = vm.envOr("PRIVATE_KEY", uint256(0));
