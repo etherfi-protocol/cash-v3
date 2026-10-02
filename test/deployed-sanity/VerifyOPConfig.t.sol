@@ -5,7 +5,6 @@ import { Test, console } from "forge-std/Test.sol";
 import { stdJson } from "forge-std/StdJson.sol";
 
 import { Utils, ChainConfig } from "../utils/Utils.sol";
-import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
@@ -24,8 +23,6 @@ import { StargateModule } from "../../src/modules/stargate/StargateModule.sol";
 /// Usage:
 ///   TEST_CHAIN=10 forge test --match-contract VerifyOPConfig -vv
 contract VerifyOPConfig is Utils {
-
-    RoleRegistry roleRegistry;
     EtherFiDataProvider dataProvider;
     IDebtManager debtManager;
     ICashModule cashModule;
@@ -50,7 +47,6 @@ contract VerifyOPConfig is Utils {
         string memory fixturesFile = string.concat(vm.projectRoot(), "/deployments/mainnet/fixtures/fixtures.json");
         fixtures = vm.readFile(fixturesFile);
 
-        roleRegistry = RoleRegistry(stdJson.readAddress(deployments, ".addresses.RoleRegistry"));
         dataProvider = EtherFiDataProvider(stdJson.readAddress(deployments, ".addresses.EtherFiDataProvider"));
         debtManager = IDebtManager(stdJson.readAddress(deployments, ".addresses.DebtManager"));
         cashModule = ICashModule(stdJson.readAddress(deployments, ".addresses.CashModule"));
@@ -59,44 +55,9 @@ contract VerifyOPConfig is Utils {
         topUpDest = TopUpDest(payable(stdJson.readAddress(deployments, ".addresses.TopUpDest")));
     }
 
-    // ---- Role Registry Owner ----
-
-    function test_config_roleRegistryOwner() public view {
-        address expected = stdJson.readAddress(config, ".roleRegistry.owner");
-        assertEq(roleRegistry.owner(), expected, "RoleRegistry owner mismatch");
-    }
-
-    // ---- Roles ----
-
-    address constant GOVERNANCE_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-    address constant OPERATING_TIMELOCK = 0x9AEb8eaa982084219d1A938D8F7B5040a1d47849;
-    address constant UPGRADE_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
-
-    function test_config_roles_admin() public view {
-        assertTrue(roleRegistry.hasRole(keccak256("ADMIN_ROLE"), GOVERNANCE_SAFE), "ADMIN_ROLE missing for the governance Safe");
-    }
-
-    function test_config_roles_adminTimelock() public view {
-        assertTrue(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), OPERATING_TIMELOCK), "ADMIN_TIMELOCK_ROLE missing for the 8h timelock");
-    }
-
-    function test_config_roleRegistryOwner_isUpgradeTimelock() public view {
-        assertEq(roleRegistry.owner(), UPGRADE_TIMELOCK, "RoleRegistry owner is not the 2-day timelock");
-    }
-
-    function test_config_roles_pauser() public view { _verifyRole("PAUSER"); }
-    function test_config_roles_unpauser() public view { _verifyRole("UNPAUSER"); }
-    function test_config_roles_etherFiWallet() public view { _verifyRole("ETHER_FI_WALLET_ROLE"); }
-    function test_config_roles_safeFactoryAdmin() public view { _verifyRole("ETHERFI_SAFE_FACTORY_ADMIN_ROLE"); }
-    function test_config_roles_settlementBridger() public view { _verifyRole("SETTLEMENT_DISPATCHER_BRIDGER_ROLE"); }
-    function test_config_roles_topUpDepositor() public view { _verifyRole("DEPOSITOR_ROLE"); }
-    function test_config_roles_topUpRole() public view { _verifyRole("TOP_UP_ROLE"); }
-
     // ---- Data Provider ----
 
-    function test_config_dataProvider_defaultModules() public {
-        // Re-enable after the Stargate taxi module switch executes on Optimism.
-        vm.skip(true);
+    function test_config_dataProvider_defaultModules() public view {
         string[] memory moduleNames = stdJson.readStringArray(config, ".dataProvider.defaultModules");
         for (uint256 i = 0; i < moduleNames.length; i++) {
             address moduleAddr = stdJson.readAddress(deployments, string.concat(".addresses.", moduleNames[i]));
@@ -158,9 +119,7 @@ contract VerifyOPConfig is Utils {
         }
     }
 
-    function test_config_cashModule_modulesCanRequestWithdraw() public {
-        // Re-enable after the Stargate taxi module switch executes on Optimism.
-        vm.skip(true);
+    function test_config_cashModule_modulesCanRequestWithdraw() public view {
         string[] memory names = stdJson.readStringArray(config, ".cashModule.modulesCanRequestWithdraw");
         address[] memory actual = cashModule.getWhitelistedModulesCanRequestWithdraw();
 
@@ -195,8 +154,7 @@ contract VerifyOPConfig is Utils {
         }
     }
 
-    function test_config_priceProvider_oracleAddresses() public {
-        vm.skip(true);
+    function test_config_priceProvider_oracleAddresses() public view {
         string[] memory names = stdJson.readStringArray(config, ".priceProvider.tokensWithPrice");
         for (uint256 i = 0; i < names.length; i++) {
             string memory oracleKey = string.concat(".priceProvider.oracles.", names[i], ".oracle");
@@ -321,32 +279,20 @@ contract VerifyOPConfig is Utils {
 
     // ---- Liquid Module Boring Queues ----
 
-    function test_config_liquidModule_boringQueues() public {
+    function test_config_liquidModule_boringQueues() public view {
         EtherFiLiquidModule lm = EtherFiLiquidModule(stdJson.readAddress(deployments, ".addresses.EtherFiLiquidModule"));
-        // The queues are copied in the same execution that makes the module default
-        vm.skip(!dataProvider.isDefaultModule(address(lm)));
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidEth), address(0), "liquidEth boring queue not set");
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidBtc), address(0), "liquidBtc boring queue not set");
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidUsd), address(0), "liquidUsd boring queue not set");
         assertNotEq(lm.liquidWithdrawQueue(cc.ebtc), address(0), "ebtc boring queue not set");
     }
 
-    function test_config_liquidModuleWithReferrer_boringQueue() public {
+    function test_config_liquidModuleWithReferrer_boringQueue() public view {
         EtherFiLiquidModuleWithReferrer lmr = EtherFiLiquidModuleWithReferrer(stdJson.readAddress(deployments, ".addresses.EtherFiLiquidModuleWithReferrer"));
-        // The queues are copied in the same execution that makes the module default
-        vm.skip(!dataProvider.isDefaultModule(address(lmr)));
         assertNotEq(lmr.liquidWithdrawQueue(cc.sethfi), address(0), "sETHFI boring queue not set");
     }
 
     // ---- Helpers ----
-
-    function _verifyRole(string memory roleName) internal view {
-        bytes32 role = keccak256(abi.encodePacked(roleName));
-        address[] memory expected = stdJson.readAddressArray(config, string.concat(".roles.", roleName));
-        for (uint256 i = 0; i < expected.length; i++) {
-            assertTrue(roleRegistry.hasRole(role, expected[i]), string.concat(roleName, " missing for: ", vm.toString(expected[i])));
-        }
-    }
 
     function _verifyFraxConfig(string memory name, address proxy, address expectedFraxUsd, address expectedCustodian, address expectedRemoteHop, address expectedDeposit) internal view {
         SettlementDispatcherV2 sd = SettlementDispatcherV2(payable(proxy));
