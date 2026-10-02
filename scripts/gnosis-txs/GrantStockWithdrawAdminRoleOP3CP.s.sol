@@ -55,7 +55,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 contract GrantStockWithdrawAdminRoleOP3CP is StockWithdrawConfig, GnosisHelpers {
     using stdJson for string;
 
-    /// @dev EtherFiTimelock at its deterministic CREATE3 address (DeployTimelock.s.sol).
+    /// @dev EtherFiTimelock at its deterministic CREATE3 address.
     address internal constant ETHERFI_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
     uint256 internal constant TIMELOCK_DELAY = 8 hours;
     bytes32 internal constant TL_PREDECESSOR = bytes32(0);

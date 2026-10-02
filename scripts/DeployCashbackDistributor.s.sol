@@ -54,7 +54,7 @@ contract DeployCashbackDistributor is CashbackDistributorConfig, GnosisHelpers {
     /// @notice Prod Safe (OperatingSafe) -- timelock proposer/executor, signs both bundles.
     address internal constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
 
-    /// @dev EtherFiTimelock at its deterministic CREATE3 address (DeployTimelock.s.sol) --
+    /// @dev EtherFiTimelock at its deterministic CREATE3 address --
     ///      the prod OP RoleRegistry owner since the governance handover.
     address internal constant ETHERFI_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
     uint256 internal constant TIMELOCK_DELAY = 8 hours;
