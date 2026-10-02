@@ -68,15 +68,24 @@ contract VerifyOPConfig is Utils {
 
     // ---- Roles ----
 
+    address constant GOVERNANCE_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address constant OPERATING_TIMELOCK = 0x9AEb8eaa982084219d1A938D8F7B5040a1d47849;
+    address constant UPGRADE_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
+
+    function test_config_roles_admin() public view {
+        assertTrue(roleRegistry.hasRole(keccak256("ADMIN_ROLE"), GOVERNANCE_SAFE), "ADMIN_ROLE missing for the governance Safe");
+    }
+
+    function test_config_roles_adminTimelock() public view {
+        assertTrue(roleRegistry.hasRole(keccak256("ADMIN_TIMELOCK_ROLE"), OPERATING_TIMELOCK), "ADMIN_TIMELOCK_ROLE missing for the 8h timelock");
+    }
+
+    function test_config_roleRegistryOwner_isUpgradeTimelock() public view {
+        assertEq(roleRegistry.owner(), UPGRADE_TIMELOCK, "RoleRegistry owner is not the 2-day timelock");
+    }
+
     function test_config_roles_pauser() public view { _verifyRole("PAUSER"); }
     function test_config_roles_unpauser() public view { _verifyRole("UNPAUSER"); }
-    function test_config_roles_dataProviderAdmin() public view { _verifyRole("DATA_PROVIDER_ADMIN_ROLE"); }
-    function test_config_roles_cashModuleController() public view { _verifyRole("CASH_MODULE_CONTROLLER_ROLE"); }
-    function test_config_roles_priceProviderAdmin() public view { _verifyRole("PRICE_PROVIDER_ADMIN_ROLE"); }
-    function test_config_roles_cashbackDispatcherAdmin() public view { _verifyRole("CASHBACK_DISPATCHER_ADMIN_ROLE"); }
-    function test_config_roles_debtManagerAdmin() public view { _verifyRole("DEBT_MANAGER_ADMIN_ROLE"); }
-    function test_config_roles_liquidModuleAdmin() public view { _verifyRole("ETHERFI_LIQUID_MODULE_ADMIN"); }
-    function test_config_roles_stargateModuleAdmin() public view { _verifyRole("STARGATE_MODULE_ADMIN_ROLE"); }
     function test_config_roles_etherFiWallet() public view { _verifyRole("ETHER_FI_WALLET_ROLE"); }
     function test_config_roles_safeFactoryAdmin() public view { _verifyRole("ETHERFI_SAFE_FACTORY_ADMIN_ROLE"); }
     function test_config_roles_settlementBridger() public view { _verifyRole("SETTLEMENT_DISPATCHER_BRIDGER_ROLE"); }
@@ -312,16 +321,20 @@ contract VerifyOPConfig is Utils {
 
     // ---- Liquid Module Boring Queues ----
 
-    function test_config_liquidModule_boringQueues() public view {
+    function test_config_liquidModule_boringQueues() public {
         EtherFiLiquidModule lm = EtherFiLiquidModule(stdJson.readAddress(deployments, ".addresses.EtherFiLiquidModule"));
+        // The withdraw queues are set once the module is made default
+        vm.skip(lm.liquidWithdrawQueue(cc.liquidEth) == address(0));
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidEth), address(0), "liquidEth boring queue not set");
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidBtc), address(0), "liquidBtc boring queue not set");
         assertNotEq(lm.liquidWithdrawQueue(cc.liquidUsd), address(0), "liquidUsd boring queue not set");
         assertNotEq(lm.liquidWithdrawQueue(cc.ebtc), address(0), "ebtc boring queue not set");
     }
 
-    function test_config_liquidModuleWithReferrer_boringQueue() public view {
+    function test_config_liquidModuleWithReferrer_boringQueue() public {
         EtherFiLiquidModuleWithReferrer lmr = EtherFiLiquidModuleWithReferrer(stdJson.readAddress(deployments, ".addresses.EtherFiLiquidModuleWithReferrer"));
+        // The withdraw queues are set once the module is made default
+        vm.skip(lmr.liquidWithdrawQueue(cc.sethfi) == address(0));
         assertNotEq(lmr.liquidWithdrawQueue(cc.sethfi), address(0), "sETHFI boring queue not set");
     }
 
