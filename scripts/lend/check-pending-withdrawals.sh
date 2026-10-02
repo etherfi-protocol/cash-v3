@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Preflight for retiring the old modules (DeployCashLendDev leaves them enabled for
-# gradual migration). Disabling the old liquid, liquidReferrer, and frax modules would
+# gradual migration). Disabling the old liquid, liquidReferrer, stargate, and frax modules would
 # strand any pending Cash withdrawal paying out to one of them, so run this right before
-# that retirement pass. Scans every Safe's getData in parallel (in-script the same scan
+# that retirement pass. This full-scan version is for small Safe sets (dev); on Optimism mainnet
+# (~540k Safes) use scripts/module-retirement/check-pending-retired-modules.sh, which scans
+# withdrawal events and confirms the suspects against live state. Scans every Safe's getData in parallel (in-script the same scan
 # takes 20+ min because forge fetches each Safe's state sequentially).
 #
 # Usage: scripts/lend/check-pending-withdrawals.sh <rpc-url>
@@ -17,12 +19,13 @@ CASH_MODULE=$(addr CashModule)
 FACTORY=$(addr EtherFiSafeFactory)
 LIQUID=$(addr EtherFiLiquidModule)
 REFERRER=$(addr EtherFiLiquidModuleWithReferrer)
+STARGATE=$(addr StargateModule)
 FRAX=$(addr FraxModule)
 
 # A recipient shows up in the raw getData blob as a 32-byte word holding the address.
 # The old module addresses cannot appear as any other SafeData field, so a hex match
 # is a reliable signal; inspect any hit by hand before deploying.
-PATTERN=$(printf '%s|%s|%s' "${LIQUID#0x}" "${REFERRER#0x}" "${FRAX#0x}" | tr '[:upper:]' '[:lower:]')
+PATTERN=$(printf '%s|%s|%s|%s' "${LIQUID#0x}" "${REFERRER#0x}" "${STARGATE#0x}" "${FRAX#0x}" | tr '[:upper:]' '[:lower:]')
 
 COUNT=$(cast call "$FACTORY" "numContractsDeployed()(uint256)" --rpc-url "$RPC")
 echo "Scanning $COUNT Safes on $CASH_MODULE ..."
