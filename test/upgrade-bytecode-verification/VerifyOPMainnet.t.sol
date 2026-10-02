@@ -152,10 +152,10 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
 
     // ---- Core infrastructure ----
 
-    // function test_verifyBytecode_EtherFiDataProvider() public {
-    //     address local = address(new EtherFiDataProvider());
-    //     _verify("EtherFiDataProvider", dataProviderImpl, local);
-    // }
+    function test_verifyBytecode_EtherFiDataProvider() public {
+        address local = address(new EtherFiDataProvider());
+        _verify("EtherFiDataProvider", dataProviderImpl, local);
+    }
 
     function test_verifyBytecode_RoleRegistry() public {
         address local = address(new RoleRegistry(dataProviderProxy));
@@ -184,13 +184,11 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Cash module ----
 
     function test_verifyBytecode_CashModuleCore() public {
-        _skipWhileOld(cashModuleProxy, "CASH_MODULE_CONTROLLER_ROLE()");
         address local = address(new CashModuleCore(dataProviderProxy));
         _verify("CashModuleCore", cashModuleCoreImpl, local);
     }
 
     function test_verifyBytecode_CashModuleSetters() public {
-        _skipWhileOld(cashModuleProxy, "CASH_MODULE_CONTROLLER_ROLE()");
         address local = address(new CashModuleSetters(dataProviderProxy));
         _verify("CashModuleSetters", cashModuleSettersImpl, local);
     }
@@ -213,13 +211,11 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Debt manager ----
 
     function test_verifyBytecode_DebtManagerCore() public {
-        _skipWhileOld(debtManagerProxy, "DEBT_MANAGER_ADMIN_ROLE()");
         address local = address(new DebtManagerCore(dataProviderProxy));
         _verify("DebtManagerCore", debtManagerCoreImpl, local);
     }
 
     function test_verifyBytecode_DebtManagerAdmin() public {
-        _skipWhileOld(debtManagerProxy, "DEBT_MANAGER_ADMIN_ROLE()");
         address local = address(new DebtManagerAdmin(dataProviderProxy));
         _verify("DebtManagerAdmin", debtManagerAdminImpl, local);
     }
@@ -227,7 +223,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Oracle ----
 
     function test_verifyBytecode_PriceProvider() public {
-        _skipWhileOld(priceProviderProxy, "PRICE_PROVIDER_ADMIN_ROLE()");
         address local = address(new PriceProviderV2());
         _verify("PriceProvider", priceProviderImpl, local);
     }
@@ -336,13 +331,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
         console.log("  Deployed:", deployed);
         console.log("  Local:   ", local);
         requireCodeMatchAllowingAddressEmbeds(name, deployed, local);
-    }
-
-    /// @dev Skip while `target` still exposes the pre-re-gating role getter `sig`; the re-gated
-    ///      code no longer has it, so the check starts enforcing once the upgrade lands
-    function _skipWhileOld(address target, string memory sig) internal {
-        (bool ok, bytes memory ret) = target.staticcall(abi.encodeWithSignature(sig));
-        vm.skip(ok && ret.length == 32);
     }
 
     function _tryEnv(string memory key, string memory fallback_) internal view returns (string memory) {
