@@ -208,9 +208,12 @@ contract TopUpDest is UpgradeableProxy {
     function _topUp(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) internal {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
 
-        bytes32 txId = getTxId(txHash, user, token);
+        bytes32 txId = getTxId(txHash, chainId, user, token);
+        // Legacy (pre-chainId) key is still checked so already-processed top-ups recorded
+        // before this change remain protected against replays.
+        bytes32 legacyTxId = keccak256(abi.encode(txHash, user, token));
         if (!etherFiDataProvider.isEtherFiSafe(user)) revert NotARegisteredSafe();
-        if ($.transactionCompleted[txId]) revert TopUpAlreadyProcessed();
+        if ($.transactionCompleted[legacyTxId] || $.transactionCompleted[txId]) revert TopUpAlreadyProcessed();
 
         $.transactionCompleted[txId] = true;
         _transfer(user, token, amount);
@@ -262,8 +265,15 @@ contract TopUpDest is UpgradeableProxy {
      * @param token Address of the token to send
      * @return bytes32 txId
      */
+    /// @notice Legacy idempotency key (pre-chainId). Kept for backward compatibility.
     function getTxId(bytes32 txHash, address user, address token) public pure returns (bytes32) {
         return keccak256(abi.encode(txHash, user, token));
+    }
+
+    /// @notice Chain-aware idempotency key. Newly generated keys include chainId so the
+    ///         same (txHash, user, token) can be processed once per source chain.
+    function getTxId(bytes32 txHash, uint256 chainId, address user, address token) public pure returns (bytes32) {
+        return keccak256(abi.encode(chainId, txHash, user, token));
     }
 
     /**
@@ -276,6 +286,10 @@ contract TopUpDest is UpgradeableProxy {
      */
     function isTransactionCompleted(bytes32 txHash, address user, address token) external view returns (bool) {
         return _getTopUpDestStorage().transactionCompleted[getTxId(txHash, user, token)];
+    }
+
+    function isTransactionCompleted(bytes32 txHash, uint256 chainId, address user, address token) external view returns (bool) {
+        return _getTopUpDestStorage().transactionCompleted[getTxId(txHash, chainId, user, token)];
     }
 
     /**
