@@ -7,9 +7,24 @@ import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/Upgradea
 import { stdJson } from "forge-std/StdJson.sol";
 import { Test, console } from "forge-std/Test.sol";
 
-import { ContractCodeChecker } from "../../scripts/utils/ContractCodeChecker.sol";
-import { ChainConfig, Utils } from "../utils/Utils.sol";
+import { ChainConfig } from "../utils/Utils.sol";
+import { TradingStackBytecode } from "./TradingStackBytecode.sol";
 
+import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
+import { CashbackDistributor } from "../../src/cashback-distributor/CashbackDistributor.sol";
+import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
+import { AaveV4Lens } from "../../src/lens/AaveV4Lens.sol";
+import { SafeErc1271Lib } from "../../src/libraries/SafeErc1271Lib.sol";
+import { CashLiquidationHelper } from "../../src/modules/cash/CashLiquidationHelper.sol";
+import { CCTPModule } from "../../src/modules/cctp/CCTPModule.sol";
+import { MidasLiquifierModule } from "../../src/modules/etherfi/MidasLiquifierModule.sol";
+import { BeHYPEStakeModule } from "../../src/modules/hype/BeHYPEStakeModule.sol";
+import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
+import { MidasModule } from "../../src/modules/midas/MidasModule.sol";
+import { AssetRecoveryModule } from "../../src/modules/recovery/AssetRecoveryModule.sol";
+import { SafeAssetRecoveryModule } from "../../src/modules/recovery/SafeAssetRecoveryModule.sol";
+import { StockWithdrawModule } from "../../src/stock-withdraw/StockWithdrawModule.sol";
+import { EtherFiTimelock } from "../../src/timelock/EtherFiTimelock.sol";
 import { CashbackDispatcher } from "../../src/cashback-dispatcher/CashbackDispatcher.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { DebtManagerAdmin } from "../../src/debt-manager/DebtManagerAdmin.sol";
@@ -40,9 +55,7 @@ import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 ///
 /// Usage:
 ///   TEST_CHAIN=10 forge test --match-contract VerifyOPMainnetBytecode -vv
-contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
-    bytes32 constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-
+contract VerifyOPMainnetBytecode is TradingStackBytecode {
     // Deployed proxy addresses from deployments.json
     address dataProviderProxy;
     address roleRegistryProxy;
@@ -91,14 +104,21 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     address debtManagerAdminImpl;
 
     ChainConfig cc;
+    string deployments;
+    string fixtures;
 
     function setUp() public {
         string memory rpc = _tryEnv("OPTIMISM_RPC", "https://mainnet.optimism.io");
         vm.createSelectFork(rpc);
+        _load();
+    }
 
+    function _load() internal {
         cc = getChainConfig(vm.toString(block.chainid));
+        _loadTrading();
 
-        string memory deployments = readDeploymentFile();
+        deployments = readDeploymentFile();
+        fixtures = vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/fixtures/fixtures.json"));
 
         dataProviderProxy = stdJson.readAddress(deployments, ".addresses.EtherFiDataProvider");
         roleRegistryProxy = stdJson.readAddress(deployments, ".addresses.RoleRegistry");
@@ -152,16 +172,12 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
 
     // ---- Core infrastructure ----
 
-    // function test_verifyBytecode_EtherFiDataProvider() public {
-    //     address local = address(new EtherFiDataProvider());
-    //     _verify("EtherFiDataProvider", dataProviderImpl, local);
-    // }
+    function test_verifyBytecode_EtherFiDataProvider() public {
+        address local = address(new EtherFiDataProvider());
+        _verify("EtherFiDataProvider", dataProviderImpl, local);
+    }
 
     function test_verifyBytecode_RoleRegistry() public {
-        // The admin roles now live on the RoleRegistry (onlyAdmin/onlyAdminTimelock, STAKE-1889),
-        // so the bytecode no longer matches the deployed implementation. Re-enable after the
-        // timelock-cutover deployment (STAKE-1891).
-        vm.skip(true);
         address local = address(new RoleRegistry(dataProviderProxy));
         _verify("RoleRegistry", roleRegistryImpl, local);
     }
@@ -188,17 +204,11 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Cash module ----
 
     function test_verifyBytecode_CashModuleCore() public {
-        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
-        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
-        vm.skip(true);
         address local = address(new CashModuleCore(dataProviderProxy));
         _verify("CashModuleCore", cashModuleCoreImpl, local);
     }
 
     function test_verifyBytecode_CashModuleSetters() public {
-        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
-        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
-        vm.skip(true);
         address local = address(new CashModuleSetters(dataProviderProxy));
         _verify("CashModuleSetters", cashModuleSettersImpl, local);
     }
@@ -214,10 +224,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_CashbackDispatcher() public {
-        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
-        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
-        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
-        vm.skip(true);
         address local = address(new CashbackDispatcher(dataProviderProxy));
         _verify("CashbackDispatcher", cashbackDispatcherImpl, local);
     }
@@ -225,17 +231,11 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Debt manager ----
 
     function test_verifyBytecode_DebtManagerCore() public {
-        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
-        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
-        vm.skip(true);
         address local = address(new DebtManagerCore(dataProviderProxy));
         _verify("DebtManagerCore", debtManagerCoreImpl, local);
     }
 
     function test_verifyBytecode_DebtManagerAdmin() public {
-        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
-        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
-        vm.skip(true);
         address local = address(new DebtManagerAdmin(dataProviderProxy));
         _verify("DebtManagerAdmin", debtManagerAdminImpl, local);
     }
@@ -243,10 +243,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Oracle ----
 
     function test_verifyBytecode_PriceProvider() public {
-        // The admin roles now live on the RoleRegistry (onlyAdmin/onlyAdminTimelock, STAKE-1889),
-        // so the bytecode no longer matches the deployed implementation. Re-enable after the
-        // timelock-cutover deployment (STAKE-1891).
-        vm.skip(true);
         address local = address(new PriceProviderV2());
         _verify("PriceProvider", priceProviderImpl, local);
     }
@@ -254,37 +250,21 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Settlement dispatchers ----
 
     function test_verifyBytecode_SettlementDispatcherReap() public {
-        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
-        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
-        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
-        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.Reap, dataProviderProxy));
         _verify("SettlementDispatcherReap", settlementReapImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherRain() public {
-        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
-        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
-        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
-        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.Rain, dataProviderProxy));
         _verify("SettlementDispatcherRain", settlementRainImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherPix() public {
-        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
-        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
-        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
-        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.PIX, dataProviderProxy));
         _verify("SettlementDispatcherPix", settlementPixImpl, local);
     }
 
     function test_verifyBytecode_SettlementDispatcherCardOrder() public {
-        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
-        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
-        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
-        vm.skip(true);
         address local = address(new SettlementDispatcherV2(BinSponsor.CardOrder, dataProviderProxy));
         _verify("SettlementDispatcherCardOrder", settlementCardOrderImpl, local);
     }
@@ -292,9 +272,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     // ---- Top up ----
 
     function test_verifyBytecode_TopUpDest() public {
-        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
-        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
-        vm.skip(true);
         address local = address(new TopUpDest(dataProviderProxy, cc.weth));
         _verify("TopUpDest", topUpDestImpl, local);
     }
@@ -307,9 +284,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiLiquidModule() public {
-        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
-        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
-        vm.skip(true);
         address[] memory assets = new address[](4);
         assets[0] = cc.liquidEth;
         assets[1] = cc.liquidBtc;
@@ -327,9 +301,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_EtherFiLiquidModuleWithReferrer() public {
-        // Role re-gating (STAKE-1889) changed this contract's bytecode; it no longer matches the
-        // deployed implementation. Re-enable after the rollout batches ship (STAKE-1891/1925+).
-        vm.skip(true);
         address[] memory assets = new address[](1);
         assets[0] = cc.sethfi;
 
@@ -341,10 +312,6 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_StargateModule() public {
-        // Admin roles were consolidated into ADMIN_ROLE / ADMIN_TIMELOCK_ROLE and the
-        // RoleRegistry-owner functions re-gated (STAKE-1889), so the bytecode no longer matches the
-        // deployed implementation. Re-enable after the timelock-cutover deployment (STAKE-1891).
-        vm.skip(true);
         address[] memory assets = new address[](2);
         assets[0] = cc.usdc;
         assets[1] = cc.weETH;
@@ -368,32 +335,139 @@ contract VerifyOPMainnetBytecode is ContractCodeChecker, Utils {
     }
 
     function test_verifyBytecode_LiquidUSDLiquifierModule() public {
-        // The Item 21 repay fixes are not live yet: the proxy runs the 3CP-674 impl until 3CP-707 step 3 executes
-        // upgradeToAndCall. Re-enable once it does.
-        vm.skip(true);
         address liquifierImpl = _getImpl(liquidUsdLiquifierProxy);
         address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));
         _verify("LiquidUSDLiquifierModule", liquifierImpl, local);
     }
 
+    // ---- Swap, lend and withdraw proxies ----
+
+    function test_verifyBytecode_AcrossSwapModule() public {
+        address local = address(new AcrossSwapModule(dataProviderProxy));
+        _verify("AcrossSwapModule", _getImpl(_cash("AcrossSwapModule")), local);
+    }
+
+    function test_verifyBytecode_EnsoSwapModule() public {
+        address local = address(new EnsoSwapModule(dataProviderProxy));
+        _verify("EnsoSwapModule", _getImpl(_cash("EnsoSwapModule")), local);
+    }
+
+    function test_verifyBytecode_LendGateway() public {
+        address gateway = _cash("LendGateway");
+        address local = address(new LendGateway(dataProviderProxy, address(LendGateway(gateway).spoke())));
+        _verify("LendGateway", _getImpl(gateway), local);
+    }
+
+    function test_verifyBytecode_StockWithdrawModule() public {
+        address local = address(new StockWithdrawModule(dataProviderProxy));
+        _verify("StockWithdrawModule", _getImpl(_cash("StockWithdrawModule")), local);
+    }
+
+    // ---- Immutable modules, rebuilt from the constructor config they report ----
+
+    function test_verifyBytecode_BeHYPEStakeModule() public {
+        BeHYPEStakeModule live = BeHYPEStakeModule(_cash("BeHYPEStakeModule"));
+        address local = address(new BeHYPEStakeModule(dataProviderProxy, address(live.staker()), live.whype(), live.beHYPE(), live.getRefundGasLimit()));
+        _verify("BeHYPEStakeModule", _cash("BeHYPEStakeModule"), local);
+    }
+
+    function test_verifyBytecode_MidasModule() public {
+        MidasModule live = MidasModule(_cash("MidasModule"));
+        string[3] memory names = ["liquidReserve", "liquidEUR", "liquidRWA"];
+        uint256 count;
+        for (uint256 i = 0; i < names.length; ++i) {
+            (address deposit,) = live.vaults(_fixture(names[i]));
+            if (deposit != address(0)) ++count;
+        }
+        require(count > 0, "Midas module has no configured vaults");
+        address[] memory tokens = new address[](count);
+        address[] memory deposits = new address[](count);
+        address[] memory redemptions = new address[](count);
+        uint256 j;
+        for (uint256 i = 0; i < names.length; ++i) {
+            address token = _fixture(names[i]);
+            (address deposit, address redemption) = live.vaults(token);
+            if (deposit == address(0)) continue;
+            tokens[j] = token;
+            deposits[j] = deposit;
+            redemptions[j] = redemption;
+            ++j;
+        }
+        address local = address(new MidasModule(dataProviderProxy, tokens, deposits, redemptions));
+        _verify("MidasModule", _cash("MidasModule"), local);
+    }
+
+    // ---- Other cash contracts ----
+
+    function test_verifyBytecode_CCTPModule() public {
+        CCTPModule live = CCTPModule(_cash("CCTPModule"));
+        address[] memory assets = new address[](1);
+        assets[0] = cc.usdc;
+        CCTPModule.AssetConfig[] memory configs = new CCTPModule.AssetConfig[](1);
+        configs[0] = live.getAssetConfig(cc.usdc);
+        address local = address(new CCTPModule(assets, configs, dataProviderProxy));
+        _verify("CCTPModule", address(live), local);
+    }
+
+    function test_verifyBytecode_AssetRecoveryModule() public {
+        AssetRecoveryModule live = AssetRecoveryModule(_cash("AssetRecoveryModule"));
+        address local = address(new AssetRecoveryModule(dataProviderProxy, address(live.endpoint()), live.owner()));
+        _verify("AssetRecoveryModule", address(live), local);
+    }
+
+    function test_verifyBytecode_SafeAssetRecoveryModule() public {
+        address local = address(new SafeAssetRecoveryModule(dataProviderProxy));
+        _verify("SafeAssetRecoveryModule", _cash("SafeAssetRecoveryModule"), local);
+    }
+
+    function test_verifyBytecode_MidasLiquifierModule() public {
+        address local = address(new MidasLiquifierModule(debtManagerProxy, dataProviderProxy));
+        _verify("MidasLiquifierModule", _getImpl(_cash("MidasLiquifierModule")), local);
+    }
+
+    function test_verifyBytecode_CashbackDistributor() public {
+        CashbackDistributor live = CashbackDistributor(_cash("CashbackDistributor"));
+        address local = address(new CashbackDistributor(live.ethfi(), live.sEthfi(), dataProviderProxy));
+        _verify("CashbackDistributor", _getImpl(address(live)), local);
+    }
+
+    function test_verifyBytecode_CashLiquidationHelper() public {
+        address local = address(new CashLiquidationHelper(debtManagerProxy, _fixture("eUSD")));
+        _verify("CashLiquidationHelper", _cash("CashLiquidationHelper"), local);
+    }
+
+    function test_verifyBytecode_AaveV4Lens() public {
+        address local = address(new AaveV4Lens());
+        _verify("AaveV4Lens", _getImpl(_cash("AaveV4Lens")), local);
+    }
+
+    function test_verifyBytecode_EtherFiTimelock() public {
+        address[] memory none = new address[](0);
+        address local = address(new EtherFiTimelock(0, none, none, address(0)));
+        _verify("EtherFiTimelock (2 day)", _cash("EtherFiTimelock"), local);
+        _verify("EtherFiTimelock (8 hour)", stdJson.readAddress(vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/10/roles.json")), ".governance.operatingTimelock.address"), local);
+    }
+
+    /// @dev A library embeds its own address as the first PUSH20 operand, so the local copy is etched at a
+    ///      fresh address with that operand patched to it.
+    function test_verifyBytecode_SafeErc1271Lib() public {
+        bytes memory code = vm.getDeployedCode("SafeErc1271Lib.sol:SafeErc1271Lib");
+        address local = makeAddr("SafeErc1271Lib");
+        bytes20 self = bytes20(local);
+        for (uint256 i = 0; i < 20; ++i) {
+            code[1 + i] = self[i];
+        }
+        vm.etch(local, code);
+        _verify("SafeErc1271Lib", _cash("SafeErc1271Lib"), local);
+    }
+
     // ---- Helpers ----
 
-    function _getImpl(address proxy) internal view returns (address) {
-        return address(uint160(uint256(vm.load(proxy, EIP1967_IMPL_SLOT))));
+    function _cash(string memory key) internal view returns (address) {
+        return stdJson.readAddress(deployments, string.concat(".addresses.", key));
     }
 
-    function _verify(string memory name, address deployed, address local) internal {
-        console.log("------", name, "------");
-        console.log("  Deployed:", deployed);
-        console.log("  Local:   ", local);
-        verifyContractByteCodeMatch(deployed, local);
-    }
-
-    function _tryEnv(string memory key, string memory fallback_) internal view returns (string memory) {
-        try vm.envString(key) returns (string memory val) {
-            return bytes(val).length > 0 ? val : fallback_;
-        } catch {
-            return fallback_;
-        }
+    function _fixture(string memory name) internal view returns (address) {
+        return stdJson.readAddress(fixtures, string.concat(".10.", name));
     }
 }
