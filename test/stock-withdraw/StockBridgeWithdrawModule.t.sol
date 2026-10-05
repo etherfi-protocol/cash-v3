@@ -161,7 +161,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
     }
 
     function _warpPastDelay() internal {
-        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        uint64 withdrawalDelay = cashModule.getWithdrawalDelayForModule(address(module));
         vm.warp(block.timestamp + withdrawalDelay + 1);
     }
 
@@ -207,7 +207,7 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         order.recipient = address(0);
         _expectRequestRevert(order, ModuleBase.InvalidInput.selector);
 
-        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        uint64 withdrawalDelay = cashModule.getWithdrawalDelayForModule(address(module));
         order = _order();
         order.deadline = block.timestamp + withdrawalDelay;
         _expectRequestRevert(order, StockBridgeWithdrawModule.DeadlineBeforeWithdrawalDelay.selector);

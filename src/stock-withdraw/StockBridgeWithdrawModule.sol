@@ -294,7 +294,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         if ($.withdrawals[safe].order.wrapper != address(0)) revert OrderAlreadyActive();
         if (address($.bridge) == address(0)) revert MissingConfig();
 
-        (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        uint64 withdrawalDelay = cashModule.getWithdrawalDelayForModule(address(this));
         if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
         if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
     }
