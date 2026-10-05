@@ -42,7 +42,7 @@ contract TradingSafeLiquidDepositEth3CP is TradingAccountGnosisHelpers, Utils, T
         RoleRegistry registry = RoleRegistry(address(EtherFiDataProvider(dataProvider).roleRegistry()));
         require(address(registry) == _predict(C.SALT_ROLE_REGISTRY_PROXY), "registry is not the prod CREATE3 registry");
         require(registry.owner() == C.OPERATING_SAFE, "OperatingSafe does not own the RoleRegistry");
-        require(registry.hasRole(EtherFiDataProvider(dataProvider).DATA_PROVIDER_ADMIN_ROLE(), C.OPERATING_SAFE), "OperatingSafe is not DATA_PROVIDER_ADMIN");
+        require(registry.hasRole(keccak256("DATA_PROVIDER_ADMIN_ROLE"), C.OPERATING_SAFE), "OperatingSafe is not DATA_PROVIDER_ADMIN");
 
         bytes32 admin = keccak256("TRADING_SAFE_LIQUID_DEPOSIT_MODULE_ADMIN");
         bytes32 pauser = registry.PAUSER();
