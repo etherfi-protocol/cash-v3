@@ -195,3 +195,22 @@ contract ConfigureQqqxCashOP3CP is ConfigureStockCashOP3CPBase {
         return "./output/ListQqqxSummerLend3CP-10.json";
     }
 }
+
+/**
+ * @title ConfigureTbllxCashOP3CP
+ * @notice iwTBLLx's Operating Safe bundle: DebtManager collateral support + LendGateway reserve id
+ *         registration. Must execute AFTER ListTbllxSummerLend3CP, which assigns the reserve id.
+ */
+contract ConfigureTbllxCashOP3CP is ConfigureStockCashOP3CPBase {
+    function _asset() internal pure override returns (StockLendAsset memory) {
+        return StockLendAssets.wtbllx();
+    }
+
+    function _outputPath() internal pure override returns (string memory) {
+        return "./output/3CP-643-ConfigureTbllxCashOP3CP-10.json";
+    }
+
+    function _lendBundlePath() internal pure override returns (string memory) {
+        return "./output/3CP-642-ListTbllxSummerLend3CP-10.json";
+    }
+}

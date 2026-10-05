@@ -150,6 +150,48 @@ forge script scripts/stock-listing/ListStockSummerLend3CP.s.sol:ListQqqxSummerLe
 forge script scripts/stock-listing/ConfigureStockCashOP3CP.s.sol:ConfigureQqqxCashOP3CP --rpc-url $OPTIMISM_RPC
 ```
 
+## The dev counterpart (iwTBLLx): reuse the prod rails, config only
+
+The dev stack shares a chain with prod, so dev does not need its own copy of anything immutable or
+admin-less. The iwTBLLx dev rollout points straight at the **prod iwTBLLx ShadowOFT, the prod OFT
+adapter, the prod OracleSink and the prod Aave v4 feed**, and only writes config on dev's own
+contracts. That makes it three EOA broadcasts with nothing deployed:
+
+| Order | Script | Chain | Prod equivalent |
+|---|---|---|---|
+| 1 | `scripts/ConfigureDevTbllxTopUpEth.s.sol` | ETH | last tx of 3CP-640 (`TopUpFactory.setTokenConfig`) |
+| 2 | `scripts/ConfigureDevTbllxCashOP.s.sol` | OP | txs 7-9 of 3CP-641 (PriceProviderV2 + CashModule + StargateModule) |
+| 3 | `scripts/aave-v4/SupportTbllxCollateral.s.sol` | OP | 3CP-642 + 3CP-643 (Summer Lend reserve, LendGateway, DebtManager) |
+
+2 must precede 3 (the DebtManager leg reads `price(iwTBLLx)` through the entry 2 writes). 1 is
+independent of both.
+
+Only two fields anywhere in this rollout are dev-specific — the dev `EtherFiOFTBridgeAdapter` and the
+dev `TopUpDest` as the top-up route's recipient. Everything else is prod's, which buys some real
+properties: dev prices iwTBLLx off the same aggregator and the same relayed rate as prod, and it
+inherits the prod keeper's `<= 3 day` poke cadence rather than the ad-hoc dev-sink window the iwSPYx
+dev feed had to settle for. Risk parameters are prod's 2026-08-12 sign-off verbatim, so dev
+rehearses the numbers prod runs.
+
+Consequences of the reuse worth knowing:
+
+- **no dev feed deploy.** The prod feed is immutable and admin-less, so `RefreshSummerLendOracles`
+  deliberately skips this reserve — a refresh would only cut it off from the prod keeper.
+- **no `OracleSink.setMaxStaleness` on dev.** That window belongs to the prod sink and is set by
+  3CP-641; dev reads it and cannot (and need not) repeat it.
+- **no `TopUpDest` token config on OP.** `TopUpDest` has no per-token config; the lend hand-off is
+  gated on `lendGateway.isRegistered(token)`, which step 3 writes.
+- **dev reserves stay uncapped** (`addCap = type(uint40).max`, from `AddSummerLendCollateral._list`)
+  where prod sizes a notional add cap per asset.
+- **the prod bundles are the hard prerequisite.** Steps 2 and 3 assert the prod iwTBLLx ShadowOFT has
+  code, and the price legs need 3CP-640/641 executed plus at least one relay keeper poke. Every
+  script fails loudly, before broadcasting, rather than half-configuring.
+
+iwSPYx predates this approach and still has its own dev feed
+(`DeployWspyxOracleSinkFeed` / `SupportWspyxCollateral`, with the feed addresses recorded by hand
+under `.details.iwSPYx` in `deployments/dev/10/aave-v4-test.json`). Prefer the iwTBLLx shape for new
+assets.
+
 ## What is deliberately out of scope
 
 The OFT rails, the PriceRelay/OracleSink wiring, and the cash-side `PriceProviderV2` entry for an

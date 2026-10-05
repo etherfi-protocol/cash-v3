@@ -99,6 +99,11 @@ contract RefreshSummerLendOracles is AddSummerLendCollateral {
             vm.writeJson(vm.toString(spyUsd), jsonPath, ".details.iwSPYx.spyUsdLeg");
         }
 
+        // iwTBLLx is deliberately NOT refreshed here. Its dev reserve points at the IMMUTABLE PROD
+        // Aave v4 feed (0x1cee92F9…, deployed by DeployTbllxProdFeeds and reading the prod
+        // OracleSink), so there is nothing dev-side to redeploy and repointing it at a fresh dev
+        // feed would only cut it off from the prod keeper's cadence. See SupportTbllxCollateral.
+
         // Deploy-time reserves (their ids come from the deployment json, not a token scan)
         address weethUsd = _chainlink(WEETH_ETH_ORACLE, ethUsd, CHAINLINK_MAX_STALENESS, false, "weETH / USD");
         _update(weethReserveId, weethUsd);

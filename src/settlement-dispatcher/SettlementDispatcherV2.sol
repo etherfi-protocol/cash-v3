@@ -130,7 +130,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @notice Emitted when funds are successfully bridged via Stargate
      * @param token Address of the token that was bridged
      * @param amount Amount of tokens that were bridged
-     * @param ticket Stargate ticket containing details of the bridge transaction
+     * @param ticket Empty in taxi mode and retained for event ABI compatibility
      */
     event FundsBridgedWithStargate(address indexed token, uint256 amount, Ticket ticket);
 
@@ -388,26 +388,26 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Function to set the destination data for an array of tokens
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param tokens Addresses of tokens to configure
      * @param destDatas Destination data structs for respective tokens
      * @custom:throws ArrayLengthMismatch If arrays have different lengths
      * @custom:throws InvalidValue If any address parameter is zero
      * @custom:throws StargateValueInvalid If the Stargate router doesn't support the token
      */
-    function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external virtual onlyRoleRegistryOwner {
+    function setDestinationData(address[] calldata tokens, DestinationData[] calldata destDatas) external virtual onlyAdminTimelock {
         _setDestinationData(tokens, destDatas);
     }
 
     /**
      * @notice Function to set the liquid asset withdraw queue 
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param asset Address of the liquid asset
      * @param boringQueue Address of the boring queue
      * @custom:throws InvalidValue If any address parameter is zero
      * @custom:throws InvalidBoringQueue If the queue does not belong to the liquid asset
      */
-    function setLiquidAssetWithdrawQueue(address asset, address boringQueue) external onlyRoleRegistryOwner {
+    function setLiquidAssetWithdrawQueue(address asset, address boringQueue) external onlyAdminTimelock {
         if (asset == address(0) || boringQueue == address(0)) revert InvalidValue();
         if (asset != address(IBoringOnChainQueue(boringQueue).boringVault())) revert InvalidBoringQueue();
 
@@ -427,10 +427,10 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets the configurable refund wallet address
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param _refundWallet Address of the refund wallet to set (can be address(0) to clear and use data provider)
      */
-    function setRefundWallet(address _refundWallet) external onlyRoleRegistryOwner {
+    function setRefundWallet(address _refundWallet) external onlyAdminTimelock {
         _getSettlementDispatcherV2Storage().refundWallet = _refundWallet;
         emit RefundWalletSet(_refundWallet);
     }
@@ -451,14 +451,14 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets the Frax config for sync and async redeem
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param _fraxUsd Address of the Frax USD token
      * @param _fraxCustodian Address of the Frax custodian (for sync redeem)
      * @param _fraxRemoteHop Address of the Frax RemoteHop contract (for async redeem via LayerZero OFT)
      * @param _fraxAsyncRedeemRecipient Recipient address on Ethereum for async Frax redemptions
      * @custom:throws InvalidValue If fraxUsd or fraxCustodian is zero
      */
-    function setFraxConfig(address _fraxUsd, address _fraxCustodian, address _fraxRemoteHop, address _fraxAsyncRedeemRecipient) external onlyRoleRegistryOwner {
+    function setFraxConfig(address _fraxUsd, address _fraxCustodian, address _fraxRemoteHop, address _fraxAsyncRedeemRecipient) external onlyAdminTimelock {
         if (_fraxUsd == address(0) || _fraxCustodian == address(0)) revert InvalidValue();
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
         $.fraxUsd = _fraxUsd;
@@ -482,12 +482,12 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets the Midas redemption vault for a Midas token (e.g. Liquid Reserve)
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param midasToken Address of the Midas token
      * @param redemptionVault Address of the redemption vault
      * @custom:throws InvalidValue If any address is zero
      */
-    function setMidasRedemptionVault(address midasToken, address redemptionVault) external onlyRoleRegistryOwner {
+    function setMidasRedemptionVault(address midasToken, address redemptionVault) external onlyAdminTimelock {
         if (midasToken == address(0) || redemptionVault == address(0)) revert InvalidValue();
         _getSettlementDispatcherV2Storage().midasRedemptionVault[midasToken] = redemptionVault;
         emit MidasRedemptionVaultSet(midasToken, redemptionVault);
@@ -676,7 +676,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
             emit FundsBridgedWithOFT(token, amount);
         } else {
             (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) =
-                prepareRideBus(token, amount);
+                prepareTakeTaxi(token, amount);
 
             if (minReturnLD > minReturnFromStargate) revert InsufficientMinReturn();
             if (address(this).balance < valueToSend) revert InsufficientFeeToCoverCost();
@@ -689,7 +689,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Prepares parameters for the Stargate bridge transaction
-     * @dev Uses Stargate's "Ride the Bus" pattern for token bridging
+     * @dev Uses taxi mode. Empty extraOptions use the pool's enforced destination gas options.
      * @param token Address of the token to bridge
      * @param amount Amount of the token to bridge
      * @return stargate Address of the Stargate router to use
@@ -701,7 +701,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws InsufficientBalance If the contract doesn't have enough tokens
      * @custom:throws DestinationDataNotSet If destination data is not set for the token
      */
-    function prepareRideBus(
+    function prepareTakeTaxi(
         address token,
         uint256 amount
     ) public view virtual returns (address stargate, uint256 valueToSend, uint256 minReturnFromStargate, SendParam memory sendParam, MessagingFee memory messagingFee) {
@@ -717,7 +717,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
             minAmountLD: amount,
             extraOptions: new bytes(0),
             composeMsg: new bytes(0),
-            oftCmd: new bytes(1)
+            oftCmd: new bytes(0)
         });
 
         (, , OFTReceipt memory receipt) = IStargate(stargate).quoteOFT(sendParam);
@@ -772,7 +772,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Withdraws tokens or ETH from the contract
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param token Address of the token to withdraw (address(0) for ETH)
      * @param recipient Address to receive the withdrawn funds
      * @param amount Amount to withdraw (0 to withdraw all)
@@ -780,7 +780,7 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      * @custom:throws CannotWithdrawZeroAmount If attempting to withdraw zero tokens or ETH
      * @custom:throws WithdrawFundsFailed If ETH transfer fails
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external nonReentrant onlyRoleRegistryOwner() {
+    function withdrawFunds(address token, address recipient, uint256 amount) external nonReentrant onlyAdminTimelock {
         if (recipient == address(0)) revert InvalidValue();
         amount = _withdrawFunds(token, recipient, amount);
         emit FundsWithdrawn(token, amount, recipient);
@@ -881,13 +881,13 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets CCTP configuration for cross-chain USDC bridging
-     * @dev Only callable by the role registry owner
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE)
      * @param _tokenMessenger Address of the CCTP TokenMessenger contract
      * @param _destinationDomain CCTP destination domain (e.g. 0 for Ethereum)
      * @param _maxFee Maximum fee in burn token units (0 for standard transfer)
      * @param _minFinalityThreshold Minimum finality threshold for attestation
      */
-    function setCCTPConfig(address _tokenMessenger, uint32 _destinationDomain, uint256 _maxFee, uint32 _minFinalityThreshold) external onlyRoleRegistryOwner {
+    function setCCTPConfig(address _tokenMessenger, uint32 _destinationDomain, uint256 _maxFee, uint32 _minFinalityThreshold) external onlyAdminTimelock {
         if (_tokenMessenger == address(0)) revert InvalidValue();
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
         $.cctpTokenMessenger = _tokenMessenger;
@@ -934,11 +934,11 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
 
     /**
      * @notice Sets settlement recipients for multiple tokens at once
-     * @dev Only callable by the role registry owner. Each token can have a different recipient.
+     * @dev Only callable by the operating timelock (ADMIN_TIMELOCK_ROLE). Each token can have a different recipient.
      * @param tokens Array of token addresses to configure
      * @param recipients Array of recipient addresses corresponding to each token
      */
-    function setSettlementRecipients(address[] calldata tokens, address[] calldata recipients) external onlyRoleRegistryOwner {
+    function setSettlementRecipients(address[] calldata tokens, address[] calldata recipients) external onlyAdminTimelock {
         if (tokens.length != recipients.length) revert ArrayLengthMismatch();
         SettlementDispatcherV2Storage storage $ = _getSettlementDispatcherV2Storage();
         for (uint256 i = 0; i < tokens.length;) {
@@ -982,4 +982,3 @@ contract SettlementDispatcherV2 is UpgradeableProxy, Constants {
      */
     receive() external payable {}
 }
-

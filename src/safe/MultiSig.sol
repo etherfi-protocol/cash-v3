@@ -12,8 +12,9 @@ import { EtherFiSafeBase } from "./EtherFiSafeBase.sol";
  * @title MultiSig
  * @author ether.fi
  * @notice Implements multi-sig functionality with configurable owners and threshold
- * @dev Deliberately does not expose ERC-1271 isValidSignature. Adding it would arm Aave's
- *      setUserPositionManagersWithSig against safes; see the invariant in LendGateway before changing this.
+ * @dev checkSignatures validates whatever digest it is handed, so each caller must bind that digest itself.
+ *      EtherFiSafe.isValidSignature is the only caller fed external hashes; an unbound one would arm Aave's
+ *      setUserPositionManagersWithSig. See the LendGateway invariant before adding another.
  */
 abstract contract MultiSig is EtherFiSafeBase {
     using SignatureUtils for bytes32;

@@ -85,4 +85,7 @@ abstract contract EtherFiSafeErrors {
 
     /// @notice Thrown when a recovery signer at the given index is invalid
     error InvalidRecoverySigner(uint256 index);
+
+    /// @notice Thrown when `wrapEth` is called while the data provider is paused
+    error EthWrapPaused();
 }

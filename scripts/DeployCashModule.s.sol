@@ -82,7 +82,8 @@ contract DeployCashModule is Utils {
         cashLens.initialize(address(roleRegistry));
 
         roleRegistry.grantRole(cashModule.ETHER_FI_WALLET_ROLE(), owner);
-        roleRegistry.grantRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);
 
 
         address[] memory modules = new address[](1);

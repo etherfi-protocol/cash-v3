@@ -19,5 +19,11 @@
   },
   "lib/solady": {
     "rev": "5dd6f93498b8ebdc9d72194cfa680a90b738e1ad"
+  },
+  "lib/solidity-bytes-utils": {
+    "tag": {
+      "name": "v0.8.4",
+      "rev": "f4413cd6137b78403e3a1156bee6aceab46b46fa"
+    }
   }
 }

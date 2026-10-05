@@ -14,6 +14,7 @@ import { IOFT, MessagingFee, SendParam } from "../../../../../src/interfaces/IOF
 import { Constants } from "../../../../../src/utils/Constants.sol";
 import { IMidasVault } from "../../../../../src/interfaces/IMidasVault.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 
 /**
  * @notice Mock Frax custodian: pulls fraxUsd from owner, sends usdc to receiver. Returns configurable amountOut.
@@ -151,7 +152,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
 
     function test_v2_setRefundWallet_reverts_whenNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         v2.setRefundWallet(makeAddr("newWallet"));
     }
 
@@ -445,6 +446,13 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         assertGt(messagingFee.nativeFee, 0);
     }
     
+    function test_v2_prepareTakeTaxi_usesEmptyCommandAndExtraOptions() public view {
+        (,,, SendParam memory sendParam,) = v2.prepareTakeTaxi(address(usdc), 100e6);
+
+        assertEq(sendParam.oftCmd.length, 0);
+        assertEq(sendParam.extraOptions.length, 0);
+    }
+
     function test_v2_bridge_succeeds_withOFT() public {
         uint256 amount = 100e6;
         deal(EURC, address(v2), amount);
@@ -605,7 +613,7 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         MockERC20 token = new MockERC20("USDC", "USDC", 6);
 
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         _setRecipient(address(token), alice);
     }
 
@@ -617,4 +625,3 @@ contract SettlementDispatcherV2Test is CashModuleTestSetup {
         _setRecipient(address(token), address(0));
     }
 }
-

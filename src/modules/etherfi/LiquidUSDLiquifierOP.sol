@@ -37,7 +37,7 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
     
     /// @notice Role identifier for Settlement Dispatcher Bridger
     bytes32 public constant SETTLEMENT_DISPATCHER_BRIDGER_ROLE = keccak256("SETTLEMENT_DISPATCHER_BRIDGER_ROLE");
-    
+
     /// @notice Address of the Debt Manager
     IDebtManager public immutable debtManager;
     
@@ -129,6 +129,7 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
      * @param usdAmount Amount of USD to repay
      */
     function _repayUsingLiquidUSD(address user, uint256 usdAmount) internal {
+        uint256 healthFactorBefore = _gatewayHealthFactor(user);
         uint256 usdcRepaid;
         if (cashModule.usesLendGateway(user)) {
             // Cap at the user's Aave debt: the gateway refunds any unconsumed repayment to the safe, and an
@@ -139,8 +140,10 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
             if (USDC.balanceOf(address(this)) < usdAmount) revert InsufficientUsdcBalance();
 
             // The gateway pulls repayment from the safe, so the float hops through it within this transaction.
+            // Charge for what left the float: anything Aave did not consume is refunded loose to the safe.
             USDC.safeTransfer(user, usdAmount);
-            usdcRepaid = gateway().repay(user, address(USDC), usdAmount);
+            gateway().repay(user, address(USDC), usdAmount);
+            usdcRepaid = usdAmount;
         } else {
             if (USDC.balanceOf(address(this)) < usdAmount) revert InsufficientUsdcBalance();
 
@@ -162,9 +165,8 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
         // LiquidUSD is a listed reserve, so a gateway safe's holdings may be supplied to Aave: pull the
         // shortfall loose before reclaiming (no-op for legacy safes; engine-gated, so it still works for
         // an opted-out safe — including a matured opt-out whose unwind open borrows block — because this
-        // repayment is exactly the deleveraging that unblocks it). The flow is deliberately EXEMPT from
-        // the gateway's health-factor floor (_ensureGatewayFloor): it swaps collateral for a matching
-        // debt reduction, and de-risking must never be blocked by the floor.
+        // repayment is exactly the deleveraging that unblocks it). Instead of the floor, the flow ends with
+        // the not-worsened check below: a repay may never lower health, and a genuine de-risk always passes.
         _pullAndRequire(user, address(LIQUID_USD), liquidUsdAmountRepaid);
 
         address[] memory to = new address[](1);
@@ -178,6 +180,8 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
         IEtherFiSafe(user).execTransactionFromModule(to, values, data);
 
         LIQUID_USD.safeTransferFrom(user, address(this), liquidUsdAmountRepaid);
+        // A PriceProvider-vs-Aave gap on LiquidUSD could take more collateral than the debt it clears
+        _ensureGatewayHealthNotWorsened(user, healthFactorBefore);
 
         emit RepaidUsingLiquidUSD(user, usdcRepaid, liquidUsdAmountRepaid);
     }
@@ -207,7 +211,7 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
      * @param recipient Address to receive the withdrawn funds
      * @param amount Amount of tokens to withdraw
      */
-    function withdrawFunds(address token, address recipient, uint256 amount) external onlyRoleRegistryOwner() {
+    function withdrawFunds(address token, address recipient, uint256 amount) external onlyAdminTimelock {
         if (recipient == address(0)) revert InvalidValue();
         amount = _withdrawFunds(token, recipient, amount);
         emit FundsWithdrawn(token, amount, recipient);

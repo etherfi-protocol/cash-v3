@@ -1,0 +1,45 @@
+{
+  "aclManager": "0x188d7173772499FB6375F23FdFd130CE6107286b",
+  "ETHFI": {
+    "reserveId": "8",
+    "source": "0x53c3d3c36cae804E6B639cA2600662aF51B4fFc9",
+    "replaces": "0x89AB0BeEF8f88933f4724a2D0C4a149c644a8a80",
+    "price": "38349406"
+  },
+  "wHYPE": {
+    "reserveId": "11",
+    "source": "0xB41cE833937aEf200B77fa796bADED2F6Bea7D82",
+    "replaces": "0x7405E1C9a5AdC2A1730f38186f5845EC54Cd1B22",
+    "price": "5760070700"
+  },
+  "OP": {
+    "reserveId": "10",
+    "source": "0x3b79488486f0aD5F05a66Ad377E25b829fff2bD5",
+    "replaces": "0x6D53a69EBC75cFeDf319F77569a4F732f75AED79",
+    "price": "8684862"
+  },
+  "sETHFI": {
+    "reserveId": "9",
+    "source": "0xd452ca984E0606297bCb430e076087F126e24a38",
+    "replaces": "0xaF8749C3DC1Fc0592f21c2593204C45D3bE0d322",
+    "price": "46064469"
+  },
+  "beHYPE": {
+    "reserveId": "12",
+    "source": "0xc6d0023679769A532879AE50E57F40aB628201E7",
+    "replaces": "0xefeDBa79436767AAfcF7902C66383d4735DacA50",
+    "price": "5870575661"
+  },
+  "weEUR": {
+    "reserveId": "17",
+    "source": "0xFA239571dDa672A935Fb7962513b37b1CfF280cb",
+    "replaces": "0x7605dbe2948C99a559B9a065881916Ef043dA567",
+    "price": "116964810"
+  },
+  "EURC": {
+    "reserveId": "3",
+    "source": "0xC1Cf424A5d58BB943aDbA7fF3E1E1D2e354C2CD1",
+    "replaces": "0xcBF18F68e2aBd480231241fa97BD41aE556433A0",
+    "price": "115256774"
+  }
+}
