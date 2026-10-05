@@ -352,6 +352,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
                 _resupplyToGateway(safe, swap.order.dstToken, balanceAfter - balanceBefore);
             }
         }
+        _checkPendingWithdrawalBacked(safe);
     }
 
     function _balanceOf(address token, address account) internal view returns (uint256) {

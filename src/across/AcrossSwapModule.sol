@@ -418,6 +418,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         data[2] = abi.encodeCall(IERC20.approve, (spokePool, 0));
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        _checkPendingWithdrawalBacked(safe);
     }
 
     /// @dev Origin-swap (anyToBridgeable): approve the allowlisted periphery for the input token,
@@ -440,6 +441,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         data[2] = abi.encodeCall(IERC20.approve, (periphery, 0));
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        _checkPendingWithdrawalBacked(safe);
     }
 
     /// @dev Encoded separately to dodge stack-too-deep on the 12-arg `depositV3` call.
