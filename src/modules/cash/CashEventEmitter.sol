@@ -252,6 +252,14 @@ contract CashEventEmitter is UpgradeableProxy {
     event ModulesCanRequestWithdrawConfigured(address[] modules, bool[] shouldWhitelist);
 
     /**
+     * @notice Emitted when a module-specific withdrawal delay is configured or cleared
+     * @param module Module whose delay override changed
+     * @param delay Configured delay in seconds
+     * @param enabled Whether the override is enabled
+     */
+    event ModuleWithdrawalDelayConfigured(address indexed module, uint64 delay, bool enabled);
+
+    /**
      * @notice Emits the ModulesCanRequestWithdrawConfigured event
      * @dev Can only be called by the Cash Module
      * @param modules Array of module addresses that can request withdrawals
@@ -259,6 +267,17 @@ contract CashEventEmitter is UpgradeableProxy {
      */
     function emitModulesCanRequestWithdrawConfigured(address[] calldata modules, bool[] calldata shouldWhitelist) external onlyCashModule {
         emit ModulesCanRequestWithdrawConfigured(modules, shouldWhitelist);
+    }
+
+    /**
+     * @notice Emits the ModuleWithdrawalDelayConfigured event
+     * @dev Can only be called by the Cash Module
+     * @param module Module whose delay override changed
+     * @param delay Configured delay in seconds
+     * @param enabled Whether the override is enabled
+     */
+    function emitModuleWithdrawalDelayConfigured(address module, uint64 delay, bool enabled) external onlyCashModule {
+        emit ModuleWithdrawalDelayConfigured(module, delay, enabled);
     }
 
     /**
