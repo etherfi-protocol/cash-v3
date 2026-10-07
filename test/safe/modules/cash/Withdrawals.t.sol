@@ -681,6 +681,9 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.stopPrank();
 
         assertEq(cashModule.getWithdrawalDelayForModule(module), 3);
+        vm.prank(module);
+        (uint64 callerDelay,,) = cashModule.getDelays();
+        assertEq(callerDelay, 3, "module caller should observe its configured delay");
 
         uint256 withdrawalAmount = 50e6;
         deal(address(usdc), address(safe), withdrawalAmount);
@@ -692,6 +695,23 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.configureModuleWithdrawalDelay(module, 0, false);
         (uint64 globalDelay,,) = cashModule.getDelays();
         assertEq(cashModule.getWithdrawalDelayForModule(module), globalDelay);
+        vm.prank(module);
+        (callerDelay,,) = cashModule.getDelays();
+        assertEq(callerDelay, globalDelay, "disabled override should restore the global delay");
+    }
+
+    function test_getDelays_returnsZeroOverrideToModuleCaller() public {
+        address module = makeAddr("module");
+
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(module, 0, true);
+
+        vm.prank(module);
+        (uint64 moduleDelay,,) = cashModule.getDelays();
+        assertEq(moduleDelay, 0);
+
+        (uint64 globalDelay,,) = cashModule.getDelays();
+        assertTrue(globalDelay != 0, "unconfigured caller should still observe the global delay");
     }
 
     function test_requestWithdrawal_keepsGlobalDelayWhenModuleOverrideIsSet() public {
