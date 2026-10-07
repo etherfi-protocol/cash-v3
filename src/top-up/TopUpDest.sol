@@ -149,10 +149,13 @@ contract TopUpDest is UpgradeableProxy {
      */
     function deposit(address token, uint256 amount) external onlyRole(TOP_UP_DEPOSITOR_ROLE) {
         if (amount == 0) revert AmountCannotBeZero();
+        // A rebasing stock delivers whole shares, which can be less than the amount asked for
+        uint256 before = IERC20(token).balanceOf(address(this));
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 received = IERC20(token).balanceOf(address(this)) - before;
 
-        _getTopUpDestStorage().deposits[token] += amount;
-        emit Deposit(token, amount);
+        _getTopUpDestStorage().deposits[token] += received;
+        emit Deposit(token, received);
     }
 
     /**
@@ -304,12 +307,16 @@ contract TopUpDest is UpgradeableProxy {
         IERC20(raw).forceApprove(wrapper, amount);
         uint256 shares = IERC4626(wrapper).deposit(amount, address(this));
         if (shares == 0) revert WrapMintedNothing();
-        // Raw booked through deposit() has left as wrapper; raw from the bridge was never booked
+        IERC20(raw).forceApprove(wrapper, 0);
+        // The wrapper pulls whole shares, so a sub-share remainder stays here until the next wrap
+        uint256 wrapped = amount - IERC20(raw).balanceOf(address(this));
+        // Raw booked through deposit() has left as wrapper. Raw from the bridge was never booked, but it
+        // refills the float that already paid those top-ups, so its shares are booked like a deposit.
         uint256 booked = $.deposits[raw];
-        $.deposits[raw] -= amount > booked ? booked : amount;
+        $.deposits[raw] -= wrapped > booked ? booked : wrapped;
         $.deposits[wrapper] += shares;
 
-        emit StockWrapped(raw, wrapper, amount, shares);
+        emit StockWrapped(raw, wrapper, wrapped, shares);
     }
 
     /**

@@ -15,7 +15,8 @@ import { BaseAaveV4PriceFeed } from "./BaseAaveV4PriceFeed.sol";
  *         no relayed rate is needed.
  * @dev The rate is `convertToAssets(one share)` at read time, so it carries no timestamp and no staleness
  *      bound of its own; freshness comes from the required underlying USD feed, an IAaveV4PriceFeed that
- *      enforces its own. Fails closed when that leg reverts or is non-positive.
+ *      enforces its own. Fails closed when that leg reverts or is non-positive. The rate itself is not
+ *      verified: it trusts the vault's issuer, whose multiplier updates move it.
  * @author ether.fi
  */
 contract ERC4626RatePriceFeed is BaseAaveV4PriceFeed {

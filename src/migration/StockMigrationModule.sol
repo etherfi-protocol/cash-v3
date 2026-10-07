@@ -43,6 +43,7 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
     event SwapPairSet(address indexed standIn, address indexed wrapper);
     event Migrated(address indexed safe, address indexed standIn, address indexed wrapper, uint256 supplied, uint256 loose);
     event MigrateSkipped(address indexed safe, address indexed standIn, bytes reason);
+    event SuppliedDeferred(address indexed safe, address indexed standIn, uint256 supplied, bytes reason);
     event Swept(address indexed token, address indexed to, uint256 amount);
 
     error OnlySelf();
@@ -50,6 +51,7 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
     error PendingWithdrawal();
     error NothingToMigrate();
     error InsufficientSeed();
+    error OptOutBlocked();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
@@ -148,17 +150,27 @@ contract StockMigrationModule is ModuleBase, ModuleCheckBalance, ModuleLendGatew
 
         uint256 supplied;
         uint256 healthFactorBefore;
+        bool deferred;
         if (_onGatewayEngine(safe)) {
             supplied = gateway().suppliedOf(safe, standIn);
             if (supplied != 0 && cashModule.isLendOptedOut(safe)) {
-                // A matured opt-out returns the whole position to the safe, so everything is swapped loose
-                cashModule.processLendOptOut(safe);
+                // A matured opt-out returns the whole position to the safe, so everything is swapped loose.
+                // Open borrows block that unwind and the gateway refuses new supplies for an opted-out safe,
+                // so the supplied leg waits for the repayment while the loose balance still swaps.
+                try cashModule.processLendOptOut(safe) { }
+                catch (bytes memory reason) {
+                    emit SuppliedDeferred(safe, standIn, supplied, reason);
+                    deferred = true;
+                }
                 supplied = 0;
             }
             healthFactorBefore = _gatewayHealthFactor(safe);
         }
         uint256 loose = IERC20(standIn).balanceOf(safe);
-        if (supplied == 0 && loose == 0) revert NothingToMigrate();
+        if (supplied == 0 && loose == 0) {
+            if (deferred) revert OptOutBlocked();
+            revert NothingToMigrate();
+        }
         if (IERC20(wrapper).balanceOf(address(this)) < supplied + loose) revert InsufficientSeed();
 
         if (supplied != 0) {

@@ -42,6 +42,7 @@ contract BackedCCIPBridgeAdapter is BridgeAdapterBase {
         uint256 fee = ccipBridge.getDeliveryFeeCost(selector, receiver, token, amount, "");
         if (address(this).balance < fee) revert InsufficientNativeFee();
 
+        // The bridge moves whole shares of the rebasing stock, so a sub-share remainder stays in the factory
         IERC20(token).forceApprove(address(ccipBridge), amount);
         bytes32 messageId = ccipBridge.send{ value: fee }(selector, receiver, token, amount, "");
 

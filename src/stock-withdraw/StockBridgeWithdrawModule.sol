@@ -223,6 +223,7 @@ contract StockBridgeWithdrawModule is ModuleBase, UpgradeableProxy, IBridgeModul
         bytes32 receiver = _receiver(order.recipient);
         uint256 fee = $.bridge.getDeliveryFeeCost($.destinationSelector, receiver, raw, rawAmount, "");
         if (msg.value < fee) revert InsufficientNativeFee();
+        // The bridge moves whole shares, so a sub-share remainder of raw stock stays in this module
         IERC20(raw).forceApprove(address($.bridge), rawAmount);
         bytes32 messageId = $.bridge.send{ value: fee }($.destinationSelector, receiver, raw, rawAmount, "");
 

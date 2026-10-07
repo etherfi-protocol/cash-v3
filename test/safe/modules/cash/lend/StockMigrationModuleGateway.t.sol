@@ -159,6 +159,50 @@ contract StockMigrationModuleGatewayTest is CashGatewayTestSetup {
         assertEq(standIn.balanceOf(address(safe)), 0);
     }
 
+    /// A borrow taken during the opt-out delay blocks the unwind, so only the loose balance swaps and the supplied leg waits.
+    function test_migrate_optedOutSafeWithDebt_swapsLooseAndDefersSupplied() public {
+        _supplyToGateway(address(safe), address(standIn), SUPPLIED);
+        deal(address(standIn), address(safe), LOOSE);
+        _requestLendOptOut();
+        _borrowOnGateway(address(safe), address(usdc), DEBT, recipient);
+        (,, uint64 modeDelay) = cashModule.getDelays();
+        vm.warp(block.timestamp + modeDelay + 1);
+        assertTrue(cashModule.isLendOptedOut(address(safe)));
+
+        vm.prank(keeper);
+        vm.expectEmit(true, true, false, false, address(module));
+        emit StockMigrationModule.SuppliedDeferred(address(safe), address(standIn), SUPPLIED, "");
+        (uint256 supplied, uint256 loose) = module.migrate(address(safe), address(standIn));
+
+        assertEq(supplied, 0);
+        assertEq(loose, LOOSE);
+        assertApproxEqAbs(gw.suppliedOf(address(safe), address(standIn)), SUPPLIED, 1, "supplied leg must wait for the repayment");
+        assertEq(wrapper.balanceOf(address(safe)), LOOSE, "loose leg not swapped");
+        assertEq(standIn.balanceOf(address(safe)), 0);
+        assertGe(gw.debtOf(address(safe), address(usdc)), DEBT, "debt must be untouched");
+    }
+
+    /// With nothing loose, a blocked opt-out is reported as such rather than as nothing to migrate.
+    function test_migrate_optedOutSafeWithDebt_revertsOptOutBlocked() public {
+        _supplyToGateway(address(safe), address(standIn), SUPPLIED);
+        _requestLendOptOut();
+        _borrowOnGateway(address(safe), address(usdc), DEBT, recipient);
+        (,, uint64 modeDelay) = cashModule.getDelays();
+        vm.warp(block.timestamp + modeDelay + 1);
+
+        vm.prank(keeper);
+        vm.expectRevert(StockMigrationModule.OptOutBlocked.selector);
+        module.migrate(address(safe), address(standIn));
+    }
+
+    /// @dev Signs the safe's lend opt-out request; it matures after the mode delay
+    function _requestLendOptOut() internal {
+        uint256 nonce = cashModule.getNonce(address(safe));
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.TOGGLE_LEND_METHOD, block.chainid, address(safe), nonce, abi.encode(false))).toEthSignedMessageHash();
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(owner1Pk, digest);
+        cashModule.toggleLend(address(safe), false, owner1, abi.encodePacked(r, s, v));
+    }
+
     /// A legacy safe has no gateway position, so the wrapper stays loose.
     function test_migrate_legacySafe_wrapperStaysLoose() public {
         _forceLegacyEngine(address(safe));

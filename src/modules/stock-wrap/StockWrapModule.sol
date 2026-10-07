@@ -114,14 +114,17 @@ contract StockWrapModule is ModuleBase, ModuleCheckBalance, UpgradeableProxy {
         uint256 amount = _getAvailableAmount(safe, raw);
         if (amount == 0) revert NothingToWrap();
 
-        // The safe approves the wrapper and deposits with itself as receiver, in one module batch
-        address[] memory to = new address[](2);
-        uint256[] memory values = new uint256[](2);
-        bytes[] memory data = new bytes[](2);
+        // The safe approves the wrapper, deposits with itself as receiver and clears the approval, in one
+        // module batch. The wrapper pulls whole shares, so a sub-share remainder can stay raw in the safe.
+        address[] memory to = new address[](3);
+        uint256[] memory values = new uint256[](3);
+        bytes[] memory data = new bytes[](3);
         to[0] = raw;
         data[0] = abi.encodeCall(IERC20.approve, (wrapper, amount));
         to[1] = wrapper;
         data[1] = abi.encodeCall(IERC4626.deposit, (amount, safe));
+        to[2] = raw;
+        data[2] = abi.encodeCall(IERC20.approve, (wrapper, 0));
 
         uint256 before = IERC20(wrapper).balanceOf(safe);
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
