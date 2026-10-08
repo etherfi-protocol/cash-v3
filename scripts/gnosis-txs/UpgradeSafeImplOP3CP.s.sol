@@ -59,7 +59,7 @@ contract UpgradeSafeImplOP3CP is Utils, GnosisHelpers {
 
     /// @dev ether.fi OperatingSafe on Optimism
     address internal constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
-    /// @dev EtherFiTimelock at its deterministic CREATE3 address (DeployTimelock.s.sol)
+    /// @dev EtherFiTimelock at its deterministic CREATE3 address
     address internal constant ETHERFI_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
     address internal constant OP_WETH = 0x4200000000000000000000000000000000000006;
 

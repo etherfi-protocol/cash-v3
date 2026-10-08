@@ -13,8 +13,9 @@ import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
  *      risk-increasing consumer flows end with _ensureGatewayFloor: whatever the resupply put back, the
  *      end state must sit at or above the gateway's configured health-factor floor (a failed or
  *      unregistered resupply otherwise leaves the health factor between Aave's 1.0 limit and the floor).
- *      Repayment flows (the LiquidUSD liquifier) are deliberately exempt: de-risking must never be
- *      blocked. Gating: the WITHDRAW bookend and the FLOOR check run for any gateway-engine safe —
+ *      Repayment flows (the liquifiers) take _ensureGatewayHealthNotWorsened instead: a repay must
+ *      never lower health at all, and a genuine de-risk always passes it, even from under the floor.
+ *      Gating: the WITHDRAW bookend and the FLOOR check run for any gateway-engine safe —
  *      an opted-out safe (including a matured opt-out whose unwind open borrows still block) can hold
  *      funds supplied on Aave, and pulling them loose is an exit op the repayment/exit paths depend on
  *      (repayUsingLiquidUSD sourcing supplied LiquidUSD); the floor must bind those pulls exactly
@@ -30,6 +31,9 @@ import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
 abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     /// @notice Emitted when a best-effort post-operation supply to the lend gateway fails
     event LendSupplyFailed(address indexed safe, address indexed token, uint256 amount, bytes reason);
+
+    /// @notice A repayment left the safe's health factor lower than before
+    error HealthFactorWorsened();
 
     /**
      * @notice The lend gateway the bookends drive, resolved live from the CashModule
@@ -137,8 +141,8 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
      * @dev Called at the very end of an operation that may have pulled collateral out of Aave: the
      *      module's signed amount is not bound to the lens quote, and a failed or unregistered resupply
      *      can leave the health factor between Aave's 1.0 limit and the configured floor — this makes the
-     *      end state take the floor. Repayment flows are deliberately exempt (de-risking must never be
-     *      blocked). Engine-gated like the withdraw bookend, NOT _lendActive: an opted-out safe can still
+     *      end state take the floor. Repayment flows use _ensureGatewayHealthNotWorsened instead.
+     *      Engine-gated like the withdraw bookend, NOT _lendActive: an opted-out safe can still
      *      hold a live Aave position (a matured opt-out whose unwind open borrows block), and the floor
      *      must bind its extractions too — otherwise the withdraw bookend could park that position at
      *      Aave's raw 1.0 boundary with no check. A cleanly opted-out safe has no debt, so
@@ -155,5 +159,17 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
     function _ensureGatewayFloor(address safe, uint256 healthFactorBefore) internal view {
         if (!_onGatewayEngine(safe)) return;
         gateway().ensureMinHealthFactorNotWorsened(safe, healthFactorBefore);
+    }
+
+    /**
+     * @notice Post-op check for repayment flows: health may not end lower than before the repay
+     * @dev Stricter than the floor, and independent of it: a repay swaps collateral for a matching debt
+     *      reduction, which can only raise health unless a fee or a PriceProvider-vs-Aave price gap takes
+     *      more collateral than the debt it clears. No-op off the gateway engine, where the snapshot is zero.
+     * @param safe The safe to check
+     * @param healthFactorBefore The health factor read before the repay touched the position
+     */
+    function _ensureGatewayHealthNotWorsened(address safe, uint256 healthFactorBefore) internal view {
+        if (_gatewayHealthFactor(safe) < healthFactorBefore) revert HealthFactorWorsened();
     }
 }

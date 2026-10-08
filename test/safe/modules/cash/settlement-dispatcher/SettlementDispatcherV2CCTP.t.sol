@@ -39,6 +39,8 @@ contract MockCCTPTokenMessenger is ICCTPTokenMessenger {
         IERC20(burnToken).transferFrom(msg.sender, address(this), amount);
         emit DepositForBurnCalled(amount, destinationDomain, mintRecipient, burnToken, destinationCaller, maxFee, minFinalityThreshold);
     }
+
+    function localMinter() external pure override returns (address) { return address(0); }
 }
 
 contract SettlementDispatcherV2CCTPTest is Test, Constants {
@@ -81,6 +83,7 @@ contract SettlementDispatcherV2CCTPTest is Test, Constants {
         ))));
 
         roleRegistry.grantRole(BRIDGER_ROLE, owner);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
         roleRegistry.grantRole(BRIDGER_ROLE, bridger);
 
         // Configure CCTP
@@ -127,7 +130,7 @@ contract SettlementDispatcherV2CCTPTest is Test, Constants {
 
     function test_cctp_setCCTPConfig_reverts_whenNotOwner() public {
         vm.prank(alice);
-        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         dispatcher.setCCTPConfig(address(mockMessenger), DEST_DOMAIN_ETHEREUM, 0, 2000);
     }
 

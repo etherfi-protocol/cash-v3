@@ -10,6 +10,7 @@ import { CashEventEmitter, CashModuleTestSetup, Mode } from "../CashModuleTestSe
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
 import { MockPriceProvider } from "../../../../../src/mocks/MockPriceProvider.sol";
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 
 contract DebtManagerLiquidationTest is CashModuleTestSetup {
     uint256 collateralAmount = 0.01 ether;
@@ -66,7 +67,7 @@ contract DebtManagerLiquidationTest is CashModuleTestSetup {
         collateralTokenConfig.liquidationThreshold = newThreshold;
 
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         debtManager.setCollateralTokenConfig(address(weETH), collateralTokenConfig);
 
         vm.stopPrank();
