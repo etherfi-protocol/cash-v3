@@ -191,6 +191,10 @@ contract OpenOceanSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewa
         // Re-supply the output as collateral when the gateway lists it; an unlisted output (or ETH) stays loose.
         _resupplyToGateway(safe, toAsset, receivedAmt);
 
+        // A callback during router execution can place a withdrawal hold against tokens that the
+        // router pulls or that the resupply above moves into Aave. Revert unless every hold remains backed.
+        _checkPendingWithdrawalBacked(safe);
+
         _ensureGatewayFloor(safe, healthFactorBefore);
 
         emit SwapOnOpenOcean(safe, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, receivedAmt);
