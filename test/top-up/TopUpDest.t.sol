@@ -74,6 +74,7 @@ contract TopUpDestTest is Utils, Constants {
 
         roleRegistry.grantRole(TOP_UP_DEPOSITOR_ROLE, depositor);
         roleRegistry.grantRole(TOP_UP_ROLE, topUpRole);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), owner);
         roleRegistry.grantRole(roleRegistry.PAUSER(), pauser);
         roleRegistry.grantRole(roleRegistry.UNPAUSER(), unpauser);
 
