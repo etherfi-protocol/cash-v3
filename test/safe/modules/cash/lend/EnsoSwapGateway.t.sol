@@ -7,6 +7,7 @@ import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { EnsoSwapModule } from "../../../../../src/enso/EnsoSwapModule.sol";
+import { ModuleCheckBalance } from "../../../../../src/modules/ModuleCheckBalance.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /// @dev Minimal Enso Router stand-in: pulls the input from the caller (the safe) and, for the
@@ -14,6 +15,13 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 ///      against the real LendGateway without live Enso calldata.
 contract EnsoRouterStub {
     function swap(address token, uint256 amount) external {
+        IERC20(token).transferFrom(msg.sender, address(this), amount);
+    }
+
+    /// @dev Makes `hookData` call to `hookTarget` before the pull, standing in for a callback-capable route.
+    function swapWithHook(address token, uint256 amount, address hookTarget, bytes calldata hookData) external {
+        (bool ok, bytes memory reason) = hookTarget.call(hookData);
+        if (!ok) assembly { revert(add(reason, 32), mload(reason)) }
         IERC20(token).transferFrom(msg.sender, address(this), amount);
     }
 
@@ -129,6 +137,21 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
         assertEq(gw.suppliedOf(address(safe), address(weETH)), 0, "output must not be supplied to Aave");
     }
 
+    // L-01: a callback during the router call places a new hold on the input before the router pulls it.
+    // The hold's request-time balance check passes, so only the post-call check can reject the under-backed hold.
+    function test_executeSwap_revertsWhenCallbackHoldIsUnderBacked() public {
+        deal(address(usdc), address(safe), SRC_AMOUNT);
+        bytes memory innerSwapData = abi.encodeCall(EnsoRouterStub.swap, (address(usdc), SRC_AMOUNT));
+        _request(_crossChainOrder(), abi.encodeCall(
+            EnsoRouterStub.swapWithHook, (address(usdc), SRC_AMOUNT, address(swapModule), _requestCalldataAtNonce(_crossChainOrder(), innerSwapData, safe.nonce() + 1))
+        ));
+        _warpPastDelay();
+
+        vm.expectRevert(ModuleCheckBalance.PendingWithdrawalUnderBacked.selector);
+        vm.prank(keeper);
+        swapModule.executeSwap(address(safe));
+    }
+
     // ---- Helpers ----
 
     function _sameChainOrderToSafe() internal view returns (EnsoSwapModule.Order memory) {
@@ -156,18 +179,23 @@ contract EnsoSwapGatewayTest is CashGatewayTestSetup {
     }
 
     function _request(EnsoSwapModule.Order memory order, bytes memory swapData) internal {
+        (bool ok, bytes memory reason) = address(swapModule).call(_requestCalldataAtNonce(order, swapData, safe.nonce()));
+        if (!ok) assembly { revert(add(reason, 32), mload(reason)) }
+    }
+
+    function _requestCalldataAtNonce(EnsoSwapModule.Order memory order, bytes memory swapData, uint256 nonce) internal view returns (bytes memory) {
         bytes32 digest = keccak256(abi.encodePacked(
             keccak256("EnsoSwapModule.requestSwap"),
             block.chainid,
             address(swapModule),
-            safe.nonce(),
+            nonce,
             address(safe),
             abi.encode(order),
             keccak256(swapData),
             swapModule.getEnsoRouter()
         )).toEthSignedMessageHash();
         (address[] memory signers, bytes[] memory sigs) = _twoSig(digest);
-        swapModule.requestSwap(address(safe), order, swapData, signers, sigs);
+        return abi.encodeCall(EnsoSwapModule.requestSwap, (address(safe), order, swapData, signers, sigs));
     }
 
     function _twoSig(bytes32 digest) internal view returns (address[] memory, bytes[] memory) {
