@@ -10,6 +10,7 @@ import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { SendParam, MessagingFee, MessagingReceipt, OFTLimit, OFTFeeDetail, OFTReceipt } from "../../src/interfaces/IOFT.sol";
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
+import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 
 /// @dev ShadowOFT stand-in: an ERC20 that is its own OFT (token() == address(this),
 ///      approvalRequired() == false), recording the last send() for assertions. Faithful to
@@ -158,7 +159,8 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         vm.startPrank(owner);
         dataProvider.configureModules(mods, shouldWhitelist);
         cashModule.configureModulesCanRequestWithdraw(mods, shouldWhitelist);
-        roleRegistry.grantRole(module.STOCK_WITHDRAW_MODULE_ADMIN_ROLE(), moduleAdmin);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), moduleAdmin);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), moduleAdmin);
 
         // Whitelist the iToken as a withdrawable asset in CashModule
         address[] memory withdrawAssets = new address[](1);
@@ -717,7 +719,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         bool[] memory supported = new bool[](1);
         supported[0] = true;
 
-        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         module.configureTokens(iTokens, supported);
 
         // a token whose OFT.token() != itself must be rejected
@@ -748,7 +750,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         address[] memory unwrappers = new address[](1);
         unwrappers[0] = makeAddr("otherUnwrapper");
 
-        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.configureUnwrappers(dstEids, unwrappers);
 
         vm.prank(moduleAdmin);
@@ -766,7 +768,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     }
 
     function test_setLzGasLimits_adminOnlyValidatesAndStores() public {
-        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         module.setLzGasLimits(80_000, 500_000);
 
         vm.startPrank(moduleAdmin);
@@ -786,7 +788,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     // ---- provider fee ----
 
     function test_setProviderFee_adminOnlyCapAndValidation() public {
-        vm.expectRevert(StockWithdrawModule.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         module.setProviderFee(100, feeReceiver);
 
         vm.startPrank(moduleAdmin);
