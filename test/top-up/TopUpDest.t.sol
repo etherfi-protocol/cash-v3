@@ -513,8 +513,9 @@ contract TopUpDestTest is Utils, Constants {
         assertEq(topUpDest.getDeposit(address(token1)), DEPOSIT_AMOUNT);
         assertEq(topUpDest.getDeposit(address(token2)), DEPOSIT_AMOUNT);
 
-        // Check isTransactionCompleted
-        assertTrue(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
+        // New top-ups are recorded under chain-aware IDs; the legacy query remains false.
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(100, txHash, user1, address(token1)));
+        assertFalse(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
         
         // Check isTransactionCompletedByTxId
         bytes32 txId = topUpDest.getChainAwareTxId(100, txHash, user1, address(token1));
