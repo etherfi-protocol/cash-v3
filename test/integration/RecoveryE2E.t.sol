@@ -90,6 +90,7 @@ contract RecoveryE2ETest is SafeTestSetup {
         // ── Phase 1: source side — single call submits + dispatches LZ ──────────────────
         uint256 nonce = module.getNonce(address(safe));
         bytes memory lzOptions = "";
+        uint256 deadline = type(uint256).max;
         bytes32 digest = keccak256(abi.encode(
             block.chainid,
             address(module),
@@ -99,6 +100,7 @@ contract RecoveryE2ETest is SafeTestSetup {
             recipient,
             SAFE_SALT,
             ARB_EID,
+            deadline,
             keccak256(lzOptions)
         ));
         address[] memory signers = new address[](2);
@@ -110,7 +112,7 @@ contract RecoveryE2ETest is SafeTestSetup {
 
         vm.deal(owner1, 1 ether);
         vm.prank(owner1);
-        module.recover{value: 1e15}(address(safe), address(token), recipient, SAFE_SALT, ARB_EID, lzOptions, signers, sigs);
+        module.recover{value: 1e15}(address(safe), address(token), recipient, SAFE_SALT, ARB_EID, deadline, lzOptions, signers, sigs);
 
         (uint32 dstEid, bytes memory message) = srcEndpoint.lastSendArgs();
         assertEq(uint256(dstEid), uint256(ARB_EID), "dstEid mismatch");
