@@ -33,6 +33,7 @@ contract TopUpDestTest is Utils, Constants {
     address public weth;
     bytes32 public constant TOP_UP_DEPOSITOR_ROLE = keccak256("DEPOSITOR_ROLE");
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
+    bytes32 private constant TOP_UP_DEST_STORAGE_LOCATION = 0xcf0121b0f46cee8ebfce652f58f0ad785e4fcd91a62127b83995179fc450fe00;
 
     uint256 public constant INITIAL_AMOUNT = 1000 ether;
     uint256 public constant DEPOSIT_AMOUNT = 500 ether;
@@ -201,14 +202,14 @@ contract TopUpDestTest is Utils, Constants {
 
         uint256 chainId = 100;
         bytes32 txHash = keccak256("transaction1");
-        bytes32 txId = topUpDest.getTxId(txHash, user1, address(token1));
+        bytes32 txId = topUpDest.getChainAwareTxId(chainId, txHash, user1, address(token1));
 
         vm.expectEmit(true, true, true, true);
         emit TopUpDest.TopUp(txId, user1, address(token1), txHash, chainId, TOP_UP_AMOUNT);
         topUpDest.topUpUserSafe(txHash, user1, chainId, address(token1), TOP_UP_AMOUNT);
 
         // Check state changes
-        assertTrue(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(chainId, txHash, user1, address(token1)));
         assertTrue(topUpDest.isTransactionCompletedByTxId(txId));
         assertEq(token1.balanceOf(user1), TOP_UP_AMOUNT);
         assertEq(token1.balanceOf(address(topUpDest)), DEPOSIT_AMOUNT - TOP_UP_AMOUNT);
@@ -251,9 +252,9 @@ contract TopUpDestTest is Utils, Constants {
         amounts[1] = TOP_UP_AMOUNT;
         amounts[2] = TOP_UP_AMOUNT;
 
-        bytes32 txId1 = topUpDest.getTxId(txHashes[0], users[0], tokens[0]);
-        bytes32 txId2 = topUpDest.getTxId(txHashes[1], users[1], tokens[1]);
-        bytes32 txId3 = topUpDest.getTxId(txHashes[2], users[2], tokens[2]);
+        bytes32 txId1 = topUpDest.getChainAwareTxId(chainIds[0], txHashes[0], users[0], tokens[0]);
+        bytes32 txId2 = topUpDest.getChainAwareTxId(chainIds[1], txHashes[1], users[1], tokens[1]);
+        bytes32 txId3 = topUpDest.getChainAwareTxId(chainIds[2], txHashes[2], users[2], tokens[2]);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpDest.TopUp(txId1, users[0], tokens[0], txHashes[0], chainIds[0], amounts[0]);
@@ -265,9 +266,9 @@ contract TopUpDestTest is Utils, Constants {
         topUpDest.topUpUserSafeBatch(txHashes, users, chainIds, tokens, amounts);
 
         // Check state changes
-        assertTrue(topUpDest.isTransactionCompleted(txHashes[0], users[0], tokens[0]));
-        assertTrue(topUpDest.isTransactionCompleted(txHashes[1], users[1], tokens[1]));
-        assertTrue(topUpDest.isTransactionCompleted(txHashes[2], users[2], tokens[2]));
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(chainIds[0], txHashes[0], users[0], tokens[0]));
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(chainIds[1], txHashes[1], users[1], tokens[1]));
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(chainIds[2], txHashes[2], users[2], tokens[2]));
         
         assertTrue(topUpDest.isTransactionCompletedByTxId(txId1));
         assertTrue(topUpDest.isTransactionCompletedByTxId(txId2));
@@ -438,15 +439,62 @@ contract TopUpDestTest is Utils, Constants {
         topUpDest.topUpUserSafe(txHash, user1, 100, address(token1), TOP_UP_AMOUNT);
         vm.stopPrank();
         
-        // Check transaction completed status
-        assertTrue(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
+        // New top-ups are recorded under chain-aware IDs; the legacy query remains false.
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(100, txHash, user1, address(token1)));
+        assertFalse(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
         
         // Check non-existent transaction
         assertFalse(topUpDest.isTransactionCompleted(keccak256("nonexistent_tx"), user1, address(token1)));
         
         // Check completed transaction with different parameters
-        assertFalse(topUpDest.isTransactionCompleted(txHash, user2, address(token1)));
-        assertFalse(topUpDest.isTransactionCompleted(txHash, user1, address(token2)));
+        assertFalse(topUpDest.isChainAwareTransactionCompleted(100, txHash, user2, address(token1)));
+        assertFalse(topUpDest.isChainAwareTransactionCompleted(100, txHash, user1, address(token2)));
+    }
+
+    function test_topUpUserSafe_sameSourceTxOnDifferentChains_succeedsOncePerChain() public {
+        vm.prank(depositor);
+        topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
+
+        bytes32 txHash = keccak256("same-source-tx");
+        uint256 chainIdA = 100;
+        uint256 chainIdB = 200;
+
+        vm.startPrank(topUpRole);
+        topUpDest.topUpUserSafe(txHash, user1, chainIdA, address(token1), TOP_UP_AMOUNT);
+        topUpDest.topUpUserSafe(txHash, user1, chainIdB, address(token1), TOP_UP_AMOUNT);
+        vm.stopPrank();
+
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(chainIdA, txHash, user1, address(token1)));
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(chainIdB, txHash, user1, address(token1)));
+        assertEq(token1.balanceOf(user1), TOP_UP_AMOUNT * 2);
+
+        vm.startPrank(topUpRole);
+        vm.expectRevert(TopUpDest.TopUpAlreadyProcessed.selector);
+        topUpDest.topUpUserSafe(txHash, user1, chainIdA, address(token1), TOP_UP_AMOUNT);
+        vm.expectRevert(TopUpDest.TopUpAlreadyProcessed.selector);
+        topUpDest.topUpUserSafe(txHash, user1, chainIdB, address(token1), TOP_UP_AMOUNT);
+        vm.stopPrank();
+    }
+
+    function test_topUpUserSafe_rejectsLegacyCompletedTransaction() public {
+        vm.prank(depositor);
+        topUpDest.deposit(address(token1), DEPOSIT_AMOUNT);
+
+        bytes32 txHash = keccak256("legacy-top-up");
+        bytes32 legacyTxId = topUpDest.getTxId(txHash, user1, address(token1));
+        bytes32 legacyMappingSlot = keccak256(
+            abi.encode(legacyTxId, bytes32(uint256(TOP_UP_DEST_STORAGE_LOCATION) + 1))
+        );
+        vm.store(address(topUpDest), legacyMappingSlot, bytes32(uint256(1)));
+
+        assertTrue(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(100, txHash, user1, address(token1)));
+
+        vm.prank(topUpRole);
+        vm.expectRevert(TopUpDest.TopUpAlreadyProcessed.selector);
+        topUpDest.topUpUserSafe(txHash, user1, 100, address(token1), TOP_UP_AMOUNT);
+
+        assertEq(token1.balanceOf(user1), 0);
     }
 
     function test_getters() public {
@@ -465,11 +513,12 @@ contract TopUpDestTest is Utils, Constants {
         assertEq(topUpDest.getDeposit(address(token1)), DEPOSIT_AMOUNT);
         assertEq(topUpDest.getDeposit(address(token2)), DEPOSIT_AMOUNT);
 
-        // Check isTransactionCompleted
-        assertTrue(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
+        // New top-ups are recorded under chain-aware IDs; the legacy query remains false.
+        assertTrue(topUpDest.isChainAwareTransactionCompleted(100, txHash, user1, address(token1)));
+        assertFalse(topUpDest.isTransactionCompleted(txHash, user1, address(token1)));
         
         // Check isTransactionCompletedByTxId
-        bytes32 txId = topUpDest.getTxId(txHash, user1, address(token1));
+        bytes32 txId = topUpDest.getChainAwareTxId(100, txHash, user1, address(token1));
         assertTrue(topUpDest.isTransactionCompletedByTxId(txId));
 
         // Check getEtherFiDataProvider
