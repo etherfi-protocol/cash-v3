@@ -343,12 +343,12 @@ contract VerifyOPMainnetBytecode is TradingStackBytecode {
     // ---- Swap, lend and withdraw proxies ----
 
     function test_verifyBytecode_AcrossSwapModule() public {
-        address local = address(new AcrossSwapModule(dataProviderProxy));
+        address local = address(new AcrossSwapModule(dataProviderProxy, _tradingAddr("TradingSafeFactory")));
         _verify("AcrossSwapModule", _getImpl(_cash("AcrossSwapModule")), local);
     }
 
     function test_verifyBytecode_EnsoSwapModule() public {
-        address local = address(new EnsoSwapModule(dataProviderProxy));
+        address local = address(new EnsoSwapModule(dataProviderProxy, _tradingAddr("TradingSafeFactory")));
         _verify("EnsoSwapModule", _getImpl(_cash("EnsoSwapModule")), local);
     }
 
