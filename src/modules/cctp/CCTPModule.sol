@@ -147,9 +147,6 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     /// @dev Storage location for the module's storage.
     bytes32 private constant CCTPModuleStorageLocation = 0x8acda1cfca4f5cfd72da8b3438a383a2a5be2d370022c8dfe2b3e8c2690b2e00;
 
-    /// @notice Role in the RoleRegistry permitted to configure assets, routes and the fee recipient.
-    bytes32 public constant CCTP_MODULE_ADMIN_ROLE = keccak256("CCTP_MODULE_ADMIN_ROLE");
-
     /// @notice Domain separator prefix for the `requestBridge` signature digest.
     bytes32 public constant REQUEST_BRIDGE_SIG = keccak256("cctpRequestBridge");
     /// @notice Domain separator prefix for the `cancelBridge` signature digest.
@@ -297,13 +294,13 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
     /**
      * @notice Sets the admin configuration for one or more assets.
-     * @dev Only callable by CCTP_MODULE_ADMIN_ROLE. Setting `tokenMessenger` to address(0) delists the
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE. Setting `tokenMessenger` to address(0) delists the
      *      asset for new requests; already-queued bridges keep their snapshotted messenger and still execute.
      * @param assets Assets to configure.
      * @param assetConfigs Configuration for each asset, index-aligned with `assets`.
      */
     function setAssetConfig(address[] memory assets, AssetConfig[] memory assetConfigs) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         _setAssetConfigs(assets, assetConfigs);
     }
 
@@ -319,14 +316,14 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
     /**
      * @notice Allows or denies destination domains for a given asset.
-     * @dev Only callable by CCTP_MODULE_ADMIN_ROLE. The allowlist is checked at request time only —
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE. The allowlist is checked at request time only —
      *      revoking a route does not block an already-queued bridge from executing.
      * @param asset Token whose routes are being updated.
      * @param domains CCTP destination domain ids to update.
      * @param allowed Allow/deny flag for each domain, index-aligned with `domains`.
      */
     function setAllowedRoutes(address asset, uint32[] calldata domains, bool[] calldata allowed) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         if (asset == address(0)) revert InvalidInput();
         if (domains.length != allowed.length) revert ArrayLengthMismatch();
         CCTPModuleStorage storage $ = _getCCTPModuleStorage();
@@ -337,9 +334,9 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
         emit AllowedRoutesSet(asset, domains, allowed);
     }
 
-    /// @dev Reverts unless `msg.sender` holds CCTP_MODULE_ADMIN_ROLE in the RoleRegistry.
-    function _onlyAdmin() internal view {
-        if (!IRoleRegistry(etherFiDataProvider.roleRegistry()).hasRole(CCTP_MODULE_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+    /// @dev Reverts unless `msg.sender` holds ADMIN_TIMELOCK_ROLE in the RoleRegistry.
+    function _onlyAdminTimelock() internal view {
+        IRoleRegistry(etherFiDataProvider.roleRegistry()).onlyAdminTimelock(msg.sender);
     }
 
     /**
@@ -352,12 +349,12 @@ contract CCTPModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
 
     /**
      * @notice Sets the module-wide recipient of the EtherFi service fee.
-     * @dev Only callable by CCTP_MODULE_ADMIN_ROLE. Recipient can be address(0) to disable service fees
+     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE. Recipient can be address(0) to disable service fees
      *      (any asset with providerFeeBps > 0 will then revert on request).
      * @param recipient New fee recipient.
      */
     function setproviderFeeRecipient(address recipient) external {
-        _onlyAdmin();
+        _onlyAdminTimelock();
         _getCCTPModuleStorage().providerFeeRecipient = recipient;
         emit providerFeeRecipientSet(recipient);
     }
