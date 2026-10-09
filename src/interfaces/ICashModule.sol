@@ -531,7 +531,7 @@ interface ICashModule {
 
     /**
      * @notice Configures an optional withdrawal-delay override for a module
-     * @dev Only callable by accounts with CASH_MODULE_CONTROLLER_ROLE. Disabling restores
+     * @dev Can only be called by the ADMIN_TIMELOCK_ROLE. Disabling restores
      *      the global withdrawal delay for the module.
      * @param module Module address to configure
      * @param delay Withdrawal delay in seconds
