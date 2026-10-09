@@ -733,8 +733,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + globalDelay);
     }
 
-    function test_configureModuleWithdrawalDelay_revertsForNonController() public {
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+    function test_configureModuleWithdrawalDelay_revertsForNonAdminTimelock() public {
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cashModule.configureModuleWithdrawalDelay(makeAddr("module"), 3, true);
     }
 
