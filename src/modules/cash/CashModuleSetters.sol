@@ -314,10 +314,10 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Configures or clears a module-specific withdrawal delay
-     * @dev Unconfigured modules continue to use the global withdrawal delay.
+     * @dev Can only be called by the ADMIN_TIMELOCK_ROLE. Unconfigured modules continue to use the global withdrawal delay.
      */
     function configureModuleWithdrawalDelay(address module, uint64 delay, bool enabled) external {
-        if (!roleRegistry().hasRole(CASH_MODULE_CONTROLLER_ROLE, msg.sender)) revert OnlyCashModuleController();
+        roleRegistry().onlyAdminTimelock(msg.sender);
         if (module == address(0)) revert InvalidInput();
 
         CashModuleStorage storage $ = _getCashModuleStorage();
