@@ -665,6 +665,85 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(request.recipient, module);
     }
 
+    function test_requestWithdrawalByModule_usesConfiguredModuleDelayAndCanRestoreGlobalDelay() public {
+        address module = makeAddr("module");
+        address[] memory modules = new address[](1);
+        modules[0] = module;
+        bool[] memory shouldWhitelist = new bool[](1);
+        shouldWhitelist[0] = true;
+
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
+
+        vm.expectEmit(true, false, false, true);
+        emit CashEventEmitter.ModuleWithdrawalDelayConfigured(module, 3, true);
+        cashModule.configureModuleWithdrawalDelay(module, 3, true);
+        vm.stopPrank();
+
+        assertEq(cashModule.getWithdrawalDelayForModule(module), 3);
+        vm.prank(module);
+        (uint64 callerDelay,,) = cashModule.getDelays();
+        assertEq(callerDelay, 3, "module caller should observe its configured delay");
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdc), address(safe), withdrawalAmount);
+        vm.prank(module);
+        cashModule.requestWithdrawalByModule(address(safe), address(usdc), withdrawalAmount);
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + 3);
+
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(module, 0, false);
+        (uint64 globalDelay,,) = cashModule.getDelays();
+        assertEq(cashModule.getWithdrawalDelayForModule(module), globalDelay);
+        vm.prank(module);
+        (callerDelay,,) = cashModule.getDelays();
+        assertEq(callerDelay, globalDelay, "disabled override should restore the global delay");
+    }
+
+    function test_getDelays_returnsZeroOverrideToModuleCaller() public {
+        address module = makeAddr("module");
+
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(module, 0, true);
+
+        vm.prank(module);
+        (uint64 moduleDelay,,) = cashModule.getDelays();
+        assertEq(moduleDelay, 0);
+
+        (uint64 globalDelay,,) = cashModule.getDelays();
+        assertTrue(globalDelay != 0, "unconfigured caller should still observe the global delay");
+    }
+
+    function test_requestWithdrawal_keepsGlobalDelayWhenModuleOverrideIsSet() public {
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(makeAddr("module"), 3, true);
+
+        uint256 withdrawalAmount = 50e6;
+        deal(address(usdc), address(safe), withdrawalAmount);
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = withdrawalAmount;
+
+        (uint64 globalDelay,,) = cashModule.getDelays();
+        assertTrue(globalDelay != 3);
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + globalDelay);
+    }
+
+    function test_configureModuleWithdrawalDelay_revertsForNonAdminTimelock() public {
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        cashModule.configureModuleWithdrawalDelay(makeAddr("module"), 3, true);
+    }
+
+    function test_configureModuleWithdrawalDelay_revertsForZeroModule() public {
+        vm.prank(owner);
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        cashModule.configureModuleWithdrawalDelay(address(0), 3, true);
+    }
+
     function test_cancelWithdrawalByModule_works() public {
         address module = makeAddr("module");
         address[] memory modules = new address[](1);

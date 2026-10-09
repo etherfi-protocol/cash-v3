@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
 import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
@@ -24,13 +25,15 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         auto-land at the safe.
  * @dev The Across destination-side `message` (MulticallHandler `Instructions` payload) and
  *      the deposit args are built off-chain by the BE and stored at request time, then
- *      forwarded verbatim — there is no on-chain sandwich enforcement. Off-chain monitoring
- *      catches BE bugs or mis-routing.
+ *      forwarded verbatim. The signed `order.recipient` is restricted to the user's Cash Safe /
+ *      Trading Safe pair, but the opaque destination payload is not decoded. Off-chain monitoring
+ *      remains responsible for route-payload consistency.
  *
- *      On the OP deploy the module hooks `CashModule.requestWithdrawalByModule` /
- *      `cancelWithdrawalByModule` to place a solvency hold for the duration of the
- *      CashModule withdrawal delay. Where the data provider's `cashModule` is the zero
- *      address the hold mechanic is skipped.
+ *      When the input is collateral or a card spend asset, the module hooks
+ *      `CashModule.requestWithdrawalByModule` / `cancelWithdrawalByModule` to place a solvency
+ *      hold for this module's CashModule withdrawal delay (a per-module override, falling back
+ *      to the global delay). Any other input — and every input where the data provider's
+ *      `cashModule` is the zero address — skips the hold and executes at request time.
  *
  *      Per-chain config (SpokePool, MulticallHandler) is admin-set; the module is otherwise
  *      stateless across safes apart from the one-active-swap-per-safe map.
@@ -78,6 +81,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         bytes swapData;
         address target;
         address multicallHandler;
+        bool hasWithdrawalHold;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.AcrossSwapModule
@@ -98,6 +102,9 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /// @dev Domain-separator-style prefixes for the digest the user signs.
     bytes32 private constant REQUEST_SWAP_SIG = keccak256("AcrossSwapModule.requestSwap");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("AcrossSwapModule.cancelSwap");
+
+    /// @notice TradingSafeFactory address on the trading chain; the CREATE3 deployer of each user's Trading Safe.
+    address private immutable tradingSafeFactory;
 
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id. `srcToken` / `dstChainId` are no longer
@@ -147,12 +154,17 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     error ZeroWithdrawalDelay();
     /// @notice Reverts when an origin-swap request is made before the periphery is configured.
     error PeripheryNotAllowlisted();
+    /// @notice Reverts when the signed recipient is not one of the user's two safes.
+    error InvalidRecipient();
 
-    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
-    ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
-    ///      `cashModule` is zero where there is no card spending (and therefore no lend gateway).
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance, and
+    ///      `tradingSafeFactory`) live in the IMPLEMENTATION's code — every upgrade impl must
+    ///      be constructed with the same dependencies. `cashModule` is zero where there is no
+    ///      card spending (and therefore no lend gateway).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _tradingSafeFactory) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+        if (_tradingSafeFactory == address(0)) revert InvalidInput();
+        tradingSafeFactory = _tradingSafeFactory;
         _disableInitializers();
     }
 
@@ -226,8 +238,9 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     /**
      * @notice Stores a user-signed swap intent for `safe` together with the BE-supplied
      *         Across deposit args and destination `message`, and places a CashModule
-     *         solvency hold for the source amount (if cashModule is installed on this
-     *         chain). `executeSwap` later replays exactly what is stored here.
+     *         solvency hold for the source amount when it is collateral or a spend asset
+     *         (otherwise it executes immediately). `executeSwap` later replays exactly what
+     *         is stored here.
      * @dev One active swap per safe; re-requesting requires cancel-or-execute first. The
      *      user signs over the FULL request — `order`, `depositArgs`, AND the destination
      *      `message` — so the keeper cannot substitute a different destination payload or
@@ -278,16 +291,17 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
         if ($.spokePool == address(0) || $.multicallHandler == address(0)) revert MissingConfig();
-        if (address(cashModule) != address(0)) {
-            (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        _validateRecipient(safe, order.recipient);
+        if (_requiresSolvencyHold(safe, order.srcToken)) {
+            uint64 withdrawalDelay = cashModule.getWithdrawalDelayForModule(address(this));
             if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
             if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
         }
     }
 
-    /// @dev Stores the verified swap and either places the CashModule hold (OP) or executes
-    ///      immediately (mainnet, where `cashModule == 0`). Split out to keep `requestSwap`'s
-    ///      stack under the legacy limit.
+    /// @dev Stores the verified swap and either places a CashModule solvency hold for a
+    ///      collateral or spend-asset input or executes immediately for any other input.
+    ///      Split out to keep `requestSwap`'s stack under the legacy limit.
     function _storeAndDispatch(
         address safe,
         Order calldata order,
@@ -299,6 +313,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
         (address target, address multicallHandler) = _requestConfig(swapData);
         bytes32 swapId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
+        bool hasWithdrawalHold = _requiresSolvencyHold(safe, order.srcToken);
         $.swaps[safe] = StoredSwap({
             order: order,
             depositArgs: depositArgs,
@@ -306,12 +321,13 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
             swapId: swapId,
             swapData: swapData,
             target: target,
-            multicallHandler: multicallHandler
+            multicallHandler: multicallHandler,
+            hasWithdrawalHold: hasWithdrawalHold
         });
 
         _emitSwapRequested(safe, swapId, order);
 
-        if (address(cashModule) != address(0)) {
+        if (hasWithdrawalHold) {
             cashModule.requestWithdrawalByModule(safe, order.srcToken, order.srcAmount);
         } else {
             executeSwap(safe);
@@ -350,7 +366,8 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         if (swap.target == address(0)) revert MissingConfig();
         if (swap.swapData.length == 0 && swap.multicallHandler == address(0)) revert MissingConfig();
 
-        if (address(cashModule) != address(0)) {
+        bool hasWithdrawalHold = _hasWithdrawalHold(safe, swap);
+        if (hasWithdrawalHold) {
             if (block.timestamp < cashModule.getData(safe).pendingWithdrawalRequest.finalizeTime) {
                 revert WithdrawalDelayNotElapsed();
             }
@@ -359,7 +376,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         delete $.swaps[safe];
         uint256 healthFactorBefore;
         if (address(cashModule) != address(0)) {
-            cashModule.cancelWithdrawalByModule(safe);
+            if (hasWithdrawalHold) cashModule.cancelWithdrawalByModule(safe);
             // Front bookend: request-time sourcing normally leaves the input loose through the delay;
             // this re-pulls any shortfall from the safe's Aave position and asserts the full input is
             // present before the safe approves the target. Runs after the cancel so the released
@@ -395,6 +412,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         data[2] = abi.encodeCall(IERC20.approve, (spokePool, 0));
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        _checkPendingWithdrawalBacked(safe);
     }
 
     /// @dev Origin-swap (anyToBridgeable): approve the allowlisted periphery for the input token,
@@ -417,6 +435,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         data[2] = abi.encodeCall(IERC20.approve, (periphery, 0));
 
         IEtherFiSafe(safe).execTransactionFromModule(to, values, data);
+        _checkPendingWithdrawalBacked(safe);
     }
 
     /// @dev Encoded separately to dodge stack-too-deep on the 12-arg `depositV3` call.
@@ -451,7 +470,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
      *         on `cashModule` which calls back into `cancelBridgeByCashModule` — that
      *         callback clears state and emits.
      * @dev Signed by the safe's owners (same threshold as `requestSwap`). The user's
-     *      BE-down escape hatch. Where `cashModule == 0` clears state directly.
+     *      BE-down escape hatch. A swap without a CashModule hold is cleared directly.
      */
     function cancelSwap(address safe, address[] calldata signers, bytes[] calldata signatures) external nonReentrant onlyEtherFiSafe(safe) {
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
@@ -462,14 +481,14 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         ).toEthSignedMessageHash();
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
 
-        bytes32 swapId = $.swaps[safe].swapId;
-        if (address(cashModule) != address(0)) {
+        StoredSwap memory swap = $.swaps[safe];
+        if (_hasWithdrawalHold(safe, swap)) {
             cashModule.cancelWithdrawalByModule(safe);
         } else {
-            // the if block cancelWithdrawalByModule calls the cancelBridgeByCashModule function 
-            // and cancels the swap already, so we need to delete the swap only in else block
+            // A held swap is cleared by the cancelBridgeByCashModule callback; a swap without a
+            // hold has no CashModule request to cancel, so we clear it here directly.
             delete $.swaps[safe];
-            emit SwapCancelled(safe, swapId);
+            emit SwapCancelled(safe, swap.swapId);
         }
     }
 
@@ -482,7 +501,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
      *      run after expiry, and it merely refunds the safe's own funds back to the safe (via
      *      `cancelWithdrawalByModule`) and clears state — there is no fund-movement authority to
      *      abuse, so it is safe to let the backend keeper (or anyone) call it. Mirrors
-     *      `cancelSwap`'s clearing path; where `cashModule == 0` state is cleared directly.
+     *      `cancelSwap`'s clearing path; a swap without a CashModule hold is cleared directly.
      */
     function cancelExpiredSwap(address safe) external nonReentrant onlyEtherFiSafe(safe) {
         AcrossSwapModuleStorage storage $ = _getAcrossSwapModuleStorage();
@@ -490,7 +509,7 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
         if (swap.order.srcToken == address(0)) revert NoActiveOrder();
         if (block.timestamp <= swap.order.deadline) revert OrderNotExpired();
 
-        if (address(cashModule) != address(0)) {
+        if (_hasWithdrawalHold(safe, swap)) {
             cashModule.cancelWithdrawalByModule(safe);
         } else {
             delete $.swaps[safe];
@@ -514,6 +533,30 @@ contract AcrossSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySa
     }
 
     // ---- Internals ----
+
+    function _validateRecipient(address safe, address recipient) internal view {
+        // The recipient may be the calling Safe itself.
+        if (recipient == safe) return;
+
+        if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
+            // Trading Safe -> its source Cash Safe.
+            if (safe != _predictTradingSafe(recipient)) revert InvalidRecipient();
+        } else {
+            // Cash Safe -> its CREATE3-derived Trading Safe.
+            if (recipient != _predictTradingSafe(safe)) revert InvalidRecipient();
+        }
+    }
+
+    function _predictTradingSafe(address cashSafe) internal view returns (address) {
+        return CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
+    }
+
+    /// @dev The pending-request check preserves swaps stored before `hasWithdrawalHold` was added.
+    function _hasWithdrawalHold(address safe, StoredSwap memory swap) internal view returns (bool) {
+        if (swap.hasWithdrawalHold) return true;
+        if (address(cashModule) == address(0)) return false;
+        return cashModule.getData(safe).pendingWithdrawalRequest.recipient == address(this);
+    }
 
     /// @dev Extracted from `requestSwap` to keep that function's stack budget under the
     ///      legacy codegen limit. Verifies the user's signature over the FULL request —

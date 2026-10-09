@@ -132,15 +132,25 @@ contract CashModuleCore is CashModuleStorageContract {
     }
 
     /**
-     * @notice Gets the current delay settings for the module
-     * @return withdrawalDelay Delay in seconds before a withdrawal can be finalized
+     * @notice Gets the current delay settings for the caller
+     * @dev The withdrawal delay uses the caller's module override when configured; the other delays are global.
+     *      Callers without an override receive the global withdrawal delay.
+     * @return withdrawalDelay Effective delay in seconds before the caller's withdrawal can be finalized
      * @return spendLimitDelay Delay in seconds before spending limit changes take effect
      * @return modeDelay Delay in seconds before a mode change takes effect
      */
     function getDelays() external view returns (uint64, uint64, uint64) {
         CashModuleStorage storage $ = _getCashModuleStorage();
 
-        return ($.withdrawalDelay, $.spendLimitDelay, $.modeDelay);
+        return (_withdrawalDelayForModule($, msg.sender), $.spendLimitDelay, $.modeDelay);
+    }
+
+    /**
+     * @notice Returns the effective withdrawal delay for `module`
+     * @dev Uses the module override when configured, otherwise the global withdrawal delay.
+     */
+    function getWithdrawalDelayForModule(address module) external view returns (uint64) {
+        return _withdrawalDelayForModule(_getCashModuleStorage(), module);
     }
 
     /**

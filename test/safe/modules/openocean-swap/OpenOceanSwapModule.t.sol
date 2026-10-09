@@ -1,14 +1,37 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/interfaces/IERC20Metadata.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Test } from "forge-std/Test.sol";
 
+import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
+import { IOpenOceanCaller, OpenOceanSwapDescription } from "../../../../src/interfaces/IOpenOcean.sol";
 import { OpenOceanSwapModule, ModuleBase, ModuleCheckBalance } from "../../../../src/modules/openocean-swap/OpenOceanSwapModule.sol";
 import { ArrayDeDupLib, EtherFiDataProvider, EtherFiSafe, EtherFiSafeErrors, SafeTestSetup, IDebtManager } from "../../SafeTestSetup.t.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
+
+contract CallbackOpenOceanRouter {
+    ICashModule internal immutable cashModule;
+
+    constructor(ICashModule _cashModule) {
+        cashModule = _cashModule;
+    }
+
+    function swap(
+        IOpenOceanCaller,
+        OpenOceanSwapDescription calldata desc,
+        IOpenOceanCaller.CallDescription[] calldata
+    ) external returns (uint256 returnAmount) {
+        // Place a hold while the input is still in the Safe, then consume the same input.
+        cashModule.requestWithdrawalByModule(msg.sender, address(desc.srcToken), desc.amount);
+        desc.srcToken.transferFrom(msg.sender, address(this), desc.amount);
+        desc.dstToken.transfer(desc.dstReceiver, desc.minReturnAmount);
+        return desc.minReturnAmount;
+    }
+}
 
 contract OpenOceanSwapModuleTest is SafeTestSetup {
     using MessageHashUtils for bytes32;
@@ -200,6 +223,71 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
 
         vm.expectRevert(ModuleCheckBalance.InsufficientAvailableBalanceOnSafe.selector);
         openOceanSwapModule.swap(address(safe), fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData, owners, signatures);
+    }
+
+    function test_swap_revertsWhenCallbackCreatesUnderBackedHold() public {
+        CallbackOpenOceanRouter callbackRouter = new CallbackOpenOceanRouter(cashModule);
+        OpenOceanSwapModule callbackModule = new OpenOceanSwapModule(address(callbackRouter), address(dataProvider));
+
+        address[] memory modules = new address[](2);
+        modules[0] = address(callbackModule);
+        modules[1] = address(callbackRouter);
+        bool[] memory shouldWhitelist = new bool[](2);
+        shouldWhitelist[0] = true;
+        shouldWhitelist[1] = true;
+
+        vm.startPrank(owner);
+        dataProvider.configureModules(modules, shouldWhitelist);
+        address[] memory withdrawalModules = new address[](1);
+        withdrawalModules[0] = address(callbackRouter);
+        bool[] memory enableWithdrawal = new bool[](1);
+        enableWithdrawal[0] = true;
+        cashModule.configureModulesCanRequestWithdraw(withdrawalModules, enableWithdrawal);
+        vm.stopPrank();
+
+        address[] memory safeModules = new address[](1);
+        safeModules[0] = address(callbackModule);
+        bool[] memory enableSafeModule = new bool[](1);
+        enableSafeModule[0] = true;
+        _configureModules(safeModules, enableSafeModule, new bytes[](1));
+
+        uint256 fromAssetAmount = 100e6;
+        uint256 minToAssetAmount = 1;
+        deal(address(usdc), address(safe), fromAssetAmount);
+        deal(address(weETH), address(callbackRouter), minToAssetAmount);
+
+        OpenOceanSwapDescription memory desc = OpenOceanSwapDescription({
+            srcToken: IERC20(address(usdc)),
+            dstToken: IERC20(address(weETH)),
+            srcReceiver: address(callbackRouter),
+            dstReceiver: address(safe),
+            amount: fromAssetAmount,
+            minReturnAmount: minToAssetAmount,
+            guaranteedAmount: minToAssetAmount,
+            flags: 0,
+            referrer: address(0),
+            permit: ""
+        });
+        IOpenOceanCaller.CallDescription[] memory calls = new IOpenOceanCaller.CallDescription[](0);
+        bytes memory swapData = abi.encodeCall(
+            CallbackOpenOceanRouter.swap,
+            (IOpenOceanCaller(address(0)), desc, calls)
+        );
+        (address[] memory owners, bytes[] memory signatures) = _createSwapSignaturesFor(
+            callbackModule,
+            safe.nonce(),
+            address(usdc),
+            address(weETH),
+            fromAssetAmount,
+            minToAssetAmount,
+            swapData
+        );
+
+        vm.expectRevert(ModuleCheckBalance.PendingWithdrawalUnderBacked.selector);
+        callbackModule.swap(address(safe), address(usdc), address(weETH), fromAssetAmount, minToAssetAmount, swapData, owners, signatures);
+
+        assertEq(usdc.balanceOf(address(safe)), fromAssetAmount, "revert should restore Safe input");
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0, "callback hold should roll back");
     }
 
     function test_swap_revertsWhenInsufficientNativeBalance() public {
@@ -424,12 +512,24 @@ contract OpenOceanSwapModuleTest is SafeTestSetup {
         uint256 minToAssetAmount, 
         bytes memory swapData
     ) internal view returns (address[] memory, bytes[] memory) {
+        return _createSwapSignaturesFor(openOceanSwapModule, nonceBefore, fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData);
+    }
+
+    function _createSwapSignaturesFor(
+        OpenOceanSwapModule targetModule,
+        uint256 nonceBefore,
+        address fromAsset,
+        address toAsset,
+        uint256 fromAssetAmount,
+        uint256 minToAssetAmount,
+        bytes memory swapData
+    ) internal view returns (address[] memory, bytes[] memory) {
         bytes32 digestHash = keccak256(abi.encodePacked(
-            openOceanSwapModule.SWAP_SIG(), 
-            block.chainid, 
-            address(openOceanSwapModule), 
-            nonceBefore, 
-            address(safe), 
+            targetModule.SWAP_SIG(),
+            block.chainid,
+            address(targetModule),
+            nonceBefore,
+            address(safe),
             abi.encode(fromAsset, toAsset, fromAssetAmount, minToAssetAmount, swapData)
         )).toEthSignedMessageHash();
 

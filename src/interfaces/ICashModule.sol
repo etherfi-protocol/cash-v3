@@ -441,6 +441,14 @@ interface ICashModule {
     function getDelays() external view returns (uint64, uint64, uint64);
 
     /**
+     * @notice Returns the effective withdrawal delay for a module
+     * @dev Falls back to the global withdrawal delay when no module override is configured.
+     * @param module Module address to query
+     * @return Effective withdrawal delay in seconds
+     */
+    function getWithdrawalDelayForModule(address module) external view returns (uint64);
+
+    /**
      * @notice Gets the current operating mode of a safe
      * @dev Considers pending mode changes that have passed their delay
      * @param safe Address of the EtherFi Safe
@@ -520,6 +528,16 @@ interface ICashModule {
      * @custom:throws OnlyWhitelistedModuleCanRequestWithdraw if the caller is not a whitelisted module
      */
     function requestWithdrawalByModule(address safe, address token, uint256 amount) external;
+
+    /**
+     * @notice Configures an optional withdrawal-delay override for a module
+     * @dev Can only be called by the ADMIN_TIMELOCK_ROLE. Disabling restores
+     *      the global withdrawal delay for the module.
+     * @param module Module address to configure
+     * @param delay Withdrawal delay in seconds
+     * @param enabled Whether the override should be enabled
+     */
+    function configureModuleWithdrawalDelay(address module, uint64 delay, bool enabled) external;
 
     /**
      * @notice Configures which modules can request withdrawals

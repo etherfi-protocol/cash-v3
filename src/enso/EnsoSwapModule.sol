@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { Address } from "@openzeppelin/contracts/utils/Address.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
+import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { IBridgeModule } from "../interfaces/IBridgeModule.sol";
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
@@ -26,19 +27,20 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         by the keeper at execution and forwarded through the safe to the Enso Router.
  * @dev The Enso calldata (`swapData`) is built off-chain by the BE via the Enso Route/Bundle
  *      API with the `router` routing strategy and stored at request time, then forwarded
- *      verbatim — there is no on-chain min-out / balance enforcement. Slippage protection
- *      lives entirely inside the Enso calldata; `order.minOut` is carried only for the
- *      signed intent and events. Off-chain monitoring catches BE bugs or mis-routing.
+ *      verbatim. The signed `order.recipient` is restricted to the user's Cash Safe /
+ *      Trading Safe pair, but the opaque route calldata is not decoded. Off-chain monitoring
+ *      remains responsible for route-payload consistency.
  *
  *      The module always executes via `EtherFiSafe.execTransactionFromModule`, which is a
  *      plain `call` (never `delegatecall`), so ONLY Enso's `router` strategy is usable here
  *      (approve the router, then call it). The `delegate` strategy is not supported.
  *
- *      On the OP deploy the module hooks `CashModule.requestWithdrawalByModule` /
- *      `cancelWithdrawalByModule` to place a solvency hold for the duration of the
- *      CashModule withdrawal delay. Where the data provider's `cashModule` is the zero
- *      address (e.g. the mainnet `TradingSafe`) the hold mechanic is skipped and the swap
- *      executes immediately at request time.
+ *      When the input is collateral or a card spend asset, the module hooks
+ *      `CashModule.requestWithdrawalByModule` / `cancelWithdrawalByModule` to place a solvency
+ *      hold for this module's CashModule withdrawal delay (a per-module override, falling back
+ *      to the global delay). Any other input — and every input where the data provider's
+ *      `cashModule` is the zero address (e.g. the mainnet `TradingSafe`) — skips the hold and
+ *      the swap executes immediately at request time.
  *
  *      The Enso Router address is admin-set (pinned) and every swap is forwarded only to it,
  *      mirroring how `AcrossSwapModule` pins its periphery. Enso recommends using the API's
@@ -78,6 +80,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         bytes32 swapId;
         address target;
         uint256 nativeFee;
+        bool hasWithdrawalHold;
     }
 
     /// @custom:storage-location erc7201:etherfi.storage.EnsoSwapModule
@@ -96,6 +99,9 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     bytes32 private constant REQUEST_SWAP_WITH_NATIVE_FEE_SIG = keccak256("EnsoSwapModule.requestSwapWithNativeFee");
     bytes32 private constant CANCEL_SWAP_SIG = keccak256("EnsoSwapModule.cancelSwap");
     address private constant NATIVE_TOKEN = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+    /// @notice TradingSafeFactory address on the trading chain; the CREATE3 deployer of each user's Trading Safe.
+    address private immutable tradingSafeFactory;
 
     /// @dev `swapId` is the second topic on every lifecycle event so consumers can filter or
     ///      join a swap's request/execute/cancel by id.
@@ -129,12 +135,17 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     error InsufficientOutputAmount();
     /// @notice Reverts when the native fee supplied by the keeper differs from the signed fee.
     error InvalidNativeFee();
+    /// @notice Reverts when the signed recipient is not one of the user's two safes.
+    error InvalidRecipient();
 
-    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance) live in the
-    ///      IMPLEMENTATION's code — every upgrade impl must be constructed with the same data provider.
-    ///      `cashModule` is zero where there is no card spending (and therefore no lend gateway).
+    /// @dev Immutables (`etherFiDataProvider`, `cashModule` via ModuleCheckBalance, and
+    ///      `tradingSafeFactory`) live in the IMPLEMENTATION's code — every upgrade impl must
+    ///      be constructed with the same dependencies. `cashModule` is zero where there is no
+    ///      card spending (and therefore no lend gateway).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor(address _etherFiDataProvider) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+    constructor(address _etherFiDataProvider, address _tradingSafeFactory) ModuleBase(_etherFiDataProvider) ModuleCheckBalance(_etherFiDataProvider) {
+        if (_tradingSafeFactory == address(0)) revert InvalidInput();
+        tradingSafeFactory = _tradingSafeFactory;
         _disableInitializers();
     }
 
@@ -192,8 +203,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
 
     /**
      * @notice Native-fee variant of `requestSwap`. On chains with a CashModule hold, the
-     *         keeper supplies the signed fee later to `executeSwap`. Without a CashModule,
-     *         execution is immediate and the fee must accompany this request.
+     *         keeper supplies the signed fee later to `executeSwap`. Without a collateral
+     *         hold, execution is immediate and the fee must accompany this request.
      */
     function requestSwapWithNativeFee(address safe, Order calldata order, bytes calldata swapData, uint256 nativeFee, address[] calldata signers, bytes[] calldata signatures) external payable whenNotPaused onlyEtherFiSafe(safe) {
         if (nativeFee == 0) revert InvalidNativeFee();
@@ -202,7 +213,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         if (order.dstChainId == block.chainid && order.dstToken == NATIVE_TOKEN && order.recipient == safe) {
             revert InvalidNativeFee();
         }
-        if (address(cashModule) != address(0) && msg.value != 0) revert InvalidNativeFee();
+        bool delayed = _requiresSolvencyHold(safe, order.srcToken);
+        if ((delayed && msg.value != 0) || (!delayed && msg.value != nativeFee)) revert InvalidNativeFee();
         _requestSwap(safe, order, swapData, nativeFee, true, signers, signatures);
     }
 
@@ -224,24 +236,26 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         }
         if ($.swaps[safe].order.srcToken != address(0)) revert OrderAlreadyActive();
         if ($.ensoRouter == address(0)) revert MissingConfig();
-        if (address(cashModule) != address(0)) {
-            (uint64 withdrawalDelay,,) = cashModule.getDelays();
+        _validateRecipient(safe, order.recipient);
+        if (_requiresSolvencyHold(safe, order.srcToken)) {
+            uint64 withdrawalDelay = cashModule.getWithdrawalDelayForModule(address(this));
             if (withdrawalDelay == 0) revert ZeroWithdrawalDelay();
             if (order.deadline <= block.timestamp + withdrawalDelay) revert DeadlineBeforeWithdrawalDelay();
         }
     }
 
-    /// @dev Stores the verified swap and either places the CashModule hold (OP) or executes
-    ///      immediately (mainnet, where `cashModule == 0`).
+    /// @dev Stores the verified swap and either places a CashModule solvency hold for a
+    ///      collateral or spend-asset input or executes immediately for any other input.
     function _storeAndDispatch(address safe, Order calldata order, bytes calldata swapData, uint256 nativeFee, uint256 nonce) internal {
         EnsoSwapModuleStorage storage $ = _getEnsoSwapModuleStorage();
         bytes32 swapId = keccak256(abi.encode(block.chainid, address(this), safe, nonce, order));
-        $.swaps[safe] = StoredSwap({ order: order, swapData: swapData, swapId: swapId, target: $.ensoRouter, nativeFee: nativeFee });
+        bool hasWithdrawalHold = _requiresSolvencyHold(safe, order.srcToken);
+        $.swaps[safe] = StoredSwap({ order: order, swapData: swapData, swapId: swapId, target: $.ensoRouter, nativeFee: nativeFee, hasWithdrawalHold: hasWithdrawalHold });
 
         _emitSwapRequested(safe, swapId, order);
         if (nativeFee != 0) emit NativeFeeRequested(safe, swapId, nativeFee);
 
-        if (address(cashModule) != address(0)) {
+        if (hasWithdrawalHold) {
             cashModule.requestWithdrawalByModule(safe, order.srcToken, order.srcAmount);
         } else {
             executeSwap(safe);
@@ -269,7 +283,8 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         if (swap.target == address(0)) revert MissingConfig();
         if (msg.value != swap.nativeFee) revert InvalidNativeFee();
 
-        if (address(cashModule) != address(0)) {
+        bool hasWithdrawalHold = _hasWithdrawalHold(safe, swap);
+        if (hasWithdrawalHold) {
             if (block.timestamp < cashModule.getData(safe).pendingWithdrawalRequest.finalizeTime) {
                 revert WithdrawalDelayNotElapsed();
             }
@@ -278,7 +293,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         delete $.swaps[safe];
         uint256 healthFactorBefore;
         if (address(cashModule) != address(0)) {
-            cashModule.cancelWithdrawalByModule(safe);
+            if (hasWithdrawalHold) cashModule.cancelWithdrawalByModule(safe);
             // Front bookend: request-time sourcing normally leaves the input loose through the delay;
             // this re-pulls any shortfall from the safe's Aave position and asserts the full input is
             // present before the safe approves the router. Runs after the cancel so the released
@@ -332,6 +347,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
                 _resupplyToGateway(safe, swap.order.dstToken, balanceAfter - balanceBefore);
             }
         }
+        _checkPendingWithdrawalBacked(safe);
     }
 
     function _balanceOf(address token, address account) internal view returns (uint256) {
@@ -354,14 +370,14 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         bytes32 digest = _cancelDigest(safe, nonce);
         if (!IEtherFiSafe(safe).checkSignatures(digest, signers, signatures)) revert InvalidSignatures();
 
-        bytes32 swapId = $.swaps[safe].swapId;
-        if (address(cashModule) != address(0)) {
+        StoredSwap memory swap = $.swaps[safe];
+        if (_hasWithdrawalHold(safe, swap)) {
             cashModule.cancelWithdrawalByModule(safe);
         } else {
-            // When cashModule is set, cancelWithdrawalByModule calls cancelBridgeByCashModule
-            // which clears the swap; where cashModule == 0 we clear it here directly.
+            // A held swap is cleared by the cancelBridgeByCashModule callback; a swap without a
+            // hold has no CashModule request to cancel, so we clear it here directly.
             delete $.swaps[safe];
-            emit SwapCancelled(safe, swapId);
+            emit SwapCancelled(safe, swap.swapId);
         }
     }
 
@@ -382,7 +398,7 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
         if (swap.order.srcToken == address(0)) revert NoActiveOrder();
         if (block.timestamp <= swap.order.deadline) revert OrderNotExpired();
 
-        if (address(cashModule) != address(0)) {
+        if (_hasWithdrawalHold(safe, swap)) {
             cashModule.cancelWithdrawalByModule(safe);
         } else {
             delete $.swaps[safe];
@@ -405,6 +421,30 @@ contract EnsoSwapModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewaySand
     }
 
     // ---- Internals ----
+
+    function _validateRecipient(address safe, address recipient) internal view {
+        // The recipient may be the calling Safe itself.
+        if (recipient == safe) return;
+
+        if (etherFiDataProvider.getEtherFiSafeFactory() == tradingSafeFactory) {
+            // Trading Safe -> its source Cash Safe.
+            if (safe != _predictTradingSafe(recipient)) revert InvalidRecipient();
+        } else {
+            // Cash Safe -> its CREATE3-derived Trading Safe.
+            if (recipient != _predictTradingSafe(safe)) revert InvalidRecipient();
+        }
+    }
+
+    function _predictTradingSafe(address cashSafe) internal view returns (address) {
+        return CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
+    }
+
+    /// @dev The pending-request check preserves swaps stored before `hasWithdrawalHold` was added.
+    function _hasWithdrawalHold(address safe, StoredSwap memory swap) internal view returns (bool) {
+        if (swap.hasWithdrawalHold) return true;
+        if (address(cashModule) == address(0)) return false;
+        return cashModule.getData(safe).pendingWithdrawalRequest.recipient == address(this);
+    }
 
     /// @dev Verifies the user's signature over the FULL request — the order AND the Enso
     ///      `swapData` — consuming a safe nonce so a signed request can't replay. Binding
