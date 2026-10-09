@@ -11,7 +11,7 @@ import { Utils } from "../utils/Utils.sol";
 
 /// @title TimelockHandoverOptimism
 /// @notice Generates the TWO Gnosis Safe Transaction Builder JSONs that hand RoleRegistry
-///         ownership on Optimism to the EtherFiTimelock (deployed by DeployTimelock.s.sol),
+///         ownership on Optimism to the EtherFiTimelock,
 ///         then simulates both bundles on the current fork and asserts the end state.
 ///
 ///         The ownership move uses solady Ownable's two-step handover:
@@ -32,7 +32,7 @@ import { Utils } from "../utils/Utils.sol";
 ///   forge script scripts/gnosis-txs/TimelockHandoverOptimism.s.sol --rpc-url $OPTIMISM_RPC
 contract TimelockHandoverOptimism is Utils, GnosisHelpers {
     /// @dev EtherFiTimelock at its deterministic CREATE3 address, deployed through the
-    ///      permissioned EtherFiDeployer (DeployTimelock.s.sol)
+    ///      permissioned EtherFiDeployer
     address constant ETHERFI_TIMELOCK = 0x9106cD76E10Ac60D1dd16144243416EbD2C64434;
     uint256 constant TIMELOCK_DELAY = 8 hours;
     bytes32 constant TL_PREDECESSOR = bytes32(0);
@@ -43,7 +43,7 @@ contract TimelockHandoverOptimism is Utils, GnosisHelpers {
 
     function run() public {
         require(block.chainid == 10, "TimelockHandover: Optimism only");
-        require(ETHERFI_TIMELOCK.code.length > 0, "EtherFiTimelock not deployed - run DeployTimelock.s.sol first");
+        require(ETHERFI_TIMELOCK.code.length > 0, "EtherFiTimelock not deployed");
         // Never hand RoleRegistry ownership to a mimic squatting the CREATE3 address: the code
         // at the hardcoded address must be exactly this build's EtherFiTimelock runtime code
         require(keccak256(ETHERFI_TIMELOCK.code) == keccak256(type(EtherFiTimelock).runtimeCode), "timelock bytecode != local EtherFiTimelock build");

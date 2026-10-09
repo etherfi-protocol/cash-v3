@@ -53,11 +53,6 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
     error InsufficientFee();
     /// @notice Thrown when refunding excess fee back to the caller fails
     error RefundFailed();
-    /// @notice Thrown when caller lacks the required module admin role
-    error Unauthorized();
-
-    /// @notice Role identifier for BeHYPE stake module administrators
-    bytes32 public constant BEHYPE_STAKE_MODULE_ADMIN_ROLE = keccak256("BEHYPE_STAKE_MODULE_ADMIN_ROLE");
 
     /**
      * @notice Contract constructor
@@ -100,11 +95,11 @@ contract BeHYPEStakeModule is ModuleBase, ModuleCheckBalance, ModuleLendGatewayS
      * @notice Sets the gas limit used when refunding excess fees
      * @dev Setting the gas limit to zero resets it back to the default value
      * @param refundGasLimit The gas limit to use when refunding excess fees
-     * @custom:throws Unauthorized If the caller lacks the module admin role
+     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
      */
     function setRefundGasLimit(uint32 refundGasLimit) external {
         IRoleRegistry roleRegistry = IRoleRegistry(etherFiDataProvider.roleRegistry());
-        if (!roleRegistry.hasRole(BEHYPE_STAKE_MODULE_ADMIN_ROLE, msg.sender)) revert Unauthorized();
+        roleRegistry.onlyAdmin(msg.sender);
 
         _getBeHYPEStakeModuleStorage().refundGasLimit = refundGasLimit;
         emit RefundGasLimitUpdated(refundGasLimit);
