@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { ERC4626Mock } from "@openzeppelin/contracts/mocks/token/ERC4626Mock.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 
@@ -488,5 +489,135 @@ contract TopUpDestTest is Utils, Constants {
 
         uint256 balanceAfter = IERC20(weth).balanceOf(address(topUpDest));
         assertEq(balanceAfter - balanceBefore, amount);
+    }
+
+    function _stockPair() internal returns (MockERC20 raw, ERC4626Mock wrapper) {
+        raw = new MockERC20("SPYx", "SPYx", 18);
+        wrapper = new ERC4626Mock(address(raw));
+        vm.prank(owner);
+        topUpDest.setStockWrappers(_one(address(raw)), _one(address(wrapper)));
+    }
+
+    function _one(address a) internal pure returns (address[] memory arr) {
+        arr = new address[](1);
+        arr[0] = a;
+    }
+
+    /// The timelock sets a raw-to-wrapper pair, and a zero wrapper removes it.
+    function test_setStockWrappers_setsAndRemoves() public {
+        (MockERC20 raw, ERC4626Mock wrapper) = _stockPair();
+        assertEq(topUpDest.stockWrapperFor(address(raw)), address(wrapper));
+
+        vm.prank(owner);
+        vm.expectEmit(true, true, true, true);
+        emit TopUpDest.StockWrapperSet(address(raw), address(0));
+        topUpDest.setStockWrappers(_one(address(raw)), _one(address(0)));
+        assertEq(topUpDest.stockWrapperFor(address(raw)), address(0));
+    }
+
+    /// A wrapper whose asset is not the raw stock is rejected.
+    function test_setStockWrappers_fails_whenWrapperAssetMismatch() public {
+        ERC4626Mock wrapper = new ERC4626Mock(address(token1));
+        vm.prank(owner);
+        vm.expectRevert(TopUpDest.InvalidWrapperAsset.selector);
+        topUpDest.setStockWrappers(_one(address(token2)), _one(address(wrapper)));
+    }
+
+    /// Mismatched array lengths are rejected.
+    function test_setStockWrappers_fails_whenArrayLengthsMismatch() public {
+        vm.prank(owner);
+        vm.expectRevert(TopUpDest.ArrayLengthMismatch.selector);
+        topUpDest.setStockWrappers(_one(address(token1)), new address[](2));
+    }
+
+    /// Only the timelock sets wrappers.
+    function test_setStockWrappers_fails_whenCallerNotAdminTimelock() public {
+        ERC4626Mock wrapper = new ERC4626Mock(address(token1));
+        vm.prank(depositor);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        topUpDest.setStockWrappers(_one(address(token1)), _one(address(wrapper)));
+    }
+
+    /// wrapStock turns the whole raw balance into wrapper and books it as float that topUpUserSafe can pay out.
+    function test_wrapStock_wrapsBalanceAndCreditsDeposit() public {
+        (MockERC20 raw, ERC4626Mock wrapper) = _stockPair();
+        raw.mint(address(topUpDest), TOP_UP_AMOUNT);
+
+        vm.prank(topUpRole);
+        vm.expectEmit(true, true, true, true);
+        emit TopUpDest.StockWrapped(address(raw), address(wrapper), TOP_UP_AMOUNT, TOP_UP_AMOUNT);
+        topUpDest.wrapStock(address(raw));
+
+        assertEq(raw.balanceOf(address(topUpDest)), 0);
+        assertEq(wrapper.balanceOf(address(topUpDest)), TOP_UP_AMOUNT);
+        assertEq(topUpDest.getDeposit(address(wrapper)), TOP_UP_AMOUNT);
+
+        // The wrapped shares are ordinary top-up float from here on
+        vm.prank(topUpRole);
+        topUpDest.topUpUserSafe(keccak256("bridge-tx"), user1, 1, address(wrapper), TOP_UP_AMOUNT);
+        assertEq(wrapper.balanceOf(user1), TOP_UP_AMOUNT);
+    }
+
+    /// Raw that came in through deposit() leaves the raw ledger; bridged raw was never booked, so only the wrapper is credited.
+    function test_wrapStock_lowersRawLedgerOnlyByWhatWasBooked() public {
+        (MockERC20 raw, ERC4626Mock wrapper) = _stockPair();
+        raw.mint(depositor, TOP_UP_AMOUNT);
+        vm.startPrank(depositor);
+        raw.approve(address(topUpDest), TOP_UP_AMOUNT);
+        topUpDest.deposit(address(raw), TOP_UP_AMOUNT);
+        vm.stopPrank();
+        raw.mint(address(topUpDest), TOP_UP_AMOUNT); // a bridge payout, never booked
+
+        vm.prank(topUpRole);
+        topUpDest.wrapStock(address(raw));
+
+        assertEq(topUpDest.getDeposit(address(raw)), 0, "booked raw should be released");
+        assertEq(topUpDest.getDeposit(address(wrapper)), 2 * TOP_UP_AMOUNT);
+    }
+
+    /// A deposit that mints no shares reverts rather than consuming the raw for nothing.
+    function test_wrapStock_fails_whenWrapperMintsNothing() public {
+        (MockERC20 raw, ERC4626Mock wrapper) = _stockPair();
+        raw.mint(address(wrapper), 10 * TOP_UP_AMOUNT); // inflate the share price so a dust deposit rounds to zero shares
+        raw.mint(address(topUpDest), 1);
+
+        vm.prank(topUpRole);
+        vm.expectRevert(TopUpDest.WrapMintedNothing.selector);
+        topUpDest.wrapStock(address(raw));
+    }
+
+    /// A raw stock without a wrapper is refused.
+    function test_wrapStock_fails_whenWrapperNotSet() public {
+        vm.prank(topUpRole);
+        vm.expectRevert(TopUpDest.StockWrapperNotSet.selector);
+        topUpDest.wrapStock(address(token1));
+    }
+
+    /// No raw balance means nothing to wrap.
+    function test_wrapStock_fails_whenNothingToWrap() public {
+        (MockERC20 raw,) = _stockPair();
+        vm.prank(topUpRole);
+        vm.expectRevert(TopUpDest.AmountCannotBeZero.selector);
+        topUpDest.wrapStock(address(raw));
+    }
+
+    /// Only the top-up role wraps.
+    function test_wrapStock_fails_whenCallerNotTopUpRole() public {
+        (MockERC20 raw,) = _stockPair();
+        raw.mint(address(topUpDest), TOP_UP_AMOUNT);
+        vm.prank(depositor);
+        vm.expectRevert();
+        topUpDest.wrapStock(address(raw));
+    }
+
+    /// Pause blocks wrapping.
+    function test_wrapStock_fails_whenPaused() public {
+        (MockERC20 raw,) = _stockPair();
+        raw.mint(address(topUpDest), TOP_UP_AMOUNT);
+        vm.prank(pauser);
+        topUpDest.pause();
+        vm.prank(topUpRole);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        topUpDest.wrapStock(address(raw));
     }
 }
