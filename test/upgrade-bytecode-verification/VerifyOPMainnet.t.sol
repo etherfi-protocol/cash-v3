@@ -400,6 +400,10 @@ contract VerifyOPMainnetBytecode is TradingStackBytecode {
     // ---- Other cash contracts ----
 
     function test_verifyBytecode_CCTPModule() public {
+        // CCTPModule setters moved from CCTP_MODULE_ADMIN_ROLE to ADMIN_TIMELOCK_ROLE (#343). The module is not
+        // upgradeable, so prod keeps the old bytecode until the re-gated module is deployed and
+        // deployments.json points at it. Re-enable then.
+        vm.skip(true);
         CCTPModule live = CCTPModule(_cash("CCTPModule"));
         address[] memory assets = new address[](1);
         assets[0] = cc.usdc;
