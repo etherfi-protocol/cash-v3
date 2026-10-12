@@ -49,9 +49,14 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 ///         Timelock Safe is not yet a proposer on Optimism, the queued governance Safe tx (nonce 136) that grants
 ///         it is replayed first.
 ///
+///         Bundles queued at earlier nonces on the same Safes can be replayed first with PRIOR_BUNDLES, a
+///         comma-separated list of Transaction Builder files run in order. The entry WARP moves the fork 2 days
+///         ahead, past both timelock delays.
+///
 /// Usage (no broadcast):
 ///   ENV=mainnet forge script scripts/cctp-regate/CCTPRegateProd3CP.s.sol --rpc-url $OPTIMISM_RPC
 ///   ENV=mainnet forge script scripts/cctp-regate/CCTPRegateProd3CP.s.sol --rpc-url $MAINNET_RPC
+///   Optional: PRIOR_BUNDLES=<file>,<file>,WARP,<file>
 contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCodeChecker {
     using stdJson for string;
 
@@ -116,6 +121,7 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
     function run() public {
         require(isEqualString(getEnv(), "mainnet"), "prod only: ENV must be mainnet");
         console.log("Fork block:", block.number);
+        _replayPriorBundles();
         if (block.chainid == 10) _runOptimism();
         else if (block.chainid == 1) _runEthereum();
         else revert("run on Optimism or Ethereum");
@@ -392,6 +398,21 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
     }
 
     // ═══════════════════════════════ shared ═══════════════════════════════
+
+    function _replayPriorBundles() internal {
+        string[] memory entries = vm.envOr("PRIOR_BUNDLES", ",", new string[](0));
+        for (uint256 i = 0; i < entries.length; ++i) {
+            if (isEqualString(entries[i], "WARP")) {
+                vm.warp(block.timestamp + UPGRADE_DELAY + 1);
+                console.log("Prior bundles: warped 2 days");
+                continue;
+            }
+            string memory json = vm.readFile(entries[i]);
+            require(vm.parseJsonUint(json, ".chainId") == block.chainid, "prior bundle is for another chain");
+            executeGnosisTransactionBundle(entries[i]);
+            console.log("Prior bundle replayed:", entries[i]);
+        }
+    }
 
     function _checkTimelock(address timelock, uint256 delay) internal view {
         require(keccak256(timelock.code) == keccak256(type(EtherFiTimelock).runtimeCode), "timelock bytecode != local build");
