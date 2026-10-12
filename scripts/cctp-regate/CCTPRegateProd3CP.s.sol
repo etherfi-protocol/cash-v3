@@ -23,8 +23,8 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 ///
 ///         Optimism (10), signed by the Admin Timelock Safe 0x4799...240B (3/6), a proposer and executor on the
 ///         8h operating timelock. Every call is gated on ADMIN_TIMELOCK_ROLE, which only that timelock holds:
-///           nonce 4  operatingTimelock.scheduleBatch
-///           nonce 5  operatingTimelock.executeBatch (not before 8 hours after nonce 4 executes)
+///           nonce 3  operatingTimelock.scheduleBatch
+///           nonce 5  operatingTimelock.executeBatch (not before 8 hours after nonce 3 executes)
 ///         The batch enables the re-gated CCTPModule next to the live one and copies the live config:
 ///           a. EtherFiDataProvider.configureDefaultModules([new], [true])  (also whitelists it)
 ///           b. CashModule.configureModulesCanRequestWithdraw([new], [true])
@@ -35,11 +35,14 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 ///
 ///         Ethereum (1), signed by the governance Safe 0xA6cf...AAC4, a proposer and executor on the 2-day upgrade
 ///         timelock, which owns the trading RoleRegistry:
-///           nonce 71  upgradeTimelock.scheduleBatch
-///           nonce 72  upgradeTimelock.executeBatch (not before 2 days after nonce 71 executes)
+///           nonce 70  upgradeTimelock.scheduleBatch
+///           nonce 72  upgradeTimelock.executeBatch (not before 2 days after nonce 70 executes)
 ///         The batch:
 ///           a. TradingLens.upgradeToAndCall(new impl, "")
 ///           b. trading RoleRegistry.grantRole(TRADING_LENS_TOKEN_LISTER_ROLE, listing wallet)
+///
+///         The nonces interleave with 3CP-725 on the same Safes: it takes Admin Timelock Safe nonces 2 and 4 and
+///         governance Safe nonces 69 and 71, so both 3CPs wait out their timelock delays at the same time.
 ///
 ///         Safe Transaction Builder files carry no nonce; the nonce is in each file name and must be set when the
 ///         bundle is created in the Safe UI.
@@ -49,14 +52,15 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 ///         Timelock Safe is not yet a proposer on Optimism, the queued governance Safe tx (nonce 136) that grants
 ///         it is replayed first.
 ///
-///         Bundles queued at earlier nonces on the same Safes can be replayed first with PRIOR_BUNDLES, a
-///         comma-separated list of Transaction Builder files run in order. The entry WARP moves the fork 2 days
+///         Bundles queued at other nonces on the same Safes can be replayed with PRIOR_BUNDLES (before this 3CP's
+///         schedule) and BETWEEN_BUNDLES (after its schedule and delay, right before its execute). Each is a
+///         comma-separated list of Transaction Builder files run in order; the entry WARP moves the fork 2 days
 ///         ahead, past both timelock delays.
 ///
 /// Usage (no broadcast):
 ///   ENV=mainnet forge script scripts/cctp-regate/CCTPRegateProd3CP.s.sol --rpc-url $OPTIMISM_RPC
 ///   ENV=mainnet forge script scripts/cctp-regate/CCTPRegateProd3CP.s.sol --rpc-url $MAINNET_RPC
-///   Optional: PRIOR_BUNDLES=<file>,<file>,WARP,<file>
+///   Optional: PRIOR_BUNDLES=<file>,<file>  BETWEEN_BUNDLES=WARP,<file>
 contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCodeChecker {
     using stdJson for string;
 
@@ -69,8 +73,10 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
     uint256 internal constant OPERATING_DELAY = 8 hours;
     uint256 internal constant UPGRADE_DELAY = 2 days;
 
-    uint256 internal constant OP_SCHEDULE_NONCE = 4;
-    uint256 internal constant ETH_SCHEDULE_NONCE = 71;
+    uint256 internal constant OP_SCHEDULE_NONCE = 3;
+    uint256 internal constant OP_EXECUTE_NONCE = 5;
+    uint256 internal constant ETH_SCHEDULE_NONCE = 70;
+    uint256 internal constant ETH_EXECUTE_NONCE = 72;
 
     bytes32 internal constant TL_PREDECESSOR = bytes32(0);
     bytes32 internal constant TL_SALT_OP = keccak256("CCTPRegate.OP.EnableCCTPModule.v1");
@@ -118,10 +124,15 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
     uint256 internal defaultsBefore;
     uint256 internal requestersBefore;
 
+    // Ethereum state read right before the execute
+    address[] internal tokensBefore;
+    address[] internal adminsBefore;
+    address[] internal atlBefore;
+
     function run() public {
         require(isEqualString(getEnv(), "mainnet"), "prod only: ENV must be mainnet");
         console.log("Fork block:", block.number);
-        _replayPriorBundles();
+        _replayBundles("PRIOR_BUNDLES");
         if (block.chainid == 10) _runOptimism();
         else if (block.chainid == 1) _runEthereum();
         else revert("run on Optimism or Ethereum");
@@ -154,7 +165,7 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         bytes32 id = TimelockController(payable(OPERATING_TIMELOCK)).hashOperationBatch(targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, TL_SALT_OP);
         require(!TimelockController(payable(OPERATING_TIMELOCK)).isOperation(id), "operation already scheduled");
 
-        (string memory schedulePath, string memory executePath) = _writeBundles(ADMIN_TIMELOCK_SAFE, OPERATING_TIMELOCK, OPERATING_DELAY, TL_SALT_OP, OP_SCHEDULE_NONCE, "op");
+        (string memory schedulePath, string memory executePath) = _writeBundles(ADMIN_TIMELOCK_SAFE, OPERATING_TIMELOCK, OPERATING_DELAY, TL_SALT_OP, OP_SCHEDULE_NONCE, OP_EXECUTE_NONCE, "op");
         _simulateOptimism(id, schedulePath, executePath);
         _assertOptimismEndState();
 
@@ -184,9 +195,6 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
 
     function _simulateOptimism(bytes32 id, string memory schedulePath, string memory executePath) internal {
         TimelockController tl = TimelockController(payable(OPERATING_TIMELOCK));
-        whitelistedBefore = dataProvider.getWhitelistedModules().length;
-        defaultsBefore = dataProvider.getDefaultModules().length;
-        requestersBefore = cashModule.getWhitelistedModulesCanRequestWithdraw().length;
 
         // Neither Safe can configure the new module directly; the governance Safe still holds the old
         // CCTP_MODULE_ADMIN_ROLE, which the new module no longer accepts
@@ -195,13 +203,19 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         _expectRevert(ADMIN_TIMELOCK_SAFE, NEW_MODULE, payloads[3], "Admin Timelock Safe configured the new module directly");
         _expectRevert(GOVERNANCE_SAFE, address(dataProvider), payloads[0], "governance Safe enabled the module directly");
 
-        console.log("=== Simulating schedule (Admin Timelock Safe nonce 4) ===");
+        console.log("=== Simulating schedule (Admin Timelock Safe nonce 3) ===");
         executeGnosisTransactionBundle(schedulePath);
         require(tl.isOperationPending(id) && !tl.isOperationReady(id), "operation not pending after schedule");
         _expectRevert(ADMIN_TIMELOCK_SAFE, OPERATING_TIMELOCK, _executeData(TL_SALT_OP), "executeBatch succeeded before the delay");
 
         vm.warp(block.timestamp + OPERATING_DELAY + 1);
         require(tl.isOperationReady(id), "operation not ready after 8 hours");
+        _replayBundles("BETWEEN_BUNDLES");
+
+        // Counted right before the execute, so changes from bundles replayed in between are not attributed to it
+        whitelistedBefore = dataProvider.getWhitelistedModules().length;
+        defaultsBefore = dataProvider.getDefaultModules().length;
+        requestersBefore = cashModule.getWhitelistedModulesCanRequestWithdraw().length;
 
         console.log("=== Simulating execute (Admin Timelock Safe nonce 5) ===");
         executeGnosisTransactionBundle(executePath);
@@ -326,17 +340,13 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         bytes32 id = tl.hashOperationBatch(targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, TL_SALT_ETH);
         require(!tl.isOperation(id), "operation already scheduled");
 
-        (string memory schedulePath, string memory executePath) = _writeBundles(GOVERNANCE_SAFE, UPGRADE_TIMELOCK, UPGRADE_DELAY, TL_SALT_ETH, ETH_SCHEDULE_NONCE, "eth");
-
-        address[] memory tokensBefore = lens.getSupportedTokens();
-        address[] memory adminsBefore = registry.roleHolders(registry.ADMIN_ROLE());
-        address[] memory atlBefore = registry.roleHolders(registry.ADMIN_TIMELOCK_ROLE());
+        (string memory schedulePath, string memory executePath) = _writeBundles(GOVERNANCE_SAFE, UPGRADE_TIMELOCK, UPGRADE_DELAY, TL_SALT_ETH, ETH_SCHEDULE_NONCE, ETH_EXECUTE_NONCE, "eth");
 
         // The Safe cannot upgrade or grant directly
         _expectRevert(GOVERNANCE_SAFE, TRADING_LENS, payloads[0], "Safe upgraded the lens directly");
         _expectRevert(GOVERNANCE_SAFE, TRADING_REGISTRY, payloads[1], "Safe granted the role directly");
 
-        console.log("=== Simulating schedule (governance Safe nonce 71) ===");
+        console.log("=== Simulating schedule (governance Safe nonce 70) ===");
         executeGnosisTransactionBundle(schedulePath);
         require(tl.isOperationPending(id) && !tl.isOperationReady(id), "operation not pending after schedule");
         _expectRevert(GOVERNANCE_SAFE, UPGRADE_TIMELOCK, _executeData(TL_SALT_ETH), "executeBatch succeeded before the delay");
@@ -345,6 +355,12 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
 
         vm.warp(block.timestamp + UPGRADE_DELAY);
         require(tl.isOperationReady(id), "operation not ready after 2 days");
+        _replayBundles("BETWEEN_BUNDLES");
+
+        // Read right before the execute, so changes from bundles replayed in between are not attributed to it
+        tokensBefore = lens.getSupportedTokens();
+        adminsBefore = registry.roleHolders(registry.ADMIN_ROLE());
+        atlBefore = registry.roleHolders(registry.ADMIN_TIMELOCK_ROLE());
 
         console.log("=== Simulating execute (governance Safe nonce 72) ===");
         executeGnosisTransactionBundle(executePath);
@@ -399,18 +415,18 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
 
     // ═══════════════════════════════ shared ═══════════════════════════════
 
-    function _replayPriorBundles() internal {
-        string[] memory entries = vm.envOr("PRIOR_BUNDLES", ",", new string[](0));
+    function _replayBundles(string memory envKey) internal {
+        string[] memory entries = vm.envOr(envKey, ",", new string[](0));
         for (uint256 i = 0; i < entries.length; ++i) {
             if (isEqualString(entries[i], "WARP")) {
                 vm.warp(block.timestamp + UPGRADE_DELAY + 1);
-                console.log("Prior bundles: warped 2 days");
+                console.log(envKey, ": warped 2 days");
                 continue;
             }
             string memory json = vm.readFile(entries[i]);
-            require(vm.parseJsonUint(json, ".chainId") == block.chainid, "prior bundle is for another chain");
+            require(vm.parseJsonUint(json, ".chainId") == block.chainid, "replayed bundle is for another chain");
             executeGnosisTransactionBundle(entries[i]);
-            console.log("Prior bundle replayed:", entries[i]);
+            console.log(envKey, "replayed:", entries[i]);
         }
     }
 
@@ -429,15 +445,18 @@ contract CCTPRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         return abi.encodeCall(TimelockController.executeBatch, (targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, salt));
     }
 
-    function _writeBundles(address safe, address timelock, uint256 delay, bytes32 salt, uint256 nonce, string memory chain) internal returns (string memory schedulePath, string memory executePath) {
-        string memory header = _getGnosisHeader(vm.toString(block.chainid), addressToHex(safe));
+    function _writeBundles(address safe, address timelock, uint256 delay, bytes32 salt, uint256 scheduleNonce, uint256 executeNonce, string memory chain) internal returns (string memory schedulePath, string memory executePath) {
         string memory prefix = string.concat("./output/CCTPRegate-", chain, "-", vm.toString(block.chainid), "-");
-        schedulePath = string.concat(prefix, "nonce", vm.toString(nonce), "-schedule.json");
-        executePath = string.concat(prefix, "nonce", vm.toString(nonce + 1), "-execute.json");
-        vm.writeFile(schedulePath, string.concat(header, _getGnosisTransaction(addressToHex(timelock), iToHex(_scheduleData(delay, salt)), "0", true)));
-        vm.writeFile(executePath, string.concat(header, _getGnosisTransaction(addressToHex(timelock), iToHex(_executeData(salt)), "0", true)));
-        console.log("Wrote", schedulePath);
-        console.log("Wrote", executePath);
+        schedulePath = string.concat(prefix, "nonce", vm.toString(scheduleNonce), "-schedule.json");
+        executePath = string.concat(prefix, "nonce", vm.toString(executeNonce), "-execute.json");
+        _writeBundle(schedulePath, safe, timelock, _scheduleData(delay, salt));
+        _writeBundle(executePath, safe, timelock, _executeData(salt));
+    }
+
+    function _writeBundle(string memory path, address safe, address timelock, bytes memory data) internal {
+        string memory header = _getGnosisHeader(vm.toString(block.chainid), addressToHex(safe));
+        vm.writeFile(path, string.concat(header, _getGnosisTransaction(addressToHex(timelock), iToHex(data), "0", true)));
+        console.log("Wrote", path);
     }
 
     function _expectRevert(address from, address to, bytes memory data, string memory err) internal {
