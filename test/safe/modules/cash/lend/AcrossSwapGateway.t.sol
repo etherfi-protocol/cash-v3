@@ -7,6 +7,7 @@ import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { AcrossSwapModule } from "../../../../../src/across/AcrossSwapModule.sol";
+import { ModuleCheckBalance } from "../../../../../src/modules/ModuleCheckBalance.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /// @dev SpokePool stand-in that PULLS the deposit's input like the real one, so post-execute
@@ -15,8 +16,22 @@ import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 ///      straight out of calldata (args 2 and 4 after the 4-byte selector).
 contract PullingSpokePoolStub {
     uint256 public callCount;
+    address public hookTarget;
+    bytes public hookData;
+
+    /// @dev One-shot call made before the pull, standing in for a callback-capable route.
+    function setHook(address target, bytes calldata data) external {
+        hookTarget = target;
+        hookData = data;
+    }
 
     fallback() external payable {
+        if (hookTarget != address(0)) {
+            address target = hookTarget;
+            hookTarget = address(0);
+            (bool ok, bytes memory reason) = target.call(hookData);
+            if (!ok) assembly { revert(add(reason, 32), mload(reason)) }
+        }
         address inputToken = address(uint160(uint256(bytes32(msg.data[68:100]))));
         uint256 inputAmount = uint256(bytes32(msg.data[132:164]));
         IERC20(inputToken).transferFrom(msg.sender, address(this), inputAmount);
@@ -109,6 +124,20 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
         assertEq(spokePool.callCount(), 1, "deposit not dispatched");
     }
 
+    // L-01: a callback during the deposit places a new hold on the input before the spoke pool pulls it.
+    // The hold's request-time balance check passes, so only the post-call check can reject the under-backed hold.
+    function test_executeSwap_revertsWhenCallbackHoldIsUnderBacked() public {
+        deal(address(usdc), address(safe), SRC_AMOUNT);
+        _request(_baseOrder());
+        _warpPastDelay();
+
+        spokePool.setHook(address(swapModule), _requestCalldata(_baseOrder()));
+
+        vm.expectRevert(ModuleCheckBalance.PendingWithdrawalUnderBacked.selector);
+        vm.prank(keeper);
+        swapModule.executeSwap(address(safe));
+    }
+
     // ---- Helpers ----
 
     function _baseOrder() internal returns (AcrossSwapModule.Order memory) {
@@ -134,6 +163,11 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
     }
 
     function _request(AcrossSwapModule.Order memory order) internal {
+        (bool ok, bytes memory reason) = address(swapModule).call(_requestCalldata(order));
+        if (!ok) assembly { revert(add(reason, 32), mload(reason)) }
+    }
+
+    function _requestCalldata(AcrossSwapModule.Order memory order) internal view returns (bytes memory) {
         bytes32 digest = keccak256(abi.encodePacked(
             keccak256("AcrossSwapModule.requestSwap"),
             block.chainid,
@@ -148,7 +182,9 @@ contract AcrossSwapGatewayTest is CashGatewayTestSetup {
             swapModule.getMulticallHandler()
         )).toEthSignedMessageHash();
         (address[] memory signers, bytes[] memory sigs) = _twoSig(digest);
-        swapModule.requestSwap(address(safe), order, _baseDepositArgs(), FAKE_MESSAGE, "", signers, sigs);
+        return abi.encodeCall(
+            AcrossSwapModule.requestSwap, (address(safe), order, _baseDepositArgs(), FAKE_MESSAGE, "", signers, sigs)
+        );
     }
 
     function _twoSig(bytes32 digest) internal view returns (address[] memory, bytes[] memory) {

@@ -106,9 +106,9 @@ contract SafeAssetRecoveryModuleForkE2E is Test {
     function _whitelistModule() internal {
         EtherFiDataProvider dp = EtherFiDataProvider(DATA_PROVIDER);
         IRoleRegistry rr = IRoleRegistry(ROLE_REGISTRY);
-        bytes32 role = dp.DATA_PROVIDER_ADMIN_ROLE();
+        // configureModules is gated on ADMIN_TIMELOCK_ROLE (held by the 8h timelock in prod)
         vm.prank(rr.owner());
-        rr.grantRole(role, address(this));
+        rr.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), address(this));
 
         address[] memory mods = new address[](1);
         mods[0] = address(module);

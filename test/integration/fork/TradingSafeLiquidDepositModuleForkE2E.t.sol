@@ -88,7 +88,8 @@ contract TradingSafeLiquidDepositModuleForkE2E is Test {
         address roleRegistryOwner = roleRegistry.owner();
         vm.startPrank(roleRegistryOwner);
         roleRegistry.grantRole(factory.TRADING_SAFE_FACTORY_ADMIN_ROLE(), address(this));
-        roleRegistry.grantRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), address(this));
+        roleRegistry.grantRole(keccak256("DATA_PROVIDER_ADMIN_ROLE"), address(this));
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), address(this));
         vm.stopPrank();
 
         address[] memory owners = new address[](1);

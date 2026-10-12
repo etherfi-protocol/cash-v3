@@ -41,7 +41,7 @@ contract ConfigureZchfRelayEthereum3CP is GnosisHelpers, Utils, Test {
         // Roles: read off the contracts, then checked on the registry they point at
         IRoleRegistryLike registry = IRoleRegistryLike(IRoleRegistryAwareLike(address(pp)).roleRegistry());
         require(address(registry) == relay.roleRegistry(), "provider and relay disagree on the RoleRegistry");
-        require(registry.hasRole(pp.PRICE_PROVIDER_ADMIN_ROLE(), C.OPERATING_SAFE), "Operating Safe lacks PRICE_PROVIDER_ADMIN_ROLE");
+        require(registry.hasRole(keccak256("PRICE_PROVIDER_ADMIN_ROLE"), C.OPERATING_SAFE), "Operating Safe lacks PRICE_PROVIDER_ADMIN_ROLE");
         require(registry.hasRole(relay.PRICE_RELAY_ADMIN_ROLE(), C.OPERATING_SAFE), "Operating Safe lacks PRICE_RELAY_ADMIN_ROLE");
 
         // Pre-state: nothing ZCHF-shaped on the relay yet, and the source is alive

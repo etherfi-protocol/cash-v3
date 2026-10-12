@@ -212,7 +212,8 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
 
     /**
      * @notice Sets the `TopUpFactory` whose `isTokenSupported` gates `redirectToTopUp`.
-     * @dev Admin-only. Mirrors how `TopUpFactory` holds a mutable `tradingSafeFactory`
+     * @dev Routes user-fund redirects, so it is gated like an upgrade: only the RoleRegistry
+     *      owner (the upgrade timelock) may call it. Mirrors how `TopUpFactory` holds a mutable `tradingSafeFactory`
      *      reference, so the supported-asset source can change without a beacon upgrade.
      * @param _topUpFactory Address of the `TopUpFactory` on this chain.
      * @custom:throws TopUpFactoryCannotBeZeroAddress If `_topUpFactory == address(0)`.
@@ -233,7 +234,7 @@ contract TradingSafeFactory is BeaconFactory, ITradingSafeFactory {
 
     /**
      * @notice Sets the `TradingLens` registry backing `isSupportedToken`.
-     * @dev Admin-only. The lens owns the supported-trading-token set; the factory exposes it
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
      *      so cross-chain callers (the TopUp source factory) can gate redirects on it.
      * @param _tradingLens Address of the `TradingLens` on this chain.
      * @custom:throws TradingLensCannotBeZeroAddress If `_tradingLens == address(0)`.

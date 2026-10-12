@@ -111,7 +111,7 @@ contract EnableCCTPModuleOptimism is EtherFiDeployerHelper, GnosisHelpers {
         require(tl.hasRole(tl.EXECUTOR_ROLE(), SAFE), "Safe is not a timelock executor");
         require(!tl.isOperation(opId), "operation already scheduled");
         require(!roleRegistry.hasRole(role, SAFE), "Safe already holds CCTP_MODULE_ADMIN_ROLE");
-        require(roleRegistry.hasRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), SAFE), "Safe lacks DATA_PROVIDER_ADMIN_ROLE");
+        require(roleRegistry.hasRole(keccak256("DATA_PROVIDER_ADMIN_ROLE"), SAFE), "Safe lacks DATA_PROVIDER_ADMIN_ROLE");
         require(roleRegistry.hasRole(keccak256("CASH_MODULE_CONTROLLER_ROLE"), SAFE), "Safe lacks CASH_MODULE_CONTROLLER_ROLE");
         require(!dataProvider.isWhitelistedModule(MODULE), "module already whitelisted");
         require(!_canRequestWithdraw(MODULE), "module already allowed to request withdrawals");

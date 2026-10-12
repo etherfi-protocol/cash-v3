@@ -104,8 +104,8 @@ contract DeployStargateTaxiOptimism is EtherFiDeployerHelper, GnosisHelpers, Con
         require(deployments.readAddress(".addresses.SettlementDispatcherPix") == PIX_PROXY, "unexpected PIX proxy");
         require(deployments.readAddress(".addresses.SettlementDispatcherCardOrder") == CARD_ORDER_PROXY, "unexpected CardOrder proxy");
 
-        require(roleRegistry.hasRole(dataProvider.DATA_PROVIDER_ADMIN_ROLE(), SAFE), "Safe lacks DATA_PROVIDER_ADMIN_ROLE");
-        require(roleRegistry.hasRole(cashModule.CASH_MODULE_CONTROLLER_ROLE(), SAFE), "Safe lacks CASH_MODULE_CONTROLLER_ROLE");
+        require(roleRegistry.hasRole(keccak256("DATA_PROVIDER_ADMIN_ROLE"), SAFE), "Safe lacks DATA_PROVIDER_ADMIN_ROLE");
+        require(roleRegistry.hasRole(keccak256("CASH_MODULE_CONTROLLER_ROLE"), SAFE), "Safe lacks CASH_MODULE_CONTROLLER_ROLE");
         require(roleRegistry.owner() == ETHERFI_TIMELOCK, "RoleRegistry owner is not the timelock");
         require(timelockController.getMinDelay() == TIMELOCK_DELAY, "unexpected timelock delay");
         require(timelockController.hasRole(timelockController.PROPOSER_ROLE(), SAFE), "Safe is not a proposer");

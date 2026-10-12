@@ -5,6 +5,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { ModuleCheckBalance } from "../../../../../src/modules/ModuleCheckBalance.sol";
+import { ModuleLendGatewaySandwich } from "../../../../../src/modules/ModuleLendGatewaySandwich.sol";
 import { LiquidUSDLiquifierOPModule } from "../../../../../src/modules/etherfi/LiquidUSDLiquifierOP.sol";
 import { AccountantWithRateProviders, ILayerZeroTeller } from "../../../../../src/interfaces/ILayerZeroTeller.sol";
 import { PriceProvider } from "../../../../../src/oracle/PriceProvider.sol";
@@ -125,6 +126,28 @@ contract LiquidUsdLiquifierGatewayTest is CashGatewayTestSetup {
         assertApproxEqAbs(gw.suppliedOf(address(safe), address(liquidUsd)), 1000e6 - expectedLiquidUsd, 2, "supplied LiquidUSD not debited");
         assertEq(liquidUsd.balanceOf(address(safe)), 0, "LiquidUSD left loose in safe");
         assertEq(usdc.balanceOf(address(safe)), 0, "USDC left loose in safe");
+    }
+
+    // A repay may never lower health. At matching valuations it always improves it; if the PriceProvider
+    // values LiquidUSD below Aave, the reclaim pulls more collateral than the debt it clears and is rejected.
+    /// @notice Verifies repayment reverts when a price gap makes it lower health, and passes otherwise.
+    function test_repay_revertsWhenPriceGapWorsensHealth() public {
+        _supplyToGateway(address(safe), address(liquidUsd), 10_000e6);
+        _borrowOnGateway(address(safe), address(usdc), 6000e6, recipient);
+        deal(address(usdc), address(liquifier), 1000e6);
+        uint256 hfBefore = gw.healthFactor(address(safe));
+
+        // PriceProvider at half of Aave's valuation: 100 of debt cleared for 200 of collateral out
+        uint256 price = priceProvider.price(address(liquidUsd));
+        vm.mockCall(address(priceProvider), abi.encodeWithSelector(priceProvider.price.selector, address(liquidUsd)), abi.encode(price / 2));
+        vm.prank(etherFiWallet);
+        vm.expectRevert(ModuleLendGatewaySandwich.HealthFactorWorsened.selector);
+        liquifier.repayUsingLiquidUSD(address(safe), 100e6);
+        vm.clearMockedCalls();
+
+        vm.prank(etherFiWallet);
+        liquifier.repayUsingLiquidUSD(address(safe), 100e6);
+        assertGt(gw.healthFactor(address(safe)), hfBefore, "health improved");
     }
 
     // The reclaim consumes the safe's loose LiquidUSD first and pulls only the shortfall out of Aave.

@@ -8,6 +8,7 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { ArrayDeDupLib } from "../../src/libraries/ArrayDeDupLib.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
 
 contract EtherFiDataProviderTest is Test {
     EtherFiDataProvider public provider;
@@ -58,7 +59,8 @@ contract EtherFiDataProviderTest is Test {
 
         provider.initialize(EtherFiDataProvider.InitParams(address(roleRegistry), address(cashModule), cashLens, initialModules, defaultModules, hookAddress, safeFactory, priceProvider, etherFiRecoverySigner, thirdPartyRecoverySigner, refundWallet));
 
-        roleRegistry.grantRole(provider.DATA_PROVIDER_ADMIN_ROLE(), admin);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), admin);
+        roleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), admin);
         vm.stopPrank();
     }
 
@@ -305,7 +307,7 @@ contract EtherFiDataProviderTest is Test {
         whitelist[0] = true;
 
         vm.prank(nonAdmin);
-        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         provider.configureModules(modules, whitelist);
     }
 
@@ -400,7 +402,7 @@ contract EtherFiDataProviderTest is Test {
         whitelist[0] = true;
 
         vm.prank(nonAdmin);
-        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         provider.configureDefaultModules(modules, whitelist);
     }
 
@@ -459,7 +461,7 @@ contract EtherFiDataProviderTest is Test {
     function test_setCashModule_updatesAddress() public {
         address newCashModule = address(0x600);
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.CashModuleConfigured(cashModule, newCashModule);
         provider.setCashModule(newCashModule);
@@ -471,12 +473,12 @@ contract EtherFiDataProviderTest is Test {
         address newCashModule = address(0x600);
 
         vm.prank(nonAdmin);
-        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         provider.setCashModule(newCashModule);
     }
 
     function test_setCashModule_reverts_whenZeroAddress() public {
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(EtherFiDataProvider.InvalidCashModule.selector);
         provider.setCashModule(address(0));
     }
@@ -486,7 +488,7 @@ contract EtherFiDataProviderTest is Test {
     function test_setHookAddress_updatesAddress() public {
         address newHook = address(0x500);
 
-        vm.prank(admin);
+        vm.prank(owner);
         provider.setHookAddress(newHook);
 
         assertEq(provider.getHookAddress(), newHook);
@@ -495,7 +497,7 @@ contract EtherFiDataProviderTest is Test {
     function test_setHookAddress_emitsEvent() public {
         address newHook = address(0x500);
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.HookAddressUpdated(hookAddress, newHook);
         provider.setHookAddress(newHook);
@@ -505,12 +507,12 @@ contract EtherFiDataProviderTest is Test {
         address newHook = address(0x500);
 
         vm.prank(nonAdmin);
-        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         provider.setHookAddress(newHook);
     }
 
     function test_setHookAddress_reverts_whenZeroAddress() public {
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
         provider.setHookAddress(address(0));
     }
@@ -560,7 +562,7 @@ contract EtherFiDataProviderTest is Test {
 
     function test_setEtherFiRecoverySigner_reverts_whenCalledByNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         provider.setEtherFiRecoverySigner(newEtherFiRecoverySigner);
     }
 
@@ -583,7 +585,7 @@ contract EtherFiDataProviderTest is Test {
     
     function test_setThirdPartyRecoverySigner_reverts_whenCalledByNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         provider.setThirdPartyRecoverySigner(newThirdPartyRecoverySigner);
     }
 
@@ -605,7 +607,7 @@ contract EtherFiDataProviderTest is Test {
     
     function test_setRefundWallet_reverts_whenCalledByNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         provider.setRefundWallet(newRefundWallet);
     }
 
@@ -634,7 +636,7 @@ contract EtherFiDataProviderTest is Test {
 
     function test_setRecoveryDelayPeriod_reverts_whenCalledByNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert(EtherFiDataProvider.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         provider.setRecoveryDelayPeriod(newRecoveryPeriod);
     }
 

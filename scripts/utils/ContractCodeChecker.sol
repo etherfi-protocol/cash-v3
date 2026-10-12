@@ -232,6 +232,12 @@ contract ContractCodeChecker {
         require(lc.length != 0, string.concat(label, ": local reference has no code"));
         require(oc.length == lc.length, string.concat(label, ": bytecode length mismatch - source drift since broadcast"));
 
+        // Bindings are shared across the whole library tree so they stay consistent, but each level
+        // only verifies the ones IT discovered. Walking all of them made a library re-verify its
+        // parent (whose self-binding it sees), which recursed parent -> lib -> parent until out of
+        // gas. A binding found again deeper down is already known, so it is not re-pushed; its
+        // consistency is enforced in _consumeBindingWindow.
+        uint256 first = bindingLocal.length;
         uint256 i;
         while (i < lc.length) {
             if (lc[i] == oc[i]) {
@@ -244,7 +250,7 @@ contract ContractCodeChecker {
         // Snapshot before recursion — the recursive call reuses the shared binding arrays.
         address[] memory locals = bindingLocal;
         address[] memory onchains = bindingOnchain;
-        for (uint256 j = 0; j < locals.length; ++j) {
+        for (uint256 j = first; j < locals.length; ++j) {
             if (locals[j] == local) {
                 require(onchains[j] == onchain, string.concat(label, ": self-address binding mismatch"));
             } else {

@@ -13,6 +13,7 @@ import { PriceProvider, IAggregatorV3 } from "../../../../../src/oracle/PricePro
 import { MockERC20 } from "../../../../../src/mocks/MockERC20.sol";
 import { IDebtManager } from "../../../../../src/interfaces/IDebtManager.sol";
 import { UpgradeableProxy } from "../../../../../src/utils/UpgradeableProxy.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 
 contract DebtManagerCollateralTest is CashModuleTestSetup {
     using SafeERC20 for IERC20;
@@ -98,7 +99,7 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
         collateralTokenConfig.liquidationBonus = newLiquidationBonus;
 
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         debtManager.supportCollateralToken(newCollateralToken, collateralTokenConfig);
         vm.stopPrank();
     }
@@ -106,7 +107,7 @@ contract DebtManagerCollateralTest is CashModuleTestSetup {
     function test_unsupportCollateralToken_reverts_whenCallerNotAdmin() public {
         // Second part of previously: test_OnlyAdminCanSupportOrUnsupportCollateral
         vm.startPrank(notOwner);
-        vm.expectRevert(UpgradeableProxy.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         debtManager.unsupportCollateralToken(address(weETH));
         vm.stopPrank();
     }

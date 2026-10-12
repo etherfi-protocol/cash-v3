@@ -72,7 +72,7 @@ contract DeployTradingSafeWithdrawModuleDev is Utils {
 
         bytes32 pauser = registry.PAUSER();
         bytes32 unpauser = registry.UNPAUSER();
-        bytes32 dataProviderAdmin = provider.DATA_PROVIDER_ADMIN_ROLE();
+        bytes32 dataProviderAdmin = keccak256("ADMIN_TIMELOCK_ROLE");
         require(pauser == keccak256("PAUSER") && unpauser == keccak256("UNPAUSER"), "unexpected role hashes");
 
         address module = DEPLOYER.getDeterministicAddress(getSalt(SALT_NAME));

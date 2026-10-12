@@ -83,9 +83,6 @@ contract DebtManagerStorageContract is UpgradeableProxy {
         uint256 liquidationBonus;
     }
 
-    /// @notice Role identifier for debt manager administrators
-    bytes32 public constant DEBT_MANAGER_ADMIN_ROLE = keccak256("DEBT_MANAGER_ADMIN_ROLE");
-
     /// @notice Role identifier for the ether.fi wallet, which runs lend gateway migrations
     bytes32 public constant ETHER_FI_WALLET_ROLE = keccak256("ETHER_FI_WALLET_ROLE");
     

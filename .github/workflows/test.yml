@@ -20,10 +20,31 @@ env:
 jobs:
   check:
     strategy:
-      fail-fast: true
+      # The deployed-contract checks can be red on their own (they describe the post-upgrade state), so
+      # one shard failing must not cancel the others
+      fail-fast: false
+      matrix:
+        include:
+          - shard: safe
+            profile: ci
+            args: --match-path 'test/safe/**'
+            size-gate: true
+          - shard: rest
+            profile: ci
+            args: --no-match-path 'test/{safe,deployed-sanity,upgrade-bytecode-verification}/**'
+          - shard: deployed
+            profile: ci
+            args: --match-path 'test/{deployed-sanity,upgrade-bytecode-verification}/**'
+          # The lend (Aave v4) tests deploy a real Aave v4 instance on an Optimism fork, so they run under
+          # the lend profile against the fork rather than the default profile.
+          - shard: lend
+            profile: lend
+            args: --match-path 'test/safe/modules/cash/lend/**'
 
-    name: Run Tests
+    name: Run Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    env:
+      FOUNDRY_PROFILE: ${{ matrix.profile }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,22 +70,23 @@ jobs:
       - name: Show Forge version
         run: forge --version
 
+      # Forge recompiles only what changed, so the previous run's artifacts make the build incremental
+      - name: Restore compile cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            cache
+            out
+          key: forge-${{ matrix.profile }}-${{ github.sha }}
+          restore-keys: forge-${{ matrix.profile }}-
+
       # Size-gate our own contracts. The lend tests (and aave-v4's SpokeInstance) are skipped by the default
       # profile, so they never reach this size check.
       - name: Run Forge build
+        if: matrix.size-gate
         run: forge build --sizes
-        id: build
 
       - name: Run Forge tests
-        run: forge test -vvv
+        run: forge test -vvv ${{ matrix.args }}
         env:
           TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
-        id: test
-
-      # The lend (Aave v4) tests deploy a real Aave v4 instance on an Optimism fork, so they run under the
-      # lend profile against the fork rather than the default profile.
-      - name: Run lend tests
-        run: FOUNDRY_PROFILE=lend forge test -vvv --match-path 'test/safe/modules/cash/lend/**'
-        env:
-          TS_NODE_COMPILER_OPTIONS: '{"module":"commonjs"}'
-        id: test-lend

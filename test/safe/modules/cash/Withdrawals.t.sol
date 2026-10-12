@@ -13,6 +13,7 @@ import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../../../src/interfaces/IBridgeModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
 
 contract CashModuleWithdrawalTest is CashModuleTestSetup {
     using MessageHashUtils for bytes32;
@@ -53,7 +54,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         address alice = makeAddr("alice");
 
         vm.prank(alice);
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
         cashModule.configureWithdrawAssets(asset, whitelist);
     }
 
@@ -681,6 +682,9 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         vm.stopPrank();
 
         assertEq(cashModule.getWithdrawalDelayForModule(module), 3);
+        vm.prank(module);
+        (uint64 callerDelay,,) = cashModule.getDelays();
+        assertEq(callerDelay, 3, "module caller should observe its configured delay");
 
         uint256 withdrawalAmount = 50e6;
         deal(address(usdc), address(safe), withdrawalAmount);
@@ -692,6 +696,23 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.configureModuleWithdrawalDelay(module, 0, false);
         (uint64 globalDelay,,) = cashModule.getDelays();
         assertEq(cashModule.getWithdrawalDelayForModule(module), globalDelay);
+        vm.prank(module);
+        (callerDelay,,) = cashModule.getDelays();
+        assertEq(callerDelay, globalDelay, "disabled override should restore the global delay");
+    }
+
+    function test_getDelays_returnsZeroOverrideToModuleCaller() public {
+        address module = makeAddr("module");
+
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(module, 0, true);
+
+        vm.prank(module);
+        (uint64 moduleDelay,,) = cashModule.getDelays();
+        assertEq(moduleDelay, 0);
+
+        (uint64 globalDelay,,) = cashModule.getDelays();
+        assertTrue(globalDelay != 0, "unconfigured caller should still observe the global delay");
     }
 
     function test_requestWithdrawal_keepsGlobalDelayWhenModuleOverrideIsSet() public {
@@ -712,8 +733,8 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.finalizeTime, block.timestamp + globalDelay);
     }
 
-    function test_configureModuleWithdrawalDelay_revertsForNonController() public {
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+    function test_configureModuleWithdrawalDelay_revertsForNonAdminTimelock() public {
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cashModule.configureModuleWithdrawalDelay(makeAddr("module"), 3, true);
     }
 
@@ -914,7 +935,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         dataProvider.configureModules(modules, shouldWhitelist);
 
         vm.prank(alice);
-        vm.expectRevert(ICashModule.OnlyCashModuleController.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cashModule.configureModulesCanRequestWithdraw(modules, shouldWhitelist);
 
         vm.prank(owner);
