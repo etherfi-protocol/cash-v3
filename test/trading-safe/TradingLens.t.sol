@@ -51,6 +51,7 @@ contract PriceProviderMock {
 contract TradingLensTest is Test {
     address public owner = makeAddr("owner");
     address public admin = makeAddr("admin");
+    address public lister = makeAddr("lister");
     address public stranger = makeAddr("stranger");
     address public safe = makeAddr("safe");
 
@@ -81,8 +82,10 @@ contract TradingLensTest is Test {
         )));
 
         bytes32 adminRole = keccak256("ADMIN_ROLE");
-        vm.prank(owner);
+        vm.startPrank(owner);
         roleRegistry.grantRole(adminRole, admin);
+        roleRegistry.grantRole(lens.TRADING_LENS_TOKEN_LISTER_ROLE(), lister);
+        vm.stopPrank();
 
         tokenA = new TestToken("Token A", "TKA", 18);
         tokenB = new TestToken("Token B", "TKB", 6);
@@ -102,9 +105,29 @@ contract TradingLensTest is Test {
     }
 
     function test_addSupportedToken_revertsWhen_notAdmin() public {
-        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        vm.expectRevert(TradingLens.OnlyTokenLister.selector);
         vm.prank(stranger);
         lens.addSupportedToken(address(tokenA));
+    }
+
+    function test_addSupportedToken_tokenLister() public {
+        vm.prank(lister);
+        lens.addSupportedToken(address(tokenA));
+
+        assertTrue(lens.isSupportedToken(address(tokenA)));
+    }
+
+    function test_addSupportedToken_roleHash() public view {
+        assertEq(lens.TRADING_LENS_TOKEN_LISTER_ROLE(), keccak256("TRADING_LENS_TOKEN_LISTER_ROLE"));
+    }
+
+    function test_removeSupportedToken_revertsWhen_tokenLister() public {
+        vm.prank(lister);
+        lens.addSupportedToken(address(tokenA));
+
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        vm.prank(lister);
+        lens.removeSupportedToken(address(tokenA));
     }
 
     function test_addSupportedToken_revertsWhen_zeroAddress() public {

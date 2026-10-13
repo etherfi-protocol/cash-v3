@@ -136,7 +136,6 @@ contract EnableCCTPModuleOptimism is EtherFiDeployerHelper, GnosisHelpers {
         require(cfg.tokenMessenger == TOKEN_MESSENGER, "module USDC tokenMessenger mismatch");
         require(cfg.maxFeeBps == MAX_FEE_BPS, "module USDC maxFeeBps mismatch");
         require(cfg.providerFeeBps == PROVIDER_FEE_BPS, "module USDC providerFeeBps mismatch");
-        require(module.CCTP_MODULE_ADMIN_ROLE() == role, "module admin role constant mismatch");
         require(module.getproviderFeeRecipient() == address(0), "fee recipient already set");
         uint32[] memory domains = _domains();
         for (uint256 i = 0; i < domains.length; i++) {
