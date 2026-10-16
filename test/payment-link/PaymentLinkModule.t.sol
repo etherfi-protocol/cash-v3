@@ -1292,6 +1292,24 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(usdc), externalRecipient) + _bal(address(usdc), plFeeReceiver), AMOUNT);
     }
 
+    /// @dev Codex: the fee transfer (30 units, untaxed after rounding) succeeds and the payout
+    ///      (9,970 units, taxed 99) fails. The whole claim reverts, including the fee transfer.
+    function test_senderTaxedToken_feeSucceedsThenPayoutFails_claimFullyReverts() public {
+        (address link, uint256 linkPk) = _fundedLink(address(taxedToken), 10_000);
+        _fundedLink(address(taxedToken), 100 ether); // backing the payout could have skimmed
+        uint256 moduleBefore = _bal(address(taxedToken), address(plm));
+
+        bytes memory sig = _claimSig(plm, linkPk, link, externalRecipient);
+        vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
+        plm.claim(link, externalRecipient, sig);
+
+        assertEq(_bal(address(taxedToken), plFeeReceiver), 0, "fee transfer rolled back");
+        assertEq(_bal(address(taxedToken), externalRecipient), 0);
+        assertEq(_bal(address(taxedToken), address(plm)), moduleBefore);
+        assertEq(plm.getLiabilities(address(taxedToken)), 100 ether + 10_000);
+        assertEq(uint8(_status(link)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+    }
+
     /// @dev The check is exact, not blanket: a transfer the token does not tax goes through, and a
     ///      requested (unfunded) link in the same token can still be cancelled.
     function test_senderTaxedToken_untaxedExitAndRequestedCancelStillWork() public {
