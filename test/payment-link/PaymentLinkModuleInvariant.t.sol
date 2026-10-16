@@ -18,8 +18,8 @@ import { PaymentLinkModuleTestSetup } from "./PaymentLinkModuleTestSetup.t.sol";
  * @notice Drives random sequences of payment-link lifecycle calls against the real CashModule:
  *         owner-signed requests (zero and non-zero withdrawal delay), permissionless funding,
  *         claims to a safe or an external address, owner cancels, owner withdrawals that make
- *         CashModule cancel the pending request through the callback, reconciles, fee changes
- *         and direct donations to the module. Every call is bounded to mostly succeed; ghost
+ *         CashModule cancel the pending request through the callback, reconciles, fee changes,
+ *         direct donations to the module and governance rescues of that surplus. Every call is bounded to mostly succeed; ghost
  *         variables record what the module should owe so the invariants can check it exactly.
  */
 contract PaymentLinkHandler is Test {
@@ -41,7 +41,8 @@ contract PaymentLinkHandler is Test {
     address[] public linkSigners;
     mapping(address => uint256) public linkPk;
 
-    /// @notice Per token: total funded, total exited (claim gross + cancel refund) and donated.
+    /// @notice Per token: total funded, total exited (claim gross + cancel refund) and surplus
+    ///         (donated minus rescued).
     mapping(address => uint256) public ghostFunded;
     mapping(address => uint256) public ghostExited;
     mapping(address => uint256) public ghostDonated;
@@ -192,6 +193,18 @@ contract PaymentLinkHandler is Test {
         opsExecuted++;
     }
 
+    /// @dev Governance takes some of the surplus (only donations create surplus here).
+    function rescue(uint256 tokenSeed, uint256 amount) external {
+        PlainToken token = tokens[tokenSeed % 2];
+        uint256 surplus = token.balanceOf(address(plm)) - plm.getLiabilities(address(token));
+        if (surplus == 0) return;
+        amount = bound(amount, 1, surplus);
+        vm.prank(admin);
+        plm.rescueSurplus(address(token), externalRecipient, amount);
+        ghostDonated[address(token)] -= amount;
+        opsExecuted++;
+    }
+
     function warp(uint256 seconds_) external {
         vm.warp(block.timestamp + bound(seconds_, 1, 2 days));
     }
@@ -270,7 +283,7 @@ contract PaymentLinkModuleInvariantTest is PaymentLinkModuleTestSetup {
         address recipientSafe = _deployRecipientSafe();
         handler = new PaymentLinkHandler(plm, cashModule, safe, owner, recipientSafe, plainToken, tokenB, owner1Pk, owner2Pk);
 
-        bytes4[] memory selectors = new bytes4[](9);
+        bytes4[] memory selectors = new bytes4[](10);
         selectors[0] = PaymentLinkHandler.requestLink.selector;
         selectors[1] = PaymentLinkHandler.fundLink.selector;
         selectors[2] = PaymentLinkHandler.claim.selector;
@@ -280,6 +293,7 @@ contract PaymentLinkModuleInvariantTest is PaymentLinkModuleTestSetup {
         selectors[6] = PaymentLinkHandler.setFee.selector;
         selectors[7] = PaymentLinkHandler.donate.selector;
         selectors[8] = PaymentLinkHandler.warp.selector;
+        selectors[9] = PaymentLinkHandler.rescue.selector;
         targetContract(address(handler));
         targetSelector(FuzzSelector({ addr: address(handler), selectors: selectors }));
         targetSender(makeAddr("invariantSenderA"));
@@ -340,6 +354,8 @@ contract PaymentLinkModuleInvariantTest is PaymentLinkModuleTestSetup {
         handler.requestLink(0, 3 ether, false);
         handler.ownerWithdrawalPreemptsLink(0);
         handler.donate(1, 1 ether);
+        handler.rescue(1, 0.4 ether);
+        assertEq(handler.ghostDonated(handler.tokenAt(1)), 0.6 ether);
         assertEq(handler.fundedCount(), 2);
         assertEq(handler.claimedCount(), 1);
         assertEq(handler.cancelledCount(), 1);

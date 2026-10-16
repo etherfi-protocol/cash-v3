@@ -17,6 +17,7 @@ import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol"
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { EtherFiSafeErrors } from "../../src/safe/EtherFiSafeErrors.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
+import { SenderTaxToken } from "./PaymentLinkMocks.sol";
 import { PaymentLinkModuleTestSetup } from "./PaymentLinkModuleTestSetup.t.sol";
 
 contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
@@ -901,6 +902,115 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         plm.pause();
         plm.reconcile(address(safe));
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+    }
+
+    // ---- governance de-whitelisting (Codex pass 1) and surplus rescue ----
+
+    /// @dev Removing the module from CashModule's requester list lets anyone process a live hold
+    ///      into the module without `fundLink`. The funds land as surplus; reconcile marks the link
+    ///      RequestCancelled; governance returns them with `rescueSurplus`.
+    function test_requesterDeWhitelisted_thirdPartyProcessing_isRecoverableViaRescue() public {
+        uint256 safeBalBefore = _bal(address(usdc), address(safe));
+        (address linkSigner,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, linkSigner);
+
+        _setCanRequestWithdraw(false);
+        _warpPastDelay();
+        vm.prank(makeAddr("anyone"));
+        cashModule.processWithdrawal(address(safe));
+
+        assertEq(_bal(address(usdc), address(plm)), AMOUNT, "hold processed into the module");
+        assertEq(plm.getLiabilities(address(usdc)), 0, "no liability was recorded");
+        vm.expectRevert(IPaymentLinkModule.CannotFindMatchingWithdrawal.selector);
+        plm.fundLink(address(safe));
+
+        plm.reconcile(address(safe));
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+
+        vm.expectEmit(true, true, true, true, address(plm));
+        emit IPaymentLinkModule.SurplusRescued(address(usdc), address(safe), AMOUNT);
+        vm.prank(owner);
+        plm.rescueSurplus(address(usdc), address(safe), AMOUNT);
+        assertEq(_bal(address(usdc), address(safe)), safeBalBefore, "sender made whole");
+        assertEq(_bal(address(usdc), address(plm)), 0);
+    }
+
+    /// @dev Removing the module from the DataProvider whitelist makes CashModule refuse the
+    ///      module's own cancel, so the owners' `cancel` reverts and the link stays consistent. The
+    ///      owners recover by replacing the hold with their own withdrawal, then `reconcile`.
+    function test_dataProviderDeWhitelisted_cancelRequestedReverts_ownersRecover() public {
+        (address linkSigner,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, linkSigner);
+
+        address[] memory mods = new address[](1);
+        mods[0] = address(plm);
+        bool[] memory no = new bool[](1);
+        vm.prank(owner);
+        dataProvider.configureModules(mods, no);
+
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
+        vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
+        plm.cancel(linkSigner, signers, sigs);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Requested));
+        assertEq(plm.getPendingLink(address(safe)), linkSigner);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+        plm.reconcile(address(safe));
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+    }
+
+    function test_rescueSurplus_boundedByBalanceAboveLiabilities() public {
+        _fundedLink(address(usdc), AMOUNT);
+        deal(address(usdc), address(plm), AMOUNT + 5e6); // 5 USDC donated on top of the liability
+
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        plm.rescueSurplus(address(usdc), externalRecipient, 1);
+
+        vm.startPrank(owner);
+        vm.expectRevert(IPaymentLinkModule.InsufficientSurplus.selector);
+        plm.rescueSurplus(address(usdc), externalRecipient, 5e6 + 1);
+
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        plm.rescueSurplus(address(usdc), address(0), 1);
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        plm.rescueSurplus(address(usdc), address(plm), 1);
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        plm.rescueSurplus(address(usdc), externalRecipient, 0);
+
+        plm.rescueSurplus(address(usdc), externalRecipient, 5e6);
+        vm.stopPrank();
+        assertEq(_bal(address(usdc), externalRecipient), 5e6);
+        assertEq(_bal(address(usdc), address(plm)), plm.getLiabilities(address(usdc)));
+    }
+
+    function test_rescueSurplus_refusedInShortfall() public {
+        _fundedLink(address(rebaseToken), 100 ether);
+        rebaseToken.rebase(9, 10);
+        vm.prank(owner);
+        vm.expectRevert(IPaymentLinkModule.InsufficientSurplus.selector);
+        plm.rescueSurplus(address(rebaseToken), externalRecipient, 1);
+    }
+
+    function test_rescueSurplus_rejectsTransferThatEatsIntoLiabilities() public {
+        SenderTaxToken taxed = new SenderTaxToken();
+        taxed.mint(address(plm), 1000);
+        // A 900 liability leaves 100 of surplus (written to `liabilities[taxed]` directly).
+        bytes32 slot = keccak256(abi.encode(address(taxed), uint256(0x72f6ddc7d992479425dc8c9c22860bd7f83946c3315c4ff3de0873cbf7571b00) + 2));
+        vm.store(address(plm), slot, bytes32(uint256(900)));
+        assertEq(plm.getLiabilities(address(taxed)), 900);
+
+        // Rescuing all 100 would cost the module 101 and dip into the liability.
+        vm.prank(owner);
+        vm.expectRevert(IPaymentLinkModule.EscrowShortfall.selector);
+        plm.rescueSurplus(address(taxed), externalRecipient, 100);
+
+        vm.prank(owner);
+        plm.rescueSurplus(address(taxed), externalRecipient, 99);
+        assertGe(_bal(address(taxed), address(plm)), 900);
     }
 
     // ---- pause ----

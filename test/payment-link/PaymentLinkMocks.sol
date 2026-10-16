@@ -30,6 +30,22 @@ contract FeeOnTransferToken is ERC20 {
     }
 }
 
+/// @dev Charges the SENDER `value + 1%` on every transfer (the 1% is burned), so a transfer of
+///      `value` lowers the sender's balance by more than `value`.
+contract SenderTaxToken is ERC20 {
+    constructor() ERC20("Sender Tax", "STAX") { }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (from == address(0) || to == address(0)) return super._update(from, to, value);
+        super._update(from, address(0), value / 100);
+        super._update(from, to, value);
+    }
+}
+
 /// @dev `transfer` returns false without moving anything while `failTransfers` is set. The safe's
 ///      module path only checks call success, so CashModule believes the withdrawal went through.
 contract FalseReturnToken is ERC20 {
