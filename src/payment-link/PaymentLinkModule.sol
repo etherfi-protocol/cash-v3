@@ -38,6 +38,12 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *      No token allowlist and no amount caps live here: CashModule's withdraw-asset list bounds
  *      what can be requested, and the backend decides what is offered.
  *
+ *      Every transfer in and out must move the module's balance by exactly the amount sent
+ *      (`BalanceDeltaMismatch` otherwise), so no exit can take more from the pooled escrow than
+ *      it pays out. A token that taxes the SENDER passes funding (the safe pays the tax) but
+ *      then fails every exit: such a link can be neither claimed nor cancelled and its escrow
+ *      stays in the module until an upgrade. Only offer tokens that move exact amounts.
+ *
  *      GOVERNANCE RULE: do not remove this module from the DataProvider whitelist or from
  *      CashModule's withdraw-requester list while any link is `Requested`. CashModule decides who
  *      may process or cancel a module's withdrawal from CURRENT list membership, so after removal
@@ -113,7 +119,8 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @param _roleRegistry Role registry (upgrade authority, pause control, admin roles).
      * @param _feeBps Claim fee in basis points, at most `MAX_FEE_BPS`.
      * @param _feeReceiver Fee receiver; may be zero only when `_feeBps` is zero.
-     * @custom:throws InvalidInput If `_roleRegistry` is zero, or `_feeReceiver` is zero with a non-zero fee.
+     * @custom:throws InvalidInput If `_roleRegistry` is zero, `_feeReceiver` is zero with a non-zero
+     *                fee, or `_feeReceiver` is this module.
      * @custom:throws FeeTooHigh If `_feeBps` exceeds `MAX_FEE_BPS`.
      */
     function initialize(address _roleRegistry, uint16 _feeBps, address _feeReceiver) external initializer {
@@ -204,6 +211,8 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @custom:throws LinkNotClaimable If the link is not `Funded`.
      * @custom:throws InvalidInput If `recipient` is zero or this module.
      * @custom:throws InvalidClaimSignature If the signature was not made by `linkSigner`.
+     * @custom:throws BalanceDeltaMismatch If a payout moved the module's balance by more or less
+     *                than the amount sent (for example a token that taxes the sender).
      */
     function claim(address linkSigner, address recipient, bytes calldata signature) external whenNotPaused nonReentrant {
         PaymentLinkModuleStorage storage $ = _getPaymentLinkModuleStorage();
@@ -223,8 +232,8 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
         link.status = LinkStatus.Claimed;
         $.liabilities[token] -= amount;
 
-        if (fee > 0) IERC20(token).safeTransfer(feeReceiver, fee);
-        if (gross > fee) IERC20(token).safeTransfer(recipient, gross - fee);
+        if (fee > 0) _transferOut(token, feeReceiver, fee);
+        if (gross > fee) _transferOut(token, recipient, gross - fee);
 
         emit LinkClaimed(link.safe, linkSigner, recipient, token, gross - fee, fee);
     }
@@ -241,6 +250,8 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @param signatures Signatures corresponding to `signers`.
      * @custom:throws LinkNotCancellable If the link is neither `Requested` nor `Funded`.
      * @custom:throws InvalidSignatures If the signatures don't meet the safe's threshold.
+     * @custom:throws BalanceDeltaMismatch If a funded link's refund moved the module's balance by
+     *                more or less than the amount refunded.
      */
     function cancel(address linkSigner, address[] calldata signers, bytes[] calldata signatures) external nonReentrant {
         PaymentLinkModuleStorage storage $ = _getPaymentLinkModuleStorage();
@@ -305,7 +316,7 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @param _feeReceiver The fee receiver; may be zero only when `_feeBps` is zero.
      * @custom:throws OnlyAdminTimelock If the caller lacks `ADMIN_TIMELOCK_ROLE`.
      * @custom:throws FeeTooHigh If `_feeBps` exceeds `MAX_FEE_BPS`.
-     * @custom:throws InvalidInput If `_feeReceiver` is zero while `_feeBps` is non-zero.
+     * @custom:throws InvalidInput If `_feeReceiver` is zero while `_feeBps` is non-zero, or is this module.
      */
     function setFee(uint16 _feeBps, address _feeReceiver) external onlyAdminTimelock {
         _setFee(_feeBps, _feeReceiver);
@@ -315,7 +326,7 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @notice Transfers `amount` of `token` that the module holds ABOVE its liabilities to `to`.
      * @dev Surplus is owed to no link: donations, positive rebases, or a CashModule withdrawal
      *      processed into the module without `fundLink` (see the governance rule above). The
-     *      bound `amount <= balance - liabilities` is re-checked after the transfer, so no
+     *      transfer must lower the balance by exactly `amount <= balance - liabilities`, so no
      *      outstanding link can ever be paid less because of a rescue. It is NOT a guaranteed
      *      recovery: in a token that is in shortfall, misprocessed funds first cover the deficit.
      *      Gated by ADMIN_TIMELOCK_ROLE (the 8h operating timelock on Optimism), not by the 2-day
@@ -326,7 +337,7 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @custom:throws OnlyAdminTimelock If the caller lacks `ADMIN_TIMELOCK_ROLE`.
      * @custom:throws InvalidInput If `to` is zero or this module, or `amount` is zero.
      * @custom:throws InsufficientSurplus If `amount` exceeds `balance - liabilities`.
-     * @custom:throws EscrowShortfall If the transfer left the module below its liabilities.
+     * @custom:throws BalanceDeltaMismatch If the transfer moved the balance by more or less than `amount`.
      */
     function rescueSurplus(address token, address to, uint256 amount) external onlyAdminTimelock nonReentrant {
         if (to == address(0) || to == address(this) || amount == 0) revert InvalidInput();
@@ -334,8 +345,7 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
         uint256 balance = IERC20(token).balanceOf(address(this));
         if (balance < liabilities || amount > balance - liabilities) revert InsufficientSurplus();
 
-        IERC20(token).safeTransfer(to, amount);
-        if (IERC20(token).balanceOf(address(this)) < liabilities) revert EscrowShortfall();
+        _transferOut(token, to, amount);
 
         emit SurplusRescued(token, to, amount);
     }
@@ -515,9 +525,18 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
         link.status = LinkStatus.Cancelled;
         $.liabilities[token] -= amount;
 
-        if (gross > 0) IERC20(token).safeTransfer(safe, gross);
+        if (gross > 0) _transferOut(token, safe, gross);
 
         emit LinkCancelled(safe, linkSigner, token, gross);
+    }
+
+    /// @dev The only way tokens leave the module. Reverts unless the module's balance fell by
+    ///      exactly `amount`: a token that charges the sender more (or rebases inside the transfer)
+    ///      would otherwise take the difference from other links' escrow in the same token.
+    function _transferOut(address token, address to, uint256 amount) internal {
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransfer(to, amount);
+        if (IERC20(token).balanceOf(address(this)) + amount != balanceBefore) revert BalanceDeltaMismatch();
     }
 
     /**
@@ -556,10 +575,11 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
     }
 
     /// @dev Shared by `initialize` and `setFee`. Zero bps disables the fee (the receiver may then
-    ///      be zero too); a non-zero fee requires a real receiver.
+    ///      be zero too); a non-zero fee requires a real receiver. The module itself is never a
+    ///      receiver: a fee "paid" to itself would fail `_transferOut` and block external claims.
     function _setFee(uint16 _feeBps, address _feeReceiver) internal {
         if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
-        if (_feeBps > 0 && _feeReceiver == address(0)) revert InvalidInput();
+        if ((_feeBps > 0 && _feeReceiver == address(0)) || _feeReceiver == address(this)) revert InvalidInput();
         PaymentLinkModuleStorage storage $ = _getPaymentLinkModuleStorage();
         emit FeeSet($.feeBps, _feeBps, $.feeReceiver, _feeReceiver);
         $.feeBps = _feeBps;

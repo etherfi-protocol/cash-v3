@@ -8,7 +8,7 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IPaymentLinkModule } from "../../src/interfaces/IPaymentLinkModule.sol";
 import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
 import { CashModuleTestSetup } from "../safe/modules/cash/CashModuleTestSetup.t.sol";
-import { FalseReturnToken, FeeOnTransferToken, NegativeRebaseToken, PlainToken, ReentrantToken } from "./PaymentLinkMocks.sol";
+import { FalseReturnToken, FeeOnTransferToken, NegativeRebaseToken, PlainToken, ReentrantToken, SenderTaxToken } from "./PaymentLinkMocks.sol";
 
 /**
  * @title PaymentLinkModuleTestSetup
@@ -28,6 +28,7 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
     FalseReturnToken internal falseToken;
     NegativeRebaseToken internal rebaseToken;
     ReentrantToken internal reentrantToken;
+    SenderTaxToken internal taxedToken;
 
     address internal plFeeReceiver = makeAddr("plFeeReceiver");
     address internal relayer = makeAddr("relayer");
@@ -48,27 +49,29 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         falseToken = new FalseReturnToken();
         rebaseToken = new NegativeRebaseToken();
         reentrantToken = new ReentrantToken();
+        taxedToken = new SenderTaxToken();
 
         address[] memory mods = new address[](1);
         mods[0] = address(plm);
         bool[] memory yes = new bool[](1);
         yes[0] = true;
 
-        address[] memory assets = new address[](5);
+        address[] memory assets = new address[](6);
         assets[0] = address(plainToken);
         assets[1] = address(fotToken);
         assets[2] = address(falseToken);
         assets[3] = address(rebaseToken);
         assets[4] = address(reentrantToken);
-        bool[] memory yes5 = new bool[](5);
-        for (uint256 i = 0; i < 5; i++) {
-            yes5[i] = true;
+        assets[5] = address(taxedToken);
+        bool[] memory yesAll = new bool[](6);
+        for (uint256 i = 0; i < 6; i++) {
+            yesAll[i] = true;
         }
 
         vm.startPrank(owner);
         dataProvider.configureModules(mods, yes);
         cashModule.configureModulesCanRequestWithdraw(mods, yes);
-        cashModule.configureWithdrawAssets(assets, yes5);
+        cashModule.configureWithdrawAssets(assets, yesAll);
         vm.stopPrank();
         _setWithdrawalDelay(WITHDRAWAL_DELAY);
 
@@ -78,6 +81,7 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         falseToken.mint(address(safe), 1_000_000 ether);
         rebaseToken.mint(address(safe), 1_000_000 ether);
         reentrantToken.mint(address(safe), 1_000_000 ether);
+        taxedToken.mint(address(safe), 1_000_000 ether);
     }
 
     // ---- deployment ----

@@ -123,7 +123,8 @@ interface IPaymentLinkModule is IBridgeModule {
     error NoPendingLink();
     /// @notice Reverts when CashModule's pending withdrawal does not match the requested link.
     error CannotFindMatchingWithdrawal();
-    /// @notice Reverts when processing the withdrawal did not deliver exactly the link amount.
+    /// @notice Reverts when a transfer into or out of the module did not move its balance by
+    ///         exactly the amount (fee-on-transfer funding, sender-taxed payouts).
     error BalanceDeltaMismatch();
     /// @notice Reverts when CashModule's response to a link request is neither a matching pending
     ///         request nor an exact inline transfer.
@@ -185,7 +186,7 @@ interface IPaymentLinkModule is IBridgeModule {
     /**
      * @notice Sets the fee charged on claims to non-safe recipients and its receiver.
      * @param feeBps The fee in basis points, at most `MAX_FEE_BPS`.
-     * @param feeReceiver The fee receiver; may be zero only when `feeBps` is zero.
+     * @param feeReceiver The fee receiver; may be zero only when `feeBps` is zero, never this module.
      */
     function setFee(uint16 feeBps, address feeReceiver) external;
 
