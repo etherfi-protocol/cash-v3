@@ -42,7 +42,9 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *      CashModule's withdraw-requester list while any link is `Requested`. CashModule decides who
  *      may process or cancel a module's withdrawal from CURRENT list membership, so after removal
  *      (a) anyone can `processWithdrawal` the hold into this module without `fundLink`, leaving
- *      the funds as unrecorded surplus (recoverable only through `rescueSurplus`), and (b) the
+ *      the funds as unrecorded balance: `rescueSurplus` can return them only to the extent the
+ *      token has surplus, so if that token is already in a shortfall they first cover the
+ *      deficit of funded links and the sender is NOT made whole; and (b) the
  *      owners' `cancel` of that link reverts until they replace the hold with their own
  *      withdrawal and `reconcile`. To stop the module, `pause` it instead: requests, funding and
  *      claims stop, cancels keep working.
@@ -314,7 +316,10 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @dev Surplus is owed to no link: donations, positive rebases, or a CashModule withdrawal
      *      processed into the module without `fundLink` (see the governance rule above). The
      *      bound `amount <= balance - liabilities` is re-checked after the transfer, so no
-     *      outstanding link can ever be paid less because of a rescue. Not gated by pause.
+     *      outstanding link can ever be paid less because of a rescue. It is NOT a guaranteed
+     *      recovery: in a token that is in shortfall, misprocessed funds first cover the deficit.
+     *      Gated by ADMIN_TIMELOCK_ROLE (the 8h operating timelock on Optimism), not by the 2-day
+     *      upgrade authority. Not gated by pause.
      * @param token The token to rescue.
      * @param to The recipient (for a misprocessed withdrawal, the safe it came from).
      * @param amount The amount to transfer.
