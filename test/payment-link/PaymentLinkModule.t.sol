@@ -935,6 +935,36 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(usdc), address(plm)), 0);
     }
 
+    /// @dev Codex pass 2: rescue is bounded by surplus, so when the token is already in a
+    ///      shortfall a misprocessed hold first covers the deficit and the sender is only
+    ///      partially made whole. Pins that behaviour; the full fix belongs in CashModule.
+    function test_requesterDeWhitelisted_inShortfall_misprocessedFundsCoverDeficitFirst() public {
+        (address funded, uint256 fundedPk) = _fundedLink(address(rebaseToken), 100 ether);
+        (address requested,) = _newLinkKey();
+        _request(address(rebaseToken), 100 ether, requested);
+
+        rebaseToken.rebase(4, 5); // module: 80 held against 100 owed
+        _setCanRequestWithdraw(false);
+        _warpPastDelay();
+        cashModule.processWithdrawal(address(safe)); // the Requested link's 100 lands unrecorded
+        plm.reconcile(address(safe));
+        assertEq(uint8(_status(requested)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+        assertEq(_bal(address(rebaseToken), address(plm)), 180 ether);
+        assertEq(plm.getLiabilities(address(rebaseToken)), 100 ether);
+
+        vm.startPrank(owner);
+        vm.expectRevert(IPaymentLinkModule.InsufficientSurplus.selector);
+        plm.rescueSurplus(address(rebaseToken), address(safe), 80 ether + 1);
+        plm.rescueSurplus(address(rebaseToken), address(safe), 80 ether);
+        vm.stopPrank();
+
+        // The funded link now exits in full: 20 of the misprocessed 100 covered its deficit.
+        address recipient = _deploySecondSafe();
+        _claim(funded, fundedPk, recipient);
+        assertEq(_bal(address(rebaseToken), recipient), 100 ether);
+        assertEq(_bal(address(rebaseToken), address(plm)), 0);
+    }
+
     /// @dev Removing the module from the DataProvider whitelist makes CashModule refuse the
     ///      module's own cancel, so the owners' `cancel` reverts and the link stays consistent. The
     ///      owners recover by replacing the hold with their own withdrawal, then `reconcile`.
