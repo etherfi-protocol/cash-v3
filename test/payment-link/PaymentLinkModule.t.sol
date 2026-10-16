@@ -14,6 +14,7 @@ import { IPaymentLinkModule } from "../../src/interfaces/IPaymentLinkModule.sol"
 import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
+import { CashLendLib } from "../../src/modules/cash/CashLendLib.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { EtherFiSafeErrors } from "../../src/safe/EtherFiSafeErrors.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
@@ -367,8 +368,10 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _newLinkKey();
         _request(address(usdc), AMOUNT, linkSigner);
 
-        // With the module off CashModule's requester list, an owner withdrawal replaces the hold
-        // WITHOUT calling back, so the link is still Requested but the request is someone else's.
+        // For a hold placed before CashModule recorded module requests, and with the module off the
+        // requester list, an owner withdrawal replaces the hold WITHOUT calling back, so the link is
+        // still Requested but the request is someone else's.
+        _dropWithdrawalRecord();
         _setCanRequestWithdraw(false);
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
@@ -647,6 +650,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _newLinkKey();
         _request(address(usdc), AMOUNT, linkSigner);
 
+        _dropWithdrawalRecord();
         _setCanRequestWithdraw(false);
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
@@ -841,6 +845,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         (address linkSigner,) = _newLinkKey();
         _request(address(usdc), AMOUNT, linkSigner);
 
+        _dropWithdrawalRecord();
         _setCanRequestWithdraw(false);
         address[] memory tokens = new address[](1);
         tokens[0] = address(usdc);
@@ -904,15 +909,82 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
     }
 
-    // ---- governance de-whitelisting (Codex pass 1) and surplus rescue ----
+    // ---- governance de-whitelisting and surplus rescue ----
 
-    /// @dev Removing the module from CashModule's requester list lets anyone process a live hold
-    ///      into the module without `fundLink`. The funds land as surplus; reconcile marks the link
+    /// @dev Removing the module from CashModule's requester list, the DataProvider whitelist, or both in
+    ///      either order only blocks new links. CashModule records the hold as this module's own, so
+    ///      nobody else can process it, `fundLink` still funds it and the owners can still cancel it.
+    function test_requesterListRemoved_thirdPartyCannotProcess_linkStillFunds() public {
+        _assertHoldStaysTheModules(Removal.RequesterListOnly);
+    }
+
+    function test_dataProviderRemoved_thirdPartyCannotProcess_linkStillFunds() public {
+        _assertHoldStaysTheModules(Removal.DataProviderOnly);
+    }
+
+    function test_removed_requesterListFirst_thirdPartyCannotProcess_linkStillFunds() public {
+        _assertHoldStaysTheModules(Removal.RequesterListThenDataProvider);
+    }
+
+    function test_removed_dataProviderFirst_thirdPartyCannotProcess_linkStillFunds() public {
+        _assertHoldStaysTheModules(Removal.DataProviderThenRequesterList);
+    }
+
+    function test_removed_requesterListFirst_cancelRequestedReleasesHold() public {
+        _assertOwnersCanCancelRequested(Removal.RequesterListThenDataProvider);
+    }
+
+    function test_removed_dataProviderFirst_cancelRequestedReleasesHold() public {
+        _assertOwnersCanCancelRequested(Removal.DataProviderThenRequesterList);
+    }
+
+    /// @dev A card spend or the owners' own withdrawal still reaches `cancelBridgeByCashModule` after
+    ///      removal, so the link moves to RequestCancelled without a `reconcile`.
+    function test_removed_requesterListFirst_cardSpendCallbackStillArrives() public {
+        _assertCallbackStillArrives(Removal.RequesterListThenDataProvider, true);
+    }
+
+    function test_removed_dataProviderFirst_ownerWithdrawalCallbackStillArrives() public {
+        _assertCallbackStillArrives(Removal.DataProviderThenRequesterList, false);
+    }
+
+    function test_removed_newLinksBlocked() public {
+        _remove(Removal.DataProviderThenRequesterList);
+        (address linkSigner,) = _newLinkKey();
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS));
+        vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+    }
+
+    /// @dev CashModule caps the gas it gives a removed module's callback; ours must fit with room to
+    ///      spare, measured with the module's storage cold as when the cancel lands in a later transaction.
+    function test_cancelBridgeByCashModule_fitsRemovedModuleGasCap() public {
+        (address linkSigner,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, linkSigner);
+        // vm.cool is newer than the pinned forge-std Vm interface; call the cheatcode by selector
+        (bool cooled,) = address(vm).call(abi.encodeWithSignature("cool(address)", address(plm)));
+        require(cooled, "vm.cool unavailable");
+
+        vm.prank(address(cashModule));
+        uint256 gasBefore = gasleft();
+        plm.cancelBridgeByCashModule(address(safe));
+        uint256 gasUsed = gasBefore - gasleft();
+
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+        assertLt(gasUsed, CashLendLib.REMOVED_MODULE_CALLBACK_GAS / 2, "callback too close to CashModule's cap");
+    }
+
+    // A hold placed before CashModule recorded module requests (this module live before that CashModule
+    // upgrade) still follows CURRENT list membership, so the module's governance rule applies to it.
+
+    /// @dev Pre-upgrade hold: removing the module from CashModule's requester list lets anyone process the
+    ///      hold into the module without `fundLink`. The funds land as surplus; reconcile marks the link
     ///      RequestCancelled; governance returns them with `rescueSurplus`.
-    function test_requesterDeWhitelisted_thirdPartyProcessing_isRecoverableViaRescue() public {
+    function test_preUpgradeHold_requesterDeWhitelisted_thirdPartyProcessing_isRecoverableViaRescue() public {
         uint256 safeBalBefore = _bal(address(usdc), address(safe));
         (address linkSigner,) = _newLinkKey();
         _request(address(usdc), AMOUNT, linkSigner);
+        _dropWithdrawalRecord();
 
         _setCanRequestWithdraw(false);
         _warpPastDelay();
@@ -935,13 +1007,14 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(usdc), address(plm)), 0);
     }
 
-    /// @dev Codex pass 2: rescue is bounded by surplus, so when the token is already in a
-    ///      shortfall a misprocessed hold first covers the deficit and the sender is only
-    ///      partially made whole. Pins that behaviour; the full fix belongs in CashModule.
-    function test_requesterDeWhitelisted_inShortfall_misprocessedFundsCoverDeficitFirst() public {
+    /// @dev Codex pass 2, pre-upgrade hold: rescue is bounded by surplus, so when the token is already in
+    ///      a shortfall a misprocessed hold first covers the deficit and the sender is only partially made
+    ///      whole.
+    function test_preUpgradeHold_requesterDeWhitelisted_inShortfall_misprocessedFundsCoverDeficitFirst() public {
         (address funded, uint256 fundedPk) = _fundedLink(address(rebaseToken), 100 ether);
         (address requested,) = _newLinkKey();
         _request(address(rebaseToken), 100 ether, requested);
+        _dropWithdrawalRecord();
 
         rebaseToken.rebase(4, 5); // module: 80 held against 100 owed
         _setCanRequestWithdraw(false);
@@ -965,18 +1038,15 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(rebaseToken), address(plm)), 0);
     }
 
-    /// @dev Removing the module from the DataProvider whitelist makes CashModule refuse the
-    ///      module's own cancel, so the owners' `cancel` reverts and the link stays consistent. The
+    /// @dev Pre-upgrade hold: removing the module from the DataProvider whitelist makes CashModule refuse
+    ///      the module's own cancel, so the owners' `cancel` reverts and the link stays consistent. The
     ///      owners recover by replacing the hold with their own withdrawal, then `reconcile`.
-    function test_dataProviderDeWhitelisted_cancelRequestedReverts_ownersRecover() public {
+    function test_preUpgradeHold_dataProviderDeWhitelisted_cancelRequestedReverts_ownersRecover() public {
         (address linkSigner,) = _newLinkKey();
         _request(address(usdc), AMOUNT, linkSigner);
+        _dropWithdrawalRecord();
 
-        address[] memory mods = new address[](1);
-        mods[0] = address(plm);
-        bool[] memory no = new bool[](1);
-        vm.prank(owner);
-        dataProvider.configureModules(mods, no);
+        _remove(Removal.DataProviderOnly);
 
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(linkSigner));
         vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
@@ -991,6 +1061,63 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         _requestWithdrawal(tokens, amounts, withdrawRecipient);
         plm.reconcile(address(safe));
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+    }
+
+    function _assertHoldStaysTheModules(Removal removal) internal {
+        (address linkSigner, uint256 linkPk) = _newLinkKey();
+        _request(address(usdc), AMOUNT, linkSigner);
+        _remove(removal);
+        _warpPastDelay();
+
+        vm.prank(makeAddr("anyone"));
+        vm.expectRevert(ICashModule.OnlyModuleThatRequestedCanWithdraw.selector);
+        cashModule.processWithdrawal(address(safe));
+        assertEq(_bal(address(usdc), address(plm)), 0, "nothing processed into the module");
+
+        vm.prank(relayer);
+        plm.fundLink(address(safe));
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+        assertEq(plm.getLiabilities(address(usdc)), AMOUNT);
+
+        address recipient = _deploySecondSafe();
+        _claim(linkSigner, linkPk, recipient);
+        assertEq(_bal(address(usdc), recipient), AMOUNT);
+        assertEq(_bal(address(usdc), address(plm)), 0);
+    }
+
+    function _assertOwnersCanCancelRequested(Removal removal) internal {
+        uint256 safeBalBefore = _bal(address(usdc), address(safe));
+        (address linkSigner,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, linkSigner);
+        _remove(removal);
+
+        _cancel(linkSigner);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.Cancelled));
+        assertEq(plm.getPendingLink(address(safe)), address(0));
+        assertEq(_pendingTokensLength(), 0, "hold released");
+        assertEq(_bal(address(usdc), address(safe)), safeBalBefore);
+    }
+
+    function _assertCallbackStillArrives(Removal removal, bool viaCardSpend) internal {
+        deal(address(usdc), address(safe), 200e6);
+        (address linkSigner,) = _newLinkKey();
+        _request(address(usdc), 150e6, linkSigner);
+        _remove(removal);
+
+        vm.expectEmit(true, true, true, true, address(plm));
+        emit IPaymentLinkModule.LinkRequestCancelled(address(safe), linkSigner);
+        if (viaCardSpend) {
+            _spendUsdc(100e6); // 100 against 200 loose with 150 reserved: CashModule cancels the hold
+        } else {
+            address[] memory tokens = new address[](1);
+            tokens[0] = address(usdc);
+            uint256[] memory amounts = new uint256[](1);
+            amounts[0] = 1e6;
+            _requestWithdrawal(tokens, amounts, withdrawRecipient);
+        }
+
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+        assertEq(plm.getPendingLink(address(safe)), address(0));
     }
 
     function test_rescueSurplus_boundedByBalanceAboveLiabilities() public {
@@ -1338,6 +1465,44 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
     }
 
     // ---- helpers ----
+
+    enum Removal {
+        RequesterListOnly,
+        DataProviderOnly,
+        RequesterListThenDataProvider,
+        DataProviderThenRequesterList
+    }
+
+    /// @dev keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 internal constant CASH_MODULE_STORAGE_LOCATION = 0xe000c7adec5855bcf51f74b73aa86172d0a325bc54c3f73cb406d259df90ea00;
+
+    function _remove(Removal removal) internal {
+        address[] memory mods = new address[](1);
+        mods[0] = address(plm);
+        bool[] memory no = new bool[](1);
+        vm.startPrank(owner);
+        if (removal == Removal.RequesterListOnly) {
+            cashModule.configureModulesCanRequestWithdraw(mods, no);
+        } else if (removal == Removal.DataProviderOnly) {
+            dataProvider.configureModules(mods, no);
+        } else if (removal == Removal.RequesterListThenDataProvider) {
+            cashModule.configureModulesCanRequestWithdraw(mods, no);
+            dataProvider.configureModules(mods, no);
+        } else {
+            dataProvider.configureModules(mods, no);
+            cashModule.configureModulesCanRequestWithdraw(mods, no);
+        }
+        vm.stopPrank();
+    }
+
+    /// @dev Models a hold placed before CashModule recorded module requests (SafeCashConfig slot 17,
+    ///      byte 15: withdrawalRequestedByModule). CashModule then applies current list membership to it.
+    function _dropWithdrawalRecord() internal {
+        bytes32 slot = bytes32(uint256(keccak256(abi.encode(address(safe), CASH_MODULE_STORAGE_LOCATION))) + 17);
+        uint256 word = uint256(vm.load(address(cashModule), slot));
+        require((word >> 120) & 0xff == 1, "no record to drop");
+        vm.store(address(cashModule), slot, bytes32(word & ~(uint256(0xff) << 120)));
+    }
 
     function _setCanRequestWithdraw(bool allowed) internal {
         address[] memory mods = new address[](1);
