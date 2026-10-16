@@ -3,14 +3,16 @@ pragma solidity ^0.8.28;
 
 import { BinSponsor, Cashback, ICashModule, WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IBridgeModule } from "../../../../src/interfaces/IBridgeModule.sol";
-import { CashModuleTestSetup } from "./CashModuleTestSetup.t.sol";
+import { CashModuleTestSetup, CashVerificationLib, MessageHashUtils } from "./CashModuleTestSetup.t.sol";
 
-/// @dev A withdraw-requesting module whose cancelBridgeByCashModule can record, revert or burn all its gas.
+/// @dev A withdraw-requesting module whose cancelBridgeByCashModule can record, revert, burn all its gas, or
+///      record after two fresh storage writes (about what an escrow module's record cleanup costs).
 contract MockWithdrawModule is IBridgeModule {
     enum Callback {
         Record,
         Revert,
-        BurnGas
+        BurnGas,
+        Heavy
     }
 
     error CallbackReverted();
@@ -18,6 +20,7 @@ contract MockWithdrawModule is IBridgeModule {
     ICashModule internal immutable cashModule;
     Callback public callbackMode;
     uint256 public callbackCount;
+    mapping(uint256 => uint256) internal scratch;
 
     constructor(ICashModule _cashModule) {
         cashModule = _cashModule;
@@ -45,6 +48,10 @@ contract MockWithdrawModule is IBridgeModule {
         if (callbackMode == Callback.BurnGas) {
             while (true) { }
         }
+        if (callbackMode == Callback.Heavy) {
+            scratch[2 * callbackCount] = 1;
+            scratch[2 * callbackCount + 1] = 1;
+        }
         callbackCount++;
     }
 }
@@ -57,6 +64,8 @@ contract MockWithdrawModule is IBridgeModule {
  *         and cancel it, and the module still hears of cancels made elsewhere without being able to block them.
  */
 contract CashModuleModuleWithdrawalAuthorityTest is CashModuleTestSetup {
+    using MessageHashUtils for bytes32;
+
     enum Removal {
         RequesterListOnly,
         DataProviderOnly,
@@ -222,6 +231,36 @@ contract CashModuleModuleWithdrawalAuthorityTest is CashModuleTestSetup {
 
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, withdrawRecipient);
         assertLt(gasUsed, 1_000_000, "the removed module's callback burned more than its cap");
+    }
+
+    /// @dev EIP-150: whoever submits a cancel picks its gas limit, but cannot make the capped callback run out of
+    ///      gas while the cancel itself succeeds. Binary-searches the smallest gas limit at which a relayed owner
+    ///      replacement request succeeds; every probe that succeeds must have delivered the callback.
+    function test_removedModuleCallback_notStarvableByOuterGasLimit() public {
+        module.requestWithdrawal(address(safe), address(usdc), HOLD);
+        _remove(Removal.RequesterListThenDataProvider);
+        module.setCallbackMode(MockWithdrawModule.Callback.Heavy);
+
+        bytes memory replacement = _signedReplacementCall(1e6);
+        uint256 snapshot = vm.snapshotState();
+
+        uint256 lo = 50_000;
+        uint256 hi = 5_000_000;
+        assertFalse(_probeReplacement(replacement, lo));
+        vm.revertToState(snapshot);
+        assertTrue(_probeReplacement(replacement, hi));
+        vm.revertToState(snapshot);
+
+        while (hi - lo > 1) {
+            uint256 mid = (lo + hi) / 2;
+            if (_probeReplacement(replacement, mid)) hi = mid;
+            else lo = mid;
+            vm.revertToState(snapshot);
+        }
+
+        // At the boundary the callback still got what it needed
+        assertTrue(_probeReplacement(replacement, hi));
+        assertEq(module.callbackCount(), 1);
     }
 
     function test_whitelistedModule_revertingCallback_stillRevertsCancel() public {
@@ -391,6 +430,27 @@ contract CashModuleModuleWithdrawalAuthorityTest is CashModuleTestSetup {
     function _setDataProviderWhitelist(bool allowed) internal {
         vm.prank(owner);
         dataProvider.configureModules(_single(address(module)), _singleBool(allowed));
+    }
+
+    /// @dev Calls CashModule with an owner-signed replacement request at `gasLimit`; a success must notify the module
+    function _probeReplacement(bytes memory callData, uint256 gasLimit) internal returns (bool ok) {
+        (ok,) = address(cashModule).call{ gas: gasLimit }(callData);
+        if (ok) assertEq(module.callbackCount(), 1, "the cancel succeeded with the callback starved");
+    }
+
+    function _signedReplacementCall(uint256 amount) internal view returns (bytes memory) {
+        address[] memory tokens = _single(address(usdc));
+        uint256[] memory amounts = _single(amount);
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(owner1Pk, digest);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(owner2Pk, digest);
+        address[] memory signers = new address[](2);
+        signers[0] = owner1;
+        signers[1] = owner2;
+        bytes[] memory signatures = new bytes[](2);
+        signatures[0] = abi.encodePacked(r1, s1, v1);
+        signatures[1] = abi.encodePacked(r2, s2, v2);
+        return abi.encodeCall(ICashModule.requestWithdrawal, (address(safe), tokens, amounts, withdrawRecipient, signers, signatures));
     }
 
     function _spendUsdc(uint256 amountUsd) internal {
