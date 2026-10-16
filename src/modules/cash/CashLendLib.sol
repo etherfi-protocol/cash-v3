@@ -56,6 +56,10 @@ library CashLendLib {
     /// @dev Pad on resupply sizing so Aave share rounding cannot leave the headroom short; excess supply is harmless
     uint256 internal constant RESUPPLY_BUFFER_BPS = 10;
 
+    /// @dev Gas cap on cancelBridgeByCashModule for a module governance removed (see _notifyRemovedModule). The
+    ///      in-repo callbacks only clear the module's own record for the safe, well under this cap.
+    uint256 internal constant REMOVED_MODULE_CALLBACK_GAS = 200_000;
+
     // Threads a debit spend's cross-token state through the sizing pass. Bundled into one struct so the
     // sizing frames stay well under the legacy stack limit (the price provider is a parameter here, where in
     // the module it was a free immutable).
@@ -93,9 +97,28 @@ library CashLendLib {
     }
 
     /**
+     * @notice Whether the safe's pending withdrawal belongs to its recipient module, which alone may then
+     *         process or cancel it
+     * @dev A request placed through requestWithdrawalByModule is recorded as the module's own and stays so
+     *      after governance removes the module from either whitelist: removal only blocks new requests. A
+     *      request without that record (placed by the owners, or by a module before the record existed)
+     *      belongs to a module only while its recipient is on the withdraw-requester list, as before.
+     * @param $ The CashModule storage (passed by the delegatecalling module)
+     * @param safe Address of the EtherFi Safe
+     * @return True if only the request's recipient module may process or cancel it
+     */
+    function isModuleWithdrawal(CashModuleStorageContract.CashModuleStorage storage $, address safe) internal view returns (bool) {
+        SafeCashConfig storage safeCashConfig = $.safeCashConfig[safe];
+        return safeCashConfig.withdrawalRequestedByModule || $.whitelistedModulesCanRequestWithdraw.contains(safeCashConfig.pendingWithdrawalRequest.recipient);
+    }
+
+    /**
      * @notice Cancels the safe's pending withdrawal request, if any, and emits WithdrawalCancelled
      * @dev The module's internal _cancelOldWithdrawal delegates here; the spend paths in this library call
-     *      it directly when a spend wins the competing claim over a reservation.
+     *      it directly when a spend wins the competing claim over a reservation. The recipient module hears
+     *      of the cancel through cancelBridgeByCashModule: a module on both whitelists exactly as before (its
+     *      revert reverts the cancel), and a module governance has since removed whenever the request is
+     *      recorded as its own, through _notifyRemovedModule so it cannot block the cancel.
      * @param $ The CashModule storage (passed by the delegatecalling module)
      * @param dataProvider The module's data provider (to vet the recipient before the bridge-cancel call)
      * @param safe Address of the EtherFi Safe
@@ -105,13 +128,32 @@ library CashLendLib {
         address recipient = safeCashConfig.pendingWithdrawalRequest.recipient;
 
         if (safeCashConfig.pendingWithdrawalRequest.tokens.length > 0) {
-            if ($.whitelistedModulesCanRequestWithdraw.contains(recipient)) {
-                // Only call the function if the module is whitelisted on data provider
-                if (dataProvider.isWhitelistedModule(recipient)) IBridgeModule(recipient).cancelBridgeByCashModule(safe);
+            if ($.whitelistedModulesCanRequestWithdraw.contains(recipient) && dataProvider.isWhitelistedModule(recipient)) {
+                IBridgeModule(recipient).cancelBridgeByCashModule(safe);
+            } else if (safeCashConfig.withdrawalRequestedByModule) {
+                _notifyRemovedModule(recipient, safe);
             }
 
             $.cashEventEmitter.emitWithdrawalCancelled(safe, safeCashConfig.pendingWithdrawalRequest.tokens, safeCashConfig.pendingWithdrawalRequest.amounts, recipient);
             delete safeCashConfig.pendingWithdrawalRequest;
+            delete safeCashConfig.withdrawalRequestedByModule;
+        }
+    }
+
+    /**
+     * @dev Tells a module that governance removed from a whitelist that CashModule cancelled its request, without
+     *      letting it block the cancel: spends, liquidations (preLiquidate) and the owners' replacement request all
+     *      cancel through here, and the removed module may be broken or retired to a reverting implementation. The
+     *      call gets at most REMOVED_MODULE_CALLBACK_GAS, its result is ignored and no return data is copied, so a
+     *      reverting, gas-burning or return-bombing module cannot fail the cancel. A module that needs the signal
+     *      must keep its callback within that gas.
+     * @param module The removed module that requested the withdrawal (its recipient)
+     * @param safe Address of the EtherFi Safe
+     */
+    function _notifyRemovedModule(address module, address safe) private {
+        bytes memory data = abi.encodeCall(IBridgeModule.cancelBridgeByCashModule, (safe));
+        assembly ("memory-safe") {
+            pop(call(REMOVED_MODULE_CALLBACK_GAS, module, 0, add(data, 0x20), mload(data), 0, 0))
         }
     }
 

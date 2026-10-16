@@ -143,6 +143,10 @@ struct SafeCashConfig {
     uint96 lendOptOutFinalizeTime;
     /// @notice True once the safe's borrow/collateral engine is the Aave gateway (set at onboarding or by migration; one-way)
     bool usesLendGateway;
+    /// @notice True while the pending withdrawal request was placed by its recipient module through requestWithdrawalByModule.
+    ///         Recorded per request, so the module keeps sole authority over that request after governance removes it from
+    ///         either whitelist (removal only blocks new requests). Appended last: packs into the slot above.
+    bool withdrawalRequestedByModule;
 }
 
 /**
