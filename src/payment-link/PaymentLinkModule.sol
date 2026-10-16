@@ -22,7 +22,8 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *         `linkSigner` address whose private key travels in the link URL. Once the withdrawal
  *         delay matures, the permissionless `fundLink(safe)` pulls the funds in. Whoever holds the
  *         link key can then `claim` to any recipient (fee-free to an EtherFiSafe, `feeBps` to
- *         anything else); the safe's current owners can `cancel` at any time, paused or not.
+ *         anything else); the safe's current owners can call `cancel` at any time, including
+ *         while paused.
  * @dev The module is whitelisted on the DataProvider and allowed to request withdrawals on the
  *      CashModule, but is never enabled on safes, so it has no `execTransactionFromModule`
  *      authority and cannot use `IEtherFiSafe.useNonce()`. Owner signatures therefore use this
@@ -40,9 +41,23 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *
  *      Every transfer in and out must move the module's balance by exactly the amount sent
  *      (`BalanceDeltaMismatch` otherwise), so no exit can take more from the pooled escrow than
- *      it pays out. A token that taxes the SENDER passes funding (the safe pays the tax) but
- *      then fails every exit: such a link can be neither claimed nor cancelled and its escrow
- *      stays in the module until an upgrade. Only offer tokens that move exact amounts.
+ *      it pays out. Cancellation stays callable while paused, but a refund still needs a
+ *      successful exact-debit transfer. A token that taxes the SENDER passes funding (the safe
+ *      pays the tax) and then fails every exit whose transfers are actually taxed: such a link
+ *      can be neither claimed nor cancelled while that holds. Transfers the tax rounds to zero,
+ *      or that the token exempts, still succeed, and a shortfall exit whose gross payout is zero
+ *      finalizes without transferring. Only offer tokens that move exact amounts.
+ *
+ *      Failed transfers (token blocklists, pauses, taxes): the whole call reverts, so the link
+ *      stays `Funded` and liabilities, balances and the owners' cancel nonce are unchanged.
+ *      - Blocked recipient: the link key can sign a new claim to another address.
+ *      - Blocked fee receiver: claims that owe a fee revert until the admin changes the receiver
+ *        with `setFee` (read live at claim); claims to an EtherFiSafe owe no fee.
+ *      - Blocked safe: refunds of funded links revert, but the link can still be claimed to
+ *        another address. Cancelling a `Requested` link moves no tokens and still works.
+ *      - Blocked module: no positive payout can succeed until the token's restrictions change.
+ *      - Sender-taxed token: exits stay stuck until exact-debit transfers become possible or
+ *        the module is upgraded.
  *
  *      GOVERNANCE RULE: do not remove this module from the DataProvider whitelist or from
  *      CashModule's withdraw-requester list while any link is `Requested`. CashModule decides who
@@ -242,9 +257,11 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @notice Cancels a `Requested` or `Funded` link, signed by the safe's CURRENT owners. A
      *         requested link releases its CashModule hold; a funded link's escrow returns to the
      *         safe (pro rata in a shortfall, never with a fee).
-     * @dev Deliberately not gated by pause, so a sender can always get their funds back. For a
-     *      `Requested` link the state is cleared BEFORE `cancelWithdrawalByModule`, so CashModule's
-     *      `cancelBridgeByCashModule` callback finds nothing to do.
+     * @dev Deliberately not gated by pause: cancellation remains callable while paused, and a
+     *      funded link's refund requires a successful exact-debit transfer (see the contract notes
+     *      on failed transfers). A `Requested` link moves no tokens; its state is cleared BEFORE
+     *      `cancelWithdrawalByModule`, so CashModule's `cancelBridgeByCashModule` callback finds
+     *      nothing to do.
      * @param linkSigner The link ID.
      * @param signers Safe owners that signed `cancelLinkDigest(linkSigner)`.
      * @param signatures Signatures corresponding to `signers`.
