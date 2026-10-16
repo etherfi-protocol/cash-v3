@@ -246,6 +246,41 @@ abstract contract StockWithdrawModuleTestBase is SafeTestSetup {
         module.configureUnwrappers(dstEids, unwrappers);
     }
 
+
+    function _removeFromWhitelists(bool dataProviderFirst) internal {
+        address[] memory mods = new address[](1);
+        mods[0] = address(module);
+        bool[] memory no = new bool[](1);
+        vm.startPrank(owner);
+        if (dataProviderFirst) {
+            dataProvider.configureModules(mods, no);
+            cashModule.configureModulesCanRequestWithdraw(mods, no);
+        } else {
+            cashModule.configureModulesCanRequestWithdraw(mods, no);
+            dataProvider.configureModules(mods, no);
+        }
+        vm.stopPrank();
+    }
+
+    /// @dev Owner-signed CashModule requestWithdrawal of `amount` iTOKEN to the safe itself, as calldata
+    function _cashWithdrawalToSelfCall(uint256 amount) internal view returns (bytes memory) {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(oft);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amount;
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, address(safe)))).toEthSignedMessageHash();
+        (address[] memory signers, bytes[] memory sigs) = _twoSig(digest);
+        return abi.encodeCall(ICashModule.requestWithdrawal, (address(safe), tokens, amounts, address(safe), signers, sigs));
+    }
+
+    function _requestCashWithdrawalToSelf(uint256 amount) internal {
+        (bool ok, bytes memory ret) = address(cashModule).call(_cashWithdrawalToSelfCall(amount));
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
+        }
+    }
 }
 
 contract StockWithdrawModuleTest is StockWithdrawModuleTestBase {
@@ -830,31 +865,6 @@ contract StockWithdrawModuleTest is StockWithdrawModuleTestBase {
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(safe));
     }
 
-    function _removeFromWhitelists(bool dataProviderFirst) internal {
-        address[] memory mods = new address[](1);
-        mods[0] = address(module);
-        bool[] memory no = new bool[](1);
-        vm.startPrank(owner);
-        if (dataProviderFirst) {
-            dataProvider.configureModules(mods, no);
-            cashModule.configureModulesCanRequestWithdraw(mods, no);
-        } else {
-            cashModule.configureModulesCanRequestWithdraw(mods, no);
-            dataProvider.configureModules(mods, no);
-        }
-        vm.stopPrank();
-    }
-
-    function _requestCashWithdrawalToSelf(uint256 amount) internal {
-        address[] memory tokens = new address[](1);
-        tokens[0] = address(oft);
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = amount;
-        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, address(safe)))).toEthSignedMessageHash();
-        (address[] memory signers, bytes[] memory sigs) = _twoSig(digest);
-        cashModule.requestWithdrawal(address(safe), tokens, amounts, address(safe), signers, sigs);
-    }
-
     // ---- admin config ----
 
     function test_configureTokens_adminOnlyAndValidatesOft() public {
@@ -1105,12 +1115,13 @@ contract StockWithdrawModuleTest is StockWithdrawModuleTestBase {
     }
 }
 
-/// @dev The order is placed in setUp, a transaction before the test, so the callback below deletes persisted
-///      storage starting cold: the cost it has when a cancel lands after the request.
+/// @dev The order is placed and the module removed from both whitelists in setUp, a transaction before each
+///      test, so the callback deletes persisted storage starting cold: what it costs when a cancel lands later.
 contract StockWithdrawModuleCallbackGasTest is StockWithdrawModuleTestBase {
     function setUp() public override {
         super.setUp();
         _request(_baseOrder());
+        _removeFromWhitelists(false);
     }
 
     /// @dev CashModule caps the gas it gives a removed module's callback; ours must fit with room to spare.
@@ -1122,5 +1133,37 @@ contract StockWithdrawModuleCallbackGasTest is StockWithdrawModuleTestBase {
 
         assertEq(module.getOrder(address(safe)).iToken, address(0));
         assertLt(gasUsed, CashLendLib.REMOVED_MODULE_CALLBACK_GAS / 2, "callback too close to CashModule's cap");
+    }
+
+    /// @dev Whoever relays the owners' replacement withdrawal picks its gas limit, but cannot make CashModule's
+    ///      capped callback into this removed module run out of gas while the replacement succeeds. Finds a cheap
+    ///      successful limit, then sweeps every limit from far below it to 100k above it in 1k steps: each one that
+    ///      succeeds must have cleared the order. Past that range a successful call leaves the callback the full cap.
+    function test_removedModuleCallback_notStarvableByOuterGasLimit() public {
+        bytes memory replacement = _cashWithdrawalToSelfCall(1e18);
+        uint256 snapshot = vm.snapshotState();
+
+        uint256 lo = 50_000;
+        uint256 hi = 5_000_000;
+        assertTrue(_probe(replacement, hi));
+        vm.revertToState(snapshot);
+        while (hi - lo > 1) {
+            uint256 mid = (lo + hi) / 2;
+            if (_probe(replacement, mid)) hi = mid;
+            else lo = mid;
+            vm.revertToState(snapshot);
+        }
+
+        uint256 successes;
+        for (uint256 gasLimit = 50_000; gasLimit <= hi + 100_000; gasLimit += 1_000) {
+            if (_probe(replacement, gasLimit)) successes++;
+            vm.revertToState(snapshot);
+        }
+        assertGt(successes, 0);
+    }
+
+    function _probe(bytes memory callData, uint256 gasLimit) internal returns (bool ok) {
+        (ok,) = address(cashModule).call{ gas: gasLimit }(callData);
+        if (ok) assertEq(module.getOrder(address(safe)).iToken, address(0), "replacement succeeded with the callback starved");
     }
 }
