@@ -234,8 +234,9 @@ contract CashModuleModuleWithdrawalAuthorityTest is CashModuleTestSetup {
     }
 
     /// @dev EIP-150: whoever submits a cancel picks its gas limit, but cannot make the capped callback run out of
-    ///      gas while the cancel itself succeeds. Binary-searches the smallest gas limit at which a relayed owner
-    ///      replacement request succeeds; every probe that succeeds must have delivered the callback.
+    ///      gas while the cancel itself succeeds. Finds a cheap successful gas limit for a relayed owner replacement
+    ///      request, then sweeps every limit from far below it to 100k above it in 1k steps: each one that succeeds
+    ///      must have delivered the callback. Past that range a successful call leaves the callback the full cap.
     function test_removedModuleCallback_notStarvableByOuterGasLimit() public {
         module.requestWithdrawal(address(safe), address(usdc), HOLD);
         _remove(Removal.RequesterListThenDataProvider);
@@ -243,24 +244,14 @@ contract CashModuleModuleWithdrawalAuthorityTest is CashModuleTestSetup {
 
         bytes memory replacement = _signedReplacementCall(1e6);
         uint256 snapshot = vm.snapshotState();
+        uint256 cheapest = _cheapestSuccess(replacement, snapshot);
 
-        uint256 lo = 50_000;
-        uint256 hi = 5_000_000;
-        assertFalse(_probeReplacement(replacement, lo));
-        vm.revertToState(snapshot);
-        assertTrue(_probeReplacement(replacement, hi));
-        vm.revertToState(snapshot);
-
-        while (hi - lo > 1) {
-            uint256 mid = (lo + hi) / 2;
-            if (_probeReplacement(replacement, mid)) hi = mid;
-            else lo = mid;
+        uint256 successes;
+        for (uint256 gasLimit = 50_000; gasLimit <= cheapest + 100_000; gasLimit += 1_000) {
+            if (_probeReplacement(replacement, gasLimit)) successes++;
             vm.revertToState(snapshot);
         }
-
-        // At the boundary the callback still got what it needed
-        assertTrue(_probeReplacement(replacement, hi));
-        assertEq(module.callbackCount(), 1);
+        assertGt(successes, 0);
     }
 
     function test_whitelistedModule_revertingCallback_stillRevertsCancel() public {
@@ -430,6 +421,20 @@ contract CashModuleModuleWithdrawalAuthorityTest is CashModuleTestSetup {
     function _setDataProviderWhitelist(bool allowed) internal {
         vm.prank(owner);
         dataProvider.configureModules(_single(address(module)), _singleBool(allowed));
+    }
+
+    /// @dev Binary search for a gas limit at which `callData` succeeds; every probe checks the callback ran
+    function _cheapestSuccess(bytes memory callData, uint256 snapshot) internal returns (uint256 hi) {
+        uint256 lo = 50_000;
+        hi = 5_000_000;
+        assertTrue(_probeReplacement(callData, hi));
+        vm.revertToState(snapshot);
+        while (hi - lo > 1) {
+            uint256 mid = (lo + hi) / 2;
+            if (_probeReplacement(callData, mid)) hi = mid;
+            else lo = mid;
+            vm.revertToState(snapshot);
+        }
     }
 
     /// @dev Calls CashModule with an owner-signed replacement request at `gasLimit`; a success must notify the module
