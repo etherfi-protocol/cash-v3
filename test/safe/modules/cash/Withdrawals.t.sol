@@ -764,7 +764,7 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         cashModule.cancelWithdrawalByModule(address(safe));
     }
 
-    function test_cancelWithdrawalByModule_reverts_whenCalledByModuleRemovedFromDataProviderWhitelist() public {
+    function test_cancelWithdrawalByModule_works_whenCalledByModuleRemovedFromDataProviderWhitelist() public {
         address module = makeAddr("module");
         address[] memory modules = new address[](1);
         modules[0] = module;
@@ -794,9 +794,12 @@ contract CashModuleWithdrawalTest is CashModuleTestSetup {
         dataProvider.configureModules(modules, shouldWhitelist);
         vm.stopPrank();
 
+        // Removal only blocks new requests: the module can still cancel its own
         vm.prank(address(module));
-        vm.expectRevert(ICashModule.ModuleNotWhitelistedOnDataProvider.selector);
         cashModule.cancelWithdrawalByModule(address(safe));
+
+        request = cashModule.getData(address(safe)).pendingWithdrawalRequest;
+        assertEq(request.tokens.length, 0);
     }
 
     function test_cancelWithdrawalByModule_reverts_whenModuleIsNotTheCaller() public {

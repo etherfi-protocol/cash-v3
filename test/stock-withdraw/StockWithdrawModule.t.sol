@@ -11,6 +11,10 @@ import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { SendParam, MessagingFee, MessagingReceipt, OFTLimit, OFTFeeDetail, OFTReceipt } from "../../src/interfaces/IOFT.sol";
 import { SafeTestSetup } from "../safe/SafeTestSetup.t.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { ICashModule } from "../../src/interfaces/ICashModule.sol";
+import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
+import { CashLendLib } from "../../src/modules/cash/CashLendLib.sol";
+import { EtherFiSafeErrors } from "../../src/safe/EtherFiSafeErrors.sol";
 
 /// @dev ShadowOFT stand-in: an ERC20 that is its own OFT (token() == address(this),
 ///      approvalRequired() == false), recording the last send() for assertions. Faithful to
@@ -101,7 +105,7 @@ contract OFTStub is ERC20 {
     }
 }
 
-contract StockWithdrawModuleTest is SafeTestSetup {
+abstract contract StockWithdrawModuleTestBase is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
     StockWithdrawModule internal module;
@@ -119,7 +123,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     uint256 internal constant AMOUNT = 100e18;
     uint256 internal constant MIN_RETURN = 99e18;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
 
         oft = new OFTStub();
@@ -241,6 +245,46 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         vm.prank(moduleAdmin);
         module.configureUnwrappers(dstEids, unwrappers);
     }
+
+
+    function _removeFromWhitelists(bool dataProviderFirst) internal {
+        address[] memory mods = new address[](1);
+        mods[0] = address(module);
+        bool[] memory no = new bool[](1);
+        vm.startPrank(owner);
+        if (dataProviderFirst) {
+            dataProvider.configureModules(mods, no);
+            cashModule.configureModulesCanRequestWithdraw(mods, no);
+        } else {
+            cashModule.configureModulesCanRequestWithdraw(mods, no);
+            dataProvider.configureModules(mods, no);
+        }
+        vm.stopPrank();
+    }
+
+    /// @dev Owner-signed CashModule requestWithdrawal of `amount` iTOKEN to the safe itself, as calldata
+    function _cashWithdrawalToSelfCall(uint256 amount) internal view returns (bytes memory) {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(oft);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amount;
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, address(safe)))).toEthSignedMessageHash();
+        (address[] memory signers, bytes[] memory sigs) = _twoSig(digest);
+        return abi.encodeCall(ICashModule.requestWithdrawal, (address(safe), tokens, amounts, address(safe), signers, sigs));
+    }
+
+    function _requestCashWithdrawalToSelf(uint256 amount) internal {
+        (bool ok, bytes memory ret) = address(cashModule).call(_cashWithdrawalToSelfCall(amount));
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(ret, 0x20), mload(ret))
+            }
+        }
+    }
+}
+
+contract StockWithdrawModuleTest is StockWithdrawModuleTestBase {
+    using MessageHashUtils for bytes32;
 
     // ---- initialize ----
 
@@ -711,6 +755,116 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         assertEq(module.getOrder(address(safe)).iToken, address(0));
     }
 
+    // ---- governance removal: the module keeps authority over its live hold ----
+
+    /// @dev Removing the module from CashModule's requester list and the DataProvider whitelist (in either
+    ///      order) only blocks new requests. Nobody else can process the hold into the module, so the order
+    ///      still executes through the module.
+    function test_removedFromWhitelists_requesterListFirst_onlyModuleProcessesHold() public {
+        _assertOnlyModuleProcessesAfterRemoval(false);
+    }
+
+    function test_removedFromWhitelists_dataProviderFirst_onlyModuleProcessesHold() public {
+        _assertOnlyModuleProcessesAfterRemoval(true);
+    }
+
+    /// @dev Off the requester list but still on the DataProvider, the owners' signed cancel goes through
+    ///      the module as before.
+    function test_removedFromRequesterList_ownersCanCancel() public {
+        _request(_baseOrder());
+        address[] memory mods = new address[](1);
+        mods[0] = address(module);
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(mods, new bool[](1));
+
+        (address[] memory signers, bytes[] memory sigs) = _signCancel();
+        vm.expectEmit(true, false, false, false, address(module));
+        emit StockWithdrawModule.WithdrawalCancelled(address(safe), bytes32(0));
+        module.cancelWithdrawal(address(safe), signers, sigs);
+
+        assertEq(module.getOrder(address(safe)).iToken, address(0));
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
+        assertEq(oft.balanceOf(address(safe)), AMOUNT);
+    }
+
+    function test_removedFromWhitelists_requesterListFirst_expiredOrderStillReleasable() public {
+        _assertExpiredOrderReleasableAfterRemoval(false);
+    }
+
+    function test_removedFromWhitelists_dataProviderFirst_expiredOrderStillReleasable() public {
+        _assertExpiredOrderReleasableAfterRemoval(true);
+    }
+
+    function test_removedFromWhitelists_requesterListFirst_ownerReplacementClearsOrder() public {
+        _assertOwnerReplacementClearsOrderAfterRemoval(false);
+    }
+
+    function test_removedFromWhitelists_dataProviderFirst_ownerReplacementClearsOrder() public {
+        _assertOwnerReplacementClearsOrderAfterRemoval(true);
+    }
+
+    function test_removedFromRequesterList_newRequestsBlocked() public {
+        address[] memory mods = new address[](1);
+        mods[0] = address(module);
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(mods, new bool[](1));
+
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(_baseOrder());
+        vm.expectRevert(ICashModule.OnlyWhitelistedModuleCanRequestWithdraw.selector);
+        module.requestWithdrawal(address(safe), _baseOrder(), signers, sigs);
+    }
+
+    function _assertOnlyModuleProcessesAfterRemoval(bool dataProviderFirst) internal {
+        _request(_baseOrder());
+        _removeFromWhitelists(dataProviderFirst);
+        _warpPastDelay();
+
+        vm.prank(makeAddr("rando"));
+        vm.expectRevert(ICashModule.OnlyModuleThatRequestedCanWithdraw.selector);
+        cashModule.processWithdrawal(address(safe));
+        assertEq(oft.balanceOf(address(module)), 0, "nothing processed into the module");
+
+        vm.prank(keeper);
+        module.executeWithdrawal{ value: 0.01 ether }(address(safe));
+        assertEq(oft.callCount(), 1);
+        assertEq(oft.lastAmountLD(), AMOUNT);
+        assertEq(module.getOrder(address(safe)).iToken, address(0));
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
+    }
+
+    function _assertExpiredOrderReleasableAfterRemoval(bool dataProviderFirst) internal {
+        StockWithdrawModule.Order memory order = _baseOrder();
+        _request(order);
+        _removeFromWhitelists(dataProviderFirst);
+
+        vm.warp(order.deadline + 1);
+        vm.prank(makeAddr("rando"));
+        module.cancelExpiredWithdrawal(address(safe));
+        assertEq(module.getOrder(address(safe)).iToken, address(0));
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.tokens.length, 0);
+        assertEq(oft.balanceOf(address(safe)), AMOUNT);
+    }
+
+    /// @dev Once off the DataProvider the module's own signed cancel stops working: it takes its nonce from
+    ///      the safe, which serves enabled modules only. The owners release the hold by replacing it with
+    ///      their own CashModule withdrawal, and the order still clears because CashModule calls back into
+    ///      the removed module (without letting it block the replacement).
+    function _assertOwnerReplacementClearsOrderAfterRemoval(bool dataProviderFirst) internal {
+        _request(_baseOrder());
+        _removeFromWhitelists(dataProviderFirst);
+
+        (address[] memory signers, bytes[] memory sigs) = _signCancel();
+        vm.expectRevert(EtherFiSafeErrors.OnlyModules.selector);
+        module.cancelWithdrawal(address(safe), signers, sigs);
+
+        vm.expectEmit(true, false, false, false, address(module));
+        emit StockWithdrawModule.WithdrawalCancelled(address(safe), bytes32(0));
+        _requestCashWithdrawalToSelf(1e18);
+
+        assertEq(module.getOrder(address(safe)).iToken, address(0), "order cleared by the callback");
+        assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, address(safe));
+    }
+
     // ---- admin config ----
 
     function test_configureTokens_adminOnlyAndValidatesOft() public {
@@ -958,5 +1112,58 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         module.executeWithdrawal{ value: 0.01 ether }(address(safe));
         assertEq(oft.balanceOf(feeReceiver), 0, "no fee taken when disabled");
         assertEq(oft.lastAmountLD(), AMOUNT, "full amount bridged");
+    }
+}
+
+/// @dev The order is placed and the module removed from both whitelists in setUp, a transaction before each
+///      test, so the callback deletes persisted storage starting cold: what it costs when a cancel lands later.
+contract StockWithdrawModuleCallbackGasTest is StockWithdrawModuleTestBase {
+    function setUp() public override {
+        super.setUp();
+        _request(_baseOrder());
+        _removeFromWhitelists(false);
+    }
+
+    /// @dev CashModule caps the gas it gives a removed module's callback; ours must fit with room to spare.
+    function test_cancelBridgeByCashModule_fitsRemovedModuleGasCap() public {
+        vm.prank(address(cashModule));
+        uint256 gasBefore = gasleft();
+        module.cancelBridgeByCashModule(address(safe));
+        uint256 gasUsed = gasBefore - gasleft();
+
+        assertEq(module.getOrder(address(safe)).iToken, address(0));
+        assertLt(gasUsed, CashLendLib.REMOVED_MODULE_CALLBACK_GAS / 2, "callback too close to CashModule's cap");
+    }
+
+    /// @dev Whoever relays the owners' replacement withdrawal picks its gas limit, but cannot make CashModule's
+    ///      capped callback into this removed module run out of gas while the replacement succeeds. Finds a cheap
+    ///      successful limit, then sweeps every limit from far below it to 100k above it in 1k steps: each one that
+    ///      succeeds must have cleared the order. Past that range a successful call leaves the callback the full cap.
+    function test_removedModuleCallback_notStarvableByOuterGasLimit() public {
+        bytes memory replacement = _cashWithdrawalToSelfCall(1e18);
+        uint256 snapshot = vm.snapshotState();
+
+        uint256 lo = 50_000;
+        uint256 hi = 5_000_000;
+        assertTrue(_probe(replacement, hi));
+        vm.revertToState(snapshot);
+        while (hi - lo > 1) {
+            uint256 mid = (lo + hi) / 2;
+            if (_probe(replacement, mid)) hi = mid;
+            else lo = mid;
+            vm.revertToState(snapshot);
+        }
+
+        uint256 successes;
+        for (uint256 gasLimit = 50_000; gasLimit <= hi + 100_000; gasLimit += 1_000) {
+            if (_probe(replacement, gasLimit)) successes++;
+            vm.revertToState(snapshot);
+        }
+        assertGt(successes, 0);
+    }
+
+    function _probe(bytes memory callData, uint256 gasLimit) internal returns (bool ok) {
+        (ok,) = address(cashModule).call{ gas: gasLimit }(callData);
+        if (ok) assertEq(module.getOrder(address(safe)).iToken, address(0), "replacement succeeded with the callback starved");
     }
 }
