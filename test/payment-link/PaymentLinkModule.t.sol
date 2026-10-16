@@ -6,6 +6,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import { ReentrancyGuardTransientUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardTransientUpgradeable.sol";
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { Vm } from "forge-std/Vm.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
@@ -13,6 +14,7 @@ import { BinSponsor, Cashback, ICashModule, SafeData } from "../../src/interface
 import { IPaymentLinkModule } from "../../src/interfaces/IPaymentLinkModule.sol";
 import { IPriceProvider } from "../../src/interfaces/IPriceProvider.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
+import { CashVerificationLib } from "../../src/libraries/CashVerificationLib.sol";
 import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
 import { CashLendLib } from "../../src/modules/cash/CashLendLib.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
@@ -1529,15 +1531,25 @@ contract PaymentLinkModuleTestSetupToken {
     }
 }
 
-/// @dev The link is requested in setUp, a transaction before the test, so the callback below writes persisted
-///      storage starting cold: the cost it has when a cancel lands after the request.
+/// @dev The link is requested and the module removed from both whitelists in setUp, a transaction before each
+///      test, so the callback writes persisted storage starting cold: what it costs when a cancel lands later.
 contract PaymentLinkModuleCallbackGasTest is PaymentLinkModuleTestSetup {
+    using MessageHashUtils for bytes32;
+
     address internal linkSigner;
 
     function setUp() public override {
         super.setUp();
         (linkSigner,) = _newLinkKey();
         _request(address(usdc), 100e6, linkSigner);
+
+        address[] memory mods = new address[](1);
+        mods[0] = address(plm);
+        bool[] memory no = new bool[](1);
+        vm.startPrank(owner);
+        cashModule.configureModulesCanRequestWithdraw(mods, no);
+        dataProvider.configureModules(mods, no);
+        vm.stopPrank();
     }
 
     /// @dev CashModule caps the gas it gives a removed module's callback; ours must fit with room to spare.
@@ -1549,5 +1561,49 @@ contract PaymentLinkModuleCallbackGasTest is PaymentLinkModuleTestSetup {
 
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
         assertLt(gasUsed, CashLendLib.REMOVED_MODULE_CALLBACK_GAS / 2, "callback too close to CashModule's cap");
+    }
+
+    /// @dev Whoever relays the owners' replacement withdrawal picks its gas limit, but cannot make CashModule's
+    ///      capped callback into this removed module run out of gas while the replacement succeeds. Finds a cheap
+    ///      successful limit, then sweeps every limit from far below it to 100k above it in 1k steps: each one that
+    ///      succeeds must have moved the link to RequestCancelled. Past that range a successful call leaves the
+    ///      callback the full cap.
+    function test_removedModuleCallback_notStarvableByOuterGasLimit() public {
+        bytes memory replacement = _ownerWithdrawalCall(1e6);
+        uint256 snapshot = vm.snapshotState();
+
+        uint256 lo = 50_000;
+        uint256 hi = 5_000_000;
+        assertTrue(_probe(replacement, hi));
+        vm.revertToState(snapshot);
+        while (hi - lo > 1) {
+            uint256 mid = (lo + hi) / 2;
+            if (_probe(replacement, mid)) hi = mid;
+            else lo = mid;
+            vm.revertToState(snapshot);
+        }
+
+        uint256 successes;
+        for (uint256 gasLimit = 50_000; gasLimit <= hi + 100_000; gasLimit += 1_000) {
+            if (_probe(replacement, gasLimit)) successes++;
+            vm.revertToState(snapshot);
+        }
+        assertGt(successes, 0);
+    }
+
+    function _probe(bytes memory callData, uint256 gasLimit) internal returns (bool ok) {
+        (ok,) = address(cashModule).call{ gas: gasLimit }(callData);
+        if (ok) assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled), "replacement succeeded with the callback starved");
+    }
+
+    /// @dev Owner-signed CashModule requestWithdrawal of `amount` USDC to withdrawRecipient, as calldata
+    function _ownerWithdrawalCall(uint256 amount) internal view returns (bytes memory) {
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = amount;
+        bytes32 digest = keccak256(abi.encodePacked(CashVerificationLib.REQUEST_WITHDRAWAL_METHOD, block.chainid, address(safe), safe.nonce(), abi.encode(tokens, amounts, withdrawRecipient))).toEthSignedMessageHash();
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(digest);
+        return abi.encodeCall(ICashModule.requestWithdrawal, (address(safe), tokens, amounts, withdrawRecipient, signers, sigs));
     }
 }
