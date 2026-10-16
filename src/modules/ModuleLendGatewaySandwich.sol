@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { Mode, SafeData } from "../interfaces/ICashModule.sol";
+import { IDebtManager } from "../interfaces/IDebtManager.sol";
 import { ILendGateway } from "../interfaces/ILendGateway.sol";
 import { ModuleCheckBalance } from "./ModuleCheckBalance.sol";
 
@@ -64,6 +66,38 @@ abstract contract ModuleLendGatewaySandwich is ModuleCheckBalance {
      */
     function _onGatewayEngine(address safe) internal view virtual returns (bool) {
         return cashModule.usesLendGateway(safe);
+    }
+
+    /**
+     * @notice Whether moving `asset` out of the safe can race card spending or reduce borrowing capacity
+     * @dev Gateway safes: a spend asset is always held. A collateral asset (live LTV != 0) is held
+     *      unless the safe is in Debit mode with no debt and no mode switch inside its delay — then the
+     *      collateral backs nothing. Legacy safes: DebtManager's collateral and borrow registries, held regardless of
+     *      mode because the no-hold path runs no DebtManager health check. Chains without CashModule card
+     *      spending never need a hold.
+     * @param safe The safe moving the asset
+     * @param asset The asset being moved
+     * @return True if the move must sit behind a CashModule withdrawal hold
+     */
+    function _requiresSolvencyHold(address safe, address asset) internal view returns (bool) {
+        if (address(cashModule) == address(0)) return false; // any asset: chain with no card spending (mainnet safes)
+        if (_onGatewayEngine(safe)) {
+            ILendGateway lendGateway = gateway();
+            if (address(lendGateway) == address(0)) return false; // any asset: chain with no aave lending engine
+            if (lendGateway.isSpendAsset(asset)) return true; // spend asset
+            if (lendGateway.ltv(asset) == 0) return false; // non-collateral, non-spend asset
+            if (lendGateway.hasDebt(safe)) return true; // collateral asset, safe has debt
+            SafeData memory data = cashModule.getData(safe);
+            // Collateral asset, no debt:
+            //   - mode switch still inside its delay -> held (CashLens already authorizes in the incoming mode)
+            //   - Credit mode                        -> held (card spends borrow against it)
+            //   - Debit mode                         -> not held (no need to hold collateral for Debit users without debt)
+            // getMode applies a matured switch that storage has not recorded yet (stored mode is updated lazily)
+            bool modeSwitchPending = data.incomingModeStartTime != 0 && block.timestamp <= data.incomingModeStartTime;
+            return modeSwitchPending || cashModule.getMode(safe) == Mode.Credit;
+        }
+        IDebtManager debtManager = cashModule.getDebtManager();
+        return debtManager.isCollateralToken(asset) || debtManager.isBorrowToken(asset); // legacy safe: collateral or borrow (spend) asset
     }
 
     /**

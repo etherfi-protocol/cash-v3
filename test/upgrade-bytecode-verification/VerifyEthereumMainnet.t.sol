@@ -52,12 +52,12 @@ contract VerifyEthereumMainnetBytecode is TradingStackBytecode {
     }
 
     function test_verifyBytecode_TradingAcrossSwapModule() public {
-        address local = address(new AcrossSwapModule(_tradingAddr("EtherFiDataProvider")));
+        address local = address(new AcrossSwapModule(_tradingAddr("EtherFiDataProvider"), _tradingAddr("TradingSafeFactory")));
         _verify("trading AcrossSwapModule", _getImpl(_tradingAddr("AcrossSwapModule")), local);
     }
 
     function test_verifyBytecode_TradingEnsoSwapModule() public {
-        address local = address(new EnsoSwapModule(_tradingAddr("EtherFiDataProvider")));
+        address local = address(new EnsoSwapModule(_tradingAddr("EtherFiDataProvider"), _tradingAddr("TradingSafeFactory")));
         _verify("trading EnsoSwapModule", _getImpl(_tradingAddr("EnsoSwapModule")), local);
     }
 
