@@ -1035,7 +1035,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
 
         // Rescuing all 100 would cost the module 101 and dip into the liability.
         vm.prank(owner);
-        vm.expectRevert(IPaymentLinkModule.EscrowShortfall.selector);
+        vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
         plm.rescueSurplus(address(taxed), externalRecipient, 100);
 
         vm.prank(owner);
@@ -1253,6 +1253,64 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertLe(escrowAfterRebase, total);
     }
 
+    // ---- sender-taxed tokens (Bugbot: exits must not skim other links) ----
+
+    /// @dev A token that charges the SENDER funds normally (the safe pays the tax), but any exit
+    ///      would cost the module more than it pays out, taken from the other links' escrow.
+    ///      Every such exit reverts, so the pooled escrow stays whole; the links are stuck.
+    function test_senderTaxedToken_exitsRevert_otherLinksStayWhole() public {
+        (address a, uint256 aPk) = _fundedLink(address(taxedToken), 100 ether);
+        (address b, uint256 bPk) = _fundedLink(address(taxedToken), 100 ether);
+        (address u, uint256 uPk) = _fundedLink(address(usdc), AMOUNT);
+        assertEq(_bal(address(taxedToken), address(plm)), 200 ether, "funding delivered exact amounts");
+        assertEq(plm.getLiabilities(address(taxedToken)), 200 ether);
+
+        address recipientSafe = _deploySecondSafe();
+        address[2] memory links = [a, b];
+        uint256[2] memory pks = [aPk, bPk];
+        for (uint256 i = 0; i < 2; i++) {
+            // External recipient (fee + payout), ether.fi safe (payout only) and cancel all revert.
+            bytes memory sig = _claimSig(plm, pks[i], links[i], externalRecipient);
+            vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
+            plm.claim(links[i], externalRecipient, sig);
+
+            sig = _claimSig(plm, pks[i], links[i], recipientSafe);
+            vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
+            plm.claim(links[i], recipientSafe, sig);
+
+            (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.cancelLinkDigest(links[i]));
+            vm.expectRevert(IPaymentLinkModule.BalanceDeltaMismatch.selector);
+            plm.cancel(links[i], signers, sigs);
+
+            assertEq(uint8(_status(links[i])), uint8(IPaymentLinkModule.LinkStatus.Funded));
+        }
+        assertEq(_bal(address(taxedToken), address(plm)), 200 ether, "no escrow skimmed");
+        assertEq(plm.getLiabilities(address(taxedToken)), 200 ether);
+
+        // Other tokens are unaffected.
+        _claim(u, uPk, externalRecipient);
+        assertEq(_bal(address(usdc), externalRecipient) + _bal(address(usdc), plFeeReceiver), AMOUNT);
+    }
+
+    /// @dev The check is exact, not blanket: a transfer the token does not tax goes through, and a
+    ///      requested (unfunded) link in the same token can still be cancelled.
+    function test_senderTaxedToken_untaxedExitAndRequestedCancelStillWork() public {
+        _fundedLink(address(taxedToken), 100 ether);
+        (address small, uint256 smallPk) = _fundedLink(address(taxedToken), 99); // 1% of 99 wei rounds to 0
+
+        address recipientSafe = _deploySecondSafe();
+        _claim(small, smallPk, recipientSafe);
+        assertEq(_bal(address(taxedToken), recipientSafe), 99);
+        assertEq(_bal(address(taxedToken), address(plm)), 100 ether);
+        assertEq(plm.getLiabilities(address(taxedToken)), 100 ether);
+
+        (address requested,) = _newLinkKey();
+        _request(address(taxedToken), 5 ether, requested);
+        _cancel(requested);
+        assertEq(uint8(_status(requested)), uint8(IPaymentLinkModule.LinkStatus.Cancelled));
+        assertEq(_pendingTokensLength(), 0);
+    }
+
     // ---- fees ----
 
     function test_setFee_onlyAdminTimelock() public {
@@ -1275,6 +1333,12 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
 
         vm.expectRevert(ModuleBase.InvalidInput.selector);
         plm.setFee(1, address(0));
+
+        // The module can never be its own fee receiver (its fee transfer would fail the exact-delta check).
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        plm.setFee(1, address(plm));
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        plm.setFee(0, address(plm));
 
         address newReceiver = makeAddr("newReceiver");
         vm.expectEmit(true, true, true, true, address(plm));
