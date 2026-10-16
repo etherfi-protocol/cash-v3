@@ -22,6 +22,8 @@ import { PaymentLinkModuleTestSetup } from "./PaymentLinkModuleTestSetup.t.sol";
 contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
     uint256 internal constant AMOUNT = 100e6; // 100 USDC
 
+    uint256 internal originalChainId;
+
     // ---- initialize / construction ----
 
     function test_initialize_setsConfig() public view {
@@ -495,10 +497,13 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
 
     function test_claim_replayFromOtherChainReverts() public {
         (address linkSigner, uint256 linkPk) = _fundedLink(address(usdc), AMOUNT);
-        uint256 chainId = block.chainid;
-        vm.chainId(chainId + 1);
+        // Kept in storage: via-IR builds (forge coverage --ir-minimum) may otherwise re-read
+        // CHAINID after the cheatcode and "restore" the wrong chain.
+        originalChainId = block.chainid;
+        vm.chainId(originalChainId + 1);
         bytes memory otherChainSig = _claimSig(plm, linkPk, linkSigner, externalRecipient);
-        vm.chainId(chainId);
+        vm.chainId(originalChainId);
+        assertEq(block.chainid, originalChainId);
 
         vm.expectRevert(IPaymentLinkModule.InvalidClaimSignature.selector);
         plm.claim(linkSigner, externalRecipient, otherChainSig);
