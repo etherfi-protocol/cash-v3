@@ -956,24 +956,6 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
     }
 
-    /// @dev CashModule caps the gas it gives a removed module's callback; ours must fit with room to
-    ///      spare, measured with the module's storage cold as when the cancel lands in a later transaction.
-    function test_cancelBridgeByCashModule_fitsRemovedModuleGasCap() public {
-        (address linkSigner,) = _newLinkKey();
-        _request(address(usdc), AMOUNT, linkSigner);
-        // vm.cool is newer than the pinned forge-std Vm interface; call the cheatcode by selector
-        (bool cooled,) = address(vm).call(abi.encodeWithSignature("cool(address)", address(plm)));
-        require(cooled, "vm.cool unavailable");
-
-        vm.prank(address(cashModule));
-        uint256 gasBefore = gasleft();
-        plm.cancelBridgeByCashModule(address(safe));
-        uint256 gasUsed = gasBefore - gasleft();
-
-        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
-        assertLt(gasUsed, CashLendLib.REMOVED_MODULE_CALLBACK_GAS / 2, "callback too close to CashModule's cap");
-    }
-
     // A hold placed before CashModule recorded module requests (this module live before that CashModule
     // upgrade) still follows CURRENT list membership, so the module's governance rule applies to it.
 
@@ -1544,5 +1526,28 @@ contract PaymentLinkModuleTestSetupToken {
 
     function mint(address to, uint256 amount) external {
         balanceOf[to] += amount;
+    }
+}
+
+/// @dev The link is requested in setUp, a transaction before the test, so the callback below writes persisted
+///      storage starting cold: the cost it has when a cancel lands after the request.
+contract PaymentLinkModuleCallbackGasTest is PaymentLinkModuleTestSetup {
+    address internal linkSigner;
+
+    function setUp() public override {
+        super.setUp();
+        (linkSigner,) = _newLinkKey();
+        _request(address(usdc), 100e6, linkSigner);
+    }
+
+    /// @dev CashModule caps the gas it gives a removed module's callback; ours must fit with room to spare.
+    function test_cancelBridgeByCashModule_fitsRemovedModuleGasCap() public {
+        vm.prank(address(cashModule));
+        uint256 gasBefore = gasleft();
+        plm.cancelBridgeByCashModule(address(safe));
+        uint256 gasUsed = gasBefore - gasleft();
+
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+        assertLt(gasUsed, CashLendLib.REMOVED_MODULE_CALLBACK_GAS / 2, "callback too close to CashModule's cap");
     }
 }
