@@ -37,6 +37,15 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *
  *      No token allowlist and no amount caps live here: CashModule's withdraw-asset list bounds
  *      what can be requested, and the backend decides what is offered.
+ *
+ *      GOVERNANCE RULE: do not remove this module from the DataProvider whitelist or from
+ *      CashModule's withdraw-requester list while any link is `Requested`. CashModule decides who
+ *      may process or cancel a module's withdrawal from CURRENT list membership, so after removal
+ *      (a) anyone can `processWithdrawal` the hold into this module without `fundLink`, leaving
+ *      the funds as unrecorded surplus (recoverable only through `rescueSurplus`), and (b) the
+ *      owners' `cancel` of that link reverts until they replace the hold with their own
+ *      withdrawal and `reconcile`. To stop the module, `pause` it instead: requests, funding and
+ *      claims stop, cancels keep working.
  */
 contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaymentLinkModule {
     using MessageHashUtils for bytes32;
@@ -298,6 +307,32 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      */
     function setFee(uint16 _feeBps, address _feeReceiver) external onlyAdminTimelock {
         _setFee(_feeBps, _feeReceiver);
+    }
+
+    /**
+     * @notice Transfers `amount` of `token` that the module holds ABOVE its liabilities to `to`.
+     * @dev Surplus is owed to no link: donations, positive rebases, or a CashModule withdrawal
+     *      processed into the module without `fundLink` (see the governance rule above). The
+     *      bound `amount <= balance - liabilities` is re-checked after the transfer, so no
+     *      outstanding link can ever be paid less because of a rescue. Not gated by pause.
+     * @param token The token to rescue.
+     * @param to The recipient (for a misprocessed withdrawal, the safe it came from).
+     * @param amount The amount to transfer.
+     * @custom:throws OnlyAdminTimelock If the caller lacks `ADMIN_TIMELOCK_ROLE`.
+     * @custom:throws InvalidInput If `to` is zero or this module, or `amount` is zero.
+     * @custom:throws InsufficientSurplus If `amount` exceeds `balance - liabilities`.
+     * @custom:throws EscrowShortfall If the transfer left the module below its liabilities.
+     */
+    function rescueSurplus(address token, address to, uint256 amount) external onlyAdminTimelock nonReentrant {
+        if (to == address(0) || to == address(this) || amount == 0) revert InvalidInput();
+        uint256 liabilities = _getPaymentLinkModuleStorage().liabilities[token];
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        if (balance < liabilities || amount > balance - liabilities) revert InsufficientSurplus();
+
+        IERC20(token).safeTransfer(to, amount);
+        if (IERC20(token).balanceOf(address(this)) < liabilities) revert EscrowShortfall();
+
+        emit SurplusRescued(token, to, amount);
     }
 
     // ---- Views ----

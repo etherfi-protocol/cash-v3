@@ -97,6 +97,14 @@ interface IPaymentLinkModule is IBridgeModule {
      */
     event FeeSet(uint16 oldFeeBps, uint16 newFeeBps, address oldFeeReceiver, address newFeeReceiver);
 
+    /**
+     * @notice Emitted when governance moves surplus (balance above liabilities) out of the module.
+     * @param token The rescued token.
+     * @param to The recipient.
+     * @param amount The amount transferred.
+     */
+    event SurplusRescued(address indexed token, address indexed to, uint256 amount);
+
     /// @notice Reverts when the owner signatures do not meet the safe's threshold.
     error InvalidSignatures();
     /// @notice Reverts when the claim signature was not produced by the link's key.
@@ -126,6 +134,8 @@ interface IPaymentLinkModule is IBridgeModule {
     error LinkNotClaimable();
     /// @notice Reverts when cancelling a link that is neither `Requested` nor `Funded`.
     error LinkNotCancellable();
+    /// @notice Reverts when a rescue exceeds the module's balance above liabilities.
+    error InsufficientSurplus();
 
     /**
      * @notice Creates a link for `linkSigner` and places a CashModule withdrawal of `amount` of
@@ -178,6 +188,14 @@ interface IPaymentLinkModule is IBridgeModule {
      * @param feeReceiver The fee receiver; may be zero only when `feeBps` is zero.
      */
     function setFee(uint16 feeBps, address feeReceiver) external;
+
+    /**
+     * @notice Transfers surplus (balance above liabilities) of `token` to `to`. Governance only.
+     * @param token The token to rescue.
+     * @param to The recipient.
+     * @param amount The amount, at most `balance - liabilities`.
+     */
+    function rescueSurplus(address token, address to, uint256 amount) external;
 
     /**
      * @notice Returns the link stored for `linkSigner` (zeroed when unused).
