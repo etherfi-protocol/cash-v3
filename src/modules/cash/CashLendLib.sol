@@ -145,8 +145,10 @@ library CashLendLib {
      *      letting it block the cancel: spends, liquidations (preLiquidate) and the owners' replacement request all
      *      cancel through here, and the removed module may be broken or retired to a reverting implementation. The
      *      call gets at most REMOVED_MODULE_CALLBACK_GAS, its result is ignored and no return data is copied, so a
-     *      reverting, gas-burning or return-bombing module cannot fail the cancel. A module that needs the signal
-     *      must keep its callback within that gas.
+     *      reverting, gas-burning or return-bombing module cannot fail the cancel. Removal therefore no longer stops
+     *      the callback from running (it may re-enter CashModule with the authority the module already holds over
+     *      its own request); it only stops it from blocking. A module that needs the signal must keep its callback
+     *      within that gas.
      * @param module The removed module that requested the withdrawal (its recipient)
      * @param safe Address of the EtherFi Safe
      */

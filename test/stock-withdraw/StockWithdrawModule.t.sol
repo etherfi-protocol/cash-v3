@@ -105,7 +105,7 @@ contract OFTStub is ERC20 {
     }
 }
 
-contract StockWithdrawModuleTest is SafeTestSetup {
+abstract contract StockWithdrawModuleTestBase is SafeTestSetup {
     using MessageHashUtils for bytes32;
 
     StockWithdrawModule internal module;
@@ -123,7 +123,7 @@ contract StockWithdrawModuleTest is SafeTestSetup {
     uint256 internal constant AMOUNT = 100e18;
     uint256 internal constant MIN_RETURN = 99e18;
 
-    function setUp() public override {
+    function setUp() public virtual override {
         super.setUp();
 
         oft = new OFTStub();
@@ -245,6 +245,11 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         vm.prank(moduleAdmin);
         module.configureUnwrappers(dstEids, unwrappers);
     }
+
+}
+
+contract StockWithdrawModuleTest is StockWithdrawModuleTestBase {
+    using MessageHashUtils for bytes32;
 
     // ---- initialize ----
 
@@ -774,23 +779,6 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         module.requestWithdrawal(address(safe), _baseOrder(), signers, sigs);
     }
 
-    /// @dev CashModule caps the gas it gives a removed module's callback. Ours must fit with room to spare,
-    ///      measured with the module's storage cold as it is when the cancel lands in a later transaction.
-    function test_cancelBridgeByCashModule_fitsRemovedModuleGasCap() public {
-        _request(_baseOrder());
-        // vm.cool is newer than the pinned forge-std Vm interface; call the cheatcode by selector
-        (bool cooled,) = address(vm).call(abi.encodeWithSignature("cool(address)", address(module)));
-        require(cooled, "vm.cool unavailable");
-
-        vm.prank(address(cashModule));
-        uint256 gasBefore = gasleft();
-        module.cancelBridgeByCashModule(address(safe));
-        uint256 gasUsed = gasBefore - gasleft();
-
-        assertEq(module.getOrder(address(safe)).iToken, address(0));
-        assertLt(gasUsed, CashLendLib.REMOVED_MODULE_CALLBACK_GAS / 2, "callback too close to CashModule's cap");
-    }
-
     function _assertOnlyModuleProcessesAfterRemoval(bool dataProviderFirst) internal {
         _request(_baseOrder());
         _removeFromWhitelists(dataProviderFirst);
@@ -1114,5 +1102,25 @@ contract StockWithdrawModuleTest is SafeTestSetup {
         module.executeWithdrawal{ value: 0.01 ether }(address(safe));
         assertEq(oft.balanceOf(feeReceiver), 0, "no fee taken when disabled");
         assertEq(oft.lastAmountLD(), AMOUNT, "full amount bridged");
+    }
+}
+
+/// @dev The order is placed in setUp, a transaction before the test, so the callback below deletes persisted
+///      storage starting cold: the cost it has when a cancel lands after the request.
+contract StockWithdrawModuleCallbackGasTest is StockWithdrawModuleTestBase {
+    function setUp() public override {
+        super.setUp();
+        _request(_baseOrder());
+    }
+
+    /// @dev CashModule caps the gas it gives a removed module's callback; ours must fit with room to spare.
+    function test_cancelBridgeByCashModule_fitsRemovedModuleGasCap() public {
+        vm.prank(address(cashModule));
+        uint256 gasBefore = gasleft();
+        module.cancelBridgeByCashModule(address(safe));
+        uint256 gasUsed = gasBefore - gasleft();
+
+        assertEq(module.getOrder(address(safe)).iToken, address(0));
+        assertLt(gasUsed, CashLendLib.REMOVED_MODULE_CALLBACK_GAS / 2, "callback too close to CashModule's cap");
     }
 }
