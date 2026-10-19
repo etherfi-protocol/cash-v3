@@ -29,7 +29,8 @@ interface ISafeHashes {
 ///
 ///         Admin Safe 0x4799...240B (3/6), a proposer and executor on the 8h operating timelock:
 ///           nonce 6  operatingTimelock.scheduleBatch
-///           nonce 7  operatingTimelock.executeBatch (not before 8 hours after nonce 6 executes)
+///           nonce 8  operatingTimelock.executeBatch (not before 8 hours after nonce 6 executes)
+///         Nonce 7 is left for another transaction. The simulation marks it as used (a no-op) before the execute.
 ///         The batch removes the old module from every place it is enabled, requesters first:
 ///           a. CashModule.configureModulesCanRequestWithdraw([old], [false])
 ///           b. LendGateway.setDriver(old OpenOcean, false)
@@ -66,7 +67,7 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
     uint256 internal constant UPGRADE_DELAY = 2 days;
 
     uint256 internal constant ADMIN_SCHEDULE_NONCE = 6;
-    uint256 internal constant ADMIN_EXECUTE_NONCE = 7;
+    uint256 internal constant ADMIN_EXECUTE_NONCE = 8;
     uint256 internal constant UPGRADE_SCHEDULE_NONCE = 4;
     uint256 internal constant UPGRADE_EXECUTE_NONCE = 6;
 
@@ -266,7 +267,12 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         require(!upTl.isOperationReady(roleId), "role operation ready after only 8 hours");
         _expectRevert(UPGRADE_SAFE, UPGRADE_TIMELOCK, _executeData(roleTargets, rolePayloads, TL_SALT_ROLE), "role executeBatch succeeded after only 8 hours");
 
-        console.log("=== Simulating retire execute (Admin Safe nonce 7) ===");
+        // Nonce 7 is used by another transaction first; the Safe's nonce slot (5) is moved so nonce() reads 8
+        require(ISafeHashes(ADMIN_SAFE).nonce() == ADMIN_SCHEDULE_NONCE, "Admin Safe nonce moved during the simulation");
+        vm.store(ADMIN_SAFE, bytes32(uint256(5)), bytes32(ADMIN_EXECUTE_NONCE));
+        require(ISafeHashes(ADMIN_SAFE).nonce() == ADMIN_EXECUTE_NONCE, "Admin Safe nonce not at the execute nonce");
+
+        console.log("=== Simulating retire execute (Admin Safe nonce 8) ===");
         executeGnosisTransactionBundle(paths[1]);
         require(opTl.isOperationDone(retireId), "retire operation not done after execute");
         require(cashRegistry.hasRole(CCTP_MODULE_ADMIN_ROLE, GOVERNANCE_SAFE), "role revoked before its own delay");
@@ -373,7 +379,7 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         _writeBundle(paths[3], UPGRADE_SAFE, UPGRADE_TIMELOCK, roleExecute);
 
         _logSafeHashes("Admin Safe nonce 6 (schedule)", ADMIN_SAFE, OPERATING_TIMELOCK, retireSchedule, ADMIN_SCHEDULE_NONCE);
-        _logSafeHashes("Admin Safe nonce 7 (execute)", ADMIN_SAFE, OPERATING_TIMELOCK, retireExecute, ADMIN_EXECUTE_NONCE);
+        _logSafeHashes("Admin Safe nonce 8 (execute)", ADMIN_SAFE, OPERATING_TIMELOCK, retireExecute, ADMIN_EXECUTE_NONCE);
         _logSafeHashes("Upgrade Safe nonce 4 (schedule)", UPGRADE_SAFE, UPGRADE_TIMELOCK, roleSchedule, UPGRADE_SCHEDULE_NONCE);
         _logSafeHashes("Upgrade Safe nonce 6 (execute)", UPGRADE_SAFE, UPGRADE_TIMELOCK, roleExecute, UPGRADE_EXECUTE_NONCE);
     }
