@@ -36,8 +36,9 @@ contract StockWrapModuleTest is CashGatewayTestSetup {
         module = StockWrapModule(address(new UUPSProxy(impl, abi.encodeWithSelector(StockWrapModule.initialize.selector, address(roleRegistry)))));
         _enableModule(address(module));
 
+        bytes32 adminTimelockRole = roleRegistry.ADMIN_TIMELOCK_ROLE();
         vm.prank(owner);
-        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), admin);
+        roleRegistry.grantRole(adminTimelockRole, admin);
 
         vm.prank(admin);
         module.setWrapPairs(_addr1(address(raw)), _addr1(address(wrapper)));
