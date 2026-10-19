@@ -269,8 +269,8 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         if ($$.pendingWithdrawalRequest.tokens.length == 0) revert WithdrawalDoesNotExist();
 
         if ($$.pendingWithdrawalRequest.finalizeTime > block.timestamp) revert CannotWithdrawYet();
-        // Ensure that if the recipient of withdrawal is a whitelisted withdrawal module, only that module can process the withdrawal
-        if ($.whitelistedModulesCanRequestWithdraw.contains($$.pendingWithdrawalRequest.recipient)) {
+        // Ensure that a module's withdrawal is processed only by that module, also after governance removes it from either whitelist
+        if (CashLendLib.isModuleWithdrawal($, safe)) {
             if (msg.sender != $$.pendingWithdrawalRequest.recipient) revert OnlyModuleThatRequestedCanWithdraw();
         }
         _areAssetsWithdrawable($, $$.pendingWithdrawalRequest.tokens);
@@ -307,6 +307,7 @@ contract CashModuleStorageContract is UpgradeableProxy, ModuleBase {
         _getCashModuleStorage().cashEventEmitter.emitWithdrawalProcessed(safe, $$.pendingWithdrawalRequest.tokens, $$.pendingWithdrawalRequest.amounts, recipient);
 
         delete $$.pendingWithdrawalRequest;
+        delete $$.withdrawalRequestedByModule;
 
         // Legacy safes only: see _requestWithdrawal. Gateway safes are health-gated by Aave at request time
         // and would revert here if DebtManager cannot price a supplied Aave asset.
