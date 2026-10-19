@@ -32,12 +32,17 @@ interface ISafeHashes {
 ///           nonce 7  operatingTimelock.executeBatch (not before 8 hours after nonce 6 executes)
 ///         The batch removes the old module from every place it is enabled, requesters first:
 ///           a. CashModule.configureModulesCanRequestWithdraw([old], [false])
-///           b. EtherFiDataProvider.configureModules([old], [false])  (also removes it from the default set)
+///           b. LendGateway.setDriver(old OpenOcean, false)
+///           c. EtherFiDataProvider.configureModules([old CCTP, old OpenOcean], [false, false])  (also removes both
+///              from the default set)
+///         The new OpenOcean module registered by 3CP-725 is not touched.
 ///
 ///         Upgrade Safe 0xBAf0...2588 (4/7), a proposer and executor on the 2-day upgrade timelock, which owns the
 ///         cash RoleRegistry:
 ///           nonce 4  upgradeTimelock.scheduleBatch
-///           nonce 5  upgradeTimelock.executeBatch (not before 2 days after nonce 4 executes)
+///           nonce 6  upgradeTimelock.executeBatch (not before 2 days after nonce 4 executes)
+///         Nonce 5 is left for another transaction. Safe nonces run in order, so the simulation marks nonce 5 as
+///         used (a no-op) before the execute at nonce 6.
 ///         The batch revokes CCTP_MODULE_ADMIN_ROLE from the cash controller Safe 0xA6cf...AAC4, its only holder:
 ///           a. cash RoleRegistry.revokeRole(CCTP_MODULE_ADMIN_ROLE, AAC4)
 ///
@@ -63,10 +68,10 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
     uint256 internal constant ADMIN_SCHEDULE_NONCE = 6;
     uint256 internal constant ADMIN_EXECUTE_NONCE = 7;
     uint256 internal constant UPGRADE_SCHEDULE_NONCE = 4;
-    uint256 internal constant UPGRADE_EXECUTE_NONCE = 5;
+    uint256 internal constant UPGRADE_EXECUTE_NONCE = 6;
 
     bytes32 internal constant TL_PREDECESSOR = bytes32(0);
-    bytes32 internal constant TL_SALT_RETIRE = keccak256("CCTPRegate.OP.RetireOldCCTPModule.v1");
+    bytes32 internal constant TL_SALT_RETIRE = keccak256("CCTPRegate.OP.RetireOldCCTPAndOpenOcean.v1");
     bytes32 internal constant TL_SALT_ROLE = keccak256("CCTPRegate.OP.RevokeCCTPModuleAdminRole.v1");
 
     bytes32 internal constant SAFE_TX_TYPEHASH = keccak256("SafeTx(address to,uint256 value,bytes data,uint8 operation,uint256 safeTxGas,uint256 baseGas,uint256 gasPrice,address gasToken,address refundReceiver,uint256 nonce)");
@@ -76,6 +81,9 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
     address internal constant OLD_MODULE = 0xFEF147ce61614aa787B6E68c24Ff096D13593A9d;
     address internal constant NEW_MODULE = 0xD3f5c617EF328b73130467b0ec867aD9058a1784;
     address internal constant USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+    address internal constant OLD_OPENOCEAN = 0x850D01FfCD8d23fA29751Eb26F8A473FFa4FFD0A;
+    address internal constant NEW_OPENOCEAN = 0xFec8640113C5ff6c28A9aBAE5162f8602D8BD4bF;
+    address internal constant LEND_GATEWAY = 0x01F8cDFb1694eA8fE4ED6c38a0fD78d1188E03F4;
     bytes32 internal constant CCTP_MODULE_ADMIN_ROLE = 0xb817fb5ee552a2466b9ad53344de1868ec13e9ead5f256ef1fb9b0911888f2f4;
     uint32[4] internal NEW_ROUTES = [0, 3, 6, 19];
     /// @dev Highest CCTP domain checked when comparing route sets
@@ -117,6 +125,9 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         "WORMHOLE_MODULE_ADMIN_ROLE"
     ];
 
+    // Every address LendGateway has ever emitted DriverSet for (LendGateway has no driver list), read from its logs
+    address[] internal DRIVER_CANDIDATES = [0x0078C5a459132e279056B2371fE8A8eC973A9553, 0x3a6A724595184dda4be69dB1Ce726F2Ac3D66B87, 0x850D01FfCD8d23fA29751Eb26F8A473FFa4FFD0A, 0x427fDe7FF5D685e76f572BDFb896184a2048f232, 0xA051246A613E3216DD90402453D3B8aD63E71Cd1, 0x3C97a4899a92b7e84d92c5032dC7d865E7471EcE, 0xD4F81cF925248513631723A5cd0a8842f8cC2C3E, 0x80b14dC43d257C6bC7487249095F1435d43fC591, 0x46E9aF4DC3D4535AfCbeb408Db564D729F527bD8, 0x39161A44588ec2327a18D4707EA5216C721ba539, 0xac6BcA0bB66D4587171CFc77b19E5E68F74De55e, 0x241D0227e6Ae4df1747f2A04F4bF3d33eD850cA7, 0x162c9f902867308B6f92c80B7329f5883385FC87, 0xf4d5Be5CfcCE8C32785FC36bF3851D2f1E3C0154, 0x48651bf1ED1eE15C7493a79188E3326602b321c4, 0xd2fBD2fCac7e88ef323694e617141Efb20140c56, 0x1052fDcE6CBE3D2AD265050e1426D41E23fc54dc, 0xFec8640113C5ff6c28A9aBAE5162f8602D8BD4bF];
+
     address[] internal retireTargets;
     bytes[] internal retirePayloads;
     address[] internal roleTargets;
@@ -124,11 +135,13 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
 
     EtherFiDataProvider internal dataProvider;
     ICashModule internal cashModule;
+    ILendGatewayDrivers internal lendGateway;
     RoleRegistry internal cashRegistry;
 
     address[] internal whitelistedBefore;
     address[] internal defaultsBefore;
     address[] internal requestersBefore;
+    bool[] internal driverBefore;
     bytes32[] internal otherRoleDigests;
 
     function run() public {
@@ -140,6 +153,8 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         dataProvider = EtherFiDataProvider(dep.readAddress(".addresses.EtherFiDataProvider"));
         cashModule = ICashModule(dep.readAddress(".addresses.CashModule"));
         cashRegistry = RoleRegistry(dep.readAddress(".addresses.RoleRegistry"));
+        lendGateway = ILendGatewayDrivers(dep.readAddress(".addresses.LendGateway"));
+        require(address(lendGateway) == LEND_GATEWAY, "LendGateway differs from the pinned address");
 
         _checkGovernance();
         _checkBefore();
@@ -159,6 +174,7 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
 
         console.log("");
         console.log("  [OK] old CCTPModule retired:", OLD_MODULE);
+        console.log("  [OK] old OpenOcean module retired:", OLD_OPENOCEAN);
         console.log("  [OK] CCTP_MODULE_ADMIN_ROLE revoked from", GOVERNANCE_SAFE);
         console.log("8h operation id:");
         console.logBytes32(retireId);
@@ -188,12 +204,17 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         require(holders.length == 1 && holders[0] == GOVERNANCE_SAFE, "CCTP_MODULE_ADMIN_ROLE is not held by exactly the governance Safe");
         require(IERC20Balance(USDC).balanceOf(OLD_MODULE) == 0 && OLD_MODULE.balance == 0, "old module holds funds");
 
+        require(dataProvider.isWhitelistedModule(OLD_OPENOCEAN) && dataProvider.isDefaultModule(OLD_OPENOCEAN) && lendGateway.isDriver(OLD_OPENOCEAN), "old OpenOcean is not whitelisted, default and a driver");
+        require(!_contains(cashModule.getWhitelistedModulesCanRequestWithdraw(), OLD_OPENOCEAN), "old OpenOcean is a withdraw requester");
+        require(IERC20Balance(USDC).balanceOf(OLD_OPENOCEAN) == 0 && OLD_OPENOCEAN.balance == 0, "old OpenOcean holds funds");
+        require(dataProvider.isWhitelistedModule(NEW_OPENOCEAN) && dataProvider.isDefaultModule(NEW_OPENOCEAN) && lendGateway.isDriver(NEW_OPENOCEAN), "new OpenOcean is not whitelisted, default and a driver");
         require(dataProvider.isWhitelistedModule(NEW_MODULE) && dataProvider.isDefaultModule(NEW_MODULE), "new module is not whitelisted and default");
         require(_contains(cashModule.getWhitelistedModulesCanRequestWithdraw(), NEW_MODULE), "new module is not a withdraw requester");
 
         whitelistedBefore = dataProvider.getWhitelistedModules();
         defaultsBefore = dataProvider.getDefaultModules();
         requestersBefore = cashModule.getWhitelistedModulesCanRequestWithdraw();
+        for (uint256 i = 0; i < DRIVER_CANDIDATES.length; ++i) driverBefore.push(lendGateway.isDriver(DRIVER_CANDIDATES[i]));
         for (uint256 i = 0; i < OTHER_ROLES.length; ++i) {
             otherRoleDigests.push(keccak256(abi.encode(cashRegistry.roleHolders(keccak256(bytes(OTHER_ROLES[i]))))));
         }
@@ -206,8 +227,14 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         bool[] memory no = new bool[](1);
         retireTargets.push(address(cashModule));
         retirePayloads.push(abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (m, no)));
+        retireTargets.push(LEND_GATEWAY);
+        retirePayloads.push(abi.encodeCall(ILendGatewayDrivers.setDriver, (OLD_OPENOCEAN, false)));
+        address[] memory both = new address[](2);
+        both[0] = OLD_MODULE;
+        both[1] = OLD_OPENOCEAN;
+        bool[] memory noNo = new bool[](2);
         retireTargets.push(address(dataProvider));
-        retirePayloads.push(abi.encodeCall(EtherFiDataProvider.configureModules, (m, no)));
+        retirePayloads.push(abi.encodeCall(EtherFiDataProvider.configureModules, (both, noNo)));
         roleTargets.push(address(cashRegistry));
         rolePayloads.push(abi.encodeCall(RoleRegistry.revokeRole, (CCTP_MODULE_ADMIN_ROLE, GOVERNANCE_SAFE)));
     }
@@ -216,7 +243,8 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         address[3] memory safes = [GOVERNANCE_SAFE, ADMIN_SAFE, UPGRADE_SAFE];
         for (uint256 i = 0; i < 3; ++i) {
             _expectRevert(safes[i], address(cashModule), retirePayloads[0], "a Safe removed the requester directly");
-            _expectRevert(safes[i], address(dataProvider), retirePayloads[1], "a Safe removed the module directly");
+            _expectRevert(safes[i], LEND_GATEWAY, retirePayloads[1], "a Safe removed the driver directly");
+            _expectRevert(safes[i], address(dataProvider), retirePayloads[2], "a Safe removed the modules directly");
             _expectRevert(safes[i], address(cashRegistry), rolePayloads[0], "a Safe revoked the role directly");
         }
     }
@@ -246,7 +274,12 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         vm.warp(block.timestamp + UPGRADE_DELAY);
         require(upTl.isOperationReady(roleId), "role operation not ready after 2 days");
 
-        console.log("=== Simulating role revoke execute (Upgrade Safe nonce 5) ===");
+        // Nonce 5 is used by another transaction first; the Safe's nonce slot (5) is moved so nonce() reads 6
+        require(ISafeHashes(UPGRADE_SAFE).nonce() == UPGRADE_SCHEDULE_NONCE, "Upgrade Safe nonce moved during the simulation");
+        vm.store(UPGRADE_SAFE, bytes32(uint256(5)), bytes32(UPGRADE_EXECUTE_NONCE));
+        require(ISafeHashes(UPGRADE_SAFE).nonce() == UPGRADE_EXECUTE_NONCE, "Upgrade Safe nonce not at the execute nonce");
+
+        console.log("=== Simulating role revoke execute (Upgrade Safe nonce 6) ===");
         executeGnosisTransactionBundle(paths[3]);
         require(upTl.isOperationDone(roleId), "role operation not done after execute");
     }
@@ -257,6 +290,15 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         require(!_contains(cashModule.getWhitelistedModulesCanRequestWithdraw(), OLD_MODULE), "old module still a requester");
         require(cashRegistry.roleHolders(CCTP_MODULE_ADMIN_ROLE).length == 0, "CCTP_MODULE_ADMIN_ROLE still has a holder");
 
+        require(!dataProvider.isWhitelistedModule(OLD_OPENOCEAN) && !dataProvider.isDefaultModule(OLD_OPENOCEAN) && !lendGateway.isDriver(OLD_OPENOCEAN), "old OpenOcean still enabled");
+        require(!_contains(cashModule.getWhitelistedModulesCanRequestWithdraw(), OLD_OPENOCEAN), "old OpenOcean became a requester");
+        require(dataProvider.isWhitelistedModule(NEW_OPENOCEAN) && dataProvider.isDefaultModule(NEW_OPENOCEAN) && lendGateway.isDriver(NEW_OPENOCEAN), "new OpenOcean no longer whitelisted, default and a driver");
+        require(IERC20Balance(USDC).balanceOf(OLD_OPENOCEAN) == 0 && OLD_OPENOCEAN.balance == 0, "old OpenOcean holds funds");
+        for (uint256 i = 0; i < DRIVER_CANDIDATES.length; ++i) {
+            bool expected = DRIVER_CANDIDATES[i] == OLD_OPENOCEAN ? false : driverBefore[i];
+            require(lendGateway.isDriver(DRIVER_CANDIDATES[i]) == expected, "a driver flag changed");
+        }
+
         require(dataProvider.isWhitelistedModule(NEW_MODULE) && dataProvider.isDefaultModule(NEW_MODULE), "new module no longer whitelisted and default");
         require(_contains(cashModule.getWhitelistedModulesCanRequestWithdraw(), NEW_MODULE), "new module no longer a requester");
         CCTPModule module = CCTPModule(NEW_MODULE);
@@ -265,9 +307,14 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
             require(module.isRouteAllowed(USDC, d) == expected, "new module route set changed");
         }
 
-        _assertRemovedOnly(whitelistedBefore, dataProvider.getWhitelistedModules(), "whitelist");
-        _assertRemovedOnly(defaultsBefore, dataProvider.getDefaultModules(), "default set");
-        _assertRemovedOnly(requestersBefore, cashModule.getWhitelistedModulesCanRequestWithdraw(), "requesters");
+        address[] memory oneOld = new address[](1);
+        oneOld[0] = OLD_MODULE;
+        address[] memory twoOld = new address[](2);
+        twoOld[0] = OLD_MODULE;
+        twoOld[1] = OLD_OPENOCEAN;
+        _assertRemovedOnly(whitelistedBefore, dataProvider.getWhitelistedModules(), twoOld, "whitelist");
+        _assertRemovedOnly(defaultsBefore, dataProvider.getDefaultModules(), twoOld, "default set");
+        _assertRemovedOnly(requestersBefore, cashModule.getWhitelistedModulesCanRequestWithdraw(), oneOld, "requesters");
         for (uint256 i = 0; i < OTHER_ROLES.length; ++i) {
             require(keccak256(abi.encode(cashRegistry.roleHolders(keccak256(bytes(OTHER_ROLES[i]))))) == otherRoleDigests[i], "a role holder list changed");
         }
@@ -275,12 +322,15 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         console.log("whitelisted / default / requesters after:", dataProvider.getWhitelistedModules().length, dataProvider.getDefaultModules().length, cashModule.getWhitelistedModulesCanRequestWithdraw().length);
     }
 
-    /// @dev `after` is `before` without OLD_MODULE: one shorter, every other entry still present
-    function _assertRemovedOnly(address[] memory before, address[] memory afterList, string memory label) internal pure {
-        require(afterList.length == before.length - 1, string.concat(label, ": length not one less"));
-        require(!_contains(afterList, OLD_MODULE), string.concat(label, ": old module still listed"));
+    /// @dev `afterList` is `before` without the `removed` entries: shorter by that many, every other entry still present
+    function _assertRemovedOnly(address[] memory before, address[] memory afterList, address[] memory removed, string memory label) internal pure {
+        require(afterList.length == before.length - removed.length, string.concat(label, ": length not shorter by the removed entries"));
+        for (uint256 i = 0; i < removed.length; ++i) {
+            require(_contains(before, removed[i]), string.concat(label, ": removed entry was not listed before"));
+            require(!_contains(afterList, removed[i]), string.concat(label, ": removed entry still listed"));
+        }
         for (uint256 i = 0; i < before.length; ++i) {
-            if (before[i] != OLD_MODULE) require(_contains(afterList, before[i]), string.concat(label, ": another entry was removed"));
+            if (!_contains(removed, before[i])) require(_contains(afterList, before[i]), string.concat(label, ": another entry was removed"));
         }
     }
 
@@ -325,7 +375,7 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         _logSafeHashes("Admin Safe nonce 6 (schedule)", ADMIN_SAFE, OPERATING_TIMELOCK, retireSchedule, ADMIN_SCHEDULE_NONCE);
         _logSafeHashes("Admin Safe nonce 7 (execute)", ADMIN_SAFE, OPERATING_TIMELOCK, retireExecute, ADMIN_EXECUTE_NONCE);
         _logSafeHashes("Upgrade Safe nonce 4 (schedule)", UPGRADE_SAFE, UPGRADE_TIMELOCK, roleSchedule, UPGRADE_SCHEDULE_NONCE);
-        _logSafeHashes("Upgrade Safe nonce 5 (execute)", UPGRADE_SAFE, UPGRADE_TIMELOCK, roleExecute, UPGRADE_EXECUTE_NONCE);
+        _logSafeHashes("Upgrade Safe nonce 6 (execute)", UPGRADE_SAFE, UPGRADE_TIMELOCK, roleExecute, UPGRADE_EXECUTE_NONCE);
     }
 
     /// @dev Builds the hash from the Safe's domain separator and the SafeTx struct, and requires it to equal the Safe's own getTransactionHash
@@ -359,6 +409,11 @@ contract RetireOldCCTPModuleProd3CP is EtherFiDeployerHelper, GnosisHelpers {
         (bool ok,) = to.call(data);
         require(!ok, err);
     }
+}
+
+interface ILendGatewayDrivers {
+    function isDriver(address account) external view returns (bool);
+    function setDriver(address driver, bool authorized) external;
 }
 
 interface IERC20Balance {
