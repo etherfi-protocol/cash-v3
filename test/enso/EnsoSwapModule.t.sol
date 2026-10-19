@@ -222,6 +222,67 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         module.requestSwap(address(safe), order, swapData, signers, sigs);
     }
 
+    function test_requestSwap_revertsForRecipientOutsideUserSafePair() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.recipient = makeAddr("attacker");
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+    }
+
+    function test_requestSwap_allowsLocallyDerivedTradingSafeWhenFactoryHasNoCode() public {
+        assertEq(tradingSafeFactory.code.length, 0);
+        EnsoSwapModule.Order memory order = _baseOrder();
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        assertEq(module.getOrder(address(safe)).recipient, recipient);
+    }
+
+    function test_requestSwap_allowsCashSafeItselfAsRecipient() public {
+        EnsoSwapModule.Order memory order = _baseOrder();
+        order.recipient = address(safe);
+        bytes memory swapData = _swapData(SRC_AMOUNT);
+        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
+
+        module.requestSwap(address(safe), order, swapData, signers, sigs);
+
+        assertEq(module.getOrder(address(safe)).recipient, address(safe));
+    }
+
+    function test_validateRecipient_allowsTradingSafeSendingToSourceCashSafe() public {
+        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
+        EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
+        address cashSafe = makeAddr("cashSafe");
+        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
+
+        harness.exposed_validateRecipient(tradingSafe, cashSafe);
+    }
+
+    function test_validateRecipient_revertsForTradingSafeSendingToOtherCashSafe() public {
+        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
+        EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
+        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", makeAddr("cashSafe"))), tradingSafeFactory);
+
+        vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
+        harness.exposed_validateRecipient(tradingSafe, makeAddr("otherCashSafe"));
+    }
+
+    function test_validateRecipient_revertsForTradingSafeSendingToNestedDerivedAddress() public {
+        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
+        EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
+        address cashSafe = makeAddr("cashSafe");
+        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
+        address nestedTradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", tradingSafe)), tradingSafeFactory);
+
+        vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
+        harness.exposed_validateRecipient(tradingSafe, nestedTradingSafe);
+    }
+
     function test_requestSwap_usesConfiguredModuleWithdrawalDelay() public {
         vm.prank(owner);
         cashModule.configureModuleWithdrawalDelay(address(module), 3, true);
@@ -340,67 +401,6 @@ contract EnsoSwapModuleTest is SafeTestSetup {
         assertEq(ensoRouter.pulled(), SRC_AMOUNT);
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.recipient, withdrawRecipient);
         assertEq(cashModule.getData(address(safe)).pendingWithdrawalRequest.amounts[0], SRC_AMOUNT);
-    }
-
-    function test_requestSwap_revertsForRecipientOutsideUserSafePair() public {
-        EnsoSwapModule.Order memory order = _baseOrder();
-        order.recipient = makeAddr("attacker");
-        bytes memory swapData = _swapData(SRC_AMOUNT);
-        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
-
-        vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
-        module.requestSwap(address(safe), order, swapData, signers, sigs);
-    }
-
-    function test_requestSwap_allowsLocallyDerivedTradingSafeWhenFactoryHasNoCode() public {
-        assertEq(tradingSafeFactory.code.length, 0);
-        EnsoSwapModule.Order memory order = _baseOrder();
-        bytes memory swapData = _swapData(SRC_AMOUNT);
-        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
-
-        module.requestSwap(address(safe), order, swapData, signers, sigs);
-
-        assertEq(module.getOrder(address(safe)).recipient, recipient);
-    }
-
-    function test_requestSwap_allowsCashSafeItselfAsRecipient() public {
-        EnsoSwapModule.Order memory order = _baseOrder();
-        order.recipient = address(safe);
-        bytes memory swapData = _swapData(SRC_AMOUNT);
-        (address[] memory signers, bytes[] memory sigs) = _signRequest(order, swapData);
-
-        module.requestSwap(address(safe), order, swapData, signers, sigs);
-
-        assertEq(module.getOrder(address(safe)).recipient, address(safe));
-    }
-
-    function test_validateRecipient_allowsTradingSafeSendingToSourceCashSafe() public {
-        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
-        EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
-        address cashSafe = makeAddr("cashSafe");
-        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
-
-        harness.exposed_validateRecipient(tradingSafe, cashSafe);
-    }
-
-    function test_validateRecipient_revertsForTradingSafeSendingToOtherCashSafe() public {
-        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
-        EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
-        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", makeAddr("cashSafe"))), tradingSafeFactory);
-
-        vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
-        harness.exposed_validateRecipient(tradingSafe, makeAddr("otherCashSafe"));
-    }
-
-    function test_validateRecipient_revertsForTradingSafeSendingToNestedDerivedAddress() public {
-        vm.mockCall(address(dataProvider), abi.encodeWithSignature("getEtherFiSafeFactory()"), abi.encode(tradingSafeFactory));
-        EnsoSwapModuleHarness harness = new EnsoSwapModuleHarness(address(dataProvider), tradingSafeFactory);
-        address cashSafe = makeAddr("cashSafe");
-        address tradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", cashSafe)), tradingSafeFactory);
-        address nestedTradingSafe = CREATE3.predictDeterministicAddress(keccak256(abi.encode("TradingSafe", tradingSafe)), tradingSafeFactory);
-
-        vm.expectRevert(EnsoSwapModule.InvalidRecipient.selector);
-        harness.exposed_validateRecipient(tradingSafe, nestedTradingSafe);
     }
 
     function test_requestSwap_revertsForExpiredDeadline() public {

@@ -6,6 +6,7 @@ import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/I
 import { EnumerableSetLib } from "solady/utils/EnumerableSetLib.sol";
 
 import { IPriceProvider } from "../interfaces/IPriceProvider.sol";
+import { IRoleRegistry } from "../interfaces/IRoleRegistry.sol";
 import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
 import { Constants } from "../utils/Constants.sol";
 
@@ -36,6 +37,9 @@ contract TradingLens is UpgradeableProxy, Constants {
         uint256 valueUsd;
     }
 
+    /// @notice Role allowed to add supported trading tokens (alongside `ADMIN_ROLE`). It cannot remove them.
+    bytes32 public constant TRADING_LENS_TOKEN_LISTER_ROLE = keccak256("TRADING_LENS_TOKEN_LISTER_ROLE");
+
     /// @notice Price source for supported tokens.
     IPriceProvider public immutable priceProvider;
 
@@ -55,6 +59,9 @@ contract TradingLens is UpgradeableProxy, Constants {
     /// @notice Emitted when a token is removed from the supported-token set.
     /// @param token The token contract address.
     event SupportedTokenRemoved(address indexed token);
+
+    /// @notice Reverts when the caller holds neither `TRADING_LENS_TOKEN_LISTER_ROLE` nor `ADMIN_ROLE`.
+    error OnlyTokenLister();
 
     /// @notice Reverts when a zero-address token is passed to `addSupportedToken`.
     error InvalidToken();
@@ -89,12 +96,13 @@ contract TradingLens is UpgradeableProxy, Constants {
      * @notice Adds `token` to the supported-trading-token set. Idempotent across deploys —
      *         reverts if the token is already present (callers don't want silent no-ops).
      * @param token The token contract to support.
-     * @custom:throws OnlyAdmin If caller lacks `ADMIN_ROLE`.
+     * @custom:throws OnlyTokenLister If caller holds neither `TRADING_LENS_TOKEN_LISTER_ROLE` nor `ADMIN_ROLE`.
      * @custom:throws InvalidToken If `token == address(0)`.
      * @custom:throws TokenAlreadySupported If `token` is already in the set.
      */
     function addSupportedToken(address token) external {
-        roleRegistry().onlyAdmin(msg.sender);
+        IRoleRegistry registry = roleRegistry();
+        if (!registry.hasRole(TRADING_LENS_TOKEN_LISTER_ROLE, msg.sender) && !registry.hasRole(registry.ADMIN_ROLE(), msg.sender)) revert OnlyTokenLister();
         if (token == address(0)) revert InvalidToken();
 
         if (!_getTradingLensStorage().supportedTokens.add(token)) revert TokenAlreadySupported(token);

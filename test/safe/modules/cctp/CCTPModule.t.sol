@@ -12,6 +12,7 @@ import { ICCTPTokenMinter } from "../../../../src/interfaces/ICCTPTokenMinter.so
 import { ICashModule, SafeTestSetup } from "../../SafeTestSetup.t.sol";
 import { WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
+import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
 import { CashVerificationLib } from "../../../../src/libraries/CashVerificationLib.sol";
 
 /// @dev Mock TokenMessenger + Minter. Default burn cap = uint256.max.
@@ -98,15 +99,12 @@ contract CCTPModuleTest is SafeTestSetup {
         bytes[] memory setupData = new bytes[](1);
         _configureModules(modules, yes, setupData);
 
-        bytes32 adminRole = cctpModule.CCTP_MODULE_ADMIN_ROLE();
         uint32[] memory doms = new uint32[](1);
         doms[0] = destDomain;
         bool[] memory ok = new bool[](1);
         ok[0] = true;
-        vm.startPrank(owner);
-        roleRegistry.grantRole(adminRole, owner);
+        vm.prank(owner);
         cctpModule.setAllowedRoutes(address(usdc), doms, ok);
-        vm.stopPrank();
     }
 
     // ───────────────────────── helpers ─────────────────────────
@@ -195,7 +193,7 @@ contract CCTPModuleTest is SafeTestSetup {
         doms[0] = 42;
         bool[] memory ok = new bool[](1);
         ok[0] = true;
-        vm.expectRevert(CCTPModule.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cctpModule.setAllowedRoutes(address(usdc), doms, ok);
     }
 
@@ -288,7 +286,7 @@ contract CCTPModuleTest is SafeTestSetup {
     }
 
     function test_setproviderFeeRecipient_nonAdminReverts() public {
-        vm.expectRevert(CCTPModule.Unauthorized.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cctpModule.setproviderFeeRecipient(address(1));
     }
 

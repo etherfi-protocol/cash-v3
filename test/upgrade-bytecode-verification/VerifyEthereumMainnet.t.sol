@@ -62,6 +62,9 @@ contract VerifyEthereumMainnetBytecode is TradingStackBytecode {
     }
 
     function test_verifyBytecode_TradingLens() public {
+        // TradingLens gained TRADING_LENS_TOKEN_LISTER_ROLE (#343) after the live impl was deployed. Re-enable after
+        // the prod upgrade.
+        vm.skip(true);
         address local = address(new TradingLens(_tradingAddr("PriceProvider")));
         _verify("TradingLens", _getImpl(_tradingAddr("TradingLens")), local);
     }
