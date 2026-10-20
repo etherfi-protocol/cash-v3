@@ -13,6 +13,7 @@
     "HopBridgeAdapter": "0xf184AE71645A10965909a75DA55D297389fd9e88",
     "AssetRecoveryDispatcher": "0x418e0af7c750Ba5cbffC5C2a8398591755926A29",
     "StockUnwrapper": "0x4Fc4a684e6bd57f8149581C2bf84F80d973cD448",
-    "StockOFTBridgeAdapter": "0x12e058A27Cd91699A285262F3c0ced7180bB2E4B"
+    "StockOFTBridgeAdapter": "0x12e058A27Cd91699A285262F3c0ced7180bB2E4B",
+    "BackedCCIPBridgeAdapter": "0xa15E4054E7c5B0089aAe614780444195aD3A396d"
   }
 }
