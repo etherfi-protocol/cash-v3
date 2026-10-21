@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { IEtherFiSafe } from "../interfaces/IEtherFiSafe.sol";
@@ -31,7 +32,7 @@ import { ModuleBase } from "../modules/ModuleBase.sol";
  *      is permissionless. Replay protection is the safe nonce; a signed `deadline` stops a stashed
  *      signature from being replayed later.
  */
-contract TradingSafeLiquidDepositModule is ITradingSafeLiquidDepositModule, ModuleBase, Pausable {
+contract TradingSafeLiquidDepositModule is ITradingSafeLiquidDepositModule, ModuleBase, Pausable, ReentrancyGuard {
     using MessageHashUtils for bytes32;
 
     /// @notice Role allowed to add and remove Liquid vault routes.
@@ -55,7 +56,7 @@ contract TradingSafeLiquidDepositModule is ITradingSafeLiquidDepositModule, Modu
     function setupModule(bytes calldata) external override { }
 
     /// @inheritdoc ITradingSafeLiquidDepositModule
-    function depositToTopUp(ITradingSafeLiquidDepositModule.DepositRequest calldata request, address[] calldata signers, bytes[] calldata signatures) external whenNotPaused onlyEtherFiSafe(request.safe) {
+    function depositToTopUp(ITradingSafeLiquidDepositModule.DepositRequest calldata request, address[] calldata signers, bytes[] calldata signatures) external whenNotPaused nonReentrant onlyEtherFiSafe(request.safe) {
         if (request.assetToDeposit == address(0)) revert InvalidConfiguration();
         if (request.amountToDeposit == 0) revert InvalidAmount();
         if (request.minReturn == 0) revert InvalidMinReturn();
