@@ -84,6 +84,15 @@
     "wHYPE": {
       "oracle": "0xA9D5227D0063904Cb20d0fC9a2e71dd4cb19F8cD"
     },
+    "wQQQx": {
+      "oracle": "0xEE10AC041AD60e3db1a3DfbDa36dE6AEE8765135"
+    },
+    "wSPYx": {
+      "oracle": "0xCC69Be955A3B76EDf3ef882563a5958Bc369e775"
+    },
+    "wTBLLx": {
+      "oracle": "0xB52601150b362cd78c3eA63BA1b565E7727fFbfC"
+    },
     "weETH": {
       "oracle": "0x6D6afbc1579EB8e17C170Fc60a67161bc9F44874"
     },
