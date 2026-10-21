@@ -41,6 +41,13 @@
     "MidasLiquifierModule": "0x162c9f902867308B6f92c80B7329f5883385FC87",
     "MidasLiquifierModuleImpl": "0x1d728a750acd8a55E88cBf9B172f9d5ea1851404",
     "LiquidUSDLiquifierModuleImpl": "0x606A50FE014603e47D108bcCB415BFC260C880b1",
-    "CCTPModule": "0xFEF147ce61614aa787B6E68c24Ff096D13593A9d"
+    "CCTPModule": "0xFEF147ce61614aa787B6E68c24Ff096D13593A9d",
+    "StockMigrationModule": "0x15A90D4548bEB6D0f7140c17497F632e329e14dD",
+    "StockMigrationModuleImpl": "0xc68A24E4E5fB97C78a7Ea0d0d08B2650712D98fC",
+    "StockWrapModule": "0xe7c6a85fA9a8EDf84870e5658a83D94Ed7e09270",
+    "StockWrapModuleImpl": "0x1b11e1511a5a77Bf608Fb3adBb0F3685f87e0177",
+    "StockBridgeWithdrawModule": "0x2e654540Fec9b409F67c0c0E3Bf3973e6A987482",
+    "StockBridgeWithdrawModuleImpl": "0x15FF822E7c58a7774210F08E972208453e9a28f4",
+    "TopUpDestImplV2": "0xfd082f251D27e83A62a8Ef9c045EFaeF26B9ce26"
   }
 }
