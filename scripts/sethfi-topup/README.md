@@ -38,5 +38,6 @@ yet it is deployed on the fork only; the real deploy must land before signing.
 
 ## Not covered here
 
-The top-up service (cash-topup-v3) must list sETHFI for the Arbitrum and Base trackers, and the Ethereum
-bridger must forward sETHFI that lands in the Ethereum TopUpFactory itself (leg 2).
+The top-up service (cash-topup-v3) must list sETHFI for the Arbitrum and Base trackers. Leg 2 needs no
+service change: the Ethereum tracker already bridges sETHFI whenever the Ethereum TopUpFactory balance
+passes the threshold (`bridgeFunds` in `src/topup/bridge.go`).
