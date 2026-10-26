@@ -50,8 +50,10 @@ library XStocksOPProd {
     string internal constant KEY_BRIDGE_WITHDRAW = "StockBridgeWithdrawModule";
     string internal constant KEY_TOP_UP_DEST_IMPL = "TopUpDestImplV2";
     string internal constant KEY_CCIP_ADAPTER = "BackedCCIPBridgeAdapter";
+    string internal constant KEY_CCIP_WRAPPER_ADAPTER = "BackedCCIPWrapperBridgeAdapter";
     string internal constant SALT_PREFIX = "XStocksOP.";
     string internal constant SALT_CCIP_ADAPTER = "Prod.StockTopup.BackedCCIPBridgeAdapter";
+    string internal constant SALT_CCIP_WRAPPER_ADAPTER = "Prod.StockTopup.BackedCCIPWrapperBridgeAdapter";
 
     function stocks() internal pure returns (XStock[] memory) {
         XStock[] memory list = new XStock[](3);
