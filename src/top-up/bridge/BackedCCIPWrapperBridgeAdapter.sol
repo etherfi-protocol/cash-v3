@@ -5,6 +5,7 @@ import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import { IBackedCCIPBridge } from "../../interfaces/IBackedCCIPBridge.sol";
+import { IBackedToken } from "../../interfaces/IBackedToken.sol";
 import { BridgeAdapterBase } from "./BridgeAdapterBase.sol";
 
 /**
@@ -25,11 +26,11 @@ contract BackedCCIPWrapperBridgeAdapter is BridgeAdapterBase {
      * @param wrapper The wrapper redeemed.
      * @param shares The wrapper shares redeemed.
      * @param token The raw stock token sent.
-     * @param amount The raw amount sent.
+     * @param sharesBridged The raw shares the bridge moved, what the destination pays out.
      * @param destRecipient The recipient on the destination chain.
      * @param messageId The CCIP message id.
      */
-    event BridgeBackedCCIPWrapper(address indexed wrapper, uint256 shares, address indexed token, uint256 amount, address indexed destRecipient, bytes32 messageId);
+    event BridgeBackedCCIPWrapper(address indexed wrapper, uint256 shares, address indexed token, uint256 sharesBridged, address indexed destRecipient, bytes32 messageId);
 
     /**
      * @notice Redeems the wrapper shares and sends the raw stock over Backed's bridge.
@@ -53,7 +54,7 @@ contract BackedCCIPWrapperBridgeAdapter is BridgeAdapterBase {
         IERC20(raw).forceApprove(address(ccipBridge), rawAmount);
         bytes32 messageId = ccipBridge.send{ value: fee }(selector, receiver, raw, rawAmount, "");
 
-        emit BridgeBackedCCIPWrapper(token, amount, raw, rawAmount, destRecipient, messageId);
+        emit BridgeBackedCCIPWrapper(token, amount, raw, IBackedToken(raw).getSharesByUnderlyingAmount(rawAmount), destRecipient, messageId);
     }
 
     /**

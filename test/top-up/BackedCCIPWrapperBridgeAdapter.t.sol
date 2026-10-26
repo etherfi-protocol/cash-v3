@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import { Test } from "forge-std/Test.sol";
+import { Test, Vm } from "forge-std/Test.sol";
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IBackedCCIPBridge } from "../../src/interfaces/IBackedCCIPBridge.sol";
@@ -12,6 +12,10 @@ import { TopUp } from "../../src/top-up/TopUp.sol";
 import { TopUpFactory } from "../../src/top-up/TopUpFactory.sol";
 import { BackedCCIPWrapperBridgeAdapter } from "../../src/top-up/bridge/BackedCCIPWrapperBridgeAdapter.sol";
 import { Constants } from "../../src/utils/Constants.sol";
+
+interface IBackedShares {
+    function sharesOf(address account) external view returns (uint256);
+}
 
 /// @notice Runs the wrapper adapter through a real TopUpFactory against Backed's live bridge on a mainnet fork:
 ///         the factory holds wSPYx, Backed's custody receives raw SPYx.
@@ -89,16 +93,32 @@ contract BackedCCIPWrapperBridgeAdapterTest is Test, Constants {
         uint256 rawAmount = IERC4626(WSPYX).previewRedeem(shares);
         (, uint256 fee) = factory.getBridgeFee(WSPYX, shares, OP_CHAIN_ID);
         uint256 custodyBefore = IERC20(SPYX).balanceOf(BACKED_CUSTODY);
+        uint256 custodySharesBefore = IBackedShares(SPYX).sharesOf(BACKED_CUSTODY);
 
         vm.expectEmit(true, true, true, true);
         emit TopUpFactory.Bridge(WSPYX, shares, OP_CHAIN_ID);
+        vm.recordLogs();
         factory.bridge{ value: fee }(WSPYX, shares, OP_CHAIN_ID);
+
+        assertEq(_bridgedShares(), IBackedShares(SPYX).sharesOf(BACKED_CUSTODY) - custodySharesBefore, "event should carry the shares custody received");
 
         assertEq(IERC20(WSPYX).balanceOf(address(factory)), 0, "shares should have left the factory");
         assertLe(IERC20(SPYX).balanceOf(address(factory)), 2, "raw stock should have left the factory");
         assertGe(IERC20(SPYX).balanceOf(BACKED_CUSTODY) - custodyBefore, rawAmount - 2, "custody did not receive the stock");
         assertEq(IERC20(SPYX).allowance(address(factory), BACKED_BRIDGE), 0, "allowance left on the bridge");
         assertEq(address(factory).balance, 0, "fee not spent");
+    }
+
+    /// The raw shares the adapter's event reports, from the recorded logs
+    function _bridgedShares() internal returns (uint256) {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter == address(factory) && logs[i].topics[0] == BackedCCIPWrapperBridgeAdapter.BridgeBackedCCIPWrapper.selector) {
+                (, uint256 sharesBridged,) = abi.decode(logs[i].data, (uint256, uint256, bytes32));
+                return sharesBridged;
+            }
+        }
+        revert("bridge event not emitted");
     }
 
     /// The factory rejects a bridge call that underpays the quoted fee.
