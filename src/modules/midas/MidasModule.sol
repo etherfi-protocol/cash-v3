@@ -273,13 +273,16 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param midasTokens Array of Midas token addresses to add
      * @param depositVaults Array of deposit vault addresses corresponding to the Midas tokens
      * @param redemptionVaults Array of redemption vault addresses corresponding to the Midas tokens
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
-     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
+     * @dev New pairs need ADMIN_TIMELOCK_ROLE. Overwriting an existing pair redirects where signed withdrawals of that
+     *      token go, so it needs the RoleRegistry owner (the upgrade timelock).
+     * @custom:throws OnlyAdminTimelock if the caller is neither the RoleRegistry owner nor has ADMIN_TIMELOCK_ROLE
+     * @custom:throws Unauthorized If a non-owner caller tries to overwrite an existing pair
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
      */
     function addMidasVaults(address[] calldata midasTokens, address[] calldata depositVaults, address[] calldata redemptionVaults) external {
-        etherFiDataProvider.roleRegistry().onlyAdminTimelock(msg.sender);
+        bool isRegistryOwner = etherFiDataProvider.roleRegistry().owner() == msg.sender;
+        if (!isRegistryOwner) etherFiDataProvider.roleRegistry().onlyAdminTimelock(msg.sender);
 
         uint256 len = midasTokens.length;
         if (len != depositVaults.length || len != redemptionVaults.length) revert ArrayLengthMismatch();
@@ -291,6 +294,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
             address redemptionVault = redemptionVaults[i];
 
             if (midasToken == address(0) || depositVault == address(0) || redemptionVault == address(0)) revert InvalidInput();
+            if (!isRegistryOwner && vaults[midasToken].redemptionVault != address(0)) revert Unauthorized();
 
             vaults[midasToken] = MidasVaultConfig({ depositVault: depositVault, redemptionVault: redemptionVault });
 

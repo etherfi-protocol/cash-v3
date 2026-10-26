@@ -473,6 +473,32 @@ contract MidasModuleTest is SafeTestSetup {
         midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
     }
 
+    /// Overwriting a configured pair changes where signed withdrawals go, so only the RoleRegistry owner can do it.
+    function test_addMidasVaults_overwrite_requiresRegistryOwner() public {
+        address timelockOnly = makeAddr("timelockOnly");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), timelockOnly);
+        vm.stopPrank();
+
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = address(midasToken);
+        address[] memory depositVaults = new address[](1);
+        depositVaults[0] = makeAddr("replacementDepositVault");
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = makeAddr("replacementRedemptionVault");
+
+        vm.prank(timelockOnly);
+        vm.expectRevert(MidasModule.Unauthorized.selector);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
+
+        vm.prank(owner);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
+
+        (address depositVaultResult, address redemptionVaultResult) = midasModule.vaults(address(midasToken));
+        assertEq(depositVaultResult, depositVaults[0]);
+        assertEq(redemptionVaultResult, redemptionVaults[0]);
+    }
+
     function test_addMidasVaults_revertsWithArrayLengthMismatch() public {
         vm.startPrank(owner);
         roleRegistry.grantRole(keccak256("ADMIN_ROLE"), owner);

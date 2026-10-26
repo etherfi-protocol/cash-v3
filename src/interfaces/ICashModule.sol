@@ -541,7 +541,7 @@ interface ICashModule {
 
     /**
      * @notice Configures which modules can request withdrawals
-     * @dev Can only be called by the ADMIN_TIMELOCK_ROLE
+     * @dev Adding a module needs the ADMIN_TIMELOCK_ROLE; a call that only removes modules can also come from ADMIN_ROLE
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether to whitelist each module
      */
@@ -593,11 +593,11 @@ interface ICashModule {
 
     /**
      * @notice Sets the time delays for withdrawals, spending limit changes, and mode changes
-     * @dev Only callable by accounts with ADMIN_ROLE
+     * @dev Only callable by the ADMIN_TIMELOCK_ROLE
      * @param withdrawalDelay Delay in seconds before a withdrawal can be finalized
      * @param spendLimitDelay Delay in seconds before spending limit changes take effect
      * @param modeDelay Delay in seconds before a mode change takes effect
-     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      */
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external;
 

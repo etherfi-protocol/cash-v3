@@ -13,6 +13,7 @@ import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
+import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { LendCapacityLib } from "./LendCapacityLib.sol";
@@ -72,6 +73,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     uint256 internal constant RAY = 1e27;
     /// @notice Aave's minimum executable health factor
     uint256 internal constant MIN_HEALTH_FACTOR = 1e18;
+    /// @notice RoleRegistry pauser role, allowed to revoke a driver with no delay
+    bytes32 internal constant PAUSER_ROLE = keccak256("PAUSER");
 
     /// @custom:storage-location erc7201:etherfi.storage.LendGateway
     struct LendGatewayStorage {
@@ -238,21 +241,33 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      *      exempt: settlement obligations must never fail on the floor, and de-risking must always work.
      *      Aave still liquidates at HF < 1e18 regardless; this floor only keeps ether.fi-initiated
      *      extraction from parking a position near that line.
+     *      Raising the floor (or enabling it) stays with ADMIN_ROLE. Lowering it or disabling it with 0 weakens
+     *      protection for every safe, so it needs ADMIN_TIMELOCK_ROLE.
      * @param value The floor in WAD (1e18); 0 disables the check, otherwise bounded to [1e18, 2e18]
      * @custom:throws InvalidMinHealthFactor if value is non-zero and outside [1e18, 2e18]
      */
-    function setMinHealthFactor(uint256 value) external onlyAdmin {
+    function setMinHealthFactor(uint256 value) external {
         if (value != 0 && (value < 1e18 || value > 2e18)) revert InvalidMinHealthFactor();
-        _getLendGatewayStorage().minHealthFactor = value;
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        uint256 current = $.minHealthFactor;
+        if (current != 0 && (value == 0 || value < current)) roleRegistry().onlyAdminTimelock(msg.sender);
+        else roleRegistry().onlyAdmin(msg.sender);
+        $.minHealthFactor = value;
         emit MinHealthFactorSet(value);
     }
 
     /**
      * @notice Authorizes or de-authorizes a driver (beyond the always-authorized CashModule)
+     * @dev Authorizing a driver gives it custody of every position, so it needs ADMIN_TIMELOCK_ROLE. Revoking is
+     *      safety-increasing, so ADMIN_ROLE and PAUSER can also do it with no delay.
      * @param driver The driver contract (e.g. an auto-supply or migration module)
      * @param authorized True to authorize, false to revoke
      */
-    function setDriver(address driver, bool authorized) external onlyAdminTimelock {
+    function setDriver(address driver, bool authorized) external {
+        IRoleRegistry registry = roleRegistry();
+        if (authorized || !(registry.hasRole(registry.ADMIN_ROLE(), msg.sender) || registry.hasRole(PAUSER_ROLE, msg.sender))) {
+            registry.onlyAdminTimelock(msg.sender);
+        }
         if (driver == address(0)) revert ZeroAddress();
         _getLendGatewayStorage().isDriver[driver] = authorized;
         emit DriverSet(driver, authorized);

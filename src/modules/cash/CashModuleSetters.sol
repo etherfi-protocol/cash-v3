@@ -11,6 +11,7 @@ import { IDebtManager } from "../../interfaces/IDebtManager.sol";
 import { IEtherFiDataProvider } from "../../interfaces/IEtherFiDataProvider.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
+import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { ArrayDeDupLib } from "../../libraries/ArrayDeDupLib.sol";
 import { CashVerificationLib } from "../../libraries/CashVerificationLib.sol";
 import { EnumerableAddressWhitelistLib } from "../../libraries/EnumerableAddressWhitelistLib.sol";
@@ -144,15 +145,16 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Sets the time delays for withdrawals, spending limit changes, and mode changes
-     * @dev Only callable by accounts with ADMIN_ROLE
+     * @dev Only callable by the ADMIN_TIMELOCK_ROLE. These delays protect every user, so changing them goes
+     *      through the operating timelock rather than the fast admin multisig.
      * @param withdrawalDelay Delay in seconds before a withdrawal can be finalized
      * @param spendLimitDelay Delay in seconds before spending limit changes take effect
      * @param modeDelay Delay in seconds before a mode change takes effect
-     * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
+     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
      */
 
     function setDelays(uint64 withdrawalDelay, uint64 spendLimitDelay, uint64 modeDelay) external {
-        roleRegistry().onlyAdmin(msg.sender);
+        roleRegistry().onlyAdminTimelock(msg.sender);
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         $.withdrawalDelay = withdrawalDelay;
@@ -289,24 +291,30 @@ contract CashModuleSetters is CashModuleStorageContract {
 
     /**
      * @notice Configures which modules can request withdrawals
-     * @dev Can only be called by the ADMIN_TIMELOCK_ROLE
+     * @dev Adding a module needs the ADMIN_TIMELOCK_ROLE. A call that only removes modules is safety-increasing,
+     *      so the ADMIN_ROLE can also make it with no delay, to cut a misbehaving module quickly.
      * @param modules Array of module addresses to configure
      * @param shouldWhitelist Array of boolean values indicating whether to whitelist each module
      */
     function configureModulesCanRequestWithdraw(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        roleRegistry().onlyAdminTimelock(msg.sender);
-
         CashModuleStorage storage $ = _getCashModuleStorage();
 
         uint256 len = modules.length;
         if (len == 0 || len != shouldWhitelist.length) revert ArrayLengthMismatch();
 
+        bool adds;
         for (uint256 i = 0; i < len;) {
-            if (shouldWhitelist[i] && !etherFiDataProvider.isWhitelistedModule(modules[i])) revert ModuleNotWhitelistedOnDataProvider();
+            if (shouldWhitelist[i]) {
+                adds = true;
+                if (!etherFiDataProvider.isWhitelistedModule(modules[i])) revert ModuleNotWhitelistedOnDataProvider();
+            }
             unchecked {
                 ++i;
             }
         }
+
+        IRoleRegistry registry = roleRegistry();
+        if (adds || !registry.hasRole(registry.ADMIN_ROLE(), msg.sender)) registry.onlyAdminTimelock(msg.sender);
 
         EnumerableAddressWhitelistLib.configure($.whitelistedModulesCanRequestWithdraw, modules, shouldWhitelist);
         $.cashEventEmitter.emitModulesCanRequestWithdrawConfigured(modules, shouldWhitelist);

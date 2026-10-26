@@ -532,6 +532,33 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         gw.setDriver(makeAddr("d"), true);
     }
 
+    /// Revoking a driver is a fast safety brake for ADMIN_ROLE and PAUSER; authorizing one still needs the timelock.
+    function test_setDriver_revokeIsFastButAuthorizeNeedsTimelock() public {
+        address adminOnly = makeAddr("adminOnly");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), adminOnly);
+        vm.stopPrank();
+
+        vm.prank(adminOnly);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        gw.setDriver(makeAddr("d"), true);
+
+        vm.prank(pauser);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        gw.setDriver(makeAddr("d"), true);
+
+        vm.prank(pauser);
+        gw.setDriver(driver, false);
+        assertFalse(gw.isDriver(driver), "pauser revoked the driver");
+
+        vm.prank(owner);
+        gw.setDriver(driver, true);
+
+        vm.prank(adminOnly);
+        gw.setDriver(driver, false);
+        assertFalse(gw.isDriver(driver), "admin revoked the driver");
+    }
+
     // ----------------------------------------------------------------- op guards (all mutating ops)
 
     function test_mutatingOps_onlyDriver() public {
