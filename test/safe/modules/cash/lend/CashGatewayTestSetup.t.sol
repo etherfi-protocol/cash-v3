@@ -6,6 +6,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { UUPSProxy } from "../../../../../src/UUPSProxy.sol";
 import { IAaveV4PriceFeed } from "../../../../../src/interfaces/IAaveV4PriceFeed.sol";
 import { IAggregatorV3 } from "../../../../../src/interfaces/IAggregatorV3.sol";
+import { BinSponsor } from "../../../../../src/interfaces/ICashModule.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
 import { ChainlinkPriceFeed } from "../../../../../src/oracle/ChainlinkPriceFeed.sol";
 import { AaveV4Fixture } from "./helpers/AaveV4Fixture.sol";
@@ -63,6 +64,10 @@ abstract contract CashGatewayTestSetup is CashModuleTestSetup, AaveV4Fixture {
         gw.setSpendAsset(address(usdc), true);
         gw.setDriver(driver, true);
         cashModule.setLendGateway(address(gw));
+        // The gateway only pays a safe's withdrawn or borrowed funds to the safe, a settlement dispatcher or the
+        // DebtManager. Tests that arrange positions pay `recipient`, so register it as the (otherwise unused)
+        // CardOrder dispatcher.
+        cashModule.setSettlementDispatcher(BinSponsor.CardOrder, recipient);
         vm.stopPrank();
 
         _enableModule(address(gw));

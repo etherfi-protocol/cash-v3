@@ -116,9 +116,9 @@ contract LiquidUSDLiquifierOPModule is Constants, UpgradeableProxy, ModuleCheckB
      * @notice Repays using Liquid USD
      * @param user Address of the user
      * @param usdAmount Amount of USD to repay
-     * @dev Repays using Liquid USD
+     * @dev Repays using Liquid USD. Blocked while the module is paused, and not re-entrant.
      */
-    function repayUsingLiquidUSD(address user, uint256 usdAmount) external onlyEtherFiSafe(user) onlyEtherFiWallet() {
+    function repayUsingLiquidUSD(address user, uint256 usdAmount) external nonReentrant whenNotPaused onlyEtherFiSafe(user) onlyEtherFiWallet() {
         if (usdAmount == 0) revert AmountZero();
         _repayUsingLiquidUSD(user, usdAmount);
     }

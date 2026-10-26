@@ -407,6 +407,15 @@ interface ICashModule {
     function getSettlementDispatcher(BinSponsor binSponsor) external view returns (address settlementDispatcher);
 
     /**
+     * @notice Returns whether the lend gateway may send a safe's withdrawn or borrowed funds to `to`, other than
+     *         the safe itself: a configured settlement dispatcher, or for borrows the DebtManager
+     * @param to The recipient to check
+     * @param isBorrow True for a borrow, false for a withdrawal
+     * @return True if `to` is an allowed recipient
+     */
+    function isAllowedLendRecipient(address to, bool isBorrow) external view returns (bool);
+
+    /**
      * @notice Returns the EtherFiDataProvider contract reference
      * @dev Used to access global system configuration and services
      * @return The EtherFiDataProvider contract instance

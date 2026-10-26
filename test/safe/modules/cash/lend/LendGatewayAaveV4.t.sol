@@ -559,6 +559,45 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         assertFalse(gw.isDriver(driver), "admin revoked the driver");
     }
 
+    // ----------------------------------------------------------------- recipient allowlist
+
+    /// A driver can only send a safe's withdrawn collateral to the safe or a settlement dispatcher.
+    function test_withdraw_onlyPaysSafeOrDispatcher() public {
+        _supplyToGateway(address(safe), address(weETH), 2 ether);
+        address debtManager = address(cashModule.getDebtManager());
+
+        vm.startPrank(driver);
+        vm.expectRevert(LendGateway.InvalidRecipient.selector);
+        gw.withdraw(address(safe), address(weETH), 0.1 ether, makeAddr("attacker"));
+
+        vm.expectRevert(LendGateway.InvalidRecipient.selector);
+        gw.withdraw(address(safe), address(weETH), 0.1 ether, debtManager);
+
+        gw.withdraw(address(safe), address(weETH), 0.1 ether, address(safe));
+        gw.withdraw(address(safe), address(weETH), 0.1 ether, recipient);
+        vm.stopPrank();
+
+        assertEq(weETH.balanceOf(recipient), 0.1 ether, "dispatcher received the withdrawal");
+    }
+
+    /// A driver can only send a safe's new debt to the safe, a settlement dispatcher or the DebtManager.
+    function test_borrow_onlyPaysSafeDispatcherOrDebtManager() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        address debtManager = address(cashModule.getDebtManager());
+        uint256 debtManagerBefore = usdc.balanceOf(debtManager);
+
+        vm.startPrank(driver);
+        vm.expectRevert(LendGateway.InvalidRecipient.selector);
+        gw.borrow(address(safe), address(usdc), 100e6, makeAddr("attacker"));
+
+        gw.borrow(address(safe), address(usdc), 100e6, address(safe));
+        gw.borrow(address(safe), address(usdc), 100e6, recipient);
+        gw.borrow(address(safe), address(usdc), 100e6, debtManager);
+        vm.stopPrank();
+
+        assertEq(usdc.balanceOf(debtManager) - debtManagerBefore, 100e6, "DebtManager received the borrow");
+    }
+
     // ----------------------------------------------------------------- op guards (all mutating ops)
 
     function test_mutatingOps_onlyDriver() public {

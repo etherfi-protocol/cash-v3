@@ -43,6 +43,21 @@ contract CashModuleSetters is CashModuleStorageContract {
      * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
      * @custom:throws InvalidInput if caller doesn't have the controller role
      */
+    /**
+     * @notice Returns whether the lend gateway may send a safe's withdrawn or borrowed funds to `to`, other than
+     *         the safe itself
+     * @dev Allowed: a configured settlement dispatcher, and for borrows only the DebtManager (migration re-borrow).
+     * @param to The recipient to check
+     * @param isBorrow True for a borrow, false for a withdrawal
+     * @return True if `to` is an allowed recipient
+     */
+    function isAllowedLendRecipient(address to, bool isBorrow) external view returns (bool) {
+        if (to == address(0)) return false;
+        CashModuleStorage storage $ = _getCashModuleStorage();
+        if (to == $.settlementDispatcherReap || to == $.settlementDispatcherRain || to == $.settlementDispatcherPix || to == $.settlementDispatcherCardOrder) return true;
+        return isBorrow && to == address($.debtManager);
+    }
+
     function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external onlyRoleRegistryOwner {
         if (dispatcher == address(0)) revert InvalidInput();
 

@@ -17,6 +17,7 @@ import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { LendCapacityLib } from "./LendCapacityLib.sol";
+import { LendReserveLib } from "./LendReserveLib.sol";
 
 /**
  * @title LendGateway
@@ -135,6 +136,9 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     error HealthFactorBelowMinimum();
     /// @notice Thrown when setting a health-factor floor outside [1e18, 2e18] (0 disables)
     error InvalidMinHealthFactor();
+    /// @notice Thrown when a withdraw or borrow names a recipient other than the safe, a settlement dispatcher or
+    ///         (for borrows) the DebtManager
+    error InvalidRecipient();
 
     /**
      * @param _etherFiDataProvider Address of the EtherFiDataProvider
@@ -157,6 +161,13 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // ---------------------------------------------------------------------
     // Access control
     // ---------------------------------------------------------------------
+
+    /// @dev Reverts unless `to` is the safe, a settlement dispatcher, or (borrows only) the DebtManager, so no
+    ///      driver can send a safe's collateral or new debt to an arbitrary address.
+    function _checkRecipient(address safe, address to, bool isBorrow) internal view {
+        if (to == address(0)) revert ZeroAddress();
+        if (to != safe && !ICashModule(etherFiDataProvider.getCashModule()).isAllowedLendRecipient(to, isBorrow)) revert InvalidRecipient();
+    }
 
     /// @dev Reverts unless the caller is the CashModule or an authorized driver.
     function _onlyDriver() internal view {
@@ -187,17 +198,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param reserveId The Aave reserveId for the asset
      */
     function setReserveId(address asset, uint256 reserveId) external onlyAdmin {
-        if (asset == address(0)) revert ZeroAddress();
-        if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
-
         LendGatewayStorage storage $ = _getLendGatewayStorage();
-        if ($.assets.contains(asset)) {
-            uint256 currentReserveId = $.reserveId[asset];
-            if (currentReserveId == reserveId) return;
-            if (spoke.getReserveTotalDebt(currentReserveId) != 0 || spoke.getReserveSuppliedAssets(currentReserveId) != 0) {
-                revert ReserveStillInUse();
-            }
-        }
+        if (!LendReserveLib.validateRegistration(spoke, asset, reserveId, $.assets.contains(asset), $.reserveId[asset])) return;
 
         $.assets.add(asset);
         $.reserveId[asset] = reserveId;
@@ -222,10 +224,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
 
-        uint256 reserveId = $.reserveId[asset];
-        if (spoke.getReserveTotalDebt(reserveId) != 0 || spoke.getReserveSuppliedAssets(reserveId) != 0) {
-            revert ReserveStillInUse();
-        }
+        LendReserveLib.requireUnused(spoke, $.reserveId[asset]);
 
         $.assets.remove(asset);
         $.spendAssets.remove(asset);
@@ -367,11 +366,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws ZeroAddress if to is the zero address
+     * @custom:throws InvalidRecipient if to is not the safe, a settlement dispatcher, or (for borrows) the DebtManager
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
     function withdraw(address safe, address asset, uint256 amount, address to) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
-        if (to == address(0)) revert ZeroAddress();
+        _checkRecipient(safe, to, false);
         uint256 reserveId = _reserveIdOf(asset);
 
         // Spoke sends the underlying to the caller (this gateway); forward the actual amount received.
@@ -394,11 +394,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws LendOptedOut if the safe has opted out of lend
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws ZeroAddress if to is the zero address
+     * @custom:throws InvalidRecipient if to is not the safe, a settlement dispatcher, or (for borrows) the DebtManager
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
     function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
-        if (to == address(0)) revert ZeroAddress();
+        _checkRecipient(safe, to, true);
         uint256 reserveId = _reserveIdOf(asset);
 
         // Spoke sends the borrowed underlying to the caller (this gateway); forward it.

@@ -25,6 +25,10 @@ contract MockMidasRedemptionVault is IMidasVault {
     function depositInstant(address, uint256, uint256, bytes32) external { }
     function redeemInstant(address, uint256, uint256) external { }
 
+    function mToken() external view returns (address) {
+        return midasToken;
+    }
+
     function redeemRequest(address, uint256 amountMTokenIn, address) external returns (uint256) {
         IERC20(midasToken).transferFrom(msg.sender, address(this), amountMTokenIn);
         return 0;

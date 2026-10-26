@@ -9,6 +9,7 @@ import { ICashModule } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.sol";
+import { IMidasVault } from "../../../../src/interfaces/IMidasVault.sol";
 import { MidasModule } from "../../../../src/modules/midas/MidasModule.sol";
 import { IAggregatorV3 } from "../../../../src/oracle/PriceProvider.sol";
 import { EtherFiSafeErrors } from "../../../../src/safe/EtherFiSafeErrors.sol";
@@ -446,6 +447,9 @@ contract MidasModuleTest is SafeTestSetup {
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = newRedemptionVault;
 
+        _mockMidasVault(newDepositVault, newMidasToken);
+        _mockMidasVault(newRedemptionVault, newMidasToken);
+
         vm.expectEmit(true, true, true, true);
         emit MidasModule.MidasVaultsAdded(midasTokens, depositVaults, redemptionVaults);
 
@@ -486,6 +490,8 @@ contract MidasModuleTest is SafeTestSetup {
         depositVaults[0] = makeAddr("replacementDepositVault");
         address[] memory redemptionVaults = new address[](1);
         redemptionVaults[0] = makeAddr("replacementRedemptionVault");
+        _mockMidasVault(depositVaults[0], address(midasToken));
+        _mockMidasVault(redemptionVaults[0], address(midasToken));
 
         vm.prank(timelockOnly);
         vm.expectRevert(MidasModule.Unauthorized.selector);
@@ -497,6 +503,39 @@ contract MidasModuleTest is SafeTestSetup {
         (address depositVaultResult, address redemptionVaultResult) = midasModule.vaults(address(midasToken));
         assertEq(depositVaultResult, depositVaults[0]);
         assertEq(redemptionVaultResult, redemptionVaults[0]);
+    }
+
+    /// A vault must be a contract that serves the Midas token it is registered for.
+    function test_addMidasVaults_revertsForInvalidVault() public {
+        address newMidasToken = makeAddr("newMidasToken");
+        address goodVault = makeAddr("goodVault");
+        address wrongTokenVault = makeAddr("wrongTokenVault");
+        _mockMidasVault(goodVault, newMidasToken);
+        _mockMidasVault(wrongTokenVault, makeAddr("otherMidasToken"));
+
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = newMidasToken;
+        address[] memory depositVaults = new address[](1);
+        address[] memory redemptionVaults = new address[](1);
+
+        // deposit vault with no code
+        depositVaults[0] = makeAddr("eoaVault");
+        redemptionVaults[0] = goodVault;
+        vm.prank(owner);
+        vm.expectRevert(MidasModule.InvalidMidasVault.selector);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
+
+        // redemption vault for another token
+        depositVaults[0] = goodVault;
+        redemptionVaults[0] = wrongTokenVault;
+        vm.prank(owner);
+        vm.expectRevert(MidasModule.InvalidMidasVault.selector);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
+    }
+
+    function _mockMidasVault(address vault, address token) internal {
+        vm.etch(vault, hex"00");
+        vm.mockCall(vault, abi.encodeWithSelector(IMidasVault.mToken.selector), abi.encode(token));
     }
 
     function test_addMidasVaults_revertsWithArrayLengthMismatch() public {

@@ -65,6 +65,9 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /// @notice Thrown when token decimals exceed the maximum allowed (18)
     error InvalidDecimals();
 
+    /// @notice Thrown when a vault has no code or does not serve the Midas token it is registered for
+    error InvalidMidasVault();
+
     /**
      * @notice Initializes the contract with Midas vaults and their supported assets
      * @param _etherFiDataProvider Address of the EtherFiDataProvider contract
@@ -277,6 +280,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      *      token go, so it needs the RoleRegistry owner (the upgrade timelock).
      * @custom:throws OnlyAdminTimelock if the caller is neither the RoleRegistry owner nor has ADMIN_TIMELOCK_ROLE
      * @custom:throws Unauthorized If a non-owner caller tries to overwrite an existing pair
+     * @custom:throws InvalidMidasVault If a vault has no code or its mToken() is not the Midas token
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
      */
@@ -295,6 +299,8 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
 
             if (midasToken == address(0) || depositVault == address(0) || redemptionVault == address(0)) revert InvalidInput();
             if (!isRegistryOwner && vaults[midasToken].redemptionVault != address(0)) revert Unauthorized();
+            _checkVault(depositVault, midasToken);
+            _checkVault(redemptionVault, midasToken);
 
             vaults[midasToken] = MidasVaultConfig({ depositVault: depositVault, redemptionVault: redemptionVault });
 
@@ -304,6 +310,11 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         }
 
         emit MidasVaultsAdded(midasTokens, depositVaults, redemptionVaults);
+    }
+
+    /// @dev Reverts unless `vault` is a contract whose mToken() is `midasToken`
+    function _checkVault(address vault, address midasToken) private view {
+        if (vault.code.length == 0 || IMidasVault(vault).mToken() != midasToken) revert InvalidMidasVault();
     }
 
     /**
