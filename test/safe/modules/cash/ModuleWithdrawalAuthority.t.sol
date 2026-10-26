@@ -298,6 +298,18 @@ contract CashModuleModuleWithdrawalAuthorityTest is CashModuleTestSetup {
         assertEq(usdc.balanceOf(address(module)), HOLD);
     }
 
+    /// @dev A module override of zero (global delay one hour) also processes inline: the record is written before
+    ///      that processing and cleared by it
+    function test_record_clearedWhenModuleOverrideOfZeroProcessesInline() public {
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(address(module), 0, true);
+
+        module.requestWithdrawal(address(safe), address(usdc), HOLD);
+        assertEq(_pendingTokensLength(), 0);
+        assertFalse(_record());
+        assertEq(usdc.balanceOf(address(module)), HOLD);
+    }
+
     function test_record_notSetByOwnerRequest() public {
         _requestWithdrawal(_single(address(usdc)), _single(HOLD), withdrawRecipient);
         assertFalse(_record());
