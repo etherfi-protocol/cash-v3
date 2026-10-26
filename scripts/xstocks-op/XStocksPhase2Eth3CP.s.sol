@@ -166,9 +166,12 @@ contract XStocksPhase2Eth3CP is XStocksOPDeployer, GnosisHelpers, Test {
             _pushOp(wrapperOps, _slice(wrappers, start, n), wrapperAdapter, keccak256(abi.encodePacked("XStocksOP.phase2.wrapperRoutes.", vm.toString(index))));
         }
         require(rawOps.length == 2 && wrapperOps.length == 2, "expected two batches per list");
+        console.log("Phase 1 operation to cancel:", vm.toString(phase1Id));
         for (uint256 i; i < 2; ++i) {
             require(!tl.isOperation(_id(rawOps[i])), "raw batch already scheduled");
             require(!tl.isOperation(_id(wrapperOps[i])), "wrapper batch already scheduled");
+            console.log(string.concat("raw batch ", vm.toString(i + 1), " (", vm.toString(rawOps[i].payloads.length), " call): salt ", vm.toString(rawOps[i].salt), " id ", vm.toString(_id(rawOps[i]))));
+            console.log(string.concat("wrapper batch ", vm.toString(i + 1), ": salt ", vm.toString(wrapperOps[i].salt), " id ", vm.toString(_id(wrapperOps[i]))));
         }
     }
 

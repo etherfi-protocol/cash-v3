@@ -112,6 +112,7 @@ contract XStocksPhase2OP3CP is EtherFiDeployerHelper, GnosisHelpers, Test {
         targets.push(address(topUpDest));
         payloads.push(abi.encodeCall(TopUpDest.setStockWrappers, (raws, wrappers)));
         require(!tl.isOperation(_id()), "batch already scheduled");
+        console.log(string.concat("modules batch: salt ", vm.toString(SALT), " id ", vm.toString(_id())));
     }
 
     function _assertAfter() internal view {
