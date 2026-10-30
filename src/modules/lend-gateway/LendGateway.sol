@@ -199,7 +199,10 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      */
     function setReserveId(address asset, uint256 reserveId) external onlyAdmin {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
-        if (!LendReserveLib.validateRegistration(spoke, asset, reserveId, $.assets.contains(asset), $.reserveId[asset])) return;
+        bool registered = $.assets.contains(asset);
+        uint256 currentReserveId = $.reserveId[asset];
+        LendReserveLib.validateRegistration(spoke, asset, reserveId, registered, currentReserveId);
+        if (registered && currentReserveId == reserveId) return;
 
         $.assets.add(asset);
         $.reserveId[asset] = reserveId;
@@ -257,14 +260,22 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
 
     /**
      * @notice Authorizes or de-authorizes a driver (beyond the always-authorized CashModule)
-     * @dev Authorizing a driver gives it custody of every position, so it needs ADMIN_TIMELOCK_ROLE. Revoking is
-     *      safety-increasing, so ADMIN_ROLE and PAUSER can also do it with no delay.
+     * @dev Authorizing a driver lets it supply, withdraw and borrow on every safe that has not opted out, so it
+     *      needs the RoleRegistry owner (the upgrade timelock), the same bar as adding a default module. Revoking
+     *      is safety-increasing, so ADMIN_TIMELOCK_ROLE, ADMIN_ROLE and PAUSER can also do it with no delay.
      * @param driver The driver contract (e.g. an auto-supply or migration module)
      * @param authorized True to authorize, false to revoke
+     * @custom:throws OnlyRoleRegistryOwner if authorizing and the caller is not the RoleRegistry owner
+     * @custom:throws OnlyAdminTimelock if revoking and the caller is none of the owner, ADMIN_TIMELOCK_ROLE,
+     *                ADMIN_ROLE or PAUSER
+     * @custom:throws ZeroAddress if driver is the zero address
      */
     function setDriver(address driver, bool authorized) external {
         IRoleRegistry registry = roleRegistry();
-        if (authorized || !(registry.hasRole(registry.ADMIN_ROLE(), msg.sender) || registry.hasRole(PAUSER_ROLE, msg.sender))) {
+        bool isOwner = registry.owner() == msg.sender;
+        if (authorized) {
+            if (!isOwner) revert OnlyRoleRegistryOwner();
+        } else if (!isOwner && !registry.hasRole(registry.ADMIN_ROLE(), msg.sender) && !registry.hasRole(PAUSER_ROLE, msg.sender)) {
             registry.onlyAdminTimelock(msg.sender);
         }
         if (driver == address(0)) revert ZeroAddress();

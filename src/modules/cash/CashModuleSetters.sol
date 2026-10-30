@@ -37,13 +37,6 @@ contract CashModuleSetters is CashModuleStorageContract {
     }
 
     /**
-     * @notice Sets the settlement dispatcher address for a bin sponsor
-     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
-     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
-     * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
-     * @custom:throws InvalidInput if caller doesn't have the controller role
-     */
-    /**
      * @notice Returns whether the lend gateway may send a safe's withdrawn or borrowed funds to `to`, other than
      *         the safe itself
      * @dev Allowed: a configured settlement dispatcher, and for borrows only the DebtManager (migration re-borrow).
@@ -58,6 +51,14 @@ contract CashModuleSetters is CashModuleStorageContract {
         return isBorrow && to == address($.debtManager);
     }
 
+    /**
+     * @notice Sets the settlement dispatcher address for a bin sponsor
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock)
+     * @param binSponsor Bin sponsor for which the settlement dispatcher is updated
+     * @param dispatcher Address of the new settlement dispatcher for the bin sponsor
+     * @custom:throws OnlyRoleRegistryOwner if the caller is not the RoleRegistry owner
+     * @custom:throws InvalidInput if dispatcher is the zero address
+     */
     function setSettlementDispatcher(BinSponsor binSponsor, address dispatcher) external onlyRoleRegistryOwner {
         if (dispatcher == address(0)) revert InvalidInput();
 

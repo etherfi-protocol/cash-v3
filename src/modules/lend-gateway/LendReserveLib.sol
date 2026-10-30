@@ -20,22 +20,22 @@ library LendReserveLib {
     error ReserveStillInUse();
 
     /**
-     * @notice Validates registering `asset` at `reserveId`
+     * @notice Reverts unless `asset` may be registered at `reserveId`
+     * @dev Validation only. Whether the registration changes anything is the caller's check: re-registering an
+     *      asset at its current reserve passes here and is a no-op for the gateway.
      * @param spoke The Aave Spoke
      * @param asset The underlying asset
      * @param reserveId The Aave reserveId to register
      * @param registered Whether the asset is already registered
      * @param currentReserveId The asset's current reserveId (ignored when not registered)
-     * @return changed False when the asset is already registered at `reserveId` (a no-op)
+     * @custom:throws ZeroAddress if asset is the zero address
+     * @custom:throws ReserveAssetMismatch if the reserve's underlying is not `asset`
+     * @custom:throws ReserveStillInUse if moving a registered asset off a reserve that still has supply or debt
      */
-    function validateRegistration(IAaveV4Spoke spoke, address asset, uint256 reserveId, bool registered, uint256 currentReserveId) external view returns (bool changed) {
+    function validateRegistration(IAaveV4Spoke spoke, address asset, uint256 reserveId, bool registered, uint256 currentReserveId) external view {
         if (asset == address(0)) revert ZeroAddress();
         if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
-        if (registered) {
-            if (currentReserveId == reserveId) return false;
-            requireUnused(spoke, currentReserveId);
-        }
-        return true;
+        if (registered && currentReserveId != reserveId) requireUnused(spoke, currentReserveId);
     }
 
     /**

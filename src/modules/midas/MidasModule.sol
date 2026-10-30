@@ -35,6 +35,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /// @notice Mapping from Midas token to vault configuration
     mapping(address midasToken => MidasVaultConfig config) public vaults;
 
+    /// @notice Whether a Midas token has ever had vaults configured. Survives removal, so re-registering a token
+    ///         that was configured before needs the RoleRegistry owner just like overwriting a live pair.
+    mapping(address midasToken => bool configured) public everConfigured;
+
     /// @notice TypeHash for deposit function signature
     bytes32 public constant DEPOSIT_SIG = keccak256("deposit");
 
@@ -90,6 +94,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
             if (midasToken == address(0) || depositVault == address(0) || redemptionVault == address(0)) revert InvalidInput();
 
             vaults[midasToken] = MidasVaultConfig({ depositVault: depositVault, redemptionVault: redemptionVault });
+            everConfigured[midasToken] = true;
 
             unchecked {
                 ++i;
@@ -277,9 +282,11 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param depositVaults Array of deposit vault addresses corresponding to the Midas tokens
      * @param redemptionVaults Array of redemption vault addresses corresponding to the Midas tokens
      * @dev New pairs need ADMIN_TIMELOCK_ROLE. Overwriting an existing pair redirects where signed withdrawals of that
-     *      token go, so it needs the RoleRegistry owner (the upgrade timelock).
+     *      token go, so it needs the RoleRegistry owner (the upgrade timelock). So does re-registering a token that
+     *      was configured before and then removed: removal clears `vaults` but not `everConfigured`, so ADMIN_ROLE
+     *      removing a pair cannot open the way for ADMIN_TIMELOCK_ROLE to swap in a new vault (audit Item 27 L-01).
      * @custom:throws OnlyAdminTimelock if the caller is neither the RoleRegistry owner nor has ADMIN_TIMELOCK_ROLE
-     * @custom:throws Unauthorized If a non-owner caller tries to overwrite an existing pair
+     * @custom:throws Unauthorized If a non-owner caller tries to configure a token that has ever been configured
      * @custom:throws InvalidMidasVault If a vault has no code or its mToken() is not the Midas token
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
@@ -298,11 +305,12 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
             address redemptionVault = redemptionVaults[i];
 
             if (midasToken == address(0) || depositVault == address(0) || redemptionVault == address(0)) revert InvalidInput();
-            if (!isRegistryOwner && vaults[midasToken].redemptionVault != address(0)) revert Unauthorized();
+            if (!isRegistryOwner && everConfigured[midasToken]) revert Unauthorized();
             _checkVault(depositVault, midasToken);
             _checkVault(redemptionVault, midasToken);
 
             vaults[midasToken] = MidasVaultConfig({ depositVault: depositVault, redemptionVault: redemptionVault });
+            everConfigured[midasToken] = true;
 
             unchecked {
                 ++i;
@@ -320,7 +328,8 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /**
      * @notice Removes Midas vaults from the module
      * @param midasTokens Array of Midas token addresses to remove
-     * @dev Only callable by accounts with the ADMIN_ROLE role
+     * @dev Only callable by accounts with the ADMIN_ROLE role. Leaves `everConfigured` set, so adding the token
+     *      back needs the RoleRegistry owner.
      * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
      * @custom:throws InvalidInput If the array is empty
      */

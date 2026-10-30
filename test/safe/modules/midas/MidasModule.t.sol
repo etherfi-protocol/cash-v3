@@ -505,6 +505,64 @@ contract MidasModuleTest is SafeTestSetup {
         assertEq(redemptionVaultResult, redemptionVaults[0]);
     }
 
+    /// Audit Item 27 L-01: removing a pair must not let ADMIN_TIMELOCK_ROLE re-register the token with a different
+    /// vault. Removal clears the pair but not `everConfigured`, so re-adding still needs the RoleRegistry owner.
+    function test_addMidasVaults_reRegistrationAfterRemoval_requiresRegistryOwner() public {
+        address timelockOnly = makeAddr("timelockOnly");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), timelockOnly);
+        vm.stopPrank();
+
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = address(midasToken);
+        assertTrue(midasModule.everConfigured(address(midasToken)), "constructor marks the token configured");
+
+        vm.prank(owner);
+        midasModule.removeMidasVaults(midasTokens);
+        (, address removedRedemptionVault) = midasModule.vaults(address(midasToken));
+        assertEq(removedRedemptionVault, address(0), "pair removed");
+        assertTrue(midasModule.everConfigured(address(midasToken)), "removal keeps the history");
+
+        address[] memory depositVaults = new address[](1);
+        depositVaults[0] = makeAddr("replacementDepositVault");
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = makeAddr("replacementRedemptionVault");
+        _mockMidasVault(depositVaults[0], address(midasToken));
+        _mockMidasVault(redemptionVaults[0], address(midasToken));
+
+        vm.prank(timelockOnly);
+        vm.expectRevert(MidasModule.Unauthorized.selector);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
+
+        vm.prank(owner);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
+        (, address redemptionVaultResult) = midasModule.vaults(address(midasToken));
+        assertEq(redemptionVaultResult, redemptionVaults[0], "registry owner re-registered the token");
+    }
+
+    /// A brand-new token is still listable by ADMIN_TIMELOCK_ROLE, and is marked configured once listed.
+    function test_addMidasVaults_newToken_allowedForTimelock() public {
+        address timelockOnly = makeAddr("timelockOnly");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), timelockOnly);
+        vm.stopPrank();
+
+        address newToken = makeAddr("newMidasToken");
+        address[] memory midasTokens = new address[](1);
+        midasTokens[0] = newToken;
+        address[] memory depositVaults = new address[](1);
+        depositVaults[0] = makeAddr("newDepositVault");
+        address[] memory redemptionVaults = new address[](1);
+        redemptionVaults[0] = makeAddr("newRedemptionVault");
+        _mockMidasVault(depositVaults[0], newToken);
+        _mockMidasVault(redemptionVaults[0], newToken);
+
+        assertFalse(midasModule.everConfigured(newToken));
+        vm.prank(timelockOnly);
+        midasModule.addMidasVaults(midasTokens, depositVaults, redemptionVaults);
+        assertTrue(midasModule.everConfigured(newToken));
+    }
+
     /// A vault must be a contract that serves the Midas token it is registered for.
     function test_addMidasVaults_revertsForInvalidVault() public {
         address newMidasToken = makeAddr("newMidasToken");

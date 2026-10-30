@@ -419,6 +419,16 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         gw.setReserveId(address(0), 0);
     }
 
+    /// Re-registering an asset at its current reserve passes validation and changes nothing (audit Item 27 I-02:
+    /// the no-op check now lives in the gateway, and LendReserveLib.validateRegistration only reverts).
+    function test_setReserveId_sameReserveIsNoop() public {
+        vm.recordLogs();
+        vm.prank(owner);
+        gw.setReserveId(address(weETH), weethReserveId);
+        assertEq(vm.getRecordedLogs().length, 0, "no ReserveRegistered for a no-op");
+        assertEq(gw.reserveIdOf(address(weETH)), weethReserveId);
+    }
+
     /// An empty reserve (no supply, no debt) removes cleanly and its reads zero out. weETH is used because the
     /// USDC reserve carries seeded liquidity, which the in-use guard (below) blocks.
     function test_removeReserve_unregistersAndZeroesReads() public {
@@ -528,24 +538,30 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         gw.setDriver(address(0), true);
 
         vm.prank(makeAddr("notAdmin"));
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         gw.setDriver(makeAddr("d"), true);
+
+        vm.prank(makeAddr("notAdmin"));
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        gw.setDriver(driver, false);
     }
 
-    /// Revoking a driver is a fast safety brake for ADMIN_ROLE and PAUSER; authorizing one still needs the timelock.
-    function test_setDriver_revokeIsFastButAuthorizeNeedsTimelock() public {
+    /// Authorizing a driver needs the RoleRegistry owner (audit Item 27 I-03). Revoking one is a fast safety brake
+    /// for ADMIN_TIMELOCK_ROLE, ADMIN_ROLE and PAUSER.
+    function test_setDriver_revokeIsFastButAuthorizeNeedsRegistryOwner() public {
         address adminOnly = makeAddr("adminOnly");
+        address timelockOnly = makeAddr("timelockOnly");
         vm.startPrank(owner);
         roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), adminOnly);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), timelockOnly);
         vm.stopPrank();
 
-        vm.prank(adminOnly);
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
-        gw.setDriver(makeAddr("d"), true);
-
-        vm.prank(pauser);
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
-        gw.setDriver(makeAddr("d"), true);
+        address[3] memory nonOwners = [adminOnly, pauser, timelockOnly];
+        for (uint256 i = 0; i < nonOwners.length; i++) {
+            vm.prank(nonOwners[i]);
+            vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+            gw.setDriver(makeAddr("d"), true);
+        }
 
         vm.prank(pauser);
         gw.setDriver(driver, false);
@@ -553,10 +569,18 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
 
         vm.prank(owner);
         gw.setDriver(driver, true);
+        assertTrue(gw.isDriver(driver), "registry owner authorized the driver");
 
         vm.prank(adminOnly);
         gw.setDriver(driver, false);
         assertFalse(gw.isDriver(driver), "admin revoked the driver");
+
+        vm.prank(owner);
+        gw.setDriver(driver, true);
+
+        vm.prank(timelockOnly);
+        gw.setDriver(driver, false);
+        assertFalse(gw.isDriver(driver), "timelock revoked the driver");
     }
 
     // ----------------------------------------------------------------- recipient allowlist
