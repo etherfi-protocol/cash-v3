@@ -16,6 +16,7 @@ import { AccountantWithRateProviders } from "../../../../src/interfaces/ILayerZe
 import { ILayerZeroTeller } from "../../../../src/interfaces/ILayerZeroTeller.sol";
 import { UUPSProxy } from "../../../../src/UUPSProxy.sol";
 import { RoleRegistry } from "../../../../src/role-registry/RoleRegistry.sol";
+import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 contract LiquidUSDLiquifierTest is SafeTestSetup {
     using SafeERC20 for IERC20;
@@ -148,6 +149,15 @@ contract LiquidUSDLiquifierTest is SafeTestSetup {
         vm.prank(etherFiWallet);
         vm.expectRevert(LiquidUSDLiquifierOPModule.LiquidUsdAmountZero.selector);
         liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 1);
+    }
+
+    function test_RepayUsingLiquidUSD_RevertsWhenPaused() public {
+        vm.prank(pauser);
+        liquidUSDLiquifier.pause();
+
+        vm.prank(etherFiWallet);
+        vm.expectRevert(PausableUpgradeable.EnforcedPause.selector);
+        liquidUSDLiquifier.repayUsingLiquidUSD(address(safe), 10e6);
     }
 
     function test_RepayUsingLiquidUSD_InsufficientUsdcBalance() public {

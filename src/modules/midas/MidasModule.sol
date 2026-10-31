@@ -35,6 +35,10 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /// @notice Mapping from Midas token to vault configuration
     mapping(address midasToken => MidasVaultConfig config) public vaults;
 
+    /// @notice Whether a Midas token has ever had vaults configured. Survives removal, so re-registering a token
+    ///         that was configured before needs the RoleRegistry owner just like overwriting a live pair.
+    mapping(address midasToken => bool configured) public everConfigured;
+
     /// @notice TypeHash for deposit function signature
     bytes32 public constant DEPOSIT_SIG = keccak256("deposit");
 
@@ -65,6 +69,9 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
     /// @notice Thrown when token decimals exceed the maximum allowed (18)
     error InvalidDecimals();
 
+    /// @notice Thrown when a vault has no code or does not serve the Midas token it is registered for
+    error InvalidMidasVault();
+
     /**
      * @notice Initializes the contract with Midas vaults and their supported assets
      * @param _etherFiDataProvider Address of the EtherFiDataProvider contract
@@ -87,6 +94,7 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
             if (midasToken == address(0) || depositVault == address(0) || redemptionVault == address(0)) revert InvalidInput();
 
             vaults[midasToken] = MidasVaultConfig({ depositVault: depositVault, redemptionVault: redemptionVault });
+            everConfigured[midasToken] = true;
 
             unchecked {
                 ++i;
@@ -273,13 +281,19 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
      * @param midasTokens Array of Midas token addresses to add
      * @param depositVaults Array of deposit vault addresses corresponding to the Midas tokens
      * @param redemptionVaults Array of redemption vault addresses corresponding to the Midas tokens
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
-     * @custom:throws OnlyAdminTimelock if the caller does not have ADMIN_TIMELOCK_ROLE
+     * @dev New pairs need ADMIN_TIMELOCK_ROLE. Overwriting an existing pair redirects where signed withdrawals of that
+     *      token go, so it needs the RoleRegistry owner (the upgrade timelock). So does re-registering a token that
+     *      was configured before and then removed: removal clears `vaults` but not `everConfigured`, so ADMIN_ROLE
+     *      removing a pair cannot open the way for ADMIN_TIMELOCK_ROLE to swap in a new vault (audit Item 27 L-01).
+     * @custom:throws OnlyAdminTimelock if the caller is neither the RoleRegistry owner nor has ADMIN_TIMELOCK_ROLE
+     * @custom:throws Unauthorized If a non-owner caller tries to configure a token that has ever been configured
+     * @custom:throws InvalidMidasVault If a vault has no code or its mToken() is not the Midas token
      * @custom:throws ArrayLengthMismatch If the lengths of arrays mismatch
      * @custom:throws InvalidInput If any provided address is zero or the array is empty
      */
     function addMidasVaults(address[] calldata midasTokens, address[] calldata depositVaults, address[] calldata redemptionVaults) external {
-        etherFiDataProvider.roleRegistry().onlyAdminTimelock(msg.sender);
+        bool isRegistryOwner = etherFiDataProvider.roleRegistry().owner() == msg.sender;
+        if (!isRegistryOwner) etherFiDataProvider.roleRegistry().onlyAdminTimelock(msg.sender);
 
         uint256 len = midasTokens.length;
         if (len != depositVaults.length || len != redemptionVaults.length) revert ArrayLengthMismatch();
@@ -291,8 +305,12 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
             address redemptionVault = redemptionVaults[i];
 
             if (midasToken == address(0) || depositVault == address(0) || redemptionVault == address(0)) revert InvalidInput();
+            if (!isRegistryOwner && everConfigured[midasToken]) revert Unauthorized();
+            _checkVault(depositVault, midasToken);
+            _checkVault(redemptionVault, midasToken);
 
             vaults[midasToken] = MidasVaultConfig({ depositVault: depositVault, redemptionVault: redemptionVault });
+            everConfigured[midasToken] = true;
 
             unchecked {
                 ++i;
@@ -302,10 +320,16 @@ contract MidasModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient
         emit MidasVaultsAdded(midasTokens, depositVaults, redemptionVaults);
     }
 
+    /// @dev Reverts unless `vault` is a contract whose mToken() is `midasToken`
+    function _checkVault(address vault, address midasToken) private view {
+        if (vault.code.length == 0 || IMidasVault(vault).mToken() != midasToken) revert InvalidMidasVault();
+    }
+
     /**
      * @notice Removes Midas vaults from the module
      * @param midasTokens Array of Midas token addresses to remove
-     * @dev Only callable by accounts with the ADMIN_ROLE role
+     * @dev Only callable by accounts with the ADMIN_ROLE role. Leaves `everConfigured` set, so adding the token
+     *      back needs the RoleRegistry owner.
      * @custom:throws OnlyAdmin if the caller does not have ADMIN_ROLE
      * @custom:throws InvalidInput If the array is empty
      */

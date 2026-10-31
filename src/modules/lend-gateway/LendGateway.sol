@@ -13,9 +13,11 @@ import { ICashModule } from "../../interfaces/ICashModule.sol";
 import { IEtherFiSafe } from "../../interfaces/IEtherFiSafe.sol";
 import { ILendGateway } from "../../interfaces/ILendGateway.sol";
 import { IPriceProvider } from "../../interfaces/IPriceProvider.sol";
+import { IRoleRegistry } from "../../interfaces/IRoleRegistry.sol";
 import { UpgradeableProxy } from "../../utils/UpgradeableProxy.sol";
 import { ModuleBase } from "../ModuleBase.sol";
 import { LendCapacityLib } from "./LendCapacityLib.sol";
+import { LendReserveLib } from "./LendReserveLib.sol";
 
 /**
  * @title LendGateway
@@ -72,6 +74,8 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     uint256 internal constant RAY = 1e27;
     /// @notice Aave's minimum executable health factor
     uint256 internal constant MIN_HEALTH_FACTOR = 1e18;
+    /// @notice RoleRegistry pauser role, allowed to revoke a driver with no delay
+    bytes32 internal constant PAUSER_ROLE = keccak256("PAUSER");
 
     /// @custom:storage-location erc7201:etherfi.storage.LendGateway
     struct LendGatewayStorage {
@@ -132,6 +136,9 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     error HealthFactorBelowMinimum();
     /// @notice Thrown when setting a health-factor floor outside [1e18, 2e18] (0 disables)
     error InvalidMinHealthFactor();
+    /// @notice Thrown when a withdraw or borrow names a recipient other than the safe, a settlement dispatcher or
+    ///         (for borrows) the DebtManager
+    error InvalidRecipient();
 
     /**
      * @param _etherFiDataProvider Address of the EtherFiDataProvider
@@ -154,6 +161,13 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
     // ---------------------------------------------------------------------
     // Access control
     // ---------------------------------------------------------------------
+
+    /// @dev Reverts unless `to` is the safe, a settlement dispatcher, or (borrows only) the DebtManager, so no
+    ///      driver can send a safe's collateral or new debt to an arbitrary address.
+    function _checkRecipient(address safe, address to, bool isBorrow) internal view {
+        if (to == address(0)) revert ZeroAddress();
+        if (to != safe && !ICashModule(etherFiDataProvider.getCashModule()).isAllowedLendRecipient(to, isBorrow)) revert InvalidRecipient();
+    }
 
     /// @dev Reverts unless the caller is the CashModule or an authorized driver.
     function _onlyDriver() internal view {
@@ -184,17 +198,11 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @param reserveId The Aave reserveId for the asset
      */
     function setReserveId(address asset, uint256 reserveId) external onlyAdmin {
-        if (asset == address(0)) revert ZeroAddress();
-        if (spoke.getReserve(reserveId).underlying != asset) revert ReserveAssetMismatch();
-
         LendGatewayStorage storage $ = _getLendGatewayStorage();
-        if ($.assets.contains(asset)) {
-            uint256 currentReserveId = $.reserveId[asset];
-            if (currentReserveId == reserveId) return;
-            if (spoke.getReserveTotalDebt(currentReserveId) != 0 || spoke.getReserveSuppliedAssets(currentReserveId) != 0) {
-                revert ReserveStillInUse();
-            }
-        }
+        bool registered = $.assets.contains(asset);
+        uint256 currentReserveId = $.reserveId[asset];
+        LendReserveLib.validateRegistration(spoke, asset, reserveId, registered, currentReserveId);
+        if (registered && currentReserveId == reserveId) return;
 
         $.assets.add(asset);
         $.reserveId[asset] = reserveId;
@@ -219,10 +227,7 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
         LendGatewayStorage storage $ = _getLendGatewayStorage();
         if (!$.assets.contains(asset)) revert AssetNotRegistered(asset);
 
-        uint256 reserveId = $.reserveId[asset];
-        if (spoke.getReserveTotalDebt(reserveId) != 0 || spoke.getReserveSuppliedAssets(reserveId) != 0) {
-            revert ReserveStillInUse();
-        }
+        LendReserveLib.requireUnused(spoke, $.reserveId[asset]);
 
         $.assets.remove(asset);
         $.spendAssets.remove(asset);
@@ -238,21 +243,41 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      *      exempt: settlement obligations must never fail on the floor, and de-risking must always work.
      *      Aave still liquidates at HF < 1e18 regardless; this floor only keeps ether.fi-initiated
      *      extraction from parking a position near that line.
+     *      Raising the floor (or enabling it) stays with ADMIN_ROLE. Lowering it or disabling it with 0 weakens
+     *      protection for every safe, so it needs ADMIN_TIMELOCK_ROLE.
      * @param value The floor in WAD (1e18); 0 disables the check, otherwise bounded to [1e18, 2e18]
      * @custom:throws InvalidMinHealthFactor if value is non-zero and outside [1e18, 2e18]
      */
-    function setMinHealthFactor(uint256 value) external onlyAdmin {
+    function setMinHealthFactor(uint256 value) external {
         if (value != 0 && (value < 1e18 || value > 2e18)) revert InvalidMinHealthFactor();
-        _getLendGatewayStorage().minHealthFactor = value;
+        LendGatewayStorage storage $ = _getLendGatewayStorage();
+        uint256 current = $.minHealthFactor;
+        if (current != 0 && (value == 0 || value < current)) roleRegistry().onlyAdminTimelock(msg.sender);
+        else roleRegistry().onlyAdmin(msg.sender);
+        $.minHealthFactor = value;
         emit MinHealthFactorSet(value);
     }
 
     /**
      * @notice Authorizes or de-authorizes a driver (beyond the always-authorized CashModule)
+     * @dev Authorizing a driver lets it supply, withdraw and borrow on every safe that has not opted out, so it
+     *      needs the RoleRegistry owner (the upgrade timelock), the same bar as adding a default module. Revoking
+     *      is safety-increasing, so ADMIN_TIMELOCK_ROLE, ADMIN_ROLE and PAUSER can also do it with no delay.
      * @param driver The driver contract (e.g. an auto-supply or migration module)
      * @param authorized True to authorize, false to revoke
+     * @custom:throws OnlyRoleRegistryOwner if authorizing and the caller is not the RoleRegistry owner
+     * @custom:throws OnlyAdminTimelock if revoking and the caller is none of the owner, ADMIN_TIMELOCK_ROLE,
+     *                ADMIN_ROLE or PAUSER
+     * @custom:throws ZeroAddress if driver is the zero address
      */
-    function setDriver(address driver, bool authorized) external onlyAdminTimelock {
+    function setDriver(address driver, bool authorized) external {
+        IRoleRegistry registry = roleRegistry();
+        bool isOwner = registry.owner() == msg.sender;
+        if (authorized) {
+            if (!isOwner) revert OnlyRoleRegistryOwner();
+        } else if (!isOwner && !registry.hasRole(registry.ADMIN_ROLE(), msg.sender) && !registry.hasRole(PAUSER_ROLE, msg.sender)) {
+            registry.onlyAdminTimelock(msg.sender);
+        }
         if (driver == address(0)) revert ZeroAddress();
         _getLendGatewayStorage().isDriver[driver] = authorized;
         emit DriverSet(driver, authorized);
@@ -352,11 +377,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws OnlyDriver if the caller is not the CashModule or an authorized driver
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws ZeroAddress if to is the zero address
+     * @custom:throws InvalidRecipient if to is not the safe, a settlement dispatcher, or (for borrows) the DebtManager
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
     function withdraw(address safe, address asset, uint256 amount, address to) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
-        if (to == address(0)) revert ZeroAddress();
+        _checkRecipient(safe, to, false);
         uint256 reserveId = _reserveIdOf(asset);
 
         // Spoke sends the underlying to the caller (this gateway); forward the actual amount received.
@@ -379,11 +405,12 @@ contract LendGateway is ILendGateway, UpgradeableProxy, ModuleBase {
      * @custom:throws LendOptedOut if the safe has opted out of lend
      * @custom:throws ZeroAmount if amount is zero
      * @custom:throws ZeroAddress if to is the zero address
+     * @custom:throws InvalidRecipient if to is not the safe, a settlement dispatcher, or (for borrows) the DebtManager
      * @custom:throws AssetNotRegistered if asset has no registered reserveId
      */
     function borrow(address safe, address asset, uint256 amount, address to) external onlyDriver onlyEtherFiSafe(safe) whenNotPaused nonReentrant whenNotOptedOut(safe) ensuresApproval(safe) {
         if (amount == 0) revert ZeroAmount();
-        if (to == address(0)) revert ZeroAddress();
+        _checkRecipient(safe, to, true);
         uint256 reserveId = _reserveIdOf(asset);
 
         // Spoke sends the borrowed underlying to the caller (this gateway); forward it.
