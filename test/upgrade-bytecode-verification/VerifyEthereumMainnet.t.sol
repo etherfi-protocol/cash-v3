@@ -6,6 +6,8 @@ import { stdJson } from "forge-std/StdJson.sol";
 
 import { AcrossSwapModule } from "../../src/across/AcrossSwapModule.sol";
 import { EnsoSwapModule } from "../../src/enso/EnsoSwapModule.sol";
+import { RoleRegateProdConfig } from "../../scripts/role-regate/RoleRegateProdConfig.sol";
+import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { StockUnwrapper } from "../../src/stock-withdraw/StockUnwrapper.sol";
@@ -24,9 +26,8 @@ import { TradingStackBytecode } from "./TradingStackBytecode.sol";
 ///
 /// Usage:
 ///   ENV=mainnet forge test --match-contract VerifyEthereumMainnetBytecode -vv
-contract VerifyEthereumMainnetBytecode is TradingStackBytecode {
+contract VerifyEthereumMainnetBytecode is TradingStackBytecode, RoleRegateProdConfig {
     address internal constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address internal constant LIQUID_BTC = 0x5f46d540b6eD704C3c8789105F30E075AA900726;
 
     string deployments;
 
@@ -97,6 +98,22 @@ contract VerifyEthereumMainnetBytecode is TradingStackBytecode {
         address deployed = UpgradeableBeacon(beacon).implementation();
         address local = address(new TopUpV2(WETH, _cash("AssetRecoveryDispatcher")));
         _verify("TopUp", deployed, local);
+    }
+
+    // ---- Pending upgrade: role re-gating (cash-v3 #356) ----
+    // Deployed but not yet behind the proxy or registered on the trading data provider; the 3CP in
+    // scripts/role-regate does that. These check the pinned addresses directly. Once the 3CP executes and
+    // trading-account.json points at the new module, the checks above cover them and these can go.
+
+    function test_verifyBytecode_pending_TradingEtherFiDataProvider() public {
+        address local = address(new EtherFiDataProvider());
+        _verify("pending trading EtherFiDataProvider", ETH_DP_IMPL, local);
+    }
+
+    function test_verifyBytecode_pending_TradingSafeLiquidDepositModule() public {
+        (address[] memory assets, address[] memory tellers) = _depositArgs();
+        address local = address(new TradingSafeLiquidDepositModule(assets, tellers, ETH_DATA_PROVIDER));
+        _verify("pending TradingSafeLiquidDepositModule", NEW_DEPOSIT_MODULE, local);
     }
 
     // ---- Helpers ----
