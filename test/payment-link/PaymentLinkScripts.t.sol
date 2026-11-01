@@ -518,8 +518,8 @@ contract PaymentLinkScriptsTest is Test {
         gen.checkPreconditions();
     }
 
-    /// @dev Codex pass 2: an impl whose embedded `__self` equals the local reference's address
-    ///      byte-matches the reference, so only the direct `proxiableUUID()` call catches it.
+    /// @dev Codex pass 2: an impl whose embedded `__self` copies all equal the local reference's
+    ///      address would byte-match the reference under an embed-tolerant comparison.
     function test_builtCode_rejectsImplWhoseSelfIsNotItsAddress() public {
         _deployProd();
         BuiltCodeHarness checker = new BuiltCodeHarness();
@@ -545,8 +545,47 @@ contract PaymentLinkScriptsTest is Test {
         assertGt(patched, 0, "impl embeds its own address");
         vm.etch(PROD_IMPL, code);
 
-        vm.expectRevert(bytes("PaymentLinkModule impl: proxiableUUID reverts when called directly - embedded __self is not the impl address"));
+        vm.expectRevert(bytes("PaymentLinkModuleImpl: bytecode differs from the local build with every __self rebound to the impl"));
         checker.check("mainnet", PROD_IMPL, PROD_PROXY);
+    }
+
+    /// @dev Codex pass 5 Blocking: keep every `__self` copy correct except ONE, pointed at the
+    ///      local reference's address (e.g. only the copy `_checkProxy` compares against, which
+    ///      would brick upgrades while `proxiableUUID` still answers). Each copy is tried alone.
+    function test_builtCode_rejectsImplWithAnySingleSelfCopyRedirected() public {
+        _deployProd();
+        bytes memory genuine = PROD_IMPL.code;
+        bytes20 self = bytes20(PROD_IMPL);
+        uint256[] memory offsets = new uint256[](16);
+        uint256 copies;
+        for (uint256 i = 0; i + 20 <= genuine.length && copies < offsets.length; i++) {
+            bool hit = true;
+            for (uint256 j = 0; j < 20 && hit; j++) {
+                hit = genuine[i + j] == self[j];
+            }
+            if (hit) {
+                offsets[copies++] = i;
+                i += 19;
+            }
+        }
+        assertGt(copies, 1, "UUPS embeds __self more than once");
+
+        for (uint256 k = 0; k < copies; k++) {
+            uint256 snap = vm.snapshotState();
+            BuiltCodeHarness checker = new BuiltCodeHarness();
+            bytes20 localRef = bytes20(vm.computeCreateAddress(address(checker), vm.getNonce(address(checker))));
+            bytes memory code = PROD_IMPL.code;
+            for (uint256 j = 0; j < 20; j++) {
+                code[offsets[k] + j] = localRef[j];
+            }
+            vm.etch(PROD_IMPL, code);
+            vm.expectRevert(bytes("PaymentLinkModuleImpl: bytecode differs from the local build with every __self rebound to the impl"));
+            checker.check("mainnet", PROD_IMPL, PROD_PROXY);
+            vm.revertToState(snap);
+        }
+
+        // Control: the untouched deployment passes.
+        new BuiltCodeHarness().check("mainnet", PROD_IMPL, PROD_PROXY);
     }
 
     /// @dev The real reader (`cast` over ffi) on a real EtherFiDeployer.deploy transaction on

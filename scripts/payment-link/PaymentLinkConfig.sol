@@ -175,11 +175,11 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
      *      - the impl's immutables must be THIS stack's DataProvider and CashModule (checked by
      *        getter: the code comparison alone would accept other addresses whose code matches,
      *        such as another stack's proxies);
-     *      - the impl must match a local build except its embedded own address (UUPS `__self`),
+     *      - the impl must equal a local build byte for byte once EVERY copy of the local build's
+     *        own address (UUPS `__self`) is rebound to the impl's address (`_requireImplCodeMatch`),
      *        and the proxy must match a local `UUPSProxy` exactly and point at that impl;
-     *      - the impl's `proxiableUUID()` must answer when called directly, which proves its
-     *        embedded `__self` is its own address (the code comparison would accept a `__self`
-     *        that happens to equal the local reference's address);
+     *      - the impl's `proxiableUUID()` must answer when called directly (defence in depth: the
+     *        rebinding comparison already rejects any `__self` copy that is not the impl);
      *      - the proxy must have run its initializer exactly once and the impl's initializers
      *        must be disabled (`_requireInitialized`), so nobody can initialize it later.
      *      Runtime code and these slots cannot prove the rest of the proxy's storage is empty: a
@@ -192,7 +192,7 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         require(address(deployed.cashModule()) == address(s.cashModule), "PaymentLinkModule impl: cashModule immutable is not this stack's");
 
         address localImpl = address(new PaymentLinkModule(address(s.dataProvider), address(s.cashModule)));
-        requireCodeMatchAllowingAddressEmbeds("PaymentLinkModuleImpl", impl, localImpl);
+        _requireImplCodeMatch(impl, localImpl);
         requireExactCodeMatch("PaymentLinkModuleProxy", proxy, address(new UUPSProxy(localImpl, "")));
         require(_implOf(proxy) == impl, "PaymentLinkModule: proxy impl slot does not point at the verified impl - possible hijack");
         try UUPSUpgradeable(impl).proxiableUUID() returns (bytes32 slot) {
@@ -201,6 +201,38 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
             revert("PaymentLinkModule impl: proxiableUUID reverts when called directly - embedded __self is not the impl address");
         }
         _requireInitialized(impl, proxy);
+    }
+
+    /**
+     * @dev Exact implementation comparison. The impl's only address-dependent bytes are its UUPS
+     *      `__self` immutable, which the compiler copies into several places; the other immutables
+     *      (DataProvider, CashModule) are the same constructor arguments on both sides. So rebind
+     *      every 20-byte copy of `localImpl` in the local build to `impl` and require the result
+     *      to equal the deployed code exactly. Unlike `requireCodeMatchAllowingAddressEmbeds`,
+     *      which skips bytes that already match, this rejects a deployed impl that keeps one
+     *      `__self` copy (say the one `proxiableUUID` reads) correct and points another (say the
+     *      one `_checkProxy` compares against) elsewhere, including at `localImpl` itself.
+     */
+    function _requireImplCodeMatch(address impl, address localImpl) internal view {
+        require(impl.code.length != 0, "PaymentLinkModuleImpl: not deployed on-chain");
+        bytes memory expected = localImpl.code;
+        bytes20 from = bytes20(localImpl);
+        bytes20 to = bytes20(impl);
+        uint256 rebound;
+        for (uint256 i = 0; i + 20 <= expected.length; i++) {
+            bool hit = true;
+            for (uint256 j = 0; j < 20 && hit; j++) {
+                hit = expected[i + j] == from[j];
+            }
+            if (!hit) continue;
+            for (uint256 j = 0; j < 20; j++) {
+                expected[i + j] = to[j];
+            }
+            rebound++;
+            i += 19;
+        }
+        require(rebound > 0, "PaymentLinkModuleImpl: local build embeds no own address - comparison would be meaningless");
+        require(keccak256(impl.code) == keccak256(expected), "PaymentLinkModuleImpl: bytecode differs from the local build with every __self rebound to the impl");
     }
 
     /// @dev The proxy initcode the deploy script sends to the EtherFiDeployer: `UUPSProxy` with
