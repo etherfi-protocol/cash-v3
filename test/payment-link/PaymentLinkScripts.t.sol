@@ -81,13 +81,16 @@ contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
     address internal txTo;
     bytes internal txInput;
     bool internal txSuccess;
+    bytes32 internal txBlockHash;
 
     /// @dev The proxy deploy transaction the provenance check sees, in place of `cast` over RPC.
-    ///      A zero `to` with empty input stands for "no tx hash provided".
-    constructor(address to, bytes memory input, bool success) {
+    ///      A zero `to` with empty input stands for "no tx hash provided". The block hash still
+    ///      goes through the real check against the fork's chain.
+    constructor(address to, bytes memory input, bool success, bytes32 blockHash) {
         txTo = to;
         txInput = input;
         txSuccess = success;
+        txBlockHash = blockHash;
     }
 
     function _env() internal pure override returns (string memory) {
@@ -99,7 +102,7 @@ contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
     }
 
     function _fetchTx(bytes32) internal view override returns (DeployTx memory) {
-        return DeployTx({ to: txTo, input: txInput, success: txSuccess });
+        return DeployTx({ to: txTo, input: txInput, success: txSuccess, blockHash: txBlockHash });
     }
 
     /// @dev Runs only the preconditions (the gate before any bundle is written).
@@ -118,9 +121,13 @@ contract BuiltCodeHarness is PaymentLinkConfig {
 
 /// @dev Exposes the real `cast`-over-ffi transaction reader.
 contract ProvenanceProbe is PaymentLinkConfig {
-    function fetch(bytes32 txHash) external returns (address to, bytes memory input, bool success) {
+    function fetch(bytes32 txHash) external returns (address to, bytes memory input, bool success, bytes32 blockHash) {
         DeployTx memory t = _fetchTx(txHash);
-        return (t.to, t.input, t.success);
+        return (t.to, t.input, t.success, t.blockHash);
+    }
+
+    function requireOnChain(bytes32 blockHash) external {
+        _requireBlockOnReviewedChain(blockHash);
     }
 }
 
@@ -425,22 +432,37 @@ contract PaymentLinkScriptsTest is Test {
         _deployProd();
         _new3CP().checkPreconditions(); // control: the call the deploy script actually sent
 
-        Enable3CPHarness gen = new Enable3CPHarness(address(0), "", false);
+        bytes32 recentBlock = blockhash(block.number - 1);
+        Enable3CPHarness gen = new Enable3CPHarness(address(0), "", false, recentBlock);
         vm.expectRevert(bytes("proxy deploy tx hash not provided (set PAYMENT_LINK_PROXY_DEPLOY_TX)"));
         gen.checkPreconditions();
 
-        gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, false);
+        gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, false, recentBlock);
         vm.expectRevert(bytes("proxy deploy tx did not succeed"));
         gen.checkPreconditions();
 
-        gen = new Enable3CPHarness(makeAddr("someBatcher"), proxyDeployCall, true);
+        gen = new Enable3CPHarness(makeAddr("someBatcher"), proxyDeployCall, true, recentBlock);
         vm.expectRevert(bytes("proxy deploy tx was not a direct call to the EtherFiDeployer"));
         gen.checkPreconditions();
 
         bytes memory otherInit = abi.encodeCall(PaymentLinkModule.initialize, (address(prodRoleRegistry), 30, PROD_SAFE));
         bytes memory otherCall = abi.encodeCall(EtherFiDeployer.deploy, (keccak256("Prod.PaymentLink.PaymentLinkModuleProxy"), abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(PROD_IMPL, otherInit))));
-        gen = new Enable3CPHarness(address(DEPLOYER), otherCall, true);
+        gen = new Enable3CPHarness(address(DEPLOYER), otherCall, true, recentBlock);
         vm.expectRevert(bytes("proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified"));
+        gen.checkPreconditions();
+
+        // Codex pass 3: the exact expected call, but mined on another chain or fork.
+        gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, keccak256("a block on another chain"));
+        vm.expectRevert(bytes("proxy deploy tx's block is not on the chain under review"));
+        gen.checkPreconditions();
+    }
+
+    /// @dev Codex pass 3 Blocking: a real deployer tx read from an endpoint on another chain or
+    ///      fork carries a block hash this chain does not know.
+    function test_enable3CP_rejectsDeployTxFromAnotherChainOrFork() public {
+        _deployProd();
+        Enable3CPHarness gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, keccak256("block on a fork"));
+        vm.expectRevert(bytes("proxy deploy tx's block is not on the chain under review"));
         gen.checkPreconditions();
     }
 
@@ -459,7 +481,7 @@ contract PaymentLinkScriptsTest is Test {
 
         // ...but its deploy tx is not the expected call, so no enable bundle is written.
         bytes memory poisonedCall = abi.encodeCall(EtherFiDeployer.deploy, (keccak256("Prod.PaymentLink.PaymentLinkModuleProxy"), abi.encodePacked(type(PoisonedProxy).creationCode, poisonedArgs)));
-        Enable3CPHarness gen = new Enable3CPHarness(address(DEPLOYER), poisonedCall, true);
+        Enable3CPHarness gen = new Enable3CPHarness(address(DEPLOYER), poisonedCall, true, blockhash(block.number - 1));
         vm.expectRevert(bytes("proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified"));
         gen.checkPreconditions();
     }
@@ -498,11 +520,18 @@ contract PaymentLinkScriptsTest is Test {
     /// @dev The real reader (`cast` over ffi) on a real EtherFiDeployer.deploy transaction on
     ///      Optimism (the wspyx price-feed deploy recorded in broadcast/DeployWspyxPaxgProdFeeds.s.sol).
     function test_provenance_readsARealDeployerTransaction() public {
-        (address to, bytes memory input, bool success) = new ProvenanceProbe().fetch(0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe);
+        ProvenanceProbe probe = new ProvenanceProbe();
+        (address to, bytes memory input, bool success, bytes32 blockHash) = probe.fetch(0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe);
         assertEq(to, address(DEPLOYER));
         assertTrue(success);
         assertEq(bytes4(input), EtherFiDeployer.deploy.selector);
         assertGt(input.length, 68);
+        assertEq(blockHash, 0xb9728515776b3827d7efa7c94e25c8dc253ad759057889ad5a488cac6dc509cb);
+
+        // Its block is known to the chain under review; a made-up one is not.
+        probe.requireOnChain(blockHash);
+        vm.expectRevert(bytes("proxy deploy tx's block is not on the chain under review"));
+        probe.requireOnChain(keccak256("a block on another chain"));
     }
 
     // ---- helpers ----
@@ -528,8 +557,10 @@ contract PaymentLinkScriptsTest is Test {
         require(proxyDeployCall.length > 0, "prod proxy deploy call not captured");
     }
 
+    /// @dev A 3CP generator that sees the captured deploy call as a successful tx in a real,
+    ///      recent block of the fork's chain.
     function _new3CP() internal returns (Enable3CPHarness) {
-        return new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true);
+        return new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, blockhash(block.number - 1));
     }
 
     /// @dev A bundle is one Safe transaction to the operating timelock carrying the 3-call batch.

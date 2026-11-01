@@ -218,6 +218,7 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         address to;
         bytes input;
         bool success;
+        bytes32 blockHash;
     }
 
     /**
@@ -226,6 +227,11 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
      *      address is occupied, so a successful call proves this initcode created the proxy and
      *      that its storage is only what `UUPSProxy`'s constructor and `initialize` wrote, not
      *      something a custom constructor seeded.
+     *
+     *      The transaction is read from a separate endpoint (`_fetchTx`), so its block is then
+     *      looked up by hash on the chain under review, through the RPC this script runs against
+     *      (`vm.rpc` on the active fork). A transaction from another chain, or from a fork of this
+     *      one, sits in a block this chain does not know, and is rejected.
      */
     function _requireProxyProvenance(Stack memory s, address impl, string memory proxySalt, bytes32 txHash) internal {
         require(txHash != bytes32(0), "proxy deploy tx hash not provided (set PAYMENT_LINK_PROXY_DEPLOY_TX)");
@@ -234,6 +240,21 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         require(t.to == address(DEPLOYER), "proxy deploy tx was not a direct call to the EtherFiDeployer");
         bytes memory expected = abi.encodeCall(EtherFiDeployer.deploy, (getSalt(proxySalt), _expectedProxyInitCode(s, impl)));
         require(keccak256(t.input) == keccak256(expected), "proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified");
+        _requireBlockOnReviewedChain(t.blockHash);
+    }
+
+    /// @dev Every Optimism block holds at least the L1-info deposit transaction, so a block this
+    ///      chain knows has a non-zero transaction count; an unknown hash returns null (zero).
+    function _requireBlockOnReviewedChain(bytes32 blockHash) internal {
+        bytes memory count = vm.rpc("eth_getBlockTransactionCountByHash", string.concat("[\"", vm.toString(blockHash), "\"]"));
+        bool known;
+        for (uint256 i = 0; i < count.length; i++) {
+            if (count[i] != 0) {
+                known = true;
+                break;
+            }
+        }
+        require(known, "proxy deploy tx's block is not on the chain under review");
     }
 
     /// @dev Reads a transaction's recipient, calldata and receipt status from Optimism through
@@ -246,6 +267,9 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         t.input = _cast("tx", hash, "input");
         bytes32 status = keccak256(_cast("receipt", hash, "status"));
         t.success = status == keccak256("true") || status == keccak256("1") || status == keccak256("0x1") || status == keccak256(hex"01");
+        bytes memory blockHash = _cast("receipt", hash, "blockHash");
+        require(blockHash.length == 32, "could not read the deploy tx block hash");
+        t.blockHash = bytes32(blockHash);
     }
 
     /// @dev RPC for `_fetchTx`: PAYMENT_LINK_PROVENANCE_RPC, else OPTIMISM_RPC, else the public endpoint.
