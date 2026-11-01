@@ -82,15 +82,17 @@ contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
     bytes internal txInput;
     bool internal txSuccess;
     bytes32 internal txBlockHash;
+    uint256 internal txBlockNumber;
 
     /// @dev The proxy deploy transaction the provenance check sees, in place of `cast` over RPC.
-    ///      A zero `to` with empty input stands for "no tx hash provided". The block hash still
-    ///      goes through the real check against the fork's chain.
-    constructor(address to, bytes memory input, bool success, bytes32 blockHash) {
+    ///      A zero `to` with empty input stands for "no tx hash provided". The block still goes
+    ///      through the real canonical and finality checks against Optimism.
+    constructor(address to, bytes memory input, bool success, bytes32 blockHash, uint256 blockNumber) {
         txTo = to;
         txInput = input;
         txSuccess = success;
         txBlockHash = blockHash;
+        txBlockNumber = blockNumber;
     }
 
     function _env() internal pure override returns (string memory) {
@@ -102,7 +104,7 @@ contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
     }
 
     function _fetchTx(bytes32) internal view override returns (DeployTx memory) {
-        return DeployTx({ to: txTo, input: txInput, success: txSuccess, blockHash: txBlockHash });
+        return DeployTx({ to: txTo, input: txInput, success: txSuccess, blockHash: txBlockHash, blockNumber: txBlockNumber });
     }
 
     /// @dev Runs only the preconditions (the gate before any bundle is written).
@@ -121,13 +123,20 @@ contract BuiltCodeHarness is PaymentLinkConfig {
 
 /// @dev Exposes the real `cast`-over-ffi transaction reader.
 contract ProvenanceProbe is PaymentLinkConfig {
-    function fetch(bytes32 txHash) external returns (address to, bytes memory input, bool success, bytes32 blockHash) {
-        DeployTx memory t = _fetchTx(txHash);
-        return (t.to, t.input, t.success, t.blockHash);
+    function fetch(bytes32 txHash) external returns (DeployTx memory) {
+        return _fetchTx(txHash);
     }
 
-    function requireOnChain(bytes32 blockHash) external {
-        _requireBlockOnReviewedChain(blockHash);
+    function requireCanonical(bytes32 blockHash, uint256 blockNumber) external {
+        _requireCanonicalOnReviewedChain(blockHash, blockNumber);
+    }
+}
+
+/// @dev The same reader pointed at another chain (Arbitrum One, whose block heights exceed
+///      Optimism's, so the anchor height exists there with a different hash).
+contract OtherChainProvenanceProbe is ProvenanceProbe {
+    function _provenanceRpc() internal pure override returns (string memory) {
+        return "https://arb1.arbitrum.io/rpc";
     }
 }
 
@@ -185,6 +194,11 @@ contract PaymentLinkScriptsTest is Test {
     address internal constant DEV_IMPL = 0x0393014ce03Fe8F0EfeF0817D7c439474ff748dD;
     address internal constant PROD_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
     address internal constant USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+    /// @dev A real EtherFiDeployer.deploy tx on Optimism (wspyx price feeds, recorded in
+    ///      broadcast/DeployWspyxPaxgProdFeeds.s.sol) and its finalized, canonical block.
+    bytes32 internal constant REAL_DEPLOY_TX = 0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe;
+    bytes32 internal constant REAL_BLOCK_HASH = 0xb9728515776b3827d7efa7c94e25c8dc253ad759057889ad5a488cac6dc509cb;
+    uint256 internal constant REAL_BLOCK_NUMBER = 155_269_969;
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
     bytes32 internal constant INITIALIZABLE_STORAGE_SLOT = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
@@ -432,38 +446,56 @@ contract PaymentLinkScriptsTest is Test {
         _deployProd();
         _new3CP().checkPreconditions(); // control: the call the deploy script actually sent
 
-        bytes32 recentBlock = blockhash(block.number - 1);
-        Enable3CPHarness gen = new Enable3CPHarness(address(0), "", false, recentBlock);
+        Enable3CPHarness gen = new Enable3CPHarness(address(0), "", false, REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
         vm.expectRevert(bytes("proxy deploy tx hash not provided (set PAYMENT_LINK_PROXY_DEPLOY_TX)"));
         gen.checkPreconditions();
 
-        gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, false, recentBlock);
+        gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, false, REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
         vm.expectRevert(bytes("proxy deploy tx did not succeed"));
         gen.checkPreconditions();
 
-        gen = new Enable3CPHarness(makeAddr("someBatcher"), proxyDeployCall, true, recentBlock);
+        gen = new Enable3CPHarness(makeAddr("someBatcher"), proxyDeployCall, true, REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
         vm.expectRevert(bytes("proxy deploy tx was not a direct call to the EtherFiDeployer"));
         gen.checkPreconditions();
 
         bytes memory otherInit = abi.encodeCall(PaymentLinkModule.initialize, (address(prodRoleRegistry), 30, PROD_SAFE));
         bytes memory otherCall = abi.encodeCall(EtherFiDeployer.deploy, (keccak256("Prod.PaymentLink.PaymentLinkModuleProxy"), abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(PROD_IMPL, otherInit))));
-        gen = new Enable3CPHarness(address(DEPLOYER), otherCall, true, recentBlock);
+        gen = new Enable3CPHarness(address(DEPLOYER), otherCall, true, REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
         vm.expectRevert(bytes("proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified"));
         gen.checkPreconditions();
 
-        // Codex pass 3: the exact expected call, but mined on another chain or fork.
-        gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, keccak256("a block on another chain"));
-        vm.expectRevert(bytes("proxy deploy tx's block is not on the chain under review"));
+        // Codex pass 3/4: the exact expected call, but in a block that is not this chain's
+        // canonical block at that height (another chain, a fork or a reorged-out branch).
+        gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, keccak256("a block on another branch"), REAL_BLOCK_NUMBER);
+        vm.expectRevert(bytes("proxy deploy tx's block is not canonical on the chain under review"));
         gen.checkPreconditions();
     }
 
-    /// @dev Codex pass 3 Blocking: a real deployer tx read from an endpoint on another chain or
-    ///      fork carries a block hash this chain does not know.
-    function test_enable3CP_rejectsDeployTxFromAnotherChainOrFork() public {
-        _deployProd();
-        Enable3CPHarness gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, keccak256("block on a fork"));
-        vm.expectRevert(bytes("proxy deploy tx's block is not on the chain under review"));
-        gen.checkPreconditions();
+    /// @dev Codex passes 3 and 4: the deploy tx's block must be this chain's canonical,
+    ///      finalized block at its height, older than the reviewed state, and the provenance RPC
+    ///      must follow the chain under review.
+    function test_provenance_requiresCanonicalFinalizedAncestorBlock() public {
+        ProvenanceProbe probe = new ProvenanceProbe();
+        probe.requireCanonical(REAL_BLOCK_HASH, REAL_BLOCK_NUMBER); // control
+
+        // Known only on another branch (or chain) at that height.
+        vm.expectRevert(bytes("proxy deploy tx's block is not canonical on the chain under review"));
+        probe.requireCanonical(keccak256("reorged-out block"), REAL_BLOCK_NUMBER);
+
+        // Not an ancestor of the state under review.
+        vm.expectRevert(bytes("proxy deploy tx's block is not before the state under review"));
+        probe.requireCanonical(REAL_BLOCK_HASH, block.number + 10);
+
+        // Canonical but too recent to be final.
+        uint256 recent = block.number - 3;
+        bytes32 recentHash = blockhash(recent);
+        vm.expectRevert(bytes("proxy deploy tx's block is not finalized yet"));
+        probe.requireCanonical(recentHash, recent);
+
+        // Provenance read from another chain.
+        OtherChainProvenanceProbe other = new OtherChainProvenanceProbe();
+        vm.expectRevert(bytes("provenance RPC does not follow the chain under review"));
+        other.requireCanonical(REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
     }
 
     /// @dev Codex pass 2 Blocking: the right runtime, slots and Initializable state with a seeded
@@ -481,7 +513,7 @@ contract PaymentLinkScriptsTest is Test {
 
         // ...but its deploy tx is not the expected call, so no enable bundle is written.
         bytes memory poisonedCall = abi.encodeCall(EtherFiDeployer.deploy, (keccak256("Prod.PaymentLink.PaymentLinkModuleProxy"), abi.encodePacked(type(PoisonedProxy).creationCode, poisonedArgs)));
-        Enable3CPHarness gen = new Enable3CPHarness(address(DEPLOYER), poisonedCall, true, blockhash(block.number - 1));
+        Enable3CPHarness gen = new Enable3CPHarness(address(DEPLOYER), poisonedCall, true, REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
         vm.expectRevert(bytes("proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified"));
         gen.checkPreconditions();
     }
@@ -521,17 +553,16 @@ contract PaymentLinkScriptsTest is Test {
     ///      Optimism (the wspyx price-feed deploy recorded in broadcast/DeployWspyxPaxgProdFeeds.s.sol).
     function test_provenance_readsARealDeployerTransaction() public {
         ProvenanceProbe probe = new ProvenanceProbe();
-        (address to, bytes memory input, bool success, bytes32 blockHash) = probe.fetch(0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe);
-        assertEq(to, address(DEPLOYER));
-        assertTrue(success);
-        assertEq(bytes4(input), EtherFiDeployer.deploy.selector);
-        assertGt(input.length, 68);
-        assertEq(blockHash, 0xb9728515776b3827d7efa7c94e25c8dc253ad759057889ad5a488cac6dc509cb);
+        PaymentLinkConfig.DeployTx memory t = probe.fetch(REAL_DEPLOY_TX);
+        assertEq(t.to, address(DEPLOYER));
+        assertTrue(t.success);
+        assertEq(bytes4(t.input), EtherFiDeployer.deploy.selector);
+        assertGt(t.input.length, 68);
+        assertEq(t.blockHash, REAL_BLOCK_HASH);
+        assertEq(t.blockNumber, REAL_BLOCK_NUMBER);
 
-        // Its block is known to the chain under review; a made-up one is not.
-        probe.requireOnChain(blockHash);
-        vm.expectRevert(bytes("proxy deploy tx's block is not on the chain under review"));
-        probe.requireOnChain(keccak256("a block on another chain"));
+        // Its block passes the canonical and finality binding.
+        probe.requireCanonical(t.blockHash, t.blockNumber);
     }
 
     // ---- helpers ----
@@ -558,9 +589,9 @@ contract PaymentLinkScriptsTest is Test {
     }
 
     /// @dev A 3CP generator that sees the captured deploy call as a successful tx in a real,
-    ///      recent block of the fork's chain.
+    ///      finalized, canonical Optimism block (the block itself is borrowed from a real deploy).
     function _new3CP() internal returns (Enable3CPHarness) {
-        return new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, blockhash(block.number - 1));
+        return new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
     }
 
     /// @dev A bundle is one Safe transaction to the operating timelock carrying the 3-call batch.

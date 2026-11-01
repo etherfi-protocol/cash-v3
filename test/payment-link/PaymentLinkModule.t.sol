@@ -1601,6 +1601,45 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(receiver, plFeeReceiver);
     }
 
+    /// @dev Codex: upgrading from storage written before the allowlist existed. A pre-allowlist
+    ///      impl never wrote `allowedTokens` (namespace slot + 4), so that state is emulated by
+    ///      clearing the entry this fixture set; everything else was written by real lifecycle calls.
+    function test_upgrade_fromPreAllowlistState_keepsLinksAndDeniesNewRequests() public {
+        (address toClaim, uint256 toClaimPk) = _fundedLink(address(usdc), AMOUNT);
+        (address toCancel,) = _fundedLink(address(usdc), AMOUNT);
+        (address requested,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, requested);
+
+        uint256 allowlistSlot = uint256(0x72f6ddc7d992479425dc8c9c22860bd7f83946c3315c4ff3de0873cbf7571b00) + 4;
+        vm.store(address(plm), keccak256(abi.encode(address(usdc), allowlistSlot)), bytes32(0));
+        assertFalse(plm.isTokenAllowed(address(usdc)));
+
+        address newImpl = address(new PaymentLinkModule(address(dataProvider), address(cashModule)));
+        vm.prank(owner);
+        UUPSUpgradeable(address(plm)).upgradeToAndCall(newImpl, "");
+
+        // Existing state survives and every token starts disallowed.
+        assertEq(plm.getNonce(address(safe)), 3);
+        assertEq(plm.getLiabilities(address(usdc)), 2 * AMOUNT);
+        assertEq(plm.getPendingLink(address(safe)), requested);
+        (uint16 feeBps, address receiver) = plm.getFee();
+        assertEq(feeBps, FEE_BPS);
+        assertEq(receiver, plFeeReceiver);
+        assertFalse(plm.isTokenAllowed(address(usdc)));
+
+        // New requests wait for governance; existing links fund, claim and cancel.
+        _fund();
+        assertEq(uint8(_status(requested)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+        (address next,) = _newLinkKey();
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, next, FEE_BPS));
+        vm.expectRevert(IPaymentLinkModule.TokenNotAllowed.selector);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, next, FEE_BPS, signers, sigs);
+        _claim(toClaim, toClaimPk, externalRecipient);
+        _cancel(toCancel);
+        _cancel(requested);
+        assertEq(plm.getLiabilities(address(usdc)), 0);
+    }
+
     // ---- helpers ----
 
     function _setCanRequestWithdraw(bool allowed) internal {

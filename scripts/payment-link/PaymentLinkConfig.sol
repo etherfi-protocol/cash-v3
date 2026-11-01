@@ -219,19 +219,16 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         bytes input;
         bool success;
         bytes32 blockHash;
+        uint256 blockNumber;
     }
 
     /**
      * @dev Requires `txHash` to be a successful direct call to `EtherFiDeployer.deploy` with the
-     *      proxy salt and exactly `_expectedProxyInitCode`. `deploy` reverts when the CREATE3
-     *      address is occupied, so a successful call proves this initcode created the proxy and
-     *      that its storage is only what `UUPSProxy`'s constructor and `initialize` wrote, not
-     *      something a custom constructor seeded.
-     *
-     *      The transaction is read from a separate endpoint (`_fetchTx`), so its block is then
-     *      looked up by hash on the chain under review, through the RPC this script runs against
-     *      (`vm.rpc` on the active fork). A transaction from another chain, or from a fork of this
-     *      one, sits in a block this chain does not know, and is rejected.
+     *      proxy salt and exactly `_expectedProxyInitCode`, mined in a finalized block that is an
+     *      ancestor of the state under review. `deploy` reverts when the CREATE3 address is
+     *      occupied, so such a call proves this initcode created the proxy and that its storage is
+     *      only what `UUPSProxy`'s constructor and `initialize` wrote, not something a custom
+     *      constructor seeded. See `_requireCanonicalOnReviewedChain` for the chain binding.
      */
     function _requireProxyProvenance(Stack memory s, address impl, string memory proxySalt, bytes32 txHash) internal {
         require(txHash != bytes32(0), "proxy deploy tx hash not provided (set PAYMENT_LINK_PROXY_DEPLOY_TX)");
@@ -240,52 +237,90 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         require(t.to == address(DEPLOYER), "proxy deploy tx was not a direct call to the EtherFiDeployer");
         bytes memory expected = abi.encodeCall(EtherFiDeployer.deploy, (getSalt(proxySalt), _expectedProxyInitCode(s, impl)));
         require(keccak256(t.input) == keccak256(expected), "proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified");
-        _requireBlockOnReviewedChain(t.blockHash);
+        _requireCanonicalOnReviewedChain(t.blockHash, t.blockNumber);
     }
 
-    /// @dev Every Optimism block holds at least the L1-info deposit transaction, so a block this
-    ///      chain knows has a non-zero transaction count; an unknown hash returns null (zero).
-    function _requireBlockOnReviewedChain(bytes32 blockHash) internal {
-        bytes memory count = vm.rpc("eth_getBlockTransactionCountByHash", string.concat("[\"", vm.toString(blockHash), "\"]"));
-        bool known;
-        for (uint256 i = 0; i < count.length; i++) {
-            if (count[i] != 0) {
-                known = true;
-                break;
-            }
-        }
-        require(known, "proxy deploy tx's block is not on the chain under review");
+    /**
+     * @dev Binds a block to the history of the state this script reviews. The transaction comes
+     *      from the provenance endpoint, and the fork only exposes `blockhash` for its last 256
+     *      blocks, so the endpoint is anchored to the fork first:
+     *      1. the endpoint's canonical hash at the fork's parent height equals the fork's own
+     *         `blockhash` there, so both follow the same chain and branch;
+     *      2. the endpoint's canonical hash at `blockNumber` equals `blockHash`, so the block was
+     *         not reorged out (a block the node merely knows, on an abandoned branch, fails);
+     *      3. `blockNumber` is below the fork's head (an ancestor of the reviewed state) and at or
+     *         below the endpoint's finalized head, so it cannot be reorged out later.
+     *      The endpoint is trusted not to fabricate answers; this guards against pointing it at
+     *      another chain, another fork or a reorged branch.
+     */
+    function _requireCanonicalOnReviewedChain(bytes32 blockHash, uint256 blockNumber) internal {
+        require(block.number > 1 && blockNumber < block.number - 1, "proxy deploy tx's block is not before the state under review");
+        bytes32 forkParent = blockhash(block.number - 1);
+        require(forkParent != bytes32(0) && _castBlockHash(vm.toString(block.number - 1)) == forkParent, "provenance RPC does not follow the chain under review");
+        require(_castBlockHash(vm.toString(blockNumber)) == blockHash, "proxy deploy tx's block is not canonical on the chain under review");
+        require(blockNumber <= _castDecimal(_castArgs3("block", "finalized", "--field", "number")), "proxy deploy tx's block is not finalized yet");
     }
 
-    /// @dev Reads a transaction's recipient, calldata and receipt status from Optimism through
+    /// @dev Reads a transaction's recipient, calldata, status and block from Optimism through
     ///      `cast` (ffi, enabled in foundry.toml). Virtual for script tests.
     function _fetchTx(bytes32 txHash) internal virtual returns (DeployTx memory t) {
         string memory hash = vm.toString(txHash);
-        bytes memory to = _cast("tx", hash, "to");
+        bytes memory to = _castArgs3("tx", hash, "to", "");
         require(to.length == 20, "could not read the deploy tx recipient");
         t.to = address(bytes20(to));
-        t.input = _cast("tx", hash, "input");
-        bytes32 status = keccak256(_cast("receipt", hash, "status"));
+        t.input = _castArgs3("tx", hash, "input", "");
+        bytes32 status = keccak256(_castArgs3("receipt", hash, "status", ""));
         t.success = status == keccak256("true") || status == keccak256("1") || status == keccak256("0x1") || status == keccak256(hex"01");
-        bytes memory blockHash = _cast("receipt", hash, "blockHash");
+        bytes memory blockHash = _castArgs3("receipt", hash, "blockHash", "");
         require(blockHash.length == 32, "could not read the deploy tx block hash");
         t.blockHash = bytes32(blockHash);
+        t.blockNumber = _castDecimal(_castArgs3("receipt", hash, "blockNumber", ""));
     }
 
-    /// @dev RPC for `_fetchTx`: PAYMENT_LINK_PROVENANCE_RPC, else OPTIMISM_RPC, else the public endpoint.
-    function _provenanceRpc() internal view returns (string memory) {
-        return vm.envOr("PAYMENT_LINK_PROVENANCE_RPC", vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
+    /// @dev RPC for the provenance reads: PAYMENT_LINK_PROVENANCE_RPC, else OPTIMISM_RPC, else the
+    ///      public endpoint (an empty variable counts as unset). Virtual for script tests.
+    function _provenanceRpc() internal view virtual returns (string memory) {
+        string memory rpc = vm.envOr("PAYMENT_LINK_PROVENANCE_RPC", string(""));
+        if (bytes(rpc).length == 0) rpc = vm.envOr("OPTIMISM_RPC", string(""));
+        if (bytes(rpc).length == 0) rpc = "https://mainnet.optimism.io";
+        return rpc;
     }
 
-    function _cast(string memory command, string memory hash, string memory field) internal returns (bytes memory) {
-        string[] memory cmd = new string[](6);
+    function _castBlockHash(string memory blockNumber) internal returns (bytes32) {
+        bytes memory h = _castArgs3("block", blockNumber, "--field", "hash");
+        require(h.length == 32, "could not read a block hash from the provenance RPC");
+        return bytes32(h);
+    }
+
+    /// @dev `cast <a> <b> <c> [<d>] --rpc-url <provenance RPC>` through ffi; empty `d` is omitted.
+    function _castArgs3(string memory a, string memory b, string memory c, string memory d) internal returns (bytes memory) {
+        bool withD = bytes(d).length > 0;
+        string[] memory cmd = new string[](withD ? 7 : 6);
         cmd[0] = "cast";
-        cmd[1] = command;
-        cmd[2] = hash;
-        cmd[3] = field;
-        cmd[4] = "--rpc-url";
-        cmd[5] = _provenanceRpc();
+        cmd[1] = a;
+        cmd[2] = b;
+        cmd[3] = c;
+        uint256 i = 4;
+        if (withD) cmd[i++] = d;
+        cmd[i++] = "--rpc-url";
+        cmd[i] = _provenanceRpc();
         return vm.ffi(cmd);
+    }
+
+    /// @dev Parses a decimal number printed by `cast`. ffi hex-decodes output that looks like hex,
+    ///      which an even-length run of digits does; re-printing those bytes as hex restores them.
+    function _castDecimal(bytes memory out) internal pure returns (uint256) {
+        bool digits = out.length > 0;
+        for (uint256 i = 0; i < out.length && digits; i++) {
+            digits = out[i] >= "0" && out[i] <= "9";
+        }
+        if (digits) return vm.parseUint(string(out));
+        string memory asHex = vm.toString(out); // "0x" + the original digits
+        bytes memory stripped = new bytes(bytes(asHex).length - 2);
+        for (uint256 i = 0; i < stripped.length; i++) {
+            stripped[i] = bytes(asHex)[i + 2];
+        }
+        return vm.parseUint(string(stripped));
     }
 
     /// @dev The whole OZ Initializable slot, not just the version: the proxy is at version 1 and
