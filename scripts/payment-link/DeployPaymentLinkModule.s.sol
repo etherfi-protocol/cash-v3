@@ -72,7 +72,8 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
         if (!_isDev()) {
             console.log("");
             console.log("Next: run VerifyPaymentLinkModule.s.sol with PAYMENT_LINK_VERIFY_DEPLOY_ONLY=true,");
-            console.log("then scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol to generate the enable 3CP.");
+            console.log("then scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol to generate the enable 3CP, with");
+            console.log("PAYMENT_LINK_PROXY_DEPLOY_TX = the proxy deploy tx hash from broadcast/DeployPaymentLinkModule.s.sol/10/run-latest.json.");
         }
     }
 
@@ -96,8 +97,8 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
     ///      atomic init. Reuses either if it already has code.
     function _deploy() internal {
         impl = _create3(_moduleImplSalt(), type(PaymentLinkModule).creationCode, abi.encode(address(stack.dataProvider), address(stack.cashModule)));
-        bytes memory initData = abi.encodeCall(PaymentLinkModule.initialize, (address(stack.roleRegistry), DEPLOY_FEE_BPS, DEPLOY_FEE_RECEIVER));
-        proxy = _create3(_moduleProxySalt(), type(UUPSProxy).creationCode, abi.encode(impl, initData));
+        // Built by the same helper the 3CP's provenance check compares the deploy tx against.
+        proxy = _create3(_moduleProxySalt(), _expectedProxyInitCode(stack, impl), "");
     }
 
     /// @dev DEV ONLY: the four enable calls, each skipped when already applied. On prod these

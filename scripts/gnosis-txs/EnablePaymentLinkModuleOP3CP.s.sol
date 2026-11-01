@@ -39,8 +39,11 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *         Bytecode (PLM-04): a CREATE3 address does not commit to bytecode or constructor state,
  *         so the bundles are only written after the impl's immutables are this stack's, the impl
  *         matches a local build (allowing its embedded own address), the proxy matches a local
- *         `UUPSProxy` build exactly, the proxy is initialised exactly once and the impl's
- *         initializers are disabled.
+ *         `UUPSProxy` build exactly, the impl's `proxiableUUID()` answers directly, the proxy is
+ *         initialised exactly once, the impl's initializers are disabled, and the proxy's deploy
+ *         transaction (PAYMENT_LINK_PROXY_DEPLOY_TX) is a successful direct
+ *         `EtherFiDeployer.deploy` call with exactly the expected initcode, so no custom
+ *         constructor can have seeded its storage.
  *
  *         PREREQUISITE (PLM-01): enable on prod only after the CashModule fix in cash-v3#350 is
  *         live. Until then the governance rule in PaymentLinkModule's NatSpec applies: never
@@ -53,9 +56,11 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  * equal the pinned prod proxy.
  *
  * Usage (no broadcast; writes ./output/*.json and simulates both steps on the fork):
- *   forge script scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol --rpc-url $OPTIMISM_RPC --sender 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E --no-isolate -vvv
+ *   PAYMENT_LINK_PROXY_DEPLOY_TX=<proxy deploy tx hash> forge script scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol --rpc-url $OPTIMISM_RPC --sender 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E --no-isolate -vvv
  *   (--sender: the default script sender cannot `new` on this fork; nothing is sent. --no-isolate:
- *   the simulation pranks the Safe, which forge 1.8 rejects as an isolated top-level sender.)
+ *   the simulation pranks the Safe, which forge 1.8 rejects as an isolated top-level sender. The
+ *   provenance check reads the deploy tx with `cast` through ffi, which foundry.toml enables, over
+ *   PAYMENT_LINK_PROVENANCE_RPC or OPTIMISM_RPC.)
  */
 contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
     using stdJson for string;
@@ -102,6 +107,11 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         }
     }
 
+    /// @dev PAYMENT_LINK_PROXY_DEPLOY_TX: the prod proxy's deploy transaction. Virtual for script tests.
+    function _proxyDeployTx() internal view virtual returns (bytes32) {
+        return vm.envOr("PAYMENT_LINK_PROXY_DEPLOY_TX", bytes32(0));
+    }
+
     function _prodDeployments() internal view returns (string memory) {
         return vm.readFile(string.concat(vm.projectRoot(), "/deployments/mainnet/10/deployments.json"));
     }
@@ -119,6 +129,7 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         require(address(module.etherFiDataProvider()) == address(s.dataProvider), "module bound to a different DataProvider");
         require(address(module.cashModule()) == address(s.cashModule), "module bound to a different CashModule");
         _requireBuiltCode(s, impl, address(module));
+        _requireProxyProvenance(s, impl, PROD_SALT_MODULE_PROXY, _proxyDeployTx());
 
         // Deploy-time state, so the bundle is not already applied (idempotence).
         (uint16 feeBps, address feeReceiver) = module.getFee();

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import { stdJson } from "forge-std/StdJson.sol";
 import { Test } from "forge-std/Test.sol";
-import { Vm } from "forge-std/Vm.sol";
+import { Vm, VmSafe } from "forge-std/Vm.sol";
 import { CREATE3 } from "solady/utils/CREATE3.sol";
 
 import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
@@ -78,8 +78,28 @@ contract BytecodeHarness is VerifyPaymentLinkBytecode {
 }
 
 contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
+    address internal txTo;
+    bytes internal txInput;
+    bool internal txSuccess;
+
+    /// @dev The proxy deploy transaction the provenance check sees, in place of `cast` over RPC.
+    ///      A zero `to` with empty input stands for "no tx hash provided".
+    constructor(address to, bytes memory input, bool success) {
+        txTo = to;
+        txInput = input;
+        txSuccess = success;
+    }
+
     function _env() internal pure override returns (string memory) {
         return "mainnet";
+    }
+
+    function _proxyDeployTx() internal view override returns (bytes32) {
+        return txTo == address(0) && txInput.length == 0 ? bytes32(0) : keccak256("test-proxy-deploy-tx");
+    }
+
+    function _fetchTx(bytes32) internal view override returns (DeployTx memory) {
+        return DeployTx({ to: txTo, input: txInput, success: txSuccess });
     }
 
     /// @dev Runs only the preconditions (the gate before any bundle is written).
@@ -93,6 +113,36 @@ contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
 contract BuiltCodeHarness is PaymentLinkConfig {
     function check(string memory env, address impl, address proxy) external {
         _requireBuiltCode(_stack(env), impl, proxy);
+    }
+}
+
+/// @dev Exposes the real `cast`-over-ffi transaction reader.
+contract ProvenanceProbe is PaymentLinkConfig {
+    function fetch(bytes32 txHash) external returns (address to, bytes memory input, bool success) {
+        DeployTx memory t = _fetchTx(txHash);
+        return (t.to, t.input, t.success);
+    }
+}
+
+/// @dev Codex pass 2 attack: a custom constructor that leaves exactly the expected proxy runtime,
+///      impl slot, RoleRegistry slot and Initializable state, but also seeds a Funded link with no
+///      liability behind it. Runtime and slot checks cannot see it; only deployment provenance can.
+contract PoisonedProxy {
+    constructor(address impl, address registry, address seededSigner, address token) {
+        bytes32 linkSlot = keccak256(abi.encode(seededSigner, uint256(0x72f6ddc7d992479425dc8c9c22860bd7f83946c3315c4ff3de0873cbf7571b00)));
+        assembly {
+            sstore(0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc, impl)
+            sstore(0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500, registry)
+            sstore(0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00, 1)
+            sstore(linkSlot, 0xdead) // safe
+            sstore(add(linkSlot, 1), token)
+            sstore(add(linkSlot, 2), 100000000) // 100 USDC
+            sstore(add(linkSlot, 3), shl(16, 2)) // feeBps 0, status Funded
+        }
+        bytes memory runtime = type(UUPSProxy).runtimeCode;
+        assembly {
+            return(add(runtime, 32), mload(runtime))
+        }
     }
 }
 
@@ -131,6 +181,9 @@ contract PaymentLinkScriptsTest is Test {
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
     bytes32 internal constant INITIALIZABLE_STORAGE_SLOT = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
+
+    /// @dev The calldata the deploy script sent to `EtherFiDeployer.deploy` for the prod proxy.
+    bytes internal proxyDeployCall;
 
     address internal deployerAddr;
     uint256 internal deployerPk;
@@ -176,7 +229,7 @@ contract PaymentLinkScriptsTest is Test {
 
     function test_prod_deployVerifyEnable3CP_endToEnd() public {
         // 1. Deploy (unprivileged CREATE3 only on prod).
-        new DeployHarness("mainnet", deployerPk).run();
+        _deployProd();
         assertGt(PROD_PROXY.code.length, 0);
         assertEq(address(uint160(uint256(vm.load(PROD_PROXY, EIP1967_IMPL_SLOT)))), PROD_IMPL);
         assertFalse(prodDataProvider.isWhitelistedModule(PROD_PROXY), "prod deploy must not wire anything");
@@ -189,7 +242,7 @@ contract PaymentLinkScriptsTest is Test {
         new BytecodeHarness("mainnet").run();
 
         // 3. The enable 3CP: writes both bundles and simulates schedule -> 8h -> execute.
-        Enable3CPHarness gen = new Enable3CPHarness();
+        Enable3CPHarness gen = _new3CP();
         gen.run();
         _assertBundle(gen.step1Path(), bytes4(keccak256("scheduleBatch(address[],uint256[],bytes[],bytes32,bytes32,uint256)")));
         _assertBundle(gen.step2Path(), bytes4(keccak256("executeBatch(address[],uint256[],bytes[],bytes32,bytes32)")));
@@ -207,7 +260,7 @@ contract PaymentLinkScriptsTest is Test {
         DeployHarness redeploy = new DeployHarness("mainnet", deployerPk);
         vm.expectRevert(bytes("mainnet: code already exists at the pinned impl address - refusing to reuse it"));
         redeploy.run();
-        Enable3CPHarness again = new Enable3CPHarness();
+        Enable3CPHarness again = _new3CP();
         vm.expectRevert(bytes("module fee already configured - enable already done?"));
         again.run();
 
@@ -253,7 +306,7 @@ contract PaymentLinkScriptsTest is Test {
     }
 
     function test_verify_detectsHijackedProxy() public {
-        new DeployHarness("mainnet", deployerPk).run();
+        _deployProd();
         VerifyHarness verifier = new VerifyHarness("mainnet", true, address(0));
         verifier.run();
 
@@ -287,8 +340,8 @@ contract PaymentLinkScriptsTest is Test {
     /// @dev PLM-04: a proxy that keeps the right slots and getters but adds a function must not
     ///      get an enable bundle.
     function test_enable3CP_rejectsProxyWhoseCodeDiffers() public {
-        new DeployHarness("mainnet", deployerPk).run();
-        Enable3CPHarness gen = new Enable3CPHarness();
+        _deployProd();
+        Enable3CPHarness gen = _new3CP();
         gen.checkPreconditions(); // control: the genuine proxy passes
 
         vm.etch(PROD_PROXY, address(new ProxyWithBackdoor(PROD_IMPL)).code);
@@ -301,7 +354,7 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(feeReceiver, address(0));
 
         // ...but not to the exact proxy bytecode comparison.
-        gen = new Enable3CPHarness();
+        gen = _new3CP();
         vm.expectRevert();
         gen.checkPreconditions();
 
@@ -314,26 +367,26 @@ contract PaymentLinkScriptsTest is Test {
     /// @dev Codex: the right runtime code is not enough; a proxy that never ran its initializer
     ///      (or an impl whose initializers are not locked) could be initialized by anyone later.
     function test_enable3CP_rejectsUninitialisedProxyOrUnlockedImpl() public {
-        new DeployHarness("mainnet", deployerPk).run();
-        Enable3CPHarness gen = new Enable3CPHarness();
+        _deployProd();
+        Enable3CPHarness gen = _new3CP();
         gen.checkPreconditions(); // control
 
         uint256 snap = vm.snapshotState();
         vm.store(PROD_PROXY, INITIALIZABLE_STORAGE_SLOT, bytes32(0));
-        gen = new Enable3CPHarness();
+        gen = _new3CP();
         vm.expectRevert(bytes("proxy not initialised exactly once"));
         gen.checkPreconditions();
         vm.revertToState(snap);
 
         // Version 1 but flagged mid-initialization is rejected too (the whole slot is compared).
         vm.store(PROD_PROXY, INITIALIZABLE_STORAGE_SLOT, bytes32(uint256(1) | (uint256(1) << 64)));
-        gen = new Enable3CPHarness();
+        gen = _new3CP();
         vm.expectRevert(bytes("proxy not initialised exactly once"));
         gen.checkPreconditions();
         vm.revertToState(snap);
 
         vm.store(PROD_IMPL, INITIALIZABLE_STORAGE_SLOT, bytes32(0));
-        gen = new Enable3CPHarness();
+        gen = _new3CP();
         vm.expectRevert(bytes("impl initializers not disabled"));
         gen.checkPreconditions();
     }
@@ -354,7 +407,7 @@ contract PaymentLinkScriptsTest is Test {
     }
 
     function test_enable3CP_refusesWithoutDeployment() public {
-        Enable3CPHarness gen = new Enable3CPHarness();
+        Enable3CPHarness gen = _new3CP();
         vm.expectRevert(bytes("PaymentLinkModule proxy has no code - deploy it first"));
         gen.run();
     }
@@ -366,7 +419,118 @@ contract PaymentLinkScriptsTest is Test {
         script.run();
     }
 
+    // ---- deployment provenance (Codex pass 2) ----
+
+    function test_enable3CP_rejectsDeployTxThatIsNotTheExpectedCall() public {
+        _deployProd();
+        _new3CP().checkPreconditions(); // control: the call the deploy script actually sent
+
+        Enable3CPHarness gen = new Enable3CPHarness(address(0), "", false);
+        vm.expectRevert(bytes("proxy deploy tx hash not provided (set PAYMENT_LINK_PROXY_DEPLOY_TX)"));
+        gen.checkPreconditions();
+
+        gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, false);
+        vm.expectRevert(bytes("proxy deploy tx did not succeed"));
+        gen.checkPreconditions();
+
+        gen = new Enable3CPHarness(makeAddr("someBatcher"), proxyDeployCall, true);
+        vm.expectRevert(bytes("proxy deploy tx was not a direct call to the EtherFiDeployer"));
+        gen.checkPreconditions();
+
+        bytes memory otherInit = abi.encodeCall(PaymentLinkModule.initialize, (address(prodRoleRegistry), 30, PROD_SAFE));
+        bytes memory otherCall = abi.encodeCall(EtherFiDeployer.deploy, (keccak256("Prod.PaymentLink.PaymentLinkModuleProxy"), abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(PROD_IMPL, otherInit))));
+        gen = new Enable3CPHarness(address(DEPLOYER), otherCall, true);
+        vm.expectRevert(bytes("proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified"));
+        gen.checkPreconditions();
+    }
+
+    /// @dev Codex pass 2 Blocking: the right runtime, slots and Initializable state with a seeded
+    ///      Funded link passes every runtime check; the provenance check rejects it.
+    function test_enable3CP_rejectsPoisonedConstructorState() public {
+        address attacker = makeAddr("seededLinkSigner");
+        deployCodeTo("PaymentLinkModule.sol:PaymentLinkModule", abi.encode(address(prodDataProvider), address(prodCashModule)), PROD_IMPL);
+        bytes memory poisonedArgs = abi.encode(PROD_IMPL, address(prodRoleRegistry), attacker, USDC);
+        deployCodeTo("PaymentLinkScripts.t.sol:PoisonedProxy", poisonedArgs, PROD_PROXY);
+
+        // Invisible to the runtime, slot and initialisation checks...
+        new BuiltCodeHarness().check("mainnet", PROD_IMPL, PROD_PROXY);
+        assertEq(uint8(PaymentLinkModule(PROD_PROXY).getLink(attacker).status), 2, "seeded link is Funded");
+        assertEq(PaymentLinkModule(PROD_PROXY).getLiabilities(USDC), 0, "with no liability behind it");
+
+        // ...but its deploy tx is not the expected call, so no enable bundle is written.
+        bytes memory poisonedCall = abi.encodeCall(EtherFiDeployer.deploy, (keccak256("Prod.PaymentLink.PaymentLinkModuleProxy"), abi.encodePacked(type(PoisonedProxy).creationCode, poisonedArgs)));
+        Enable3CPHarness gen = new Enable3CPHarness(address(DEPLOYER), poisonedCall, true);
+        vm.expectRevert(bytes("proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified"));
+        gen.checkPreconditions();
+    }
+
+    /// @dev Codex pass 2: an impl whose embedded `__self` equals the local reference's address
+    ///      byte-matches the reference, so only the direct `proxiableUUID()` call catches it.
+    function test_builtCode_rejectsImplWhoseSelfIsNotItsAddress() public {
+        _deployProd();
+        BuiltCodeHarness checker = new BuiltCodeHarness();
+        address localRef = vm.computeCreateAddress(address(checker), vm.getNonce(address(checker)));
+
+        bytes memory code = PROD_IMPL.code;
+        bytes20 from = bytes20(PROD_IMPL);
+        bytes20 to = bytes20(localRef);
+        uint256 patched;
+        for (uint256 i = 0; i + 20 <= code.length; i++) {
+            bool hit = true;
+            for (uint256 j = 0; j < 20 && hit; j++) {
+                hit = code[i + j] == from[j];
+            }
+            if (hit) {
+                for (uint256 j = 0; j < 20; j++) {
+                    code[i + j] = to[j];
+                }
+                patched++;
+                i += 19;
+            }
+        }
+        assertGt(patched, 0, "impl embeds its own address");
+        vm.etch(PROD_IMPL, code);
+
+        vm.expectRevert(bytes("PaymentLinkModule impl: proxiableUUID reverts when called directly - embedded __self is not the impl address"));
+        checker.check("mainnet", PROD_IMPL, PROD_PROXY);
+    }
+
+    /// @dev The real reader (`cast` over ffi) on a real EtherFiDeployer.deploy transaction on
+    ///      Optimism (the wspyx price-feed deploy recorded in broadcast/DeployWspyxPaxgProdFeeds.s.sol).
+    function test_provenance_readsARealDeployerTransaction() public {
+        (address to, bytes memory input, bool success) = new ProvenanceProbe().fetch(0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe);
+        assertEq(to, address(DEPLOYER));
+        assertTrue(success);
+        assertEq(bytes4(input), EtherFiDeployer.deploy.selector);
+        assertGt(input.length, 68);
+    }
+
     // ---- helpers ----
+
+    /// @dev Runs the real prod deploy and keeps the calldata it sent for the proxy, which the
+    ///      3CP's provenance check is then given in place of an on-chain transaction.
+    function _deployProd() internal {
+        vm.startStateDiffRecording();
+        new DeployHarness("mainnet", deployerPk).run();
+        VmSafe.AccountAccess[] memory accesses = vm.stopAndReturnStateDiff();
+        bytes32 proxySalt = keccak256("Prod.PaymentLink.PaymentLinkModuleProxy");
+        delete proxyDeployCall;
+        for (uint256 i = 0; i < accesses.length; i++) {
+            if (accesses[i].account != address(DEPLOYER) || accesses[i].kind != VmSafe.AccountAccessKind.Call) continue;
+            bytes memory data = accesses[i].data;
+            if (data.length < 36 || bytes4(data) != EtherFiDeployer.deploy.selector) continue;
+            bytes32 salt;
+            assembly {
+                salt := mload(add(data, 36))
+            }
+            if (salt == proxySalt) proxyDeployCall = data;
+        }
+        require(proxyDeployCall.length > 0, "prod proxy deploy call not captured");
+    }
+
+    function _new3CP() internal returns (Enable3CPHarness) {
+        return new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true);
+    }
 
     /// @dev A bundle is one Safe transaction to the operating timelock carrying the 3-call batch.
     function _assertBundle(string memory path, bytes4 selector) internal view {

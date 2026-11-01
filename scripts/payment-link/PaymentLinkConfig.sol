@@ -3,11 +3,14 @@ pragma solidity ^0.8.28;
 
 import { stdJson } from "forge-std/StdJson.sol";
 
+import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { EtherFiDeployer } from "../../src/utils/EtherFiDeployer.sol";
 import { ContractCodeChecker } from "../utils/ContractCodeChecker.sol";
 import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
 
@@ -174,8 +177,14 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
      *        such as another stack's proxies);
      *      - the impl must match a local build except its embedded own address (UUPS `__self`),
      *        and the proxy must match a local `UUPSProxy` exactly and point at that impl;
+     *      - the impl's `proxiableUUID()` must answer when called directly, which proves its
+     *        embedded `__self` is its own address (the code comparison would accept a `__self`
+     *        that happens to equal the local reference's address);
      *      - the proxy must have run its initializer exactly once and the impl's initializers
      *        must be disabled (`_requireInitialized`), so nobody can initialize it later.
+     *      Runtime code and these slots cannot prove the rest of the proxy's storage is empty: a
+     *      custom constructor could seed links. The enable 3CP therefore also checks the proxy's
+     *      deployment transaction (`_requireProxyProvenance`).
      */
     function _requireBuiltCode(Stack memory s, address impl, address proxy) internal {
         PaymentLinkModule deployed = PaymentLinkModule(impl);
@@ -186,7 +195,73 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         requireCodeMatchAllowingAddressEmbeds("PaymentLinkModuleImpl", impl, localImpl);
         requireExactCodeMatch("PaymentLinkModuleProxy", proxy, address(new UUPSProxy(localImpl, "")));
         require(_implOf(proxy) == impl, "PaymentLinkModule: proxy impl slot does not point at the verified impl - possible hijack");
+        try UUPSUpgradeable(impl).proxiableUUID() returns (bytes32 slot) {
+            require(slot == EIP1967_IMPL_SLOT, "PaymentLinkModule impl: unexpected proxiableUUID");
+        } catch {
+            revert("PaymentLinkModule impl: proxiableUUID reverts when called directly - embedded __self is not the impl address");
+        }
         _requireInitialized(impl, proxy);
+    }
+
+    /// @dev The proxy initcode the deploy script sends to the EtherFiDeployer: `UUPSProxy` with
+    ///      `impl` and the atomic `initialize(roleRegistry, 0, address(0))` call. The 3CP's
+    ///      provenance check compares against the same bytes.
+    function _expectedProxyInitCode(Stack memory s, address impl) internal pure returns (bytes memory) {
+        bytes memory initData = abi.encodeCall(PaymentLinkModule.initialize, (address(s.roleRegistry), DEPLOY_FEE_BPS, DEPLOY_FEE_RECEIVER));
+        return abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(impl, initData));
+    }
+
+    // ---- Deployment provenance (PLM-04) ----
+
+    /// @dev What `_requireProxyProvenance` needs from a transaction.
+    struct DeployTx {
+        address to;
+        bytes input;
+        bool success;
+    }
+
+    /**
+     * @dev Requires `txHash` to be a successful direct call to `EtherFiDeployer.deploy` with the
+     *      proxy salt and exactly `_expectedProxyInitCode`. `deploy` reverts when the CREATE3
+     *      address is occupied, so a successful call proves this initcode created the proxy and
+     *      that its storage is only what `UUPSProxy`'s constructor and `initialize` wrote, not
+     *      something a custom constructor seeded.
+     */
+    function _requireProxyProvenance(Stack memory s, address impl, string memory proxySalt, bytes32 txHash) internal {
+        require(txHash != bytes32(0), "proxy deploy tx hash not provided (set PAYMENT_LINK_PROXY_DEPLOY_TX)");
+        DeployTx memory t = _fetchTx(txHash);
+        require(t.success, "proxy deploy tx did not succeed");
+        require(t.to == address(DEPLOYER), "proxy deploy tx was not a direct call to the EtherFiDeployer");
+        bytes memory expected = abi.encodeCall(EtherFiDeployer.deploy, (getSalt(proxySalt), _expectedProxyInitCode(s, impl)));
+        require(keccak256(t.input) == keccak256(expected), "proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified");
+    }
+
+    /// @dev Reads a transaction's recipient, calldata and receipt status from Optimism through
+    ///      `cast` (ffi, enabled in foundry.toml). Virtual for script tests.
+    function _fetchTx(bytes32 txHash) internal virtual returns (DeployTx memory t) {
+        string memory hash = vm.toString(txHash);
+        bytes memory to = _cast("tx", hash, "to");
+        require(to.length == 20, "could not read the deploy tx recipient");
+        t.to = address(bytes20(to));
+        t.input = _cast("tx", hash, "input");
+        bytes32 status = keccak256(_cast("receipt", hash, "status"));
+        t.success = status == keccak256("true") || status == keccak256("1") || status == keccak256("0x1") || status == keccak256(hex"01");
+    }
+
+    /// @dev RPC for `_fetchTx`: PAYMENT_LINK_PROVENANCE_RPC, else OPTIMISM_RPC, else the public endpoint.
+    function _provenanceRpc() internal view returns (string memory) {
+        return vm.envOr("PAYMENT_LINK_PROVENANCE_RPC", vm.envOr("OPTIMISM_RPC", string("https://mainnet.optimism.io")));
+    }
+
+    function _cast(string memory command, string memory hash, string memory field) internal returns (bytes memory) {
+        string[] memory cmd = new string[](6);
+        cmd[0] = "cast";
+        cmd[1] = command;
+        cmd[2] = hash;
+        cmd[3] = field;
+        cmd[4] = "--rpc-url";
+        cmd[5] = _provenanceRpc();
+        return vm.ffi(cmd);
     }
 
     /// @dev The whole OZ Initializable slot, not just the version: the proxy is at version 1 and
