@@ -166,6 +166,62 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(usdc), address(safe)), safeBalBefore - AMOUNT);
     }
 
+    /// @dev CashModule's per-module withdrawal delay (master): a zero override funds inline even
+    ///      with a non-zero global delay, and a longer override is what `fundLink` waits for.
+    function test_requestLink_followsModuleSpecificWithdrawalDelay() public {
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(address(plm), 0, true);
+        (address inlineLink,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, inlineLink);
+        assertEq(uint8(_status(inlineLink)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+        assertEq(plm.getLiabilities(address(usdc)), AMOUNT);
+
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(address(plm), WITHDRAWAL_DELAY * 2, true);
+        (address delayedLink,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, delayedLink);
+        assertEq(uint8(_status(delayedLink)), uint8(IPaymentLinkModule.LinkStatus.Requested));
+
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY + 1); // past the global delay, not the module's
+        vm.expectRevert(ICashModule.CannotWithdrawYet.selector);
+        plm.fundLink(address(safe));
+
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY);
+        plm.fundLink(address(safe));
+        assertEq(uint8(_status(delayedLink)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+        assertEq(plm.getLiabilities(address(usdc)), 2 * AMOUNT);
+    }
+
+    /// @dev A pending request keeps the maturity CashModule stamped at request time, whatever
+    ///      happens to the module's delay override afterwards.
+    function test_fundLink_usesMaturityFromRequestTime_acrossDelayOverrideChanges() public {
+        // Requested under the 1h global delay; a zero override afterwards does not bring it forward.
+        (address first,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, first);
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(address(plm), 0, true);
+        vm.expectRevert(ICashModule.CannotWithdrawYet.selector);
+        plm.fundLink(address(safe));
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY + 1);
+        plm.fundLink(address(safe));
+        assertEq(uint8(_status(first)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+
+        // Requested under a 2h override; clearing it afterwards does not shorten it to the 1h global.
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(address(plm), WITHDRAWAL_DELAY * 2, true);
+        (address second,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, second);
+        vm.prank(owner);
+        cashModule.configureModuleWithdrawalDelay(address(plm), 0, false);
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY + 1);
+        vm.expectRevert(ICashModule.CannotWithdrawYet.selector);
+        plm.fundLink(address(safe));
+        vm.warp(block.timestamp + WITHDRAWAL_DELAY);
+        plm.fundLink(address(safe));
+        assertEq(uint8(_status(second)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+        assertEq(plm.getLiabilities(address(usdc)), 2 * AMOUNT);
+    }
+
     function test_requestLink_revertsOnInvalidInput() public {
         (address linkSigner,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(bytes32(0));

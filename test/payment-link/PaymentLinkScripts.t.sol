@@ -17,6 +17,7 @@ import { EtherFiDeployer } from "../../src/utils/EtherFiDeployer.sol";
 import { EnablePaymentLinkModuleOP3CP } from "../../scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol";
 import { DeployPaymentLinkModule } from "../../scripts/payment-link/DeployPaymentLinkModule.s.sol";
 import { VerifyPaymentLinkBytecode } from "../../scripts/payment-link/VerifyPaymentLinkBytecode.s.sol";
+import { PaymentLinkConfig } from "../../scripts/payment-link/PaymentLinkConfig.sol";
 import { VerifyPaymentLinkModule } from "../../scripts/payment-link/VerifyPaymentLinkModule.s.sol";
 
 // ---- Harnesses: the real scripts with their environment inputs pinned per instance ----
@@ -88,6 +89,13 @@ contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
     }
 }
 
+/// @dev Runs the shared PLM-04 check against any stack and any pair of addresses.
+contract BuiltCodeHarness is PaymentLinkConfig {
+    function check(string memory env, address impl, address proxy) external {
+        _requireBuiltCode(_stack(env), impl, proxy);
+    }
+}
+
 /// @dev PLM-04 attack shape: an ERC-1967 proxy with the genuine impl in its slot, so every slot
 ///      and getter check passes, plus one extra function that only a bytecode check can see.
 contract ProxyWithBackdoor is UUPSProxy {
@@ -122,6 +130,7 @@ contract PaymentLinkScriptsTest is Test {
     address internal constant USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
+    bytes32 internal constant INITIALIZABLE_STORAGE_SLOT = 0xf0c57e16840df040f15088dc2f81fe391c3923bec73e23a9662efc9c229c6a00;
 
     address internal deployerAddr;
     uint256 internal deployerPk;
@@ -300,6 +309,48 @@ contract PaymentLinkScriptsTest is Test {
         BytecodeHarness verifier = new BytecodeHarness("mainnet");
         vm.expectRevert();
         verifier.run();
+    }
+
+    /// @dev Codex: the right runtime code is not enough; a proxy that never ran its initializer
+    ///      (or an impl whose initializers are not locked) could be initialized by anyone later.
+    function test_enable3CP_rejectsUninitialisedProxyOrUnlockedImpl() public {
+        new DeployHarness("mainnet", deployerPk).run();
+        Enable3CPHarness gen = new Enable3CPHarness();
+        gen.checkPreconditions(); // control
+
+        uint256 snap = vm.snapshotState();
+        vm.store(PROD_PROXY, INITIALIZABLE_STORAGE_SLOT, bytes32(0));
+        gen = new Enable3CPHarness();
+        vm.expectRevert(bytes("proxy not initialised exactly once"));
+        gen.checkPreconditions();
+        vm.revertToState(snap);
+
+        // Version 1 but flagged mid-initialization is rejected too (the whole slot is compared).
+        vm.store(PROD_PROXY, INITIALIZABLE_STORAGE_SLOT, bytes32(uint256(1) | (uint256(1) << 64)));
+        gen = new Enable3CPHarness();
+        vm.expectRevert(bytes("proxy not initialised exactly once"));
+        gen.checkPreconditions();
+        vm.revertToState(snap);
+
+        vm.store(PROD_IMPL, INITIALIZABLE_STORAGE_SLOT, bytes32(0));
+        gen = new Enable3CPHarness();
+        vm.expectRevert(bytes("impl initializers not disabled"));
+        gen.checkPreconditions();
+    }
+
+    /// @dev Codex: an impl built against another stack must fail the prod check by its
+    ///      immutables, whatever the embedded-address code comparison would conclude.
+    function test_builtCode_rejectsImplBoundToAnotherStack() public {
+        vm.startPrank(devRoleRegistry.owner());
+        devRoleRegistry.grantRole(keccak256("ADMIN_TIMELOCK_ROLE"), deployerAddr);
+        vm.stopPrank();
+        new DeployHarness("dev", deployerPk).run();
+
+        BuiltCodeHarness checker = new BuiltCodeHarness();
+        checker.check("dev", DEV_IMPL, DEV_PROXY); // control: right stack
+
+        vm.expectRevert(bytes("PaymentLinkModule impl: etherFiDataProvider immutable is not this stack's"));
+        checker.check("mainnet", DEV_IMPL, DEV_PROXY);
     }
 
     function test_enable3CP_refusesWithoutDeployment() public {

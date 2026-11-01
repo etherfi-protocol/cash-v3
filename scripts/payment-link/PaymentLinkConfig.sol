@@ -167,17 +167,33 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
     }
 
     /**
-     * @dev PLM-04: the code at the pinned addresses must be exactly what this commit builds. A
-     *      CREATE3 address does not commit to bytecode, so the slot and getter checks alone would
-     *      accept a proxy that keeps the right slots but adds functions. Rebuilds both locally with
-     *      the stack's constructor arguments: the impl may differ only in its embedded own address
-     *      (UUPS `__self`); the proxy must match exactly and point at that impl.
+     * @dev PLM-04: what sits at the pinned addresses must be exactly what this commit builds and
+     *      deploys. A CREATE3 address commits to neither bytecode nor constructor state, so:
+     *      - the impl's immutables must be THIS stack's DataProvider and CashModule (checked by
+     *        getter: the code comparison alone would accept other addresses whose code matches,
+     *        such as another stack's proxies);
+     *      - the impl must match a local build except its embedded own address (UUPS `__self`),
+     *        and the proxy must match a local `UUPSProxy` exactly and point at that impl;
+     *      - the proxy must have run its initializer exactly once and the impl's initializers
+     *        must be disabled (`_requireInitialized`), so nobody can initialize it later.
      */
     function _requireBuiltCode(Stack memory s, address impl, address proxy) internal {
+        PaymentLinkModule deployed = PaymentLinkModule(impl);
+        require(address(deployed.etherFiDataProvider()) == address(s.dataProvider), "PaymentLinkModule impl: etherFiDataProvider immutable is not this stack's");
+        require(address(deployed.cashModule()) == address(s.cashModule), "PaymentLinkModule impl: cashModule immutable is not this stack's");
+
         address localImpl = address(new PaymentLinkModule(address(s.dataProvider), address(s.cashModule)));
         requireCodeMatchAllowingAddressEmbeds("PaymentLinkModuleImpl", impl, localImpl);
         requireExactCodeMatch("PaymentLinkModuleProxy", proxy, address(new UUPSProxy(localImpl, "")));
         require(_implOf(proxy) == impl, "PaymentLinkModule: proxy impl slot does not point at the verified impl - possible hijack");
+        _requireInitialized(impl, proxy);
+    }
+
+    /// @dev The whole OZ Initializable slot, not just the version: the proxy is at version 1 and
+    ///      not mid-initialization; the impl is locked at `type(uint64).max`.
+    function _requireInitialized(address impl, address proxy) internal view {
+        require(uint256(vm.load(proxy, INITIALIZABLE_STORAGE_SLOT)) == 1, "proxy not initialised exactly once");
+        require(uint256(vm.load(impl, INITIALIZABLE_STORAGE_SLOT)) == uint256(type(uint64).max), "impl initializers not disabled");
     }
 
     function _implOf(address proxy) internal view returns (address) {
@@ -186,10 +202,6 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
 
     function _registryOf(address proxy) internal view returns (address) {
         return address(uint160(uint256(vm.load(proxy, UPGRADEABLE_PROXY_STORAGE_SLOT))));
-    }
-
-    function _initializedVersion(address target) internal view returns (uint64) {
-        return uint64(uint256(vm.load(target, INITIALIZABLE_STORAGE_SLOT)));
     }
 
     function _canRequestWithdraw(ICashModule cashModule, address module) internal view returns (bool) {

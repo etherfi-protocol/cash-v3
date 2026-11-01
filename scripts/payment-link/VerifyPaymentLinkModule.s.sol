@@ -70,8 +70,7 @@ contract VerifyPaymentLinkModule is PaymentLinkConfig {
 
         require(_implOf(proxy) == expectedImpl, "impl address mismatch - possible hijack");
         require(_registryOf(proxy) == address(s.roleRegistry), "roleRegistry mismatch - possible hijack");
-        require(_initializedVersion(proxy) == 1, "proxy not initialised exactly once");
-        require(_initializedVersion(expectedImpl) == type(uint64).max, "impl initializers not disabled");
+        _requireInitialized(expectedImpl, proxy);
 
         PaymentLinkModule module = PaymentLinkModule(proxy);
         PaymentLinkModule implModule = PaymentLinkModule(expectedImpl);

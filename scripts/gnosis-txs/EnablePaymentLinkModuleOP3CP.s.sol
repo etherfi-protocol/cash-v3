@@ -36,9 +36,16 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *         holds PAUSER/UNPAUSER (asserted and exercised below), and `cancel` stays callable
  *         while paused.
  *
- *         Bytecode (PLM-04): a CREATE3 address does not commit to bytecode, so the bundles are
- *         only written after the impl matches a local build (allowing its embedded own address)
- *         and the proxy matches a local `UUPSProxy` build exactly.
+ *         Bytecode (PLM-04): a CREATE3 address does not commit to bytecode or constructor state,
+ *         so the bundles are only written after the impl's immutables are this stack's, the impl
+ *         matches a local build (allowing its embedded own address), the proxy matches a local
+ *         `UUPSProxy` build exactly, the proxy is initialised exactly once and the impl's
+ *         initializers are disabled.
+ *
+ *         PREREQUISITE (PLM-01): enable on prod only after the CashModule fix in cash-v3#350 is
+ *         live. Until then the governance rule in PaymentLinkModule's NatSpec applies: never
+ *         remove this module from the DataProvider whitelist or CashModule's requester list
+ *         while any link is `Requested`. This script cannot check #350 on chain.
  *
  * Prerequisite: the prod module is deployed (DeployPaymentLinkModule.s.sol, ENV=mainnet) and
  * VerifyPaymentLinkModule passes with PAYMENT_LINK_VERIFY_DEPLOY_ONLY=true. If
