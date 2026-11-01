@@ -435,6 +435,29 @@ contract PaymentLinkScriptsTest is Test {
         checker.check("mainnet", DEV_IMPL, DEV_PROXY);
     }
 
+    /// @dev Allowing a launch token CashModule cannot withdraw would make every request in it
+    ///      revert, so the enable bundle is refused unless all of them are on that list.
+    function test_enable3CP_requiresLaunchTokensOnCashModuleWithdrawList() public {
+        _deployProd();
+        _new3CP().checkPreconditions(); // control: every launch token is on the live list
+
+        address[] memory listed = prodCashModule.getWhitelistedWithdrawAssets();
+        address[] memory withoutUsdt0 = new address[](listed.length);
+        uint256 n;
+        for (uint256 i = 0; i < listed.length; i++) {
+            if (listed[i] != USDT0) withoutUsdt0[n++] = listed[i];
+        }
+        assertEq(n, listed.length - 1, "USDT0 is on the live withdraw-asset list");
+        assembly {
+            mstore(withoutUsdt0, n)
+        }
+        vm.mockCall(address(prodCashModule), abi.encodeWithSelector(ICashModule.getWhitelistedWithdrawAssets.selector), abi.encode(withoutUsdt0));
+
+        Enable3CPHarness gen = _new3CP();
+        vm.expectRevert(bytes(string.concat("launch token not on CashModule's withdraw-asset list: ", vm.toString(USDT0))));
+        gen.checkPreconditions();
+    }
+
     function test_enable3CP_refusesWithoutDeployment() public {
         Enable3CPHarness gen = _new3CP();
         vm.expectRevert(bytes("PaymentLinkModule proxy has no code - deploy it first"));

@@ -143,6 +143,7 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
             for (uint256 i = 0; i < tokens.length; i++) {
                 require(module.isTokenAllowed(tokens[i]), "dev: a launch token is not allowed");
             }
+            _requireLaunchTokensWithdrawable(stack.cashModule);
         }
     }
 }

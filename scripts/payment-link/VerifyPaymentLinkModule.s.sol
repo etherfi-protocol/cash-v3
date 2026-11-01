@@ -104,6 +104,7 @@ contract VerifyPaymentLinkModule is PaymentLinkConfig {
         for (uint256 i = 0; i < tokens.length; i++) {
             require(PaymentLinkModule(proxy).isTokenAllowed(tokens[i]), "a launch token is not on the token allowlist");
         }
+        _requireLaunchTokensWithdrawable(s.cashModule);
     }
 
     function _verifyNotYetEnabled(Stack memory s, address proxy) internal view {
@@ -115,6 +116,7 @@ contract VerifyPaymentLinkModule is PaymentLinkConfig {
         for (uint256 i = 0; i < tokens.length; i++) {
             require(!PaymentLinkModule(proxy).isTokenAllowed(tokens[i]), "a launch token is already on the token allowlist");
         }
+        _requireLaunchTokensWithdrawable(s.cashModule);
     }
 
     /// @dev The dev instance must be invisible to the prod stack.

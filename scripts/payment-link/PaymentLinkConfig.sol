@@ -392,6 +392,20 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         return address(uint160(uint256(vm.load(proxy, UPGRADEABLE_PROXY_STORAGE_SLOT))));
     }
 
+    /// @dev Every launch token must be on CashModule's withdraw-asset list: allowing a token
+    ///      CashModule cannot withdraw would make every `requestLink` in it revert.
+    function _requireLaunchTokensWithdrawable(ICashModule cashModule) internal view {
+        address[] memory listed = cashModule.getWhitelistedWithdrawAssets();
+        address[] memory tokens = _launchTokens();
+        for (uint256 i = 0; i < tokens.length; i++) {
+            bool found;
+            for (uint256 j = 0; j < listed.length && !found; j++) {
+                found = listed[j] == tokens[i];
+            }
+            require(found, string.concat("launch token not on CashModule's withdraw-asset list: ", vm.toString(tokens[i])));
+        }
+    }
+
     function _canRequestWithdraw(ICashModule cashModule, address module) internal view returns (bool) {
         address[] memory allowed = cashModule.getWhitelistedModulesCanRequestWithdraw();
         for (uint256 i = 0; i < allowed.length; i++) {

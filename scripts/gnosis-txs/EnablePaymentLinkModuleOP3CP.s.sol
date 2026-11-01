@@ -145,6 +145,7 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         for (uint256 i = 0; i < launchTokens.length; i++) {
             require(!module.isTokenAllowed(launchTokens[i]), "a launch token is already allowed - enable already done?");
         }
+        _requireLaunchTokensWithdrawable(s.cashModule);
         require(!module.paused(), "module is paused");
 
         // Launch config is valid for setFee.
