@@ -20,7 +20,7 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *                         also wires the module into the DEV stack only: whitelisted (not default)
  *                         on the dev DataProvider, allowed to request withdrawals on the dev
  *                         CashModule, the launch fee with the broadcaster as receiver, and the
- *                         launch tokens (USDC, EURC, USDT0) on the token allowlist.
+ *                         launch tokens (USDC, EURC, USDT0, ZCHF, WETH) on the token allowlist.
  *         - ENV=mainnet:  only the unprivileged CREATE3 deploys. Enabling is the 3CP built by
  *                         scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol.
  *

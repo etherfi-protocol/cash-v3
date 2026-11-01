@@ -19,7 +19,7 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *         and the RoleRegistry owner (the 2-day upgrade timelock on prod). Then the wiring:
  *         - default (after enable): whitelisted on the DataProvider but NOT a default module,
  *           allowed to request withdrawals on the CashModule, launch fee set, every launch token
- *           (USDC, EURC, USDT0) allowed.
+ *           (USDC, EURC, USDT0, ZCHF, WETH) allowed.
  *         - PAYMENT_LINK_VERIFY_DEPLOY_ONLY=true (between deploy and the enable 3CP): fee off and
  *           not yet registered anywhere.
  *         On dev it also reads the PROD DataProvider and CashModule and requires that the dev

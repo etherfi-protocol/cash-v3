@@ -74,24 +74,30 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
 
     // ---- Token allowlist ----
 
-    // Launch tokens (Optimism, 6 decimals each, all on CashModule's withdraw-asset list). Each
+    // Launch tokens (Optimism, all on CashModule's withdraw-asset list). Each
     // must move exact amounts in and out of the module; test/payment-link/PaymentLinkLaunchTokens.t.sol
     // round-trips every one against the real token contract on a fork. Further tokens are
     // allowed later through another timelocked `setTokenAllowed`, under the same condition.
 
-    /// @notice USDC (native, Circle).
+    /// @notice USDC (native, Circle). 6 decimals.
     address internal constant LAUNCH_TOKEN_USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
-    /// @notice EURC (Circle).
+    /// @notice EURC (Circle). 6 decimals.
     address internal constant LAUNCH_TOKEN_EURC = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
-    /// @notice USDT0 (symbol "USD₮0"), not the legacy bridged USDT.
+    /// @notice USDT0 (symbol "USD₮0"), not the legacy bridged USDT. 6 decimals.
     address internal constant LAUNCH_TOKEN_USDT0 = 0x01bFF41798a0BcF287b996046Ca68b395DbC1071;
+    /// @notice ZCHF (Frankencoin). 18 decimals.
+    address internal constant LAUNCH_TOKEN_ZCHF = 0xD4dD9e2F021BB459D5A5f6c24C12fE09c5D45553;
+    /// @notice WETH (the WETH9 predeploy). 18 decimals.
+    address internal constant LAUNCH_TOKEN_WETH = 0x4200000000000000000000000000000000000006;
 
     /// @dev The launch tokens, in the order the enable batch allows them.
     function _launchTokens() internal pure returns (address[] memory tokens) {
-        tokens = new address[](3);
+        tokens = new address[](5);
         tokens[0] = LAUNCH_TOKEN_USDC;
         tokens[1] = LAUNCH_TOKEN_EURC;
         tokens[2] = LAUNCH_TOKEN_USDT0;
+        tokens[3] = LAUNCH_TOKEN_ZCHF;
+        tokens[4] = LAUNCH_TOKEN_WETH;
     }
 
     // ---- Storage slots read by the verifiers ----

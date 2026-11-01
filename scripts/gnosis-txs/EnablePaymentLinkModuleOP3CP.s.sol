@@ -17,7 +17,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  * @notice Builds the Safe bundles that turn the deployed prod PaymentLinkModule on, then
  *         simulates them on the current fork and asserts the end state. Nothing is broadcast.
  *
- *         All six calls are gated by ADMIN_TIMELOCK_ROLE, which on Optimism is held ONLY by
+ *         All eight calls are gated by ADMIN_TIMELOCK_ROLE, which on Optimism is held ONLY by
  *         the 8h operating timelock (the Safe does not hold it), so they ship as one timelock
  *         batch in two Safe bundles:
  *
@@ -30,6 +30,8 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *           PaymentLinkModule.setTokenAllowed(USDC, true)                      launch tokens, one call each
  *           PaymentLinkModule.setTokenAllowed(EURC, true)
  *           PaymentLinkModule.setTokenAllowed(USDT0, true)
+ *           PaymentLinkModule.setTokenAllowed(ZCHF, true)
+ *           PaymentLinkModule.setTokenAllowed(WETH, true)
  *
  *         Whitelist-only: the module is never enabled on safes, so it has no
  *         `execTransactionFromModule` authority; it only receives CashModule withdrawals.
@@ -258,6 +260,8 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         console.log("       allowed tokens: USDC", LAUNCH_TOKEN_USDC);
         console.log("                       EURC", LAUNCH_TOKEN_EURC);
         console.log("                       USDT0", LAUNCH_TOKEN_USDT0);
+        console.log("                       ZCHF", LAUNCH_TOKEN_ZCHF);
+        console.log("                       WETH", LAUNCH_TOKEN_WETH);
         console.log("  [OK] pause/unpause verified; RoleRegistry owner unchanged");
         console.log("EnablePaymentLinkModuleOP3CP simulation passed. Run VerifyPaymentLinkModule.s.sol after execution.");
     }
