@@ -45,10 +45,10 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *         `EtherFiDeployer.deploy` call with exactly the expected initcode, so no custom
  *         constructor can have seeded its storage.
  *
- *         PREREQUISITE (PLM-01): enable on prod only after the CashModule fix in cash-v3#350 is
- *         live. Until then the governance rule in PaymentLinkModule's NatSpec applies: never
- *         remove this module from the DataProvider whitelist or CashModule's requester list
- *         while any link is `Requested`. This script cannot check #350 on chain.
+ *         PLM-01: unless cash-v3#350 is live, the governance rule in PaymentLinkModule's NatSpec
+ *         applies (never remove this module from the DataProvider whitelist or CashModule's
+ *         requester list while any link is `Requested`). Whether to wait for #350 is decided in
+ *         the release checklist. This script cannot check #350 on chain.
  *
  * Prerequisite: the prod module is deployed (DeployPaymentLinkModule.s.sol, ENV=mainnet) and
  * VerifyPaymentLinkModule passes with PAYMENT_LINK_VERIFY_DEPLOY_ONLY=true. If
