@@ -277,8 +277,10 @@ contract PaymentLinkModuleInvariantTest is PaymentLinkModuleTestSetup {
         assets[0] = address(tokenB);
         bool[] memory yes = new bool[](1);
         yes[0] = true;
-        vm.prank(owner);
+        vm.startPrank(owner);
         cashModule.configureWithdrawAssets(assets, yes);
+        plm.setTokenAllowed(address(tokenB), true);
+        vm.stopPrank();
 
         address recipientSafe = _deployRecipientSafe();
         handler = new PaymentLinkHandler(plm, cashModule, safe, owner, recipientSafe, plainToken, tokenB, owner1Pk, owner2Pk);

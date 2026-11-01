@@ -105,6 +105,13 @@ interface IPaymentLinkModule is IBridgeModule {
      */
     event SurplusRescued(address indexed token, address indexed to, uint256 amount);
 
+    /**
+     * @notice Emitted when a token is allowed or disallowed for new links.
+     * @param token The token.
+     * @param allowed Whether new links may escrow it.
+     */
+    event TokenAllowedSet(address indexed token, bool allowed);
+
     /// @notice Reverts when the owner signatures do not meet the safe's threshold.
     error InvalidSignatures();
     /// @notice Reverts when the claim signature was not produced by the link's key.
@@ -137,13 +144,15 @@ interface IPaymentLinkModule is IBridgeModule {
     error LinkNotCancellable();
     /// @notice Reverts when a rescue exceeds the module's balance above liabilities.
     error InsufficientSurplus();
+    /// @notice Reverts when `requestLink` names a token that is not on the module's allowlist.
+    error TokenNotAllowed();
 
     /**
      * @notice Creates a link for `linkSigner` and places a CashModule withdrawal of `amount` of
      *         `token` from `safe` with this module as recipient. With a zero CashModule withdrawal
      *         delay the link is funded in the same call.
      * @param safe The EtherFiSafe sending the funds.
-     * @param token The ERC-20 to escrow.
+     * @param token The ERC-20 to escrow; must be allowed (`isTokenAllowed`).
      * @param amount The amount to escrow.
      * @param linkSigner The address of the link's private key; the link ID.
      * @param feeBps The fee the owners agreed to; must equal the current fee.
@@ -199,6 +208,13 @@ interface IPaymentLinkModule is IBridgeModule {
     function rescueSurplus(address token, address to, uint256 amount) external;
 
     /**
+     * @notice Allows or disallows `token` for new links. Governance only; gates `requestLink` only.
+     * @param token The token to configure.
+     * @param allowed Whether new links may escrow `token`.
+     */
+    function setTokenAllowed(address token, bool allowed) external;
+
+    /**
      * @notice Returns the link stored for `linkSigner` (zeroed when unused).
      * @param linkSigner The link ID.
      * @return The stored link.
@@ -225,6 +241,13 @@ interface IPaymentLinkModule is IBridgeModule {
      * @return feeReceiver The fee receiver.
      */
     function getFee() external view returns (uint16 feeBps, address feeReceiver);
+
+    /**
+     * @notice Returns whether new links may escrow `token`.
+     * @param token The token to query.
+     * @return True if `token` is allowed.
+     */
+    function isTokenAllowed(address token) external view returns (bool);
 
     /**
      * @notice Returns the EIP-712 digest the link key signs to claim to `recipient`.

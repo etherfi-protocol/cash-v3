@@ -36,8 +36,12 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *      liabilities (for example after a negative rebase), every exit in that token is paid
  *      pro rata and new links in it are refused (`EscrowShortfall`); other tokens are untouched.
  *
- *      No token allowlist and no amount caps live here: CashModule's withdraw-asset list bounds
- *      what can be requested, and the backend decides what is offered.
+ *      New links are limited to tokens governance allows here (`setTokenAllowed`), which must also
+ *      be on CashModule's withdraw-asset list. Allow only tokens that move exact amounts: the
+ *      allowlist is what keeps a sender-taxed token (see below) from being escrowed at all. It
+ *      gates `requestLink` only; links already requested or funded keep funding, claiming,
+ *      cancelling and reconciling after their token is disallowed. There are no amount caps here;
+ *      the backend decides what is offered.
  *
  *      Every transfer in and out must move the module's balance by exactly the amount sent
  *      (`BalanceDeltaMismatch` otherwise), so no exit can take more from the pooled escrow than
@@ -87,6 +91,8 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
         uint16 feeBps;
         /// @notice Receiver of claim fees. Zero waives the fee on every claim.
         address feeReceiver;
+        /// @notice Tokens new links may escrow. Checked only by `requestLink`.
+        mapping(address token => bool allowed) allowedTokens;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.PaymentLinkModule")) - 1)) & ~bytes32(uint256(0xff))
@@ -154,7 +160,7 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @dev The owners sign `requestLinkDigest(safe, token, amount, linkSigner, feeBps)` at the
      *      module's current nonce for `safe`.
      * @param safe The EtherFiSafe sending the funds.
-     * @param token The ERC-20 to escrow (must be on CashModule's withdraw-asset list).
+     * @param token The ERC-20 to escrow (allowed here and on CashModule's withdraw-asset list).
      * @param amount The amount to escrow.
      * @param linkSigner The address of the link's private key; the link ID.
      * @param feeBps The fee the owners agreed to; must equal the current fee.
@@ -162,6 +168,7 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
      * @param signatures Signatures corresponding to `signers`.
      * @custom:throws OnlyEtherFiSafe If `safe` is not an EtherFiSafe.
      * @custom:throws InvalidInput If `token`, `linkSigner` or `amount` is zero.
+     * @custom:throws TokenNotAllowed If `token` is not on this module's allowlist.
      * @custom:throws EscrowShortfall If the module already holds less `token` than its liabilities.
      * @custom:throws LinkSignerUsed If `linkSigner` was used by any earlier link.
      * @custom:throws FeeMismatch If `feeBps` differs from the current fee.
@@ -340,6 +347,22 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
     }
 
     /**
+     * @notice Allows or disallows `token` for new links.
+     * @dev Gates `requestLink` only. Disallowing a token never strands a link: links already
+     *      requested still fund (their owners signed while it was allowed), and funded links still
+     *      claim, cancel and reconcile. Allow only tokens that transfer exact amounts.
+     * @param token The ERC-20 to configure.
+     * @param allowed Whether new links may escrow `token`.
+     * @custom:throws OnlyAdminTimelock If the caller lacks `ADMIN_TIMELOCK_ROLE`.
+     * @custom:throws InvalidInput If `token` is zero.
+     */
+    function setTokenAllowed(address token, bool allowed) external onlyAdminTimelock {
+        if (token == address(0)) revert InvalidInput();
+        _getPaymentLinkModuleStorage().allowedTokens[token] = allowed;
+        emit TokenAllowedSet(token, allowed);
+    }
+
+    /**
      * @notice Transfers `amount` of `token` that the module holds ABOVE its liabilities to `to`.
      * @dev Surplus is owed to no link: donations, positive rebases, or a CashModule withdrawal
      *      processed into the module without `fundLink` (see the governance rule above). The
@@ -407,6 +430,15 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
     }
 
     /**
+     * @notice Returns whether new links may escrow `token`.
+     * @param token The token to query.
+     * @return True if `token` is allowed.
+     */
+    function isTokenAllowed(address token) external view returns (bool) {
+        return _getPaymentLinkModuleStorage().allowedTokens[token];
+    }
+
+    /**
      * @notice Returns the EIP-712 digest the link key signs to claim to `recipient`.
      * @param linkSigner The link ID.
      * @param recipient The recipient bound into the signature.
@@ -460,6 +492,7 @@ contract PaymentLinkModule is ModuleBase, UpgradeableProxy, IBridgeModule, IPaym
     function _validateRequest(address safe, address token, uint256 amount, address linkSigner, uint16 feeBps) internal view {
         PaymentLinkModuleStorage storage $ = _getPaymentLinkModuleStorage();
         if (token == address(0) || linkSigner == address(0) || amount == 0) revert InvalidInput();
+        if (!$.allowedTokens[token]) revert TokenNotAllowed();
         // A new link must never absorb an existing deficit in its token.
         if (IERC20(token).balanceOf(address(this)) < $.liabilities[token]) revert EscrowShortfall();
         if ($.links[linkSigner].status != LinkStatus.None) revert LinkSignerUsed();

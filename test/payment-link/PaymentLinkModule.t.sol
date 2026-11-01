@@ -17,7 +17,7 @@ import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol"
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
 import { EtherFiSafeErrors } from "../../src/safe/EtherFiSafeErrors.sol";
 import { UpgradeableProxy } from "../../src/utils/UpgradeableProxy.sol";
-import { SenderTaxToken } from "./PaymentLinkMocks.sol";
+import { PlainToken, SenderTaxToken } from "./PaymentLinkMocks.sol";
 import { PaymentLinkModuleTestSetup } from "./PaymentLinkModuleTestSetup.t.sol";
 
 contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
@@ -318,10 +318,136 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
     function test_requestLink_revertsForNonWithdrawableToken() public {
         PaymentLinkModuleTestSetupToken unlisted = new PaymentLinkModuleTestSetupToken();
         unlisted.mint(address(safe), 1 ether);
+        // Allowed here, so CashModule's withdraw-asset list is what rejects it.
+        vm.prank(owner);
+        plm.setTokenAllowed(address(unlisted), true);
         (address linkSigner,) = _newLinkKey();
         (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(unlisted), 1 ether, linkSigner, FEE_BPS));
         vm.expectRevert(abi.encodeWithSelector(ICashModule.InvalidWithdrawAsset.selector, address(unlisted)));
         plm.requestLink(address(safe), address(unlisted), 1 ether, linkSigner, FEE_BPS, signers, sigs);
+    }
+
+    // ---- token allowlist (PLM-02) ----
+
+    function test_requestLink_revertsForTokenNotAllowed() public {
+        PlainToken notAllowed = new PlainToken("Not allowed", "NA");
+        address[] memory assets = new address[](1);
+        assets[0] = address(notAllowed);
+        bool[] memory yes = new bool[](1);
+        yes[0] = true;
+        vm.prank(owner);
+        cashModule.configureWithdrawAssets(assets, yes); // withdrawable, but not on the module's list
+        notAllowed.mint(address(safe), 1 ether);
+
+        (address linkSigner,) = _newLinkKey();
+        (address[] memory signers, bytes[] memory sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(notAllowed), 1 ether, linkSigner, FEE_BPS));
+        vm.expectRevert(IPaymentLinkModule.TokenNotAllowed.selector);
+        plm.requestLink(address(safe), address(notAllowed), 1 ether, linkSigner, FEE_BPS, signers, sigs);
+
+        // Disallowing a launch token blocks new links in it too, and the rejected attempt used nothing up.
+        vm.prank(owner);
+        plm.setTokenAllowed(address(usdc), false);
+        (signers, sigs) = _ownerSigs(plm.requestLinkDigest(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS));
+        vm.expectRevert(IPaymentLinkModule.TokenNotAllowed.selector);
+        plm.requestLink(address(safe), address(usdc), AMOUNT, linkSigner, FEE_BPS, signers, sigs);
+        assertEq(plm.getNonce(address(safe)), 0);
+        assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.None));
+    }
+
+    function test_setTokenAllowed_adminTimelockOnly_emits_rejectsZero() public {
+        address token = makeAddr("someToken");
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        plm.setTokenAllowed(token, true);
+
+        // ADMIN_ROLE alone is not enough.
+        address admin = makeAddr("adminOnlyAllowlist");
+        vm.prank(owner);
+        roleRegistry.grantRole(keccak256("ADMIN_ROLE"), admin);
+        vm.prank(admin);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        plm.setTokenAllowed(token, true);
+
+        vm.startPrank(owner);
+        vm.expectRevert(ModuleBase.InvalidInput.selector);
+        plm.setTokenAllowed(address(0), true);
+
+        assertFalse(plm.isTokenAllowed(token));
+        vm.expectEmit(true, true, true, true, address(plm));
+        emit IPaymentLinkModule.TokenAllowedSet(token, true);
+        plm.setTokenAllowed(token, true);
+        assertTrue(plm.isTokenAllowed(token));
+
+        vm.expectEmit(true, true, true, true, address(plm));
+        emit IPaymentLinkModule.TokenAllowedSet(token, false);
+        plm.setTokenAllowed(token, false);
+        assertFalse(plm.isTokenAllowed(token));
+        vm.stopPrank();
+    }
+
+    /// @dev The allowlist gates new requests only: links that already exist keep every exit.
+    function test_disallowingToken_doesNotBlockExistingLinks() public {
+        (address toClaim, uint256 toClaimPk) = _fundedLink(address(usdc), AMOUNT);
+        (address toCancel,) = _fundedLink(address(usdc), AMOUNT);
+        (address requested,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, requested);
+
+        vm.prank(owner);
+        plm.setTokenAllowed(address(usdc), false);
+
+        // A request signed while USDC was allowed still funds.
+        _fund();
+        assertEq(uint8(_status(requested)), uint8(IPaymentLinkModule.LinkStatus.Funded));
+
+        _claim(toClaim, toClaimPk, externalRecipient);
+        assertEq(uint8(_status(toClaim)), uint8(IPaymentLinkModule.LinkStatus.Claimed));
+
+        uint256 safeBefore = _bal(address(usdc), address(safe));
+        _cancel(toCancel);
+        assertEq(_bal(address(usdc), address(safe)), safeBefore + AMOUNT);
+
+        _cancel(requested);
+        assertEq(plm.getLiabilities(address(usdc)), 0);
+        assertEq(_bal(address(usdc), address(plm)), 0);
+    }
+
+    /// @dev A requested link in a token that was since disallowed still cancels, reconciles and
+    ///      takes the CashModule callback.
+    function test_disallowingToken_requestedLinkStillCancelsAndReconciles() public {
+        (address viaCallback,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, viaCallback);
+        vm.prank(owner);
+        plm.setTokenAllowed(address(usdc), false);
+
+        address[] memory tokens = new address[](1);
+        tokens[0] = address(usdc);
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 1e6;
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+        assertEq(uint8(_status(viaCallback)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+        _cancelWithdrawal(tokens, amounts, withdrawRecipient);
+
+        vm.prank(owner);
+        plm.setTokenAllowed(address(usdc), true);
+        (address viaReconcile,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, viaReconcile);
+        vm.prank(owner);
+        plm.setTokenAllowed(address(usdc), false);
+        _setCanRequestWithdraw(false);
+        _requestWithdrawal(tokens, amounts, withdrawRecipient);
+        plm.reconcile(address(safe));
+        assertEq(uint8(_status(viaReconcile)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
+        _cancelWithdrawal(tokens, amounts, withdrawRecipient);
+
+        _setCanRequestWithdraw(true);
+        vm.prank(owner);
+        plm.setTokenAllowed(address(usdc), true);
+        (address viaCancel,) = _newLinkKey();
+        _request(address(usdc), AMOUNT, viaCancel);
+        vm.prank(owner);
+        plm.setTokenAllowed(address(usdc), false);
+        _cancel(viaCancel);
+        assertEq(uint8(_status(viaCancel)), uint8(IPaymentLinkModule.LinkStatus.Cancelled));
+        assertEq(_pendingTokensLength(), 0);
     }
 
     // ---- fundLink ----

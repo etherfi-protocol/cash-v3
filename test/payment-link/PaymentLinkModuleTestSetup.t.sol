@@ -72,6 +72,12 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         dataProvider.configureModules(mods, yes);
         cashModule.configureModulesCanRequestWithdraw(mods, yes);
         cashModule.configureWithdrawAssets(assets, yesAll);
+        // Every token the suites escrow is allowlisted, the misbehaving mocks included, so their
+        // failure modes are exercised past the allowlist (PLM-02 is tested on its own).
+        plm.setTokenAllowed(address(usdc), true);
+        for (uint256 i = 0; i < assets.length; i++) {
+            plm.setTokenAllowed(assets[i], true);
+        }
         vm.stopPrank();
         _setWithdrawalDelay(WITHDRAWAL_DELAY);
 
