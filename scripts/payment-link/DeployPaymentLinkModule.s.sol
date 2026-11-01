@@ -19,12 +19,16 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *         - ENV=dev:      the broadcaster holds every role on the dev RoleRegistry, so the script
  *                         also wires the module into the DEV stack only: whitelisted (not default)
  *                         on the dev DataProvider, allowed to request withdrawals on the dev
- *                         CashModule, and the launch fee with the broadcaster as receiver.
+ *                         CashModule, the launch fee with the broadcaster as receiver, and USDC
+ *                         on the token allowlist.
  *         - ENV=mainnet:  only the unprivileged CREATE3 deploys. Enabling is the 3CP built by
  *                         scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol.
  *
- *         Idempotent: existing CREATE3 deployments are reused and dev wiring that is already in
- *         place is skipped, so a re-run changes nothing.
+ *         Code at the pinned addresses (PLM-04): a CREATE3 address does not commit to bytecode.
+ *         On mainnet the script refuses to run if either address already has code, instead of
+ *         reusing it. On dev existing deployments are reused and wiring already in place is
+ *         skipped, so a re-run changes nothing. In both envs the script then rebuilds the impl
+ *         and proxy locally and requires the deployed runtime code to match.
  *
  * Addresses (DataProvider, RoleRegistry, CashModule) come from deployments/{ENV}/10/deployments.json.
  *
@@ -77,10 +81,15 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
         return vm.envUint("PRIVATE_KEY");
     }
 
-    /// @dev Pre-broadcast guards: pinned salts and a self-consistent stack for this ENV.
+    /// @dev Pre-broadcast guards: pinned salts, a self-consistent stack for this ENV and, on
+    ///      mainnet, nothing already deployed at the pinned addresses.
     function _preflight() internal view {
         _assertPinnedAddresses();
         _assertStack(stack);
+        if (!_isDev()) {
+            require(_expectedImpl().code.length == 0, "mainnet: code already exists at the pinned impl address - refusing to reuse it");
+            require(_expectedProxy().code.length == 0, "mainnet: code already exists at the pinned proxy address - refusing to reuse it");
+        }
     }
 
     /// @dev CREATE3 deploys: impl (immutable dataProvider + cashModule), then the UUPS proxy with
@@ -91,7 +100,7 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
         proxy = _create3(_moduleProxySalt(), type(UUPSProxy).creationCode, abi.encode(impl, initData));
     }
 
-    /// @dev DEV ONLY: the three enable calls, each skipped when already applied. On prod these
+    /// @dev DEV ONLY: the four enable calls, each skipped when already applied. On prod these
     ///      ship as the timelocked 3CP, because they need ADMIN_TIMELOCK_ROLE.
     function _wireDev(address devAdmin) internal {
         address[] memory modules = new address[](1);
@@ -104,14 +113,17 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
 
         (uint16 feeBps, address feeReceiver) = PaymentLinkModule(proxy).getFee();
         if (feeBps != LAUNCH_FEE_BPS || feeReceiver != devAdmin) PaymentLinkModule(proxy).setFee(LAUNCH_FEE_BPS, devAdmin);
+
+        if (!PaymentLinkModule(proxy).isTokenAllowed(LAUNCH_TOKEN_USDC)) PaymentLinkModule(proxy).setTokenAllowed(LAUNCH_TOKEN_USDC, true);
     }
 
-    /// @dev The deployment landed where expected and the proxy is ours.
-    function _postflight(address devAdmin) internal view {
+    /// @dev The deployment landed where expected, runs this commit's code, and the proxy is ours.
+    function _postflight(address devAdmin) internal {
         require(impl == _expectedImpl(), "impl did not land at the pinned address");
         require(proxy == _expectedProxy(), "proxy did not land at the pinned address");
         require(_implOf(proxy) == impl, "proxy impl slot != deployed impl");
         require(_registryOf(proxy) == address(stack.roleRegistry), "proxy roleRegistry != stack RoleRegistry - possible hijack");
+        _requireBuiltCode(stack, impl, proxy);
 
         PaymentLinkModule module = PaymentLinkModule(proxy);
         require(address(module.etherFiDataProvider()) == address(stack.dataProvider), "module DataProvider mismatch");
@@ -123,6 +135,7 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
             require(_canRequestWithdraw(stack.cashModule, proxy), "dev: module cannot request withdrawals");
             (uint16 feeBps, address feeReceiver) = module.getFee();
             require(feeBps == LAUNCH_FEE_BPS && feeReceiver == devAdmin, "dev: fee not set");
+            require(module.isTokenAllowed(LAUNCH_TOKEN_USDC), "dev: USDC not allowed");
         }
     }
 }

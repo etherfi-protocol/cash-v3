@@ -9,7 +9,6 @@ import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
 import { EtherFiTimelock } from "../../src/timelock/EtherFiTimelock.sol";
 import { PaymentLinkConfig } from "../payment-link/PaymentLinkConfig.sol";
-import { ContractCodeChecker } from "../utils/ContractCodeChecker.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 
 /**
@@ -18,7 +17,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  * @notice Builds the Safe bundles that turn the deployed prod PaymentLinkModule on, then
  *         simulates them on the current fork and asserts the end state. Nothing is broadcast.
  *
- *         All three calls are gated by ADMIN_TIMELOCK_ROLE, which on Optimism is held ONLY by
+ *         All four calls are gated by ADMIN_TIMELOCK_ROLE, which on Optimism is held ONLY by
  *         the 8h operating timelock (the Safe does not hold it), so they ship as one timelock
  *         batch in two Safe bundles:
  *
@@ -28,13 +27,18 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *           EtherFiDataProvider.configureModules([module], [true])           whitelist only, NOT default
  *           CashModule.configureModulesCanRequestWithdraw([module], [true])  needs the whitelist first
  *           PaymentLinkModule.setFee(LAUNCH_FEE_BPS, PROD_FEE_RECEIVER)
+ *           PaymentLinkModule.setTokenAllowed(USDC, true)                      the only launch token
  *
  *         Whitelist-only (spec §2 DEFAULT): the module is never enabled on safes, so it has no
  *         `execTransactionFromModule` authority; it only receives CashModule withdrawals.
  *
  *         Going live is safe without an admin-role grant: `pause()` is PAUSER-gated and the Safe
- *         holds PAUSER/UNPAUSER (asserted and exercised below), and `cancel` stays open while
- *         paused, so senders can always recover funds.
+ *         holds PAUSER/UNPAUSER (asserted and exercised below), and `cancel` stays callable
+ *         while paused.
+ *
+ *         Bytecode (PLM-04): a CREATE3 address does not commit to bytecode, so the bundles are
+ *         only written after the impl matches a local build (allowing its embedded own address)
+ *         and the proxy matches a local `UUPSProxy` build exactly.
  *
  * Prerequisite: the prod module is deployed (DeployPaymentLinkModule.s.sol, ENV=mainnet) and
  * VerifyPaymentLinkModule passes with PAYMENT_LINK_VERIFY_DEPLOY_ONLY=true. If
@@ -46,7 +50,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *   (--sender: the default script sender cannot `new` on this fork; nothing is sent. --no-isolate:
  *   the simulation pranks the Safe, which forge 1.8 rejects as an isolated top-level sender.)
  */
-contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers, ContractCodeChecker {
+contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
     using stdJson for string;
 
     bytes32 internal constant TL_PREDECESSOR = bytes32(0);
@@ -107,13 +111,14 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers, Contr
         require(_registryOf(address(module)) == address(s.roleRegistry), "proxy roleRegistry != prod RoleRegistry - possible hijack");
         require(address(module.etherFiDataProvider()) == address(s.dataProvider), "module bound to a different DataProvider");
         require(address(module.cashModule()) == address(s.cashModule), "module bound to a different CashModule");
-        requireCodeMatchAllowingAddressEmbeds("PaymentLinkModuleImpl", impl, address(new PaymentLinkModule(address(s.dataProvider), address(s.cashModule))));
+        _requireBuiltCode(s, impl, address(module));
 
         // Deploy-time state, so the bundle is not already applied (idempotence).
         (uint16 feeBps, address feeReceiver) = module.getFee();
         require(feeBps == DEPLOY_FEE_BPS && feeReceiver == DEPLOY_FEE_RECEIVER, "module fee already configured - enable already done?");
         require(!s.dataProvider.isWhitelistedModule(address(module)), "module already whitelisted - enable already done?");
         require(!_canRequestWithdraw(s.cashModule, address(module)), "module already allowed to request withdrawals");
+        require(!module.isTokenAllowed(LAUNCH_TOKEN_USDC), "USDC already allowed - enable already done?");
         require(!module.paused(), "module is paused");
 
         // Launch config is valid for setFee.
@@ -149,6 +154,8 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers, Contr
         payloads.push(abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (modules, enable)));
         targets.push(address(module));
         payloads.push(abi.encodeCall(PaymentLinkModule.setFee, (LAUNCH_FEE_BPS, PROD_FEE_RECEIVER)));
+        targets.push(address(module));
+        payloads.push(abi.encodeCall(PaymentLinkModule.setTokenAllowed, (LAUNCH_TOKEN_USDC, true)));
 
         require(!_isOperation(), "enable batch already scheduled");
     }
@@ -196,6 +203,7 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers, Contr
         require(_canRequestWithdraw(s.cashModule, address(module)), "SIM FAILED: module cannot request withdrawals");
         (uint16 feeBps, address feeReceiver) = module.getFee();
         require(feeBps == LAUNCH_FEE_BPS && feeReceiver == PROD_FEE_RECEIVER, "SIM FAILED: fee not set");
+        require(module.isTokenAllowed(LAUNCH_TOKEN_USDC), "SIM FAILED: USDC not allowed");
 
         // The emergency stop must actually work on the now-live module, not merely be role-held.
         vm.prank(PROD_SAFE);
@@ -217,6 +225,7 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers, Contr
         console.log("       can request withdrawals on CashModule");
         console.log("       fee bps:", feeBps);
         console.log("       fee receiver:", feeReceiver);
+        console.log("       allowed token (USDC):", LAUNCH_TOKEN_USDC);
         console.log("  [OK] pause/unpause verified; RoleRegistry owner unchanged");
         console.log("EnablePaymentLinkModuleOP3CP simulation passed. Run VerifyPaymentLinkModule.s.sol after execution.");
     }

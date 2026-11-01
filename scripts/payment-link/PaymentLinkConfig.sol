@@ -3,9 +3,12 @@ pragma solidity ^0.8.28;
 
 import { stdJson } from "forge-std/StdJson.sol";
 
+import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
+import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
+import { ContractCodeChecker } from "../utils/ContractCodeChecker.sol";
 import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
 
 /**
@@ -18,7 +21,7 @@ import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
  * @dev The dev instance is a separate deployment on Optimism mainnet that registers only with
  *      the dev cash-v3 stack (deployments/dev/10). There are no testnet or fork environments.
  */
-abstract contract PaymentLinkConfig is EtherFiDeployerHelper {
+abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecker {
     using stdJson for string;
 
     // ---- CREATE3 salts (env-prefixed) ----
@@ -65,6 +68,12 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper {
     uint16 internal constant LAUNCH_FEE_BPS = 30;
     /// @notice Prod fee receiver. DEFAULT pending PAY-1169: the prod Safe, as for StockWithdrawModule.
     address internal constant PROD_FEE_RECEIVER = PROD_SAFE;
+
+    // ---- Token allowlist ----
+
+    /// @notice USDC (Optimism), the only launch token. Further tokens are allowed later through
+    ///         another timelocked `setTokenAllowed`, and only if they transfer exact amounts.
+    address internal constant LAUNCH_TOKEN_USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
 
     // ---- Storage slots read by the verifiers ----
 
@@ -155,6 +164,20 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper {
             require(address(s.cashModule) != address(prod.cashModule), "dev stack resolves to the prod CashModule");
             require(address(s.roleRegistry) != address(prod.roleRegistry), "dev stack resolves to the prod RoleRegistry");
         }
+    }
+
+    /**
+     * @dev PLM-04: the code at the pinned addresses must be exactly what this commit builds. A
+     *      CREATE3 address does not commit to bytecode, so the slot and getter checks alone would
+     *      accept a proxy that keeps the right slots but adds functions. Rebuilds both locally with
+     *      the stack's constructor arguments: the impl may differ only in its embedded own address
+     *      (UUPS `__self`); the proxy must match exactly and point at that impl.
+     */
+    function _requireBuiltCode(Stack memory s, address impl, address proxy) internal {
+        address localImpl = address(new PaymentLinkModule(address(s.dataProvider), address(s.cashModule)));
+        requireCodeMatchAllowingAddressEmbeds("PaymentLinkModuleImpl", impl, localImpl);
+        requireExactCodeMatch("PaymentLinkModuleProxy", proxy, address(new UUPSProxy(localImpl, "")));
+        require(_implOf(proxy) == impl, "PaymentLinkModule: proxy impl slot does not point at the verified impl - possible hijack");
     }
 
     function _implOf(address proxy) internal view returns (address) {

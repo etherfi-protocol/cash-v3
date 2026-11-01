@@ -6,6 +6,9 @@ import { Test } from "forge-std/Test.sol";
 import { Vm } from "forge-std/Vm.sol";
 import { CREATE3 } from "solady/utils/CREATE3.sol";
 
+import { IERC20 } from "@openzeppelin/contracts/interfaces/IERC20.sol";
+
+import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { EtherFiDataProvider } from "../../src/data-provider/EtherFiDataProvider.sol";
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
@@ -77,6 +80,24 @@ contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
     function _env() internal pure override returns (string memory) {
         return "mainnet";
     }
+
+    /// @dev Runs only the preconditions (the gate before any bundle is written).
+    function checkPreconditions() external {
+        _load();
+        _checkPreconditions();
+    }
+}
+
+/// @dev PLM-04 attack shape: an ERC-1967 proxy with the genuine impl in its slot, so every slot
+///      and getter check passes, plus one extra function that only a bytecode check can see.
+contract ProxyWithBackdoor is UUPSProxy {
+    constructor(address impl) UUPSProxy(impl, "") { }
+
+    receive() external payable { }
+
+    function sweep(address token, address to) external {
+        IERC20(token).transfer(to, IERC20(token).balanceOf(address(this)));
+    }
 }
 
 /**
@@ -98,6 +119,7 @@ contract PaymentLinkScriptsTest is Test {
     address internal constant DEV_PROXY = 0x1bfCca1f03252D6734dCaB45F37AE3f81f6E0781;
     address internal constant DEV_IMPL = 0x0393014ce03Fe8F0EfeF0817D7c439474ff748dD;
     address internal constant PROD_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address internal constant USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
     bytes32 internal constant EIP1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes32 internal constant UPGRADEABLE_PROXY_STORAGE_SLOT = 0xa5586bb7fe6c4d1a576fc53fefe6d5915940638d338769f6905020734977f500;
 
@@ -171,10 +193,11 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(feeBps, 30);
         assertEq(feeReceiver, PROD_SAFE);
 
-        // 5. Re-running is safe: the deploy changes nothing and the 3CP refuses to rebuild.
-        vm.recordLogs();
-        new DeployHarness("mainnet", deployerPk).run();
-        _assertNoDeploys(vm.getRecordedLogs());
+        // 5. Re-running is refused: mainnet never reuses code at the pinned addresses (PLM-04),
+        //    and the 3CP refuses to rebuild an applied bundle.
+        DeployHarness redeploy = new DeployHarness("mainnet", deployerPk);
+        vm.expectRevert(bytes("mainnet: code already exists at the pinned impl address - refusing to reuse it"));
+        redeploy.run();
         Enable3CPHarness again = new Enable3CPHarness();
         vm.expectRevert(bytes("module fee already configured - enable already done?"));
         again.run();
@@ -197,6 +220,7 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(feeBps, 30);
         assertEq(feeReceiver, deployerAddr);
         assertEq(address(PaymentLinkModule(DEV_PROXY).cashModule()), address(devCashModule));
+        assertTrue(PaymentLinkModule(DEV_PROXY).isTokenAllowed(USDC), "dev deploy allows USDC");
 
         // Production cannot see the dev instance.
         assertFalse(prodDataProvider.isWhitelistedModule(DEV_PROXY));
@@ -235,6 +259,49 @@ contract PaymentLinkScriptsTest is Test {
         verifier.run();
     }
 
+    function test_deploy_mainnetRefusesExistingCodeAtPinnedAddresses() public {
+        // Code at the impl address only (for example an earlier deploy from other code).
+        uint256 snap = vm.snapshotState();
+        vm.etch(PROD_IMPL, hex"00");
+        DeployHarness script = new DeployHarness("mainnet", deployerPk);
+        vm.expectRevert(bytes("mainnet: code already exists at the pinned impl address - refusing to reuse it"));
+        script.run();
+        vm.revertToState(snap);
+
+        // Code at the proxy address only.
+        vm.etch(PROD_PROXY, hex"00");
+        script = new DeployHarness("mainnet", deployerPk);
+        vm.expectRevert(bytes("mainnet: code already exists at the pinned proxy address - refusing to reuse it"));
+        script.run();
+    }
+
+    /// @dev PLM-04: a proxy that keeps the right slots and getters but adds a function must not
+    ///      get an enable bundle.
+    function test_enable3CP_rejectsProxyWhoseCodeDiffers() public {
+        new DeployHarness("mainnet", deployerPk).run();
+        Enable3CPHarness gen = new Enable3CPHarness();
+        gen.checkPreconditions(); // control: the genuine proxy passes
+
+        vm.etch(PROD_PROXY, address(new ProxyWithBackdoor(PROD_IMPL)).code);
+        // The swap is invisible to the slot and getter checks...
+        assertEq(address(uint160(uint256(vm.load(PROD_PROXY, EIP1967_IMPL_SLOT)))), PROD_IMPL);
+        assertEq(address(uint160(uint256(vm.load(PROD_PROXY, UPGRADEABLE_PROXY_STORAGE_SLOT)))), address(prodRoleRegistry));
+        assertEq(address(PaymentLinkModule(PROD_PROXY).cashModule()), address(prodCashModule));
+        (uint16 feeBps, address feeReceiver) = PaymentLinkModule(PROD_PROXY).getFee();
+        assertEq(feeBps, 0);
+        assertEq(feeReceiver, address(0));
+
+        // ...but not to the exact proxy bytecode comparison.
+        gen = new Enable3CPHarness();
+        vm.expectRevert();
+        gen.checkPreconditions();
+
+        // The standalone bytecode verifier rejects it the same way.
+        BytecodeHarness verifier = new BytecodeHarness("mainnet");
+        vm.expectRevert();
+        verifier.run();
+    }
+
     function test_enable3CP_refusesWithoutDeployment() public {
         Enable3CPHarness gen = new Enable3CPHarness();
         vm.expectRevert(bytes("PaymentLinkModule proxy has no code - deploy it first"));
@@ -265,11 +332,12 @@ contract PaymentLinkScriptsTest is Test {
             args[i] = data[i + 4];
         }
         (address[] memory targets, uint256[] memory values, bytes[] memory payloads) = abi.decode(args, (address[], uint256[], bytes[]));
-        assertEq(targets.length, 3);
+        assertEq(targets.length, 4);
         assertEq(targets[0], address(prodDataProvider));
         assertEq(targets[1], address(prodCashModule));
         assertEq(targets[2], PROD_PROXY);
-        for (uint256 i = 0; i < 3; i++) {
+        assertEq(targets[3], PROD_PROXY);
+        for (uint256 i = 0; i < 4; i++) {
             assertEq(values[i], 0);
         }
         address[] memory modules = new address[](1);
@@ -279,6 +347,7 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(payloads[0], abi.encodeCall(EtherFiDataProvider.configureModules, (modules, enable)));
         assertEq(payloads[1], abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (modules, enable)));
         assertEq(payloads[2], abi.encodeCall(PaymentLinkModule.setFee, (30, PROD_SAFE)));
+        assertEq(payloads[3], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (USDC, true)));
     }
 
     function _assertNoDeploys(Vm.Log[] memory logs) internal pure {

@@ -3,9 +3,6 @@ pragma solidity ^0.8.28;
 
 import { console } from "forge-std/console.sol";
 
-import { UUPSProxy } from "../../src/UUPSProxy.sol";
-import { PaymentLinkModule } from "../../src/payment-link/PaymentLinkModule.sol";
-import { ContractCodeChecker } from "../utils/ContractCodeChecker.sol";
 import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
 
 /**
@@ -25,7 +22,7 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *
  * Run: forge script scripts/payment-link/VerifyPaymentLinkBytecode.s.sol --rpc-url $OPTIMISM_RPC -vv
  */
-contract VerifyPaymentLinkBytecode is PaymentLinkConfig, ContractCodeChecker {
+contract VerifyPaymentLinkBytecode is PaymentLinkConfig {
     function run() public {
         require(block.chainid == OPTIMISM_CHAIN_ID, "This script must be run on Optimism (chain ID 10)");
         Stack memory s = _currentStack();
@@ -36,11 +33,7 @@ contract VerifyPaymentLinkBytecode is PaymentLinkConfig, ContractCodeChecker {
         console.log("  PaymentLinkModule impl: ", impl);
         console.log("  PaymentLinkModule proxy:", proxy);
 
-        address localImpl = address(new PaymentLinkModule(address(s.dataProvider), address(s.cashModule)));
-        requireCodeMatchAllowingAddressEmbeds("PaymentLinkModuleImpl", impl, localImpl);
-        requireExactCodeMatch("PaymentLinkModuleProxy", proxy, address(new UUPSProxy(localImpl, "")));
-
-        require(_implOf(proxy) == impl, "PaymentLinkModule: proxy impl slot does not point at the verified impl - possible hijack");
+        _requireBuiltCode(s, impl, proxy);
         console.log("  [OK] proxy impl slot -> verified impl");
         console.log("");
         console.log("VerifyPaymentLinkBytecode: all bytecode checks passed");

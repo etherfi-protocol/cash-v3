@@ -18,7 +18,7 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *         immutables (DataProvider, CashModule) and their cross-references, the EIP-712 domain,
  *         and the RoleRegistry owner (the 2-day upgrade timelock on prod). Then the wiring:
  *         - default (after enable): whitelisted on the DataProvider but NOT a default module,
- *           allowed to request withdrawals on the CashModule, launch fee set.
+ *           allowed to request withdrawals on the CashModule, launch fee set, USDC allowed.
  *         - PAYMENT_LINK_VERIFY_DEPLOY_ONLY=true (between deploy and the enable 3CP): fee off and
  *           not yet registered anywhere.
  *         On dev it also reads the PROD DataProvider and CashModule and requires that the dev
@@ -99,6 +99,8 @@ contract VerifyPaymentLinkModule is PaymentLinkConfig {
         require(feeBps == LAUNCH_FEE_BPS, "fee mismatch");
         address expectedReceiver = _isDev() ? _devFeeReceiver(s) : PROD_FEE_RECEIVER;
         require(feeReceiver == expectedReceiver, "fee receiver mismatch");
+
+        require(PaymentLinkModule(proxy).isTokenAllowed(LAUNCH_TOKEN_USDC), "USDC not on the token allowlist");
     }
 
     function _verifyNotYetEnabled(Stack memory s, address proxy) internal view {
@@ -106,6 +108,7 @@ contract VerifyPaymentLinkModule is PaymentLinkConfig {
         require(feeBps == DEPLOY_FEE_BPS && feeReceiver == DEPLOY_FEE_RECEIVER, "deploy-time fee config mismatch");
         require(!s.dataProvider.isWhitelistedModule(proxy), "module already whitelisted");
         require(!_canRequestWithdraw(s.cashModule, proxy), "module already allowed to request withdrawals");
+        require(!PaymentLinkModule(proxy).isTokenAllowed(LAUNCH_TOKEN_USDC), "USDC already on the token allowlist");
     }
 
     /// @dev The dev instance must be invisible to the prod stack.
