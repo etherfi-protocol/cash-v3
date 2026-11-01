@@ -194,6 +194,8 @@ contract PaymentLinkScriptsTest is Test {
     address internal constant DEV_IMPL = 0x0393014ce03Fe8F0EfeF0817D7c439474ff748dD;
     address internal constant PROD_SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
     address internal constant USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+    address internal constant EURC = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
+    address internal constant USDT0 = 0x01bFF41798a0BcF287b996046Ca68b395DbC1071;
     /// @dev A real EtherFiDeployer.deploy tx on Optimism (wspyx price feeds, recorded in
     ///      broadcast/DeployWspyxPaxgProdFeeds.s.sol) and its finalized, canonical block.
     bytes32 internal constant REAL_DEPLOY_TX = 0x4c0685a2f0eca4c8da73e2de9fac18691be90cd7a1bf543aaa7fd1b19a3b8bfe;
@@ -304,6 +306,8 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(feeReceiver, deployerAddr);
         assertEq(address(PaymentLinkModule(DEV_PROXY).cashModule()), address(devCashModule));
         assertTrue(PaymentLinkModule(DEV_PROXY).isTokenAllowed(USDC), "dev deploy allows USDC");
+        assertTrue(PaymentLinkModule(DEV_PROXY).isTokenAllowed(EURC), "dev deploy allows EURC");
+        assertTrue(PaymentLinkModule(DEV_PROXY).isTokenAllowed(USDT0), "dev deploy allows USDT0");
 
         // Production cannot see the dev instance.
         assertFalse(prodDataProvider.isWhitelistedModule(DEV_PROXY));
@@ -648,12 +652,13 @@ contract PaymentLinkScriptsTest is Test {
             args[i] = data[i + 4];
         }
         (address[] memory targets, uint256[] memory values, bytes[] memory payloads) = abi.decode(args, (address[], uint256[], bytes[]));
-        assertEq(targets.length, 4);
+        assertEq(targets.length, 6);
         assertEq(targets[0], address(prodDataProvider));
         assertEq(targets[1], address(prodCashModule));
-        assertEq(targets[2], PROD_PROXY);
-        assertEq(targets[3], PROD_PROXY);
-        for (uint256 i = 0; i < 4; i++) {
+        for (uint256 i = 2; i < 6; i++) {
+            assertEq(targets[i], PROD_PROXY);
+        }
+        for (uint256 i = 0; i < 6; i++) {
             assertEq(values[i], 0);
         }
         address[] memory modules = new address[](1);
@@ -664,6 +669,8 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(payloads[1], abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (modules, enable)));
         assertEq(payloads[2], abi.encodeCall(PaymentLinkModule.setFee, (30, PROD_SAFE)));
         assertEq(payloads[3], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (USDC, true)));
+        assertEq(payloads[4], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (EURC, true)));
+        assertEq(payloads[5], abi.encodeCall(PaymentLinkModule.setTokenAllowed, (USDT0, true)));
     }
 
     function _assertNoDeploys(Vm.Log[] memory logs) internal pure {

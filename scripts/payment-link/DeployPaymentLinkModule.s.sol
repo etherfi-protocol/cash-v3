@@ -19,8 +19,8 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *         - ENV=dev:      the broadcaster holds every role on the dev RoleRegistry, so the script
  *                         also wires the module into the DEV stack only: whitelisted (not default)
  *                         on the dev DataProvider, allowed to request withdrawals on the dev
- *                         CashModule, the launch fee with the broadcaster as receiver, and USDC
- *                         on the token allowlist.
+ *                         CashModule, the launch fee with the broadcaster as receiver, and the
+ *                         launch tokens (USDC, EURC, USDT0) on the token allowlist.
  *         - ENV=mainnet:  only the unprivileged CREATE3 deploys. Enabling is the 3CP built by
  *                         scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol.
  *
@@ -115,7 +115,10 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
         (uint16 feeBps, address feeReceiver) = PaymentLinkModule(proxy).getFee();
         if (feeBps != LAUNCH_FEE_BPS || feeReceiver != devAdmin) PaymentLinkModule(proxy).setFee(LAUNCH_FEE_BPS, devAdmin);
 
-        if (!PaymentLinkModule(proxy).isTokenAllowed(LAUNCH_TOKEN_USDC)) PaymentLinkModule(proxy).setTokenAllowed(LAUNCH_TOKEN_USDC, true);
+        address[] memory tokens = _launchTokens();
+        for (uint256 i = 0; i < tokens.length; i++) {
+            if (!PaymentLinkModule(proxy).isTokenAllowed(tokens[i])) PaymentLinkModule(proxy).setTokenAllowed(tokens[i], true);
+        }
     }
 
     /// @dev The deployment landed where expected, runs this commit's code, and the proxy is ours.
@@ -136,7 +139,10 @@ contract DeployPaymentLinkModule is PaymentLinkConfig {
             require(_canRequestWithdraw(stack.cashModule, proxy), "dev: module cannot request withdrawals");
             (uint16 feeBps, address feeReceiver) = module.getFee();
             require(feeBps == LAUNCH_FEE_BPS && feeReceiver == devAdmin, "dev: fee not set");
-            require(module.isTokenAllowed(LAUNCH_TOKEN_USDC), "dev: USDC not allowed");
+            address[] memory tokens = _launchTokens();
+            for (uint256 i = 0; i < tokens.length; i++) {
+                require(module.isTokenAllowed(tokens[i]), "dev: a launch token is not allowed");
+            }
         }
     }
 }

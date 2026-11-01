@@ -74,9 +74,25 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
 
     // ---- Token allowlist ----
 
-    /// @notice USDC (Optimism), the only launch token. Further tokens are allowed later through
-    ///         another timelocked `setTokenAllowed`, and only if they transfer exact amounts.
+    // Launch tokens (Optimism, 6 decimals each, all on CashModule's withdraw-asset list). Each
+    // must move exact amounts in and out of the module; test/payment-link/PaymentLinkLaunchTokens.t.sol
+    // round-trips every one against the real token contract on a fork. Further tokens are
+    // allowed later through another timelocked `setTokenAllowed`, under the same condition.
+
+    /// @notice USDC (native, Circle).
     address internal constant LAUNCH_TOKEN_USDC = 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85;
+    /// @notice EURC (Circle).
+    address internal constant LAUNCH_TOKEN_EURC = 0xDCB612005417Dc906fF72c87DF732e5a90D49e11;
+    /// @notice USDT0 (symbol "USD₮0"), not the legacy bridged USDT.
+    address internal constant LAUNCH_TOKEN_USDT0 = 0x01bFF41798a0BcF287b996046Ca68b395DbC1071;
+
+    /// @dev The launch tokens, in the order the enable batch allows them.
+    function _launchTokens() internal pure returns (address[] memory tokens) {
+        tokens = new address[](3);
+        tokens[0] = LAUNCH_TOKEN_USDC;
+        tokens[1] = LAUNCH_TOKEN_EURC;
+        tokens[2] = LAUNCH_TOKEN_USDT0;
+    }
 
     // ---- Storage slots read by the verifiers ----
 

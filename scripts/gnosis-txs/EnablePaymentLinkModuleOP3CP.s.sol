@@ -17,7 +17,7 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  * @notice Builds the Safe bundles that turn the deployed prod PaymentLinkModule on, then
  *         simulates them on the current fork and asserts the end state. Nothing is broadcast.
  *
- *         All four calls are gated by ADMIN_TIMELOCK_ROLE, which on Optimism is held ONLY by
+ *         All six calls are gated by ADMIN_TIMELOCK_ROLE, which on Optimism is held ONLY by
  *         the 8h operating timelock (the Safe does not hold it), so they ship as one timelock
  *         batch in two Safe bundles:
  *
@@ -27,7 +27,9 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *           EtherFiDataProvider.configureModules([module], [true])           whitelist only, NOT default
  *           CashModule.configureModulesCanRequestWithdraw([module], [true])  needs the whitelist first
  *           PaymentLinkModule.setFee(LAUNCH_FEE_BPS, PROD_FEE_RECEIVER)
- *           PaymentLinkModule.setTokenAllowed(USDC, true)                      the only launch token
+ *           PaymentLinkModule.setTokenAllowed(USDC, true)                      launch tokens, one call each
+ *           PaymentLinkModule.setTokenAllowed(EURC, true)
+ *           PaymentLinkModule.setTokenAllowed(USDT0, true)
  *
  *         Whitelist-only: the module is never enabled on safes, so it has no
  *         `execTransactionFromModule` authority; it only receives CashModule withdrawals.
@@ -137,7 +139,10 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         require(feeBps == DEPLOY_FEE_BPS && feeReceiver == DEPLOY_FEE_RECEIVER, "module fee already configured - enable already done?");
         require(!s.dataProvider.isWhitelistedModule(address(module)), "module already whitelisted - enable already done?");
         require(!_canRequestWithdraw(s.cashModule, address(module)), "module already allowed to request withdrawals");
-        require(!module.isTokenAllowed(LAUNCH_TOKEN_USDC), "USDC already allowed - enable already done?");
+        address[] memory launchTokens = _launchTokens();
+        for (uint256 i = 0; i < launchTokens.length; i++) {
+            require(!module.isTokenAllowed(launchTokens[i]), "a launch token is already allowed - enable already done?");
+        }
         require(!module.paused(), "module is paused");
 
         // Launch config is valid for setFee.
@@ -173,8 +178,11 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         payloads.push(abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (modules, enable)));
         targets.push(address(module));
         payloads.push(abi.encodeCall(PaymentLinkModule.setFee, (LAUNCH_FEE_BPS, PROD_FEE_RECEIVER)));
-        targets.push(address(module));
-        payloads.push(abi.encodeCall(PaymentLinkModule.setTokenAllowed, (LAUNCH_TOKEN_USDC, true)));
+        address[] memory launchTokens = _launchTokens();
+        for (uint256 i = 0; i < launchTokens.length; i++) {
+            targets.push(address(module));
+            payloads.push(abi.encodeCall(PaymentLinkModule.setTokenAllowed, (launchTokens[i], true)));
+        }
 
         require(!_isOperation(), "enable batch already scheduled");
     }
@@ -222,7 +230,10 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         require(_canRequestWithdraw(s.cashModule, address(module)), "SIM FAILED: module cannot request withdrawals");
         (uint16 feeBps, address feeReceiver) = module.getFee();
         require(feeBps == LAUNCH_FEE_BPS && feeReceiver == PROD_FEE_RECEIVER, "SIM FAILED: fee not set");
-        require(module.isTokenAllowed(LAUNCH_TOKEN_USDC), "SIM FAILED: USDC not allowed");
+        address[] memory launchTokens = _launchTokens();
+        for (uint256 i = 0; i < launchTokens.length; i++) {
+            require(module.isTokenAllowed(launchTokens[i]), "SIM FAILED: a launch token is not allowed");
+        }
 
         // The emergency stop must actually work on the now-live module, not merely be role-held.
         vm.prank(PROD_SAFE);
@@ -244,7 +255,9 @@ contract EnablePaymentLinkModuleOP3CP is PaymentLinkConfig, GnosisHelpers {
         console.log("       can request withdrawals on CashModule");
         console.log("       fee bps:", feeBps);
         console.log("       fee receiver:", feeReceiver);
-        console.log("       allowed token (USDC):", LAUNCH_TOKEN_USDC);
+        console.log("       allowed tokens: USDC", LAUNCH_TOKEN_USDC);
+        console.log("                       EURC", LAUNCH_TOKEN_EURC);
+        console.log("                       USDT0", LAUNCH_TOKEN_USDT0);
         console.log("  [OK] pause/unpause verified; RoleRegistry owner unchanged");
         console.log("EnablePaymentLinkModuleOP3CP simulation passed. Run VerifyPaymentLinkModule.s.sol after execution.");
     }
