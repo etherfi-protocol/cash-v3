@@ -156,7 +156,7 @@ contract PaymentLinkDigestVectorsTest is Test {
     }
 
     /// @dev Reads the digests from the deployed module code and cross-checks each one against
-    ///      the spec formula rebuilt here, so the fixture is never a copy of one implementation.
+    ///      the encoding rebuilt here, so the fixture is never a copy of one implementation.
     function _compute(Vector memory v) internal returns (Computed memory c) {
         PaymentLinkModule module = PaymentLinkModule(v.module);
         c.linkSigner = vm.addr(v.linkSignerTestPrivateKey);
@@ -190,7 +190,7 @@ contract PaymentLinkDigestVectorsTest is Test {
     function _writeFixture(Vector[3] memory v) internal {
         string memory out = string.concat(
             "{\n",
-            '  "description": "PaymentLinkModule digest test vectors (payment-links build spec v1.2, section 2). Private keys here are TEST-ONLY values 1, 2 and 3. requestLinkDigest and cancelLinkDigest are the EIP-191 hashes checkSignatures verifies, i.e. personal_sign over the 32-byte *MessageHash. claimDigest is the EIP-712 hash the link key signs with a raw (no prefix) ECDSA signature, encoded r || s || v.",\n',
+            '  "description": "PaymentLinkModule digest test vectors for off-chain signers. Private keys here are TEST-ONLY values 1, 2 and 3. requestLinkDigest and cancelLinkDigest are the EIP-191 hashes checkSignatures verifies, i.e. personal_sign over the 32-byte *MessageHash. claimDigest is the EIP-712 hash the link key signs with a raw (no prefix) ECDSA signature, encoded r || s || v.",\n',
             '  "chainId": ',
             vm.toString(CHAIN_ID),
             ",\n",

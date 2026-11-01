@@ -383,7 +383,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         plm.requestLink(address(safe), address(unlisted), 1 ether, linkSigner, FEE_BPS, signers, sigs);
     }
 
-    // ---- token allowlist (PLM-02) ----
+    // ---- token allowlist ----
 
     function test_requestLink_revertsForTokenNotAllowed() public {
         PlainToken notAllowed = new PlainToken("Not allowed", "NA");
@@ -1086,7 +1086,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(uint8(_status(linkSigner)), uint8(IPaymentLinkModule.LinkStatus.RequestCancelled));
     }
 
-    // ---- governance de-whitelisting (Codex pass 1) and surplus rescue ----
+    // ---- governance de-whitelisting and surplus rescue ----
 
     /// @dev Removing the module from CashModule's requester list lets anyone process a live hold
     ///      into the module without `fundLink`. The funds land as surplus; reconcile marks the link
@@ -1117,7 +1117,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(usdc), address(plm)), 0);
     }
 
-    /// @dev Codex pass 2: rescue is bounded by surplus, so when the token is already in a
+    /// @dev Rescue is bounded by surplus, so when the token is already in a
     ///      shortfall a misprocessed hold first covers the deficit and the sender is only
     ///      partially made whole. Pins that behaviour; the full fix belongs in CashModule.
     function test_requesterDeWhitelisted_inShortfall_misprocessedFundsCoverDeficitFirst() public {
@@ -1435,7 +1435,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertLe(escrowAfterRebase, total);
     }
 
-    // ---- sender-taxed tokens (Bugbot: exits must not skim other links) ----
+    // ---- sender-taxed tokens (exits must not skim other links) ----
 
     /// @dev A token that charges the SENDER funds normally (the safe pays the tax), but any exit
     ///      would cost the module more than it pays out, taken from the other links' escrow.
@@ -1474,7 +1474,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(_bal(address(usdc), externalRecipient) + _bal(address(usdc), plFeeReceiver), AMOUNT);
     }
 
-    /// @dev Codex: the fee transfer (30 units, untaxed after rounding) succeeds and the payout
+    /// @dev The fee transfer (30 units, untaxed after rounding) succeeds and the payout
     ///      (9,970 units, taxed 99) fails. The whole claim reverts, including the fee transfer.
     function test_senderTaxedToken_feeSucceedsThenPayoutFails_claimFullyReverts() public {
         (address link, uint256 linkPk) = _fundedLink(address(taxedToken), 10_000);
@@ -1601,7 +1601,7 @@ contract PaymentLinkModuleTest is PaymentLinkModuleTestSetup {
         assertEq(receiver, plFeeReceiver);
     }
 
-    /// @dev Codex: upgrading from storage written before the allowlist existed. A pre-allowlist
+    /// @dev Upgrading from storage written before the allowlist existed. A pre-allowlist
     ///      impl never wrote `allowedTokens` (namespace slot + 4), so that state is emulated by
     ///      clearing the entry this fixture set; everything else was written by real lifecycle calls.
     function test_upgrade_fromPreAllowlistState_keepsLinksAndDeniesNewRequests() public {

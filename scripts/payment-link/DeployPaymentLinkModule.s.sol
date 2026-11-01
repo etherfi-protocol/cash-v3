@@ -24,7 +24,7 @@ import { PaymentLinkConfig } from "./PaymentLinkConfig.sol";
  *         - ENV=mainnet:  only the unprivileged CREATE3 deploys. Enabling is the 3CP built by
  *                         scripts/gnosis-txs/EnablePaymentLinkModuleOP3CP.s.sol.
  *
- *         Code at the pinned addresses (PLM-04): a CREATE3 address does not commit to bytecode.
+ *         Code at the pinned addresses: a CREATE3 address does not commit to bytecode.
  *         On mainnet the script refuses to run if either address already has code, instead of
  *         reusing it. On dev existing deployments are reused and wiring already in place is
  *         skipped, so a re-run changes nothing. In both envs the script then rebuilds the impl

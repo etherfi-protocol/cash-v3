@@ -114,7 +114,7 @@ contract Enable3CPHarness is EnablePaymentLinkModuleOP3CP {
     }
 }
 
-/// @dev Runs the shared PLM-04 check against any stack and any pair of addresses.
+/// @dev Runs the shared deployment check against any stack and any pair of addresses.
 contract BuiltCodeHarness is PaymentLinkConfig {
     function check(string memory env, address impl, address proxy) external {
         _requireBuiltCode(_stack(env), impl, proxy);
@@ -140,7 +140,7 @@ contract OtherChainProvenanceProbe is ProvenanceProbe {
     }
 }
 
-/// @dev Codex pass 2 attack: a custom constructor that leaves exactly the expected proxy runtime,
+/// @dev Attack: a custom constructor that leaves exactly the expected proxy runtime,
 ///      impl slot, RoleRegistry slot and Initializable state, but also seeds a Funded link with no
 ///      liability behind it. Runtime and slot checks cannot see it; only deployment provenance can.
 contract PoisonedProxy {
@@ -162,7 +162,7 @@ contract PoisonedProxy {
     }
 }
 
-/// @dev PLM-04 attack shape: an ERC-1967 proxy with the genuine impl in its slot, so every slot
+/// @dev Attack shape: an ERC-1967 proxy with the genuine impl in its slot, so every slot
 ///      and getter check passes, plus one extra function that only a bytecode check can see.
 contract ProxyWithBackdoor is UUPSProxy {
     constructor(address impl) UUPSProxy(impl, "") { }
@@ -176,7 +176,7 @@ contract ProxyWithBackdoor is UUPSProxy {
 
 /**
  * @title PaymentLinkScriptsTest
- * @notice Runs the PAY-1171 scripts end to end on an Optimism mainnet fork, without broadcasting
+ * @notice Runs the payment link deploy, verify and enable scripts end to end on an Optimism mainnet fork, without broadcasting
  *         anything: the prod deploy, the deploy-only verification, the bytecode check, the
  *         timelocked enable 3CP with its own simulation, the post-enable verification, the dev
  *         deploy with direct wiring to the DEV stack only, and re-runs that must change nothing.
@@ -276,7 +276,7 @@ contract PaymentLinkScriptsTest is Test {
         assertEq(feeBps, 30);
         assertEq(feeReceiver, PROD_SAFE);
 
-        // 5. Re-running is refused: mainnet never reuses code at the pinned addresses (PLM-04),
+        // 5. Re-running is refused: mainnet never reuses code at the pinned addresses,
         //    and the 3CP refuses to rebuild an applied bundle.
         DeployHarness redeploy = new DeployHarness("mainnet", deployerPk);
         vm.expectRevert(bytes("mainnet: code already exists at the pinned impl address - refusing to reuse it"));
@@ -358,7 +358,7 @@ contract PaymentLinkScriptsTest is Test {
         script.run();
     }
 
-    /// @dev PLM-04: a proxy that keeps the right slots and getters but adds a function must not
+    /// @dev A proxy that keeps the right slots and getters but adds a function must not
     ///      get an enable bundle.
     function test_enable3CP_rejectsProxyWhoseCodeDiffers() public {
         _deployProd();
@@ -385,7 +385,7 @@ contract PaymentLinkScriptsTest is Test {
         verifier.run();
     }
 
-    /// @dev Codex: the right runtime code is not enough; a proxy that never ran its initializer
+    /// @dev The right runtime code is not enough; a proxy that never ran its initializer
     ///      (or an impl whose initializers are not locked) could be initialized by anyone later.
     function test_enable3CP_rejectsUninitialisedProxyOrUnlockedImpl() public {
         _deployProd();
@@ -412,7 +412,7 @@ contract PaymentLinkScriptsTest is Test {
         gen.checkPreconditions();
     }
 
-    /// @dev Codex: an impl built against another stack must fail the prod check by its
+    /// @dev An impl built against another stack must fail the prod check by its
     ///      immutables, whatever the embedded-address code comparison would conclude.
     function test_builtCode_rejectsImplBoundToAnotherStack() public {
         vm.startPrank(devRoleRegistry.owner());
@@ -440,7 +440,7 @@ contract PaymentLinkScriptsTest is Test {
         script.run();
     }
 
-    // ---- deployment provenance (Codex pass 2) ----
+    // ---- deployment provenance ----
 
     function test_enable3CP_rejectsDeployTxThatIsNotTheExpectedCall() public {
         _deployProd();
@@ -464,14 +464,14 @@ contract PaymentLinkScriptsTest is Test {
         vm.expectRevert(bytes("proxy deploy tx is not the expected EtherFiDeployer.deploy call - proxy storage unverified"));
         gen.checkPreconditions();
 
-        // Codex pass 3/4: the exact expected call, but in a block that is not this chain's
+        // The exact expected call, but in a block that is not this chain's
         // canonical block at that height (another chain, a fork or a reorged-out branch).
         gen = new Enable3CPHarness(address(DEPLOYER), proxyDeployCall, true, keccak256("a block on another branch"), REAL_BLOCK_NUMBER);
         vm.expectRevert(bytes("proxy deploy tx's block is not canonical on the chain under review"));
         gen.checkPreconditions();
     }
 
-    /// @dev Codex passes 3 and 4: the deploy tx's block must be this chain's canonical,
+    /// @dev The deploy tx's block must be this chain's canonical,
     ///      finalized block at its height, older than the reviewed state, and the provenance RPC
     ///      must follow the chain under review.
     function test_provenance_requiresCanonicalFinalizedAncestorBlock() public {
@@ -498,7 +498,7 @@ contract PaymentLinkScriptsTest is Test {
         other.requireCanonical(REAL_BLOCK_HASH, REAL_BLOCK_NUMBER);
     }
 
-    /// @dev Codex pass 2 Blocking: the right runtime, slots and Initializable state with a seeded
+    /// @dev The right runtime, slots and Initializable state with a seeded
     ///      Funded link passes every runtime check; the provenance check rejects it.
     function test_enable3CP_rejectsPoisonedConstructorState() public {
         address attacker = makeAddr("seededLinkSigner");
@@ -518,7 +518,7 @@ contract PaymentLinkScriptsTest is Test {
         gen.checkPreconditions();
     }
 
-    /// @dev Codex pass 2: an impl whose embedded `__self` copies all equal the local reference's
+    /// @dev An impl whose embedded `__self` copies all equal the local reference's
     ///      address would byte-match the reference under an embed-tolerant comparison.
     function test_builtCode_rejectsImplWhoseSelfIsNotItsAddress() public {
         _deployProd();
@@ -549,7 +549,7 @@ contract PaymentLinkScriptsTest is Test {
         checker.check("mainnet", PROD_IMPL, PROD_PROXY);
     }
 
-    /// @dev Codex pass 5 Blocking: keep every `__self` copy correct except ONE, pointed at the
+    /// @dev Keep every `__self` copy correct except ONE, pointed at the
     ///      local reference's address (e.g. only the copy `_checkProxy` compares against, which
     ///      would brick upgrades while `proxiableUUID` still answers). Each copy is tried alone.
     function test_builtCode_rejectsImplWithAnySingleSelfCopyRedirected() public {

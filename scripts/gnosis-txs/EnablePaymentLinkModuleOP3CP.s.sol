@@ -29,26 +29,27 @@ import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
  *           PaymentLinkModule.setFee(LAUNCH_FEE_BPS, PROD_FEE_RECEIVER)
  *           PaymentLinkModule.setTokenAllowed(USDC, true)                      the only launch token
  *
- *         Whitelist-only (spec §2 DEFAULT): the module is never enabled on safes, so it has no
+ *         Whitelist-only: the module is never enabled on safes, so it has no
  *         `execTransactionFromModule` authority; it only receives CashModule withdrawals.
  *
  *         Going live is safe without an admin-role grant: `pause()` is PAUSER-gated and the Safe
  *         holds PAUSER/UNPAUSER (asserted and exercised below), and `cancel` stays callable
  *         while paused.
  *
- *         Bytecode (PLM-04): a CREATE3 address does not commit to bytecode or constructor state,
- *         so the bundles are only written after the impl's immutables are this stack's, the impl
- *         matches a local build (allowing its embedded own address), the proxy matches a local
- *         `UUPSProxy` build exactly, the impl's `proxiableUUID()` answers directly, the proxy is
- *         initialised exactly once, the impl's initializers are disabled, and the proxy's deploy
- *         transaction (PAYMENT_LINK_PROXY_DEPLOY_TX) is a successful direct
- *         `EtherFiDeployer.deploy` call with exactly the expected initcode, so no custom
- *         constructor can have seeded its storage.
+ *         Deployment checks: a CREATE3 address does not commit to bytecode or constructor state,
+ *         so the bundles are only written after: the impl's immutables are this stack's; the
+ *         impl matches a local build exactly once every copy of its embedded own address is
+ *         rebound; the proxy matches a local `UUPSProxy` build exactly; the impl's
+ *         `proxiableUUID()` answers directly; the proxy is initialised exactly once and the impl's
+ *         initializers are disabled; and the proxy's deploy transaction
+ *         (PAYMENT_LINK_PROXY_DEPLOY_TX) is a successful direct `EtherFiDeployer.deploy` call with
+ *         exactly the expected initcode, in a finalized canonical block, so no custom constructor
+ *         can have seeded its storage.
  *
- *         PLM-01: unless cash-v3#350 is live, the governance rule in PaymentLinkModule's NatSpec
- *         applies (never remove this module from the DataProvider whitelist or CashModule's
- *         requester list while any link is `Requested`). Whether to wait for #350 is decided in
- *         the release checklist. This script cannot check #350 on chain.
+ *         Unless the CashModule change in cash-v3#350 is live, the governance rule in
+ *         PaymentLinkModule's NatSpec applies: never remove this module from the DataProvider
+ *         whitelist or CashModule's requester list while any link is `Requested`. This script
+ *         cannot check that on chain.
  *
  * Prerequisite: the prod module is deployed (DeployPaymentLinkModule.s.sol, ENV=mainnet) and
  * VerifyPaymentLinkModule passes with PAYMENT_LINK_VERIFY_DEPLOY_ONLY=true. If

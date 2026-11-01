@@ -38,7 +38,7 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
     //
     // CREATE3 addresses are a pure function of the salt strings and the EtherFiDeployer address,
     // so pinning them turns a salt typo into a loud pre-broadcast failure instead of a deploy at
-    // an address the backend, indexer and 3CP do not expect.
+    // an address that off-chain consumers and the enable bundle do not expect.
 
     /// @notice `Dev.PaymentLink.PaymentLinkModuleImpl` (Optimism).
     address internal constant EXPECTED_DEV_MODULE_IMPL = 0x0393014ce03Fe8F0EfeF0817D7c439474ff748dD;
@@ -67,9 +67,9 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
     uint16 internal constant DEPLOY_FEE_BPS = 0;
     address internal constant DEPLOY_FEE_RECEIVER = address(0);
 
-    /// @notice Launch fee on claims to non-safe recipients (spec §6 DEFAULT, PAY-1169).
+    /// @notice Launch fee on claims to non-safe recipients.
     uint16 internal constant LAUNCH_FEE_BPS = 30;
-    /// @notice Prod fee receiver. DEFAULT pending PAY-1169: the prod Safe, as for StockWithdrawModule.
+    /// @notice Prod fee receiver: the prod Safe, as for StockWithdrawModule.
     address internal constant PROD_FEE_RECEIVER = PROD_SAFE;
 
     // ---- Token allowlist ----
@@ -170,7 +170,7 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
     }
 
     /**
-     * @dev PLM-04: what sits at the pinned addresses must be exactly what this commit builds and
+     * @dev Deployment checks: what sits at the pinned addresses must be exactly what this commit builds and
      *      deploys. A CREATE3 address commits to neither bytecode nor constructor state, so:
      *      - the impl's immutables must be THIS stack's DataProvider and CashModule (checked by
      *        getter: the code comparison alone would accept other addresses whose code matches,
@@ -243,7 +243,7 @@ abstract contract PaymentLinkConfig is EtherFiDeployerHelper, ContractCodeChecke
         return abi.encodePacked(type(UUPSProxy).creationCode, abi.encode(impl, initData));
     }
 
-    // ---- Deployment provenance (PLM-04) ----
+    // ---- Deployment provenance ----
 
     /// @dev What `_requireProxyProvenance` needs from a transaction.
     struct DeployTx {

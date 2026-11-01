@@ -41,7 +41,7 @@ import { UpgradeableProxy } from "../utils/UpgradeableProxy.sol";
  *      allowlist is what keeps a sender-taxed token (see below) from being escrowed at all. It
  *      gates `requestLink` only; links already requested or funded keep funding, claiming,
  *      cancelling and reconciling after their token is disallowed. There are no amount caps here;
- *      the backend decides what is offered.
+ *      which tokens and amounts are offered is decided off chain.
  *
  *      Every transfer in and out must move the module's balance by exactly the amount sent
  *      (`BalanceDeltaMismatch` otherwise), so no exit can take more from the pooled escrow than

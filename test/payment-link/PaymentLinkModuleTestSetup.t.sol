@@ -15,7 +15,7 @@ import { FalseReturnToken, FeeOnTransferToken, NegativeRebaseToken, PlainToken, 
  * @notice Shared fixture for the PaymentLinkModule suites: the full cash stack from
  *         `CashModuleTestSetup` (forked chain, real CashModule, a 2-of-3 EtherFiSafe on the lend
  *         gateway engine), plus the module behind a UUPS proxy, registered whitelist-only on the
- *         DataProvider and allowed to request withdrawals on the CashModule (spec §2 DEFAULT).
+ *         DataProvider and allowed to request withdrawals on the CashModule.
  * @dev Run with: TEST_CHAIN=10 TEST_RPC=<optimism rpc> forge test --match-path "test/payment-link/*"
  */
 contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
@@ -73,7 +73,7 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         cashModule.configureModulesCanRequestWithdraw(mods, yes);
         cashModule.configureWithdrawAssets(assets, yesAll);
         // Every token the suites escrow is allowlisted, the misbehaving mocks included, so their
-        // failure modes are exercised past the allowlist (PLM-02 is tested on its own).
+        // failure modes are exercised past the allowlist (the allowlist itself is tested on its own).
         plm.setTokenAllowed(address(usdc), true);
         for (uint256 i = 0; i < assets.length; i++) {
             plm.setTokenAllowed(assets[i], true);
@@ -132,12 +132,12 @@ contract PaymentLinkModuleTestSetup is CashModuleTestSetup {
         return abi.encodePacked(r, s, v);
     }
 
-    /// @dev The request digest rebuilt from the spec formula, independently of the module's view.
+    /// @dev The request digest rebuilt independently from its encoding, not through the module's view.
     function _specRequestDigest(address module, address safe_, address token, uint256 amount, address linkSigner, uint16 feeBps, uint256 nonce) internal view returns (bytes32) {
         return keccak256(abi.encodePacked(keccak256("requestLink"), block.chainid, module, nonce, safe_, abi.encode(token, amount, linkSigner, feeBps))).toEthSignedMessageHash();
     }
 
-    /// @dev The cancel digest rebuilt from the spec formula.
+    /// @dev The cancel digest rebuilt independently from its encoding.
     function _specCancelDigest(address module, address safe_, address linkSigner, uint256 nonce) internal view returns (bytes32) {
         return keccak256(abi.encodePacked(keccak256("cancelLink"), block.chainid, module, nonce, safe_, linkSigner)).toEthSignedMessageHash();
     }
