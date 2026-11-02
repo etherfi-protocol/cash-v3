@@ -20,24 +20,24 @@ import { Utils } from "../utils/Utils.sol";
  * @title SupportLiquidDeFiOP3CP
  * @notice Lists Liquid Bold (symbol liquidDeFi, a Midas vault token) on Optimism prod as collateral and as a
  *         debit-spend asset on both engines, DebtManager (legacy) and LendGateway (COR-2055, Notion LIST-5).
- *         Two Safe bundles from the CashController Safe:
+ *         Three Safe transactions on two Safes. The Admin Safe drives the 8h admin timelock (as in 3CP-724 to 730)
+ *         and the CashController Safe (AAC4) sends the ADMIN_ROLE calls directly:
  *
- *           Step 1 (day 0): schedule one admin timelock (8h) batch:
+ *           Step 1, Admin Safe (day 0): schedule one admin timelock (8h) batch:
  *               MidasModule.addMidasVaults (deposit + redemption vault)
  *               SettlementDispatcherV2.setMidasRedemptionVault on Rain, Reap, Pix, CardOrder
  *             Does not depend on the Aave listing, so it can go out before reserve 29 exists.
- *           Step 2 (>= 8h after step 1 executes, and after Aave lists reserve 29 for liquidDeFi):
- *             1. admin timelock executeBatch
- *             2. PriceProviderV2.setTokenConfig   -> liquidDeFi/USD Midas feed, same shape as liquidRWA
- *             3. DebtManager.supportCollateralToken (LTV 64%, liquidation threshold 75%, bonus 7.5%)
- *             4. DebtManager.supportBorrowToken   (apy 1, minShares max: legacy debit spend only, same as liquidEUR;
+ *           Step 2, Admin Safe (>= 8h after step 1 executes): admin timelock executeBatch.
+ *           Step 3, AAC4 (after step 2 executes, and after Aave lists reserve 29 for liquidDeFi):
+ *             1. PriceProviderV2.setTokenConfig   -> liquidDeFi/USD Midas feed, same shape as liquidRWA
+ *             2. DebtManager.supportCollateralToken (LTV 64%, liquidation threshold 75%, bonus 7.5%)
+ *             3. DebtManager.supportBorrowToken   (apy 1, minShares max: legacy debit spend only, same as liquidEUR;
  *                                                  nobody can meet minShares, so it cannot be supplied or borrowed)
- *             5. CashModule.configureWithdrawAssets ([liquidDeFi] => true)
- *             6. LendGateway.setReserveId(liquidDeFi, 29)
- *             7. LendGateway.setSpendAsset(liquidDeFi, true)
- *             Calls 2-7 need ADMIN_ROLE, which the Safe holds directly. PriceProvider goes before DebtManager
- *             because supportCollateralToken reverts on a zero price. Spend turns on in the same bundle that
- *             executes the timelock batch, so it is never live before every dispatcher can redeem liquidDeFi.
+ *             4. CashModule.configureWithdrawAssets ([liquidDeFi] => true)
+ *             5. LendGateway.setReserveId(liquidDeFi, 29)
+ *             6. LendGateway.setSpendAsset(liquidDeFi, true)
+ *             PriceProvider goes before DebtManager because supportCollateralToken reverts on a zero price.
+ *             Step 3 must follow step 2 so spend is never live before every dispatcher can redeem liquidDeFi.
  *
  *         Credit spend stays off on both engines: the DebtManager borrow token cannot be supplied (minShares max),
  *         and the gateway credit path also requires the Aave reserve to be borrowable (Notion borrow cap 0).
@@ -45,16 +45,17 @@ import { Utils } from "../utils/Utils.sol";
  *
  * @dev The timelock salt is specific to this listing so the operation id is unique; TimelockController keeps an
  *      id `isOperation` forever, so a reused salt could never be re-scheduled.
- *      If Aave has not listed reserve 29 on the fork, the simulation mocks Spoke.getReserve(29) so step 2 can be
- *      exercised. The real step 2 bundle is unchanged; it will revert on-chain until the reserve exists.
+ *      If Aave has not listed reserve 29 on the fork, the simulation mocks Spoke.getReserve(29) so step 3 can be
+ *      exercised. The real step 3 bundle is unchanged; it will revert on-chain until the reserve exists.
  *
- * Usage (no broadcast; writes ./output/*.json and simulates both steps on the fork):
+ * Usage (no broadcast; writes ./output/*.json and simulates all three steps on the fork):
  *   forge script scripts/gnosis-txs/SupportLiquidDeFiOP3CP.s.sol --rpc-url $OPTIMISM_RPC --sender 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E --no-isolate -vvv
  */
 contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
     using stdJson for string;
 
-    address constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4;
+    address constant SAFE = 0xA6cf33124cb342D1c604cAC87986B965F428AAC4; // CashController Safe (AAC4), holds ADMIN_ROLE
+    address constant ADMIN_SAFE = 0x47992A4E7920EE57eb3dD06131C1a086963b240B; // proposer + executor on the admin timelock
     address constant ADMIN_TIMELOCK = 0x9AEb8eaa982084219d1A938D8F7B5040a1d47849;
     uint256 constant ADMIN_DELAY = 8 hours;
     bytes32 constant TL_PREDECESSOR = bytes32(0);
@@ -98,14 +99,15 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
         _checkPreconditions();
         _buildAdminBatch();
 
-        string memory step1 = _writeBundle("step1-schedule", string.concat(_getGnosisHeader("10", addressToHex(SAFE)), _scheduleTx(true)));
-        string memory step2 = _writeBundle("step2-execute", _step2Txs());
+        string memory step1 = _writeBundle("step1-admin-safe-schedule", string.concat(_getGnosisHeader("10", addressToHex(ADMIN_SAFE)), _scheduleTx(true)));
+        string memory step2 = _writeBundle("step2-admin-safe-execute", string.concat(_getGnosisHeader("10", addressToHex(ADMIN_SAFE)), _executeTx(true)));
+        string memory step3 = _writeBundle("step3-aac4-list", _step3Txs());
 
-        _simulate(step1, step2);
+        _simulate(step1, step2, step3);
     }
 
-    function _step2Txs() internal view returns (string memory txs) {
-        txs = string.concat(_getGnosisHeader("10", addressToHex(SAFE)), _executeTx(false));
+    function _step3Txs() internal view returns (string memory txs) {
+        txs = _getGnosisHeader("10", addressToHex(SAFE));
         txs = string.concat(txs, _tx(address(priceProvider), abi.encodeCall(PriceProviderV2.setTokenConfig, (_tokens(), _priceConfigs())), false));
         txs = string.concat(txs, _tx(address(debtManager), abi.encodeCall(IDebtManager.supportCollateralToken, (LIQUID_DEFI, _collateralConfig())), false));
         txs = string.concat(txs, _tx(address(debtManager), abi.encodeCall(IDebtManager.supportBorrowToken, (LIQUID_DEFI, BORROW_APY_PER_SECOND, MIN_BORROW_SHARES)), false));
@@ -127,14 +129,14 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
     }
 
     function _checkPreconditions() internal view {
-        // Governance: ADMIN_ROLE calls come straight from the Safe, addMidasVaults goes through the 8h admin timelock
-        require(roleRegistry.hasRole(roleRegistry.ADMIN_ROLE(), SAFE), "Safe lacks ADMIN_ROLE");
+        // Governance: ADMIN_ROLE calls come straight from AAC4, the timelock batch is scheduled and executed by the Admin Safe
+        require(roleRegistry.hasRole(roleRegistry.ADMIN_ROLE(), SAFE), "AAC4 lacks ADMIN_ROLE");
         require(roleRegistry.hasRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), ADMIN_TIMELOCK), "admin timelock lacks ADMIN_TIMELOCK_ROLE");
         EtherFiTimelock tl = EtherFiTimelock(payable(ADMIN_TIMELOCK));
         require(keccak256(ADMIN_TIMELOCK.code) == keccak256(type(EtherFiTimelock).runtimeCode), "timelock bytecode != local EtherFiTimelock build");
         require(tl.getMinDelay() == ADMIN_DELAY, "admin timelock minDelay mismatch");
-        require(tl.hasRole(tl.PROPOSER_ROLE(), SAFE), "Safe is not a proposer");
-        require(tl.hasRole(tl.EXECUTOR_ROLE(), SAFE) || tl.hasRole(tl.EXECUTOR_ROLE(), address(0)), "Safe is not an executor");
+        require(tl.hasRole(tl.PROPOSER_ROLE(), ADMIN_SAFE), "Admin Safe is not a proposer");
+        require(tl.hasRole(tl.EXECUTOR_ROLE(), ADMIN_SAFE) || tl.hasRole(tl.EXECUTOR_ROLE(), address(0)), "Admin Safe is not an executor");
 
         // Inputs: both vaults point at the token, the feed is live and priced
         require(IMidasVaultToken(LIQUID_DEFI_DEPOSIT_VAULT).mToken() == LIQUID_DEFI, "deposit vault mToken mismatch");
@@ -233,18 +235,25 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
         return false;
     }
 
-    // ── Fork simulation: both steps with end-state asserts ─────────────────────
+    // ── Fork simulation: all three steps with end-state asserts ────────────────
 
-    function _simulate(string memory step1, string memory step2) internal {
-        console.log("=== Step 1: schedule addMidasVaults on the admin timelock ===");
+    function _simulate(string memory step1, string memory step2, string memory step3) internal {
+        console.log("=== Step 1 (Admin Safe): schedule the admin timelock batch ===");
         executeGnosisTransactionBundle(step1);
         require(_isOperation(), "admin batch not scheduled");
         require(!gateway.isSpendAsset(LIQUID_DEFI) && !debtManager.isBorrowToken(LIQUID_DEFI), "spend must stay off after step 1");
 
-        console.log("=== Warp 8h, step 2: execute + PriceProvider, DebtManager, CashModule, LendGateway ===");
+        console.log("=== Warp 8h, step 2 (Admin Safe): execute the batch ===");
         vm.warp(block.timestamp + ADMIN_DELAY + 1);
-        _ensureReserveListed();
         executeGnosisTransactionBundle(step2);
+        for (uint256 i = 0; i < 4; i++) {
+            require(SettlementDispatcherV2(payable(dispatchers[i])).getMidasRedemptionVault(LIQUID_DEFI) == LIQUID_DEFI_REDEMPTION_VAULT, "dispatcher vault not set after step 2");
+        }
+        require(!gateway.isSpendAsset(LIQUID_DEFI) && !debtManager.isBorrowToken(LIQUID_DEFI), "spend must stay off after step 2");
+
+        console.log("=== Step 3 (AAC4): PriceProvider, DebtManager, CashModule, LendGateway ===");
+        _ensureReserveListed();
+        executeGnosisTransactionBundle(step3);
 
         (address dv, address rv) = midasModule.vaults(LIQUID_DEFI);
         require(dv == LIQUID_DEFI_DEPOSIT_VAULT && rv == LIQUID_DEFI_REDEMPTION_VAULT, "Midas vaults mismatch");
