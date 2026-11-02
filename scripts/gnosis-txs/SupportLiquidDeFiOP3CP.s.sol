@@ -12,21 +12,20 @@ import { MidasLiquifierModule } from "../../src/modules/etherfi/MidasLiquifierMo
 import { MidasModule } from "../../src/modules/midas/MidasModule.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { RoleRegistry } from "../../src/role-registry/RoleRegistry.sol";
-import { SettlementDispatcherV2 } from "../../src/settlement-dispatcher/SettlementDispatcherV2.sol";
 import { EtherFiTimelock } from "../../src/timelock/EtherFiTimelock.sol";
 import { GnosisHelpers } from "../utils/GnosisHelpers.sol";
 import { Utils } from "../utils/Utils.sol";
 
 /**
  * @title SupportLiquidDeFiOP3CP
- * @notice Lists Liquid Bold (symbol liquidDeFi, a Midas vault token) on Optimism prod as collateral and as a
- *         debit-spend asset on both engines, DebtManager (legacy) and LendGateway (COR-2055, Notion LIST-5).
+ * @notice Lists Liquid Bold (symbol liquidDeFi, a Midas vault token) on Optimism prod as collateral on both engines,
+ *         DebtManager (legacy) and LendGateway, and as a USDC repay token on the Midas liquifier. It is not spendable
+ *         (COR-2055, Notion LIST-5).
  *         Three Safe transactions on two Safes. The Admin Safe drives the 8h admin timelock (as in 3CP-724 to 730)
  *         and the CashController Safe (AAC4) sends the ADMIN_ROLE calls directly:
  *
  *           Step 1, Admin Safe (day 0): schedule one admin timelock (8h) batch:
  *               MidasModule.addMidasVaults (deposit + redemption vault)
- *               SettlementDispatcherV2.setMidasRedemptionVault on Rain, Reap, Pix, CardOrder
  *               MidasLiquifierModule.setPair(liquidDeFi -> USDC, fee 0), same shape as liquidRWA, so USDC debt can be
  *                 repaid with liquidDeFi from the module's USDC float
  *             Does not depend on the Aave listing, so it can go out before reserve 29 exists.
@@ -34,16 +33,12 @@ import { Utils } from "../utils/Utils.sol";
  *           Step 3, AAC4 (after step 2 executes, and after Aave lists reserve 29 for liquidDeFi):
  *             1. PriceProviderV2.setTokenConfig   -> liquidDeFi/USD Midas feed, same shape as liquidRWA
  *             2. DebtManager.supportCollateralToken (LTV 64%, liquidation threshold 75%, bonus 7.5%)
- *             3. DebtManager.supportBorrowToken   (apy 1, minShares max: legacy debit spend only, same as liquidEUR;
- *                                                  nobody can meet minShares, so it cannot be supplied or borrowed)
- *             4. CashModule.configureWithdrawAssets ([liquidDeFi] => true)
- *             5. LendGateway.setReserveId(liquidDeFi, 29)
- *             6. LendGateway.setSpendAsset(liquidDeFi, true)
+ *             3. CashModule.configureWithdrawAssets ([liquidDeFi] => true)
+ *             4. LendGateway.setReserveId(liquidDeFi, 29)
  *             PriceProvider goes before DebtManager because supportCollateralToken reverts on a zero price.
- *             Step 3 must follow step 2 so spend is never live before every dispatcher can redeem liquidDeFi.
  *
- *         Credit spend stays off on both engines: the DebtManager borrow token cannot be supplied (minShares max),
- *         and the gateway credit path also requires the Aave reserve to be borrowable (Notion borrow cap 0).
+ *         Not spendable on either engine: no DebtManager.supportBorrowToken, no LendGateway.setSpendAsset, and no
+ *         settlement dispatcher redemption vault, since no liquidDeFi reaches the dispatchers without spend.
  *         Repay: the liquifier keeps one pair per payment token, so liquidDeFi repays USDC debt only. Repays price
  *         liquidDeFi through the PriceProvider, so they work once step 3 sets its token config.
  *
@@ -85,10 +80,6 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
     uint80 constant LIQUIDATION_THRESHOLD = 75e18; // 75%
     uint96 constant LIQUIDATION_BONUS = 7.5e18; // 7.5%
 
-    // ─── DebtManager borrow-token config: debit spend only (same as liquidEUR) ─
-    uint64 constant BORROW_APY_PER_SECOND = 1;
-    uint128 constant MIN_BORROW_SHARES = type(uint128).max;
-
     RoleRegistry roleRegistry;
     MidasModule midasModule;
     MidasLiquifierModule liquifier;
@@ -97,7 +88,6 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
     ICashModule cashModule;
     LendGateway gateway;
     IAaveV4Spoke spoke;
-    address[4] dispatchers;
 
     address[] adminTargets;
     bytes[] adminPayloads;
@@ -120,10 +110,8 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
         txs = _getGnosisHeader("10", addressToHex(SAFE));
         txs = string.concat(txs, _tx(address(priceProvider), abi.encodeCall(PriceProviderV2.setTokenConfig, (_tokens(), _priceConfigs())), false));
         txs = string.concat(txs, _tx(address(debtManager), abi.encodeCall(IDebtManager.supportCollateralToken, (LIQUID_DEFI, _collateralConfig())), false));
-        txs = string.concat(txs, _tx(address(debtManager), abi.encodeCall(IDebtManager.supportBorrowToken, (LIQUID_DEFI, BORROW_APY_PER_SECOND, MIN_BORROW_SHARES)), false));
         txs = string.concat(txs, _tx(address(cashModule), abi.encodeCall(ICashModule.configureWithdrawAssets, (_tokens(), _trues())), false));
-        txs = string.concat(txs, _tx(address(gateway), abi.encodeCall(LendGateway.setReserveId, (LIQUID_DEFI, RESERVE_ID)), false));
-        txs = string.concat(txs, _tx(address(gateway), abi.encodeCall(LendGateway.setSpendAsset, (LIQUID_DEFI, true)), true));
+        txs = string.concat(txs, _tx(address(gateway), abi.encodeCall(LendGateway.setReserveId, (LIQUID_DEFI, RESERVE_ID)), true));
     }
 
     function _load() internal {
@@ -136,7 +124,6 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
         cashModule = ICashModule(d.readAddress(".addresses.CashModule"));
         gateway = LendGateway(d.readAddress(".addresses.LendGateway"));
         spoke = IAaveV4Spoke(address(gateway.spoke()));
-        dispatchers = [d.readAddress(".addresses.SettlementDispatcherRain"), d.readAddress(".addresses.SettlementDispatcherReap"), d.readAddress(".addresses.SettlementDispatcherPix"), d.readAddress(".addresses.SettlementDispatcherCardOrder")];
     }
 
     function _checkPreconditions() internal view {
@@ -168,9 +155,6 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
         require(!gateway.isSpendAsset(LIQUID_DEFI), "already a gateway spend asset");
         require(liquifier.pairs(LIQUID_DEFI).debtToken == address(0), "liquifier pair already set");
         require(liquifier.pairs(0x17bC8Ffd82b8a36e737Ca1141C025089589B915e).debtToken == USDC, "liquidRWA pair is not USDC; recheck the template");
-        for (uint256 i = 0; i < 4; i++) {
-            require(SettlementDispatcherV2(payable(dispatchers[i])).getMidasRedemptionVault(LIQUID_DEFI) == address(0), "dispatcher vault already set");
-        }
     }
 
     function _buildAdminBatch() internal {
@@ -182,10 +166,6 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
 
         adminTargets.push(address(midasModule));
         adminPayloads.push(abi.encodeCall(MidasModule.addMidasVaults, (tokens, depositVaults, redemptionVaults)));
-        for (uint256 i = 0; i < 4; i++) {
-            adminTargets.push(dispatchers[i]);
-            adminPayloads.push(abi.encodeCall(SettlementDispatcherV2.setMidasRedemptionVault, (LIQUID_DEFI, LIQUID_DEFI_REDEMPTION_VAULT)));
-        }
         adminTargets.push(address(liquifier));
         adminPayloads.push(abi.encodeCall(MidasLiquifierModule.setPair, (LIQUID_DEFI, USDC, LIQUID_DEFI_REDEMPTION_VAULT, REPAY_FEE_BPS, REPAY_FLAT_FEE)));
 
@@ -261,9 +241,6 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
         console.log("=== Warp 8h, step 2 (Admin Safe): execute the batch ===");
         vm.warp(block.timestamp + ADMIN_DELAY + 1);
         executeGnosisTransactionBundle(step2);
-        for (uint256 i = 0; i < 4; i++) {
-            require(SettlementDispatcherV2(payable(dispatchers[i])).getMidasRedemptionVault(LIQUID_DEFI) == LIQUID_DEFI_REDEMPTION_VAULT, "dispatcher vault not set after step 2");
-        }
         require(!gateway.isSpendAsset(LIQUID_DEFI) && !debtManager.isBorrowToken(LIQUID_DEFI), "spend must stay off after step 2");
         MidasLiquifierModule.Pair memory pair = liquifier.pairs(LIQUID_DEFI);
         require(pair.debtToken == USDC && pair.redemptionVault == LIQUID_DEFI_REDEMPTION_VAULT && pair.feeBps == REPAY_FEE_BPS && pair.flatFee == REPAY_FLAT_FEE, "liquifier pair mismatch after step 2");
@@ -281,13 +258,8 @@ contract SupportLiquidDeFiOP3CP is Utils, GnosisHelpers {
         require(cfg.ltv == LTV && cfg.liquidationThreshold == LIQUIDATION_THRESHOLD && cfg.liquidationBonus == LIQUIDATION_BONUS, "collateral config mismatch");
         require(_isWithdrawAsset(), "not a withdraw asset");
         require(gateway.isRegistered(LIQUID_DEFI) && gateway.reserveIdOf(LIQUID_DEFI) == RESERVE_ID, "gateway reserve mismatch");
-        require(debtManager.isBorrowToken(LIQUID_DEFI), "not a DebtManager borrow token");
-        require(debtManager.borrowApyPerSecond(LIQUID_DEFI) == BORROW_APY_PER_SECOND, "borrow apy mismatch");
-        require(gateway.isSpendAsset(LIQUID_DEFI), "not a gateway spend asset");
-        for (uint256 i = 0; i < 4; i++) {
-            require(SettlementDispatcherV2(payable(dispatchers[i])).getMidasRedemptionVault(LIQUID_DEFI) == LIQUID_DEFI_REDEMPTION_VAULT, "dispatcher vault not set");
-        }
-        console.log("Simulation OK: liquidDeFi is a Midas vault, priced, collateral, debit-spendable on DebtManager and gateway reserve", RESERVE_ID);
+        require(!debtManager.isBorrowToken(LIQUID_DEFI) && !gateway.isSpendAsset(LIQUID_DEFI), "liquidDeFi must not be spendable");
+        console.log("Simulation OK: liquidDeFi is a Midas vault, priced, collateral and a USDC repay token, not spendable; gateway reserve", RESERVE_ID);
     }
 
     /// @dev Uses the real reserve when Aave has listed it; otherwise mocks getReserve(RESERVE_ID) for the fork only
