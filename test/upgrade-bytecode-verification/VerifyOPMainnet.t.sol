@@ -7,6 +7,7 @@ import { UpgradeableBeacon } from "@openzeppelin/contracts/proxy/beacon/Upgradea
 import { stdJson } from "forge-std/StdJson.sol";
 import { Test, console } from "forge-std/Test.sol";
 
+import { RoleRegateProdConfig } from "../../scripts/role-regate/RoleRegateProdConfig.sol";
 import { ChainConfig } from "../utils/Utils.sol";
 import { TradingStackBytecode } from "./TradingStackBytecode.sol";
 
@@ -55,7 +56,7 @@ import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 ///
 /// Usage:
 ///   TEST_CHAIN=10 forge test --match-contract VerifyOPMainnetBytecode -vv
-contract VerifyOPMainnetBytecode is TradingStackBytecode {
+contract VerifyOPMainnetBytecode is TradingStackBytecode, RoleRegateProdConfig {
     // Deployed proxy addresses from deployments.json
     address dataProviderProxy;
     address roleRegistryProxy;
@@ -463,6 +464,42 @@ contract VerifyOPMainnetBytecode is TradingStackBytecode {
         }
         vm.etch(local, code);
         _verify("SafeErc1271Lib", _cash("SafeErc1271Lib"), local);
+    }
+
+    // ---- Pending upgrade: role re-gating (cash-v3 #356) ----
+    // Deployed but not yet behind the proxies or registered on the data provider; the 3CP in
+    // scripts/role-regate does that. These check the pinned addresses directly. Once the 3CP executes and
+    // deployments.json points at the new modules, the checks above cover them and these can go.
+
+    function test_verifyBytecode_pending_EtherFiDataProvider() public {
+        address local = address(new EtherFiDataProvider());
+        _verify("pending EtherFiDataProvider", OP_DP_IMPL, local);
+    }
+
+    function test_verifyBytecode_pending_CashModuleSetters() public {
+        address local = address(new CashModuleSetters(dataProviderProxy));
+        _verify("pending CashModuleSetters", NEW_SETTERS, local);
+    }
+
+    function test_verifyBytecode_pending_LendGateway() public {
+        address local = address(new LendGateway(dataProviderProxy, AAVE_SPOKE));
+        _verify("pending LendGateway", NEW_GW_IMPL, local);
+    }
+
+    function test_verifyBytecode_pending_LiquidUSDLiquifierModule() public {
+        address local = address(new LiquidUSDLiquifierOPModule(debtManagerProxy, dataProviderProxy));
+        _verify("pending LiquidUSDLiquifierModule", NEW_LIQUIFIER_IMPL, local);
+    }
+
+    function test_verifyBytecode_pending_FraxModule() public {
+        address local = address(new FraxModule(dataProviderProxy, FRAXUSD, FRAX_CUSTODIAN, FRAX_REMOTE_HOP));
+        _verify("pending FraxModule", NEW_FRAX, local);
+    }
+
+    function test_verifyBytecode_pending_MidasModule() public {
+        (address[] memory tokens, address[] memory deposits, address[] memory redemptions) = _midasArgs();
+        address local = address(new MidasModule(dataProviderProxy, tokens, deposits, redemptions));
+        _verify("pending MidasModule", NEW_MIDAS, local);
     }
 
     // ---- Helpers ----
