@@ -95,6 +95,17 @@ abstract contract RoleRegateProdConfig {
         redemptions[2] = 0x12Ae90dCe5C2a4Ee5141FBfc408ff1022D051F42;
     }
 
+    /// @dev Midas vaults listed on the live MidasModule after the new one was deployed, so the 3CP adds them to the new
+    ///      module too. liquidDeFi (Liquid Bold) is 3CP-740; its vaults are checked against its mToken() on add.
+    function _midasAddedArgs() internal pure returns (address[] memory tokens, address[] memory deposits, address[] memory redemptions) {
+        tokens = new address[](1);
+        deposits = new address[](1);
+        redemptions = new address[](1);
+        tokens[0] = 0x4299b11815F25DB50fC56CD8a1C24cCCDD2AEECe; // liquidDeFi (Liquid Bold)
+        deposits[0] = 0x877f5D9fE35A0A2aFDD4539b992c0edD33d476f4;
+        redemptions[0] = 0x1BCb96E1D4CBf07334f9bDdF2f1F872ED00D504b;
+    }
+
     /// @dev The live TradingSafeLiquidDepositModule's constructor args
     function _depositArgs() internal pure returns (address[] memory assets, address[] memory tellers) {
         assets = new address[](1);

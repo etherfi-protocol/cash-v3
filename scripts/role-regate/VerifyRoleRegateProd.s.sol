@@ -63,6 +63,11 @@ contract VerifyRoleRegateProd is EtherFiDeployerHelper, ContractCodeChecker, Rol
         console2.log("  rollout: liquifier on the new impl:", _impl(OP_LIQUIFIER) == NEW_LIQUIFIER_IMPL);
         console2.log("  rollout: new Frax is a default module:", EtherFiDataProvider(OP_DATA_PROVIDER).isDefaultModule(NEW_FRAX));
         console2.log("  rollout: new Midas is a default module:", EtherFiDataProvider(OP_DATA_PROVIDER).isDefaultModule(NEW_MIDAS));
+        (address[] memory added, address[] memory addedDeposits, address[] memory addedRedemptions) = _midasAddedArgs();
+        for (uint256 i = 0; i < added.length; ++i) {
+            (address d, address r) = MidasModule(NEW_MIDAS).vaults(added[i]);
+            console2.log("  rollout: new Midas lists added vault for", added[i], d == addedDeposits[i] && r == addedRedemptions[i]);
+        }
     }
 
     function _verifyEthereum() internal {

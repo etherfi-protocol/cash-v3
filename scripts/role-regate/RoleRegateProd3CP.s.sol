@@ -34,8 +34,8 @@ import { RoleRegateProdConfig } from "./RoleRegateProdConfig.sol";
 ///
 ///         Optimism (10), two batches:
 ///           Upgrade batch, governance Safe 0xA6cf...AAC4 on the 2-day upgrade timelock (owner of the cash RoleRegistry):
-///             nonce 143  upgradeTimelock.scheduleBatch
-///             nonce 144  upgradeTimelock.executeBatch (not before 2 days after nonce 143 executes)
+///             schedule  upgradeTimelock.scheduleBatch
+///             execute   upgradeTimelock.executeBatch (not before 2 days after the schedule executes)
 ///             a. EtherFiDataProvider.upgradeToAndCall(new impl)
 ///             b. CashModule.setCashModuleSettersAddress(new CashModuleSetters)
 ///             c. LendGateway.upgradeToAndCall(new impl)
@@ -44,20 +44,27 @@ import { RoleRegateProdConfig } from "./RoleRegateProdConfig.sol";
 ///             f. LendGateway.setDriver(new Frax, true)    (needs the RoleRegistry owner after c, audit I-03)
 ///             g. LendGateway.setDriver(new Midas, true)
 ///           Operating batch, Admin Timelock Safe 0x4799...240B on the 8-hour operating timelock (ADMIN_TIMELOCK_ROLE):
-///             nonce 13  operatingTimelock.scheduleBatch
-///             nonce 14  operatingTimelock.executeBatch, only AFTER the upgrade batch executes (it needs the new Frax
-///                       module whitelisted; the simulation checks it reverts before)
-///             a. CashModule.configureModulesCanRequestWithdraw([new Frax], [true])
+///             schedule  operatingTimelock.scheduleBatch
+///             execute   operatingTimelock.executeBatch (not before 8 hours after the schedule executes)
+///             a. new MidasModule.addMidasVaults(vaults listed on the live module after the new one was deployed:
+///                liquidDeFi from 3CP-740). The live module's other vaults are constructor args of the new one.
+///
+///         The new Frax module is NOT made a CashModule withdraw requester, unlike the live one. Only its async
+///         withdrawal (exit to Ethereum through the Frax remote hop) needs it, and the remote hop is paused with
+///         fraxUSD not an approved OFT, so that path is unusable. Sync deposit and withdraw do not need it.
 ///
 ///         Ethereum (1), governance Safe on the 2-day upgrade timelock (owner of the trading RoleRegistry):
-///             nonce 78  upgradeTimelock.scheduleBatch
-///             nonce 79  upgradeTimelock.executeBatch (not before 2 days after nonce 78 executes)
+///             schedule  upgradeTimelock.scheduleBatch
+///             execute   upgradeTimelock.executeBatch (not before 2 days after the schedule executes)
 ///             a. trading EtherFiDataProvider.upgradeToAndCall(new impl)
 ///             b. trading EtherFiDataProvider.configureDefaultModules([new deposit module], [true])
 ///
-///         Nonces are the next free ones on 2026-10-31 (OP governance Safe queue ends at 142, Admin Timelock Safe at
-///         12, Ethereum governance Safe at 77). Re-check them before creating the bundles; Safe Transaction Builder
-///         files carry no nonce, so it is set when each bundle is created in the Safe UI.
+///         Nonces are not assigned here: Safe Transaction Builder files carry none, so each is set when the bundle is
+///         created in the Safe UI, from the queue at that time. Each schedule must run before its execute.
+///
+///         3CP-740 (liquidDeFi on the live MidasModule) and this 3CP can execute in either order: each adds the same
+///         vault pair to a different module, and the end-state check compares the two modules whenever the live one
+///         already has it. Replay 740's Admin Safe bundles with PRIOR_BUNDLES or BETWEEN_BUNDLES to simulate both.
 ///
 ///         If the contracts are not deployed yet (DeployRoleRegateProd.s.sol), the simulation deploys them on the
 ///         fork with the same salts and args; the real deploy is still a precondition for signing.
@@ -71,13 +78,6 @@ import { RoleRegateProdConfig } from "./RoleRegateProdConfig.sol";
 ///     --libraries src/modules/lend-gateway/LendReserveLib.sol:LendReserveLib:0xd65eCb4E22D578Bc732d51AAa4F0449D225fd723
 ///   ENV=mainnet forge script scripts/role-regate/RoleRegateProd3CP.s.sol --rpc-url $MAINNET_RPC
 contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCodeChecker, RoleRegateProdConfig {
-    uint256 internal constant OP_GOV_SCHEDULE_NONCE = 143;
-    uint256 internal constant OP_GOV_EXECUTE_NONCE = 144;
-    uint256 internal constant OP_ATS_SCHEDULE_NONCE = 13;
-    uint256 internal constant OP_ATS_EXECUTE_NONCE = 14;
-    uint256 internal constant ETH_GOV_SCHEDULE_NONCE = 78;
-    uint256 internal constant ETH_GOV_EXECUTE_NONCE = 79;
-
     bytes32 internal constant TL_PREDECESSOR = bytes32(0);
     bytes32 internal constant TL_SALT_OP_UPGRADE = keccak256("RoleRegate.OP.Upgrade.v1");
     bytes32 internal constant TL_SALT_OP_OPERATING = keccak256("RoleRegate.OP.Operating.v1");
@@ -126,11 +126,11 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         require(CashModuleCore(CASH_MODULE).getCashModuleSetters() == OLD_SETTERS, "CashModule not on the expected live setters");
         require(dp.isDefaultModule(OLD_FRAX) && dp.isDefaultModule(OLD_MIDAS), "old modules are not default modules");
         require(gw.isDriver(OLD_FRAX) && gw.isDriver(OLD_MIDAS) && gw.isDriver(OP_LIQUIFIER), "old drivers changed");
-        require(_isRequester(OLD_FRAX), "old Frax module is not a withdraw requester");
 
         _ensureOptimismContracts();
         require(!dp.isWhitelistedModule(NEW_FRAX) && !dp.isWhitelistedModule(NEW_MIDAS), "new module already whitelisted");
         require(!gw.isDriver(NEW_FRAX) && !gw.isDriver(NEW_MIDAS), "new module already a driver");
+        _checkMidasAdds();
 
         _buildOptimismBatches();
         TimelockController up = TimelockController(payable(UPGRADE_TIMELOCK));
@@ -139,24 +139,22 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         bytes32 opId = op.hashOperationBatch(opTargets, new uint256[](opTargets.length), opPayloads, TL_PREDECESSOR, TL_SALT_OP_OPERATING);
         require(!up.isOperation(upId) && !op.isOperation(opId), "operation already scheduled");
 
-        (string memory upSchedule, string memory upExecute) = _writeBundles(GOVERNANCE_SAFE, UPGRADE_TIMELOCK, targets, payloads, UPGRADE_DELAY, TL_SALT_OP_UPGRADE, OP_GOV_SCHEDULE_NONCE, OP_GOV_EXECUTE_NONCE, "op-upgrade");
-        (string memory opSchedule, string memory opExecute) = _writeBundles(ADMIN_TIMELOCK_SAFE, OPERATING_TIMELOCK, opTargets, opPayloads, OPERATING_DELAY, TL_SALT_OP_OPERATING, OP_ATS_SCHEDULE_NONCE, OP_ATS_EXECUTE_NONCE, "op-operating");
+        (string memory upSchedule, string memory upExecute) = _writeBundles(GOVERNANCE_SAFE, UPGRADE_TIMELOCK, targets, payloads, UPGRADE_DELAY, TL_SALT_OP_UPGRADE, "op-upgrade");
+        (string memory opSchedule, string memory opExecute) = _writeBundles(ADMIN_TIMELOCK_SAFE, OPERATING_TIMELOCK, opTargets, opPayloads, OPERATING_DELAY, TL_SALT_OP_OPERATING, "op-operating");
 
         // Neither Safe can do any of it directly
         _expectRevert(GOVERNANCE_SAFE, OP_DATA_PROVIDER, payloads[0], "governance Safe upgraded the data provider directly");
         _expectRevert(GOVERNANCE_SAFE, CASH_MODULE, payloads[1], "governance Safe swapped the setters directly");
-        _expectRevert(ADMIN_TIMELOCK_SAFE, CASH_MODULE, opPayloads[0], "Admin Timelock Safe configured a requester directly");
+        _expectRevert(ADMIN_TIMELOCK_SAFE, NEW_MIDAS, opPayloads[0], "Admin Timelock Safe added a Midas vault directly");
 
-        console.log("=== Simulating schedules (governance Safe nonce 143, Admin Timelock Safe nonce 13) ===");
+        console.log("=== Simulating schedules (governance Safe, Admin Timelock Safe) ===");
         executeGnosisTransactionBundle(upSchedule);
         executeGnosisTransactionBundle(opSchedule);
         require(up.isOperationPending(upId) && !up.isOperationReady(upId), "upgrade batch not pending after schedule");
         require(op.isOperationPending(opId) && !op.isOperationReady(opId), "operating batch not pending after schedule");
 
-        // The operating batch is ready after 8 hours but must not execute before the upgrade batch
         vm.warp(block.timestamp + OPERATING_DELAY + 1);
         require(op.isOperationReady(opId), "operating batch not ready after 8 hours");
-        _expectRevert(ADMIN_TIMELOCK_SAFE, OPERATING_TIMELOCK, _executeData(opTargets, opPayloads, TL_SALT_OP_OPERATING), "operating batch executed before the upgrade batch");
         _expectRevert(GOVERNANCE_SAFE, UPGRADE_TIMELOCK, _executeData(targets, payloads, TL_SALT_OP_UPGRADE), "upgrade batch executed after only 8 hours");
 
         vm.warp(block.timestamp + UPGRADE_DELAY);
@@ -167,10 +165,10 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         defaultsBefore = dp.getDefaultModules().length;
         requestersBefore = cash.getWhitelistedModulesCanRequestWithdraw().length;
 
-        console.log("=== Simulating execute (governance Safe nonce 144) ===");
+        console.log("=== Simulating execute (governance Safe, upgrade batch) ===");
         executeGnosisTransactionBundle(upExecute);
         require(up.isOperationDone(upId), "upgrade batch not done after execute");
-        console.log("=== Simulating execute (Admin Timelock Safe nonce 14) ===");
+        console.log("=== Simulating execute (Admin Timelock Safe, operating batch) ===");
         executeGnosisTransactionBundle(opExecute);
         require(op.isOperationDone(opId), "operating batch not done after execute");
 
@@ -210,12 +208,20 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         targets.push(OP_LEND_GATEWAY);
         payloads.push(abi.encodeCall(LendGateway.setDriver, (NEW_MIDAS, true)));
 
-        address[] memory frax = new address[](1);
-        frax[0] = NEW_FRAX;
-        bool[] memory yes1 = new bool[](1);
-        yes1[0] = true;
-        opTargets.push(CASH_MODULE);
-        opPayloads.push(abi.encodeCall(ICashModule.configureModulesCanRequestWithdraw, (frax, yes1)));
+        (address[] memory addTokens, address[] memory addDeposits, address[] memory addRedemptions) = _midasAddedArgs();
+        opTargets.push(NEW_MIDAS);
+        opPayloads.push(abi.encodeCall(MidasModule.addMidasVaults, (addTokens, addDeposits, addRedemptions)));
+    }
+
+    /// @dev The operating timelock can only add a token the new module has never had, and only a vault pair whose
+    ///      mToken() is that token. If the live module already lists it (3CP-740 executed), the pairs must match.
+    function _checkMidasAdds() internal view {
+        (address[] memory tokens, address[] memory deposits, address[] memory redemptions) = _midasAddedArgs();
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            require(!MidasModule(NEW_MIDAS).everConfigured(tokens[i]), "new Midas already has an added token");
+            (address d0, address r0) = MidasModule(OLD_MIDAS).vaults(tokens[i]);
+            require(d0 == address(0) || (d0 == deposits[i] && r0 == redemptions[i]), "live Midas lists the added token with other vaults");
+        }
     }
 
     function _assertOptimismEndState() internal view {
@@ -238,10 +244,9 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         require(gw.isDriver(OLD_FRAX) && gw.isDriver(OLD_MIDAS) && gw.isDriver(OP_LIQUIFIER), "an existing driver was revoked");
         require(address(gw.spoke()) == AAVE_SPOKE, "gateway spoke changed across the upgrade");
 
-        require(_isRequester(NEW_FRAX), "new Frax cannot request withdrawals");
-        require(_isRequester(OLD_FRAX), "old Frax lost withdraw requests");
+        require(!_isRequester(NEW_FRAX), "new Frax became a withdraw requester; its async exit is unusable");
         require(!_isRequester(NEW_MIDAS), "new Midas became a withdraw requester; the live one is not");
-        require(cash.getWhitelistedModulesCanRequestWithdraw().length == requestersBefore + 1, "requesters changed by more than the new Frax");
+        require(cash.getWhitelistedModulesCanRequestWithdraw().length == requestersBefore, "withdraw requesters changed");
 
         (address[] memory tokens,,) = _midasArgs();
         for (uint256 i = 0; i < tokens.length; ++i) {
@@ -250,8 +255,26 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
             require(d1 == d0 && r1 == r0, "new Midas vaults differ from the live module");
             require(MidasModule(NEW_MIDAS).everConfigured(tokens[i]), "new Midas token not marked configured");
         }
+        (address[] memory added, address[] memory addedDeposits, address[] memory addedRedemptions) = _midasAddedArgs();
+        for (uint256 i = 0; i < added.length; ++i) {
+            (address d1, address r1) = MidasModule(NEW_MIDAS).vaults(added[i]);
+            require(d1 == addedDeposits[i] && r1 == addedRedemptions[i], "new Midas is missing an added vault");
+            (address d0, address r0) = MidasModule(OLD_MIDAS).vaults(added[i]);
+            require(d0 == address(0) || (d0 == d1 && r0 == r1), "added vault differs from the live module");
+        }
         FraxModule f = FraxModule(NEW_FRAX);
         require(f.fraxusd() == FRAXUSD && f.custodian() == FRAX_CUSTODIAN && f.remoteHop() == FRAX_REMOTE_HOP, "new Frax args differ");
+        require(cash.getWithdrawalDelayForModule(NEW_FRAX) == cash.getWithdrawalDelayForModule(OLD_FRAX), "new Frax withdrawal delay differs");
+        require(cash.getWithdrawalDelayForModule(NEW_MIDAS) == cash.getWithdrawalDelayForModule(OLD_MIDAS), "new Midas withdrawal delay differs");
+
+        _logParity("whitelisted module", dp.isWhitelistedModule(OLD_FRAX), dp.isWhitelistedModule(NEW_FRAX), dp.isWhitelistedModule(OLD_MIDAS), dp.isWhitelistedModule(NEW_MIDAS));
+        _logParity("default module", dp.isDefaultModule(OLD_FRAX), dp.isDefaultModule(NEW_FRAX), dp.isDefaultModule(OLD_MIDAS), dp.isDefaultModule(NEW_MIDAS));
+        _logParity("LendGateway driver", gw.isDriver(OLD_FRAX), gw.isDriver(NEW_FRAX), gw.isDriver(OLD_MIDAS), gw.isDriver(NEW_MIDAS));
+        _logParity("withdraw requester", _isRequester(OLD_FRAX), _isRequester(NEW_FRAX), _isRequester(OLD_MIDAS), _isRequester(NEW_MIDAS));
+        console.log("  withdrawal delay (s), Frax live/new:", cash.getWithdrawalDelayForModule(OLD_FRAX), cash.getWithdrawalDelayForModule(NEW_FRAX));
+        console.log("  withdrawal delay (s), Midas live/new:", cash.getWithdrawalDelayForModule(OLD_MIDAS), cash.getWithdrawalDelayForModule(NEW_MIDAS));
+        for (uint256 i = 0; i < tokens.length; ++i) _logMidasParity(tokens[i]);
+        for (uint256 i = 0; i < added.length; ++i) _logMidasParity(added[i]);
 
         require(RoleRegistry(OP_ROLE_REGISTRY).owner() == UPGRADE_TIMELOCK, "cash RoleRegistry owner changed");
     }
@@ -316,6 +339,18 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         requireExactCodeMatch("MidasModule", NEW_MIDAS, address(new MidasModule(OP_DATA_PROVIDER, tokens, deposits, redemptions)));
     }
 
+    function _logParity(string memory what, bool oldFrax, bool newFrax, bool oldMidas, bool newMidas) internal pure {
+        console.log(string.concat("  ", what, ": Frax live/new ", oldFrax ? "true" : "false", "/", newFrax ? "true" : "false", ", Midas live/new ", string.concat(oldMidas ? "true" : "false", "/", newMidas ? "true" : "false")));
+    }
+
+    function _logMidasParity(address token) internal view {
+        (address d0, address r0) = MidasModule(OLD_MIDAS).vaults(token);
+        (address d1, address r1) = MidasModule(NEW_MIDAS).vaults(token);
+        console.log("  Midas token", token);
+        console.log("    live deposit/redemption:", d0, r0);
+        console.log("    new  deposit/redemption:", d1, r1);
+    }
+
     function _isRequester(address module) internal view returns (bool) {
         address[] memory list = ICashModule(CASH_MODULE).getWhitelistedModulesCanRequestWithdraw();
         for (uint256 i = 0; i < list.length; ++i) {
@@ -351,11 +386,11 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         TimelockController tl = TimelockController(payable(UPGRADE_TIMELOCK));
         bytes32 id = tl.hashOperationBatch(targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, TL_SALT_ETH_UPGRADE);
         require(!tl.isOperation(id), "operation already scheduled");
-        (string memory schedulePath, string memory executePath) = _writeBundles(GOVERNANCE_SAFE, UPGRADE_TIMELOCK, targets, payloads, UPGRADE_DELAY, TL_SALT_ETH_UPGRADE, ETH_GOV_SCHEDULE_NONCE, ETH_GOV_EXECUTE_NONCE, "eth-upgrade");
+        (string memory schedulePath, string memory executePath) = _writeBundles(GOVERNANCE_SAFE, UPGRADE_TIMELOCK, targets, payloads, UPGRADE_DELAY, TL_SALT_ETH_UPGRADE, "eth-upgrade");
 
         _expectRevert(GOVERNANCE_SAFE, ETH_DATA_PROVIDER, payloads[0], "governance Safe upgraded the trading data provider directly");
 
-        console.log("=== Simulating schedule (governance Safe nonce 78) ===");
+        console.log("=== Simulating schedule (governance Safe) ===");
         executeGnosisTransactionBundle(schedulePath);
         require(tl.isOperationPending(id) && !tl.isOperationReady(id), "operation not pending after schedule");
         vm.warp(block.timestamp + OPERATING_DELAY + 1);
@@ -367,7 +402,7 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         whitelistedBefore = dp.getWhitelistedModules().length;
         defaultsBefore = dp.getDefaultModules().length;
 
-        console.log("=== Simulating execute (governance Safe nonce 79) ===");
+        console.log("=== Simulating execute (governance Safe) ===");
         executeGnosisTransactionBundle(executePath);
         require(tl.isOperationDone(id), "operation not done after execute");
 
@@ -440,10 +475,10 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         return abi.encodeCall(TimelockController.executeBatch, (t, new uint256[](t.length), p, TL_PREDECESSOR, salt));
     }
 
-    function _writeBundles(address safe, address timelock, address[] storage t, bytes[] storage p, uint256 delay, bytes32 salt, uint256 scheduleNonce, uint256 executeNonce, string memory label) internal returns (string memory schedulePath, string memory executePath) {
+    function _writeBundles(address safe, address timelock, address[] storage t, bytes[] storage p, uint256 delay, bytes32 salt, string memory label) internal returns (string memory schedulePath, string memory executePath) {
         string memory prefix = string.concat("./output/RoleRegate-", label, "-", vm.toString(block.chainid), "-");
-        schedulePath = string.concat(prefix, "nonce", vm.toString(scheduleNonce), "-schedule.json");
-        executePath = string.concat(prefix, "nonce", vm.toString(executeNonce), "-execute.json");
+        schedulePath = string.concat(prefix, "schedule.json");
+        executePath = string.concat(prefix, "execute.json");
         _writeBundle(schedulePath, safe, timelock, _scheduleData(t, p, delay, salt));
         _writeBundle(executePath, safe, timelock, _executeData(t, p, salt));
     }
