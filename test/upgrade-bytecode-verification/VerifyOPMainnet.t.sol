@@ -272,6 +272,9 @@ contract VerifyOPMainnetBytecode is TradingStackBytecode {
     // ---- Top up ----
 
     function test_verifyBytecode_TopUpDest() public {
+        // The stock wrapper additions are not live yet: the proxy runs the previous impl until the xStocks
+        // bundle executes upgradeToAndCall. Re-enable once it does.
+        vm.skip(true);
         address local = address(new TopUpDest(dataProviderProxy, cc.weth));
         _verify("TopUpDest", topUpDestImpl, local);
     }
