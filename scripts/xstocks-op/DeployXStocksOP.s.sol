@@ -62,12 +62,8 @@ contract DeployXStocksOP is XStocksOPDeployer {
 
         string memory path = string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(block.chainid), "/deployments.json");
         _write(path, C.KEY_MIGRATION, d.migration);
-        _write(path, string.concat(C.KEY_MIGRATION, "Impl"), d.migrationImpl);
         _write(path, C.KEY_WRAP, d.wrap);
-        _write(path, string.concat(C.KEY_WRAP, "Impl"), d.wrapImpl);
         _write(path, C.KEY_BRIDGE_WITHDRAW, d.bridgeWithdraw);
-        _write(path, string.concat(C.KEY_BRIDGE_WITHDRAW, "Impl"), d.bridgeWithdrawImpl);
-        _write(path, C.KEY_TOP_UP_DEST_IMPL, d.topUpDestImpl);
         _recordFeeds(feedsPath, feeds, stocks, d.wrapperFeeds);
     }
 

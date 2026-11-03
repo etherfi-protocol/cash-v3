@@ -152,7 +152,6 @@ contract XStocksOPLaunch3CP is XStocksOPDeployer, GnosisHelpers, Test {
         _checkRecorded(d, C.KEY_MIGRATION, deployed.migration);
         _checkRecorded(d, C.KEY_WRAP, deployed.wrap);
         _checkRecorded(d, C.KEY_BRIDGE_WITHDRAW, deployed.bridgeWithdraw);
-        _checkRecorded(d, C.KEY_TOP_UP_DEST_IMPL, deployed.topUpDestImpl);
         topUpDestImpl = deployed.topUpDestImpl;
         migration = StockMigrationModule(deployed.migration);
         wrap = StockWrapModule(deployed.wrap);
