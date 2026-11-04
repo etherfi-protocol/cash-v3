@@ -10,6 +10,7 @@ import { ILendGateway } from "../../../../../src/interfaces/ILendGateway.sol";
 import { LendSourcingLib } from "../../../../../src/libraries/LendSourcingLib.sol";
 import { MockLendGateway } from "../../../../../src/mocks/MockLendGateway.sol";
 import { LendGateway } from "../../../../../src/modules/lend-gateway/LendGateway.sol";
+import { RoleRegistry } from "../../../../../src/role-registry/RoleRegistry.sol";
 import { CashGatewayTestSetup } from "./CashGatewayTestSetup.t.sol";
 
 /**
@@ -61,6 +62,40 @@ contract MinHealthFactorTest is CashGatewayTestSetup {
 
         gw.setMinHealthFactor(0);
         assertEq(gw.minHealthFactor(), 0, "0 disables");
+        vm.stopPrank();
+    }
+
+    /// Raising or enabling the floor stays with ADMIN_ROLE; lowering or disabling it needs the operating timelock.
+    function test_setMinHealthFactor_weakeningNeedsTimelock() public {
+        address adminOnly = makeAddr("adminOnly");
+        address timelockOnly = makeAddr("timelockOnly");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), adminOnly);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), timelockOnly);
+        gw.setMinHealthFactor(0);
+        vm.stopPrank();
+
+        // enabling and raising: ADMIN_ROLE
+        vm.startPrank(adminOnly);
+        gw.setMinHealthFactor(FLOOR);
+        gw.setMinHealthFactor(1.2e18);
+
+        // lowering and disabling: not ADMIN_ROLE
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        gw.setMinHealthFactor(FLOOR);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        gw.setMinHealthFactor(0);
+        vm.stopPrank();
+        assertEq(gw.minHealthFactor(), 1.2e18, "floor unchanged");
+
+        // the timelock can lower and disable, but cannot raise
+        vm.startPrank(timelockOnly);
+        gw.setMinHealthFactor(FLOOR);
+        assertEq(gw.minHealthFactor(), FLOOR, "timelock lowered");
+        gw.setMinHealthFactor(0);
+        assertEq(gw.minHealthFactor(), 0, "timelock disabled");
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        gw.setMinHealthFactor(FLOOR);
         vm.stopPrank();
     }
 

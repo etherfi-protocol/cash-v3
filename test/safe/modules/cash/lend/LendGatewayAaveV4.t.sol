@@ -419,6 +419,16 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         gw.setReserveId(address(0), 0);
     }
 
+    /// Re-registering an asset at its current reserve passes validation and changes nothing (audit Item 27 I-02:
+    /// the no-op check now lives in the gateway, and LendReserveLib.validateRegistration only reverts).
+    function test_setReserveId_sameReserveIsNoop() public {
+        vm.recordLogs();
+        vm.prank(owner);
+        gw.setReserveId(address(weETH), weethReserveId);
+        assertEq(vm.getRecordedLogs().length, 0, "no ReserveRegistered for a no-op");
+        assertEq(gw.reserveIdOf(address(weETH)), weethReserveId);
+    }
+
     /// An empty reserve (no supply, no debt) removes cleanly and its reads zero out. weETH is used because the
     /// USDC reserve carries seeded liquidity, which the in-use guard (below) blocks.
     function test_removeReserve_unregistersAndZeroesReads() public {
@@ -528,8 +538,88 @@ contract LendGatewayAaveV4Test is CashGatewayTestSetup {
         gw.setDriver(address(0), true);
 
         vm.prank(makeAddr("notAdmin"));
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         gw.setDriver(makeAddr("d"), true);
+
+        vm.prank(makeAddr("notAdmin"));
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        gw.setDriver(driver, false);
+    }
+
+    /// Authorizing a driver needs the RoleRegistry owner (audit Item 27 I-03). Revoking one is a fast safety brake
+    /// for ADMIN_TIMELOCK_ROLE, ADMIN_ROLE and PAUSER.
+    function test_setDriver_revokeIsFastButAuthorizeNeedsRegistryOwner() public {
+        address adminOnly = makeAddr("adminOnly");
+        address timelockOnly = makeAddr("timelockOnly");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), adminOnly);
+        roleRegistry.grantRole(roleRegistry.ADMIN_TIMELOCK_ROLE(), timelockOnly);
+        vm.stopPrank();
+
+        address[3] memory nonOwners = [adminOnly, pauser, timelockOnly];
+        for (uint256 i = 0; i < nonOwners.length; i++) {
+            vm.prank(nonOwners[i]);
+            vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+            gw.setDriver(makeAddr("d"), true);
+        }
+
+        vm.prank(pauser);
+        gw.setDriver(driver, false);
+        assertFalse(gw.isDriver(driver), "pauser revoked the driver");
+
+        vm.prank(owner);
+        gw.setDriver(driver, true);
+        assertTrue(gw.isDriver(driver), "registry owner authorized the driver");
+
+        vm.prank(adminOnly);
+        gw.setDriver(driver, false);
+        assertFalse(gw.isDriver(driver), "admin revoked the driver");
+
+        vm.prank(owner);
+        gw.setDriver(driver, true);
+
+        vm.prank(timelockOnly);
+        gw.setDriver(driver, false);
+        assertFalse(gw.isDriver(driver), "timelock revoked the driver");
+    }
+
+    // ----------------------------------------------------------------- recipient allowlist
+
+    /// A driver can only send a safe's withdrawn collateral to the safe or a settlement dispatcher.
+    function test_withdraw_onlyPaysSafeOrDispatcher() public {
+        _supplyToGateway(address(safe), address(weETH), 2 ether);
+        address debtManager = address(cashModule.getDebtManager());
+
+        vm.startPrank(driver);
+        vm.expectRevert(LendGateway.InvalidRecipient.selector);
+        gw.withdraw(address(safe), address(weETH), 0.1 ether, makeAddr("attacker"));
+
+        vm.expectRevert(LendGateway.InvalidRecipient.selector);
+        gw.withdraw(address(safe), address(weETH), 0.1 ether, debtManager);
+
+        gw.withdraw(address(safe), address(weETH), 0.1 ether, address(safe));
+        gw.withdraw(address(safe), address(weETH), 0.1 ether, recipient);
+        vm.stopPrank();
+
+        assertEq(weETH.balanceOf(recipient), 0.1 ether, "dispatcher received the withdrawal");
+    }
+
+    /// A driver can only send a safe's new debt to the safe, a settlement dispatcher or the DebtManager.
+    function test_borrow_onlyPaysSafeDispatcherOrDebtManager() public {
+        _supplyToGateway(address(safe), address(weETH), 5 ether);
+        address debtManager = address(cashModule.getDebtManager());
+        uint256 debtManagerBefore = usdc.balanceOf(debtManager);
+
+        vm.startPrank(driver);
+        vm.expectRevert(LendGateway.InvalidRecipient.selector);
+        gw.borrow(address(safe), address(usdc), 100e6, makeAddr("attacker"));
+
+        gw.borrow(address(safe), address(usdc), 100e6, address(safe));
+        gw.borrow(address(safe), address(usdc), 100e6, recipient);
+        gw.borrow(address(safe), address(usdc), 100e6, debtManager);
+        vm.stopPrank();
+
+        assertEq(usdc.balanceOf(debtManager) - debtManagerBefore, 100e6, "DebtManager received the borrow");
     }
 
     // ----------------------------------------------------------------- op guards (all mutating ops)

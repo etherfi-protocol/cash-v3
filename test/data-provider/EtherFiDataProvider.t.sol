@@ -369,7 +369,7 @@ contract EtherFiDataProviderTest is Test {
         bool[] memory whitelist = new bool[](1);
         whitelist[0] = true;
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.DefaultModulesConfigured(modules, whitelist);
         provider.configureDefaultModules(modules, whitelist);
@@ -402,7 +402,7 @@ contract EtherFiDataProviderTest is Test {
         whitelist[0] = true;
 
         vm.prank(nonAdmin);
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         provider.configureDefaultModules(modules, whitelist);
     }
 
@@ -414,7 +414,7 @@ contract EtherFiDataProviderTest is Test {
         bool[] memory whitelist = new bool[](1);
         whitelist[0] = true;
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(EtherFiDataProvider.ArrayLengthMismatch.selector);
         provider.configureDefaultModules(modules, whitelist);
     }
@@ -435,7 +435,7 @@ contract EtherFiDataProviderTest is Test {
         bool[] memory whitelist = new bool[](1);
         whitelist[0] = true;
 
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(EtherFiDataProvider.InvalidModule.selector, 0));
         provider.configureDefaultModules(modules, whitelist);
     }
@@ -451,7 +451,7 @@ contract EtherFiDataProviderTest is Test {
         whitelist[1] = true;
 
         // Expect revert due to duplicates
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(ArrayDeDupLib.DuplicateElementFound.selector);
         provider.configureDefaultModules(modules, whitelist);
     }
@@ -552,7 +552,7 @@ contract EtherFiDataProviderTest is Test {
     }
 
     function test_setEtherFiRecoverySigner_updatesAddress() public {
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.EtherFiRecoverySignerConfigured(etherFiRecoverySigner, newEtherFiRecoverySigner);
         provider.setEtherFiRecoverySigner(newEtherFiRecoverySigner);
@@ -562,12 +562,12 @@ contract EtherFiDataProviderTest is Test {
 
     function test_setEtherFiRecoverySigner_reverts_whenCalledByNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         provider.setEtherFiRecoverySigner(newEtherFiRecoverySigner);
     }
 
     function test_setEtherFiRecoverySigner_reverts_whenZeroAddress() public {
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
         provider.setEtherFiRecoverySigner(address(0));
     }
@@ -575,7 +575,7 @@ contract EtherFiDataProviderTest is Test {
     // Third Party Recovery Signer Tests
 
     function test_setThirdPartyRecoverySigner_updatesAddress() public {
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectEmit(true, true, true, true);
         emit EtherFiDataProvider.ThirdPartyRecoverySignerConfigured(thirdPartyRecoverySigner, newThirdPartyRecoverySigner);
         provider.setThirdPartyRecoverySigner(newThirdPartyRecoverySigner);
@@ -585,12 +585,12 @@ contract EtherFiDataProviderTest is Test {
     
     function test_setThirdPartyRecoverySigner_reverts_whenCalledByNonAdmin() public {
         vm.prank(nonAdmin);
-        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
         provider.setThirdPartyRecoverySigner(newThirdPartyRecoverySigner);
     }
 
     function test_setThirdPartyRecoverySigner_reverts_whenZeroAddress() public {
-        vm.prank(admin);
+        vm.prank(owner);
         vm.expectRevert(EtherFiDataProvider.InvalidInput.selector);
         provider.setThirdPartyRecoverySigner(address(0));
     }
@@ -640,6 +640,99 @@ contract EtherFiDataProviderTest is Test {
         provider.setRecoveryDelayPeriod(newRecoveryPeriod);
     }
 
+    function test_setRecoveryDelayPeriod_raise_succeedsForAdminRoleOnly() public {
+        address adminOnly = _grantOnly(keccak256("ADMIN_ROLE"));
+
+        vm.prank(adminOnly);
+        provider.setRecoveryDelayPeriod(newRecoveryPeriod);
+
+        assertEq(provider.getRecoveryDelayPeriod(), newRecoveryPeriod);
+    }
+
+    function test_setRecoveryDelayPeriod_lower_reverts_whenCalledByAdminRoleOnly() public {
+        address adminOnly = _grantOnly(keccak256("ADMIN_ROLE"));
+
+        vm.prank(adminOnly);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        provider.setRecoveryDelayPeriod(2 days);
+    }
+
+    function test_setRecoveryDelayPeriod_lower_succeedsForAdminTimelock() public {
+        address timelockOnly = _grantOnly(keccak256("ADMIN_TIMELOCK_ROLE"));
+
+        vm.prank(timelockOnly);
+        vm.expectEmit(true, true, true, true);
+        emit EtherFiDataProvider.RecoveryDelayPeriodUpdated(defaultRecoveryPeriod, 1);
+        provider.setRecoveryDelayPeriod(1);
+
+        assertEq(provider.getRecoveryDelayPeriod(), 1);
+    }
+
+    function test_setRecoveryDelayPeriod_raise_reverts_whenCalledByAdminTimelockOnly() public {
+        address timelockOnly = _grantOnly(keccak256("ADMIN_TIMELOCK_ROLE"));
+
+        vm.prank(timelockOnly);
+        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        provider.setRecoveryDelayPeriod(newRecoveryPeriod);
+    }
+
+    function test_setRecoverySigners_reverts_whenCalledByAdminTimelock() public {
+        address timelockOnly = _grantOnly(keccak256("ADMIN_TIMELOCK_ROLE"));
+
+        vm.startPrank(timelockOnly);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        provider.setEtherFiRecoverySigner(newEtherFiRecoverySigner);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        provider.setThirdPartyRecoverySigner(newThirdPartyRecoverySigner);
+        vm.stopPrank();
+    }
+
+    function test_configureDefaultModules_add_reverts_whenCalledByAdminTimelock() public {
+        address timelockOnly = _grantOnly(keccak256("ADMIN_TIMELOCK_ROLE"));
+
+        address[] memory modules = new address[](2);
+        modules[0] = module1;
+        modules[1] = module3;
+        bool[] memory whitelist = new bool[](2);
+        whitelist[0] = false;
+        whitelist[1] = true;
+
+        vm.prank(timelockOnly);
+        vm.expectRevert(UpgradeableProxy.OnlyRoleRegistryOwner.selector);
+        provider.configureDefaultModules(modules, whitelist);
+    }
+
+    function test_configureDefaultModules_remove_succeedsForAdminTimelock() public {
+        address timelockOnly = _grantOnly(keccak256("ADMIN_TIMELOCK_ROLE"));
+
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
+        bool[] memory whitelist = new bool[](1);
+
+        vm.prank(timelockOnly);
+        provider.configureDefaultModules(modules, whitelist);
+
+        assertEq(provider.isDefaultModule(module1), false);
+    }
+
+    function test_configureDefaultModules_remove_reverts_whenCalledByAdminRoleOnly() public {
+        address adminOnly = _grantOnly(keccak256("ADMIN_ROLE"));
+
+        address[] memory modules = new address[](1);
+        modules[0] = module1;
+        bool[] memory whitelist = new bool[](1);
+
+        vm.prank(adminOnly);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        provider.configureDefaultModules(modules, whitelist);
+    }
+
+    function _grantOnly(bytes32 role) internal returns (address account) {
+        account = makeAddr(vm.toString(role));
+        vm.prank(owner);
+        roleRegistry.grantRole(role, account);
+    }
+
     // Testing all getter functions
 
     function test_getAllRecoveryParameters() public view {
@@ -652,13 +745,16 @@ contract EtherFiDataProviderTest is Test {
 
     function test_updateAllRecoveryParameters() public {
         // Update EtherFi recovery signer
-        vm.startPrank(admin);
+        vm.startPrank(owner);
         provider.setEtherFiRecoverySigner(newEtherFiRecoverySigner);
         
         // Update third party recovery signer
         provider.setThirdPartyRecoverySigner(newThirdPartyRecoverySigner);
         
+        vm.stopPrank();
+
         // Update recovery delay period
+        vm.startPrank(admin);
         provider.setRecoveryDelayPeriod(newRecoveryPeriod);
         vm.stopPrank();
 

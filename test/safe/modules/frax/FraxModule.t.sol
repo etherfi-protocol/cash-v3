@@ -6,6 +6,7 @@ import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { ICashModule, WithdrawalRequest } from "../../../../src/interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../../../../src/interfaces/IEtherFiDataProvider.sol";
+import { IFraxRemoteHop } from "../../../../src/interfaces/IFraxRemoteHop.sol";
 import { MessagingFee } from "../../../../src/interfaces/IOFT.sol";
 import { ModuleBase } from "../../../../src/modules/ModuleBase.sol";
 import { ModuleCheckBalance } from "../../../../src/modules/ModuleCheckBalance.sol";
@@ -59,6 +60,14 @@ contract FraxModuleTest is SafeTestSetup {
         cashModule.configureWithdrawAssets(assets, shouldWhitelist);
 
         vm.stopPrank();
+
+        // The live remote hop is paused with FraxUSD unapproved; model an open hop so async requests can be tested.
+        _setRemoteHop(false, true);
+    }
+
+    function _setRemoteHop(bool paused, bool approved) internal {
+        vm.mockCall(remoteHop, abi.encodeWithSelector(IFraxRemoteHop.paused.selector), abi.encode(paused));
+        vm.mockCall(remoteHop, abi.encodeWithSelector(IFraxRemoteHop.approvedOft.selector, address(fraxusd)), abi.encode(approved));
     }
 
     //Success cases
@@ -461,6 +470,23 @@ contract FraxModuleTest is SafeTestSetup {
         (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
 
         vm.expectRevert(ICashModule.InsufficientBalance.selector);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, signers, signatures);
+    }
+
+    /// A request cannot be opened while the remote hop could not execute it.
+    function test_requestAsyncWithdrawal_revertsWhenRemoteHopUnavailable() public {
+        uint256 amount = 1000 * 10 ** 18;
+        deal(address(fraxusd), address(safe), amount);
+
+        bytes32 digestHash = keccak256(abi.encodePacked(fraxModule.REQUEST_ASYNC_WITHDRAW_SIG(), block.chainid, address(fraxModule), safe.nonce(), safe, abi.encode(fraxusd, depositAddress, amount))).toEthSignedMessageHash();
+        (address[] memory signers, bytes[] memory signatures) = _signRequestAsync(digestHash);
+
+        _setRemoteHop(true, true);
+        vm.expectRevert(FraxModule.RemoteHopUnavailable.selector);
+        fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, signers, signatures);
+
+        _setRemoteHop(false, false);
+        vm.expectRevert(FraxModule.RemoteHopUnavailable.selector);
         fraxModule.requestAsyncWithdraw(address(safe), depositAddress, amount, signers, signatures);
     }
 
