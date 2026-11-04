@@ -90,6 +90,34 @@ library XStocksOPProd {
         return out;
     }
 
+    /// @dev The 20 Phase 2 stocks the top-up service watches on Ethereum: the only raw stocks that get a
+    ///      TopUpFactory route, since a route disables TopUpV2.executeRecovery for that token. The other 71
+    ///      stay recoverable and get a route when they are listed for top-ups.
+    function phase2TopUpRaws() internal pure returns (address[] memory) {
+        address[] memory out = new address[](20);
+        out[0] = 0x68fa48B1C2FE52b3D776E1953e0E782b5044Ce28; // SPCXx
+        out[1] = 0x4833e7f4f0460f4B72A3a5879A6C9841bCC5B58B; // SLVx
+        out[2] = 0x12992613fDd35aBe95DEc5a4964331b1ee23B50d; // BRK.Bx
+        out[3] = 0xfEbDEd1B0986a8ee107f5AB1a1c5a813491DeCEB; // CRCLx
+        out[4] = 0x8aD3c73F833d3F9A523aB01476625F269aEB7Cf0; // TSLAx
+        out[5] = 0xe92f673Ca36C5E2Efd2DE7628f815f84807e803F; // GOOGLx
+        out[6] = 0x364f210f430eC2448Fc68A49203040F6124096F0; // COINx
+        out[7] = 0xc845b2894dBddd03858fd2D643B4eF725fE0849d; // NVDAx
+        out[8] = 0xf8A80D1cb9cFD70D03D655D9dF42339846F3B3C8; // INTCx
+        out[9] = 0xAE2f842EF90C0d5213259Ab82639D5BBF649b08E; // MSTRx
+        out[10] = 0x3522513E5F146a2006e2901b05f16B2821485E19; // AMDx
+        out[11] = 0x96702be57Cd9777f835117a809C7124fe4ec989A; // METAx
+        out[12] = 0x9e3bf4Ecfc44EeDD624F26656B6736a3F093b073; // TSMx
+        out[13] = 0x9d275685dC284C8eB1C79f6ABA7a63Dc75ec890a; // AAPLx
+        out[14] = 0xE1385FDd5ffB10081Cd52C56584F25EFa9084015; // HOODx
+        out[15] = 0x5621737f42dAE558b81269FcB9E9E70c19Aa6b35; // MSFTx
+        out[16] = 0x1Aad217B8F78dbA5E6693460e8470F8b1A3977f3; // STRCx
+        out[17] = 0x3557Ba345B01EFa20A1bdDC61F573BFD87195081; // AMZNx
+        out[18] = 0x2380F2673C640fB67E2d6B55B44C62F0E0e69DA9; // GLDx
+        out[19] = 0xb63EFBc28860c8097e341DE1fCF59456161E9D98; // SNDKx
+        return out;
+    }
+
     function flags(uint256 len, bool value) internal pure returns (bool[] memory) {
         bool[] memory out = new bool[](len);
         for (uint256 i; i < len; ++i) {

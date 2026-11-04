@@ -50,25 +50,32 @@ contract XStocksPhase2OP3CP is EtherFiDeployerHelper, GnosisHelpers, Test {
     address[] wrappers;
     address[] targets;
     bytes[] payloads;
+    bool scheduled;
 
     function run() public {
         require(block.chainid == C.OP_CHAIN_ID, "Optimism only");
         require(isEqualString(getEnv(), "mainnet"), "prod script: ENV must be mainnet (or unset)");
         _load();
-        _checkPreconditions();
         _buildBatch();
+        _checkPreconditions();
 
-        string memory schedule = _writeBundle("admin-safe-step1-schedule", string.concat(_header(C.ADMIN_SAFE), _tx(address(tl), abi.encodeWithSignature("scheduleBatch(address[],uint256[],bytes[],bytes32,bytes32,uint256)", targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, SALT, C.ADMIN_DELAY), true)));
         string memory execute = _writeBundle("admin-safe-step2-execute", string.concat(_header(C.ADMIN_SAFE), _tx(address(tl), abi.encodeWithSignature("executeBatch(address[],uint256[],bytes[],bytes32,bytes32)", targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, SALT), true)));
-        string memory withdraw = _writeBundle("controller-safe-withdraw", string.concat(_header(C.SAFE), _tx(address(cashModule), abi.encodeCall(ICashModule.configureWithdrawAssets, (wrappers, C.flags(wrappers.length, true))), true)));
+        if (scheduled) {
+            // Step 1 already ran on chain (3CP-737): only the execute is left to generate
+            console.log("=== Batch already scheduled on chain, step 2: execute ===");
+            vm.warp(tl.getTimestamp(_id()) + 1);
+        } else {
+            string memory schedule = _writeBundle("admin-safe-step1-schedule", string.concat(_header(C.ADMIN_SAFE), _tx(address(tl), abi.encodeWithSignature("scheduleBatch(address[],uint256[],bytes[],bytes32,bytes32,uint256)", targets, new uint256[](targets.length), payloads, TL_PREDECESSOR, SALT, C.ADMIN_DELAY), true)));
+            string memory withdraw = _writeBundle("controller-safe-withdraw", string.concat(_header(C.SAFE), _tx(address(cashModule), abi.encodeCall(ICashModule.configureWithdrawAssets, (wrappers, C.flags(wrappers.length, true))), true)));
 
-        console.log("=== Step 1: schedule the modules batch, withdraw assets direct ===");
-        _run(schedule);
-        require(tl.getOperationState(_id()) == TimelockController.OperationState.Waiting, "batch not scheduled");
-        _run(withdraw);
+            console.log("=== Step 1: schedule the modules batch, withdraw assets direct ===");
+            _run(schedule);
+            require(tl.getOperationState(_id()) == TimelockController.OperationState.Waiting, "batch not scheduled");
+            _run(withdraw);
 
-        console.log("=== Warp 8h, step 2: execute ===");
-        vm.warp(block.timestamp + C.ADMIN_DELAY + 1);
+            console.log("=== Warp 8h, step 2: execute ===");
+            vm.warp(block.timestamp + C.ADMIN_DELAY + 1);
+        }
         _run(execute);
         _assertAfter();
         console.log("Simulation OK");
@@ -100,7 +107,7 @@ contract XStocksPhase2OP3CP is EtherFiDeployerHelper, GnosisHelpers, Test {
             require(IERC4626(wrappers[i]).asset() == raws[i], string.concat("wrapper asset mismatch: ", n));
             require(IBackedCCIPBridge(C.BACKED_BRIDGE).tokenIds(raws[i]) != 0, string.concat("raw not on the bridge: ", n));
             require(wrap.wrapPairFor(raws[i]) == address(0) && topUpDest.stockWrapperFor(raws[i]) == address(0) && !bridgeWithdraw.isWrapperSupported(wrappers[i]), string.concat("pair already set: ", n));
-            require(!_contains(withdrawable, wrappers[i]) && !_contains(withdrawable, raws[i]), string.concat("already a withdraw asset: ", n));
+            require(_contains(withdrawable, wrappers[i]) == scheduled && !_contains(withdrawable, raws[i]), string.concat("withdraw asset state unexpected: ", n));
         }
     }
 
@@ -111,8 +118,9 @@ contract XStocksPhase2OP3CP is EtherFiDeployerHelper, GnosisHelpers, Test {
         payloads.push(abi.encodeCall(StockBridgeWithdrawModule.configureWrappers, (wrappers, C.flags(wrappers.length, true))));
         targets.push(address(topUpDest));
         payloads.push(abi.encodeCall(TopUpDest.setStockWrappers, (raws, wrappers)));
-        require(!tl.isOperation(_id()), "batch already scheduled");
-        console.log(string.concat("modules batch: salt ", vm.toString(SALT), " id ", vm.toString(_id())));
+        scheduled = tl.isOperation(_id());
+        require(!scheduled || tl.isOperationPending(_id()), "batch already executed");
+        console.log(string.concat("modules batch: salt ", vm.toString(SALT), " id ", vm.toString(_id()), scheduled ? " (scheduled on chain)" : ""));
     }
 
     function _assertAfter() internal view {

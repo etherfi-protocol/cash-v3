@@ -23,10 +23,10 @@ import { XStocksOPProd as C } from "./XStocksOPProdConfig.sol";
  * @notice The Ethereum side of moving the 91 trade-only xStocks to Optimism, as Operating Safe (AAC4) bundles:
  *
  *           Bundle 1, raw routes:
- *             b1-step1-schedule   cancel the stale Phase 1 top-up operation (SPYx, QQQx, TBLLx keep their
- *                                 current routes), then schedule two 8h batches that route the 91 raw stocks
- *                                 to TopUpDest on Optimism over the Backed CCIP adapter
- *             b1-step2-execute-N  execute each batch (>= 8h later; closes the redirect-to-TradingSafe path,
+ *             b1-step1-schedule   schedule one 8h batch that routes the 20 top-up raw stocks to TopUpDest on
+ *                                 Optimism over the Backed CCIP adapter (SPYx, QQQx and TBLLx keep the
+ *                                 Phase 1 route; the other 71 raws stay unrouted so they stay recoverable)
+ *             b1-step2-execute    execute the batch (>= 8h later; closes the redirect-to-TradingSafe path,
  *                                 so on the move day)
  *           Bundle 2, wrapper routes and the lens:
  *             b2-step1-schedule   schedule two 8h batches that route the 91 wrappers over the unwrapping
@@ -34,8 +34,8 @@ import { XStocksOPProd as C } from "./XStocksOPProdConfig.sol";
  *             b2-step2-execute-N  execute each batch (>= 8h later, after the adapter is deployed)
  *             b2-lens-remove      remove the 91 wrappers from the Ethereum TradingLens (ADMIN_ROLE, direct)
  *
- *         91 routes cost about 21M gas, past the 16.7M transaction cap, so each list goes out as two batches
- *         of 46 and 45. The simulation measures every execute and fails above the gas target.
+ *         91 routes cost about 21M gas, past the 16.7M transaction cap, so the wrapper list goes out as two
+ *         batches of 46 and 45. The simulation measures every execute and fails above the gas target.
  *
  * Prerequisites: the Backed CCIP adapter is deployed (Phase 1). The wrapper adapter is rehearsal-deployed at
  * its CREATE3 address when not live yet; its execute must not run before DeployBackedCCIPWrapperAdapterEth.
@@ -53,7 +53,6 @@ contract XStocksPhase2Eth3CP is XStocksOPDeployer, GnosisHelpers, Test {
     }
 
     bytes32 constant TL_PREDECESSOR = bytes32(0);
-    bytes32 constant PHASE1_SALT = keccak256("XStocksOP.topUpConfig");
     uint256 constant CHUNK = 46;
     uint256 constant GAS_TARGET = 14_000_000;
     uint256 constant SHARES_ROUNDING_DUST = 2;
@@ -68,9 +67,9 @@ contract XStocksPhase2Eth3CP is XStocksOPDeployer, GnosisHelpers, Test {
     address topUpDest;
     address[] raws;
     address[] wrappers;
-    Operation[] rawOps;
+    address[] topUpRaws;
+    Operation rawOp;
     Operation[] wrapperOps;
-    bytes32 phase1Id;
 
     function run() public {
         require(block.chainid == 1, "Ethereum only");
@@ -79,27 +78,27 @@ contract XStocksPhase2Eth3CP is XStocksOPDeployer, GnosisHelpers, Test {
         _checkPreconditions();
         _buildOps();
 
-        string memory b1Schedule = _writeBundle("b1-step1-schedule", string.concat(_header(), _tx(address(tl), abi.encodeCall(TimelockController.cancel, (phase1Id)), false), _scheduleTx(rawOps[0], false), _scheduleTx(rawOps[1], true)));
+        string memory b1Schedule = _writeBundle("b1-step1-schedule", string.concat(_header(), _scheduleTx(rawOp, true)));
         string memory b2Schedule = _writeBundle("b2-step1-schedule", string.concat(_header(), _scheduleTx(wrapperOps[0], false), _scheduleTx(wrapperOps[1], true)));
-        string[2] memory b1Execute = [_writeBundle("b1-step2-execute-1", string.concat(_header(), _executeTx(rawOps[0], true))), _writeBundle("b1-step2-execute-2", string.concat(_header(), _executeTx(rawOps[1], true)))];
+        string memory b1Execute = _writeBundle("b1-step2-execute", string.concat(_header(), _executeTx(rawOp, true)));
         string[2] memory b2Execute = [_writeBundle("b2-step2-execute-1", string.concat(_header(), _executeTx(wrapperOps[0], true))), _writeBundle("b2-step2-execute-2", string.concat(_header(), _executeTx(wrapperOps[1], true)))];
         string memory lensRemove = _writeBundle("b2-lens-remove", _lensTxs());
 
-        console.log("=== Bundle 1 and 2, step 1: cancel the Phase 1 operation, schedule four batches ===");
+        console.log("=== Bundle 1 and 2, step 1: schedule three batches ===");
         _run(b1Schedule);
         _run(b2Schedule);
-        require(tl.getOperationState(phase1Id) == TimelockController.OperationState.Unset, "Phase 1 operation not cancelled");
+        require(tl.getOperationState(_id(rawOp)) == TimelockController.OperationState.Waiting, "raw batch not scheduled");
         for (uint256 i; i < 2; ++i) {
-            require(tl.getOperationState(_id(rawOps[i])) == TimelockController.OperationState.Waiting, "raw batch not scheduled");
             require(tl.getOperationState(_id(wrapperOps[i])) == TimelockController.OperationState.Waiting, "wrapper batch not scheduled");
         }
 
-        console.log("=== Warp 8h, step 2: execute the four batches ===");
+        console.log("=== Warp 8h, step 2: execute the three batches ===");
         vm.warp(block.timestamp + C.ADMIN_DELAY + 1);
-        for (uint256 i; i < 2; ++i) {
-            _run(b1Execute[i]);
+        _run(b1Execute);
+        _assertRoutes(topUpRaws, rawAdapter, "raw");
+        for (uint256 i; i < raws.length; ++i) {
+            if (!_isTopUpRaw(raws[i])) assertEq(factory.getTokenConfig(raws[i], C.OP_CHAIN_ID).bridgeAdapter, address(0), string.concat("non top-up raw routed: ", vm.toString(i)));
         }
-        _assertRoutes(raws, rawAdapter, "raw");
         for (uint256 i; i < 2; ++i) {
             _run(b2Execute[i]);
         }
@@ -108,7 +107,7 @@ contract XStocksPhase2Eth3CP is XStocksOPDeployer, GnosisHelpers, Test {
         console.log("=== Lens removal ===");
         uint256 listed = lens.getSupportedTokens().length;
         _run(lensRemove);
-        assertEq(lens.getSupportedTokens().length, listed - raws.length, "lens count");
+        assertEq(lens.getSupportedTokens().length, listed - wrappers.length, "lens count");
         for (uint256 i; i < wrappers.length; ++i) {
             assertFalse(lens.isSupportedToken(wrappers[i]), string.concat("wrapper still on the lens: ", vm.toString(i)));
         }
@@ -130,13 +129,24 @@ contract XStocksPhase2Eth3CP is XStocksOPDeployer, GnosisHelpers, Test {
         _checkRecorded(d, C.KEY_CCIP_WRAPPER_ADAPTER, wrapperAdapter);
         topUpDest = vm.readFile(string.concat(vm.projectRoot(), "/deployments/", getEnv(), "/", vm.toString(C.OP_CHAIN_ID), "/deployments.json")).readAddress(".addresses.TopUpDest");
         (raws, wrappers) = StockRedirectWrappers.pairs();
+        topUpRaws = C.phase2TopUpRaws();
+        for (uint256 i; i < topUpRaws.length; ++i) {
+            require(_tableIndex(topUpRaws[i]) < raws.length, string.concat("top-up raw not in the table: ", vm.toString(i)));
+        }
+    }
 
-        // The Phase 1 top-up operation: SPYx, QQQx and TBLLx raw routes, scheduled by 3CP-730 nonce 73
-        address[] memory targets = new address[](1);
-        targets[0] = address(factory);
-        bytes[] memory payloads = new bytes[](1);
-        payloads[0] = abi.encodeCall(TopUpFactory.setTokenConfig, (C.raws(), _chainIds(3), _configs(rawAdapter, 3)));
-        phase1Id = tl.hashOperationBatch(targets, new uint256[](1), payloads, TL_PREDECESSOR, PHASE1_SALT);
+    function _tableIndex(address raw) internal view returns (uint256) {
+        for (uint256 i; i < raws.length; ++i) {
+            if (raws[i] == raw) return i;
+        }
+        return raws.length;
+    }
+
+    function _isTopUpRaw(address raw) internal view returns (bool) {
+        for (uint256 i; i < topUpRaws.length; ++i) {
+            if (topUpRaws[i] == raw) return true;
+        }
+        return false;
     }
 
     function _checkPreconditions() internal view {
@@ -145,7 +155,6 @@ contract XStocksPhase2Eth3CP is XStocksOPDeployer, GnosisHelpers, Test {
         require(tl.hasRole(tl.PROPOSER_ROLE(), C.SAFE), "Safe is not a proposer");
         require(tl.hasRole(tl.EXECUTOR_ROLE(), C.SAFE) || tl.hasRole(tl.EXECUTOR_ROLE(), address(0)), "Safe is not an executor");
         require(tl.hasRole(tl.CANCELLER_ROLE(), C.SAFE), "Safe is not a canceller");
-        require(tl.isOperationPending(phase1Id), "Phase 1 operation is not pending: drop the cancel");
         require(topUpDest != address(0), "TopUpDest on Optimism not found");
         require(lens.roleRegistry().hasRole(keccak256("ADMIN_ROLE"), C.SAFE), "Safe lacks ADMIN_ROLE on the lens registry");
         for (uint256 i; i < raws.length; ++i) {
@@ -154,29 +163,28 @@ contract XStocksPhase2Eth3CP is XStocksOPDeployer, GnosisHelpers, Test {
             require(IBackedCCIPBridge(C.BACKED_BRIDGE).tokenIds(raws[i]) != 0, string.concat("raw not on the bridge: ", n));
             require(factory.getTokenConfig(raws[i], C.OP_CHAIN_ID).bridgeAdapter == address(0), string.concat("raw already routed: ", n));
             require(factory.getTokenConfig(wrappers[i], C.OP_CHAIN_ID).bridgeAdapter == address(0), string.concat("wrapper already routed: ", n));
+            require(factory.wrapperFor(raws[i]) == wrappers[i], string.concat("redirect wrapper mismatch: ", n));
             require(lens.isSupportedToken(wrappers[i]) && !lens.isSupportedToken(raws[i]), string.concat("lens state unexpected: ", n));
         }
     }
 
     function _buildOps() internal {
-        for (uint256 start; start < raws.length; start += CHUNK) {
-            uint256 n = raws.length - start < CHUNK ? raws.length - start : CHUNK;
+        _setOp(rawOp, topUpRaws, rawAdapter, keccak256("XStocksOP.phase2.rawRoutes.topUp"));
+        require(!tl.isOperation(_id(rawOp)), "raw batch already scheduled");
+        console.log(string.concat("raw batch (", vm.toString(topUpRaws.length), " routes): salt ", vm.toString(rawOp.salt), " id ", vm.toString(_id(rawOp))));
+        for (uint256 start; start < wrappers.length; start += CHUNK) {
+            uint256 n = wrappers.length - start < CHUNK ? wrappers.length - start : CHUNK;
             uint256 index = start / CHUNK + 1;
-            _pushOp(rawOps, _slice(raws, start, n), rawAdapter, keccak256(abi.encodePacked("XStocksOP.phase2.rawRoutes.", vm.toString(index))));
-            _pushOp(wrapperOps, _slice(wrappers, start, n), wrapperAdapter, keccak256(abi.encodePacked("XStocksOP.phase2.wrapperRoutes.", vm.toString(index))));
+            _setOp(wrapperOps.push(), _slice(wrappers, start, n), wrapperAdapter, keccak256(abi.encodePacked("XStocksOP.phase2.wrapperRoutes.", vm.toString(index))));
         }
-        require(rawOps.length == 2 && wrapperOps.length == 2, "expected two batches per list");
-        console.log("Phase 1 operation to cancel:", vm.toString(phase1Id));
+        require(wrapperOps.length == 2, "expected two wrapper batches");
         for (uint256 i; i < 2; ++i) {
-            require(!tl.isOperation(_id(rawOps[i])), "raw batch already scheduled");
             require(!tl.isOperation(_id(wrapperOps[i])), "wrapper batch already scheduled");
-            console.log(string.concat("raw batch ", vm.toString(i + 1), " (", vm.toString(rawOps[i].payloads.length), " call): salt ", vm.toString(rawOps[i].salt), " id ", vm.toString(_id(rawOps[i]))));
-            console.log(string.concat("wrapper batch ", vm.toString(i + 1), ": salt ", vm.toString(wrapperOps[i].salt), " id ", vm.toString(_id(wrapperOps[i]))));
+            console.log(string.concat("wrapper batch ", vm.toString(i + 1), " (", vm.toString(i == 0 ? CHUNK : wrappers.length - CHUNK), " routes): salt ", vm.toString(wrapperOps[i].salt), " id ", vm.toString(_id(wrapperOps[i]))));
         }
     }
 
-    function _pushOp(Operation[] storage ops, address[] memory tokens, address adapter, bytes32 salt) internal {
-        Operation storage op = ops.push();
+    function _setOp(Operation storage op, address[] memory tokens, address adapter, bytes32 salt) internal {
         op.targets.push(address(factory));
         op.payloads.push(abi.encodeCall(TopUpFactory.setTokenConfig, (tokens, _chainIds(tokens.length), _configs(adapter, tokens.length))));
         op.salt = salt;
