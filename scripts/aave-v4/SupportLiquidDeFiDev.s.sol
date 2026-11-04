@@ -6,8 +6,8 @@ import { console } from "forge-std/console.sol";
 
 import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { IDebtManager } from "../../src/interfaces/IDebtManager.sol";
-import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { MidasLiquifierModule } from "../../src/modules/etherfi/MidasLiquifierModule.sol";
+import { LendGateway } from "../../src/modules/lend-gateway/LendGateway.sol";
 import { MidasModule } from "../../src/modules/midas/MidasModule.sol";
 import { PriceProviderV2 } from "../../src/oracle/PriceProviderV2.sol";
 import { AddSummerLendCollateral } from "./AddSummerLendCollateral.s.sol";
@@ -51,7 +51,7 @@ contract SupportLiquidDeFiDev is AddSummerLendCollateral {
     address constant DEV_ADMIN = 0x7D829d50aAF400B8B29B3b311F4aD70aD819DC6E;
 
     uint24 constant FEED_MAX_STALENESS = 7 days;
-    uint16 constant COLLATERAL_FACTOR_BPS = 75_00;
+    uint16 constant COLLATERAL_FACTOR_BPS = 7500;
     uint32 constant MAX_LIQUIDATION_BONUS_BPS = 10_750; // collateral paid out per unit of debt: 100% + 7.5%
 
     // DebtManager scale: 100e18 == 100%
