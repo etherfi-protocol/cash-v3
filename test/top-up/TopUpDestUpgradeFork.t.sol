@@ -28,7 +28,9 @@ contract TopUpDestUpgradeForkTest is Test {
     function setUp() public {
         string memory rpc = vm.envOr("OPTIMISM_RPC", string(""));
         vm.skip(bytes(rpc).length == 0);
-        vm.createSelectFork(rpc);
+        // Pin the last block before the live TopUpDest was upgraded to the wrapStock build (OP block 158544660),
+        // so the test rehearses the upgrade from the build it replaced. Shortly after it, the SPYx wrapper was set on-chain.
+        vm.createSelectFork(rpc, 158_544_659);
     }
 
     /// OP fork: upgrading the live TopUpDest keeps its deposits and pause state, then a custody payout of SPYx wraps into wSPYx float.
