@@ -242,7 +242,15 @@ contract TopUpDest is UpgradeableProxy {
         _topUp(txHash, user, chainId, token, amount);
     }
 
-    /// @notice Sets the signing authority and enforcement; every change invalidates outstanding approvals.
+    /**
+     * @notice Sets the co-signer and whether unsigned payouts are blocked
+     * @dev Every call increments the epoch and invalidates outstanding approvals, even if the settings
+     *      are unchanged. Signed payout methods always verify signatures regardless of enforcement.
+     * @param signer Address whose payout signatures are accepted; zero disables signed payouts
+     * @param required Whether the legacy unsigned payout methods must revert
+     * @custom:throws OnlyAdminTimelock if caller does not have the admin timelock role
+     * @custom:throws InvalidCosigner if enforcement is required with a zero signer
+     */
     function configureCosigner(address signer, bool required) external onlyAdminTimelock {
         if (required && signer == address(0)) revert InvalidCosigner();
         TopUpDestStorage storage $ = _getTopUpDestStorage();
@@ -252,24 +260,55 @@ contract TopUpDest is UpgradeableProxy {
         emit CosignerConfigured(signer, required, $.cosignerEpoch);
     }
 
-    function cosignerConfig() external view returns (address signer, bool required, uint256 epoch) {
+    /**
+     * @notice Gets the current co-signer configuration
+     * @return Address whose payout signatures are accepted
+     * @return Whether legacy unsigned payouts are blocked
+     * @return Current configuration epoch included in approval digests
+     */
+    function cosignerConfig() external view returns (address, bool, uint256) {
         TopUpDestStorage storage $ = _getTopUpDestStorage();
         return ($.cosigner, $.cosignerRequired, $.cosignerEpoch);
     }
 
-    /// @notice Approval digest only; this does not replace getTxId or completion tracking.
+    /**
+     * @notice Calculates the EIP-712 digest for a payout approval
+     * @dev Binds the payout to this destination chain, proxy and current configuration epoch.
+     *      This digest does not replace getTxId or completion tracking.
+     * @param approval Source reference, recipient, token, amount and inclusive expiry to approve
+     * @return Digest to sign without an additional personal-message prefix
+     */
     function getTopUpApprovalDigest(TopUpApproval memory approval) public view returns (bytes32) {
         bytes32 domain = keccak256(abi.encode(DOMAIN_TYPEHASH, keccak256("EtherFiTopUpDest"), keccak256("1"), block.chainid, address(this)));
         bytes32 structHash = keccak256(abi.encode(TOP_UP_APPROVAL_TYPEHASH, approval.txHash, approval.user, approval.sourceChainId, approval.token, approval.amount, approval.deadline, _getTopUpDestStorage().cosignerEpoch));
         return MessageHashUtils.toTypedDataHash(domain, structHash);
     }
 
-    /// @notice Signed payouts always validate approval, including while legacy enforcement is disabled.
+    /**
+     * @notice Tops up a user safe with a co-signer approval
+     * @dev Requires TOP_UP_ROLE, an unpaused contract and a valid signature even when enforcement is disabled.
+     * @param approval Payout details and inclusive expiry approved by the co-signer
+     * @param signature Co-signer's 65-byte EIP-712 signature
+     * @custom:throws Unauthorized if caller does not have TOP_UP_ROLE
+     * @custom:throws EnforcedPause if the contract is paused
+     * @custom:throws InvalidCosigner if no co-signer is configured
+     * @custom:throws ApprovalExpired if the approval deadline has passed
+     * @custom:throws InvalidCosignature if the signature is malformed or does not match the co-signer
+     * @custom:throws NotARegisteredSafe if the recipient is not a registered safe
+     * @custom:throws TopUpAlreadyProcessed if the payout was already completed
+     * @custom:throws BalanceTooLow if the contract has insufficient payout tokens
+     */
     function topUpUserSafeWithApproval(TopUpApproval calldata approval, bytes calldata signature) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
         _topUpWithApproval(approval, signature);
     }
 
-    /// @notice Each item needs its own approval; any invalid item reverts the entire batch.
+    /**
+     * @notice Tops up multiple user safes with one co-signer approval per payout
+     * @dev Uses the same checks as topUpUserSafeWithApproval; any failure rolls back the entire batch.
+     * @param approvals Payout details and inclusive expiry for each item
+     * @param signatures Co-signer signature for each approval in the same order
+     * @custom:throws ArrayLengthMismatch if approval and signature counts differ
+     */
     function topUpUserSafeBatchWithApproval(TopUpApproval[] calldata approvals, bytes[] calldata signatures) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
         if (approvals.length != signatures.length) revert ArrayLengthMismatch();
         for (uint256 i; i < approvals.length; ++i) {
@@ -277,6 +316,15 @@ contract TopUpDest is UpgradeableProxy {
         }
     }
 
+    /**
+     * @notice Verifies a co-signer approval before executing the existing payout logic
+     * @dev Uses the current signer and epoch; approval remains valid at its exact deadline.
+     * @param approval Exact payout details and inclusive expiry to verify
+     * @param signature Co-signer's 65-byte EIP-712 signature
+     * @custom:throws InvalidCosigner if no co-signer is configured
+     * @custom:throws ApprovalExpired if the approval deadline has passed
+     * @custom:throws InvalidCosignature if signature recovery fails or recovers a different signer
+     */
     function _topUpWithApproval(TopUpApproval memory approval, bytes memory signature) internal {
         address signer = _getTopUpDestStorage().cosigner;
         if (signer == address(0)) revert InvalidCosigner();

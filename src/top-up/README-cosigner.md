@@ -66,10 +66,13 @@ For an emergency, governance can set `required=false`; this restores unsigned me
 ## Validation
 
 ```sh
-forge test --match-path test/top-up/TopUpDestCosigner.t.sol -vv
+forge test --match-path test/top-up/TopUpDestCosigner.t.sol --threads 2 -vv
+forge test --match-path test/top-up/TopUpDestCosignerFork.t.sol --threads 2 -vv
 ```
 
 The local suite upgrades a proxy from the frozen pre-change implementation and checks prior completion records, signed payouts, field/domain binding, rotation, legacy bypass rejection, roles, pause, batch rollback, stocks and lending.
 The fixture is copied from `ac89a4b94db4bd0c0b5dc0421137dd3afa1d7bc1:src/top-up/TopUpDest.sol`; only its contract name and relative imports differ.
+
+The fork test requires `OPTIMISM_RPC` and otherwise skips. It upgrades the deployed Optimism proxy locally, checks a historical completion record and exercises signed payouts using the deployed dependencies. Set `TOP_UP_FORK_BLOCK` to replay a specific block; otherwise it uses the latest block and requires a USDC payout within the preceding 1,000 blocks.
 
 Before activation, also run existing TopUpDest tests and a fork upgrade against the intended deployed implementation. No live deployment is performed by this PR.
