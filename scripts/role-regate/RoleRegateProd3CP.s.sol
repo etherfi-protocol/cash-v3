@@ -66,6 +66,11 @@ import { RoleRegateProdConfig } from "./RoleRegateProdConfig.sol";
 ///         vault pair to a different module, and the end-state check compares the two modules whenever the live one
 ///         already has it. Replay 740's Admin Safe bundles with PRIOR_BUNDLES or BETWEEN_BUNDLES to simulate both.
 ///
+///         Precondition (Optimism): the xStocks StockMigrationModule has finished migrating supplied stand-ins. It
+///         withdraws a safe's supplied stand-in to itself, which the new LendGateway rejects, so the run fails while
+///         any stand-in with a swap pair is still supplied on the Spoke. ALLOW_UNMIGRATED_STAND_INS=true simulates
+///         anyway, for checking only.
+///
 ///         If the contracts are not deployed yet (DeployRoleRegateProd.s.sol), the simulation deploys them on the
 ///         fork with the same salts and args; the real deploy is still a precondition for signing.
 ///
@@ -127,6 +132,7 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         require(dp.isDefaultModule(OLD_FRAX) && dp.isDefaultModule(OLD_MIDAS), "old modules are not default modules");
         require(gw.isDriver(OLD_FRAX) && gw.isDriver(OLD_MIDAS) && gw.isDriver(OP_LIQUIFIER), "old drivers changed");
 
+        _requireStandInsMigrated();
         _ensureOptimismContracts();
         require(!dp.isWhitelistedModule(NEW_FRAX) && !dp.isWhitelistedModule(NEW_MIDAS), "new module already whitelisted");
         require(!gw.isDriver(NEW_FRAX) && !gw.isDriver(NEW_MIDAS), "new module already a driver");
@@ -211,6 +217,35 @@ contract RoleRegateProd3CP is EtherFiDeployerHelper, GnosisHelpers, ContractCode
         (address[] memory addTokens, address[] memory addDeposits, address[] memory addRedemptions) = _midasAddedArgs();
         opTargets.push(NEW_MIDAS);
         opPayloads.push(abi.encodeCall(MidasModule.addMidasVaults, (addTokens, addDeposits, addRedemptions)));
+    }
+
+    /// @dev The new LendGateway only pays a withdrawal to the safe or a settlement dispatcher. StockMigrationModule
+    ///      withdraws a safe's supplied stand-in to itself, so upgrading while a stand-in is still supplied strands
+    ///      those positions on the stand-in (migrateMany skips them). Requires every stand-in with a live swap pair to
+    ///      have zero supplied on the Spoke. ALLOW_UNMIGRATED_STAND_INS=true simulates anyway; never sign such a run.
+    function _requireStandInsMigrated() internal view {
+        (address[] memory tokens, uint256[] memory ids) = _standIns();
+        bool allow = vm.envOr("ALLOW_UNMIGRATED_STAND_INS", false);
+        bool pending;
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            (bool okHub, bytes memory hubRet) = AAVE_HUB.staticcall(abi.encodeWithSignature("getAssetUnderlyingAndDecimals(uint256)", ids[i]));
+            require(okHub && abi.decode(hubRet, (address)) == tokens[i], "stand-in reserve id does not match the Hub asset");
+            (bool okPair, bytes memory pairRet) = STOCK_MIGRATION_MODULE.staticcall(abi.encodeWithSignature("swapPairFor(address)", tokens[i]));
+            require(okPair && abi.decode(pairRet, (address)) != address(0), "stand-in has no StockMigrationModule swap pair");
+            (bool okSup, bytes memory supRet) = AAVE_SPOKE.staticcall(abi.encodeWithSignature("getReserveSuppliedAssets(uint256)", ids[i]));
+            require(okSup, "Spoke supplied read failed");
+            uint256 supplied = abi.decode(supRet, (uint256));
+            if (supplied != 0) {
+                pending = true;
+                console.log("  stand-in still supplied (wei):", tokens[i], supplied);
+            }
+        }
+        if (!pending) {
+            console.log("  [OK] no stand-in left to migrate on the Spoke");
+            return;
+        }
+        require(allow, "stand-ins still supplied: finish the StockMigrationModule migration first (or ALLOW_UNMIGRATED_STAND_INS=true to simulate only)");
+        console.log("WARNING: stand-ins still supplied; simulating only, these bundles are not signable yet");
     }
 
     /// @dev The operating timelock can only add a token the new module has never had, and only a vault pair whose

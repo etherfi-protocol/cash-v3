@@ -66,6 +66,25 @@ abstract contract RoleRegateProdConfig {
     address internal constant FRAX_CUSTODIAN = 0x8C81eda18b8F1cF5AdB4f2dcDb010D0B707fd940;
     address internal constant FRAX_REMOTE_HOP = 0x31D982ebd82Ad900358984bd049207A4c2468640;
 
+    /// @dev Aave v4 Hub of the Cash Spoke; its asset id equals the Spoke reserve id for every Cash listing
+    address internal constant AAVE_HUB = 0x66753c4e3fC84f1eD0e3C267C927284E9d90C572;
+    /// @dev xStocks StockMigrationModule. It withdraws a safe's supplied stand-in from the LendGateway to itself,
+    ///      which the new LendGateway's recipient check rejects, so the upgrade waits until no stand-in it migrates
+    ///      is still supplied.
+    address internal constant STOCK_MIGRATION_MODULE = 0x15A90D4548bEB6D0f7140c17497F632e329e14dD;
+
+    /// @dev Stand-in tokens with a StockMigrationModule swap pair on 2026-11-09, and their Spoke reserve ids
+    function _standIns() internal pure returns (address[] memory tokens, uint256[] memory reserveIds) {
+        tokens = new address[](3);
+        reserveIds = new uint256[](3);
+        tokens[0] = 0xc1e636Aae7d6B46229FC2C362d562610519e8D7c; // iwSPYx
+        reserveIds[0] = 19;
+        tokens[1] = 0x3c99d3a81b27583B2E26dbd387C10411f2763516; // iwQQQx
+        reserveIds[1] = 21;
+        tokens[2] = 0x5F8b2D2b97aD4d63188f44965778F6004D5bc387; // iwTBLLx
+        reserveIds[2] = 22;
+    }
+
     // ─────────────────────────────── Ethereum ───────────────────────────────
 
     address internal constant ETH_DP_IMPL = 0x3ff2c902e756ed4662205ecD7d9710419770a39b;
