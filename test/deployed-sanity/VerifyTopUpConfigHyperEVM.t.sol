@@ -17,8 +17,12 @@ contract VerifyTopUpConfigHyperEVM is TopUpConfigHelper, Test {
     string deployments;
 
     function setUp() public {
-        // Pinned to a settled block to avoid head-of-chain races on the public RPC's load-balanced nodes.
-        vm.createSelectFork("https://rpc.hyperliquid.xyz/evm", 33_627_000);
+        // CI sets unset secrets to "", which must also fall back
+        string memory rpc = vm.envOr("HYPEREVM_RPC", string(""));
+        if (bytes(rpc).length == 0) rpc = "https://rpc.hyperliquid.xyz/evm";
+        // Fork a settled block behind head: forking at head races the public RPC's load-balanced nodes, and not
+        // every node serves an old fixed block ("invalid block height").
+        vm.createSelectFork(rpc, _blockNumber(rpc) - 1000);
 
         deployments = readDeploymentFile();
         topUpFactory = TopUpFactory(payable(stdJson.readAddress(deployments, ".addresses.TopUpSourceFactory")));
@@ -62,5 +66,12 @@ contract VerifyTopUpConfigHyperEVM is TopUpConfigHelper, Test {
 
     function _readDeployments() internal view returns (string memory) {
         return readDeploymentFile();
+    }
+
+    function _blockNumber(string memory rpc) internal returns (uint256 n) {
+        bytes memory raw = vm.rpc(rpc, "eth_blockNumber", "[]");
+        for (uint256 i = 0; i < raw.length; ++i) {
+            n = (n << 8) | uint8(raw[i]);
+        }
     }
 }
