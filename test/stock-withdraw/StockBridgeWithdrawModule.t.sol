@@ -8,6 +8,7 @@ import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/Mes
 
 import { UUPSProxy } from "../../src/UUPSProxy.sol";
 import { IBackedCCIPBridge } from "../../src/interfaces/IBackedCCIPBridge.sol";
+import { ICashModule } from "../../src/interfaces/ICashModule.sol";
 import { MockERC20 } from "../../src/mocks/MockERC20.sol";
 import { ModuleBase } from "../../src/modules/ModuleBase.sol";
 import { StockBridgeWithdrawModule } from "../../src/stock-withdraw/StockBridgeWithdrawModule.sol";
@@ -163,6 +164,17 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
     function _warpPastDelay() internal {
         uint64 withdrawalDelay = cashModule.getWithdrawalDelayForModule(address(module));
         vm.warp(block.timestamp + withdrawalDelay + 1);
+    }
+
+    /// @dev keccak256(abi.encode(uint256(keccak256("etherfi.storage.CashModuleStorage")) - 1)) & ~bytes32(uint256(0xff))
+    bytes32 internal constant CASH_MODULE_STORAGE_LOCATION = 0xe000c7adec5855bcf51f74b73aa86172d0a325bc54c3f73cb406d259df90ea00;
+
+    /// @dev Clears the safe's withdrawalRequestedByModule record (SafeCashConfig member slot 17, byte 15)
+    function _dropWithdrawalRecord() internal {
+        bytes32 slot = bytes32(uint256(keccak256(abi.encode(address(safe), CASH_MODULE_STORAGE_LOCATION))) + 17);
+        uint256 word = uint256(vm.load(address(cashModule), slot));
+        require((word >> 120) & 0xff == 1, "no record to drop");
+        vm.store(address(cashModule), slot, bytes32(word & ~(uint256(0xff) << 120)));
     }
 
     function _pendingRecipient() internal view returns (address) {
@@ -432,11 +444,33 @@ contract StockBridgeWithdrawModuleTest is SafeTestSetup {
         assertEq(wrapper.balanceOf(address(safe)), AMOUNT);
     }
 
+    /// After the module leaves the requester list its live hold is still its own: the owners cannot cancel it through
+    /// the CashModule directly, and the module's cancel releases it and clears the order through the callback.
+    function test_cancelWithdrawal_releasesOwnHoldAfterDelisting() public {
+        _request(_order());
+        address[] memory mods = new address[](1);
+        mods[0] = address(module);
+        vm.prank(owner);
+        cashModule.configureModulesCanRequestWithdraw(mods, new bool[](1));
+
+        vm.expectRevert(ICashModule.InvalidWithdrawRequest.selector);
+        cashModule.cancelWithdrawal(address(safe), new address[](0), new bytes[](0));
+
+        (address[] memory signers, bytes[] memory sigs) = _signCancel();
+        module.cancelWithdrawal(address(safe), signers, sigs);
+        assertEq(module.getOrder(address(safe)).wrapper, address(0));
+        assertEq(_pendingRecipient(), address(0));
+        assertEq(wrapper.balanceOf(address(safe)), AMOUNT);
+    }
+
     /// @dev De-lists the module, then the owners release the hold through the CashModule directly, which skips the
-    ///      callback and leaves the stored order behind
+    ///      callback and leaves the stored order behind. CashModule allows that direct cancel only for a hold that
+    ///      carries no module record, i.e. one placed before the CashModule upgrade that records module requests, so
+    ///      the record is dropped first to model such a hold.
     function _strandOrder() internal returns (StockBridgeWithdrawModule.Order memory) {
         StockBridgeWithdrawModule.Order memory order = _order();
         _request(order);
+        _dropWithdrawalRecord();
 
         address[] memory mods = new address[](1);
         mods[0] = address(module);
