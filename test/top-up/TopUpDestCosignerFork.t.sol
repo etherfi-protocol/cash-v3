@@ -20,7 +20,7 @@ contract TopUpDestCosignerForkTest is Test {
     function setUp() public {
         string memory rpc = vm.envOr("OPTIMISM_RPC", string(""));
         vm.skip(bytes(rpc).length == 0);
-        uint256 forkBlock = vm.envOr("TOP_UP_FORK_BLOCK", uint256(0));
+        uint256 forkBlock = vm.envOr("TOP_UP_FORK_BLOCK", uint256(159_311_283));
         if (forkBlock == 0) {
             vm.createSelectFork(rpc);
         } else {
