@@ -11,6 +11,7 @@ import { ERC4626RatePriceFeed } from "../../src/oracle/ERC4626RatePriceFeed.sol"
 import { StockBridgeWithdrawModule } from "../../src/stock-withdraw/StockBridgeWithdrawModule.sol";
 import { TopUpDest } from "../../src/top-up/TopUpDest.sol";
 import { BackedCCIPBridgeAdapter } from "../../src/top-up/bridge/BackedCCIPBridgeAdapter.sol";
+import { BackedCCIPWrapperBridgeAdapter } from "../../src/top-up/bridge/BackedCCIPWrapperBridgeAdapter.sol";
 import { EtherFiDeployerHelper } from "../utils/EtherFiDeployerHelper.sol";
 import { XStock, XStocksOPProd as C } from "./XStocksOPProdConfig.sol";
 
@@ -58,6 +59,10 @@ abstract contract XStocksOPDeployer is EtherFiDeployerHelper {
 
     function _deployAdapter(bool rehearsal) internal returns (address) {
         return _create3(rehearsal, C.SALT_CCIP_ADAPTER, type(BackedCCIPBridgeAdapter).creationCode, "");
+    }
+
+    function _deployWrapperAdapter(bool rehearsal) internal returns (address) {
+        return _create3(rehearsal, C.SALT_CCIP_WRAPPER_ADAPTER, type(BackedCCIPWrapperBridgeAdapter).creationCode, "");
     }
 
     function _salt(string memory key, bool impl) internal pure returns (string memory) {
