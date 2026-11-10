@@ -3,6 +3,8 @@ pragma solidity ^0.8.28;
 
 import { IERC4626 } from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import { IERC20, SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 import { ICashModule } from "../interfaces/ICashModule.sol";
 import { IEtherFiDataProvider } from "../interfaces/IEtherFiDataProvider.sol";
@@ -25,6 +27,18 @@ contract TopUpDest is UpgradeableProxy {
     /// @notice Role identifier for accounts authorized to top up user safes
     bytes32 public constant TOP_UP_ROLE = keccak256("TOP_UP_ROLE");
 
+    bytes32 public constant TOP_UP_APPROVAL_TYPEHASH = keccak256("TopUpApproval(bytes32 txHash,address user,uint256 sourceChainId,address token,uint256 amount,uint256 deadline,uint256 epoch)");
+    bytes32 private constant DOMAIN_TYPEHASH = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+
+    struct TopUpApproval {
+        bytes32 txHash;
+        address user;
+        uint256 sourceChainId;
+        address token;
+        uint256 amount;
+        uint256 deadline;
+    }
+
     IWETH public immutable weth;
 
     IEtherFiDataProvider public immutable etherFiDataProvider;
@@ -42,6 +56,11 @@ contract TopUpDest is UpgradeableProxy {
 
         /// @notice ERC-4626 wrapper that raw stock arriving here is wrapped into
         mapping(address raw => address wrapper) stockWrappers;
+
+        // Append only: existing completion IDs and mapping slots must never change.
+        address cosigner;
+        bool cosignerRequired;
+        uint256 cosignerEpoch;
     }
 
     // keccak256(abi.encode(uint256(keccak256("etherfi.storage.TopUpDest")) - 1)) & ~bytes32(uint256(0xff))
@@ -110,6 +129,12 @@ contract TopUpDest is UpgradeableProxy {
 
     /// @notice Thrown when wrapping raw stock minted no wrapper shares
     error WrapMintedNothing();
+
+    event CosignerConfigured(address indexed cosigner, bool required, uint256 epoch);
+    error CosignerRequired();
+    error InvalidCosigner();
+    error ApprovalExpired();
+    error InvalidCosignature();
 
     /**
      * @dev Constructor that disables initializers to prevent implementation contract initialization
@@ -190,9 +215,10 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws Unauthorized if caller doesn't have the required role
      */
     function topUpUserSafeBatch(bytes32[] memory txHashes, address[] memory users, uint256[] memory chainIds, address[] memory tokens, uint256[] memory amounts) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+        if (_getTopUpDestStorage().cosignerRequired) revert CosignerRequired();
         uint256 len = txHashes.length;
         if (len != users.length || len != chainIds.length || len != tokens.length || len != amounts.length) revert ArrayLengthMismatch();
-            
+
         for (uint256 i = 0; i < len;) {
             _topUp(txHashes[i], users[i], chainIds[i], tokens[i], amounts[i]);
             unchecked {
@@ -212,7 +238,100 @@ contract TopUpDest is UpgradeableProxy {
      * @custom:throws Unauthorized if caller doesn't have the required role
      */
     function topUpUserSafe(bytes32 txHash, address user, uint256 chainId, address token, uint256 amount) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+        if (_getTopUpDestStorage().cosignerRequired) revert CosignerRequired();
         _topUp(txHash, user, chainId, token, amount);
+    }
+
+    /**
+     * @notice Sets the co-signer and whether unsigned payouts are blocked
+     * @dev Every call increments the epoch and invalidates outstanding approvals, even if the settings
+     *      are unchanged. Signed payout methods always verify signatures regardless of enforcement.
+     * @param signer Address whose payout signatures are accepted; zero disables signed payouts
+     * @param required Whether the legacy unsigned payout methods must revert
+     * @custom:throws OnlyAdminTimelock if caller does not have the admin timelock role
+     * @custom:throws InvalidCosigner if enforcement is required with a zero signer
+     */
+    function configureCosigner(address signer, bool required) external onlyAdminTimelock {
+        if (required && signer == address(0)) revert InvalidCosigner();
+        TopUpDestStorage storage $ = _getTopUpDestStorage();
+        $.cosigner = signer;
+        $.cosignerRequired = required;
+        ++$.cosignerEpoch;
+        emit CosignerConfigured(signer, required, $.cosignerEpoch);
+    }
+
+    /**
+     * @notice Gets the current co-signer configuration
+     * @return Address whose payout signatures are accepted
+     * @return Whether legacy unsigned payouts are blocked
+     * @return Current configuration epoch included in approval digests
+     */
+    function cosignerConfig() external view returns (address, bool, uint256) {
+        TopUpDestStorage storage $ = _getTopUpDestStorage();
+        return ($.cosigner, $.cosignerRequired, $.cosignerEpoch);
+    }
+
+    /**
+     * @notice Calculates the EIP-712 digest for a payout approval
+     * @dev Binds the payout to this destination chain, proxy and current configuration epoch.
+     *      This digest does not replace getTxId or completion tracking.
+     * @param approval Source reference, recipient, token, amount and inclusive expiry to approve
+     * @return Digest to sign without an additional personal-message prefix
+     */
+    function getTopUpApprovalDigest(TopUpApproval memory approval) public view returns (bytes32) {
+        bytes32 domain = keccak256(abi.encode(DOMAIN_TYPEHASH, keccak256("EtherFiTopUpDest"), keccak256("1"), block.chainid, address(this)));
+        bytes32 structHash = keccak256(abi.encode(TOP_UP_APPROVAL_TYPEHASH, approval.txHash, approval.user, approval.sourceChainId, approval.token, approval.amount, approval.deadline, _getTopUpDestStorage().cosignerEpoch));
+        return MessageHashUtils.toTypedDataHash(domain, structHash);
+    }
+
+    /**
+     * @notice Tops up a user safe with a co-signer approval
+     * @dev Requires TOP_UP_ROLE, an unpaused contract and a valid signature even when enforcement is disabled.
+     * @param approval Payout details and inclusive expiry approved by the co-signer
+     * @param signature Co-signer's 65-byte EIP-712 signature
+     * @custom:throws Unauthorized if caller does not have TOP_UP_ROLE
+     * @custom:throws EnforcedPause if the contract is paused
+     * @custom:throws InvalidCosigner if no co-signer is configured
+     * @custom:throws ApprovalExpired if the approval deadline has passed
+     * @custom:throws InvalidCosignature if the signature is malformed or does not match the co-signer
+     * @custom:throws NotARegisteredSafe if the recipient is not a registered safe
+     * @custom:throws TopUpAlreadyProcessed if the payout was already completed
+     * @custom:throws BalanceTooLow if the contract has insufficient payout tokens
+     */
+    function topUpUserSafeWithApproval(TopUpApproval calldata approval, bytes calldata signature) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+        _topUpWithApproval(approval, signature);
+    }
+
+    /**
+     * @notice Tops up multiple user safes with one co-signer approval per payout
+     * @dev Uses the same checks as topUpUserSafeWithApproval; any failure rolls back the entire batch.
+     * @param approvals Payout details and inclusive expiry for each item
+     * @param signatures Co-signer signature for each approval in the same order
+     * @custom:throws ArrayLengthMismatch if approval and signature counts differ
+     */
+    function topUpUserSafeBatchWithApproval(TopUpApproval[] calldata approvals, bytes[] calldata signatures) external whenNotPaused nonReentrant onlyRole(TOP_UP_ROLE) {
+        if (approvals.length != signatures.length) revert ArrayLengthMismatch();
+        for (uint256 i; i < approvals.length; ++i) {
+            _topUpWithApproval(approvals[i], signatures[i]);
+        }
+    }
+
+    /**
+     * @notice Verifies a co-signer approval before executing the existing payout logic
+     * @dev Uses the current signer and epoch; approval remains valid at its exact deadline.
+     * @param approval Exact payout details and inclusive expiry to verify
+     * @param signature Co-signer's 65-byte EIP-712 signature
+     * @custom:throws InvalidCosigner if no co-signer is configured
+     * @custom:throws ApprovalExpired if the approval deadline has passed
+     * @custom:throws InvalidCosignature if signature recovery fails or recovers a different signer
+     */
+    function _topUpWithApproval(TopUpApproval memory approval, bytes memory signature) internal {
+        address signer = _getTopUpDestStorage().cosigner;
+        if (signer == address(0)) revert InvalidCosigner();
+        if (block.timestamp > approval.deadline) revert ApprovalExpired();
+        (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(getTopUpApprovalDigest(approval), signature);
+        if (err != ECDSA.RecoverError.NoError || recovered != signer) revert InvalidCosignature();
+        _topUp(approval.txHash, approval.user, approval.sourceChainId, approval.token, approval.amount);
     }
 
     /**
@@ -237,7 +356,8 @@ contract TopUpDest is UpgradeableProxy {
         $.transactionCompleted[txId] = true;
         _transfer(user, token, amount);
 
-        try this.supplyTopUpToLend(user, token, amount) { } catch (bytes memory reason) {
+        try this.supplyTopUpToLend(user, token, amount) { }
+        catch (bytes memory reason) {
             emit LendSupplyFailed(user, token, amount, reason);
         }
 
@@ -372,7 +492,7 @@ contract TopUpDest is UpgradeableProxy {
     }
 
     receive() external payable {
-        weth.deposit{value: msg.value}();
+        weth.deposit{ value: msg.value }();
     }
 
     /**
