@@ -6,4 +6,6 @@ import { MessagingFee } from "./IOFT.sol";
 interface IFraxRemoteHop {
     function sendOFT(address _oft, uint32 _dstEid, bytes32 _to, uint256 _amountLD) external payable; 
     function quote(address _oft, uint32 _dstEid, bytes32 _to, uint256 _amountLD) external view returns (MessagingFee memory fee);
+    function paused() external view returns (bool);
+    function approvedOft(address _oft) external view returns (bool);
 }

@@ -212,13 +212,23 @@ contract EtherFiDataProvider is UpgradeableProxy {
     }
 
     /**
-     * @notice Configures multiple modules' whitelist status
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE
+     * @notice Configures multiple modules' default status
+     * @dev A default module runs on every safe without owner consent, so adding one needs the RoleRegistry owner
+     *      (the upgrade timelock). A call that only removes default modules can also come from ADMIN_TIMELOCK_ROLE.
      * @param modules Array of module addresses to configure
-     * @param shouldWhitelist Array of boolean values indicating whether each module should be whitelisted
+     * @param shouldWhitelist Array of boolean values indicating whether each module should be a default module
      */
     function configureDefaultModules(address[] calldata modules, bool[] calldata shouldWhitelist) external {
-        _onlyAdminTimelock();
+        if (roleRegistry().owner() != msg.sender) {
+            uint256 len = shouldWhitelist.length;
+            for (uint256 i = 0; i < len;) {
+                if (shouldWhitelist[i]) revert OnlyRoleRegistryOwner();
+                unchecked {
+                    ++i;
+                }
+            }
+            _onlyAdminTimelock();
+        }
         _configureDefaultModules(modules, shouldWhitelist);
     }
 
@@ -251,21 +261,21 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the EtherFi Recovery Signer address
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE    
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock): the default recovery signers decide
+     *      who can take over every safe that has not overridden them
      * @param signer Address of the new signer
      */
-    function setEtherFiRecoverySigner(address signer) external {
-        _onlyAdminTimelock();
+    function setEtherFiRecoverySigner(address signer) external onlyRoleRegistryOwner {
         _setEtherFiRecoverySigner(signer);
     }
 
     /**
-     * @notice Updates the EtherFi Recovery Signer address
-     * @dev Only callable by addresses with ADMIN_TIMELOCK_ROLE    
+     * @notice Updates the Third Party Recovery Signer address
+     * @dev Only callable by the RoleRegistry owner (the upgrade timelock): the default recovery signers decide
+     *      who can take over every safe that has not overridden them
      * @param signer Address of the new signer
      */
-    function setThirdPartyRecoverySigner(address signer) external {
-        _onlyAdminTimelock();
+    function setThirdPartyRecoverySigner(address signer) external onlyRoleRegistryOwner {
         _setThirdPartyRecoverySigner(signer);
     }
 
@@ -281,15 +291,17 @@ contract EtherFiDataProvider is UpgradeableProxy {
 
     /**
      * @notice Updates the Recovery delay period
-     * @dev Only callable by addresses with ADMIN_ROLE    
+     * @dev Raising the delay is safety-increasing and stays with ADMIN_ROLE. Lowering it needs ADMIN_TIMELOCK_ROLE.
      * @param period Recovery timelock period in seconds
      * @custom:throws InvalidInput when period is 0
      */
     function setRecoveryDelayPeriod(uint256 period) external {
-        _onlyAdmin();
         if (period == 0) revert InvalidInput();
 
         EtherFiDataProviderStorage storage $ = _getEtherFiDataProviderStorage();
+
+        if (period < $.recoveryDelayPeriod) _onlyAdminTimelock();
+        else _onlyAdmin();
 
         emit RecoveryDelayPeriodUpdated($.recoveryDelayPeriod, period);
         $.recoveryDelayPeriod = period;

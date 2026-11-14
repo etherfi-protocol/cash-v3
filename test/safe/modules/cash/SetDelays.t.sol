@@ -81,7 +81,7 @@ contract CashModuleSetDelaysTest is CashModuleTestSetup {
         uint64 newModeDelay = 300;
 
         vm.prank(notOwner);
-        vm.expectRevert(RoleRegistry.OnlyAdmin.selector);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
         cashModule.setDelays(newWithdrawalDelay, newSpendLimitDelay, newModeDelay);
 
         // Verify the values were not updated
@@ -90,5 +90,17 @@ contract CashModuleSetDelaysTest is CashModuleTestSetup {
         assertEq(updatedWithdrawalDelay, initialWithdrawalDelay, "Withdrawal delay should not have changed");
         assertEq(updatedSpendLimitDelay, initialSpendLimitDelay, "Spend limit delay should not have changed");
         assertEq(updatedModeDelay, initialModeDelay, "Mode delay should not have changed");
+    }
+
+    /// The delays protect every user, so the fast admin multisig alone cannot change them.
+    function test_setDelays_fails_whenCalledByAdminRoleOnly() public {
+        address adminOnly = makeAddr("adminOnly");
+        vm.startPrank(owner);
+        roleRegistry.grantRole(roleRegistry.ADMIN_ROLE(), adminOnly);
+        vm.stopPrank();
+
+        vm.prank(adminOnly);
+        vm.expectRevert(RoleRegistry.OnlyAdminTimelock.selector);
+        cashModule.setDelays(0, 0, 0);
     }
 }

@@ -94,6 +94,9 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
     /// @notice Error thrown when custodian has insufficient balance for synchronous deposit
     error InsufficientCustodianBalance();
 
+    /// @notice Error thrown when the Frax remote hop is paused or does not accept FraxUSD, so an async exit cannot complete
+    error RemoteHopUnavailable();
+
     /// @notice Emitted when safe deposits USDC into Frax USD
     event Deposit(address indexed safe, address indexed inputToken, uint256 inputAmount, uint256 outputAmount);
 
@@ -305,9 +308,13 @@ contract FraxModule is ModuleBase, ModuleCheckBalance, ReentrancyGuardTransient,
      * @param _withdrawAmount Amount to withdraw asynchronously
      * @param signers Array of addresses of safe owners that signed the transaction
      * @param signatures Array of signatures from the signers
-     * @dev Requires the Safe's owner quorum because funds exit to an arbitrary recipient
+     * @dev Requires the Safe's owner quorum because funds exit to an arbitrary recipient. Reverts while the Frax
+     *      remote hop is paused or does not accept FraxUSD, since the request would pull collateral out of Aave for
+     *      an exit that cannot execute.
+     * @custom:throws RemoteHopUnavailable If the remote hop is paused or FraxUSD is not an approved OFT
      */
     function requestAsyncWithdraw(address safe, address _recipient, uint256 _withdrawAmount, address[] calldata signers, bytes[] calldata signatures) external payable onlyEtherFiSafe(safe) {
+        if (IFraxRemoteHop(remoteHop).paused() || !IFraxRemoteHop(remoteHop).approvedOft(fraxusd)) revert RemoteHopUnavailable();
         bytes32 digestHash = _getRequestAsyncWithdrawDigestHash(safe, _recipient, _withdrawAmount);
         if (!IEtherFiSafe(safe).checkSignatures(digestHash, signers, signatures)) revert InvalidSignatures();
         _requestAsyncWithdraw(safe, _recipient, _withdrawAmount);

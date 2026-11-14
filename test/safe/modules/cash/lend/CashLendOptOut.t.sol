@@ -160,7 +160,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
-        gw.borrow(address(safe), address(usdc), 1000e6, driver);
+        gw.borrow(address(safe), address(usdc), 1000e6, recipient);
         vm.stopPrank();
 
         (address signer, bytes memory sig) = _toggleLendSig(false);
@@ -246,7 +246,7 @@ contract CashLendOptOutTest is CashGatewayTestSetup {
         vm.startPrank(driver);
         gw.supply(address(safe), address(weETH), 5 ether);
         gw.setUsingAsCollateral(address(safe), address(weETH), true);
-        gw.borrow(address(safe), address(usdc), 1000e6, driver);
+        gw.borrow(address(safe), address(usdc), 1000e6, recipient);
         vm.stopPrank();
 
         vm.warp(block.timestamp + MODE_DELAY + 1);
